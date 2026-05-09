@@ -5,7 +5,7 @@ import { PhotoCard } from "./PhotoCard";
 interface Photo {
   id: number; path: string; filename: string;
   width: number; height: number; fileSize: number;
-  thumbnailPath: string; isIndexed: boolean;
+  thumbnailPath: string | null; isIndexed: boolean;
 }
 interface PhotoGridProps {
   photos: Photo[];
@@ -15,12 +15,17 @@ interface PhotoGridProps {
   onDoubleClick: (id: number) => void;
 }
 
-const COLUMN_SIZES = [160, 200, 240, 280];
+const COLUMN_CONFIGS = [
+  { cols: 2, width: 280, label: "2" },
+  { cols: 3, width: 240, label: "3" },
+  { cols: 4, width: 200, label: "4" },
+  { cols: 5, width: 170, label: "5" },
+];
 
 export function PhotoGrid({ photos, loading, selectedIds, onSelect, onDoubleClick }: PhotoGridProps) {
   const { t } = useTranslation();
-  const [columnSizeIdx, setColumnSizeIdx] = useState(2);
-  const itemSize = COLUMN_SIZES[columnSizeIdx];
+  const [configIdx, setConfigIdx] = useState(2); // default 4 columns
+  const { cols } = COLUMN_CONFIGS[configIdx];
 
   if (loading) {
     return (
@@ -41,31 +46,29 @@ export function PhotoGrid({ photos, loading, selectedIds, onSelect, onDoubleClic
           {t("photosCount", { count: photos.length.toLocaleString() })}
           {selectedIds.size > 0 && t("photosSelected", { count: selectedIds.size })}
         </span>
-        <div className="flex items-center gap-2">
-          {COLUMN_SIZES.map((size, i) => (
+        <div className="flex items-center gap-1">
+          {COLUMN_CONFIGS.map((cfg, i) => (
             <button
-              key={size}
-              onClick={() => setColumnSizeIdx(i)}
+              key={cfg.cols}
+              onClick={() => setConfigIdx(i)}
               className={`px-2 py-1 text-[11px] rounded-[4px] transition-colors ${
-                i === columnSizeIdx
+                i === configIdx
                   ? "bg-[#5e6ad2]/20 text-[#5e6ad2]"
                   : "text-[#a1a1aa] hover:text-[#f7f8f8] hover:bg-white/5"
               }`}
             >
-              {size}px
+              {cfg.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Masonry waterfall */}
       <div
-        className="flex-1 overflow-y-auto p-2"
+        className="flex-1 overflow-y-auto px-2 pt-2"
         style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(auto-fill, minmax(${itemSize}px, 1fr))`,
-          gap: 4,
-          alignContent: "start",
+          columnCount: cols,
+          columnGap: 8,
         }}
       >
         {photos.map((photo) => (
@@ -73,6 +76,7 @@ export function PhotoGrid({ photos, loading, selectedIds, onSelect, onDoubleClic
             key={photo.id}
             id={photo.id}
             path={photo.path}
+            thumbnailPath={photo.thumbnailPath}
             filename={photo.filename}
             width={photo.width}
             height={photo.height}

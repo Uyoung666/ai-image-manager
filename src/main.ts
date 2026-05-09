@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, net, protocol } from "electron";
 import { ipcMain } from "electron/main";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { ipcContext } from "@/ipc/context";
@@ -7,6 +7,15 @@ import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
 import { initDatabase } from "@/db";
 import { initThumbnailer } from "@/services/thumbnailer";
+
+// Register custom protocol to serve local files safely
+// (required because Chromium blocks file:// from http:// origins in dev mode)
+protocol.handle("local-media", (request) => {
+  const encodedPath = request.url.slice("local-media://".length);
+  const filePath = decodeURIComponent(encodedPath);
+  const normalized = filePath.replace(/\\/g, "/");
+  return net.fetch(`file:///${normalized}`);
+});
 
 function createWindow() {
   const basePath = getBasePath();

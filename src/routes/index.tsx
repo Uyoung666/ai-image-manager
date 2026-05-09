@@ -10,7 +10,7 @@ import { Welcome } from "@/components/Welcome";
 interface Photo {
   id: number; path: string; filename: string;
   width: number; height: number; fileSize: number;
-  thumbnailPath: string; isIndexed: boolean;
+  thumbnailPath: string | null; isIndexed: boolean;
 }
 interface Folder {
   id: number; path: string; displayName: string; photoCount: number;
