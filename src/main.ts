@@ -9,19 +9,22 @@ import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { ipcContext } from "@/ipc/context";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
+import { initDatabase } from "@/db";
+import { initThumbnailer } from "@/services/thumbnailer";
 
 function createWindow() {
   const basePath = getBasePath();
   const preload = path.join(basePath, "preload.js");
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    title: "AI Image Manager",
     webPreferences: {
       devTools: inDevelopment,
       contextIsolation: true,
-      nodeIntegration: true,
-      nodeIntegrationInSubFrames: false,
-
+      nodeIntegration: false,
       preload,
     },
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
@@ -52,7 +55,7 @@ function checkForUpdates() {
   updateElectronApp({
     updateSource: {
       type: UpdateSourceType.ElectronPublicUpdateService,
-      repo: "LuanRoger/electron-shadcn",
+      repo: "uyoung/ai-image-manager",
     },
   });
 }
@@ -70,6 +73,10 @@ async function setupORPC() {
 
 app.whenReady().then(async () => {
   try {
+    initDatabase();
+    initThumbnailer();
+    console.log("[App] Database and thumbnailer initialized");
+
     createWindow();
     await installExtensions();
     checkForUpdates();

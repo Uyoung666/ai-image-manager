@@ -7,9 +7,9 @@ export default function BaseLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
-      <DragWindowRegion title="electron-shadcn" />
-      <main className="h-screen p-2 pb-20">{children}</main>
-    </>
+    <div className="flex flex-col h-screen overflow-hidden">
+      <DragWindowRegion title="AI Image Manager" />
+      <main className="flex-1 overflow-hidden">{children}</main>
+    </div>
   );
 }

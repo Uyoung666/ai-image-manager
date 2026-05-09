@@ -102,3 +102,9 @@ out/
 
 # Tanstack
 .tanstack/
+
+# Project data (user-specific)
+data/
+thumbnails/
+models/
+vectors/

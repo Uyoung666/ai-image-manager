@@ -3,32 +3,36 @@ import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
 import { MakerZIP } from "@electron-forge/maker-zip";
+import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpackDir: "node_modules/{sharp,better-sqlite3,@lancedb,@img,node-*}",
+    },
+    name: "AI Image Manager",
+    executableName: "ai-image-manager",
+    appBundleId: "com.uyoung.ai-image-manager",
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: "ai-image-manager",
+    }),
     new MakerZIP({}, ["darwin"]),
     new MakerRpm({}),
     new MakerDeb({}),
   ],
   publishers: [
     {
-      /*
-       * Publish release on GitHub as draft.
-       * Remember to manually publish it on GitHub website after verifying everything is correct.
-       */
       name: "@electron-forge/publisher-github",
       config: {
         repository: {
-          owner: "LuanRoger",
-          name: "electron-shadcn",
+          owner: "uyoung",
+          name: "ai-image-manager",
         },
         draft: true,
         prerelease: false,
@@ -36,6 +40,7 @@ const config: ForgeConfig = {
     },
   ],
   plugins: [
+    new AutoUnpackNativesPlugin({}),
     new VitePlugin({
       build: [
         {

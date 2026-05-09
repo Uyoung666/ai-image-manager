@@ -14,10 +14,11 @@
     "noImplicitAny": true,
     "sourceMap": true,
     "strict": true,
-    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./src/*"]
     },
+    "baseUrl": ".",
     "outDir": "dist",
     "moduleResolution": "bundler",
     "resolveJsonModule": true
