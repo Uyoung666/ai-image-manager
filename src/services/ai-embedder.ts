@@ -1,12 +1,11 @@
 import path from "node:path";
 import { app } from "electron";
-import * as lancedb from "@lancedb/lancedb";
-import { eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 
-let vectordb: lancedb.Connection | null = null;
-let photoTable: lancedb.Table | null = null;
+let vectordb: any = null;
+let photoTable: any = null;
 let embeddingModel: {
   embedImage: (imagePath: string) => Promise<number[]>;
   embedText: (text: string) => Promise<number[]>;
@@ -30,6 +29,8 @@ export async function initVectorDB(): Promise<void> {
   const vectorPath = path.join(userDataPath, "vectors");
 
   console.log(`[AI] Initializing vector DB at: ${vectorPath}`);
+  // Dynamic import to avoid static native module loading at startup
+  const lancedb = await import("@lancedb/lancedb");
   vectordb = await lancedb.connect(vectorPath);
 
   // Create or open photo embeddings table
