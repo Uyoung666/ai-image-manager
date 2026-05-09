@@ -1,9 +1,9 @@
 import { ipc } from "@/ipc/manager";
 
-export function getPlatform() {
+export function getPlatform(): Promise<string> {
   return ipc.client.app.currentPlatfom();
 }
 
-export function getAppVersion() {
+export function getAppVersion(): Promise<string> {
   return ipc.client.app.appVersion();
 }

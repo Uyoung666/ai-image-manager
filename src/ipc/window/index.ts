@@ -1,4 +1,4 @@
-import { closeWindow, maximizeWindow, minimizeWindow } from "./hadlers";
+import { closeWindow, maximizeWindow, minimizeWindow } from "./handlers";
 
 export const window = {
   minimizeWindow,

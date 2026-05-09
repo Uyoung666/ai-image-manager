@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema";
 import { app } from "electron";
 import path from "node:path";
@@ -16,6 +17,16 @@ export function getDbPath(): string {
   return path.join(dbDir, "ai-image-manager.db");
 }
 
+function getMigrationsFolder(): string {
+  // In development, migrations are in the project root
+  const devPath = path.join(app.getAppPath(), "drizzle");
+  if (fs.existsSync(devPath)) return devPath;
+  // Fallback for packaged app
+  const prodPath = path.join(process.resourcesPath, "drizzle");
+  if (fs.existsSync(prodPath)) return prodPath;
+  throw new Error("Migrations folder not found");
+}
+
 export function initDatabase(): ReturnType<typeof drizzle> {
   if (dbInstance) return dbInstance;
 
@@ -28,6 +39,13 @@ export function initDatabase(): ReturnType<typeof drizzle> {
   sqlite.pragma("busy_timeout = 5000");
 
   dbInstance = drizzle(sqlite, { schema });
+
+  // Auto-run migrations on startup
+  const migrationsFolder = getMigrationsFolder();
+  console.log(`[DB] Running migrations from: ${migrationsFolder}`);
+  migrate(dbInstance, { migrationsFolder });
+  console.log("[DB] Migrations complete");
+
   return dbInstance;
 }
 

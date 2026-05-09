@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import chokidar from "chokidar";
+import chokidar, { type FSWatcher } from "chokidar";
 import sharp from "sharp";
 import exifr from "exifr";
 import { eq } from "drizzle-orm";
@@ -25,7 +25,7 @@ interface IndexProgress {
 
 type ProgressCallback = (progress: IndexProgress) => void;
 let isScanning = false;
-let watchers: chokidar.FSWatcher[] = [];
+let watchers: FSWatcher[] = [];
 
 export function isIndexing(): boolean {
   return isScanning;

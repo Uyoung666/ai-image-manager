@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos, exifData, folders } from "@/db/schema";
 import { eq, desc, and, like, sql } from "drizzle-orm";
-import { scanFolder, stopScanning, startWatching, isIndexing } from "@/services/indexer";
+import { scanFolder as scanFolderService, stopScanning, startWatching, isIndexing } from "@/services/indexer";
 import { getThumbnailBuffer } from "@/services/thumbnailer";
 import {
   embedAllPhotos, searchByText as aiSearchByText,
@@ -24,66 +24,70 @@ const ListSchema = z.object({
 const IdSchema = z.object({ id: z.number() });
 
 // Folder management
-export const scanFolder = os.handler(async ({ input }) => {
-  const { path } = input as { path: string };
-  const result = await scanFolder(path);
-  return result;
-}).input(FolderSchema);
+export const scanFolder = os
+  .input(FolderSchema)
+  .handler(async ({ input }) => {
+    const result = await scanFolderService(input.path);
+    return result;
+  });
 
 export const getFolders = os.handler(async () => {
   const db = getDatabase();
   return db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
 });
 
-export const deleteFolder = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { id } = input as { id: number };
-  const folder = db.select({ path: folders.path }).from(folders).where(eq(folders.id, id)).get();
-  if (folder) {
-    db.delete(photos).where(eq(photos.folderId, id)).run();
-    db.delete(folders).where(eq(folders.id, id)).run();
-  }
-  return { success: true };
-}).input(IdSchema);
+export const deleteFolder = os
+  .input(IdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const folder = db.select({ path: folders.path }).from(folders).where(eq(folders.id, input.id)).get();
+    if (folder) {
+      db.delete(photos).where(eq(photos.folderId, input.id)).run();
+      db.delete(folders).where(eq(folders.id, input.id)).run();
+    }
+    return { success: true };
+  });
 
 // Photo listing
-export const listPhotos = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { folderId, search, sort, order, offset, limit } = input as {
-    folderId?: number; search?: string; sort: string; order: string; offset: number; limit: number;
-  };
+export const listPhotos = os
+  .input(ListSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const { folderId, search, sort, order, offset, limit } = input;
 
-  let query = db.select().from(photos).$dynamic();
+    let query = db.select().from(photos).$dynamic();
 
-  if (folderId) {
-    query = query.where(eq(photos.folderId, folderId));
-  }
-  if (search) {
-    query = query.where(like(photos.filename, `%${search}%`));
-  }
+    if (folderId) {
+      query = query.where(eq(photos.folderId, folderId));
+    }
+    if (search) {
+      query = query.where(like(photos.filename, `%${search}%`));
+    }
 
-  const sortCol = sort === "name" ? photos.filename : sort === "size" ? photos.fileSize : photos.fileDate;
-  query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
+    const sortCol = sort === "name" ? photos.filename : sort === "size" ? photos.fileSize : photos.fileDate;
+    query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
 
-  const total = db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
-  const items = query.limit(limit).offset(offset).all();
+    const total = db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
+    const items = query.limit(limit).offset(offset).all();
 
-  return { items, total, offset, limit };
-}).input(ListSchema);
+    return { items, total, offset, limit };
+  });
 
 // Photo detail
-export const getPhotoDetail = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { id } = input as { id: number };
-  const photo = db.select().from(photos).where(eq(photos.id, id)).get();
-  return photo || null;
-}).input(IdSchema);
+export const getPhotoDetail = os
+  .input(IdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
+    return photo || null;
+  });
 
-export const getPhotoExif = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { id } = input as { id: number };
-  return db.select().from(exifData).where(eq(exifData.photoId, id)).get() || null;
-}).input(IdSchema);
+export const getPhotoExif = os
+  .input(IdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    return db.select().from(exifData).where(eq(exifData.photoId, input.id)).get() || null;
+  });
 
 // Statistics for dashboard
 export const getStats = os.handler(async () => {
@@ -130,47 +134,49 @@ export const getStats = os.handler(async () => {
 });
 
 // AI Search
-export const searchByText = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { query, limit } = input as { query: string; limit: number };
-  const results = await aiSearchByText(query, limit);
+export const searchByText = os
+  .input(SearchSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const results = await aiSearchByText(input.query, input.limit);
 
-  const photoIds = results.map(r => r.photoId);
-  if (photoIds.length === 0) return { results: [], query };
+    const photoIds = results.map(r => r.photoId);
+    if (photoIds.length === 0) return { results: [], query: input.query };
 
-  const photoList = db.select().from(photos)
-    .where(sql`${photos.id} IN (${photoIds.join(",")})`)
-    .all();
+    const photoList = db.select().from(photos)
+      .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+      .all();
 
-  const photoMap = new Map(photoList.map(p => [p.id, p]));
-  const merged = results.map(r => ({
-    ...photoMap.get(r.photoId),
-    similarity: r.similarity,
-  })).filter(p => p.id);
+    const photoMap = new Map(photoList.map(p => [p.id, p]));
+    const merged = results.map(r => ({
+      ...photoMap.get(r.photoId),
+      similarity: r.similarity,
+    })).filter(p => p.id);
 
-  return { results: merged, query };
-}).input(SearchSchema);
+    return { results: merged, query: input.query };
+  });
 
-export const searchByImage = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const { imagePath, limit } = input as { imagePath: string; limit: number };
-  const results = await aiSearchByImage(imagePath, limit);
+export const searchByImage = os
+  .input(ImageSearchSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const results = await aiSearchByImage(input.imagePath, input.limit);
 
-  const photoIds = results.map(r => r.photoId);
-  if (photoIds.length === 0) return { results: [] };
+    const photoIds = results.map(r => r.photoId);
+    if (photoIds.length === 0) return { results: [] };
 
-  const photoList = db.select().from(photos)
-    .where(sql`${photos.id} IN (${photoIds.join(",")})`)
-    .all();
+    const photoList = db.select().from(photos)
+      .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+      .all();
 
-  const photoMap = new Map(photoList.map(p => [p.id, p]));
-  const merged = results.map(r => ({
-    ...photoMap.get(r.photoId),
-    similarity: r.similarity,
-  })).filter(p => p.id);
+    const photoMap = new Map(photoList.map(p => [p.id, p]));
+    const merged = results.map(r => ({
+      ...photoMap.get(r.photoId),
+      similarity: r.similarity,
+    })).filter(p => p.id);
 
-  return { results: merged };
-}).input(ImageSearchSchema);
+    return { results: merged };
+  });
 
 export const startAiIndexing = os.handler(async () => {
   const count = await embedAllPhotos();
