@@ -1,24 +1,23 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { Sidebar } from "@/components/Sidebar";
 import { SearchBar } from "@/components/SearchBar";
+import { Welcome } from "@/components/Welcome";
 
 interface Photo {
   id: number; path: string; filename: string;
   width: number; height: number; fileSize: number;
   thumbnailPath: string; isIndexed: boolean;
 }
-
 interface Folder {
   id: number; path: string; displayName: string; photoCount: number;
 }
 
 function HomePage() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +25,7 @@ function HomePage() {
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     loadFolders();
@@ -36,9 +36,7 @@ function HomePage() {
     try {
       const result = await ipc.client.photos.getFolders({});
       setFolders(result as Folder[]);
-    } catch (error) {
-      console.error("Failed to load folders:", error);
-    }
+    } catch { /* ignore */ }
   }
 
   async function loadPhotos() {
@@ -46,98 +44,76 @@ function HomePage() {
     try {
       const result = await ipc.client.photos.listPhotos({
         folderId: activeFolderId || undefined,
-        sort: "date",
-        order: "desc",
-        offset: 0,
-        limit: 500,
+        sort: "date", order: "desc", offset: 0, limit: 500,
       });
       setPhotos((result as any).items || []);
-    } catch (error) {
-      console.error("Failed to load photos:", error);
-    } finally {
-      setLoading(false);
-    }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
   }
 
   async function handleAddFolder() {
-    // Use Electron dialog or manual path input
-    const folderPath = prompt("Enter folder path to index:");
+    const result = await ipc.client.shell.openFolderDialog({});
+    const folderPath = (result as any)?.path;
     if (!folderPath) return;
 
     setScanningFolder(folderPath);
-    setScanProgress("Scanning...");
+    setScanProgress(t("scanningProgress", { scanned: 0, total: 0 }));
     try {
-      await ipc.client.photos.scanFolder({ path: folderPath });
+      const scanResult = await ipc.client.photos.scanFolder({ path: folderPath });
+      setScanProgress(t("scanningComplete", { count: (scanResult as any).photoIds?.length || 0 }));
       await loadFolders();
       await loadPhotos();
-    } catch (error) {
-      console.error("Failed to scan folder:", error);
+    } catch {
+      setScanProgress("");
     } finally {
       setScanningFolder(null);
-      setScanProgress("");
+      setTimeout(() => setScanProgress(""), 3000);
     }
   }
 
   async function handleAIIndex() {
-    setScanProgress("Starting AI indexing...");
+    setScanProgress(t("aiIndexingStarted"));
     try {
       const result = await ipc.client.photos.startAiIndexing({});
-      setScanProgress(`AI indexed ${(result as any).embedded} photos`);
+      setScanProgress(t("aiIndexedCount", { count: (result as any).embedded || 0 }));
       setTimeout(() => setScanProgress(""), 3000);
-    } catch (error) {
-      console.error("Failed to start AI indexing:", error);
-      setScanProgress("");
-    }
+    } catch { setScanProgress(""); }
   }
 
   const handleSelect = useCallback((id: number, event: React.MouseEvent) => {
-    setSelectedIds((prev) => {
+    setSelectedIds(prev => {
       const next = new Set(prev);
       if (event.ctrlKey || event.metaKey) {
-        if (next.has(id)) next.delete(id); else next.add(id);
+        next.has(id) ? next.delete(id) : next.add(id);
       } else {
-        next.clear();
-        next.add(id);
+        next.clear(); next.add(id);
       }
       return next;
     });
   }, []);
 
   const handleDoubleClick = useCallback((id: number) => {
-    // Open detail panel or lightbox
-    const photo = photos.find(p => p.id === id);
-    if (photo) {
-      navigate({ to: "/detail", search: { photoId: id } });
-    }
-  }, [photos, navigate]);
+    console.log("Open detail for photo:", id);
+  }, []);
 
   async function handleSearch(query: string) {
-    if (!query.trim()) {
-      loadPhotos();
-      return;
-    }
+    if (!query.trim()) { loadPhotos(); return; }
     setLoading(true);
     try {
       const result = await ipc.client.photos.searchByText({ query, limit: 100 });
       setPhotos((result as any).results || []);
     } catch {
-      // Fallback: local filename search
-      const result = await ipc.client.photos.listPhotos({
-        search: query,
-        sort: "date",
-        order: "desc",
-        offset: 0,
-        limit: 500,
+      const fallback = await ipc.client.photos.listPhotos({
+        search: query, sort: "date", order: "desc", offset: 0, limit: 500,
       });
-      setPhotos((result as any).items || []);
-    } finally {
-      setLoading(false);
-    }
+      setPhotos((fallback as any).items || []);
+    } finally { setLoading(false); }
   }
+
+  const hasPhotos = photos.length > 0 || loading;
 
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
       <Sidebar
         folders={folders}
         activeFolderId={activeFolderId}
@@ -148,25 +124,26 @@ function HomePage() {
         scanProgress={scanProgress}
         totalPhotos={photos.length}
       />
-
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Search bar */}
         <SearchBar onSearch={handleSearch} onClear={() => loadPhotos()} />
-
-        {/* Photo Grid */}
-        <PhotoGrid
-          photos={photos}
-          loading={loading}
-          selectedIds={selectedIds}
-          onSelect={handleSelect}
-          onDoubleClick={handleDoubleClick}
-        />
+        {hasPhotos ? (
+          <PhotoGrid
+            photos={photos}
+            loading={loading}
+            selectedIds={selectedIds}
+            onSelect={handleSelect}
+            onDoubleClick={handleDoubleClick}
+          />
+        ) : (
+          <Welcome
+            onAddFolder={handleAddFolder}
+            onAIIndex={handleAIIndex}
+            hasPhotos={false}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-export const Route = createFileRoute("/")({
-  component: HomePage,
-});
+export const Route = createFileRoute("/")({ component: HomePage });

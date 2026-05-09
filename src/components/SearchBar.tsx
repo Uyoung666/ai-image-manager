@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Search, X } from "lucide-react";
 
 interface SearchBarProps {
@@ -7,10 +8,10 @@ interface SearchBarProps {
 }
 
 export function SearchBar({ onSearch, onClear }: SearchBarProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Ctrl+K / Cmd+K to focus search
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -42,7 +43,7 @@ export function SearchBar({ onSearch, onClear }: SearchBarProps) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search photos... (Ctrl+K)"
+          placeholder={t("searchPlaceholder")}
           className="w-full h-9 pl-9 pr-8 bg-[#1c1e22] border border-[rgba(255,255,255,0.06)] rounded-[6px] text-[14px] text-[#f7f8f8] placeholder:text-[#6b6b75] outline-none focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2] transition-colors"
         />
         {query && (
