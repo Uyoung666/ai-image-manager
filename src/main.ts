@@ -1,5 +1,6 @@
+import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow, net, protocol } from "electron";
+import { app, BrowserWindow, protocol } from "electron";
 import { ipcMain } from "electron/main";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { ipcContext } from "@/ipc/context";
@@ -7,6 +8,24 @@ import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
 import { initDatabase } from "@/db";
 import { initThumbnailer } from "@/services/thumbnailer";
+
+function getMimeType(ext: string): string {
+  const mimeTypes: Record<string, string> = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".avif": "image/avif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+  };
+  return mimeTypes[ext] ?? "image/jpeg";
+}
 
 function createWindow() {
   const basePath = getBasePath();
@@ -58,15 +77,39 @@ async function setupORPC() {
   });
 }
 
+// Custom protocol must be registered as privileged before app.whenReady()
+// Otherwise Chromium blocks cross-origin requests to custom schemes
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "local-media",
+    privileges: {
+      supportFetchAPI: true,
+      bypassCSP: true,
+      corsEnabled: false,
+      stream: true,
+    },
+  },
+]);
+
 app.whenReady().then(async () => {
   try {
-    // Register custom protocol for local file access
+    // Register custom protocol handler for local file access
     // (Chromium blocks file:// from http:// origins in dev mode)
-    protocol.handle("local-media", (request) => {
-      const encodedPath = request.url.slice("local-media://".length);
-      const filePath = decodeURIComponent(encodedPath);
-      const normalized = filePath.replace(/\\/g, "/");
-      return net.fetch(`file:///${normalized}`);
+    protocol.handle("local-media", async (request) => {
+      try {
+        const encodedPath = request.url.slice("local-media://".length);
+        const filePath = decodeURIComponent(encodedPath);
+        const ext = path.extname(filePath).toLowerCase();
+        const buffer = await fs.promises.readFile(filePath);
+        return new Response(buffer, {
+          headers: {
+            "content-type": getMimeType(ext),
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        });
+      } catch {
+        return new Response(null, { status: 404 });
+      }
     });
 
     initDatabase();

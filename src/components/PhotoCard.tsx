@@ -14,7 +14,12 @@ interface PhotoCardProps {
 }
 
 function toLocalMediaUrl(filePath: string): string {
-  return `local-media://${filePath.replace(/\\/g, "/")}`;
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `local-media://${encoded}`;
 }
 
 export const PhotoCard = memo(function PhotoCard({
