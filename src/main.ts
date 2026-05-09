@@ -8,15 +8,6 @@ import { getBasePath } from "./utils/path";
 import { initDatabase } from "@/db";
 import { initThumbnailer } from "@/services/thumbnailer";
 
-// Register custom protocol to serve local files safely
-// (required because Chromium blocks file:// from http:// origins in dev mode)
-protocol.handle("local-media", (request) => {
-  const encodedPath = request.url.slice("local-media://".length);
-  const filePath = decodeURIComponent(encodedPath);
-  const normalized = filePath.replace(/\\/g, "/");
-  return net.fetch(`file:///${normalized}`);
-});
-
 function createWindow() {
   const basePath = getBasePath();
   const preload = path.join(basePath, "preload.js");
@@ -69,6 +60,15 @@ async function setupORPC() {
 
 app.whenReady().then(async () => {
   try {
+    // Register custom protocol for local file access
+    // (Chromium blocks file:// from http:// origins in dev mode)
+    protocol.handle("local-media", (request) => {
+      const encodedPath = request.url.slice("local-media://".length);
+      const filePath = decodeURIComponent(encodedPath);
+      const normalized = filePath.replace(/\\/g, "/");
+      return net.fetch(`file:///${normalized}`);
+    });
+
     initDatabase();
     initThumbnailer();
     console.log("[App] Database and thumbnailer initialized");
