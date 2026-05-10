@@ -142,6 +142,17 @@ async function loadModel(): Promise<void> {
     _localModelPath = await ensureLocalModel();
   }
 
+  // Force @xenova/transformers to use onnxruntime-web (WASM) instead of
+  // onnxruntime-node (native). The native ONNX Runtime requires VC++ Redist
+  // on Windows and will crash the process if missing. WASM is pure bytecode
+  // with zero native dependencies — slower per inference but never crashes.
+  const realReleaseName = process.release.name;
+  try {
+    (process.release as any).name = "browser";
+  } catch {
+    // Ignore if read-only
+  }
+
   const {
     AutoProcessor,
     AutoTokenizer,
@@ -149,6 +160,14 @@ async function loadModel(): Promise<void> {
     RawImage,
     env,
   } = await import("@xenova/transformers");
+
+  // Restore immediately after the internal onnx.js module has initialized
+  try {
+    (process.release as any).name = realReleaseName;
+  } catch {
+    // Ignore
+  }
+
   env.localModelPath = _localModelPath;
 
   // Support HuggingFace mirror via env var (e.g. hf-mirror.com for China)
@@ -160,6 +179,7 @@ async function loadModel(): Promise<void> {
   }
 
   env.allowRemoteModels = true;
+  console.log("[AI] Using ONNX Web (WASM) backend — no native dependencies");
 
   const modelId = "Xenova/clip-vit-base-patch32";
   const processor = await AutoProcessor.from_pretrained(modelId);
