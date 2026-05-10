@@ -37,8 +37,18 @@ if (!modelPath || !photos?.length) {
 }
 
 // --- Force WASM backend ---
-// Must happen BEFORE any @xenova/transformers import
-process.release = { ...process.release, name: "browser" };
+// Must happen BEFORE any @xenova/transformers import.
+// Node.js v24+ seals process.release, so we try property write first,
+// then Object.defineProperty as fallback.
+try {
+  process.release.name = "browser";
+} catch {
+  try {
+    Object.defineProperty(process.release, "name", { value: "browser" });
+  } catch {
+    console.error("[Worker] Cannot override process.release.name — WASM backend may not activate");
+  }
+}
 
 console.error(`[Worker] Loading CLIP model from: ${modelPath}`);
 
