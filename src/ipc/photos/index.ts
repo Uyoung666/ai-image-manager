@@ -5,6 +5,7 @@ import {
   deletePhoto,
   deletePhotos,
   deleteTag,
+  exportPhotos,
   findDuplicates,
   getAiProgress,
   getFolders,
@@ -23,6 +24,7 @@ import {
   setPhotoTag,
   startAiIndexing,
   stopAiIndexing,
+  suggestTags,
 } from "./handlers";
 
 export const photos = {
@@ -32,6 +34,7 @@ export const photos = {
   deletePhoto,
   deletePhotos,
   deleteTag,
+  exportPhotos,
   findDuplicates,
   getAiProgress,
   getFolders,
@@ -50,4 +53,5 @@ export const photos = {
   setPhotoTag,
   startAiIndexing,
   stopAiIndexing,
+  suggestTags,
 };

@@ -18,6 +18,7 @@ interface PhotoGridProps {
   onContextMenu: (e: React.MouseEvent) => void;
   onDeleteSelected?: () => void;
   onDoubleClick: (id: number) => void;
+  onExportSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   photos: Photo[];
   searchQuery?: string;
@@ -58,6 +59,7 @@ export function PhotoGrid({
   onDoubleClick,
   onContextMenu,
   onDeleteSelected,
+  onExportSelected,
 }: PhotoGridProps) {
   const { t } = useTranslation();
   const [densityIdx, setDensityIdx] = useState(1); // default "中" / 220px
@@ -172,6 +174,14 @@ export function PhotoGrid({
             t("photosSelected", { count: selectedIds.size })}
         </span>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && onExportSelected && (
+            <button
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              onClick={onExportSelected}
+            >
+              {compact ? "导出" : `导出选中 (${selectedIds.size})`}
+            </button>
+          )}
           {selectedIds.size > 0 && onDeleteSelected && (
             <button
               className="rounded-[4px] px-2 py-1 text-[#e5484d] text-[11px] transition-colors hover:bg-[#e5484d]/10"

@@ -14,11 +14,19 @@ vi.mock("@/components/AiProgressBar", () => ({
 
 describe("Sidebar", () => {
   const baseProps = {
-    activeFolderId: null,
-    folders: [],
+    activeFolderId: null as number | null,
+    collapsed: false,
+    folders: [] as Array<{
+      id: number;
+      path: string;
+      displayName: string;
+      photoCount: number;
+    }>,
     onAddFolder: vi.fn(),
+    onDeleteFolder: vi.fn(),
     onSelectFolder: vi.fn(),
-    scanningFolder: null,
+    onToggleCollapse: vi.fn(),
+    scanningFolder: null as string | null,
     scanProgress: "",
     totalPhotos: 1250,
   };

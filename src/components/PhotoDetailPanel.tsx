@@ -1,4 +1,4 @@
-import { FolderOpen, Plus, X } from "lucide-react";
+import { FolderOpen, Plus, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
@@ -95,6 +95,10 @@ export function PhotoDetailPanel({
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
   const [showTagInput, setShowTagInput] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [aiSuggestions, setAiSuggestions] = useState<
+    Array<{ tag: string; confidence: number }> | null
+  >(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
   const [resizing, setResizing] = useState(false);
   const resizeStartX = useRef(0);
@@ -232,6 +236,57 @@ export function PhotoDetailPanel({
       setNewTagName("");
       setShowTagInput(false);
       loadTags();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function handleAiSuggest() {
+    if (!photo) {
+      return;
+    }
+    setAiLoading(true);
+    setAiSuggestions(null);
+    try {
+      const result = await ipc.client.photos.suggestTags({ id: photo.id });
+      setAiSuggestions((result as any)?.suggestions || []);
+    } catch {
+      setAiSuggestions([]);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleApplySuggestion(tagName: string) {
+    if (!photo) {
+      return;
+    }
+    try {
+      // Find or create the tag
+      const existing = allTags.find((t) => t.name === tagName);
+      if (existing) {
+        if (!photoTagIds.has(existing.id)) {
+          await ipc.client.photos.setPhotoTag({
+            photoId: photo.id,
+            tagId: existing.id,
+          });
+        }
+      } else {
+        const created = await ipc.client.photos.addTag({
+          name: tagName,
+          color: getTagColor(tagName),
+        });
+        const tag = created as TagInfo;
+        await ipc.client.photos.setPhotoTag({
+          photoId: photo.id,
+          tagId: tag.id,
+        });
+      }
+      loadTags();
+      // Remove applied suggestion from the list
+      setAiSuggestions((prev) =>
+        prev ? prev.filter((s) => s.tag !== tagName) : null
+      );
     } catch {
       /* ignore */
     }
@@ -392,6 +447,57 @@ export function PhotoDetailPanel({
                   <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* AI Tag Suggestions */}
+        <section>
+          <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            AI 建议标签
+          </h4>
+          {aiSuggestions === null && !aiLoading ? (
+            <button
+              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+              onClick={handleAiSuggest}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              分析建议标签
+            </button>
+          ) : aiLoading ? (
+            <div className="flex items-center gap-2 py-2">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span className="text-[#6b6b75] text-[11px]">AI 分析中...</span>
+            </div>
+          ) : aiSuggestions!.length === 0 ? (
+            <p className="text-[#6b6b75] text-[11px]">未识别到合适的标签</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {aiSuggestions!.map((s) => {
+                const alreadyApplied = photoTagIds.has(
+                  allTags.find((t) => t.name === s.tag)?.id ?? -1
+                );
+                return (
+                  <button
+                    className={`rounded-[4px] px-1.5 py-0.5 text-[11px] transition-opacity hover:opacity-80 ${alreadyApplied ? "cursor-default opacity-30" : ""}`}
+                    disabled={alreadyApplied}
+                    key={s.tag}
+                    onClick={() => handleApplySuggestion(s.tag)}
+                    title={`置信度: ${Math.round(s.confidence * 100)}%`}
+                  >
+                    <span
+                      className="rounded-[3px] px-1 py-0.5"
+                      style={{
+                        background: alreadyApplied
+                          ? "rgba(255,255,255,0.08)"
+                          : `rgba(94,106,210,${0.3 + s.confidence * 0.6})`,
+                      }}
+                    >
+                      {s.tag}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>

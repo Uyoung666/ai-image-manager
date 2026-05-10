@@ -104,7 +104,8 @@ function createTray() {
 }
 
 function registerGlobalShortcuts() {
-  const registered = globalShortcut.register("Ctrl+Shift+F", () => {
+  // Ctrl+Shift+F — global search focus (works even when app is in background)
+  const searchRegistered = globalShortcut.register("Ctrl+Shift+F", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
@@ -114,10 +115,21 @@ function registerGlobalShortcuts() {
       mainWindow.webContents.send("global-shortcut:search");
     }
   });
-
-  if (!registered) {
+  if (!searchRegistered) {
     console.warn("[App] Failed to register global shortcut Ctrl+Shift+F");
   }
+
+  // Ctrl+Shift+H — quick hide window (minimize to tray)
+  const hideRegistered = globalShortcut.register("Ctrl+Shift+H", () => {
+    if (mainWindow && mainWindow.isVisible()) {
+      mainWindow.hide();
+    }
+  });
+  if (!hideRegistered) {
+    console.warn("[App] Failed to register global shortcut Ctrl+Shift+H");
+  }
+
+  console.log("[App] Global shortcuts registered: Ctrl+Shift+F (search), Ctrl+Shift+H (hide)");
 }
 
 function getMimeType(ext: string): string {

@@ -520,3 +520,63 @@ export async function searchByImage(
     similarity: r._distance as number,
   }));
 }
+
+// --- Zero-shot tag suggestion ---
+
+const CANDIDATE_TAGS = [
+  // Scenes
+  "室内", "户外", "城市", "自然风景", "海滩", "山脉", "森林", "街道", "建筑",
+  "花园", "田野", "湖泊", "河流", "天空", "夜景",
+  // Subjects
+  "人物", "动物", "猫咪", "狗狗", "鸟类", "汽车", "花卉", "食物",
+  "树木", "水面", "文字", "屏幕截图", "文档",
+  // Time / Lighting
+  "白天", "夜晚", "黄昏", "日出", "日落", "逆光",
+  // Style
+  "黑白", "鲜艳", "暗调", "亮调", "微距", "虚化背景",
+  // Colors
+  "红色调", "蓝色调", "绿色调", "黄色调", "白色调", "黑色调",
+];
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+}
+
+export async function suggestTags(
+  imagePath: string,
+  threshold = 0.22
+): Promise<Array<{ tag: string; confidence: number }>> {
+  try {
+    await loadModel();
+  } catch (err: any) {
+    console.error("[AI] suggestTags: model load failed:", err?.message);
+    return [];
+  }
+
+  if (!embeddingModel) {
+    console.warn("[AI] suggestTags: AI not initialized");
+    return [];
+  }
+
+  const imageVec = await embeddingModel.embedImage(imagePath);
+  const results: Array<{ tag: string; confidence: number }> = [];
+
+  for (const tag of CANDIDATE_TAGS) {
+    const textVec = await embeddingModel.embedText(tag);
+    const sim = cosineSimilarity(imageVec, textVec);
+    if (sim >= threshold) {
+      results.push({ tag, confidence: Math.round(sim * 100) / 100 });
+    }
+  }
+
+  results.sort((a, b) => b.confidence - a.confidence);
+  return results.slice(0, 10);
+}

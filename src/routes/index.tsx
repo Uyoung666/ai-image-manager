@@ -295,6 +295,41 @@ function HomePage() {
     });
   }
 
+  async function handleExportPhoto(id: number) {
+    await doExport([id]);
+  }
+
+  async function handleExportSelected() {
+    await doExport(Array.from(selectedIds));
+  }
+
+  async function doExport(ids: number[]) {
+    if (ids.length === 0) {
+      return;
+    }
+    try {
+      const defaultName = `gallery-${new Date().toISOString().slice(0, 10)}.zip`;
+      const dialogResult = await ipc.client.shell.saveFileDialog({
+        defaultName,
+        title: "导出照片画廊",
+      });
+      const savePath = (dialogResult as any)?.path;
+      if (!savePath) {
+        return;
+      }
+      const result = await ipc.client.photos.exportPhotos({
+        ids,
+        format: "original",
+        outputPath: savePath,
+      });
+      if ((result as any).success) {
+        await ipc.client.shell.openInExplorer({ path: savePath });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function handleDeleteSelected() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) {
@@ -350,6 +385,7 @@ function HomePage() {
               onContextMenu={handleContextMenu}
               onDeleteSelected={handleDeleteSelected}
               onDoubleClick={handleDoubleClick}
+              onExportSelected={handleExportSelected}
               onSelect={handleSelect}
               photos={photos}
               searchQuery={searchQuery}
@@ -382,6 +418,7 @@ function HomePage() {
         menu={ctxMenu}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
+        onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
       />
     </div>

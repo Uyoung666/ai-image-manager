@@ -27,3 +27,26 @@ export const openInExplorer = os
   .handler(({ input }) => {
     shell.showItemInFolder(input.path);
   });
+
+export const saveFileDialog = os
+  .input(
+    z.object({
+      defaultName: z.string().optional().default("export.zip"),
+      title: z.string().optional().default("保存文件"),
+    })
+  )
+  .handler(async ({ input }) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) {
+      return { path: null };
+    }
+    const result = await dialog.showSaveDialog(win, {
+      title: input.title,
+      defaultPath: input.defaultName,
+      filters: [
+        { name: "ZIP 归档", extensions: ["zip"] },
+        { name: "所有文件", extensions: ["*"] },
+      ],
+    });
+    return { path: result.canceled ? null : result.filePath || null };
+  });
