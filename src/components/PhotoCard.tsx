@@ -1,4 +1,4 @@
-import { memo, useState, useMemo } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface PhotoCardProps {
@@ -61,8 +61,8 @@ export const PhotoCard = memo(function PhotoCard({
   if (error) {
     return (
       <div
-        className="relative flex flex-col items-center justify-center bg-[#15171a] rounded-[8px] overflow-hiddengap-2"
-        style={{ aspectRatio }}
+        className="relative flex flex-col items-center justify-center bg-[#15171a] rounded-[8px] overflow-hidden break-inside-avoid mb-2 gap-2"
+        style={{ aspectRatio, contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
       >
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6b6b75" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -77,14 +77,14 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       className={`
-        relative group cursor-pointer rounded-[8px] overflow-hidden
+        relative group cursor-pointer rounded-[8px] overflow-hidden break-inside-avoid mb-2
         transition-all duration-150 bg-[#15171a]
         ${isSelected
           ? "ring-2 ring-[#5e6ad2] ring-offset-1 ring-offset-[#08090a] shadow-[0_0_20px_rgba(94,106,210,0.15)]"
           : "hover:ring-1 hover:ring-white/10 hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
         }
       `}
-      style={{ aspectRatio }}
+      style={{ aspectRatio, contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
       onClick={(e) => onClick(id, e)}
       onDoubleClick={() => onDoubleClick(id)}
     >

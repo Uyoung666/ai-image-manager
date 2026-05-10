@@ -28,9 +28,9 @@ function HomePage() {
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
-  const [loadingMore, setLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({ open: false, x: 0, y: 0, photoId: null, photoPath: null });
 
   useEffect(() => {
@@ -46,7 +46,8 @@ function HomePage() {
   }
 
   async function loadPhotos() {
-    setLoading(true);
+    const isFirstLoad = photos.length === 0;
+    if (isFirstLoad) setLoading(true);
     try {
       const result = await ipc.client.photos.listPhotos({
         folderId: activeFolderId || undefined,
@@ -54,7 +55,7 @@ function HomePage() {
       });
       setPhotos((result as any).items || []);
     } catch { /* ignore */ }
-    finally { setLoading(false); }
+    finally { if (isFirstLoad) setLoading(false); }
   }
 
   async function handleAddFolder() {
@@ -77,14 +78,11 @@ function HomePage() {
     }
   }
 
-  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
-
   const handleSelect = useCallback((id: number, event: React.MouseEvent) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
       const idx = photos.findIndex(p => p.id === id);
       if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
-        // Range select
         const [from, to] = lastClickedIdx < idx ? [lastClickedIdx, idx] : [idx, lastClickedIdx];
         for (let i = from; i <= to; i++) next.add(photos[i].id);
       } else if (event.ctrlKey || event.metaKey) {
@@ -96,7 +94,7 @@ function HomePage() {
       }
       return next;
     });
-  }, []);
+  }, [photos, lastClickedIdx]);
 
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photos.findIndex(p => p.id === id);
@@ -106,7 +104,6 @@ function HomePage() {
   async function handleSearch(query: string) {
     setSearchQuery(query);
     if (!query.trim()) { loadPhotos(); return; }
-    setLoading(true);
     try {
       const result = await ipc.client.photos.searchByText({ query, limit: 100 });
       setPhotos((result as any).results || []);
@@ -115,7 +112,7 @@ function HomePage() {
         search: query, sort: "date", order: "desc", offset: 0, limit: 500,
       });
       setPhotos((fallback as any).items || []);
-    } finally { setLoading(false); }
+    }
   }
 
   function handleContextMenu(e: React.MouseEvent) {
@@ -147,16 +144,14 @@ function HomePage() {
   }
 
   async function handleImageSearch(imagePath: string) {
-    setLoading(true);
     setSearchQuery("[以图搜图]");
     try {
       const result = await ipc.client.photos.searchByImage({ imagePath, limit: 100 });
       setPhotos((result as any).results || []);
     } catch { /* ignore */ }
-    finally { setLoading(false); }
   }
 
-  const hasPhotos = photos.length > 0 || loading;
+  const hasPhotos = photos.length > 0 || (loading && photos.length === 0);
 
   return (
     <div className="flex h-full">
