@@ -8,6 +8,7 @@ import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
+  deletePhotoVectors,
   embedAllPhotos,
   getEmbeddingProgress,
   stopEmbedding,
@@ -17,9 +18,28 @@ import { scanFolder as scanFolderService } from "@/services/indexer";
 
 const FolderSchema = z.object({ path: z.string().min(1) });
 const SearchSchema = z.object({
-  query: z.string().min(1),
+  query: z.string().min(1).max(500),
   limit: z.number().optional().default(50),
 });
+
+// Time-decay scoring: blends vector similarity with photo recency.
+// Newer photos get a moderate boost; older photos are not penalized below their vector score.
+const TIME_DECAY_ALPHA = 0.25; // How much recency boosts the score (0 = off, 1 = strong)
+const MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+
+function applyTimeDecay<T extends { similarity: number; fileDate?: number | null }>(
+  results: T[],
+): Array<T & { score: number }> {
+  const now = Date.now();
+  const scored = results.map((r) => {
+    const age = r.fileDate != null ? Math.max(0, now - r.fileDate) : 0;
+    const recency = Math.max(0, 1 - age / MAX_AGE_MS);
+    const score = r.similarity * (1 + TIME_DECAY_ALPHA * recency);
+    return { ...r, score: Math.round(score * 10000) / 10000 };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
 const ImageSearchSchema = z.object({
   imagePath: z.string().min(1),
   limit: z.number().optional().default(20),
@@ -45,7 +65,7 @@ export const getFolders = os.handler(() => {
   return db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
 });
 
-export const deleteFolder = os.input(IdSchema).handler(({ input }) => {
+export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const folder = db
     .select({ path: folders.path })
@@ -53,8 +73,22 @@ export const deleteFolder = os.input(IdSchema).handler(({ input }) => {
     .where(eq(folders.id, input.id))
     .get();
   if (folder) {
+    // Collect photo IDs for vector cleanup before deleting photos
+    const photoIds = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.folderId, input.id))
+      .all()
+      .map((p) => p.id);
+
     db.delete(photos).where(eq(photos.folderId, input.id)).run();
     db.delete(folders).where(eq(folders.id, input.id)).run();
+
+    if (photoIds.length > 0) {
+      deletePhotoVectors(photoIds).catch((err) =>
+        console.error("[AI] deleteFolder vector cleanup failed:", err)
+      );
+    }
   }
   return { success: true };
 });
@@ -262,13 +296,16 @@ export const searchByText = os
 
     const photoMap = new Map(photoList.map((p) => [p.id, p]));
     const merged = results
-      .map((r) => ({
-        ...photoMap.get(r.photoId),
-        similarity: r.similarity,
-      }))
-      .filter((p) => p.id);
+      .map((r) => {
+        const photo = photoMap.get(r.photoId);
+        if (!photo) return null;
+        return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-    return { results: merged, query: input.query };
+    // Apply time-decay scoring
+    const scored = applyTimeDecay(merged);
+    return { results: scored, query: input.query };
   });
 
 export const searchByImage = os
@@ -290,13 +327,15 @@ export const searchByImage = os
 
     const photoMap = new Map(photoList.map((p) => [p.id, p]));
     const merged = results
-      .map((r) => ({
-        ...photoMap.get(r.photoId),
-        similarity: r.similarity,
-      }))
-      .filter((p) => p.id);
+      .map((r) => {
+        const photo = photoMap.get(r.photoId);
+        if (!photo) return null;
+        return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-    return { results: merged };
+    const scored = applyTimeDecay(merged);
+    return { results: scored };
   });
 
 // Compound search: text + EXIF filters
@@ -357,17 +396,18 @@ export const searchCompound = os
           .select()
           .from(photos)
           .where(inArray(photos.id, photoIds))
-          .limit(limit)
           .all();
         const photoMap = new Map(photoList.map((p) => [p.id, p]));
         const merged = aiResults
-          .slice(0, limit)
-          .map((r) => ({
-            ...photoMap.get(r.photoId),
-            similarity: r.similarity,
-          }))
-          .filter((p) => p.id);
-        return { results: merged, query: query.trim(), total: merged.length };
+          .map((r) => {
+            const photo = photoMap.get(r.photoId);
+            if (!photo) return null;
+            return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
+
+        const scored = applyTimeDecay(merged);
+        return { results: scored.slice(0, limit), query: query.trim(), total: scored.length };
       }
 
       // Apply EXIF filters on AI results
@@ -418,9 +458,7 @@ export const searchCompound = os
       const filteredExif = exifQuery.all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
 
-      const filtered = aiResults
-        .filter((r) => validIds.has(r.photoId))
-        .slice(0, limit);
+      const filtered = aiResults.filter((r) => validIds.has(r.photoId));
 
       if (filtered.length === 0) {
         return { results: [], query: query.trim(), total: 0 };
@@ -434,10 +472,15 @@ export const searchCompound = os
         .all();
       const photoMap = new Map(photoList.map((p) => [p.id, p]));
       const merged = filtered
-        .map((r) => ({ ...photoMap.get(r.photoId), similarity: r.similarity }))
-        .filter((p) => p.id);
+        .map((r) => {
+          const photo = photoMap.get(r.photoId);
+          if (!photo) return null;
+          return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+        })
+        .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-      return { results: merged, query: query.trim(), total: merged.length };
+      const scored = applyTimeDecay(merged);
+      return { results: scored.slice(0, limit), query: query.trim(), total: scored.length };
     }
 
     // No text query: EXIF-only filter
@@ -524,7 +567,7 @@ export const stopAiIndexing = os.handler(() => {
   return { stopped: true };
 });
 
-export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
+export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const photo = db
     .select({ path: photos.path })
@@ -534,18 +577,26 @@ export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
   if (photo) {
     db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
     db.delete(photos).where(eq(photos.id, input.id)).run();
+    // Clean up LanceDB vector
+    deletePhotoVectors([input.id]).catch((err) =>
+      console.error("[AI] deletePhoto vector cleanup failed:", err)
+    );
   }
   return { success: true };
 });
 
 export const deletePhotos = os
   .input(z.object({ ids: z.array(z.number()) }))
-  .handler(({ input }) => {
+  .handler(async ({ input }) => {
     const db = getDatabase();
     for (const id of input.ids) {
       db.delete(exifData).where(eq(exifData.photoId, id)).run();
       db.delete(photos).where(eq(photos.id, id)).run();
     }
+    // Clean up LanceDB vectors
+    deletePhotoVectors(input.ids).catch((err) =>
+      console.error("[AI] deletePhotos vector cleanup failed:", err)
+    );
     return { deleted: input.ids.length };
   });
 

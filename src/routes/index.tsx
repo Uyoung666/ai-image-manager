@@ -216,10 +216,14 @@ function HomePage() {
         searchParams.query = query.trim();
       }
       if (filters?.dateFrom) {
-        searchParams.dateFrom = new Date(filters.dateFrom).getTime();
+        // Parse as local date at start of day
+        const [y, m, d] = filters.dateFrom.split("-").map(Number);
+        searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
       }
       if (filters?.dateTo) {
-        searchParams.dateTo = new Date(filters.dateTo + "T23:59:59").getTime();
+        // Parse as local date at end of day
+        const [y, m, d] = filters.dateTo.split("-").map(Number);
+        searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
       }
       if (filters?.cameraModel) {
         searchParams.cameraModel = filters.cameraModel;

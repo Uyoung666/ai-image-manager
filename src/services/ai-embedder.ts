@@ -67,6 +67,7 @@ export async function initVectorDB(): Promise<void> {
     photoTable = await vectordb.openTable("photo_embeddings");
     console.log("[AI] Opened existing photo_embeddings table");
   } else {
+    // Use cosine distance for CLIP embeddings (vectors are L2-normalized)
     photoTable = await vectordb.createTable("photo_embeddings", [
       { photo_id: 0, vector: new Array(512).fill(0), created_at: Date.now() },
     ]);
@@ -74,6 +75,19 @@ export async function initVectorDB(): Promise<void> {
   }
 
   isVectorDBReady = true;
+}
+
+export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
+  if (!isVectorDBReady || !photoTable || photoIds.length === 0) {
+    return;
+  }
+  try {
+    const idList = photoIds.join(", ");
+    await photoTable.delete(`photo_id IN (${idList})`);
+    console.log(`[AI] Deleted ${photoIds.length} vectors from LanceDB`);
+  } catch (err: any) {
+    console.error("[AI] Failed to delete vectors:", err?.message);
+  }
 }
 
 // --- Model loading (for search queries, not batch embedding) ---
@@ -343,6 +357,13 @@ function runEmbedBatch(
 export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
+  // Atomically guard against concurrent calls
+  if (isEmbedding) {
+    console.warn("[AI] embedAllPhotos already running, skipping duplicate call");
+    return 0;
+  }
+  isEmbedding = true;
+
   const db = getDatabase();
 
   // Check that the worker script exists before starting
@@ -350,6 +371,7 @@ export async function embedAllPhotos(
     const workerScript = findWorkerScript();
     console.log(`[AI] Embed worker found: ${workerScript}`);
   } catch (err: any) {
+    isEmbedding = false;
     currentProgress = {
       processed: 0,
       total: 0,
@@ -360,13 +382,6 @@ export async function embedAllPhotos(
     onProgress?.(currentProgress);
     return 0;
   }
-
-  if (isEmbedding) {
-    console.warn("[AI] embedAllPhotos already running, skipping duplicate call");
-    return 0;
-  }
-
-  isEmbedding = true;
 
   currentProgress = {
     processed: 0,
@@ -427,6 +442,16 @@ export async function embedAllPhotos(
     try {
       const results = await runEmbedBatch(batch, _localModelPath);
 
+      // Deduplicate: delete existing vectors for this batch before inserting
+      const batchIds = results.filter((r) => r.vector).map((r) => r.id);
+      if (batchIds.length > 0) {
+        try {
+          await photoTable.delete(`photo_id IN (${batchIds.join(", ")})`);
+        } catch {
+          // Best-effort dedup — ignore if delete fails
+        }
+      }
+
       // Store successful results
       for (const result of results) {
         if (result.vector && result.vector.length > 0) {
@@ -471,6 +496,10 @@ export async function searchByText(
   query: string,
   limit = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!query.trim()) {
+    return [];
+  }
+
   try {
     await loadModel();
   } catch (err: any) {
@@ -488,16 +517,25 @@ export async function searchByText(
   const queryVector = await embeddingModel.embedText(query);
   const results = await photoTable.search(queryVector).limit(limit).execute();
 
-  return results.map((r: Record<string, unknown>) => ({
-    photoId: r.photo_id as number,
-    similarity: r._distance as number,
-  }));
+  return results.map((r: Record<string, unknown>) => {
+    const distance = r._distance as number;
+    const similarity = 1 / (1 + distance);
+    return {
+      photoId: r.photo_id as number,
+      similarity: Math.round(similarity * 10000) / 10000,
+    };
+  });
 }
 
 export async function searchByImage(
   imagePath: string,
   limit = 20
 ): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    console.warn("[AI] searchByImage: image file not found:", imagePath);
+    return [];
+  }
+
   try {
     await loadModel();
   } catch (err: any) {
@@ -515,10 +553,14 @@ export async function searchByImage(
   const queryVector = await embeddingModel.embedImage(imagePath);
   const results = await photoTable.search(queryVector).limit(limit).execute();
 
-  return results.map((r: Record<string, unknown>) => ({
-    photoId: r.photo_id as number,
-    similarity: r._distance as number,
-  }));
+  return results.map((r: Record<string, unknown>) => {
+    const distance = r._distance as number;
+    const similarity = 1 / (1 + distance);
+    return {
+      photoId: r.photo_id as number,
+      similarity: Math.round(similarity * 10000) / 10000,
+    };
+  });
 }
 
 // --- Zero-shot tag suggestion ---
@@ -550,6 +592,9 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
 }
 
+// Pre-computed text embeddings for candidate tags (computed once after model load)
+let cachedTagEmbeddings: Array<{ tag: string; vector: number[] }> | null = null;
+
 export async function suggestTags(
   imagePath: string,
   threshold = 0.22
@@ -566,12 +611,25 @@ export async function suggestTags(
     return [];
   }
 
+  // Pre-compute tag embeddings once
+  if (!cachedTagEmbeddings) {
+    cachedTagEmbeddings = [];
+    for (const tag of CANDIDATE_TAGS) {
+      try {
+        const textVec = await embeddingModel.embedText(tag);
+        cachedTagEmbeddings.push({ tag, vector: textVec });
+      } catch {
+        // Skip tags that fail to embed
+      }
+    }
+    console.log(`[AI] Pre-computed ${cachedTagEmbeddings.length} tag embeddings`);
+  }
+
   const imageVec = await embeddingModel.embedImage(imagePath);
   const results: Array<{ tag: string; confidence: number }> = [];
 
-  for (const tag of CANDIDATE_TAGS) {
-    const textVec = await embeddingModel.embedText(tag);
-    const sim = cosineSimilarity(imageVec, textVec);
+  for (const { tag, vector } of cachedTagEmbeddings) {
+    const sim = cosineSimilarity(imageVec, vector);
     if (sim >= threshold) {
       results.push({ tag, confidence: Math.round(sim * 100) / 100 });
     }
