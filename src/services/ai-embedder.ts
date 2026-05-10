@@ -16,7 +16,8 @@ let isModelLoaded = false;
 
 interface EmbedProgress {
   currentFile: string;
-  phase: "loading" | "embedding" | "complete";
+  error?: string;
+  phase: "loading" | "embedding" | "complete" | "error";
   processed: number;
   total: number;
 }
@@ -59,6 +60,15 @@ async function loadModel(): Promise<void> {
 
   const { pipeline, env } = await import("@xenova/transformers");
   env.localModelPath = path.join(app.getPath("userData"), "models");
+
+  // Support HuggingFace mirror via env var (e.g. hf-mirror.com for China)
+  const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
+  if (mirror) {
+    env.remoteHost = mirror;
+    env.remotePathTemplate = "{model}/";
+    console.log(`[AI] Using HF mirror: ${mirror}`);
+  }
+
   env.allowRemoteModels = true;
 
   const extractor = await pipeline(
@@ -107,11 +117,36 @@ export async function embedAllPhotos(
     currentFile: "",
   };
   onProgress?.(currentProgress);
-  await loadModel();
+
+  try {
+    await loadModel();
+  } catch (err: any) {
+    isEmbedding = false;
+    currentProgress = {
+      processed: 0,
+      total: 0,
+      phase: "error",
+      currentFile: "",
+      error: `模型加载失败: ${err?.message || "未知错误"}`,
+    };
+    onProgress?.(currentProgress);
+    console.error("[AI] Model load error:", err);
+    return 0;
+  }
+
   await initVectorDB();
 
   if (!(embeddingModel && photoTable)) {
-    throw new Error("AI embedding model or vector DB not initialized");
+    isEmbedding = false;
+    currentProgress = {
+      processed: 0,
+      total: 0,
+      phase: "error",
+      currentFile: "",
+      error: "向量数据库初始化失败",
+    };
+    onProgress?.(currentProgress);
+    return 0;
   }
 
   // Find photos without AI processing
@@ -174,11 +209,18 @@ export async function searchByText(
   query: string,
   limit = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
-  await loadModel();
+  try {
+    await loadModel();
+  } catch (err: any) {
+    console.error("[AI] searchByText: model load failed:", err?.message);
+    return [];
+  }
+
   await initVectorDB();
 
   if (!(embeddingModel && photoTable)) {
-    throw new Error("AI embedding model or vector DB not initialized");
+    console.warn("[AI] searchByText: AI not initialized");
+    return [];
   }
 
   const queryVector = await embeddingModel.embedText(query);
@@ -194,11 +236,18 @@ export async function searchByImage(
   imagePath: string,
   limit = 20
 ): Promise<Array<{ photoId: number; similarity: number }>> {
-  await loadModel();
+  try {
+    await loadModel();
+  } catch (err: any) {
+    console.error("[AI] searchByImage: model load failed:", err?.message);
+    return [];
+  }
+
   await initVectorDB();
 
   if (!(embeddingModel && photoTable)) {
-    throw new Error("AI embedding model or vector DB not initialized");
+    console.warn("[AI] searchByImage: AI not initialized");
+    return [];
   }
 
   const queryVector = await embeddingModel.embedImage(imagePath);
@@ -218,5 +267,9 @@ export function getEmbeddingProgress(): EmbedProgress & {
   isActive: boolean;
   isModelLoaded: boolean;
 } {
-  return { ...currentProgress, isActive: isEmbedding, isModelLoaded };
+  return {
+    ...currentProgress,
+    isActive: isEmbedding || currentProgress.phase === "loading",
+    isModelLoaded,
+  };
 }

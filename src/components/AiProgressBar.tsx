@@ -4,26 +4,23 @@ import { ipc } from "@/ipc/manager";
 
 interface AiProgress {
   currentFile: string;
+  error?: string;
   isActive: boolean;
   isModelLoaded: boolean;
-  phase: "loading" | "embedding" | "complete";
+  phase: "loading" | "embedding" | "complete" | "error";
   processed: number;
   total: number;
 }
 
-interface AiProgressBarProps {
-  onComplete?: () => void;
-}
-
-export function AiProgressBar({ onComplete }: AiProgressBarProps) {
+export function AiProgressBar() {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<AiProgress | null>(null);
   const [paused, setPaused] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const fetchProgress = useCallback(async () => {
     try {
       const result = await ipc.client.photos.getAiProgress({});
-      setProgress(result as any as AiProgress);
       return result as any as AiProgress;
     } catch {
       return null;
@@ -36,27 +33,25 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
       if (p?.isActive) {
         timer = setInterval(fetchProgress, 500);
       }
+      if (p) setProgress(p);
     });
     return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
+      if (timer) clearInterval(timer);
     };
   }, [fetchProgress]);
 
-  // Restart polling when progress changes
   useEffect(() => {
-    if (!progress?.isActive && progress?.phase === "complete") {
-      onComplete?.();
+    if (!progress) return;
+    if (progress.phase === "error") {
+      setLastError(progress.error || "AI 初始化失败");
     }
-    if (progress?.isActive && paused) {
-      // Resume was clicked, restart polling
-      const timer = setInterval(fetchProgress, 500);
-      return () => clearInterval(timer);
+    if (progress.phase === "complete" || progress.phase === "error") {
+      // Stop considering it active
     }
-  }, [progress, paused, fetchProgress, onComplete]);
+  }, [progress]);
 
   async function handleStart() {
+    setLastError(null);
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
     setProgress({
@@ -67,17 +62,15 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
       isActive: true,
       isModelLoaded: false,
     });
-    const timer = setInterval(fetchProgress, 500);
-    // Store timer cleanup
-    setTimeout(() => {
-      const checkAndStop = setInterval(async () => {
-        const p = await fetchProgress();
-        if (!p?.isActive) {
-          clearInterval(checkAndStop);
-          clearInterval(timer);
-        }
-      }, 1000);
-    }, 0);
+    // Poll for updates
+    const poll = async () => {
+      const p = await fetchProgress();
+      if (p) setProgress(p);
+      if (p?.isActive || p?.phase === "loading") {
+        setTimeout(poll, 500);
+      }
+    };
+    setTimeout(poll, 500);
   }
 
   async function handlePause() {
@@ -86,22 +79,52 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
   }
 
   async function handleResume() {
+    setLastError(null);
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
+    const poll = async () => {
+      const p = await fetchProgress();
+      if (p) setProgress(p);
+      if (p?.isActive || p?.phase === "loading") {
+        setTimeout(poll, 500);
+      }
+    };
+    setTimeout(poll, 500);
+  }
+
+  // Error state: show retry button
+  if (progress?.phase === "error" || lastError) {
+    return (
+      <div className="mt-2 rounded-[6px] border border-[#e5484d]/30 bg-[#e5484d]/5 px-3 py-2">
+        <p className="text-[#e5484d] text-[11px]">{lastError}</p>
+        <p className="mt-1 text-[#6b6b75] text-[10px]">
+          国内用户可设置 HuggingFace 镜像：启动时设置环境变量
+          <code className="mx-0.5 rounded-[3px] bg-card px-1 text-[#a1a1aa] text-[10px]">
+            HF_MIRROR=hf-mirror.com
+          </code>
+        </p>
+        <button
+          className="mt-2 w-full rounded-[4px] bg-[#5e6ad2]/10 px-2 py-1 font-[510] text-[#5e6ad2] text-[11px] transition-colors hover:bg-[#5e6ad2]/20"
+          onClick={handleStart}
+        >
+          重试
+        </button>
+      </div>
+    );
   }
 
   if (
     !progress ||
     (!progress.isActive &&
-      progress.phase === "complete" &&
+      progress.phase !== "loading" &&
       progress.processed === 0)
   ) {
     return (
       <button
-        className="mt-2 w-full rounded-[6px] bg-[#5e6ad2]/10 px-3 py-1.5 font-[510] text-[#5e6ad2] text-[12px] transition-colors hover:bg-[#5e6ad2]/15 hover:text-[#7c7fe0]"
+        className="mt-2 w-full rounded-[6px] bg-[#5e6ad2]/10 px-3 py-1.5 font-[510] text-[#5e6ad2] text-[12px] transition-colors hover:bg-[#5e6ad2]/15"
         onClick={handleStart}
       >
-        {t("aiIndexingStarted")}
+        开始AI索引
       </button>
     );
   }
@@ -112,7 +135,7 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
       : 0;
   const phaseLabel =
     progress.phase === "loading"
-      ? "加载模型中..."
+      ? "加载 CLIP 模型中... (首次约 87MB)"
       : progress.phase === "complete"
         ? paused
           ? "已暂停"
