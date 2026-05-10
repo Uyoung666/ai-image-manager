@@ -185,7 +185,8 @@ async function loadModel(): Promise<void> {
   const {
     AutoProcessor,
     AutoTokenizer,
-    CLIPModel,
+    CLIPVisionModelWithProjection,
+    CLIPTextModelWithProjection,
     RawImage,
     env,
   } = await import("@xenova/transformers");
@@ -199,7 +200,9 @@ async function loadModel(): Promise<void> {
   const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
   if (mirror) {
     env.remoteHost = mirror;
-    env.remotePathTemplate = "{model}/";
+    // hf-mirror.com proxies the full huggingface.co path structure,
+    // so we need the resolve/main prefix for file downloads.
+    env.remotePathTemplate = "{model}/resolve/main/";
     console.log(`[AI] Using HF mirror: ${mirror}`);
   }
 
@@ -209,13 +212,17 @@ async function loadModel(): Promise<void> {
   const modelId = "Xenova/clip-vit-base-patch32";
   const processor = await AutoProcessor.from_pretrained(modelId);
   const tokenizer = await AutoTokenizer.from_pretrained(modelId);
-  const model = await CLIPModel.from_pretrained(modelId, { quantized: true });
+  // Use separate vision/text models instead of the monolithic CLIPModel:
+  // the quantized CLIPModel ONNX file requires both text AND image inputs,
+  // but we always provide only one at a time.
+  const visionModel = await CLIPVisionModelWithProjection.from_pretrained(modelId, { quantized: true });
+  const textModel = await CLIPTextModelWithProjection.from_pretrained(modelId, { quantized: true });
 
   embeddingModel = {
     embedImage: async (imagePath: string) => {
       const image = await RawImage.read(imagePath);
       const inputs = await processor(image);
-      const output = await model(inputs);
+      const output = await visionModel(inputs);
       try {
         const { image_embeds } = output;
         const vec = Array.from(image_embeds.data as Float32Array);
@@ -227,7 +234,7 @@ async function loadModel(): Promise<void> {
     },
     embedText: async (text: string) => {
       const inputs = await tokenizer([text], { padding: true, truncation: true });
-      const output = await model(inputs);
+      const output = await textModel(inputs);
       try {
         const { text_embeds } = output;
         const vec = Array.from(text_embeds.data as Float32Array);
@@ -612,26 +619,31 @@ export async function suggestTags(
   }
 
   // Pre-compute tag embeddings once
-  if (!cachedTagEmbeddings) {
-    cachedTagEmbeddings = [];
+  if (cachedTagEmbeddings === null) {
+    const fresh: Array<{ tag: string; vector: number[] }> = [];
     for (const tag of CANDIDATE_TAGS) {
       try {
         const textVec = await embeddingModel.embedText(tag);
-        cachedTagEmbeddings.push({ tag, vector: textVec });
-      } catch {
-        // Skip tags that fail to embed
+        fresh.push({ tag, vector: textVec });
+      } catch (err: any) {
+        console.error(`[AI] Tag embedding failed for "${tag}":`, err?.message);
       }
     }
-    console.log(`[AI] Pre-computed ${cachedTagEmbeddings.length} tag embeddings`);
+    if (fresh.length > 0) {
+      cachedTagEmbeddings = fresh;
+    }
+    console.log(`[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`);
   }
 
   const imageVec = await embeddingModel.embedImage(imagePath);
   const results: Array<{ tag: string; confidence: number }> = [];
 
-  for (const { tag, vector } of cachedTagEmbeddings) {
-    const sim = cosineSimilarity(imageVec, vector);
-    if (sim >= threshold) {
-      results.push({ tag, confidence: Math.round(sim * 100) / 100 });
+  if (cachedTagEmbeddings) {
+    for (const { tag, vector } of cachedTagEmbeddings) {
+      const sim = cosineSimilarity(imageVec, vector);
+      if (sim >= threshold) {
+        results.push({ tag, confidence: Math.round(sim * 100) / 100 });
+      }
     }
   }
 

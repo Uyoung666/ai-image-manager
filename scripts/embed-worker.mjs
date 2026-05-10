@@ -50,22 +50,36 @@ try {
   }
 }
 
+// Disable ONNX multi-threading BEFORE import — must be set as env
+// because onnxruntime-web initializes its WASM backend during import.
+process.env.ORT_WASM_NUM_THREADS = "1";
+
 console.error(`[Worker] Loading CLIP model from: ${modelPath}`);
 
 // --- Dynamic import (ESM package in CJS context) ---
-const { AutoProcessor, AutoTokenizer, CLIPModel, RawImage, env } =
+const { AutoProcessor, AutoTokenizer, CLIPVisionModelWithProjection, RawImage, env } =
   await import("@xenova/transformers");
 
 env.localModelPath = modelPath;
 env.allowRemoteModels = true;
+// Belt-and-suspenders: also set via the JS API
+env.backends.onnx.wasm.numThreads = 1;
+console.error("[Worker] ONNX threads: 1 (single-threaded)");
+
+// Support HF mirror for China network access
+const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
+if (mirror) {
+  env.remoteHost = mirror;
+  env.remotePathTemplate = "{model}/resolve/main/";
+  console.error(`[Worker] Using HF mirror: ${mirror}`);
+}
 
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
 
 const processor = await AutoProcessor.from_pretrained(MODEL_ID);
-const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID);
-const model = await CLIPModel.from_pretrained(MODEL_ID, { quantized: true });
+const model = await CLIPVisionModelWithProjection.from_pretrained(MODEL_ID, { quantized: true });
 
-console.error(`[Worker] Model loaded, embedding ${photos.length} photos`);
+console.error(`[Worker] Model loaded, embedding ${photos.length} photos (vision-only)`);
 
 // --- Embed ---
 const results = [];
