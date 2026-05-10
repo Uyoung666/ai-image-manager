@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 
@@ -7,7 +7,7 @@ interface AiProgress {
   error?: string;
   isActive: boolean;
   isModelLoaded: boolean;
-  phase: "loading" | "embedding" | "complete" | "error";
+  phase: "idle" | "loading" | "embedding" | "complete" | "error";
   processed: number;
   total: number;
 }
@@ -17,6 +17,7 @@ export function AiProgressBar() {
   const [progress, setProgress] = useState<AiProgress | null>(null);
   const [paused, setPaused] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const pollingRef = useRef(false);
 
   const fetchProgress = useCallback(async () => {
     try {
@@ -27,26 +28,42 @@ export function AiProgressBar() {
     }
   }, []);
 
+  // One-time initial fetch on mount
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval>;
     fetchProgress().then((p) => {
-      if (p?.isActive) {
-        timer = setInterval(fetchProgress, 500);
-      }
       if (p) setProgress(p);
     });
-    return () => {
-      if (timer) clearInterval(timer);
-    };
   }, [fetchProgress]);
+
+  // Poll while active
+  useEffect(() => {
+    if (!progress?.isActive || pollingRef.current) return;
+
+    pollingRef.current = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      const p = await fetchProgress();
+      if (p) setProgress(p);
+      if (p?.isActive) {
+        timer = setTimeout(poll, 500);
+      } else {
+        pollingRef.current = false;
+      }
+    };
+
+    timer = setTimeout(poll, 500);
+
+    return () => {
+      clearTimeout(timer);
+      pollingRef.current = false;
+    };
+  }, [progress?.isActive, fetchProgress]);
 
   useEffect(() => {
     if (!progress) return;
     if (progress.phase === "error") {
       setLastError(progress.error || "AI 初始化失败");
-    }
-    if (progress.phase === "complete" || progress.phase === "error") {
-      // Stop considering it active
     }
   }, [progress]);
 
@@ -54,42 +71,25 @@ export function AiProgressBar() {
     setLastError(null);
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
-    setProgress({
-      processed: 0,
-      total: 0,
-      phase: "loading",
-      currentFile: "",
-      isActive: true,
-      isModelLoaded: false,
-    });
-    // Poll for updates
-    const poll = async () => {
-      const p = await fetchProgress();
-      if (p) setProgress(p);
-      if (p?.isActive || p?.phase === "loading") {
-        setTimeout(poll, 500);
-      }
-    };
-    setTimeout(poll, 500);
+    // Immediately poll — the backend will have isEmbedding=true now
+    const p = await fetchProgress();
+    if (p) setProgress(p);
   }
 
   async function handlePause() {
     await ipc.client.photos.stopAiIndexing({});
     setPaused(true);
+    // Fetch final state after stopping
+    const p = await fetchProgress();
+    if (p) setProgress(p);
   }
 
   async function handleResume() {
     setLastError(null);
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
-    const poll = async () => {
-      const p = await fetchProgress();
-      if (p) setProgress(p);
-      if (p?.isActive || p?.phase === "loading") {
-        setTimeout(poll, 500);
-      }
-    };
-    setTimeout(poll, 500);
+    const p = await fetchProgress();
+    if (p) setProgress(p);
   }
 
   // Error state: show retry button
@@ -113,11 +113,10 @@ export function AiProgressBar() {
     );
   }
 
+  // Idle state: show start button (no active embedding, nothing processed yet)
   if (
     !progress ||
-    (!progress.isActive &&
-      progress.phase !== "loading" &&
-      progress.processed === 0)
+    (!progress.isActive && progress.processed === 0 && progress.phase !== "complete")
   ) {
     return (
       <button
