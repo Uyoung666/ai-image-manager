@@ -151,6 +151,15 @@ function HomePage() {
     }
   }
 
+  async function handleDeleteFolder(id: number) {
+    await ipc.client.photos.deleteFolder({ id });
+    if (activeFolderId === id) {
+      setActiveFolderId(null);
+    }
+    await loadFolders();
+    await loadPhotos();
+  }
+
   const handleSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
       setSelectedIds((prev) => {
@@ -318,6 +327,7 @@ function HomePage() {
         collapsed={sidebarCollapsed}
         folders={folders}
         onAddFolder={handleAddFolder}
+        onDeleteFolder={handleDeleteFolder}
         onSelectFolder={setActiveFolderId}
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}

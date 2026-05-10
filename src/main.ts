@@ -15,6 +15,7 @@ import Store from "electron-store";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { initDatabase } from "@/db";
 import { ipcContext } from "@/ipc/context";
+import { initVectorDB } from "@/services/ai-embedder";
 import { startWatching } from "@/services/indexer";
 import { initThumbnailer } from "@/services/thumbnailer";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
@@ -261,6 +262,11 @@ app.whenReady().then(async () => {
     initDatabase();
     initThumbnailer();
     console.log("[App] Database and thumbnailer initialized");
+
+    // Initialize AI vector DB in background (non-blocking)
+    initVectorDB()
+      .then(() => console.log("[App] AI vector DB initialized"))
+      .catch((err) => console.warn("[App] AI vector DB init skipped:", err?.message));
 
     startWatching((photoId, event) => {
       console.log(`[Watcher] File ${event}: photoId=${photoId}`);

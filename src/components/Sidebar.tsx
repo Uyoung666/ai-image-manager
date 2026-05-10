@@ -8,7 +8,9 @@ import {
   Plus,
   ScanSearch,
   Settings,
+  Trash2,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AiProgressBar } from "./AiProgressBar";
 
@@ -23,6 +25,7 @@ interface SidebarProps {
   collapsed: boolean;
   folders: FolderInfo[];
   onAddFolder: () => void;
+  onDeleteFolder: (id: number, displayName: string) => void;
   onSelectFolder: (id: number | null) => void;
   onToggleCollapse: () => void;
   scanningFolder: string | null;
@@ -36,6 +39,7 @@ export function Sidebar({
   collapsed,
   onSelectFolder,
   onAddFolder,
+  onDeleteFolder,
   onToggleCollapse,
   scanningFolder,
   scanProgress,
@@ -43,6 +47,42 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [folderCtx, setFolderCtx] = useState<{
+    folderId: number;
+    displayName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
+
+  const closeCtx = useCallback(() => setFolderCtx(null), []);
+
+  useEffect(() => {
+    if (!folderCtx) return;
+    function handleClick(e: MouseEvent) {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
+        closeCtx();
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeCtx();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [folderCtx, closeCtx]);
+
+  function handleFolderContextMenu(
+    e: React.MouseEvent,
+    folderId: number,
+    displayName: string
+  ) {
+    e.preventDefault();
+    setFolderCtx({ folderId, displayName, x: e.clientX, y: e.clientY });
+  }
 
   // Collapsed: icon-only bar
   if (collapsed) {
@@ -78,7 +118,10 @@ export function Sidebar({
               }`}
               key={folder.id}
               onClick={() => onSelectFolder(folder.id)}
-              title={`${folder.displayName} (${folder.photoCount})`}
+              onContextMenu={(e) =>
+                handleFolderContextMenu(e, folder.id, folder.displayName)
+              }
+              title={`${folder.displayName} (${folder.photoCount})\n右键删除`}
             >
               <Folder className="h-4 w-4" />
             </button>
@@ -207,6 +250,9 @@ export function Sidebar({
             }`}
             key={folder.id}
             onClick={() => onSelectFolder(folder.id)}
+            onContextMenu={(e) =>
+              handleFolderContextMenu(e, folder.id, folder.displayName)
+            }
           >
             <Folder className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">{folder.displayName}</span>
@@ -243,6 +289,30 @@ export function Sidebar({
           ⚙ {t("sidebarSettings")}
         </button>
       </div>
+
+      {/* Folder context menu */}
+      {folderCtx && (
+        <div
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-[#2c2c30] bg-[#1c1e22] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+          ref={ctxRef}
+          style={{ left: folderCtx.x, top: folderCtx.y }}
+        >
+          <div className="truncate px-3 py-1 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+            {folderCtx.displayName}
+          </div>
+          <div className="mx-2 my-1 border-[rgba(255,255,255,0.06)] border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#e5484d] text-[13px] transition-colors hover:bg-[#e5484d]/10"
+            onClick={() => {
+              onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
+              closeCtx();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            从索引中移除
+          </button>
+        </div>
+      )}
     </div>
   );
 }
