@@ -13,6 +13,12 @@ const config: ForgeConfig = {
     asar: {
       unpackDir: "node_modules/{sharp,better-sqlite3,@lancedb,@img,node-*}",
     },
+    extraResources: [
+      {
+        from: "models/",
+        to: "models",
+      },
+    ],
     name: "AI Image Manager",
     executableName: "ai-image-manager",
     appBundleId: "com.uyoung.ai-image-manager",

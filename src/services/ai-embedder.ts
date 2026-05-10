@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { app } from "electron";
@@ -53,13 +54,69 @@ export async function initVectorDB(): Promise<void> {
   }
 }
 
+async function ensureLocalModel(): Promise<string> {
+  const userDataPath = app.getPath("userData");
+  const localModelPath = path.join(userDataPath, "models");
+
+  // Check if model already exists in userData
+  const modelMarker = path.join(
+    localModelPath,
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
+    "model_quantized.onnx"
+  );
+  if (fs.existsSync(modelMarker)) {
+    return localModelPath;
+  }
+
+  // Check bundled models in app resources (production)
+  try {
+    const resourcesPath = process.resourcesPath;
+    const bundledModelPath = path.join(resourcesPath, "models");
+    const bundledMarker = path.join(
+      bundledModelPath,
+      "Xenova",
+      "clip-vit-base-patch32",
+      "onnx",
+      "model_quantized.onnx"
+    );
+
+    if (fs.existsSync(bundledMarker)) {
+      console.log("[AI] Copying bundled models to userData...");
+      await copyDir(bundledModelPath, localModelPath);
+      console.log("[AI] Models copied from resources");
+      return localModelPath;
+    }
+  } catch {
+    // Not packaged (dev mode) or no bundled models
+  }
+
+  return localModelPath;
+}
+
+function copyDir(src: string, dest: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    fs.cp(src, dest, { recursive: true }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+let _localModelPath: string | null = null;
+
 async function loadModel(): Promise<void> {
   if (isModelLoaded && embeddingModel) {
     return;
   }
 
+  if (!_localModelPath) {
+    _localModelPath = await ensureLocalModel();
+  }
+
   const { pipeline, env } = await import("@xenova/transformers");
-  env.localModelPath = path.join(app.getPath("userData"), "models");
+  env.localModelPath = _localModelPath;
 
   // Support HuggingFace mirror via env var (e.g. hf-mirror.com for China)
   const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
