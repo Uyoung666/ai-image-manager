@@ -3,11 +3,18 @@ import path from "node:path";
 import { app, BrowserWindow, protocol } from "electron";
 import { ipcMain } from "electron/main";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
+import Store from "electron-store";
 import { ipcContext } from "@/ipc/context";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
 import { initDatabase } from "@/db";
 import { initThumbnailer } from "@/services/thumbnailer";
+import { startWatching } from "@/services/indexer";
+
+const windowStore = new Store<{ x?: number; y?: number; width?: number; height?: number; isMaximized?: boolean }>({
+  name: "window-state",
+  defaults: { width: 1280, height: 800 },
+});
 
 function getMimeType(ext: string): string {
   const mimeTypes: Record<string, string> = {
@@ -30,11 +37,18 @@ function getMimeType(ext: string): string {
 function createWindow() {
   const basePath = getBasePath();
   const preload = path.join(basePath, "preload.js");
+
+  const savedWidth = windowStore.get("width", 1280);
+  const savedHeight = windowStore.get("height", 800);
+  const savedX = windowStore.get("x");
+  const savedY = windowStore.get("y");
+
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: savedWidth,
+    height: savedHeight,
     minWidth: 900,
     minHeight: 600,
+    ...(savedX !== undefined && savedY !== undefined ? { x: savedX, y: savedY } : {}),
     title: "AI Image Manager",
     webPreferences: {
       devTools: inDevelopment,
@@ -46,6 +60,27 @@ function createWindow() {
     trafficLightPosition:
       process.platform === "darwin" ? { x: 5, y: 5 } : undefined,
   });
+
+  if (windowStore.get("isMaximized", false)) {
+    mainWindow.maximize();
+  }
+
+  // Save window state on move/resize
+  const saveBounds = () => {
+    if (mainWindow.isMaximized()) {
+      windowStore.set("isMaximized", true);
+    } else {
+      windowStore.set("isMaximized", false);
+      const bounds = mainWindow.getBounds();
+      windowStore.set({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+    }
+  };
+
+  mainWindow.on("resize", saveBounds);
+  mainWindow.on("move", saveBounds);
+  mainWindow.on("maximize", () => windowStore.set("isMaximized", true));
+  mainWindow.on("unmaximize", () => windowStore.set("isMaximized", false));
+
   ipcContext.setMainWindow(mainWindow);
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -115,6 +150,10 @@ app.whenReady().then(async () => {
     initDatabase();
     initThumbnailer();
     console.log("[App] Database and thumbnailer initialized");
+
+    startWatching((photoId, event) => {
+      console.log(`[Watcher] File ${event}: photoId=${photoId}`);
+    });
 
     createWindow();
     checkForUpdates();

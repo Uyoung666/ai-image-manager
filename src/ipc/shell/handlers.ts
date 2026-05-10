@@ -1,4 +1,5 @@
 import { os } from "@orpc/server";
+import { z } from "zod";
 import { shell, dialog, BrowserWindow } from "electron";
 import { openExternalLinkInputSchema } from "./schemas";
 
@@ -18,3 +19,9 @@ export const openFolderDialog = os.handler(async () => {
   });
   return { path: result.canceled ? null : result.filePaths[0] || null };
 });
+
+export const openInExplorer = os
+  .input(z.object({ path: z.string().min(1) }))
+  .handler(({ input }) => {
+    shell.showItemInFolder(input.path);
+  });

@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 import { PhotoGrid } from "@/components/PhotoGrid";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { PhotoContextMenu } from "@/components/PhotoContextMenu";
+import type { MenuState } from "@/components/PhotoContextMenu";
 import { Sidebar } from "@/components/Sidebar";
 import { SearchBar } from "@/components/SearchBar";
 import { Welcome } from "@/components/Welcome";
@@ -26,6 +29,8 @@ function HomePage() {
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [ctxMenu, setCtxMenu] = useState<MenuState>({ open: false, x: 0, y: 0, photoId: null, photoPath: null });
 
   useEffect(() => {
     loadFolders();
@@ -71,30 +76,31 @@ function HomePage() {
     }
   }
 
-  async function handleAIIndex() {
-    setScanProgress(t("aiIndexingStarted"));
-    try {
-      const result = await ipc.client.photos.startAiIndexing({});
-      setScanProgress(t("aiIndexedCount", { count: (result as any).embedded || 0 }));
-      setTimeout(() => setScanProgress(""), 3000);
-    } catch { setScanProgress(""); }
-  }
+  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
 
   const handleSelect = useCallback((id: number, event: React.MouseEvent) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
-      if (event.ctrlKey || event.metaKey) {
+      const idx = photos.findIndex(p => p.id === id);
+      if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
+        // Range select
+        const [from, to] = lastClickedIdx < idx ? [lastClickedIdx, idx] : [idx, lastClickedIdx];
+        for (let i = from; i <= to; i++) next.add(photos[i].id);
+      } else if (event.ctrlKey || event.metaKey) {
         next.has(id) ? next.delete(id) : next.add(id);
+        if (idx >= 0) setLastClickedIdx(idx);
       } else {
         next.clear(); next.add(id);
+        if (idx >= 0) setLastClickedIdx(idx);
       }
       return next;
     });
   }, []);
 
   const handleDoubleClick = useCallback((id: number) => {
-    console.log("Open detail for photo:", id);
-  }, []);
+    const idx = photos.findIndex(p => p.id === id);
+    if (idx >= 0) setLightboxIndex(idx);
+  }, [photos]);
 
   async function handleSearch(query: string) {
     if (!query.trim()) { loadPhotos(); return; }
@@ -110,6 +116,34 @@ function HomePage() {
     } finally { setLoading(false); }
   }
 
+  function handleContextMenu(e: React.MouseEvent) {
+    const card = (e.target as HTMLElement).closest("[data-photo-id]") as HTMLElement | null;
+    if (!card) return;
+    const id = parseInt(card.dataset.photoId || "", 10);
+    const path = card.dataset.photoPath || null;
+    if (!id) return;
+    e.preventDefault();
+    setCtxMenu({ open: true, x: e.clientX, y: e.clientY, photoId: id, photoPath: path });
+  }
+
+  async function handleOpenExplorer(filePath: string) {
+    await ipc.client.shell.openInExplorer({ path: filePath });
+  }
+
+  async function handleDeletePhoto(id: number) {
+    await ipc.client.photos.deletePhoto({ id });
+    setPhotos(prev => prev.filter(p => p.id !== id));
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+  }
+
+  async function handleDeleteSelected() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    await ipc.client.photos.deletePhotos({ ids });
+    setPhotos(prev => prev.filter(p => !selectedIds.has(p.id)));
+    setSelectedIds(new Set());
+  }
+
   const hasPhotos = photos.length > 0 || loading;
 
   return (
@@ -119,7 +153,6 @@ function HomePage() {
         activeFolderId={activeFolderId}
         onSelectFolder={setActiveFolderId}
         onAddFolder={handleAddFolder}
-        onAIIndex={handleAIIndex}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}
         totalPhotos={photos.length}
@@ -133,15 +166,31 @@ function HomePage() {
             selectedIds={selectedIds}
             onSelect={handleSelect}
             onDoubleClick={handleDoubleClick}
+            onContextMenu={handleContextMenu}
+            onDeleteSelected={handleDeleteSelected}
           />
         ) : (
           <Welcome
             onAddFolder={handleAddFolder}
-            onAIIndex={handleAIIndex}
+            onAIIndex={() => {}}
             hasPhotos={false}
           />
         )}
       </div>
+      {lightboxIndex >= 0 && (
+        <PhotoLightbox
+          photos={photos}
+          index={lightboxIndex}
+          open={lightboxIndex >= 0}
+          onClose={() => setLightboxIndex(-1)}
+        />
+      )}
+      <PhotoContextMenu
+        menu={ctxMenu}
+        onOpenExplorer={handleOpenExplorer}
+        onDelete={handleDeletePhoto}
+        onClose={() => setCtxMenu(prev => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }

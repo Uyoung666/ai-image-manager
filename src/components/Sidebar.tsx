@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { Folder, Plus, Loader2, Sparkles } from "lucide-react";
+import { Folder, Plus, Loader2 } from "lucide-react";
+import { AiProgressBar } from "./AiProgressBar";
 
 interface Folder {
   id: number; path: string; displayName: string; photoCount: number;
@@ -10,7 +11,6 @@ interface SidebarProps {
   activeFolderId: number | null;
   onSelectFolder: (id: number | null) => void;
   onAddFolder: () => void;
-  onAIIndex: () => void;
   scanningFolder: string | null;
   scanProgress: string;
   totalPhotos: number;
@@ -18,7 +18,7 @@ interface SidebarProps {
 
 export function Sidebar({
   folders, activeFolderId, onSelectFolder, onAddFolder,
-  onAIIndex, scanningFolder, scanProgress, totalPhotos,
+  scanningFolder, scanProgress, totalPhotos,
 }: SidebarProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -57,13 +57,7 @@ export function Sidebar({
           )}
           {t("sidebarAddFolder")}
         </button>
-        <button
-          onClick={onAIIndex}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-[6px] text-[13px] text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8] transition-colors"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          {t("sidebarAiIndex")}
-        </button>
+        <AiProgressBar />
       </div>
 
       {/* Scan progress */}

@@ -1,7 +1,7 @@
 import { os } from "@orpc/server";
 import { app } from "electron";
 
-export const currentPlatfom = os.handler(() => {
+export const currentPlatform = os.handler(() => {
   return process.platform;
 });
 

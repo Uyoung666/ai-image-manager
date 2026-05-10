@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { ipc } from "@/ipc/manager";
 
 interface CameraStat { model: string; count: number; }
@@ -12,6 +13,12 @@ interface DashboardData {
   dateRange: { earliest: number; latest: number } | null;
   avgIso: number;
 }
+
+const ACCENT = "#5e6ad2";
+const ACCENT_HOVER = "#7c7fe0";
+const GRID_COLOR = "rgba(255,255,255,0.04)";
+const TEXT_SECONDARY = "#a1a1aa";
+const TEXT_TERTIARY = "#6b6b75";
 
 function DashboardPage() {
   const { t } = useTranslation();
@@ -37,6 +44,16 @@ function DashboardPage() {
     );
   }
 
+  const cameraData = (data?.cameraStats || []).map(c => ({
+    name: c.model || "Unknown",
+    count: c.count,
+  }));
+
+  const focalData = (data?.focalStats || [])
+    .filter(f => f.focalLength)
+    .map(f => ({ name: `${f.focalLength}mm`, count: f.count }))
+    .slice(0, 12);
+
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       <div className="flex items-center gap-4 px-6 py-4 border-b border-[rgba(255,255,255,0.06)]">
@@ -61,21 +78,23 @@ function DashboardPage() {
 
         <div className="bg-[#121214] rounded-[8px] border border-[rgba(255,255,255,0.06)] p-5">
           <h2 className="text-[#f7f8f8] text-[16px] font-[590] mb-4">{t("cameraUsage")}</h2>
-          {data?.cameraStats && data.cameraStats.length > 0 ? (
-            <div className="space-y-3">
-              {data.cameraStats.map((c, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="text-[#a1a1aa] text-[13px] w-[220px] truncate">{c.model}</span>
-                  <div className="flex-1 h-5 bg-[#1c1e22] rounded-[4px] overflow-hidden">
-                    <div
-                      className="h-full bg-[#5e6ad2] rounded-[4px]"
-                      style={{ width: `${(c.count / data.cameraStats[0].count) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-[#6b6b75] text-[12px] w-12 text-right">{c.count}</span>
-                </div>
-              ))}
-            </div>
+          {cameraData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={cameraData.length * 36 + 20}>
+              <BarChart data={cameraData} layout="vertical" margin={{ top: 0, right: 20, left: 140, bottom: 0 }}>
+                <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} tick={{ fill: TEXT_SECONDARY, fontSize: 12 }} width={130} />
+                <Tooltip
+                  contentStyle={{ background: "#1c1e22", border: "1px solid #2c2c30", borderRadius: 6, fontSize: 12 }}
+                  labelStyle={{ color: "#f7f8f8" }}
+                  cursor={{ fill: "rgba(255,255,255,0.03)" }}
+                />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                  {cameraData.map((_, i) => (
+                    <Cell key={i} fill={ACCENT} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           ) : (
             <p className="text-[#6b6b75] text-[13px]">{t("noCameraData")}</p>
           )}
@@ -83,18 +102,23 @@ function DashboardPage() {
 
         <div className="bg-[#121214] rounded-[8px] border border-[rgba(255,255,255,0.06)] p-5">
           <h2 className="text-[#f7f8f8] text-[16px] font-[590] mb-4">{t("focalDistribution")}</h2>
-          {data?.focalStats && data.focalStats.length > 0 ? (
-            <div className="flex items-end gap-2 h-[120px]">
-              {data.focalStats.slice(0, 12).map((f, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <div
-                    className="w-full bg-[#5e6ad2] rounded-t-[4px] min-h-[4px]"
-                    style={{ height: `${Math.max((f.count / data.focalStats[0].count) * 100, 4)}%` }}
-                  />
-                  <span className="text-[#6b6b75] text-[10px]">{f.focalLength}mm</span>
-                </div>
-              ))}
-            </div>
+          {focalData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={focalData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} angle={-45} textAnchor="end" height={40} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ background: "#1c1e22", border: "1px solid #2c2c30", borderRadius: 6, fontSize: 12 }}
+                  labelStyle={{ color: "#f7f8f8" }}
+                  cursor={{ fill: "rgba(255,255,255,0.03)" }}
+                />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  {focalData.map((_, i) => (
+                    <Cell key={i} fill={ACCENT} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           ) : (
             <p className="text-[#6b6b75] text-[13px]">{t("noFocalData")}</p>
           )}

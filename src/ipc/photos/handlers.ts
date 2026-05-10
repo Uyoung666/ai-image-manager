@@ -2,7 +2,7 @@ import { os } from "@orpc/server";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos, exifData, folders } from "@/db/schema";
-import { eq, desc, and, like, sql } from "drizzle-orm";
+import { eq, desc, and, like, sql, inArray } from "drizzle-orm";
 import { scanFolder as scanFolderService, stopScanning, startWatching, isIndexing } from "@/services/indexer";
 import { getThumbnailBuffer } from "@/services/thumbnailer";
 import {
@@ -67,7 +67,15 @@ export const listPhotos = os
     const sortCol = sort === "name" ? photos.filename : sort === "size" ? photos.fileSize : photos.fileDate;
     query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
 
-    const total = db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
+    // Build filtered count query with same conditions
+    let countQuery = db.select({ count: sql<number>`count(*)` }).from(photos).$dynamic();
+    if (folderId) {
+      countQuery = countQuery.where(eq(photos.folderId, folderId));
+    }
+    if (search) {
+      countQuery = countQuery.where(like(photos.filename, `%${search}%`));
+    }
+    const total = countQuery.get()?.count || 0;
     const items = query.limit(limit).offset(offset).all();
 
     return { items, total, offset, limit };
@@ -144,7 +152,7 @@ export const searchByText = os
     if (photoIds.length === 0) return { results: [], query: input.query };
 
     const photoList = db.select().from(photos)
-      .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+      .where(inArray(photos.id, photoIds))
       .all();
 
     const photoMap = new Map(photoList.map(p => [p.id, p]));
@@ -166,7 +174,7 @@ export const searchByImage = os
     if (photoIds.length === 0) return { results: [] };
 
     const photoList = db.select().from(photos)
-      .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+      .where(inArray(photos.id, photoIds))
       .all();
 
     const photoMap = new Map(photoList.map(p => [p.id, p]));
@@ -179,9 +187,89 @@ export const searchByImage = os
   });
 
 export const startAiIndexing = os.handler(async () => {
-  const count = await embedAllPhotos();
-  return { embedded: count };
+  // Fire-and-forget: launch embedding in background, poll progress via getAiProgress
+  embedAllPhotos().then(count => {
+    console.log(`[AI] Embedding complete: ${count} photos processed`);
+  }).catch(err => {
+    console.error("[AI] Embedding error:", err);
+  });
+  return { started: true };
 });
+
+export const stopAiIndexing = os.handler(async () => {
+  stopEmbedding();
+  return { stopped: true };
+});
+
+export const deletePhoto = os
+  .input(IdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const photo = db.select({ path: photos.path }).from(photos).where(eq(photos.id, input.id)).get();
+    if (photo) {
+      db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
+      db.delete(photos).where(eq(photos.id, input.id)).run();
+    }
+    return { success: true };
+  });
+
+export const deletePhotos = os
+  .input(z.object({ ids: z.array(z.number()) }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    for (const id of input.ids) {
+      db.delete(exifData).where(eq(exifData.photoId, id)).run();
+      db.delete(photos).where(eq(photos.id, id)).run();
+    }
+    return { deleted: input.ids.length };
+  });
+
+function hammingDistance(a: string, b: string): number {
+  let dist = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const xor = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    // Count set bits in the xor'd nibble
+    dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
+  }
+  return dist;
+}
+
+export const findDuplicates = os
+  .input(z.object({ threshold: z.number().optional().default(8) }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const allPhotos = db.select({
+      id: photos.id,
+      path: photos.path,
+      filename: photos.filename,
+      phash: photos.phash,
+    }).from(photos)
+      .where(sql`${photos.phash} IS NOT NULL`)
+      .all();
+
+    const duplicates: Array<{
+      photoA: { id: number; path: string; filename: string };
+      photoB: { id: number; path: string; filename: string };
+      distance: number;
+    }> = [];
+
+    for (let i = 0; i < allPhotos.length; i++) {
+      for (let j = i + 1; j < allPhotos.length; j++) {
+        if (allPhotos[i].phash && allPhotos[j].phash) {
+          const dist = hammingDistance(allPhotos[i].phash!, allPhotos[j].phash!);
+          if (dist <= input.threshold) {
+            duplicates.push({
+              photoA: { id: allPhotos[i].id, path: allPhotos[i].path, filename: allPhotos[i].filename },
+              photoB: { id: allPhotos[j].id, path: allPhotos[j].path, filename: allPhotos[j].filename },
+              distance: dist,
+            });
+          }
+        }
+      }
+    }
+
+    return { duplicates: duplicates.slice(0, 200) };
+  });
 
 export const getAiProgress = os.handler(async () => {
   return getEmbeddingProgress();

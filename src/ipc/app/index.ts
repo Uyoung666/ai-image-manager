@@ -1,6 +1,6 @@
-import { appVersion, currentPlatfom } from "./handlers";
+import { appVersion, currentPlatform } from "./handlers";
 
 export const app = {
-  currentPlatfom,
+  currentPlatform,
   appVersion,
 };

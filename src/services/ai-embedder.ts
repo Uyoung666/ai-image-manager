@@ -23,6 +23,7 @@ interface EmbedProgress {
 
 type EmbedProgressCallback = (progress: EmbedProgress) => void;
 let isEmbedding = false;
+let currentProgress: EmbedProgress = { processed: 0, total: 0, phase: "loading", currentFile: "" };
 
 export async function initVectorDB(): Promise<void> {
   const userDataPath = app.getPath("userData");
@@ -82,7 +83,8 @@ export async function embedAllPhotos(
   const db = getDatabase();
   isEmbedding = true;
 
-  onProgress?.({ processed: 0, total: 0, phase: "loading", currentFile: "" });
+  currentProgress = { processed: 0, total: 0, phase: "loading", currentFile: "" };
+  onProgress?.(currentProgress);
   await loadModel();
   await initVectorDB();
 
@@ -104,7 +106,8 @@ export async function embedAllPhotos(
   for (const photo of unprocessed) {
     if (!isEmbedding) break;
 
-    onProgress?.({ processed, total, phase: "embedding", currentFile: path.basename(photo.path) });
+    currentProgress = { processed, total, phase: "embedding", currentFile: path.basename(photo.path) };
+    onProgress?.(currentProgress);
 
     try {
       const vector = await embeddingModel.embedImage(photo.path);
@@ -128,7 +131,8 @@ export async function embedAllPhotos(
     }
   }
 
-  onProgress?.({ processed, total, phase: "complete", currentFile: "" });
+  currentProgress = { processed, total, phase: "complete", currentFile: "" };
+  onProgress?.(currentProgress);
   isEmbedding = false;
   return processed;
 }
@@ -177,6 +181,6 @@ export function stopEmbedding(): void {
   isEmbedding = false;
 }
 
-export function getEmbeddingProgress(): { isActive: boolean; isModelLoaded: boolean } {
-  return { isActive: isEmbedding, isModelLoaded };
+export function getEmbeddingProgress(): EmbedProgress & { isActive: boolean; isModelLoaded: boolean } {
+  return { ...currentProgress, isActive: isEmbedding, isModelLoaded };
 }

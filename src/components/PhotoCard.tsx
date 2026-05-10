@@ -46,7 +46,7 @@ export const PhotoCard = memo(function PhotoCard({
   if (error) {
     return (
       <div
-        className="relative flex flex-col items-center justify-center bg-[#15171a] rounded-[8px] overflow-hidden break-inside-avoid mb-2 gap-2"
+        className="relative flex flex-col items-center justify-center bg-[#15171a] rounded-[8px] overflow-hiddengap-2"
         style={{ aspectRatio }}
       >
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6b6b75" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -62,7 +62,7 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       className={`
-        relative group cursor-pointer rounded-[8px] overflow-hidden break-inside-avoid mb-2
+        relative group cursor-pointer rounded-[8px] overflow-hidden
         transition-all duration-150 bg-[#15171a]
         ${isSelected
           ? "ring-2 ring-[#5e6ad2] ring-offset-1 ring-offset-[#08090a] shadow-[0_0_20px_rgba(94,106,210,0.15)]"

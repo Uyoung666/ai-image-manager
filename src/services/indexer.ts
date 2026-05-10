@@ -46,6 +46,35 @@ function shouldIndex(filePath: string): boolean {
   return true;
 }
 
+async function computePHash(filePath: string): Promise<string | null> {
+  try {
+    const { data } = await sharp(filePath)
+      .resize(16, 16, { fit: "fill" })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Average hash: compare each pixel to the mean
+    const pixels = new Uint8Array(data.buffer, data.offset, data.size);
+    let sum = 0;
+    for (let i = 0; i < pixels.length; i++) sum += pixels[i];
+    const avg = sum / pixels.length;
+
+    // Build hex hash string
+    let hash = "";
+    for (let i = 0; i < pixels.length; i += 4) {
+      let val = 0;
+      for (let j = 0; j < 4 && i + j < pixels.length; j++) {
+        val = (val << 1) | (pixels[i + j] >= avg ? 1 : 0);
+      }
+      hash += val.toString(16);
+    }
+    return hash;
+  } catch {
+    return null;
+  }
+}
+
 async function readBasicMeta(filePath: string): Promise<{
   width: number; height: number; format: string;
   colorSpace: string; hasAlpha: boolean;
@@ -101,6 +130,9 @@ async function indexSingleFile(
   // Generate thumbnail
   const thumb = await generateThumbnail(filePath, "sm");
 
+  // Compute perceptual hash for dedup
+  const phash = await computePHash(filePath);
+
   // Insert photo record
   const result = db.insert(photos).values({
     path: filePath,
@@ -116,6 +148,7 @@ async function indexSingleFile(
     thumbnailPath: thumb.thumbnailPath,
     thumbnailSize: `${thumb.width}x${thumb.height}`,
     isIndexed: true,
+    phash,
   }).returning({ insertedId: photos.id }).get();
 
   if (!result) return null;
