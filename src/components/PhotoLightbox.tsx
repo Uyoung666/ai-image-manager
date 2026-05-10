@@ -1,4 +1,5 @@
 import Lightbox from "yet-another-react-lightbox";
+// @ts-expect-error - no type declarations for lightbox CSS
 import "yet-another-react-lightbox/styles.css";
 
 interface Photo {

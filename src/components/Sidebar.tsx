@@ -122,7 +122,13 @@ export function Sidebar({
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
           onClick={() => navigate({ to: "/dashboard" })}
         >
-          📊 {t("sidebarDashboard")}
+          ⚙ {t("sidebarDashboard")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
+          onClick={() => navigate({ to: "/duplicates" })}
+        >
+          ⟲ 重复照片检测
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"

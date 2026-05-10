@@ -68,7 +68,8 @@ async function computePHash(filePath: string): Promise<string | null> {
       .toBuffer({ resolveWithObject: true });
 
     // Average hash: compare each pixel to the mean
-    const pixels = new Uint8Array(data.buffer, data.offset, data.size);
+    // data is a Buffer (extends Uint8Array) — convert directly
+    const pixels = new Uint8Array(data);
     let sum = 0;
     for (let i = 0; i < pixels.length; i++) {
       sum += pixels[i];

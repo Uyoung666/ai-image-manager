@@ -4,7 +4,7 @@ import { os } from "@orpc/server";
 import { desc, eq, inArray, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos } from "@/db/schema";
+import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
@@ -148,6 +148,53 @@ export const getStats = os.handler(() => {
     .limit(10)
     .all();
 
+  const apertureStats = db
+    .select({
+      aperture: exifData.aperture,
+      count: sql<number>`count(*)`,
+    })
+    .from(exifData)
+    .where(sql`${exifData.aperture} IS NOT NULL`)
+    .groupBy(exifData.aperture)
+    .orderBy(exifData.aperture)
+    .all();
+
+  // ISO distribution by common ranges
+  const isoRanges = db
+    .select({
+      iso: exifData.iso,
+    })
+    .from(exifData)
+    .where(sql`${exifData.iso} IS NOT NULL`)
+    .all();
+
+  const isoBuckets = { "50-200": 0, "200-400": 0, "400-800": 0, "800-1600": 0, "1600+": 0 };
+  for (const row of isoRanges) {
+    const iso = row.iso ?? 0;
+    if (iso <= 200) isoBuckets["50-200"]++;
+    else if (iso <= 400) isoBuckets["200-400"]++;
+    else if (iso <= 800) isoBuckets["400-800"]++;
+    else if (iso <= 1600) isoBuckets["800-1600"]++;
+    else isoBuckets["1600+"]++;
+  }
+
+  // Shooting time heatmap (hour of day)
+  const hourData = db
+    .select({
+      dateTaken: exifData.dateTaken,
+    })
+    .from(exifData)
+    .where(sql`${exifData.dateTaken} IS NOT NULL`)
+    .all();
+
+  const hourBuckets: Record<string, number> = {};
+  for (const row of hourData) {
+    const hour = new Date(row.dateTaken!).getHours();
+    const period =
+      hour < 6 ? "夜间" : hour < 12 ? "上午" : hour < 18 ? "下午" : "傍晚";
+    hourBuckets[period] = (hourBuckets[period] || 0) + 1;
+  }
+
   const dateRange = db
     .select({
       earliest: sql<number>`min(${exifData.dateTaken})`,
@@ -156,21 +203,29 @@ export const getStats = os.handler(() => {
     .from(exifData)
     .get();
 
-  const isoStats = db
-    .select({
-      avgIso: sql<number>`avg(${exifData.iso})`,
-    })
-    .from(exifData)
-    .where(sql`${exifData.iso} IS NOT NULL`)
-    .get();
+  const avgIso =
+    db
+      .select({ avgIso: sql<number>`avg(${exifData.iso})` })
+      .from(exifData)
+      .where(sql`${exifData.iso} IS NOT NULL`)
+      .get()?.avgIso || 0;
 
   return {
     totalPhotos,
     aiProcessed,
     cameraStats: cameraStats.filter((c) => c.model),
     focalStats: focalStats.filter((f) => f.focalLength),
+    apertureStats: apertureStats.filter((a) => a.aperture),
+    isoDistribution: Object.entries(isoBuckets).map(([range, count]) => ({
+      range,
+      count,
+    })),
+    timeHeatmap: Object.entries(hourBuckets).map(([period, count]) => ({
+      period,
+      count,
+    })),
     dateRange,
-    avgIso: isoStats?.avgIso || 0,
+    avgIso,
   };
 });
 
@@ -368,7 +423,7 @@ export const renamePhotos = os
         .get();
       const date = exif?.dateTaken
         ? new Date(exif.dateTaken)
-        : new Date(photo.fileDate);
+        : new Date(photo.fileDate ?? Date.now());
 
       let newBase = input.pattern
         .replace(/\{yyyy\}/g, date.getFullYear().toString())
@@ -491,4 +546,72 @@ export const convertPhotos = os
 
 export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
+});
+
+// Tags
+export const getTags = os.handler(() => {
+  const db = getDatabase();
+  return db.select().from(tags).orderBy(tags.name).all();
+});
+
+export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  return db
+    .select({ id: tags.id, name: tags.name, color: tags.color })
+    .from(photoTags)
+    .innerJoin(tags, eq(photoTags.tagId, tags.id))
+    .where(eq(photoTags.photoId, input.id))
+    .all();
+});
+
+export const addTag = os
+  .input(z.object({ name: z.string().min(1).max(50), color: z.string().optional() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const existing = db
+      .select()
+      .from(tags)
+      .where(eq(tags.name, input.name))
+      .get();
+    if (existing) return existing;
+    const result = db
+      .insert(tags)
+      .values({ name: input.name, color: input.color || null })
+      .returning({ insertedId: tags.id })
+      .get();
+    return {
+      id: result?.insertedId,
+      name: input.name,
+      color: input.color || null,
+    };
+  });
+
+export const setPhotoTag = os
+  .input(z.object({ photoId: z.number(), tagId: z.number() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    db.insert(photoTags)
+      .values({ photoId: input.photoId, tagId: input.tagId })
+      .onConflictDoNothing()
+      .run();
+    return { ok: true };
+  });
+
+export const removePhotoTag = os
+  .input(z.object({ photoId: z.number(), tagId: z.number() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    db.delete(photoTags)
+      .where(
+        sql`${photoTags.photoId} = ${input.photoId} AND ${photoTags.tagId} = ${input.tagId}`
+      )
+      .run();
+    return { ok: true };
+  });
+
+export const deleteTag = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  db.delete(photoTags).where(eq(photoTags.tagId, input.id)).run();
+  db.delete(tags).where(eq(tags.id, input.id)).run();
+  return { ok: true };
 });

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
+import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { SearchBar } from "@/components/SearchBar";
@@ -39,6 +40,7 @@ function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [lastClickedIdx, setLastClickedIdx] = useState(-1);
+  const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -85,6 +87,17 @@ function HomePage() {
     loadFolders();
     loadPhotos(true);
   }, [loadPhotos, loadFolders]);
+
+  // Sync detail panel with selection
+  useEffect(() => {
+    if (selectedIds.size === 1) {
+      const id = selectedIds.values().next().value as number;
+      const photo = photos.find((p) => p.id === id);
+      setDetailPhoto(photo || null);
+    } else {
+      setDetailPhoto(null);
+    }
+  }, [selectedIds, photos]);
 
   async function handleAddFolder() {
     const result = await ipc.client.shell.openFolderDialog({});
@@ -261,16 +274,28 @@ function HomePage() {
           onSearch={handleSearch}
         />
         {hasPhotos ? (
-          <PhotoGrid
-            loading={loading}
-            onContextMenu={handleContextMenu}
-            onDeleteSelected={handleDeleteSelected}
-            onDoubleClick={handleDoubleClick}
-            onSelect={handleSelect}
-            photos={photos}
-            searchQuery={searchQuery}
-            selectedIds={selectedIds}
-          />
+          <div className="flex min-h-0 flex-1">
+            <PhotoGrid
+              loading={loading}
+              onContextMenu={handleContextMenu}
+              onDeleteSelected={handleDeleteSelected}
+              onDoubleClick={handleDoubleClick}
+              onSelect={handleSelect}
+              photos={photos}
+              searchQuery={searchQuery}
+              selectedIds={selectedIds}
+            />
+            {detailPhoto && (
+              <PhotoDetailPanel
+                onClose={() => {
+                  setDetailPhoto(null);
+                  setSelectedIds(new Set());
+                }}
+                onOpenExplorer={handleOpenExplorer}
+                photo={detailPhoto}
+              />
+            )}
+          </div>
         ) : (
           <Welcome onAddFolder={handleAddFolder} />
         )}

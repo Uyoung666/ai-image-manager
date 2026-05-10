@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as DuplicatesRouteImport } from './routes/duplicates'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DuplicatesRoute = DuplicatesRouteImport.update({
+  id: '/duplicates',
+  path: '/duplicates',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -32,30 +38,34 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/settings'
+  fullPaths: '/' | '/dashboard' | '/duplicates' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/settings'
-  id: '__root__' | '/' | '/dashboard' | '/settings'
+  to: '/' | '/dashboard' | '/duplicates' | '/settings'
+  id: '__root__' | '/' | '/dashboard' | '/duplicates' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  DuplicatesRoute: typeof DuplicatesRoute
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/duplicates': {
+      id: '/duplicates'
+      path: '/duplicates'
+      fullPath: '/duplicates'
+      preLoaderRoute: typeof DuplicatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  DuplicatesRoute: DuplicatesRoute,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport

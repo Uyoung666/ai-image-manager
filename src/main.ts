@@ -5,6 +5,7 @@ import {
   BrowserWindow,
   globalShortcut,
   Menu,
+  NativeImage,
   nativeImage,
   protocol,
   Tray,
@@ -33,7 +34,7 @@ const windowStore = new Store<{
   defaults: { width: 1280, height: 800 },
 });
 
-function createTrayIcon(): nativeImage {
+function createTrayIcon(): NativeImage {
   // Generate a 16x16 tray icon programmatically (simple square with accent color)
   const size = 16;
   const canvas = Buffer.alloc(size * size * 4);
@@ -175,12 +176,14 @@ function createWindow() {
     } else {
       windowStore.set("isMaximized", false);
       const bounds = mainWindow?.getBounds();
-      windowStore.set({
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-      });
+      if (bounds) {
+        windowStore.set({
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        });
+      }
     }
   };
 

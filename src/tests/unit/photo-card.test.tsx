@@ -1,0 +1,65 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { PhotoCard } from "@/components/PhotoCard";
+
+describe("PhotoCard", () => {
+  const baseProps = {
+    filename: "test-photo.jpg",
+    height: 3000,
+    id: 1,
+    isSelected: false,
+    onClick: vi.fn(),
+    onDoubleClick: vi.fn(),
+    path: "C:/Photos/test-photo.jpg",
+    thumbnailPath: null as string | null,
+    width: 4000,
+  };
+
+  it("renders image element", () => {
+    const { container } = render(<PhotoCard {...baseProps} />);
+    const img = container.querySelector("img");
+    expect(img).toBeInTheDocument();
+    expect(img?.alt).toBe("test-photo.jpg");
+  });
+
+  it("renders filename in overlay", () => {
+    render(<PhotoCard {...baseProps} />);
+    expect(screen.getByText("test-photo.jpg")).toBeInTheDocument();
+  });
+
+  it("shows dimensions in overlay", () => {
+    render(<PhotoCard {...baseProps} />);
+    expect(screen.getByText("4000 × 3000")).toBeInTheDocument();
+  });
+
+  it("calls onClick when clicked", () => {
+    render(<PhotoCard {...baseProps} />);
+    const card = screen.getByText("test-photo.jpg").closest("[class*='group']");
+    fireEvent.click(card!);
+    expect(baseProps.onClick).toHaveBeenCalled();
+  });
+
+  it("shows selection indicator when selected", () => {
+    render(<PhotoCard {...baseProps} isSelected={true} />);
+    const svg = document.querySelector("svg[viewBox='0 0 12 12']");
+    expect(svg).toBeInTheDocument();
+  });
+
+  it("uses thumbnailPath as src when provided", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+    const img = document.querySelector("img");
+    expect(img?.src).toContain("local-media://");
+  });
+
+  it("highlights search query in text", () => {
+    render(<PhotoCard {...baseProps} searchQuery="photo" />);
+    const mark = document.querySelector("mark");
+    expect(mark).toBeInTheDocument();
+    expect(mark?.textContent).toBe("photo");
+  });
+});
