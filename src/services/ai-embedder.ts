@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { spawn, type ChildProcess } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
@@ -11,11 +13,6 @@ let vectordb: any = null;
 let photoTable: any = null;
 let isModelLoaded = false;
 let isVectorDBReady = false;
-
-// References to ONNX model internals for periodic disposal/reload
-let _clipModel: any = null;
-let _clipProcessor: any = null;
-let _clipTokenizer: any = null;
 
 let embeddingModel: {
   embedImage: (imagePath: string) => Promise<number[]>;
@@ -51,30 +48,6 @@ function disposeTensors(output: Record<string, any>): void {
   }
 }
 
-/**
- * Completely destroy the ONNX inference session and free all WASM memory.
- * Called periodically during batch embedding to prevent WASM heap exhaustion.
- */
-async function destroyModel(): Promise<void> {
-  // Dispose the ONNX inference session (this is what holds WASM memory)
-  if (_clipModel) {
-    try {
-      // PreTrainedModel.dispose() → OrtSession.release() → frees WASM heap
-      if (typeof _clipModel.dispose === "function") {
-        await _clipModel.dispose();
-      }
-    } catch (err) {
-      console.warn("[AI] Error disposing model:", err);
-    }
-    _clipModel = null;
-  }
-
-  _clipProcessor = null;
-  _clipTokenizer = null;
-  embeddingModel = null;
-  isModelLoaded = false;
-}
-
 // --- Vector DB ---
 
 export async function initVectorDB(): Promise<void> {
@@ -103,7 +76,7 @@ export async function initVectorDB(): Promise<void> {
   isVectorDBReady = true;
 }
 
-// --- Model loading ---
+// --- Model loading (for search queries, not batch embedding) ---
 
 async function ensureLocalModel(): Promise<string> {
   const userDataPath = app.getPath("userData");
@@ -181,7 +154,7 @@ function copyDir(src: string, dest: string): Promise<void> {
 
 let _localModelPath: string | null = null;
 
-async function loadModelOnce(): Promise<void> {
+async function loadModel(): Promise<void> {
   if (isModelLoaded && embeddingModel) {
     return;
   }
@@ -190,7 +163,6 @@ async function loadModelOnce(): Promise<void> {
     _localModelPath = await ensureLocalModel();
   }
 
-  // Force @xenova/transformers to use onnxruntime-web (WASM)
   const realReleaseName = process.release.name;
   try {
     (process.release as any).name = "browser";
@@ -221,15 +193,9 @@ async function loadModelOnce(): Promise<void> {
   console.log("[AI] Using ONNX Web (WASM) backend — no native dependencies");
 
   const modelId = "Xenova/clip-vit-base-patch32";
-
-  _clipProcessor = await AutoProcessor.from_pretrained(modelId);
-  _clipTokenizer = await AutoTokenizer.from_pretrained(modelId);
-  _clipModel = await CLIPModel.from_pretrained(modelId, { quantized: true });
-
-  // Capture local refs for the closures below (module-level refs get nulled on dispose)
-  const processor = _clipProcessor;
-  const tokenizer = _clipTokenizer;
-  const model = _clipModel;
+  const processor = await AutoProcessor.from_pretrained(modelId);
+  const tokenizer = await AutoTokenizer.from_pretrained(modelId);
+  const model = await CLIPModel.from_pretrained(modelId, { quantized: true });
 
   embeddingModel = {
     embedImage: async (imagePath: string) => {
@@ -263,26 +229,6 @@ async function loadModelOnce(): Promise<void> {
   console.log("[AI] CLIP model loaded");
 }
 
-/**
- * Load the model (initial load or after a dispose cycle).
- * Safe to call multiple times — skips if already loaded.
- */
-async function loadModel(): Promise<void> {
-  await loadModelOnce();
-}
-
-/**
- * Dispose the current ONNX session and reload the model from disk.
- * This is the nuclear option for WASM heap pressure — it completely
- * destroys the inference session and creates a fresh one.
- */
-async function reloadModel(): Promise<void> {
-  console.log("[AI] Disposing ONNX session to reset WASM heap...");
-  await destroyModel();
-  await loadModelOnce();
-  console.log("[AI] Model reloaded — WASM heap reset");
-}
-
 // --- Public API ---
 
 export function isAiModelLoaded(): boolean {
@@ -304,21 +250,116 @@ export function getEmbeddingProgress(): EmbedProgress & {
   };
 }
 
-// --- Embedding ---
+// --- Child-process batch embedding ---
 
-/**
- * How many photos to process before disposing and reloading the ONNX
- * model to reset WASM heap. CLIP ViT-B/32 inference in WASM mode
- * leaks ~15-25 MB per call in the arena allocator. After about 200
- * calls the 4 GB WASM heap fragments and the next allocation crashes.
- * Reloading every 20 keeps us well under the limit.
- */
-const MODEL_RELOAD_INTERVAL = 20;
+const BATCH_SIZE = 20; // Photos per worker process
+const WORKER_TIMEOUT = 300_000; // 5 minutes per batch
+
+function findWorkerScript(): string {
+  // In dev mode, the .mjs file lives in the project's scripts/ directory
+  if (!app.isPackaged) {
+    const cwd = process.cwd();
+    const candidate = path.join(cwd, "scripts", "embed-worker.mjs");
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    // Fallback: relative to app path
+    const alt = path.join(app.getAppPath(), "scripts", "embed-worker.mjs");
+    if (fs.existsSync(alt)) {
+      return alt;
+    }
+  } else {
+    // Production: scripts are bundled as extraResources
+    const bundled = path.join(process.resourcesPath, "scripts", "embed-worker.mjs");
+    if (fs.existsSync(bundled)) {
+      return bundled;
+    }
+  }
+  throw new Error("embed-worker.mjs not found");
+}
+
+interface EmbedResult {
+  id: number;
+  vector?: number[];
+  error?: string;
+}
+
+function runEmbedBatch(
+  photos: Array<{ id: number; path: string }>,
+  modelPath: string,
+): Promise<EmbedResult[]> {
+  return new Promise((resolve, reject) => {
+    const tmpDir = os.tmpdir();
+    const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const inputFile = path.join(tmpDir, `embed-in-${batchId}.json`);
+    const outputFile = path.join(tmpDir, `embed-out-${batchId}.json`);
+
+    fs.writeFileSync(inputFile, JSON.stringify({ modelPath, photos }));
+
+    const workerScript = findWorkerScript();
+
+    console.log(`[AI] Spawning worker for ${photos.length} photos: ${workerScript}`);
+
+    const child = spawn("node", [workerScript, inputFile, outputFile], {
+      stdio: ["ignore", "inherit", "pipe"],
+      timeout: WORKER_TIMEOUT,
+    });
+
+    let stderr = "";
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    child.on("close", (code) => {
+      // Clean up input file
+      try { fs.unlinkSync(inputFile); } catch { /* ok */ }
+
+      if (code !== 0) {
+        try { fs.unlinkSync(outputFile); } catch { /* ok */ }
+        const errMsg = stderr.slice(-500) || `exit code ${code}`;
+        reject(new Error(`Worker crashed: ${errMsg}`));
+        return;
+      }
+
+      try {
+        const data = JSON.parse(fs.readFileSync(outputFile, "utf-8"));
+        try { fs.unlinkSync(outputFile); } catch { /* ok */ }
+        resolve(data.results as EmbedResult[]);
+      } catch (err: any) {
+        reject(new Error(`Failed to read worker output: ${err.message}`));
+      }
+    });
+
+    child.on("error", (err) => {
+      try { fs.unlinkSync(inputFile); } catch { /* ok */ }
+      try { fs.unlinkSync(outputFile); } catch { /* ok */ }
+      reject(err);
+    });
+  });
+}
+
+// --- Batch embedding ---
 
 export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
   const db = getDatabase();
+
+  // Check that the worker script exists before starting
+  try {
+    const workerScript = findWorkerScript();
+    console.log(`[AI] Embed worker found: ${workerScript}`);
+  } catch (err: any) {
+    currentProgress = {
+      processed: 0,
+      total: 0,
+      phase: "error",
+      currentFile: "",
+      error: `嵌入 Worker 脚本未找到: ${err.message}`,
+    };
+    onProgress?.(currentProgress);
+    return 0;
+  }
 
   if (isEmbedding) {
     console.warn("[AI] embedAllPhotos already running, skipping duplicate call");
@@ -335,25 +376,14 @@ export async function embedAllPhotos(
   };
   onProgress?.(currentProgress);
 
-  try {
-    await loadModel();
-  } catch (err: any) {
-    isEmbedding = false;
-    currentProgress = {
-      processed: 0,
-      total: 0,
-      phase: "error",
-      currentFile: "",
-      error: `模型加载失败: ${err?.message || "未知错误"}`,
-    };
-    onProgress?.(currentProgress);
-    console.error("[AI] Model load error:", err);
-    return 0;
+  // Ensure model path is resolved (worker needs the local model path)
+  if (!_localModelPath) {
+    _localModelPath = await ensureLocalModel();
   }
 
   await initVectorDB();
 
-  if (!(embeddingModel && photoTable)) {
+  if (!photoTable) {
     isEmbedding = false;
     currentProgress = {
       processed: 0,
@@ -367,97 +397,60 @@ export async function embedAllPhotos(
   }
 
   const unprocessed = db
-    .select({
-      id: photos.id,
-      path: photos.path,
-    })
+    .select({ id: photos.id, path: photos.path })
     .from(photos)
     .where(eq(photos.isAiProcessed, false))
     .all();
 
   const total = unprocessed.length;
   let processed = 0;
-  let sinceLastReload = 0;
 
-  console.log(`[AI] Starting embedding for ${total} photos (reload every ${MODEL_RELOAD_INTERVAL})`);
+  console.log(`[AI] Starting embedding for ${total} photos (batch size: ${BATCH_SIZE})`);
 
-  for (const photo of unprocessed) {
+  // Process in batches, each batch in a fresh child process
+  for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
     if (!isEmbedding) {
       console.log("[AI] Embedding stopped by user");
       break;
     }
 
+    const batch = unprocessed.slice(i, i + BATCH_SIZE);
+
     currentProgress = {
       processed,
       total,
       phase: "embedding",
-      currentFile: path.basename(photo.path),
+      currentFile: `batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(total / BATCH_SIZE)}`,
     };
     onProgress?.(currentProgress);
 
-    // --- Periodic ONNX session reset to free WASM heap ---
-    if (sinceLastReload >= MODEL_RELOAD_INTERVAL) {
-      console.log(
-        `[AI] Reloading ONNX model at ${processed}/${total} (every ${MODEL_RELOAD_INTERVAL} photos)`
-      );
-      try {
-        await reloadModel();
-      } catch (err: any) {
-        console.error("[AI] Model reload failed:", err?.message);
-        // If reload fails, we're dead in the water — report error and stop
-        isEmbedding = false;
-        currentProgress = {
-          processed,
-          total,
-          phase: "error",
-          currentFile: "",
-          error: `模型重载失败 (photo ${processed}/${total}): ${err?.message}`,
-        };
-        onProgress?.(currentProgress);
-        return processed;
-      }
-      sinceLastReload = 0;
-
-      // Short pause after reload to let everything settle
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-
     try {
-      if (!fs.existsSync(photo.path)) {
-        console.warn(`[AI] Skipping missing file: ${photo.path}`);
-        db.update(photos)
-          .set({ isAiProcessed: true })
-          .where(eq(photos.id, photo.id))
-          .run();
-        continue;
+      const results = await runEmbedBatch(batch, _localModelPath);
+
+      // Store successful results
+      for (const result of results) {
+        if (result.vector && result.vector.length > 0) {
+          await photoTable.add([
+            { photo_id: result.id, vector: result.vector, created_at: Date.now() },
+          ]);
+
+          db.update(photos)
+            .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
+            .where(eq(photos.id, result.id))
+            .run();
+
+          processed++;
+        } else if (result.error) {
+          console.warn(`[AI] Photo ${result.id} embedding failed in worker: ${result.error}`);
+        }
       }
 
-      // Brief breath between photos
-      if (processed > 0) {
-        await new Promise((r) => setTimeout(r, 100));
-      }
-
-      console.log(`[AI] Embedding photo ${photo.id}: ${path.basename(photo.path)}`);
-      const vector = await embeddingModel!.embedImage(photo.path);
-
-      await photoTable.add([
-        { photo_id: photo.id, vector, created_at: Date.now() },
-      ]);
-
-      db.update(photos)
-        .set({ isAiProcessed: true, vectorId: `vec_${photo.id}` })
-        .where(eq(photos.id, photo.id))
-        .run();
-
-      processed++;
-      sinceLastReload++;
-      console.log(`[AI] Photo ${photo.id} embedded (${processed}/${total})`);
-    } catch (error: any) {
-      console.error(
-        `[AI] Error embedding photo ${photo.id}: ${error?.message || error}`,
-        `\n  File: ${photo.path}`
-      );
-      // Don't crash the batch — continue to next photo
+      console.log(`[AI] Batch complete: ${processed}/${total}`);
+    } catch (err: any) {
+      // Worker process crashed — log and continue with next batch
+      console.error(`[AI] Worker batch failed: ${err.message}`);
+      // Individual photos in this batch won't be retried automatically;
+      // they'll remain unprocessed for the next run.
     }
   }
 

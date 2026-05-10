@@ -18,6 +18,10 @@ const config: ForgeConfig = {
         from: "models/",
         to: "models",
       },
+      {
+        from: "scripts/embed-worker.mjs",
+        to: "scripts/embed-worker.mjs",
+      },
     ],
     name: "AI Image Manager",
     executableName: "ai-image-manager",
