@@ -142,7 +142,13 @@ async function loadModel(): Promise<void> {
     _localModelPath = await ensureLocalModel();
   }
 
-  const { pipeline, env } = await import("@xenova/transformers");
+  const {
+    AutoProcessor,
+    AutoTokenizer,
+    CLIPModel,
+    RawImage,
+    env,
+  } = await import("@xenova/transformers");
   env.localModelPath = _localModelPath;
 
   // Support HuggingFace mirror via env var (e.g. hf-mirror.com for China)
@@ -155,28 +161,26 @@ async function loadModel(): Promise<void> {
 
   env.allowRemoteModels = true;
 
-  const extractor = await pipeline(
-    "feature-extraction",
-    "Xenova/clip-vit-base-patch32",
-    {
-      quantized: true,
-    }
-  );
+  const modelId = "Xenova/clip-vit-base-patch32";
+  const processor = await AutoProcessor.from_pretrained(modelId);
+  const tokenizer = await AutoTokenizer.from_pretrained(modelId);
+  const model = await CLIPModel.from_pretrained(modelId, { quantized: true });
 
   embeddingModel = {
     embedImage: async (imagePath: string) => {
-      const result = await extractor(imagePath, {
-        pooling: "mean",
-        normalize: true,
-      });
-      return Array.from(result.data as Float32Array);
+      const image = await RawImage.read(imagePath);
+      const inputs = await processor(image);
+      const { image_embeds } = await model(inputs);
+      const vec = Array.from(image_embeds.data as Float32Array);
+      const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+      return vec.map((v) => v / (norm || 1));
     },
     embedText: async (text: string) => {
-      const result = await extractor(text, {
-        pooling: "mean",
-        normalize: true,
-      });
-      return Array.from(result.data as Float32Array);
+      const inputs = await tokenizer([text], { padding: true, truncation: true });
+      const { text_embeds } = await model(inputs);
+      const vec = Array.from(text_embeds.data as Float32Array);
+      const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+      return vec.map((v) => v / (norm || 1));
     },
   };
 
