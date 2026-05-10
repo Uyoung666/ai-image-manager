@@ -1,10 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import * as schema from "./schema";
 import { app } from "electron";
-import path from "node:path";
-import fs from "node:fs";
+import * as schema from "./schema";
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
 
@@ -20,15 +20,21 @@ export function getDbPath(): string {
 function getMigrationsFolder(): string {
   // In development, migrations are in the project root
   const devPath = path.join(app.getAppPath(), "drizzle");
-  if (fs.existsSync(devPath)) return devPath;
+  if (fs.existsSync(devPath)) {
+    return devPath;
+  }
   // Fallback for packaged app
   const prodPath = path.join(process.resourcesPath, "drizzle");
-  if (fs.existsSync(prodPath)) return prodPath;
+  if (fs.existsSync(prodPath)) {
+    return prodPath;
+  }
   throw new Error("Migrations folder not found");
 }
 
 export function initDatabase(): ReturnType<typeof drizzle> {
-  if (dbInstance) return dbInstance;
+  if (dbInstance) {
+    return dbInstance;
+  }
 
   const dbPath = getDbPath();
   console.log(`[DB] Initializing database at: ${dbPath}`);

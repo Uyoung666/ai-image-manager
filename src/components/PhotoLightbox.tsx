@@ -2,15 +2,18 @@ import Lightbox from "yet-another-react-lightbox";
 import "yet-another-react-lightbox/styles.css";
 
 interface Photo {
-  id: number; path: string; filename: string;
-  width: number; height: number;
+  filename: string;
+  height: number;
+  id: number;
+  path: string;
+  width: number;
 }
 
 interface PhotoLightboxProps {
-  photos: Photo[];
   index: number;
-  open: boolean;
   onClose: () => void;
+  open: boolean;
+  photos: Photo[];
 }
 
 function toLocalMediaUrl(filePath: string): string {
@@ -22,19 +25,17 @@ function toLocalMediaUrl(filePath: string): string {
   return `local-media://${encoded}`;
 }
 
-export function PhotoLightbox({ photos, index, open, onClose }: PhotoLightboxProps) {
+export function PhotoLightbox({
+  photos,
+  index,
+  open,
+  onClose,
+}: PhotoLightboxProps) {
   const slides = photos.map((p) => ({
     src: toLocalMediaUrl(p.path),
     alt: p.filename,
     title: p.filename,
   }));
 
-  return (
-    <Lightbox
-      open={open}
-      close={onClose}
-      index={index}
-      slides={slides}
-    />
-  );
+  return <Lightbox close={onClose} index={index} open={open} slides={slides} />;
 }

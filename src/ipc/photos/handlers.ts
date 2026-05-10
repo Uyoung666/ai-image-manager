@@ -1,20 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import { os } from "@orpc/server";
+import { desc, eq, inArray, like, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { photos, exifData, folders } from "@/db/schema";
-import { eq, desc, and, like, sql, inArray } from "drizzle-orm";
-import { scanFolder as scanFolderService, stopScanning, startWatching, isIndexing } from "@/services/indexer";
-import { getThumbnailBuffer } from "@/services/thumbnailer";
+import { exifData, folders, photos } from "@/db/schema";
 import {
-  embedAllPhotos, searchByText as aiSearchByText,
-  searchByImage as aiSearchByImage, stopEmbedding, getEmbeddingProgress,
+  searchByImage as aiSearchByImage,
+  searchByText as aiSearchByText,
+  embedAllPhotos,
+  getEmbeddingProgress,
+  stopEmbedding,
 } from "@/services/ai-embedder";
+import { scanFolder as scanFolderService } from "@/services/indexer";
 
 const FolderSchema = z.object({ path: z.string().min(1) });
-const SearchSchema = z.object({ query: z.string().min(1), limit: z.number().optional().default(50) });
-const ImageSearchSchema = z.object({ imagePath: z.string().min(1), limit: z.number().optional().default(20) });
+const SearchSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().optional().default(50),
+});
+const ImageSearchSchema = z.object({
+  imagePath: z.string().min(1),
+  limit: z.number().optional().default(20),
+});
 const ListSchema = z.object({
   folderId: z.number().optional(),
   search: z.string().optional(),
@@ -26,118 +34,141 @@ const ListSchema = z.object({
 const IdSchema = z.object({ id: z.number() });
 
 // Folder management
-export const scanFolder = os
-  .input(FolderSchema)
-  .handler(async ({ input }) => {
-    const result = await scanFolderService(input.path);
-    return result;
-  });
+export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
+  const result = await scanFolderService(input.path);
+  return result;
+});
 
-export const getFolders = os.handler(async () => {
+export const getFolders = os.handler(() => {
   const db = getDatabase();
   return db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
 });
 
-export const deleteFolder = os
-  .input(IdSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const folder = db.select({ path: folders.path }).from(folders).where(eq(folders.id, input.id)).get();
-    if (folder) {
-      db.delete(photos).where(eq(photos.folderId, input.id)).run();
-      db.delete(folders).where(eq(folders.id, input.id)).run();
-    }
-    return { success: true };
-  });
+export const deleteFolder = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const folder = db
+    .select({ path: folders.path })
+    .from(folders)
+    .where(eq(folders.id, input.id))
+    .get();
+  if (folder) {
+    db.delete(photos).where(eq(photos.folderId, input.id)).run();
+    db.delete(folders).where(eq(folders.id, input.id)).run();
+  }
+  return { success: true };
+});
 
 // Photo listing
-export const listPhotos = os
-  .input(ListSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const { folderId, search, sort, order, offset, limit } = input;
+export const listPhotos = os.input(ListSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const { folderId, search, sort, order, offset, limit } = input;
 
-    let query = db.select().from(photos).$dynamic();
+  let query = db.select().from(photos).$dynamic();
 
-    if (folderId) {
-      query = query.where(eq(photos.folderId, folderId));
-    }
-    if (search) {
-      query = query.where(like(photos.filename, `%${search}%`));
-    }
+  if (folderId) {
+    query = query.where(eq(photos.folderId, folderId));
+  }
+  if (search) {
+    query = query.where(like(photos.filename, `%${search}%`));
+  }
 
-    const sortCol = sort === "name" ? photos.filename : sort === "size" ? photos.fileSize : photos.fileDate;
-    query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
+  const sortCol =
+    sort === "name"
+      ? photos.filename
+      : sort === "size"
+        ? photos.fileSize
+        : photos.fileDate;
+  query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
 
-    // Build filtered count query with same conditions
-    let countQuery = db.select({ count: sql<number>`count(*)` }).from(photos).$dynamic();
-    if (folderId) {
-      countQuery = countQuery.where(eq(photos.folderId, folderId));
-    }
-    if (search) {
-      countQuery = countQuery.where(like(photos.filename, `%${search}%`));
-    }
-    const total = countQuery.get()?.count || 0;
-    const items = query.limit(limit).offset(offset).all();
+  // Build filtered count query with same conditions
+  let countQuery = db
+    .select({ count: sql<number>`count(*)` })
+    .from(photos)
+    .$dynamic();
+  if (folderId) {
+    countQuery = countQuery.where(eq(photos.folderId, folderId));
+  }
+  if (search) {
+    countQuery = countQuery.where(like(photos.filename, `%${search}%`));
+  }
+  const total = countQuery.get()?.count || 0;
+  const items = query.limit(limit).offset(offset).all();
 
-    return { items, total, offset, limit };
-  });
+  return { items, total, offset, limit };
+});
 
 // Photo detail
-export const getPhotoDetail = os
-  .input(IdSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
-    return photo || null;
-  });
+export const getPhotoDetail = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
+  return photo || null;
+});
 
-export const getPhotoExif = os
-  .input(IdSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    return db.select().from(exifData).where(eq(exifData.photoId, input.id)).get() || null;
-  });
+export const getPhotoExif = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  return (
+    db.select().from(exifData).where(eq(exifData.photoId, input.id)).get() ||
+    null
+  );
+});
 
 // Statistics for dashboard
-export const getStats = os.handler(async () => {
+export const getStats = os.handler(() => {
   const db = getDatabase();
 
-  const totalPhotos = db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
-  const aiProcessed = db.select({ count: sql<number>`count(*)` }).from(photos).where(eq(photos.isAiProcessed, true)).get()?.count || 0;
+  const totalPhotos =
+    db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
+  const aiProcessed =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(photos)
+      .where(eq(photos.isAiProcessed, true))
+      .get()?.count || 0;
 
-  const cameraStats = db.select({
-    model: exifData.cameraModel,
-    count: sql<number>`count(*)`,
-  }).from(exifData)
+  const cameraStats = db
+    .select({
+      model: exifData.cameraModel,
+      count: sql<number>`count(*)`,
+    })
+    .from(exifData)
     .groupBy(exifData.cameraModel)
     .orderBy(desc(sql`count(*)`))
-    .limit(5).all();
+    .limit(5)
+    .all();
 
-  const focalStats = db.select({
-    focalLength: exifData.focalLength,
-    count: sql<number>`count(*)`,
-  }).from(exifData)
+  const focalStats = db
+    .select({
+      focalLength: exifData.focalLength,
+      count: sql<number>`count(*)`,
+    })
+    .from(exifData)
     .where(sql`${exifData.focalLength} IS NOT NULL`)
     .groupBy(exifData.focalLength)
     .orderBy(desc(sql`count(*)`))
-    .limit(10).all();
+    .limit(10)
+    .all();
 
-  const dateRange = db.select({
-    earliest: sql<number>`min(${exifData.dateTaken})`,
-    latest: sql<number>`max(${exifData.dateTaken})`,
-  }).from(exifData).get();
+  const dateRange = db
+    .select({
+      earliest: sql<number>`min(${exifData.dateTaken})`,
+      latest: sql<number>`max(${exifData.dateTaken})`,
+    })
+    .from(exifData)
+    .get();
 
-  const isoStats = db.select({
-    avgIso: sql<number>`avg(${exifData.iso})`,
-  }).from(exifData)
-    .where(sql`${exifData.iso} IS NOT NULL`).get();
+  const isoStats = db
+    .select({
+      avgIso: sql<number>`avg(${exifData.iso})`,
+    })
+    .from(exifData)
+    .where(sql`${exifData.iso} IS NOT NULL`)
+    .get();
 
   return {
     totalPhotos,
     aiProcessed,
-    cameraStats: cameraStats.filter(c => c.model),
-    focalStats: focalStats.filter(f => f.focalLength),
+    cameraStats: cameraStats.filter((c) => c.model),
+    focalStats: focalStats.filter((f) => f.focalLength),
     dateRange,
     avgIso: isoStats?.avgIso || 0,
   };
@@ -150,18 +181,24 @@ export const searchByText = os
     const db = getDatabase();
     const results = await aiSearchByText(input.query, input.limit);
 
-    const photoIds = results.map(r => r.photoId);
-    if (photoIds.length === 0) return { results: [], query: input.query };
+    const photoIds = results.map((r) => r.photoId);
+    if (photoIds.length === 0) {
+      return { results: [], query: input.query };
+    }
 
-    const photoList = db.select().from(photos)
+    const photoList = db
+      .select()
+      .from(photos)
       .where(inArray(photos.id, photoIds))
       .all();
 
-    const photoMap = new Map(photoList.map(p => [p.id, p]));
-    const merged = results.map(r => ({
-      ...photoMap.get(r.photoId),
-      similarity: r.similarity,
-    })).filter(p => p.id);
+    const photoMap = new Map(photoList.map((p) => [p.id, p]));
+    const merged = results
+      .map((r) => ({
+        ...photoMap.get(r.photoId),
+        similarity: r.similarity,
+      }))
+      .filter((p) => p.id);
 
     return { results: merged, query: input.query };
   });
@@ -172,52 +209,62 @@ export const searchByImage = os
     const db = getDatabase();
     const results = await aiSearchByImage(input.imagePath, input.limit);
 
-    const photoIds = results.map(r => r.photoId);
-    if (photoIds.length === 0) return { results: [] };
+    const photoIds = results.map((r) => r.photoId);
+    if (photoIds.length === 0) {
+      return { results: [] };
+    }
 
-    const photoList = db.select().from(photos)
+    const photoList = db
+      .select()
+      .from(photos)
       .where(inArray(photos.id, photoIds))
       .all();
 
-    const photoMap = new Map(photoList.map(p => [p.id, p]));
-    const merged = results.map(r => ({
-      ...photoMap.get(r.photoId),
-      similarity: r.similarity,
-    })).filter(p => p.id);
+    const photoMap = new Map(photoList.map((p) => [p.id, p]));
+    const merged = results
+      .map((r) => ({
+        ...photoMap.get(r.photoId),
+        similarity: r.similarity,
+      }))
+      .filter((p) => p.id);
 
     return { results: merged };
   });
 
-export const startAiIndexing = os.handler(async () => {
+export const startAiIndexing = os.handler(() => {
   // Fire-and-forget: launch embedding in background, poll progress via getAiProgress
-  embedAllPhotos().then(count => {
-    console.log(`[AI] Embedding complete: ${count} photos processed`);
-  }).catch(err => {
-    console.error("[AI] Embedding error:", err);
-  });
+  embedAllPhotos()
+    .then((count) => {
+      console.log(`[AI] Embedding complete: ${count} photos processed`);
+    })
+    .catch((err) => {
+      console.error("[AI] Embedding error:", err);
+    });
   return { started: true };
 });
 
-export const stopAiIndexing = os.handler(async () => {
+export const stopAiIndexing = os.handler(() => {
   stopEmbedding();
   return { stopped: true };
 });
 
-export const deletePhoto = os
-  .input(IdSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const photo = db.select({ path: photos.path }).from(photos).where(eq(photos.id, input.id)).get();
-    if (photo) {
-      db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
-      db.delete(photos).where(eq(photos.id, input.id)).run();
-    }
-    return { success: true };
-  });
+export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const photo = db
+    .select({ path: photos.path })
+    .from(photos)
+    .where(eq(photos.id, input.id))
+    .get();
+  if (photo) {
+    db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
+    db.delete(photos).where(eq(photos.id, input.id)).run();
+  }
+  return { success: true };
+});
 
 export const deletePhotos = os
   .input(z.object({ ids: z.array(z.number()) }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     for (const id of input.ids) {
       db.delete(exifData).where(eq(exifData.photoId, id)).run();
@@ -229,7 +276,7 @@ export const deletePhotos = os
 function hammingDistance(a: string, b: string): number {
   let dist = 0;
   for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    const xor = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    const xor = Number.parseInt(a[i], 16) ^ Number.parseInt(b[i], 16);
     // Count set bits in the xor'd nibble
     dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
   }
@@ -238,14 +285,16 @@ function hammingDistance(a: string, b: string): number {
 
 export const findDuplicates = os
   .input(z.object({ threshold: z.number().optional().default(8) }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
-    const allPhotos = db.select({
-      id: photos.id,
-      path: photos.path,
-      filename: photos.filename,
-      phash: photos.phash,
-    }).from(photos)
+    const allPhotos = db
+      .select({
+        id: photos.id,
+        path: photos.path,
+        filename: photos.filename,
+        phash: photos.phash,
+      })
+      .from(photos)
       .where(sql`${photos.phash} IS NOT NULL`)
       .all();
 
@@ -258,11 +307,22 @@ export const findDuplicates = os
     for (let i = 0; i < allPhotos.length; i++) {
       for (let j = i + 1; j < allPhotos.length; j++) {
         if (allPhotos[i].phash && allPhotos[j].phash) {
-          const dist = hammingDistance(allPhotos[i].phash!, allPhotos[j].phash!);
+          const dist = hammingDistance(
+            allPhotos[i].phash!,
+            allPhotos[j].phash!
+          );
           if (dist <= input.threshold) {
             duplicates.push({
-              photoA: { id: allPhotos[i].id, path: allPhotos[i].path, filename: allPhotos[i].filename },
-              photoB: { id: allPhotos[j].id, path: allPhotos[j].path, filename: allPhotos[j].filename },
+              photoA: {
+                id: allPhotos[i].id,
+                path: allPhotos[i].path,
+                filename: allPhotos[i].filename,
+              },
+              photoB: {
+                id: allPhotos[j].id,
+                path: allPhotos[j].path,
+                filename: allPhotos[j].filename,
+              },
               distance: dist,
             });
           }
@@ -274,32 +334,56 @@ export const findDuplicates = os
   });
 
 export const renamePhotos = os
-  .input(z.object({
-    ids: z.array(z.number()),
-    pattern: z.string().min(1),
-  }))
-  .handler(async ({ input }) => {
+  .input(
+    z.object({
+      ids: z.array(z.number()),
+      pattern: z.string().min(1),
+    })
+  )
+  .handler(({ input }) => {
     const db = getDatabase();
-    const results: Array<{ id: number; oldName: string; newName: string; error?: string }> = [];
+    const results: Array<{
+      id: number;
+      oldName: string;
+      newName: string;
+      error?: string;
+    }> = [];
 
     for (let i = 0; i < input.ids.length; i++) {
-      const photo = db.select().from(photos).where(eq(photos.id, input.ids[i])).get();
-      if (!photo) continue;
+      const photo = db
+        .select()
+        .from(photos)
+        .where(eq(photos.id, input.ids[i]))
+        .get();
+      if (!photo) {
+        continue;
+      }
 
       const ext = path.extname(photo.filename);
       const base = path.basename(photo.filename, ext);
-      const exif = db.select().from(exifData).where(eq(exifData.photoId, photo.id)).get();
-      const date = exif?.dateTaken ? new Date(exif.dateTaken) : new Date(photo.fileDate);
+      const exif = db
+        .select()
+        .from(exifData)
+        .where(eq(exifData.photoId, photo.id))
+        .get();
+      const date = exif?.dateTaken
+        ? new Date(exif.dateTaken)
+        : new Date(photo.fileDate);
 
       let newBase = input.pattern
         .replace(/\{yyyy\}/g, date.getFullYear().toString())
         .replace(/\{mm\}/g, String(date.getMonth() + 1).padStart(2, "0"))
         .replace(/\{dd\}/g, String(date.getDate()).padStart(2, "0"))
-        .replace(/\{camera\}/g, (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, ""))
+        .replace(
+          /\{camera\}/g,
+          (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, "")
+        )
         .replace(/\{iso\}/g, exif?.iso?.toString() || "")
         .replace(/\{focal\}/g, (exif?.focalLength || "").toString())
         .replace(/\{index\}/g, (i + 1).toString())
-        .replace(/\{index:(\d+)\}/g, (_, pad) => String(i + 1).padStart(parseInt(pad), "0"))
+        .replace(/\{index:(\d+)\}/g, (_, pad) =>
+          String(i + 1).padStart(Number.parseInt(pad, 10), "0")
+        )
         .replace(/\{orig\}/g, base)
         .replace(/\{ext\}/g, ext);
 
@@ -307,33 +391,58 @@ export const renamePhotos = os
       newBase = newBase.replace(/[<>:"/\\|?*]/g, "").trim() || base;
       const newFilename = newBase + ext;
 
-      if (newFilename === photo.filename) continue;
+      if (newFilename === photo.filename) {
+        continue;
+      }
 
       try {
         const newPath = path.join(path.dirname(photo.path), newFilename);
         if (fs.existsSync(newPath)) {
-          results.push({ id: photo.id, oldName: photo.filename, newName: newFilename, error: "目标文件已存在" });
+          results.push({
+            id: photo.id,
+            oldName: photo.filename,
+            newName: newFilename,
+            error: "目标文件已存在",
+          });
           continue;
         }
         fs.renameSync(photo.path, newPath);
-        db.update(photos).set({ path: newPath, filename: newFilename }).where(eq(photos.id, photo.id)).run();
-        results.push({ id: photo.id, oldName: photo.filename, newName: newFilename });
+        db.update(photos)
+          .set({ path: newPath, filename: newFilename })
+          .where(eq(photos.id, photo.id))
+          .run();
+        results.push({
+          id: photo.id,
+          oldName: photo.filename,
+          newName: newFilename,
+        });
       } catch (e: any) {
-        results.push({ id: photo.id, oldName: photo.filename, newName: newFilename, error: e.message });
+        results.push({
+          id: photo.id,
+          oldName: photo.filename,
+          newName: newFilename,
+          error: e.message,
+        });
       }
     }
 
-    return { renamed: results.filter(r => !r.error).length, errors: results.filter(r => r.error).length, results };
+    return {
+      renamed: results.filter((r) => !r.error).length,
+      errors: results.filter((r) => r.error).length,
+      results,
+    };
   });
 
 export const convertPhotos = os
-  .input(z.object({
-    ids: z.array(z.number()),
-    format: z.enum(["jpg", "png", "webp", "avif"]),
-    quality: z.number().min(10).max(100).default(80),
-    maxWidth: z.number().optional(),
-    outputDir: z.string().min(1),
-  }))
+  .input(
+    z.object({
+      ids: z.array(z.number()),
+      format: z.enum(["jpg", "png", "webp", "avif"]),
+      quality: z.number().min(10).max(100).default(80),
+      maxWidth: z.number().optional(),
+      outputDir: z.string().min(1),
+    })
+  )
   .handler(async ({ input }) => {
     const db = getDatabase();
     const sharp = (await import("sharp")).default;
@@ -345,7 +454,9 @@ export const convertPhotos = os
 
     for (const id of input.ids) {
       const photo = db.select().from(photos).where(eq(photos.id, id)).get();
-      if (!photo) continue;
+      if (!photo) {
+        continue;
+      }
 
       try {
         let pipeline = sharp(photo.path);
@@ -355,13 +466,19 @@ export const convertPhotos = os
           pipeline = pipeline.resize(input.maxWidth);
         }
 
-        const extNoDot = path.extname(photo.filename).toLowerCase().replace(".", "");
-        const outName = input.format === extNoDot
-          ? `${path.basename(photo.filename, path.extname(photo.filename))}_converted.${input.format}`
-          : `${path.basename(photo.filename, path.extname(photo.filename))}.${input.format}`;
+        const extNoDot = path
+          .extname(photo.filename)
+          .toLowerCase()
+          .replace(".", "");
+        const outName =
+          input.format === extNoDot
+            ? `${path.basename(photo.filename, path.extname(photo.filename))}_converted.${input.format}`
+            : `${path.basename(photo.filename, path.extname(photo.filename))}.${input.format}`;
 
         const outPath = path.join(input.outputDir, outName);
-        const buffer = await pipeline.toFormat(input.format, { quality: input.quality }).toBuffer();
+        const buffer = await pipeline
+          .toFormat(input.format, { quality: input.quality })
+          .toBuffer();
         fs.writeFileSync(outPath, buffer);
         converted++;
       } catch (e) {
@@ -372,6 +489,6 @@ export const convertPhotos = os
     return { converted, outputDir: input.outputDir };
   });
 
-export const getAiProgress = os.handler(async () => {
+export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
 });

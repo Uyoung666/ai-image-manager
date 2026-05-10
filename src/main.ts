@@ -1,20 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow, protocol, Tray, Menu, nativeImage, globalShortcut } from "electron";
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  Menu,
+  nativeImage,
+  protocol,
+  Tray,
+} from "electron";
 import { ipcMain } from "electron/main";
-import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import Store from "electron-store";
+import { UpdateSourceType, updateElectronApp } from "update-electron-app";
+import { initDatabase } from "@/db";
 import { ipcContext } from "@/ipc/context";
+import { startWatching } from "@/services/indexer";
+import { initThumbnailer } from "@/services/thumbnailer";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
-import { initDatabase } from "@/db";
-import { initThumbnailer } from "@/services/thumbnailer";
-import { startWatching } from "@/services/indexer";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
-const windowStore = new Store<{ x?: number; y?: number; width?: number; height?: number; isMaximized?: boolean }>({
+const windowStore = new Store<{
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  isMaximized?: boolean;
+}>({
   name: "window-state",
   defaults: { width: 1280, height: 800 },
 });
@@ -27,9 +41,9 @@ function createTrayIcon(): nativeImage {
     for (let x = 0; x < size; x++) {
       const i = (y * size + x) * 4;
       const inCircle = (x - 7) ** 2 + (y - 7) ** 2 < 36;
-      canvas[i] = 0x5E;     // R
-      canvas[i + 1] = 0x6A; // G
-      canvas[i + 2] = 0xD2; // B
+      canvas[i] = 0x5e; // R
+      canvas[i + 1] = 0x6a; // G
+      canvas[i + 2] = 0xd2; // B
       canvas[i + 3] = inCircle ? 255 : 0; // A
     }
   }
@@ -81,7 +95,9 @@ function createTray() {
 function registerGlobalShortcuts() {
   const registered = globalShortcut.register("Ctrl+Shift+F", () => {
     if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
       mainWindow.show();
       mainWindow.focus();
       mainWindow.webContents.send("global-shortcut:search");
@@ -125,7 +141,9 @@ function createWindow() {
     height: savedHeight,
     minWidth: 900,
     minHeight: 600,
-    ...(savedX !== undefined && savedY !== undefined ? { x: savedX, y: savedY } : {}),
+    ...(savedX !== undefined && savedY !== undefined
+      ? { x: savedX, y: savedY }
+      : {}),
     title: "AI Image Manager",
     webPreferences: {
       devTools: inDevelopment,
@@ -152,12 +170,17 @@ function createWindow() {
 
   // Save window state on move/resize
   const saveBounds = () => {
-    if (mainWindow!.isMaximized()) {
+    if (mainWindow?.isMaximized()) {
       windowStore.set("isMaximized", true);
     } else {
       windowStore.set("isMaximized", false);
-      const bounds = mainWindow!.getBounds();
-      windowStore.set({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+      const bounds = mainWindow?.getBounds();
+      windowStore.set({
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      });
     }
   };
 

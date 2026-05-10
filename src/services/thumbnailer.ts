@@ -1,9 +1,9 @@
-import sharp from "sharp";
-import path from "node:path";
-import fs from "node:fs";
 import crypto from "node:crypto";
-import { LRUCache } from "lru-cache";
+import fs from "node:fs";
+import path from "node:path";
 import { app } from "electron";
+import { LRUCache } from "lru-cache";
+import sharp from "sharp";
 
 const THUMBNAIL_SIZES = {
   sm: 160,
@@ -30,7 +30,10 @@ export function initThumbnailer(): void {
 }
 
 function getThumbnailPath(imagePath: string, size: ThumbSize): string {
-  const hash = crypto.createHash("md5").update(`${imagePath}_${size}`).digest("hex");
+  const hash = crypto
+    .createHash("md5")
+    .update(`${imagePath}_${size}`)
+    .digest("hex");
   return path.join(thumbnailDir, `${hash}.jpg`);
 }
 
@@ -49,11 +52,19 @@ export async function generateThumbnail(
     const diskData = fs.readFileSync(thumbPath);
     memoryCache?.set(cacheKey, diskData);
     const meta = await sharp(thumbPath).metadata();
-    return { thumbnailPath: thumbPath, width: meta.width || 0, height: meta.height || 0 };
+    return {
+      thumbnailPath: thumbPath,
+      width: meta.width || 0,
+      height: meta.height || 0,
+    };
   }
 
   if (cached) {
-    return { thumbnailPath: thumbPath, width: THUMBNAIL_SIZES[size], height: THUMBNAIL_SIZES[size] };
+    return {
+      thumbnailPath: thumbPath,
+      width: THUMBNAIL_SIZES[size],
+      height: THUMBNAIL_SIZES[size],
+    };
   }
 
   // L3: generate
@@ -67,7 +78,11 @@ export async function generateThumbnail(
   memoryCache?.set(cacheKey, thumbBuffer);
 
   const meta = await sharp(thumbPath).metadata();
-  return { thumbnailPath: thumbPath, width: meta.width || 0, height: meta.height || 0 };
+  return {
+    thumbnailPath: thumbPath,
+    width: meta.width || 0,
+    height: meta.height || 0,
+  };
 }
 
 export async function getThumbnailBuffer(

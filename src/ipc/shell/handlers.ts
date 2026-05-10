@@ -1,6 +1,6 @@
 import { os } from "@orpc/server";
+import { BrowserWindow, dialog, shell } from "electron";
 import { z } from "zod";
-import { shell, dialog, BrowserWindow } from "electron";
 import { openExternalLinkInputSchema } from "./schemas";
 
 export const openExternalLink = os
@@ -12,7 +12,9 @@ export const openExternalLink = os
 
 export const openFolderDialog = os.handler(async () => {
   const win = BrowserWindow.getFocusedWindow();
-  if (!win) return { path: null };
+  if (!win) {
+    return { path: null };
+  }
   const result = await dialog.showOpenDialog(win, {
     properties: ["openDirectory"],
     title: "选择照片文件夹",

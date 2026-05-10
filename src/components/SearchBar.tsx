@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Clock, Search, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, X, Clock } from "lucide-react";
 
 const HISTORY_KEY = "search_history";
 const MAX_HISTORY = 20;
@@ -9,22 +9,33 @@ function loadHistory(): string[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function saveHistory(items: string[]) {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, MAX_HISTORY)));
-  } catch { /* ignore */ }
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(items.slice(0, MAX_HISTORY))
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 interface SearchBarProps {
-  onSearch: (query: string) => void;
   onClear: () => void;
   onImageSearch?: (imagePath: string) => void;
+  onSearch: (query: string) => void;
 }
 
-export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) {
+export function SearchBar({
+  onSearch,
+  onClear,
+  onImageSearch,
+}: SearchBarProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<string[]>(loadHistory);
@@ -55,8 +66,12 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
-          inputRef.current && !inputRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target as Node)
+      ) {
         setShowHistory(false);
       }
     }
@@ -65,9 +80,11 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
   }, []);
 
   const addToHistory = useCallback((q: string) => {
-    if (!q.trim()) return;
-    setHistory(prev => {
-      const next = [q, ...prev.filter(h => h !== q)].slice(0, MAX_HISTORY);
+    if (!q.trim()) {
+      return;
+    }
+    setHistory((prev) => {
+      const next = [q, ...prev.filter((h) => h !== q)].slice(0, MAX_HISTORY);
       saveHistory(next);
       return next;
     });
@@ -75,7 +92,9 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!query.trim()) {
+      return;
+    }
     addToHistory(query.trim());
     onSearch(query.trim());
     setShowHistory(false);
@@ -95,7 +114,9 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
   }
 
   function handleDragOver(e: React.DragEvent) {
-    if (!onImageSearch) return;
+    if (!onImageSearch) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     setDragOver(true);
@@ -109,9 +130,11 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    if (!onImageSearch) return;
+    if (!onImageSearch) {
+      return;
+    }
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith("image/")) {
+    if (file?.type.startsWith("image/")) {
       // Electron exposes the full path via (file as any).path
       const filePath = (file as any).path;
       if (filePath) {
@@ -122,34 +145,36 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
 
   return (
     <div
-      className={`px-4 py-3 border-b border-[rgba(255,255,255,0.06)] relative transition-colors ${dragOver ? "bg-[#5e6ad2]/5" : ""}`}
-      onDragOver={handleDragOver}
+      className={`relative border-[rgba(255,255,255,0.06)] border-b px-4 py-3 transition-colors ${dragOver ? "bg-[#5e6ad2]/5" : ""}`}
       onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
       {dragOver && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#5e6ad2]/10 border-2 border-dashed border-[#5e6ad2] rounded-[6px] m-2 pointer-events-none">
-          <span className="text-[#5e6ad2] text-[13px] font-[510]">拖放图片以搜索相似照片</span>
+        <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-[#5e6ad2] border-dashed bg-[#5e6ad2]/10">
+          <span className="font-[510] text-[#5e6ad2] text-[13px]">
+            拖放图片以搜索相似照片
+          </span>
         </div>
       )}
-      <form onSubmit={handleSubmit} className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b6b75]" />
+      <form className="relative" onSubmit={handleSubmit}>
+        <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#6b6b75]" />
         <input
-          ref={inputRef}
-          type="text"
-          value={query}
+          className="h-9 w-full rounded-[6px] border border-[rgba(255,255,255,0.06)] bg-[#1c1e22] pr-8 pl-9 text-[#f7f8f8] text-[14px] outline-none transition-colors placeholder:text-[#6b6b75] focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2]"
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setShowHistory(history.length > 0)}
           placeholder={t("searchPlaceholder")}
-          className="w-full h-9 pl-9 pr-8 bg-[#1c1e22] border border-[rgba(255,255,255,0.06)] rounded-[6px] text-[14px] text-[#f7f8f8] placeholder:text-[#6b6b75] outline-none focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2] transition-colors"
+          ref={inputRef}
+          type="text"
+          value={query}
         />
         {query && (
           <button
-            type="button"
+            className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#6b6b75] hover:text-[#f7f8f8]"
             onClick={handleClear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-[#6b6b75] hover:text-[#f7f8f8]"
+            type="button"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
         )}
       </form>
@@ -157,19 +182,19 @@ export function SearchBar({ onSearch, onClear, onImageSearch }: SearchBarProps) 
       {/* Search history dropdown */}
       {showHistory && history.length > 0 && (
         <div
+          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-[#2c2c30] bg-[#1c1e22] shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
           ref={dropdownRef}
-          className="absolute left-4 right-4 top-full z-50 mt-1 bg-[#1c1e22] border border-[#2c2c30] rounded-[8px] shadow-[0_8px_30px_rgba(0,0,0,0.5)] overflow-hidden"
         >
-          <div className="px-3 py-1.5 text-[10px] text-[#6b6b75] font-[510] uppercase tracking-wider">
+          <div className="px-3 py-1.5 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
             最近搜索
           </div>
           {history.slice(0, 8).map((h, i) => (
             <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] hover:bg-white/5 hover:text-[#f7f8f8]"
               key={i}
               onClick={() => handleHistoryClick(h)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[13px] text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8] text-left"
             >
-              <Clock className="w-3 h-3 flex-shrink-0 text-[#6b6b75]" />
+              <Clock className="h-3 w-3 flex-shrink-0 text-[#6b6b75]" />
               <span className="truncate">{h}</span>
             </button>
           ))}

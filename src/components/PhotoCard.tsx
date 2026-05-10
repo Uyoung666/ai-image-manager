@@ -1,27 +1,32 @@
 import { memo, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 interface PhotoCardProps {
-  id: number;
-  path: string;
-  thumbnailPath: string | null;
   filename: string;
-  width: number;
   height: number;
+  id: number;
   isSelected: boolean;
-  searchQuery?: string;
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
+  path: string;
+  searchQuery?: string;
+  thumbnailPath: string | null;
+  width: number;
 }
 
 function HighlightText({ text, query }: { text: string; query?: string }) {
-  if (!query) return <>{text}</>;
+  if (!query) {
+    return <>{text}</>;
+  }
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
-  if (idx === -1) return <>{text}</>;
+  if (idx === -1) {
+    return <>{text}</>;
+  }
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-[#5e6ad2]/40 text-[#f7f8f8] rounded-[2px]">{text.slice(idx, idx + query.length)}</mark>
+      <mark className="rounded-[2px] bg-[#5e6ad2]/40 text-[#f7f8f8]">
+        {text.slice(idx, idx + query.length)}
+      </mark>
       {text.slice(idx + query.length)}
     </>
   );
@@ -48,7 +53,6 @@ export const PhotoCard = memo(function PhotoCard({
   onClick,
   onDoubleClick,
 }: PhotoCardProps) {
-  const { t } = useTranslation();
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
 
@@ -61,66 +65,89 @@ export const PhotoCard = memo(function PhotoCard({
   if (error) {
     return (
       <div
-        className="relative flex flex-col items-center justify-center bg-[#15171a] rounded-[8px] overflow-hidden break-inside-avoid mb-2 gap-2"
-        style={{ aspectRatio, contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
+        className="relative mb-2 flex break-inside-avoid flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-[#15171a]"
+        style={{
+          aspectRatio,
+          contentVisibility: "auto",
+          containIntrinsicSize: "auto 200px",
+        }}
       >
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6b6b75" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <svg
+          fill="none"
+          height="32"
+          stroke="#6b6b75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+          viewBox="0 0 24 24"
+          width="32"
+        >
+          <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
           <circle cx="8.5" cy="8.5" r="1.5" />
           <polyline points="21 15 16 10 5 21" />
         </svg>
-        <span className="text-[10px] text-[#6b6b75] truncate px-2 max-w-full">{filename}</span>
+        <span className="max-w-full truncate px-2 text-[#6b6b75] text-[10px]">
+          {filename}
+        </span>
       </div>
     );
   }
 
   return (
     <div
-      className={`
-        relative group cursor-pointer rounded-[8px] overflow-hidden break-inside-avoid mb-2
-        transition-all duration-150 bg-[#15171a]
-        ${isSelected
-          ? "ring-2 ring-[#5e6ad2] ring-offset-1 ring-offset-[#08090a] shadow-[0_0_20px_rgba(94,106,210,0.15)]"
-          : "hover:ring-1 hover:ring-white/10 hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
-        }
+      className={`group relative mb-2 cursor-pointer break-inside-avoid overflow-hidden rounded-[8px] bg-[#15171a] transition-all duration-150 ${
+        isSelected
+          ? "shadow-[0_0_20px_rgba(94,106,210,0.15)] ring-2 ring-[#5e6ad2] ring-offset-1 ring-offset-[#08090a]"
+          : "hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:ring-1 hover:ring-white/10"
+      }
       `}
-      style={{ aspectRatio, contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
       onClick={(e) => onClick(id, e)}
       onDoubleClick={() => onDoubleClick(id)}
+      style={{
+        aspectRatio,
+        contentVisibility: "auto",
+        containIntrinsicSize: "auto 200px",
+      }}
     >
       {!loaded && (
-        <div className="absolute inset-0 bg-gradient-to-b from-[#1c1e22] to-[#15171a] animate-pulse" />
+        <div className="absolute inset-0 animate-pulse bg-gradient-to-b from-[#1c1e22] to-[#15171a]" />
       )}
       <img
-        src={src}
         alt={filename}
-        loading="lazy"
-        className={`
-          w-full h-full object-cover transition-all duration-500
-          ${loaded ? "opacity-100 scale-100" : "opacity-0 scale-105"}
+        className={`h-full w-full object-cover transition-all duration-500 ${loaded ? "scale-100 opacity-100" : "scale-105 opacity-0"}
         `}
-        onLoad={() => setLoaded(true)}
+        loading="lazy"
         onError={() => setError(true)}
+        onLoad={() => setLoaded(true)}
+        src={src}
       />
 
       {/* Hover overlay */}
-      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+      <div className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2">
-          <p className="text-[#f7f8f8] text-[11px] font-[510] truncate leading-tight">
-            <HighlightText text={filename} query={searchQuery} />
+          <p className="truncate font-[510] text-[#f7f8f8] text-[11px] leading-tight">
+            <HighlightText query={searchQuery} text={filename} />
           </p>
           {width > 0 && height > 0 && (
-            <p className="text-[#a1a1aa] text-[10px] mt-0.5">{width} × {height}</p>
+            <p className="mt-0.5 text-[#a1a1aa] text-[10px]">
+              {width} × {height}
+            </p>
           )}
         </div>
       </div>
 
       {/* Selection indicator */}
       {isSelected && (
-        <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#5e6ad2] flex items-center justify-center shadow-lg">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6L5 8.5L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#5e6ad2] shadow-lg">
+          <svg fill="none" height="12" viewBox="0 0 12 12" width="12">
+            <path
+              d="M2.5 6L5 8.5L9.5 3.5"
+              stroke="white"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            />
           </svg>
         </div>
       )}

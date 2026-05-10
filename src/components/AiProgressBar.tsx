@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 
 interface AiProgress {
-  processed: number;
-  total: number;
-  phase: "loading" | "embedding" | "complete";
   currentFile: string;
   isActive: boolean;
   isModelLoaded: boolean;
+  phase: "loading" | "embedding" | "complete";
+  processed: number;
+  total: number;
 }
 
 interface AiProgressBarProps {
@@ -25,7 +25,9 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
       const result = await ipc.client.photos.getAiProgress({});
       setProgress(result as any as AiProgress);
       return result as any as AiProgress;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }, []);
 
   useEffect(() => {
@@ -35,7 +37,11 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
         timer = setInterval(fetchProgress, 500);
       }
     });
-    return () => { if (timer) clearInterval(timer); };
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
   }, [fetchProgress]);
 
   // Restart polling when progress changes
@@ -53,13 +59,23 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
   async function handleStart() {
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
-    setProgress({ processed: 0, total: 0, phase: "loading", currentFile: "", isActive: true, isModelLoaded: false });
+    setProgress({
+      processed: 0,
+      total: 0,
+      phase: "loading",
+      currentFile: "",
+      isActive: true,
+      isModelLoaded: false,
+    });
     const timer = setInterval(fetchProgress, 500);
     // Store timer cleanup
     setTimeout(() => {
       const checkAndStop = setInterval(async () => {
         const p = await fetchProgress();
-        if (!p?.isActive) { clearInterval(checkAndStop); clearInterval(timer); }
+        if (!p?.isActive) {
+          clearInterval(checkAndStop);
+          clearInterval(timer);
+        }
       }, 1000);
     }, 0);
   }
@@ -74,50 +90,65 @@ export function AiProgressBar({ onComplete }: AiProgressBarProps) {
     setPaused(false);
   }
 
-  if (!progress || (!progress.isActive && progress.phase === "complete" && progress.processed === 0)) {
+  if (
+    !progress ||
+    (!progress.isActive &&
+      progress.phase === "complete" &&
+      progress.processed === 0)
+  ) {
     return (
       <button
+        className="mt-2 w-full rounded-[6px] bg-[#5e6ad2]/10 px-3 py-1.5 font-[510] text-[#5e6ad2] text-[12px] transition-colors hover:bg-[#5e6ad2]/15 hover:text-[#7c7fe0]"
         onClick={handleStart}
-        className="w-full mt-2 px-3 py-1.5 text-[12px] font-[510] text-[#5e6ad2] hover:text-[#7c7fe0] bg-[#5e6ad2]/10 hover:bg-[#5e6ad2]/15 rounded-[6px] transition-colors"
       >
         {t("aiIndexingStarted")}
       </button>
     );
   }
 
-  const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
-  const phaseLabel = progress.phase === "loading" ? "加载模型中..."
-    : progress.phase === "complete" ? (paused ? "已暂停" : "完成!")
-    : `正在索引 ${progress.processed}/${progress.total}`;
+  const pct =
+    progress.total > 0
+      ? Math.round((progress.processed / progress.total) * 100)
+      : 0;
+  const phaseLabel =
+    progress.phase === "loading"
+      ? "加载模型中..."
+      : progress.phase === "complete"
+        ? paused
+          ? "已暂停"
+          : "完成!"
+        : `正在索引 ${progress.processed}/${progress.total}`;
 
   return (
-    <div className="mt-2 px-2 py-2 rounded-[6px] bg-[#1c1e22] border border-[#2c2c30]">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[11px] text-[#a1a1aa]">{phaseLabel}</span>
-        <span className="text-[11px] font-[510] text-[#5e6ad2]">{pct}%</span>
+    <div className="mt-2 rounded-[6px] border border-[#2c2c30] bg-[#1c1e22] px-2 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[#a1a1aa] text-[11px]">{phaseLabel}</span>
+        <span className="font-[510] text-[#5e6ad2] text-[11px]">{pct}%</span>
       </div>
-      <div className="h-1 rounded-full bg-[#121214] overflow-hidden">
+      <div className="h-1 overflow-hidden rounded-full bg-[#121214]">
         <div
           className="h-full rounded-full bg-[#5e6ad2] transition-all duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
       {progress.currentFile && (
-        <p className="text-[10px] text-[#6b6b75] mt-1 truncate">{progress.currentFile}</p>
+        <p className="mt-1 truncate text-[#6b6b75] text-[10px]">
+          {progress.currentFile}
+        </p>
       )}
       {progress.phase !== "complete" && (
-        <div className="flex gap-1 mt-2">
+        <div className="mt-2 flex gap-1">
           {paused ? (
             <button
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#5e6ad2] text-[11px] transition-colors hover:bg-[#5e6ad2]/10"
               onClick={handleResume}
-              className="flex-1 px-2 py-1 text-[11px] font-[510] text-[#5e6ad2] hover:bg-[#5e6ad2]/10 rounded-[4px] transition-colors"
             >
               继续
             </button>
           ) : (
             <button
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#a1a1aa] text-[11px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
               onClick={handlePause}
-              className="flex-1 px-2 py-1 text-[11px] font-[510] text-[#a1a1aa] hover:text-[#f7f8f8] hover:bg-white/5 rounded-[4px] transition-colors"
             >
               暂停
             </button>

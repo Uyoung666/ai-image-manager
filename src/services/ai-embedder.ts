@@ -1,6 +1,6 @@
 import path from "node:path";
-import { app } from "electron";
 import { eq } from "drizzle-orm";
+import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 
@@ -11,19 +11,24 @@ let embeddingModel: {
   embedText: (text: string) => Promise<number[]>;
 } | null = null;
 
-const MODEL_CACHE_KEY = "clip_model_loaded";
+const _MODEL_CACHE_KEY = "clip_model_loaded";
 let isModelLoaded = false;
 
 interface EmbedProgress {
+  currentFile: string;
+  phase: "loading" | "embedding" | "complete";
   processed: number;
   total: number;
-  phase: "loading" | "embedding" | "complete";
-  currentFile: string;
 }
 
 type EmbedProgressCallback = (progress: EmbedProgress) => void;
 let isEmbedding = false;
-let currentProgress: EmbedProgress = { processed: 0, total: 0, phase: "loading", currentFile: "" };
+let currentProgress: EmbedProgress = {
+  processed: 0,
+  total: 0,
+  phase: "loading",
+  currentFile: "",
+};
 
 export async function initVectorDB(): Promise<void> {
   const userDataPath = app.getPath("userData");
@@ -36,35 +41,47 @@ export async function initVectorDB(): Promise<void> {
 
   // Create or open photo embeddings table
   const tableNames = await vectordb.tableNames();
-  if (!tableNames.includes("photo_embeddings")) {
-    photoTable = await vectordb.createTable("photo_embeddings", [
-      { photo_id: 0, vector: Array(512).fill(0), created_at: Date.now() },
-    ]);
-    console.log("[AI] Created photo_embeddings table");
-  } else {
+  if (tableNames.includes("photo_embeddings")) {
     photoTable = await vectordb.openTable("photo_embeddings");
     console.log("[AI] Opened existing photo_embeddings table");
+  } else {
+    photoTable = await vectordb.createTable("photo_embeddings", [
+      { photo_id: 0, vector: new Array(512).fill(0), created_at: Date.now() },
+    ]);
+    console.log("[AI] Created photo_embeddings table");
   }
 }
 
 async function loadModel(): Promise<void> {
-  if (isModelLoaded && embeddingModel) return;
+  if (isModelLoaded && embeddingModel) {
+    return;
+  }
 
   const { pipeline, env } = await import("@xenova/transformers");
   env.localModelPath = path.join(app.getPath("userData"), "models");
   env.allowRemoteModels = true;
 
-  const extractor = await pipeline("feature-extraction", "Xenova/clip-vit-base-patch32", {
-    quantized: true,
-  });
+  const extractor = await pipeline(
+    "feature-extraction",
+    "Xenova/clip-vit-base-patch32",
+    {
+      quantized: true,
+    }
+  );
 
   embeddingModel = {
     embedImage: async (imagePath: string) => {
-      const result = await extractor(imagePath, { pooling: "mean", normalize: true });
+      const result = await extractor(imagePath, {
+        pooling: "mean",
+        normalize: true,
+      });
       return Array.from(result.data as Float32Array);
     },
     embedText: async (text: string) => {
-      const result = await extractor(text, { pooling: "mean", normalize: true });
+      const result = await extractor(text, {
+        pooling: "mean",
+        normalize: true,
+      });
       return Array.from(result.data as Float32Array);
     },
   };
@@ -83,20 +100,27 @@ export async function embedAllPhotos(
   const db = getDatabase();
   isEmbedding = true;
 
-  currentProgress = { processed: 0, total: 0, phase: "loading", currentFile: "" };
+  currentProgress = {
+    processed: 0,
+    total: 0,
+    phase: "loading",
+    currentFile: "",
+  };
   onProgress?.(currentProgress);
   await loadModel();
   await initVectorDB();
 
-  if (!embeddingModel || !photoTable) {
+  if (!(embeddingModel && photoTable)) {
     throw new Error("AI embedding model or vector DB not initialized");
   }
 
   // Find photos without AI processing
-  const unprocessed = db.select({
-    id: photos.id,
-    path: photos.path,
-  }).from(photos)
+  const unprocessed = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+    })
+    .from(photos)
     .where(eq(photos.isAiProcessed, false))
     .all();
 
@@ -104,20 +128,29 @@ export async function embedAllPhotos(
   let processed = 0;
 
   for (const photo of unprocessed) {
-    if (!isEmbedding) break;
+    if (!isEmbedding) {
+      break;
+    }
 
-    currentProgress = { processed, total, phase: "embedding", currentFile: path.basename(photo.path) };
+    currentProgress = {
+      processed,
+      total,
+      phase: "embedding",
+      currentFile: path.basename(photo.path),
+    };
     onProgress?.(currentProgress);
 
     try {
       const vector = await embeddingModel.embedImage(photo.path);
 
       // Store in LanceDB
-      await photoTable.add([{
-        photo_id: photo.id,
-        vector,
-        created_at: Date.now(),
-      }]);
+      await photoTable.add([
+        {
+          photo_id: photo.id,
+          vector,
+          created_at: Date.now(),
+        },
+      ]);
 
       // Update SQLite
       db.update(photos)
@@ -139,12 +172,12 @@ export async function embedAllPhotos(
 
 export async function searchByText(
   query: string,
-  limit: number = 50
+  limit = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   await loadModel();
   await initVectorDB();
 
-  if (!embeddingModel || !photoTable) {
+  if (!(embeddingModel && photoTable)) {
     throw new Error("AI embedding model or vector DB not initialized");
   }
 
@@ -159,12 +192,12 @@ export async function searchByText(
 
 export async function searchByImage(
   imagePath: string,
-  limit: number = 20
+  limit = 20
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   await loadModel();
   await initVectorDB();
 
-  if (!embeddingModel || !photoTable) {
+  if (!(embeddingModel && photoTable)) {
     throw new Error("AI embedding model or vector DB not initialized");
   }
 
@@ -181,6 +214,9 @@ export function stopEmbedding(): void {
   isEmbedding = false;
 }
 
-export function getEmbeddingProgress(): EmbedProgress & { isActive: boolean; isModelLoaded: boolean } {
+export function getEmbeddingProgress(): EmbedProgress & {
+  isActive: boolean;
+  isModelLoaded: boolean;
+} {
   return { ...currentProgress, isActive: isEmbedding, isModelLoaded };
 }

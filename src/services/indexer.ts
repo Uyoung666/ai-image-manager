@@ -1,26 +1,35 @@
 import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import sharp from "sharp";
-import exifr from "exifr";
 import { eq } from "drizzle-orm";
+import exifr from "exifr";
+import sharp from "sharp";
 import { getDatabase } from "@/db";
-import { folders, photos, exifData } from "@/db/schema";
+import { exifData, folders, photos } from "@/db/schema";
 import { generateThumbnail } from "./thumbnailer";
 
 const SUPPORTED_EXTENSIONS = new Set([
-  ".jpg", ".jpeg", ".png", ".webp", ".avif",
-  ".tiff", ".tif", ".heic", ".heif", ".gif",
-  ".bmp", ".ico",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".avif",
+  ".tiff",
+  ".tif",
+  ".heic",
+  ".heif",
+  ".gif",
+  ".bmp",
+  ".ico",
 ]);
 
 const SKIP_PATTERNS = [/node_modules/, /\.git/, /\.thumbnails/, /\.cache/];
 
 interface IndexProgress {
+  currentFile: string;
+  phase: "scanning" | "indexing" | "complete";
   scanned: number;
   total: number;
-  phase: "scanning" | "indexing" | "complete";
-  currentFile: string;
 }
 
 type ProgressCallback = (progress: IndexProgress) => void;
@@ -37,10 +46,14 @@ export function getSupportedExtensions(): string[] {
 
 function shouldIndex(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
-  if (!SUPPORTED_EXTENSIONS.has(ext)) return false;
+  if (!SUPPORTED_EXTENSIONS.has(ext)) {
+    return false;
+  }
 
   for (const pattern of SKIP_PATTERNS) {
-    if (pattern.test(filePath)) return false;
+    if (pattern.test(filePath)) {
+      return false;
+    }
   }
 
   return true;
@@ -57,7 +70,9 @@ async function computePHash(filePath: string): Promise<string | null> {
     // Average hash: compare each pixel to the mean
     const pixels = new Uint8Array(data.buffer, data.offset, data.size);
     let sum = 0;
-    for (let i = 0; i < pixels.length; i++) sum += pixels[i];
+    for (let i = 0; i < pixels.length; i++) {
+      sum += pixels[i];
+    }
     const avg = sum / pixels.length;
 
     // Build hex hash string
@@ -76,8 +91,11 @@ async function computePHash(filePath: string): Promise<string | null> {
 }
 
 async function readBasicMeta(filePath: string): Promise<{
-  width: number; height: number; format: string;
-  colorSpace: string; hasAlpha: boolean;
+  width: number;
+  height: number;
+  format: string;
+  colorSpace: string;
+  hasAlpha: boolean;
 } | null> {
   try {
     const meta = await sharp(filePath).metadata();
@@ -86,26 +104,40 @@ async function readBasicMeta(filePath: string): Promise<{
       height: meta.height || 0,
       format: meta.format || "",
       colorSpace: meta.space || "",
-      hasAlpha: meta.hasAlpha || false,
+      hasAlpha: meta.hasAlpha,
     };
   } catch {
     return null;
   }
 }
 
-async function readExif(filePath: string): Promise<Record<string, unknown> | null> {
+async function readExif(
+  filePath: string
+): Promise<Record<string, unknown> | null> {
   try {
     return await exifr.parse(filePath, {
       pick: [
-        "Make", "Model", "LensMake", "LensModel",
-        "FocalLength", "FocalLengthIn35mmFormat",
-        "FNumber", "ExposureTime", "ISO",
+        "Make",
+        "Model",
+        "LensMake",
+        "LensModel",
+        "FocalLength",
+        "FocalLengthIn35mmFormat",
+        "FNumber",
+        "ExposureTime",
+        "ISO",
         "ExposureCompensation",
-        "DateTimeOriginal", "DateTimeDigitized",
-        "Flash", "Orientation",
-        "GPSLatitude", "GPSLongitude", "GPSAltitude",
-        "Software", "ImageDescription",
-        "Artist", "Copyright",
+        "DateTimeOriginal",
+        "DateTimeDigitized",
+        "Flash",
+        "Orientation",
+        "GPSLatitude",
+        "GPSLongitude",
+        "GPSAltitude",
+        "Software",
+        "ImageDescription",
+        "Artist",
+        "Copyright",
       ],
     });
   } catch {
@@ -120,12 +152,20 @@ async function indexSingleFile(
   const db = getDatabase();
 
   // Check if already indexed
-  const existing = db.select({ id: photos.id }).from(photos).where(eq(photos.path, filePath)).get();
-  if (existing) return existing.id;
+  const existing = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(eq(photos.path, filePath))
+    .get();
+  if (existing) {
+    return existing.id;
+  }
 
   const stat = fs.statSync(filePath);
   const meta = await readBasicMeta(filePath);
-  if (!meta) return null;
+  if (!meta) {
+    return null;
+  }
 
   // Generate thumbnail
   const thumb = await generateThumbnail(filePath, "sm");
@@ -134,54 +174,66 @@ async function indexSingleFile(
   const phash = await computePHash(filePath);
 
   // Insert photo record
-  const result = db.insert(photos).values({
-    path: filePath,
-    folderId,
-    filename: path.basename(filePath),
-    fileSize: stat.size,
-    fileDate: Math.floor(stat.mtimeMs),
-    width: meta.width,
-    height: meta.height,
-    format: meta.format,
-    colorSpace: meta.colorSpace,
-    hasAlpha: meta.hasAlpha,
-    thumbnailPath: thumb.thumbnailPath,
-    thumbnailSize: `${thumb.width}x${thumb.height}`,
-    isIndexed: true,
-    phash,
-  }).returning({ insertedId: photos.id }).get();
+  const result = db
+    .insert(photos)
+    .values({
+      path: filePath,
+      folderId,
+      filename: path.basename(filePath),
+      fileSize: stat.size,
+      fileDate: Math.floor(stat.mtimeMs),
+      width: meta.width,
+      height: meta.height,
+      format: meta.format,
+      colorSpace: meta.colorSpace,
+      hasAlpha: meta.hasAlpha,
+      thumbnailPath: thumb.thumbnailPath,
+      thumbnailSize: `${thumb.width}x${thumb.height}`,
+      isIndexed: true,
+      phash,
+    })
+    .returning({ insertedId: photos.id })
+    .get();
 
-  if (!result) return null;
+  if (!result) {
+    return null;
+  }
   const photoId = result.insertedId;
 
   // Extract EXIF
   const exif = await readExif(filePath);
   if (exif && Object.keys(exif).length > 0) {
-    db.insert(exifData).values({
-      photoId,
-      cameraMake: exif.Make as string,
-      cameraModel: exif.Model as string,
-      lensMake: exif.LensMake as string,
-      lensModel: exif.LensModel as string,
-      focalLength: exif.FocalLength?.toString(),
-      focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
-      aperture: exif.FNumber as number,
-      shutterSpeed: exif.ExposureTime?.toString(),
-      iso: exif.ISO as number,
-      exposureCompensation: exif.ExposureCompensation as number,
-      dateTaken: exif.DateTimeOriginal ? new Date(exif.DateTimeOriginal as string).getTime() : null,
-      dateDigitized: exif.DateTimeDigitized ? new Date(exif.DateTimeDigitized as string).getTime() : null,
-      flash: exif.Flash as boolean,
-      orientation: exif.Orientation as number,
-      gpsLatitude: exif.GPSLatitude as number,
-      gpsLongitude: exif.GPSLongitude as number,
-      gpsAltitude: exif.GPSAltitude as number,
-      software: exif.Software as string,
-      imageDescription: exif.ImageDescription as string,
-      artist: exif.Artist as string,
-      copyright: exif.Copyright as string,
-      rawJson: JSON.stringify(exif),
-    }).run();
+    db.insert(exifData)
+      .values({
+        photoId,
+        cameraMake: exif.Make as string,
+        cameraModel: exif.Model as string,
+        lensMake: exif.LensMake as string,
+        lensModel: exif.LensModel as string,
+        focalLength: exif.FocalLength?.toString(),
+        focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
+        aperture: exif.FNumber as number,
+        shutterSpeed: exif.ExposureTime?.toString(),
+        iso: exif.ISO as number,
+        exposureCompensation: exif.ExposureCompensation as number,
+        dateTaken: exif.DateTimeOriginal
+          ? new Date(exif.DateTimeOriginal as string).getTime()
+          : null,
+        dateDigitized: exif.DateTimeDigitized
+          ? new Date(exif.DateTimeDigitized as string).getTime()
+          : null,
+        flash: exif.Flash as boolean,
+        orientation: exif.Orientation as number,
+        gpsLatitude: exif.GPSLatitude as number,
+        gpsLongitude: exif.GPSLongitude as number,
+        gpsAltitude: exif.GPSAltitude as number,
+        software: exif.Software as string,
+        imageDescription: exif.ImageDescription as string,
+        artist: exif.Artist as string,
+        copyright: exif.Copyright as string,
+        rawJson: JSON.stringify(exif),
+      })
+      .run();
   }
 
   return photoId;
@@ -200,13 +252,28 @@ export async function scanFolder(
   }
 
   // Create or get folder record
-  let folder = db.select().from(folders).where(eq(folders.path, resolvedPath)).get();
+  let folder = db
+    .select()
+    .from(folders)
+    .where(eq(folders.path, resolvedPath))
+    .get();
   if (!folder) {
-    const result = db.insert(folders).values({
+    const result = db
+      .insert(folders)
+      .values({
+        path: resolvedPath,
+        displayName: path.basename(resolvedPath),
+      })
+      .returning({ insertedId: folders.id })
+      .get();
+    folder = {
+      id: result?.insertedId,
       path: resolvedPath,
       displayName: path.basename(resolvedPath),
-    }).returning({ insertedId: folders.id }).get();
-    folder = { id: result!.insertedId, path: resolvedPath, displayName: path.basename(resolvedPath), photoCount: 0, lastScannedAt: null, createdAt: Date.now() };
+      photoCount: 0,
+      lastScannedAt: null,
+      createdAt: Date.now(),
+    };
   }
 
   // Walk directory
@@ -229,7 +296,9 @@ export async function scanFolder(
   let scanned = 0;
 
   for (const file of files) {
-    if (!isScanning) break;
+    if (!isScanning) {
+      break;
+    }
 
     onProgress?.({
       scanned,
@@ -240,7 +309,9 @@ export async function scanFolder(
 
     try {
       const photoId = await indexSingleFile(file, folder.id);
-      if (photoId) photoIds.push(photoId);
+      if (photoId) {
+        photoIds.push(photoId);
+      }
     } catch (error) {
       console.error(`[Indexer] Error indexing ${file}:`, error);
     }
@@ -265,7 +336,9 @@ export async function scanFolder(
   return { folderId: folder.id, photoIds };
 }
 
-export function startWatching(onChange: (photoId: number | null, event: "add" | "remove") => void): void {
+export function startWatching(
+  onChange: (photoId: number | null, event: "add" | "remove") => void
+): void {
   const db = getDatabase();
   const indexedFolders = db.select({ path: folders.path }).from(folders).all();
 
@@ -278,15 +351,23 @@ export function startWatching(onChange: (photoId: number | null, event: "add" | 
     });
 
     watcher.on("add", async (filePath) => {
-      if (!shouldIndex(filePath)) return;
+      if (!shouldIndex(filePath)) {
+        return;
+      }
       try {
         const photoId = await indexSingleFile(filePath, null);
         onChange(photoId, "add");
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     });
 
     watcher.on("unlink", (filePath) => {
-      const photo = db.select({ id: photos.id }).from(photos).where(eq(photos.path, filePath)).get();
+      const photo = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(eq(photos.path, filePath))
+        .get();
       if (photo) {
         db.delete(photos).where(eq(photos.id, photo.id)).run();
         onChange(photo.id, "remove");

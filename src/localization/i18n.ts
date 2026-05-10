@@ -127,9 +127,12 @@ i18n.use(initReactI18next).init({
 
         welcomeTitle: "Welcome to AI Image Manager",
         welcomeStep1: "1. Click 'Add Folder' to select your photo directory",
-        welcomeStep2: "2. Wait for scanning to complete, photos will appear here",
-        welcomeStep3: "3. Click 'AI Smart Index' to enable natural language search",
-        welcomeTip: "Tip: All processing is done locally. No data is ever uploaded.",
+        welcomeStep2:
+          "2. Wait for scanning to complete, photos will appear here",
+        welcomeStep3:
+          "3. Click 'AI Smart Index' to enable natural language search",
+        welcomeTip:
+          "Tip: All processing is done locally. No data is ever uploaded.",
 
         scanningTitle: "Scanning Folder",
         scanningPath: "Path: {{path}}",
@@ -169,7 +172,8 @@ i18n.use(initReactI18next).init({
         settingsLanguage: "Language",
         settingsIndexing: "Indexing",
         settingsThumbnailCache: "Thumbnail Cache",
-        settingsThumbnailCacheHint: "Clear cached thumbnails to free disk space",
+        settingsThumbnailCacheHint:
+          "Clear cached thumbnails to free disk space",
         settingsClear: "Clear",
         settingsClearing: "Clearing...",
         settingsCleared: "Cache cleared!",
