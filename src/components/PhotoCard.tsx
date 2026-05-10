@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 interface PhotoCardProps {
@@ -9,8 +9,22 @@ interface PhotoCardProps {
   width: number;
   height: number;
   isSelected: boolean;
+  searchQuery?: string;
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
+}
+
+function HighlightText({ text, query }: { text: string; query?: string }) {
+  if (!query) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-[#5e6ad2]/40 text-[#f7f8f8] rounded-[2px]">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
 }
 
 function toLocalMediaUrl(filePath: string): string {
@@ -30,6 +44,7 @@ export const PhotoCard = memo(function PhotoCard({
   width,
   height,
   isSelected,
+  searchQuery,
   onClick,
   onDoubleClick,
 }: PhotoCardProps) {
@@ -92,7 +107,9 @@ export const PhotoCard = memo(function PhotoCard({
       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2">
-          <p className="text-[#f7f8f8] text-[11px] font-[510] truncate leading-tight">{filename}</p>
+          <p className="text-[#f7f8f8] text-[11px] font-[510] truncate leading-tight">
+            <HighlightText text={filename} query={searchQuery} />
+          </p>
           {width > 0 && height > 0 && (
             <p className="text-[#a1a1aa] text-[10px] mt-0.5">{width} × {height}</p>
           )}

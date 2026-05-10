@@ -29,6 +29,7 @@ function HomePage() {
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({ open: false, x: 0, y: 0, photoId: null, photoPath: null });
 
@@ -103,6 +104,7 @@ function HomePage() {
   }, [photos]);
 
   async function handleSearch(query: string) {
+    setSearchQuery(query);
     if (!query.trim()) { loadPhotos(); return; }
     setLoading(true);
     try {
@@ -158,7 +160,18 @@ function HomePage() {
         totalPhotos={photos.length}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <SearchBar onSearch={handleSearch} onClear={() => loadPhotos()} />
+  async function handleImageSearch(imagePath: string) {
+    setLoading(true);
+    setSearchQuery("[以图搜图]");
+    try {
+      const result = await ipc.client.photos.searchByImage({ imagePath, limit: 100 });
+      setPhotos((result as any).results || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }
+
+
+        <SearchBar onSearch={handleSearch} onClear={() => { setSearchQuery(""); loadPhotos(); }} onImageSearch={handleImageSearch} />
         {hasPhotos ? (
           <PhotoGrid
             photos={photos}
@@ -166,6 +179,7 @@ function HomePage() {
             selectedIds={selectedIds}
             onSelect={handleSelect}
             onDoubleClick={handleDoubleClick}
+            searchQuery={searchQuery}
             onContextMenu={handleContextMenu}
             onDeleteSelected={handleDeleteSelected}
           />

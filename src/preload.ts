@@ -8,3 +8,8 @@ window.addEventListener("message", (event) => {
     ipcRenderer.postMessage(IPC_CHANNELS.START_ORPC_SERVER, null, [serverPort]);
   }
 });
+
+// Forward global shortcut events from main process to renderer
+ipcRenderer.on("global-shortcut:search", () => {
+  window.postMessage("global-shortcut:search", "*");
+});

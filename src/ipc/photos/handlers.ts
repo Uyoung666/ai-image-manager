@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { os } from "@orpc/server";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -269,6 +271,105 @@ export const findDuplicates = os
     }
 
     return { duplicates: duplicates.slice(0, 200) };
+  });
+
+export const renamePhotos = os
+  .input(z.object({
+    ids: z.array(z.number()),
+    pattern: z.string().min(1),
+  }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const results: Array<{ id: number; oldName: string; newName: string; error?: string }> = [];
+
+    for (let i = 0; i < input.ids.length; i++) {
+      const photo = db.select().from(photos).where(eq(photos.id, input.ids[i])).get();
+      if (!photo) continue;
+
+      const ext = path.extname(photo.filename);
+      const base = path.basename(photo.filename, ext);
+      const exif = db.select().from(exifData).where(eq(exifData.photoId, photo.id)).get();
+      const date = exif?.dateTaken ? new Date(exif.dateTaken) : new Date(photo.fileDate);
+
+      let newBase = input.pattern
+        .replace(/\{yyyy\}/g, date.getFullYear().toString())
+        .replace(/\{mm\}/g, String(date.getMonth() + 1).padStart(2, "0"))
+        .replace(/\{dd\}/g, String(date.getDate()).padStart(2, "0"))
+        .replace(/\{camera\}/g, (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, ""))
+        .replace(/\{iso\}/g, exif?.iso?.toString() || "")
+        .replace(/\{focal\}/g, (exif?.focalLength || "").toString())
+        .replace(/\{index\}/g, (i + 1).toString())
+        .replace(/\{index:(\d+)\}/g, (_, pad) => String(i + 1).padStart(parseInt(pad), "0"))
+        .replace(/\{orig\}/g, base)
+        .replace(/\{ext\}/g, ext);
+
+      // Clean invalid filename chars
+      newBase = newBase.replace(/[<>:"/\\|?*]/g, "").trim() || base;
+      const newFilename = newBase + ext;
+
+      if (newFilename === photo.filename) continue;
+
+      try {
+        const newPath = path.join(path.dirname(photo.path), newFilename);
+        if (fs.existsSync(newPath)) {
+          results.push({ id: photo.id, oldName: photo.filename, newName: newFilename, error: "目标文件已存在" });
+          continue;
+        }
+        fs.renameSync(photo.path, newPath);
+        db.update(photos).set({ path: newPath, filename: newFilename }).where(eq(photos.id, photo.id)).run();
+        results.push({ id: photo.id, oldName: photo.filename, newName: newFilename });
+      } catch (e: any) {
+        results.push({ id: photo.id, oldName: photo.filename, newName: newFilename, error: e.message });
+      }
+    }
+
+    return { renamed: results.filter(r => !r.error).length, errors: results.filter(r => r.error).length, results };
+  });
+
+export const convertPhotos = os
+  .input(z.object({
+    ids: z.array(z.number()),
+    format: z.enum(["jpg", "png", "webp", "avif"]),
+    quality: z.number().min(10).max(100).default(80),
+    maxWidth: z.number().optional(),
+    outputDir: z.string().min(1),
+  }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const sharp = (await import("sharp")).default;
+    let converted = 0;
+
+    if (!fs.existsSync(input.outputDir)) {
+      fs.mkdirSync(input.outputDir, { recursive: true });
+    }
+
+    for (const id of input.ids) {
+      const photo = db.select().from(photos).where(eq(photos.id, id)).get();
+      if (!photo) continue;
+
+      try {
+        let pipeline = sharp(photo.path);
+        const meta = await pipeline.metadata();
+
+        if (input.maxWidth && meta.width && meta.width > input.maxWidth) {
+          pipeline = pipeline.resize(input.maxWidth);
+        }
+
+        const extNoDot = path.extname(photo.filename).toLowerCase().replace(".", "");
+        const outName = input.format === extNoDot
+          ? `${path.basename(photo.filename, path.extname(photo.filename))}_converted.${input.format}`
+          : `${path.basename(photo.filename, path.extname(photo.filename))}.${input.format}`;
+
+        const outPath = path.join(input.outputDir, outName);
+        const buffer = await pipeline.toFormat(input.format, { quality: input.quality }).toBuffer();
+        fs.writeFileSync(outPath, buffer);
+        converted++;
+      } catch (e) {
+        console.error(`[Convert] Error converting photo ${id}:`, e);
+      }
+    }
+
+    return { converted, outputDir: input.outputDir };
   });
 
 export const getAiProgress = os.handler(async () => {

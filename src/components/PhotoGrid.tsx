@@ -13,6 +13,7 @@ interface PhotoGridProps {
   photos: Photo[];
   loading: boolean;
   selectedIds: Set<number>;
+  searchQuery?: string;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -26,7 +27,7 @@ const COLUMN_CONFIGS = [
   { cols: 5, label: "5" },
 ];
 
-export function PhotoGrid({ photos, loading, selectedIds, onSelect, onDoubleClick, onContextMenu, onDeleteSelected }: PhotoGridProps) {
+export function PhotoGrid({ photos, loading, selectedIds, searchQuery, onSelect, onDoubleClick, onContextMenu, onDeleteSelected }: PhotoGridProps) {
   const { t } = useTranslation();
   const [configIdx, setConfigIdx] = useState(2); // default 4 columns
   const { cols } = COLUMN_CONFIGS[configIdx];
@@ -130,6 +131,7 @@ export function PhotoGrid({ photos, loading, selectedIds, onSelect, onDoubleClic
                   width={photo.width}
                   height={photo.height}
                   isSelected={selectedIds.has(photo.id)}
+                  searchQuery={searchQuery}
                   onClick={onSelect}
                   onDoubleClick={onDoubleClick}
                 />

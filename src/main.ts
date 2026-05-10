@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow, protocol } from "electron";
+import { app, BrowserWindow, protocol, Tray, Menu, nativeImage, globalShortcut } from "electron";
 import { ipcMain } from "electron/main";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import Store from "electron-store";
@@ -11,10 +11,87 @@ import { initDatabase } from "@/db";
 import { initThumbnailer } from "@/services/thumbnailer";
 import { startWatching } from "@/services/indexer";
 
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+
 const windowStore = new Store<{ x?: number; y?: number; width?: number; height?: number; isMaximized?: boolean }>({
   name: "window-state",
   defaults: { width: 1280, height: 800 },
 });
+
+function createTrayIcon(): nativeImage {
+  // Generate a 16x16 tray icon programmatically (simple square with accent color)
+  const size = 16;
+  const canvas = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const inCircle = (x - 7) ** 2 + (y - 7) ** 2 < 36;
+      canvas[i] = 0x5E;     // R
+      canvas[i + 1] = 0x6A; // G
+      canvas[i + 2] = 0xD2; // B
+      canvas[i + 3] = inCircle ? 255 : 0; // A
+    }
+  }
+  return nativeImage.createFromBuffer(canvas, { width: size, height: size });
+}
+
+function createTray() {
+  tray = new Tray(createTrayIcon());
+  tray.setToolTip("AI Image Manager");
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: "显示窗口",
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    { type: "separator" },
+    {
+      label: "开机自启",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        app.setLoginItemSettings({ openAtLogin: menuItem.checked });
+      },
+    },
+    { type: "separator" },
+    {
+      label: "退出",
+      click: () => {
+        app.exit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on("double-click", () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+function registerGlobalShortcuts() {
+  const registered = globalShortcut.register("Ctrl+Shift+F", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("global-shortcut:search");
+    }
+  });
+
+  if (!registered) {
+    console.warn("[App] Failed to register global shortcut Ctrl+Shift+F");
+  }
+}
 
 function getMimeType(ext: string): string {
   const mimeTypes: Record<string, string> = {
@@ -43,7 +120,7 @@ function createWindow() {
   const savedX = windowStore.get("x");
   const savedY = windowStore.get("y");
 
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: savedWidth,
     height: savedHeight,
     minWidth: 900,
@@ -65,13 +142,21 @@ function createWindow() {
     mainWindow.maximize();
   }
 
+  // Minimize to tray instead of closing (Windows)
+  mainWindow.on("close", (event) => {
+    if (tray && process.platform === "win32") {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   // Save window state on move/resize
   const saveBounds = () => {
-    if (mainWindow.isMaximized()) {
+    if (mainWindow!.isMaximized()) {
       windowStore.set("isMaximized", true);
     } else {
       windowStore.set("isMaximized", false);
-      const bounds = mainWindow.getBounds();
+      const bounds = mainWindow!.getBounds();
       windowStore.set({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
     }
   };
@@ -156,6 +241,8 @@ app.whenReady().then(async () => {
     });
 
     createWindow();
+    createTray();
+    registerGlobalShortcuts();
     checkForUpdates();
     await setupORPC();
   } catch (error) {
@@ -163,16 +250,25 @@ app.whenReady().then(async () => {
   }
 });
 
-//osX only
+// Don't quit when all windows are closed (tray keeps app alive)
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  // On macOS, keep app alive (standard behavior)
+  // On Windows/Linux, tray keeps it alive
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
     createWindow();
   }
 });
-//osX only ends
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+});
