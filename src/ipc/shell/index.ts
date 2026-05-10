@@ -1,6 +1,7 @@
-import { openExternalLink, openFolderDialog } from "./handlers";
+import { openExternalLink, openFolderDialog, openInExplorer } from "./handlers";
 
 export const shell = {
   openExternalLink,
   openFolderDialog,
+  openInExplorer,
 };
