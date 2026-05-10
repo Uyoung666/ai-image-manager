@@ -1,5 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
+
+// Log uncaught errors before crashing
+process.on("uncaughtException", (err) => {
+  console.error("[App] FATAL - uncaught exception:", err);
+  console.error(err.stack);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[App] FATAL - unhandled rejection:", reason);
+});
 import {
   app,
   BrowserWindow,

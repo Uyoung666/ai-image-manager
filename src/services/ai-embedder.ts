@@ -250,8 +250,11 @@ export async function embedAllPhotos(
   const total = unprocessed.length;
   let processed = 0;
 
+  console.log(`[AI] Starting embedding for ${total} photos`);
+
   for (const photo of unprocessed) {
     if (!isEmbedding) {
+      console.log("[AI] Embedding stopped by user");
       break;
     }
 
@@ -264,6 +267,23 @@ export async function embedAllPhotos(
     onProgress?.(currentProgress);
 
     try {
+      // Validate the file exists and is accessible
+      if (!fs.existsSync(photo.path)) {
+        console.warn(`[AI] Skipping missing file: ${photo.path}`);
+        // Mark as processed anyway so we don't retry forever
+        db.update(photos)
+          .set({ isAiProcessed: true })
+          .where(eq(photos.id, photo.id))
+          .run();
+        continue;
+      }
+
+      // Small delay to avoid overwhelming the ONNX runtime
+      if (processed > 0) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      console.log(`[AI] Embedding photo ${photo.id}: ${path.basename(photo.path)}`);
       const vector = await embeddingModel.embedImage(photo.path);
 
       // Store in LanceDB
@@ -282,8 +302,13 @@ export async function embedAllPhotos(
         .run();
 
       processed++;
-    } catch (error) {
-      console.error(`[AI] Error embedding photo ${photo.id}:`, error);
+      console.log(`[AI] Photo ${photo.id} embedded successfully (${processed}/${total})`);
+    } catch (error: any) {
+      console.error(
+        `[AI] Error embedding photo ${photo.id}: ${error?.message || error}`,
+        `\n  File: ${photo.path}`
+      );
+      // Continue to next photo - don't crash the whole batch
     }
   }
 
