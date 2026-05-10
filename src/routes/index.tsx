@@ -6,6 +6,7 @@ import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import type { ExifFilters } from "@/components/SearchBar";
 import { SearchBar } from "@/components/SearchBar";
 import { Sidebar } from "@/components/Sidebar";
 import { Welcome } from "@/components/Welcome";
@@ -28,6 +29,16 @@ interface Folder {
   photoCount: number;
 }
 
+const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
+
+function loadSidebarState(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
 function HomePage() {
   const { t } = useTranslation();
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -41,6 +52,7 @@ function HomePage() {
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarState);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -48,6 +60,18 @@ function HomePage() {
     photoId: null,
     photoPath: null,
   });
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
 
   const loadFolders = useCallback(async () => {
     try {
@@ -168,21 +192,55 @@ function HomePage() {
     [photos]
   );
 
-  async function handleSearch(query: string) {
+  async function handleSearch(query: string, filters?: ExifFilters) {
     setSearchQuery(query);
-    if (!query.trim()) {
+    const hasFilters = filters && Object.values(filters).some((v) => v);
+
+    if (!(query.trim() || hasFilters)) {
       loadPhotos();
       return;
     }
+
     try {
-      const result = await ipc.client.photos.searchByText({
-        query,
-        limit: 100,
-      });
+      const searchParams: Record<string, unknown> = { limit: 100 };
+      if (query.trim()) {
+        searchParams.query = query.trim();
+      }
+      if (filters?.dateFrom) {
+        searchParams.dateFrom = new Date(filters.dateFrom).getTime();
+      }
+      if (filters?.dateTo) {
+        searchParams.dateTo = new Date(filters.dateTo + "T23:59:59").getTime();
+      }
+      if (filters?.cameraModel) {
+        searchParams.cameraModel = filters.cameraModel;
+      }
+      if (filters?.focalMin) {
+        searchParams.focalMin = Number(filters.focalMin);
+      }
+      if (filters?.focalMax) {
+        searchParams.focalMax = Number(filters.focalMax);
+      }
+      if (filters?.apertureMin) {
+        searchParams.apertureMin = Number(filters.apertureMin);
+      }
+      if (filters?.apertureMax) {
+        searchParams.apertureMax = Number(filters.apertureMax);
+      }
+      if (filters?.isoMin) {
+        searchParams.isoMin = Number(filters.isoMin);
+      }
+      if (filters?.isoMax) {
+        searchParams.isoMax = Number(filters.isoMax);
+      }
+
+      const result = await ipc.client.photos.searchCompound(
+        searchParams as any
+      );
       setPhotos((result as any).results || []);
     } catch {
       const fallback = await ipc.client.photos.listPhotos({
-        search: query,
+        search: query.trim() || undefined,
         sort: "date",
         order: "desc",
         offset: 0,
@@ -257,9 +315,11 @@ function HomePage() {
     <div className="flex h-full">
       <Sidebar
         activeFolderId={activeFolderId}
+        collapsed={sidebarCollapsed}
         folders={folders}
         onAddFolder={handleAddFolder}
         onSelectFolder={setActiveFolderId}
+        onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}
         totalPhotos={photos.length}

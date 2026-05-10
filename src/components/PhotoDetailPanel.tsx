@@ -6,11 +6,11 @@ import { ipc } from "@/ipc/manager";
 interface PhotoDetail {
   filename: string;
   fileSize: number;
+  format?: string;
   height: number;
   id: number;
   path: string;
   width: number;
-  format?: string;
 }
 
 interface ExifData {
@@ -19,13 +19,13 @@ interface ExifData {
   cameraModel: string | null;
   dateTaken: number | null;
   focalLength: string | null;
+  gpsLatitude: number | null;
+  gpsLongitude: number | null;
   iso: number | null;
   lensMake: string | null;
   lensModel: string | null;
   orientation: number | null;
   shutterSpeed: string | null;
-  gpsLatitude: number | null;
-  gpsLongitude: number | null;
   software: string | null;
 }
 
@@ -41,11 +41,36 @@ interface PhotoDetailPanelProps {
   photo: PhotoDetail | null;
 }
 
+const PANEL_WIDTH_KEY = "detail_panel_width";
+const MIN_PANEL_WIDTH = 280;
+const MAX_PANEL_WIDTH = 480;
+const DEFAULT_PANEL_WIDTH = 300;
+
+function loadPanelWidth(): number {
+  try {
+    const saved = localStorage.getItem(PANEL_WIDTH_KEY);
+    if (saved) {
+      return Math.max(
+        MIN_PANEL_WIDTH,
+        Math.min(MAX_PANEL_WIDTH, Number(saved))
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_PANEL_WIDTH;
+}
+
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
@@ -70,10 +95,68 @@ export function PhotoDetailPanel({
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
   const [showTagInput, setShowTagInput] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
+  const [resizing, setResizing] = useState(false);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+  const currentWidth = useRef(panelWidth);
+  const panelRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
+  // Keep ref in sync for resize callback closure
+  useEffect(() => {
+    currentWidth.current = panelWidth;
+  }, [panelWidth]);
+
+  // Resize handling
+  useEffect(() => {
+    if (!resizing) {
+      return;
+    }
+
+    function handleMouseMove(e: MouseEvent) {
+      const delta = resizeStartX.current - e.clientX;
+      const newWidth = Math.max(
+        MIN_PANEL_WIDTH,
+        Math.min(MAX_PANEL_WIDTH, resizeStartWidth.current + delta)
+      );
+      currentWidth.current = newWidth;
+      setPanelWidth(newWidth);
+    }
+
+    function handleMouseUp() {
+      setResizing(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(currentWidth.current));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizing]);
+
+  function handleResizeStart(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing(true);
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = currentWidth.current;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+
   const loadTags = useCallback(async () => {
-    if (!photo) return;
+    if (!photo) {
+      return;
+    }
     try {
       const [pTags, aTags] = await Promise.all([
         ipc.client.photos.getPhotoTags({ id: photo.id }),
@@ -87,7 +170,9 @@ export function PhotoDetailPanel({
   }, [photo]);
 
   useEffect(() => {
-    if (!photo) return;
+    if (!photo) {
+      return;
+    }
     setLoading(true);
     setExif(null);
     setPhotoTags([]);
@@ -106,7 +191,9 @@ export function PhotoDetailPanel({
   }, [showTagInput]);
 
   async function handleAddTag(tagId: number) {
-    if (!photo) return;
+    if (!photo) {
+      return;
+    }
     try {
       await ipc.client.photos.setPhotoTag({ photoId: photo.id, tagId });
       loadTags();
@@ -116,7 +203,9 @@ export function PhotoDetailPanel({
   }
 
   async function handleRemoveTag(tagId: number) {
-    if (!photo) return;
+    if (!photo) {
+      return;
+    }
     try {
       await ipc.client.photos.removePhotoTag({ photoId: photo.id, tagId });
       loadTags();
@@ -127,7 +216,9 @@ export function PhotoDetailPanel({
 
   async function handleCreateTag() {
     const name = newTagName.trim();
-    if (!name || !photo) return;
+    if (!(name && photo)) {
+      return;
+    }
     try {
       const created = await ipc.client.photos.addTag({
         name,
@@ -161,7 +252,9 @@ export function PhotoDetailPanel({
   );
   const photoTagIds = new Set(photoTags.map((t) => t.id));
 
-  if (!photo) return null;
+  if (!photo) {
+    return null;
+  }
 
   const dateStr = exif?.dateTaken
     ? new Date(exif.dateTaken).toLocaleDateString("zh-CN", {
@@ -174,10 +267,21 @@ export function PhotoDetailPanel({
   const dirPath = photo.path.replace(/[/\\][^/\\]+$/, "");
 
   return (
-    <div className="flex h-full w-[300px] shrink-0 flex-col border-border border-l bg-secondary">
+    <div
+      className="relative flex h-full shrink-0 flex-col border-border border-l bg-secondary"
+      ref={panelRef}
+      style={{ width: panelWidth }}
+    >
+      {/* Resize handle — drag left edge to resize */}
+      <div
+        className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
+          resizing ? "bg-primary" : "hover:bg-primary/50"
+        }`}
+        onMouseDown={handleResizeStart}
+      />
       {/* Header */}
       <div className="flex items-center justify-between border-border border-b px-4 py-3">
-        <h3 className="font-[590] text-foreground text-[14px]">
+        <h3 className="font-[590] text-[14px] text-foreground">
           {t("photoDetail")}
         </h3>
         <button
@@ -216,9 +320,7 @@ export function PhotoDetailPanel({
               label={t("fileSize")}
               value={formatFileSize(photo.fileSize)}
             />
-            {dateStr && (
-              <InfoRow label={t("dateTaken")} value={dateStr} />
-            )}
+            {dateStr && <InfoRow label={t("dateTaken")} value={dateStr} />}
           </div>
         </section>
 
@@ -242,7 +344,7 @@ export function PhotoDetailPanel({
               </button>
             ))}
             <button
-              className="rounded-[4px] border border-dashed border-input px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
+              className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
               onClick={() => setShowTagInput(true)}
             >
               + 添加
@@ -275,7 +377,7 @@ export function PhotoDetailPanel({
               )}
               <div className="flex items-center gap-1">
                 <input
-                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-foreground text-[12px] outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
                   onChange={(e) => setNewTagName(e.target.value)}
                   onKeyDown={handleTagInputKeyDown}
                   placeholder="输入新标签名称..."
@@ -324,9 +426,8 @@ export function PhotoDetailPanel({
                 <InfoRow
                   label={t("lens")}
                   value={
-                    [exif.lensMake, exif.lensModel]
-                      .filter(Boolean)
-                      .join(" ") || "—"
+                    [exif.lensMake, exif.lensModel].filter(Boolean).join(" ") ||
+                    "—"
                   }
                 />
               )}
@@ -337,10 +438,7 @@ export function PhotoDetailPanel({
                 />
               )}
               {exif.aperture && (
-                <InfoRow
-                  label={t("aperture")}
-                  value={`f/${exif.aperture}`}
-                />
+                <InfoRow label={t("aperture")} value={`f/${exif.aperture}`} />
               )}
               {exif.shutterSpeed && (
                 <InfoRow label={t("shutter")} value={`${exif.shutterSpeed}s`} />
@@ -373,9 +471,11 @@ export function PhotoDetailPanel({
           <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
             {t("filePath")}
           </h4>
-          <p className="mb-2 truncate text-muted-foreground text-[11px]">{dirPath}</p>
+          <p className="mb-2 truncate text-[11px] text-muted-foreground">
+            {dirPath}
+          </p>
           <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-muted-foreground text-[12px] transition-colors hover:border-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
             onClick={() => onOpenExplorer(photo.path)}
           >
             <FolderOpen className="h-3.5 w-3.5" />

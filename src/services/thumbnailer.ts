@@ -1,20 +1,22 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { app } from "electron";
+import { app, screen } from "electron";
 import { LRUCache } from "lru-cache";
 import sharp from "sharp";
 
-const THUMBNAIL_SIZES = {
-  sm: 220,
-  md: 360,
-  lg: 720,
+// Base sizes at 1x DPI — actual generation size is multiplied by devicePixelRatio
+const THUMBNAIL_BASE_SIZES = {
+  sm: 256,
+  md: 512,
+  lg: 800,
 } as const;
 
-type ThumbSize = keyof typeof THUMBNAIL_SIZES;
+type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
 
 let thumbnailDir: string;
 let memoryCache: LRUCache<string, Buffer>;
+let dprScale = 2; // default to 2x for HiDPI displays
 
 export function initThumbnailer(): void {
   thumbnailDir = path.join(app.getPath("userData"), "thumbnails");
@@ -22,19 +24,30 @@ export function initThumbnailer(): void {
     fs.mkdirSync(thumbnailDir, { recursive: true });
   }
 
+  try {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    dprScale = Math.min(Math.ceil(primaryDisplay.scaleFactor), 2);
+  } catch {
+    dprScale = 2;
+  }
+
   memoryCache = new LRUCache<string, Buffer>({
-    max: 200,
-    maxSize: 100 * 1024 * 1024, // 100MB
+    max: 500,
+    maxSize: 250 * 1024 * 1024, // 250MB
     sizeCalculation: (value) => value.byteLength,
   });
+}
+
+function getThumbnailSize(size: ThumbSize): number {
+  return THUMBNAIL_BASE_SIZES[size] * dprScale;
 }
 
 function getThumbnailPath(imagePath: string, size: ThumbSize): string {
   const hash = crypto
     .createHash("md5")
-    .update(`${imagePath}_${size}`)
+    .update(`${imagePath}_${size}_v2_${dprScale}`)
     .digest("hex");
-  return path.join(thumbnailDir, `${hash}.jpg`);
+  return path.join(thumbnailDir, `${hash}.webp`);
 }
 
 export async function generateThumbnail(
@@ -62,16 +75,17 @@ export async function generateThumbnail(
   if (cached) {
     return {
       thumbnailPath: thumbPath,
-      width: THUMBNAIL_SIZES[size],
-      height: THUMBNAIL_SIZES[size],
+      width: getThumbnailSize(size),
+      height: getThumbnailSize(size),
     };
   }
 
   // L3: generate
-  const targetSize = THUMBNAIL_SIZES[size];
+  const targetSize = getThumbnailSize(size);
   const thumbBuffer = await sharp(imagePath)
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
+    .webp({ quality: 85, effort: 4 })
+    .sharpen({ sigma: 0.5 })
     .toBuffer();
 
   fs.writeFileSync(thumbPath, thumbBuffer);
@@ -91,6 +105,14 @@ export async function getThumbnailBuffer(
 ): Promise<Buffer> {
   const { thumbnailPath: thumbPath } = await generateThumbnail(imagePath, size);
   return fs.readFileSync(thumbPath);
+}
+
+export function getThumbnailSizes(): Record<ThumbSize, number> {
+  return {
+    sm: getThumbnailSize("sm"),
+    md: getThumbnailSize("md"),
+    lg: getThumbnailSize("lg"),
+  };
 }
 
 export function clearThumbnailCache(): void {

@@ -1,5 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Folder, Loader2, Plus } from "lucide-react";
+import {
+  Folder,
+  LayoutDashboard,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  ScanSearch,
+  Settings,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AiProgressBar } from "./AiProgressBar";
 
@@ -11,9 +20,11 @@ interface FolderInfo {
 }
 interface SidebarProps {
   activeFolderId: number | null;
+  collapsed: boolean;
   folders: FolderInfo[];
   onAddFolder: () => void;
   onSelectFolder: (id: number | null) => void;
+  onToggleCollapse: () => void;
   scanningFolder: string | null;
   scanProgress: string;
   totalPhotos: number;
@@ -22,8 +33,10 @@ interface SidebarProps {
 export function Sidebar({
   folders,
   activeFolderId,
+  collapsed,
   onSelectFolder,
   onAddFolder,
+  onToggleCollapse,
   scanningFolder,
   scanProgress,
   totalPhotos,
@@ -31,16 +44,109 @@ export function Sidebar({
   const { t } = useTranslation();
   const navigate = useNavigate();
 
+  // Collapsed: icon-only bar
+  if (collapsed) {
+    return (
+      <div className="flex h-full w-12 flex-col items-center border-border border-r bg-secondary py-3">
+        <button
+          className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-[#6b6b75] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={onToggleCollapse}
+          title="展开侧边栏"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </button>
+
+        <div className="flex flex-1 flex-col items-center gap-1 px-1.5">
+          <button
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              activeFolderId === null
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
+            onClick={() => onSelectFolder(null)}
+            title={t("sidebarAllPhotos")}
+          >
+            <Folder className="h-4 w-4" />
+          </button>
+
+          {folders.map((folder) => (
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                activeFolderId === folder.id
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              key={folder.id}
+              onClick={() => onSelectFolder(folder.id)}
+              title={`${folder.displayName} (${folder.photoCount})`}
+            >
+              <Folder className="h-4 w-4" />
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-col items-center gap-1 px-1.5">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+            disabled={scanningFolder !== null}
+            onClick={onAddFolder}
+            title={t("sidebarAddFolder")}
+          >
+            {scanningFolder ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/dashboard" })}
+            title={t("sidebarDashboard")}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/duplicates" })}
+            title="重复照片检测"
+          >
+            <ScanSearch className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/settings" })}
+            title={t("sidebarSettings")}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Expanded: full sidebar
   return (
     <div className="flex h-full w-[240px] select-none flex-col border-border border-r bg-secondary">
       {/* Header */}
-      <div className="border-border border-b px-4 py-3">
-        <h2 className="font-[590] text-foreground text-[14px]">
-          {t("appName")}
-        </h2>
-        <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-          {t("photosCount", { count: totalPhotos.toLocaleString() })}
-        </p>
+      <div className="flex items-center justify-between border-border border-b px-4 py-3">
+        <div>
+          <h2 className="font-[590] text-[14px] text-foreground">
+            {t("appName")}
+          </h2>
+          <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+            {t("photosCount", { count: totalPhotos.toLocaleString() })}
+          </p>
+        </div>
+        <button
+          className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6b6b75] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={onToggleCollapse}
+          title="折叠侧边栏"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Quick Actions */}
@@ -56,7 +162,7 @@ export function Sidebar({
           {t("sidebarAllPhotos")}
         </button>
         <button
-          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
           disabled={scanningFolder !== null}
           onClick={onAddFolder}
         >
@@ -74,7 +180,7 @@ export function Sidebar({
       {scanProgress && (
         <div className="px-3 py-1.5">
           <div className="rounded-[6px] bg-card px-3 py-2">
-            <p className="text-muted-foreground text-[11px]">{scanProgress}</p>
+            <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
             {scanningFolder && (
               <p className="mt-0.5 truncate text-[#6b6b75] text-[10px]">
                 {t("scanningPath", { path: scanningFolder })}
@@ -119,19 +225,19 @@ export function Sidebar({
       {/* Footer */}
       <div className="border-border border-t px-3 py-2">
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/dashboard" })}
         >
           ⚙ {t("sidebarDashboard")}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/duplicates" })}
         >
           ⟲ 重复照片检测
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/settings" })}
         >
           ⚙ {t("sidebarSettings")}

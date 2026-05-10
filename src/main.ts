@@ -5,7 +5,7 @@ import {
   BrowserWindow,
   globalShortcut,
   Menu,
-  NativeImage,
+  type NativeImage,
   nativeImage,
   protocol,
   Tray,
@@ -140,8 +140,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: savedWidth,
     height: savedHeight,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 720,
+    minHeight: 480,
     ...(savedX !== undefined && savedY !== undefined
       ? { x: savedX, y: savedY }
       : {}),

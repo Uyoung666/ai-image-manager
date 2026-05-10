@@ -60,17 +60,15 @@ export const PhotoCard = memo(function PhotoCard({
     ? toLocalMediaUrl(thumbnailPath)
     : toLocalMediaUrl(path);
 
-  const aspectRatio = width && height ? width / height : 4 / 3;
+  // Clamp extreme aspect ratios for visual consistency (P1-1)
+  const rawAspect = width && height ? width / height : 4 / 3;
+  const aspectRatio = Math.max(0.6, Math.min(rawAspect, 3.0));
 
   if (error) {
     return (
       <div
-        className="relative mb-2 flex break-inside-avoid flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted"
-        style={{
-          aspectRatio,
-          contentVisibility: "auto",
-          containIntrinsicSize: "auto 200px",
-        }}
+        className="relative flex w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted"
+        style={{ aspectRatio }}
       >
         <svg
           fill="none"
@@ -95,7 +93,7 @@ export const PhotoCard = memo(function PhotoCard({
 
   return (
     <div
-      className={`group relative mb-2 cursor-pointer break-inside-avoid overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
         isSelected
           ? "shadow-[0_0_20px_rgba(94,106,210,0.15)] ring-2 ring-ring ring-offset-1 ring-offset-background"
           : "hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:ring-1 hover:ring-white/10"
@@ -103,19 +101,14 @@ export const PhotoCard = memo(function PhotoCard({
       `}
       onClick={(e) => onClick(id, e)}
       onDoubleClick={() => onDoubleClick(id)}
-      style={{
-        aspectRatio,
-        contentVisibility: "auto",
-        containIntrinsicSize: "auto 200px",
-      }}
+      style={{ aspectRatio }}
     >
-      {!loaded && (
-        <div className="absolute inset-0 animate-pulse bg-gradient-to-b from-card to-muted" />
-      )}
+      {!loaded && <div className="absolute inset-0 bg-muted" />}
       <img
         alt={filename}
-        className={`h-full w-full object-cover transition-all duration-500 ${loaded ? "scale-100 opacity-100" : "scale-105 opacity-0"}
-        `}
+        className={`h-full w-full object-cover transition-all duration-700 group-hover:scale-105 ${
+          loaded ? "scale-100 opacity-100" : "scale-105 opacity-0"
+        }`}
         loading="lazy"
         onError={() => setError(true)}
         onLoad={() => setLoaded(true)}

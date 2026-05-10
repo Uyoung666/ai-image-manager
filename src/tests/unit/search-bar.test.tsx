@@ -21,7 +21,7 @@ describe("SearchBar", () => {
     const input = screen.getByPlaceholderText("搜索照片… (例如: 去年秋天的红叶)");
     await userEvent.type(input, "test query");
     fireEvent.submit(input.closest("form")!);
-    expect(onSearch).toHaveBeenCalledWith("test query");
+    expect(onSearch).toHaveBeenCalledWith("test query", undefined);
   });
 
   it("does not search empty query", async () => {
