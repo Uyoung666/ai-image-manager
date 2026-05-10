@@ -129,6 +129,75 @@ function getMimeType(ext: string): string {
   return mimeTypes[ext] ?? "image/jpeg";
 }
 
+async function ensureModelAvailable(): Promise<void> {
+  const modelMarker = path.join(
+    app.getPath("userData"),
+    "models",
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
+    "model_quantized.onnx"
+  );
+
+  if (fs.existsSync(modelMarker)) {
+    console.log("[App] AI model already cached in userData");
+    return;
+  }
+
+  // Production: check resources
+  const resourcesModel = path.join(
+    process.resourcesPath,
+    "models",
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
+    "model_quantized.onnx"
+  );
+
+  if (fs.existsSync(resourcesModel)) {
+    console.log("[App] Copying model from resources...");
+    await fs.promises.cp(
+      path.join(process.resourcesPath, "models"),
+      path.join(app.getPath("userData"), "models"),
+      { recursive: true }
+    );
+    console.log("[App] Model copied to userData");
+    return;
+  }
+
+  // Dev mode: search project root (process.cwd() is project root with `npm run dev`)
+  if (!app.isPackaged) {
+    const devCandidates = [
+      path.join(process.cwd(), "models"),
+      path.join(app.getAppPath(), "models"),
+      path.join(app.getAppPath(), "..", "models"),
+      path.join(app.getAppPath(), "..", "..", "models"),
+    ];
+
+    for (const candidate of devCandidates) {
+      const marker = path.join(
+        candidate,
+        "Xenova",
+        "clip-vit-base-patch32",
+        "onnx",
+        "model_quantized.onnx"
+      );
+      console.log(`[App] Checking: ${marker}`);
+      if (fs.existsSync(marker)) {
+        console.log(`[App] Copying model from: ${candidate}`);
+        await fs.promises.cp(
+          candidate,
+          path.join(app.getPath("userData"), "models"),
+          { recursive: true }
+        );
+        console.log("[App] Model copied to userData");
+        return;
+      }
+    }
+    console.warn("[App] Model not found in dev paths, will rely on download");
+  }
+}
+
 function createWindow() {
   const basePath = getBasePath();
   const preload = path.join(basePath, "preload.js");
@@ -262,6 +331,9 @@ app.whenReady().then(async () => {
     initDatabase();
     initThumbnailer();
     console.log("[App] Database and thumbnailer initialized");
+
+    // Ensure AI model is available before initializing vector DB
+    await ensureModelAvailable();
 
     // Initialize AI vector DB in background (non-blocking)
     initVectorDB()

@@ -92,6 +92,37 @@ async function ensureLocalModel(): Promise<string> {
     // Not packaged (dev mode) or no bundled models
   }
 
+  // Dev mode: check project root models/ directory
+  if (!app.isPackaged) {
+    const appPath = app.getAppPath();
+    // In dev mode with electron-forge+vite, __dirname points to .vite/build/
+    // Walk up to find the project root containing models/
+    const devCandidates = [
+      path.join(appPath, "models"),
+      path.join(appPath, "..", "models"),
+      path.join(appPath, "..", "..", "models"),
+      path.join(__dirname, "..", "..", "models"),
+      path.join(__dirname, "..", "..", "..", "models"),
+    ];
+
+    console.log("[AI] Dev mode - searching for models...");
+    for (const candidate of devCandidates) {
+      const marker = path.join(
+        candidate,
+        "Xenova",
+        "clip-vit-base-patch32",
+        "onnx",
+        "model_quantized.onnx"
+      );
+      console.log(`[AI]   check: ${marker}`);
+      if (fs.existsSync(marker)) {
+        console.log(`[AI] Found model at: ${candidate}`);
+        return candidate;
+      }
+    }
+    console.log("[AI] Model not found in dev paths, will attempt download");
+  }
+
   return localModelPath;
 }
 
