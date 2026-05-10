@@ -146,6 +146,16 @@ function HomePage() {
     setSelectedIds(new Set());
   }
 
+  async function handleImageSearch(imagePath: string) {
+    setLoading(true);
+    setSearchQuery("[以图搜图]");
+    try {
+      const result = await ipc.client.photos.searchByImage({ imagePath, limit: 100 });
+      setPhotos((result as any).results || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }
+
   const hasPhotos = photos.length > 0 || loading;
 
   return (
@@ -160,17 +170,6 @@ function HomePage() {
         totalPhotos={photos.length}
       />
       <div className="flex-1 flex flex-col min-w-0">
-  async function handleImageSearch(imagePath: string) {
-    setLoading(true);
-    setSearchQuery("[以图搜图]");
-    try {
-      const result = await ipc.client.photos.searchByImage({ imagePath, limit: 100 });
-      setPhotos((result as any).results || []);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  }
-
-
         <SearchBar onSearch={handleSearch} onClear={() => { setSearchQuery(""); loadPhotos(); }} onImageSearch={handleImageSearch} />
         {hasPhotos ? (
           <PhotoGrid
