@@ -94,15 +94,11 @@ async function ensureLocalModel(): Promise<string> {
 
   // Dev mode: check project root models/ directory
   if (!app.isPackaged) {
-    const appPath = app.getAppPath();
-    // In dev mode with electron-forge+vite, __dirname points to .vite/build/
-    // Walk up to find the project root containing models/
     const devCandidates = [
-      path.join(appPath, "models"),
-      path.join(appPath, "..", "models"),
-      path.join(appPath, "..", "..", "models"),
-      path.join(__dirname, "..", "..", "models"),
-      path.join(__dirname, "..", "..", "..", "models"),
+      path.join(process.cwd(), "models"),
+      path.join(app.getAppPath(), "models"),
+      path.join(app.getAppPath(), "..", "models"),
+      path.join(app.getAppPath(), "..", "..", "models"),
     ];
 
     console.log("[AI] Dev mode - searching for models...");
