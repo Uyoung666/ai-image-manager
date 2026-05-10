@@ -67,7 +67,7 @@ describe("Sidebar", () => {
     render(<Sidebar {...activeProps} />);
     const folderBtn = screen.getByText("Photos").closest("button");
     expect(folderBtn).not.toBeNull();
-    expect(folderBtn?.className).toContain("#5e6ad2");
+    expect(folderBtn?.className).toContain("bg-primary/15");
   });
 
   it("shows scan progress when provided", () => {

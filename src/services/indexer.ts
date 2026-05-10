@@ -168,8 +168,8 @@ async function indexSingleFile(
     return null;
   }
 
-  // Generate thumbnail
-  const thumb = await generateThumbnail(filePath, "sm");
+  // Generate thumbnail (md=320px for crisp display in grid)
+  const thumb = await generateThumbnail(filePath, "md");
 
   // Compute perceptual hash for dedup
   const phash = await computePHash(filePath);

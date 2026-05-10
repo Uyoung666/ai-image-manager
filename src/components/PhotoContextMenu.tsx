@@ -62,12 +62,12 @@ export function PhotoContextMenu({
 
   return (
     <div
-      className="fixed z-50 min-w-[180px] rounded-[8px] border border-[#2c2c30] bg-[#1c1e22] p-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+      className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
       ref={ref}
       style={{ left: x, top: y }}
     >
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#f7f8f8] text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -91,7 +91,7 @@ export function PhotoContextMenu({
         在资源管理器中打开
       </button>
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#f7f8f8] text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -117,7 +117,7 @@ export function PhotoContextMenu({
         </svg>
         复制路径
       </button>
-      <div className="my-1 h-px bg-[#2c2c30]" />
+      <div className="my-1 h-px bg-border" />
       <button
         className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={menu.photoId === null}

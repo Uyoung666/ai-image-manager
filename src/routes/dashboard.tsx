@@ -48,13 +48,13 @@ const TEXT_TERTIARY = "#6b6b75";
 
 const chartTooltipStyle = {
   contentStyle: {
-    background: "#1c1e22",
-    border: "1px solid #2c2c30",
+    background: "hsl(220 10% 12%)",
+    border: "1px solid hsl(240 4% 18%)",
     borderRadius: 6,
     fontSize: 12,
   },
   cursor: { fill: "rgba(255,255,255,0.03)" },
-  labelStyle: { color: "#f7f8f8" },
+  labelStyle: { color: "hsl(180 8% 97%)" },
 };
 
 function DashboardPage() {
@@ -79,7 +79,7 @@ function DashboardPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#5e6ad2] border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
   }
@@ -111,14 +111,14 @@ function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex items-center gap-4 border-[rgba(255,255,255,0.06)] border-b px-6 py-4">
+      <div className="flex items-center gap-4 border-border border-b px-6 py-4">
         <button
-          className="text-[#a1a1aa] hover:text-[#f7f8f8]"
+          className="text-muted-foreground hover:text-foreground"
           onClick={() => navigate({ to: "/" })}
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="font-[590] text-[#f7f8f8] text-[18px]">
+        <h1 className="font-[590] text-foreground text-[18px]">
           {t("dashboardTitle")}
         </h1>
       </div>
@@ -330,11 +330,11 @@ function DashboardPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214] p-4">
+    <div className="rounded-[8px] border border-border bg-secondary p-4">
       <p className="font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
         {label}
       </p>
-      <p className="mt-1 font-[590] text-[#f7f8f8] text-[24px]">{value}</p>
+      <p className="mt-1 font-[590] text-foreground text-[24px]">{value}</p>
     </div>
   );
 }
@@ -347,8 +347,8 @@ function ChartSection({
   title: string;
 }) {
   return (
-    <div className="rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214] p-5">
-      <h2 className="mb-4 font-[590] text-[#f7f8f8] text-[16px]">{title}</h2>
+    <div className="rounded-[8px] border border-border bg-secondary p-5">
+      <h2 className="mb-4 font-[590] text-foreground text-[16px]">{title}</h2>
       {children}
     </div>
   );

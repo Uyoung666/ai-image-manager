@@ -32,10 +32,10 @@ export function Sidebar({
   const navigate = useNavigate();
 
   return (
-    <div className="flex h-full w-[240px] select-none flex-col border-[rgba(255,255,255,0.06)] border-r bg-[#0e0f12]">
+    <div className="flex h-full w-[240px] select-none flex-col border-border border-r bg-secondary">
       {/* Header */}
-      <div className="border-[rgba(255,255,255,0.06)] border-b px-4 py-3">
-        <h2 className="font-[590] text-[#f7f8f8] text-[14px]">
+      <div className="border-border border-b px-4 py-3">
+        <h2 className="font-[590] text-foreground text-[14px]">
           {t("appName")}
         </h2>
         <p className="mt-0.5 text-[#6b6b75] text-[11px]">
@@ -48,15 +48,15 @@ export function Sidebar({
         <button
           className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
             activeFolderId === null
-              ? "bg-[#5e6ad2]/15 text-[#5e6ad2]"
-              : "text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8]"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onClick={() => onSelectFolder(null)}
         >
           {t("sidebarAllPhotos")}
         </button>
         <button
-          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8] disabled:opacity-50"
+          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
           disabled={scanningFolder !== null}
           onClick={onAddFolder}
         >
@@ -73,8 +73,8 @@ export function Sidebar({
       {/* Scan progress */}
       {scanProgress && (
         <div className="px-3 py-1.5">
-          <div className="rounded-[6px] bg-[#1c1e22] px-3 py-2">
-            <p className="text-[#a1a1aa] text-[11px]">{scanProgress}</p>
+          <div className="rounded-[6px] bg-card px-3 py-2">
+            <p className="text-muted-foreground text-[11px]">{scanProgress}</p>
             {scanningFolder && (
               <p className="mt-0.5 truncate text-[#6b6b75] text-[10px]">
                 {t("scanningPath", { path: scanningFolder })}
@@ -85,7 +85,7 @@ export function Sidebar({
       )}
 
       {/* Separator */}
-      <div className="mx-3 my-2 border-[rgba(255,255,255,0.04)] border-t" />
+      <div className="mx-3 my-2 border-border border-t" />
 
       {/* Folders */}
       <div className="flex-1 overflow-y-auto px-3">
@@ -96,8 +96,8 @@ export function Sidebar({
           <button
             className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
               activeFolderId === folder.id
-                ? "bg-[#5e6ad2]/15 text-[#5e6ad2]"
-                : "text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8]"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             }`}
             key={folder.id}
             onClick={() => onSelectFolder(folder.id)}
@@ -117,21 +117,21 @@ export function Sidebar({
       </div>
 
       {/* Footer */}
-      <div className="border-[rgba(255,255,255,0.04)] border-t px-3 py-2">
+      <div className="border-border border-t px-3 py-2">
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/dashboard" })}
         >
           ⚙ {t("sidebarDashboard")}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/duplicates" })}
         >
           ⟲ 重复照片检测
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-muted-foreground text-[13px] transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/settings" })}
         >
           ⚙ {t("sidebarSettings")}

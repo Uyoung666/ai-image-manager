@@ -92,7 +92,7 @@ function DuplicatesPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#5e6ad2] border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       </div>
     );
   }
@@ -100,15 +100,15 @@ function DuplicatesPage() {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between border-[rgba(255,255,255,0.06)] border-b px-6 py-4">
+      <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-4">
           <button
-            className="text-[#a1a1aa] hover:text-[#f7f8f8]"
+            className="text-muted-foreground hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-[590] text-[#f7f8f8] text-[18px]">
+          <h1 className="font-[590] text-foreground text-[18px]">
             重复照片检测
           </h1>
           <span className="text-[#6b6b75] text-[13px]">
@@ -117,7 +117,7 @@ function DuplicatesPage() {
         </div>
         {visiblePairs.length > 0 && (
           <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-[rgba(255,255,255,0.08)] px-3 py-1.5 text-[#e5484d] text-[12px] transition-colors hover:border-[#e5484d]/30 hover:bg-[#e5484d]/5"
+            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[#e5484d] text-[12px] transition-colors hover:border-[#e5484d]/30 hover:bg-[#e5484d]/5"
             disabled={deleting}
             onClick={handleDeleteAll}
           >
@@ -130,7 +130,7 @@ function DuplicatesPage() {
       {pairs.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <p className="font-[510] text-[#f7f8f8] text-[16px]">
+            <p className="font-[510] text-foreground text-[16px]">
               未发现重复照片
             </p>
             <p className="mt-2 text-[#6b6b75] text-[13px]">
@@ -142,17 +142,17 @@ function DuplicatesPage() {
         <div className="space-y-4 p-6">
           {visiblePairs.map((pair, i) => (
             <div
-              className="overflow-hidden rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214]"
+              className="overflow-hidden rounded-[8px] border border-border bg-secondary"
               key={`${pair.photoA.id}-${pair.photoB.id}`}
             >
               {/* Pair header */}
-              <div className="flex items-center justify-between border-[rgba(255,255,255,0.04)] border-b px-4 py-2">
-                <span className="font-[510] text-[#a1a1aa] text-[11px]">
+              <div className="flex items-center justify-between border-border border-b px-4 py-2">
+                <span className="font-[510] text-muted-foreground text-[11px]">
                   相似度: {Math.round((1 - pair.distance / 64) * 100)}%
                   &nbsp;&nbsp;汉明距离: {pair.distance}
                 </span>
                 <button
-                  className="text-[#6b6b75] text-[11px] hover:text-[#a1a1aa]"
+                  className="text-[#6b6b75] text-[11px] hover:text-muted-foreground"
                   onClick={() => handleDismiss(i)}
                 >
                   忽略
@@ -162,18 +162,18 @@ function DuplicatesPage() {
               <div className="grid grid-cols-2">
                 {[pair.photoA, pair.photoB].map((photo, idx) => (
                   <div
-                    className={`flex flex-col ${idx === 0 ? "border-[rgba(255,255,255,0.04)] border-r" : ""}`}
+                    className={`flex flex-col ${idx === 0 ? "border-border border-r" : ""}`}
                     key={photo.id}
                   >
-                    <div className="flex items-center justify-center bg-[#08090a] p-4">
+                    <div className="flex items-center justify-center bg-background p-4">
                       <img
                         alt={photo.filename}
                         className="max-h-[250px] rounded-[4px] object-contain"
                         src={toLocalMediaUrl(photo.path)}
                       />
                     </div>
-                    <div className="flex items-center justify-between border-[rgba(255,255,255,0.04)] border-t px-3 py-2">
-                      <span className="truncate text-[#a1a1aa] text-[11px]">
+                    <div className="flex items-center justify-between border-border border-t px-3 py-2">
+                      <span className="truncate text-muted-foreground text-[11px]">
                         {photo.filename}
                       </span>
                       <button

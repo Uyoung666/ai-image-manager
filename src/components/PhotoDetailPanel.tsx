@@ -174,14 +174,14 @@ export function PhotoDetailPanel({
   const dirPath = photo.path.replace(/[/\\][^/\\]+$/, "");
 
   return (
-    <div className="flex h-full w-[300px] shrink-0 flex-col border-[rgba(255,255,255,0.06)] border-l bg-[#0e0f12]">
+    <div className="flex h-full w-[300px] shrink-0 flex-col border-border border-l bg-secondary">
       {/* Header */}
-      <div className="flex items-center justify-between border-[rgba(255,255,255,0.06)] border-b px-4 py-3">
-        <h3 className="font-[590] text-[#f7f8f8] text-[14px]">
+      <div className="flex items-center justify-between border-border border-b px-4 py-3">
+        <h3 className="font-[590] text-foreground text-[14px]">
           {t("photoDetail")}
         </h3>
         <button
-          className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8]"
+          className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           onClick={onClose}
         >
           <X className="h-4 w-4" />
@@ -189,8 +189,8 @@ export function PhotoDetailPanel({
       </div>
 
       {/* Preview image */}
-      <div className="border-[rgba(255,255,255,0.04)] border-b bg-[#08090a] p-4">
-        <div className="flex items-center justify-center overflow-hidden rounded-[6px] bg-[#15171a]">
+      <div className="border-border border-b bg-background p-4">
+        <div className="flex items-center justify-center overflow-hidden rounded-[6px] bg-muted">
           <img
             alt={photo.filename}
             className="max-h-[200px] object-contain"
@@ -241,22 +241,12 @@ export function PhotoDetailPanel({
                 <X className="h-2.5 w-2.5 opacity-60" />
               </button>
             ))}
-            {unassignedTags.length > 0 && (
-              <button
-                className="rounded-[4px] border border-dashed border-[rgba(255,255,255,0.08)] px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-[rgba(255,255,255,0.15)] hover:text-[#a1a1aa]"
-                onClick={() => setShowTagInput(true)}
-              >
-                + 添加
-              </button>
-            )}
-            {unassignedTags.length === 0 && (
-              <button
-                className="rounded-[4px] border border-dashed border-[rgba(255,255,255,0.08)] px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-[rgba(255,255,255,0.15)] hover:text-[#a1a1aa]"
-                onClick={() => setShowTagInput(true)}
-              >
-                + 添加
-              </button>
-            )}
+            <button
+              className="rounded-[4px] border border-dashed border-input px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
+              onClick={() => setShowTagInput(true)}
+            >
+              + 添加
+            </button>
           </div>
 
           {/* Tag suggestions / create new */}
@@ -285,7 +275,7 @@ export function PhotoDetailPanel({
               )}
               <div className="flex items-center gap-1">
                 <input
-                  className="h-7 flex-1 rounded-[4px] border border-[rgba(255,255,255,0.08)] bg-[#1c1e22] px-2 text-[#f7f8f8] text-[12px] outline-none placeholder:text-[#6b6b75] focus:border-[#5e6ad2]"
+                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-foreground text-[12px] outline-none placeholder:text-[#6b6b75] focus:border-primary"
                   onChange={(e) => setNewTagName(e.target.value)}
                   onKeyDown={handleTagInputKeyDown}
                   placeholder="输入新标签名称..."
@@ -293,7 +283,7 @@ export function PhotoDetailPanel({
                   value={newTagName}
                 />
                 <button
-                  className="flex h-7 w-7 items-center justify-center rounded-[4px] text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8] disabled:opacity-30"
+                  className="flex h-7 w-7 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-30"
                   disabled={!newTagName.trim()}
                   onClick={handleCreateTag}
                 >
@@ -383,9 +373,9 @@ export function PhotoDetailPanel({
           <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
             {t("filePath")}
           </h4>
-          <p className="mb-2 truncate text-[#a1a1aa] text-[11px]">{dirPath}</p>
+          <p className="mb-2 truncate text-muted-foreground text-[11px]">{dirPath}</p>
           <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-[rgba(255,255,255,0.08)] px-3 py-1.5 text-[#a1a1aa] text-[12px] transition-colors hover:border-[rgba(255,255,255,0.15)] hover:text-[#f7f8f8]"
+            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-muted-foreground text-[12px] transition-colors hover:border-muted-foreground hover:text-foreground"
             onClick={() => onOpenExplorer(photo.path)}
           >
             <FolderOpen className="h-3.5 w-3.5" />

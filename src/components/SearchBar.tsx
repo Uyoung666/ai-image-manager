@@ -80,9 +80,7 @@ export function SearchBar({
   }, []);
 
   const addToHistory = useCallback((q: string) => {
-    if (!q.trim()) {
-      return;
-    }
+    if (!q.trim()) return;
     setHistory((prev) => {
       const next = [q, ...prev.filter((h) => h !== q)].slice(0, MAX_HISTORY);
       saveHistory(next);
@@ -92,9 +90,7 @@ export function SearchBar({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!query.trim()) {
-      return;
-    }
+    if (!query.trim()) return;
     addToHistory(query.trim());
     onSearch(query.trim());
     setShowHistory(false);
@@ -114,9 +110,7 @@ export function SearchBar({
   }
 
   function handleDragOver(e: React.DragEvent) {
-    if (!onImageSearch) {
-      return;
-    }
+    if (!onImageSearch) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOver(true);
@@ -130,12 +124,9 @@ export function SearchBar({
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    if (!onImageSearch) {
-      return;
-    }
+    if (!onImageSearch) return;
     const file = e.dataTransfer.files[0];
     if (file?.type.startsWith("image/")) {
-      // Electron exposes the full path via (file as any).path
       const filePath = (file as any).path;
       if (filePath) {
         onImageSearch(filePath);
@@ -145,14 +136,14 @@ export function SearchBar({
 
   return (
     <div
-      className={`relative border-[rgba(255,255,255,0.06)] border-b px-4 py-3 transition-colors ${dragOver ? "bg-[#5e6ad2]/5" : ""}`}
+      className={`relative border-border border-b px-4 py-3 transition-colors ${dragOver ? "bg-primary/5" : ""}`}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
       {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-[#5e6ad2] border-dashed bg-[#5e6ad2]/10">
-          <span className="font-[510] text-[#5e6ad2] text-[13px]">
+        <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-primary border-dashed bg-primary/10">
+          <span className="font-[510] text-primary text-[13px]">
             拖放图片以搜索相似照片
           </span>
         </div>
@@ -160,7 +151,7 @@ export function SearchBar({
       <form className="relative" onSubmit={handleSubmit}>
         <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#6b6b75]" />
         <input
-          className="h-9 w-full rounded-[6px] border border-[rgba(255,255,255,0.06)] bg-[#1c1e22] pr-8 pl-9 text-[#f7f8f8] text-[14px] outline-none transition-colors placeholder:text-[#6b6b75] focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2]"
+          className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-foreground text-[14px] outline-none transition-colors placeholder:text-[#6b6b75] focus:border-primary focus:ring-1 focus:ring-ring"
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setShowHistory(history.length > 0)}
           placeholder={t("searchPlaceholder")}
@@ -170,7 +161,7 @@ export function SearchBar({
         />
         {query && (
           <button
-            className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#6b6b75] hover:text-[#f7f8f8]"
+            className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#6b6b75] hover:text-foreground"
             onClick={handleClear}
             type="button"
           >
@@ -182,7 +173,7 @@ export function SearchBar({
       {/* Search history dropdown */}
       {showHistory && history.length > 0 && (
         <div
-          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-[#2c2c30] bg-[#1c1e22] shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
           ref={dropdownRef}
         >
           <div className="px-3 py-1.5 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
@@ -190,7 +181,7 @@ export function SearchBar({
           </div>
           {history.slice(0, 8).map((h, i) => (
             <button
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#a1a1aa] text-[13px] hover:bg-white/5 hover:text-[#f7f8f8]"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-muted-foreground text-[13px] hover:bg-foreground/5 hover:text-foreground"
               key={i}
               onClick={() => handleHistoryClick(h)}
             >

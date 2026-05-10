@@ -18,32 +18,32 @@ function SettingsPage() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="flex items-center gap-4 border-[rgba(255,255,255,0.06)] border-b px-6 py-4">
+      <div className="flex items-center gap-4 border-border border-b px-6 py-4">
         <button
-          className="text-[#a1a1aa] hover:text-[#f7f8f8]"
+          className="text-muted-foreground hover:text-foreground"
           onClick={() => navigate({ to: "/" })}
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="font-[590] text-[#f7f8f8] text-[18px]">
+        <h1 className="font-[590] text-foreground text-[18px]">
           {t("settingsTitle")}
         </h1>
       </div>
 
       <div className="max-w-[500px] space-y-6 p-6">
         <section className="space-y-3">
-          <h2 className="font-[590] text-[#f7f8f8] text-[14px]">
+          <h2 className="font-[590] text-foreground text-[14px]">
             {t("settingsAppearance")}
           </h2>
-          <div className="rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214] p-4">
+          <div className="rounded-[8px] border border-border bg-secondary p-4">
             <div className="flex items-center justify-between">
-              <span className="text-[#a1a1aa] text-[13px]">
+              <span className="text-muted-foreground text-[13px]">
                 {t("settingsTheme")}
               </span>
               <ToggleTheme />
             </div>
-            <div className="mt-3 flex items-center justify-between border-[rgba(255,255,255,0.04)] border-t pt-3">
-              <span className="text-[#a1a1aa] text-[13px]">
+            <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
+              <span className="text-muted-foreground text-[13px]">
                 {t("settingsLanguage")}
               </span>
               <LangToggle />
@@ -52,13 +52,13 @@ function SettingsPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="font-[590] text-[#f7f8f8] text-[14px]">
+          <h2 className="font-[590] text-foreground text-[14px]">
             {t("settingsIndexing")}
           </h2>
-          <div className="rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214] p-4">
+          <div className="rounded-[8px] border border-border bg-secondary p-4">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[#a1a1aa] text-[13px]">
+                <span className="text-muted-foreground text-[13px]">
                   {t("settingsThumbnailCache")}
                 </span>
                 <p className="mt-0.5 text-[#6b6b75] text-[11px]">
@@ -66,7 +66,7 @@ function SettingsPage() {
                 </p>
               </div>
               <button
-                className="rounded-[6px] border border-[rgba(255,255,255,0.08)] px-3 py-1.5 text-[#a1a1aa] text-[12px] transition-colors hover:border-[rgba(255,255,255,0.15)] hover:text-[#f7f8f8]"
+                className="rounded-[6px] border border-input px-3 py-1.5 text-muted-foreground text-[12px] transition-colors hover:border-muted-foreground/30 hover:text-foreground"
                 onClick={handleClearCache}
               >
                 {clearCacheStatus || t("settingsClear")}
@@ -76,27 +76,27 @@ function SettingsPage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="font-[590] text-[#f7f8f8] text-[14px]">
+          <h2 className="font-[590] text-foreground text-[14px]">
             {t("settingsAbout")}
           </h2>
-          <div className="rounded-[8px] border border-[rgba(255,255,255,0.06)] bg-[#121214] p-4">
+          <div className="rounded-[8px] border border-border bg-secondary p-4">
             <div className="flex items-center justify-between">
-              <span className="text-[#a1a1aa] text-[13px]">
+              <span className="text-muted-foreground text-[13px]">
                 {t("settingsVersion")}
               </span>
-              <span className="text-[#f7f8f8] text-[13px]">0.1.0</span>
+              <span className="text-foreground text-[13px]">0.1.0</span>
             </div>
-            <div className="mt-3 flex items-center justify-between border-[rgba(255,255,255,0.04)] border-t pt-3">
-              <span className="text-[#a1a1aa] text-[13px]">
+            <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
+              <span className="text-muted-foreground text-[13px]">
                 {t("settingsLicense")}
               </span>
-              <span className="text-[#f7f8f8] text-[13px]">MIT</span>
+              <span className="text-foreground text-[13px]">MIT</span>
             </div>
-            <div className="mt-3 flex items-center justify-between border-[rgba(255,255,255,0.04)] border-t pt-3">
-              <span className="text-[#a1a1aa] text-[13px]">
+            <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
+              <span className="text-muted-foreground text-[13px]">
                 {t("settingsAuthor")}
               </span>
-              <span className="text-[#f7f8f8] text-[13px]">Uyoung</span>
+              <span className="text-foreground text-[13px]">Uyoung</span>
             </div>
           </div>
         </section>

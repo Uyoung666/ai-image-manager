@@ -6,9 +6,9 @@ import { LRUCache } from "lru-cache";
 import sharp from "sharp";
 
 const THUMBNAIL_SIZES = {
-  sm: 160,
-  md: 320,
-  lg: 640,
+  sm: 220,
+  md: 360,
+  lg: 720,
 } as const;
 
 type ThumbSize = keyof typeof THUMBNAIL_SIZES;
@@ -71,7 +71,7 @@ export async function generateThumbnail(
   const targetSize = THUMBNAIL_SIZES[size];
   const thumbBuffer = await sharp(imagePath)
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 75, mozjpeg: true })
+    .jpeg({ quality: 82, mozjpeg: true })
     .toBuffer();
 
   fs.writeFileSync(thumbPath, thumbBuffer);

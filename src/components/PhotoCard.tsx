@@ -65,7 +65,7 @@ export const PhotoCard = memo(function PhotoCard({
   if (error) {
     return (
       <div
-        className="relative mb-2 flex break-inside-avoid flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-[#15171a]"
+        className="relative mb-2 flex break-inside-avoid flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted"
         style={{
           aspectRatio,
           contentVisibility: "auto",
@@ -95,9 +95,9 @@ export const PhotoCard = memo(function PhotoCard({
 
   return (
     <div
-      className={`group relative mb-2 cursor-pointer break-inside-avoid overflow-hidden rounded-[8px] bg-[#15171a] transition-all duration-150 ${
+      className={`group relative mb-2 cursor-pointer break-inside-avoid overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
         isSelected
-          ? "shadow-[0_0_20px_rgba(94,106,210,0.15)] ring-2 ring-[#5e6ad2] ring-offset-1 ring-offset-[#08090a]"
+          ? "shadow-[0_0_20px_rgba(94,106,210,0.15)] ring-2 ring-ring ring-offset-1 ring-offset-background"
           : "hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:ring-1 hover:ring-white/10"
       }
       `}
@@ -110,7 +110,7 @@ export const PhotoCard = memo(function PhotoCard({
       }}
     >
       {!loaded && (
-        <div className="absolute inset-0 animate-pulse bg-gradient-to-b from-[#1c1e22] to-[#15171a]" />
+        <div className="absolute inset-0 animate-pulse bg-gradient-to-b from-card to-muted" />
       )}
       <img
         alt={filename}
