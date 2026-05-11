@@ -31,7 +31,9 @@ interface ExifData {
 
 interface TagInfo {
   color: string | null;
+  confidence: number | null;
   id: number;
+  isConfirmed: boolean | null;
   name: string;
 }
 
@@ -218,6 +220,18 @@ export function PhotoDetailPanel({
     }
   }
 
+  async function handleConfirmTag(tagId: number) {
+    if (!photo) {
+      return;
+    }
+    try {
+      await ipc.client.photos.confirmPhotoTag({ photoId: photo.id, tagId });
+      loadTags();
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function handleCreateTag() {
     const name = newTagName.trim();
     if (!(name && photo)) {
@@ -385,19 +399,47 @@ export function PhotoDetailPanel({
             标签
           </h4>
           <div className="flex flex-wrap gap-1.5">
-            {photoTags.map((tag) => (
-              <button
-                className="flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] text-white/90 hover:opacity-80"
-                key={tag.id}
-                onClick={() => handleRemoveTag(tag.id)}
-                style={{
-                  background: tag.color || "#5e6ad2",
-                }}
-              >
-                {tag.name}
-                <X className="h-2.5 w-2.5 opacity-60" />
-              </button>
-            ))}
+            {photoTags.map((tag) => {
+              const unconfirmed = tag.isConfirmed === false;
+              return (
+                <span className="group relative flex items-center gap-0.5" key={tag.id}>
+                  <button
+                    className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] text-white/90 ${
+                      unconfirmed
+                        ? "border border-dashed border-white/30 bg-white/5"
+                        : "hover:opacity-80"
+                    }`}
+                    onClick={() => unconfirmed ? handleConfirmTag(tag.id) : handleRemoveTag(tag.id)}
+                    style={
+                      unconfirmed
+                        ? undefined
+                        : { background: tag.color || "#5e6ad2" }
+                    }
+                    title={
+                      unconfirmed
+                        ? `AI 建议 (${tag.confidence ? Math.round(tag.confidence * 100) + "%" : ""}) — 点击确认`
+                        : "点击移除"
+                    }
+                  >
+                    {tag.name}
+                    {unconfirmed ? (
+                      <span className="ml-0.5 text-[10px] opacity-60">?</span>
+                    ) : (
+                      <X className="h-2.5 w-2.5 opacity-60" />
+                    )}
+                  </button>
+                  {unconfirmed && (
+                    <button
+                      className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[#6b6b75] opacity-0 transition-opacity hover:bg-[#e5484d] hover:text-white group-hover:opacity-100"
+                      onClick={() => handleRemoveTag(tag.id)}
+                      title="移除"
+                    >
+                      <X className="h-2 w-2" />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
             <button
               className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
               onClick={() => setShowTagInput(true)}

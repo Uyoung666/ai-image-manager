@@ -99,6 +99,10 @@ export const photoTags = sqliteTable(
       onDelete: "cascade",
     }),
     tagId: integer("tag_id").references(() => tags.id, { onDelete: "cascade" }),
+    confidence: real("confidence"),
+    isConfirmed: integer("is_confirmed", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => ({
     uniquePhotoTag: uniqueIndex("idx_photo_tag").on(table.photoId, table.tagId),

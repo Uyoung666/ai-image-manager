@@ -6,8 +6,6 @@ import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
 import { ipc } from "@/ipc/manager";
 
-const WM_SETTINGS_KEY = "watermark_settings";
-
 interface WatermarkSettings {
   enabled: boolean;
   text: string;
@@ -16,19 +14,13 @@ interface WatermarkSettings {
   fontSize: number;
 }
 
-function loadWatermarkSettings(): WatermarkSettings {
-  try {
-    const saved = localStorage.getItem(WM_SETTINGS_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch { /* ignore */ }
-  return {
-    enabled: false,
-    text: "",
-    position: "bottomRight",
-    opacity: 50,
-    fontSize: 24,
-  };
-}
+const DEFAULT_WM: WatermarkSettings = {
+  enabled: false,
+  text: "",
+  position: "bottomRight",
+  opacity: 50,
+  fontSize: 24,
+};
 
 function SettingsPage() {
   const { t } = useTranslation();
@@ -36,13 +28,24 @@ function SettingsPage() {
   const [clearCacheStatus, setClearCacheStatus] = useState("");
   const [cleanupStatus, setCleanupStatus] = useState("");
   const [cleanupCount, setCleanupCount] = useState(0);
-  const [wm, setWm] = useState<WatermarkSettings>(loadWatermarkSettings);
+  const [wm, setWm] = useState<WatermarkSettings>(DEFAULT_WM);
+  const [wmLoaded, setWmLoaded] = useState(false);
 
+  // Load watermark settings from database via IPC
   useEffect(() => {
-    try {
-      localStorage.setItem(WM_SETTINGS_KEY, JSON.stringify(wm));
-    } catch { /* ignore */ }
-  }, [wm]);
+    ipc.client.photos.getWatermarkSettings({}).then((result) => {
+      if (result) {
+        setWm(result as WatermarkSettings);
+      }
+      setWmLoaded(true);
+    }).catch(() => setWmLoaded(true));
+  }, []);
+
+  // Persist watermark settings to database via IPC on change
+  useEffect(() => {
+    if (!wmLoaded) return;
+    ipc.client.photos.setWatermarkSettings(wm).catch(() => { /* ignore */ });
+  }, [wm, wmLoaded]);
 
   async function handleClearCache() {
     setClearCacheStatus(t("settingsClearing"));

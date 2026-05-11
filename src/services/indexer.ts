@@ -458,65 +458,69 @@ async function runAutoTagSuggestions(photoIds: number[]): Promise<void> {
         if (!photo) continue;
 
         const suggestions = await suggestTags(photo.path, 0.32, photo.id);
-        // Auto-apply high-confidence tags, store medium-confidence as unconfirmed
+        // confidence >= 0.38: auto-apply (isConfirmed=true)
+        // confidence 0.32~0.38: store as unconfirmed (isConfirmed=false)
         for (const s of suggestions) {
-          if (s.confidence >= 0.38) {
-            // High confidence: auto-apply
-            try {
-              // Create tag if not exists
-              const tagColors = [
-                "#5e6ad2",
-                "#46a758",
-                "#ffb224",
-                "#e5484d",
-                "#7c7fe0",
-                "#3b9ec6",
-                "#d97a3e",
-                "#a855f7",
-              ];
-              let hash = 0;
-              for (let i = 0; i < s.tag.length; i++) {
-                hash = s.tag.charCodeAt(i) + ((hash << 5) - hash);
-              }
-              const tagColor = tagColors[Math.abs(hash) % tagColors.length];
-
-              // Direct DB insert to avoid IPC overhead
-              const existingTag = db
-                .select({ id: tags.id })
-                .from(tags)
-                .where(eq(tags.name, s.tag))
-                .get();
-
-              let tagId: number;
-              if (existingTag) {
-                tagId = existingTag.id;
-              } else {
-                const result = db
-                  .insert(tags)
-                  .values({ name: s.tag, color: tagColor })
-                  .returning({ insertedId: tags.id })
-                  .get();
-                if (!result) continue;
-                tagId = result.insertedId;
-              }
-
-              // Check if already tagged
-              const existing = db
-                .select({ id: photoTags.id })
-                .from(photoTags)
-                .where(
-                  sql`${photoTags.photoId} = ${photoId} AND ${photoTags.tagId} = ${tagId}`
-                )
-                .get();
-              if (!existing) {
-                db.insert(photoTags)
-                  .values({ photoId, tagId })
-                  .onConflictDoNothing()
-                  .run();
-              }
-            } catch {
-              /* skip individual tag failures */
+          const isConfirmed = s.confidence >= 0.38;
+          try {
+            // Create tag if not exists
+            const tagColors = [
+              "#5e6ad2",
+              "#46a758",
+              "#ffb224",
+              "#e5484d",
+              "#7c7fe0",
+              "#3b9ec6",
+              "#d97a3e",
+              "#a855f7",
+            ];
+            let hash = 0;
+            for (let i = 0; i < s.tag.length; i++) {
+              hash = s.tag.charCodeAt(i) + ((hash << 5) - hash);
             }
+            const tagColor = tagColors[Math.abs(hash) % tagColors.length];
+
+            // Direct DB insert to avoid IPC overhead
+            const existingTag = db
+              .select({ id: tags.id })
+              .from(tags)
+              .where(eq(tags.name, s.tag))
+              .get();
+
+            let tagId: number;
+            if (existingTag) {
+              tagId = existingTag.id;
+            } else {
+              const result = db
+                .insert(tags)
+                .values({ name: s.tag, color: tagColor })
+                .returning({ insertedId: tags.id })
+                .get();
+              if (!result) continue;
+              tagId = result.insertedId;
+            }
+
+            // Check if already tagged
+            const existing = db
+              .select({ id: photoTags.id })
+              .from(photoTags)
+              .where(
+                sql`${photoTags.photoId} = ${photoId} AND ${photoTags.tagId} = ${tagId}`
+              )
+              .get();
+            if (!existing) {
+              db.insert(photoTags)
+                .values({
+                  photoId,
+                  tagId,
+                  confidence: s.confidence,
+                  isConfirmed,
+                })
+                .onConflictDoNothing()
+                .run();
+            }
+          } catch {
+            /* skip individual tag failures */
           }
         }
       } catch {

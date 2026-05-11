@@ -4,7 +4,7 @@ import { os } from "@orpc/server";
 import { desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
+import { exifData, folders, photos, photoTags, tags, appSettings } from "@/db/schema";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
@@ -1040,7 +1040,13 @@ export const getTags = os.handler(() => {
 export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
   return db
-    .select({ id: tags.id, name: tags.name, color: tags.color })
+    .select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      confidence: photoTags.confidence,
+      isConfirmed: photoTags.isConfirmed,
+    })
     .from(photoTags)
     .innerJoin(tags, eq(photoTags.tagId, tags.id))
     .where(eq(photoTags.photoId, input.id))
@@ -1078,7 +1084,11 @@ export const setPhotoTag = os
   .handler(({ input }) => {
     const db = getDatabase();
     db.insert(photoTags)
-      .values({ photoId: input.photoId, tagId: input.tagId })
+      .values({
+        photoId: input.photoId,
+        tagId: input.tagId,
+        isConfirmed: true,
+      })
       .onConflictDoNothing()
       .run();
     return { ok: true };
@@ -1096,12 +1106,74 @@ export const removePhotoTag = os
     return { ok: true };
   });
 
+export const confirmPhotoTag = os
+  .input(z.object({ photoId: z.number(), tagId: z.number() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    db.update(photoTags)
+      .set({ isConfirmed: true })
+      .where(
+        sql`${photoTags.photoId} = ${input.photoId} AND ${photoTags.tagId} = ${input.tagId}`
+      )
+      .run();
+    return { ok: true };
+  });
+
 export const deleteTag = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
   db.delete(photoTags).where(eq(photoTags.tagId, input.id)).run();
   db.delete(tags).where(eq(tags.id, input.id)).run();
   return { ok: true };
 });
+
+// Watermark settings persistence
+const WatermarkSchema = z.object({
+  enabled: z.boolean(),
+  text: z.string(),
+  position: z.enum(["topLeft", "topRight", "bottomLeft", "bottomRight", "center"]),
+  opacity: z.number().min(10).max(100),
+  fontSize: z.number().min(12).max(72),
+});
+
+const WM_KEY = "watermark_settings";
+
+export const getWatermarkSettings = os.handler(() => {
+  const db = getDatabase();
+  const row = db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, WM_KEY))
+    .get();
+  if (row) {
+    try {
+      return JSON.parse(row.value);
+    } catch {
+      /* fall through to default */
+    }
+  }
+  return {
+    enabled: false,
+    text: "",
+    position: "bottomRight",
+    opacity: 50,
+    fontSize: 24,
+  };
+});
+
+export const setWatermarkSettings = os
+  .input(WatermarkSchema)
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const value = JSON.stringify(input);
+    db.insert(appSettings)
+      .values({ key: WM_KEY, value, updatedAt: Date.now() })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value, updatedAt: Date.now() },
+      })
+      .run();
+    return { ok: true };
+  });
 
 // Export photos as ZIP with HTML gallery
 const ExportSchema = z.object({
@@ -1304,6 +1376,27 @@ export const exportPhotos = os
     const db = getDatabase();
     const { ids, format, maxWidth, quality, outputPath } = input;
 
+    // Read watermark settings from appSettings
+    let wm: {
+      enabled: boolean;
+      text: string;
+      position: string;
+      opacity: number;
+      fontSize: number;
+    } = { enabled: false, text: "", position: "bottomRight", opacity: 50, fontSize: 24 };
+    try {
+      const wmRow = db
+        .select({ value: appSettings.value })
+        .from(appSettings)
+        .where(eq(appSettings.key, "watermark_settings"))
+        .get();
+      if (wmRow) {
+        wm = JSON.parse(wmRow.value);
+      }
+    } catch {
+      /* use defaults */
+    }
+
     const photoList = db
       .select()
       .from(photos)
@@ -1336,9 +1429,43 @@ export const exportPhotos = os
       } | null;
     }> = [];
 
+    // Build watermark SVG overlay once
+    function buildWatermarkSvg(imgWidth: number, imgHeight: number): Buffer | null {
+      if (!(wm.enabled && wm.text.trim())) return null;
+      const opacity = wm.opacity / 100;
+      const fontSize = wm.fontSize;
+      const margin = Math.max(16, Math.floor(Math.min(imgWidth, imgHeight) * 0.03));
+      const textAnchor =
+        wm.position === "topLeft" || wm.position === "bottomLeft"
+          ? "start"
+          : wm.position === "center"
+            ? "middle"
+            : "end";
+      let x: number;
+      if (wm.position === "topLeft" || wm.position === "bottomLeft") {
+        x = margin;
+      } else if (wm.position === "center") {
+        x = imgWidth / 2;
+      } else {
+        x = imgWidth - margin;
+      }
+      let y: number;
+      if (wm.position === "topLeft" || wm.position === "topRight") {
+        y = margin + fontSize;
+      } else if (wm.position === "center") {
+        y = imgHeight / 2;
+      } else {
+        y = imgHeight - margin;
+      }
+      const svg = `<svg width="${imgWidth}" height="${imgHeight}" xmlns="http://www.w3.org/2000/svg">
+  <text x="${x}" y="${y}" font-family="sans-serif" font-size="${fontSize}" fill="white" fill-opacity="${opacity}" text-anchor="${textAnchor}">${wm.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</text>
+</svg>`;
+      return Buffer.from(svg, "utf-8");
+    }
+
     try {
       const sharp =
-        format === "compressed" ? (await import("sharp")).default : null;
+        format === "compressed" || wm.enabled ? (await import("sharp")).default : null;
 
       for (const photo of photoList) {
         // Resolve filename collision
@@ -1353,17 +1480,46 @@ export const exportPhotos = os
 
         const destPath = path.join(photosDir, destName);
 
-        if (sharp && format === "compressed") {
+        if (sharp && (format === "compressed" || wm.enabled)) {
           try {
             let pipeline = sharp(photo.path);
             const meta = await pipeline.metadata();
-            if (meta.width && meta.width > maxWidth) {
+            const imgWidth = meta.width || photo.width || 0;
+            const imgHeight = meta.height || photo.height || 0;
+
+            if (format === "compressed" && imgWidth > maxWidth) {
               pipeline = pipeline.resize(maxWidth);
             }
-            const buffer = await pipeline.jpeg({ quality }).toBuffer();
-            // Change extension to .jpg for compressed output
-            destName = path.basename(destName, path.extname(destName)) + ".jpg";
-            fs.writeFileSync(path.join(photosDir, destName), buffer);
+
+            // Calculate output dimensions after potential resize
+            let outWidth = imgWidth;
+            let outHeight = imgHeight;
+            if (format === "compressed" && imgWidth > maxWidth) {
+              outWidth = maxWidth;
+              outHeight = Math.round(maxWidth * (imgHeight / imgWidth));
+            }
+
+            // Apply watermark
+            if (wm.enabled && wm.text.trim() && outWidth > 0 && outHeight > 0) {
+              const wmSvg = buildWatermarkSvg(outWidth, outHeight);
+              if (wmSvg) {
+                pipeline = pipeline.composite([
+                  { input: wmSvg, top: 0, left: 0 },
+                ]);
+              }
+            }
+
+            if (format === "compressed") {
+              const buffer = await pipeline.jpeg({ quality }).toBuffer();
+              destName = path.basename(destName, path.extname(destName)) + ".jpg";
+              fs.writeFileSync(path.join(photosDir, destName), buffer);
+            } else {
+              // Original format + watermark: output as PNG to preserve alpha
+              const buffer = wm.enabled
+                ? await pipeline.png().toBuffer()
+                : await pipeline.toBuffer();
+              fs.writeFileSync(destPath, buffer);
+            }
           } catch {
             // Fallback: copy original on sharp failure
             fs.copyFileSync(photo.path, path.join(photosDir, destName));
