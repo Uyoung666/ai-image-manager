@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  Album,
   Folder,
   LayoutDashboard,
   Loader2,
@@ -12,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ipc } from "@/ipc/manager";
 import { AiProgressBar } from "./AiProgressBar";
 
 interface FolderInfo {
@@ -20,6 +22,11 @@ interface FolderInfo {
   path: string;
   photoCount: number;
 }
+interface TagInfo {
+  color: string | null;
+  id: number;
+  name: string;
+}
 interface SidebarProps {
   activeFolderId: number | null;
   collapsed: boolean;
@@ -27,6 +34,7 @@ interface SidebarProps {
   onAddFolder: () => void;
   onDeleteFolder: (id: number, displayName: string) => void;
   onSelectFolder: (id: number | null) => void;
+  onSelectTag?: (tagId: number | null) => void;
   onToggleCollapse: () => void;
   scanningFolder: string | null;
   scanProgress: string;
@@ -40,6 +48,7 @@ export function Sidebar({
   onSelectFolder,
   onAddFolder,
   onDeleteFolder,
+  onSelectTag,
   onToggleCollapse,
   scanningFolder,
   scanProgress,
@@ -53,7 +62,17 @@ export function Sidebar({
     x: number;
     y: number;
   } | null>(null);
+  const [tags, setTags] = useState<TagInfo[]>([]);
+  const [activeTagId, setActiveTagId] = useState<number | null>(null);
+  const [tagSearch, setTagSearch] = useState("");
   const ctxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    ipc.client.photos
+      .getTags({})
+      .then((result) => setTags((result as TagInfo[]) || []))
+      .catch(() => {});
+  }, [totalPhotos]);
 
   const closeCtx = useCallback(() => setFolderCtx(null), []);
 
@@ -148,6 +167,14 @@ export function Sidebar({
             title={t("sidebarDashboard")}
           >
             <LayoutDashboard className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/albums" as any })}
+            title="相册"
+          >
+            <Album className="h-4 w-4" />
           </button>
 
           <button
@@ -266,6 +293,53 @@ export function Sidebar({
             {t("sidebarNoFolders")}
           </p>
         )}
+
+        {/* Tags */}
+        {tags.length > 0 && (
+          <>
+            <div className="mx-3 my-2 border-border border-t" />
+            <p className="px-3 py-1 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+              标签
+            </p>
+            <div className="px-1 pb-1">
+              <input
+                className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75]"
+                onChange={(e) => setTagSearch(e.target.value)}
+                placeholder="搜索标签..."
+                value={tagSearch}
+              />
+            </div>
+            <div className="max-h-[160px] overflow-y-auto">
+              {tags
+                .filter((t) =>
+                  tagSearch
+                    ? t.name.toLowerCase().includes(tagSearch.toLowerCase())
+                    : true
+                )
+                .map((tag) => (
+                  <button
+                    className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+                      activeTagId === tag.id
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    key={tag.id}
+                    onClick={() => {
+                      const nextId = activeTagId === tag.id ? null : tag.id;
+                      setActiveTagId(nextId);
+                      onSelectTag?.(nextId);
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ background: tag.color || "#5e6ad2" }}
+                    />
+                    <span className="truncate">{tag.name}</span>
+                  </button>
+                ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Footer */}
@@ -275,6 +349,13 @@ export function Sidebar({
           onClick={() => navigate({ to: "/dashboard" })}
         >
           ⚙ {t("sidebarDashboard")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/albums" as any })}
+        >
+          <Album className="mr-2 inline h-3.5 w-3.5" />
+          相册
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"

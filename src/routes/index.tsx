@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
+import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
@@ -65,6 +67,10 @@ function HomePage() {
   });
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
+  const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportIds, setExportIds] = useState<number[]>([]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -314,39 +320,19 @@ function HomePage() {
     });
   }
 
+  function handleAddToAlbum(id: number) {
+    setAddToAlbumIds([id]);
+    setAddToAlbumOpen(true);
+  }
+
   async function handleExportPhoto(id: number) {
-    await doExport([id]);
+    setExportIds([id]);
+    setExportDialogOpen(true);
   }
 
   async function handleExportSelected() {
-    await doExport(Array.from(selectedIds));
-  }
-
-  async function doExport(ids: number[]) {
-    if (ids.length === 0) {
-      return;
-    }
-    try {
-      const defaultName = `gallery-${new Date().toISOString().slice(0, 10)}.zip`;
-      const dialogResult = await ipc.client.shell.saveFileDialog({
-        defaultName,
-        title: "导出照片画廊",
-      });
-      const savePath = (dialogResult as any)?.path;
-      if (!savePath) {
-        return;
-      }
-      const result = await ipc.client.photos.exportPhotos({
-        ids,
-        format: "original",
-        outputPath: savePath,
-      });
-      if ((result as any).success) {
-        await ipc.client.shell.openInExplorer({ path: savePath });
-      }
-    } catch {
-      /* ignore */
-    }
+    setExportIds(Array.from(selectedIds));
+    setExportDialogOpen(true);
   }
 
   async function handleDeleteSelected() {
@@ -543,6 +529,7 @@ function HomePage() {
       )}
       <PhotoContextMenu
         menu={ctxMenu}
+        onAddToAlbum={handleAddToAlbum}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
@@ -566,6 +553,16 @@ function HomePage() {
         onConvert={handleConvertSelected}
         open={convertDialogOpen}
         photoCount={selectedIds.size}
+      />
+      <AddToAlbumDialog
+        onClose={() => setAddToAlbumOpen(false)}
+        open={addToAlbumOpen}
+        photoIds={addToAlbumIds}
+      />
+      <ExportDialog
+        onClose={() => setExportDialogOpen(false)}
+        open={exportDialogOpen}
+        photoIds={exportIds}
       />
     </div>
   );

@@ -10,6 +10,7 @@ interface MenuState {
 
 interface PhotoContextMenuProps {
   menu: MenuState;
+  onAddToAlbum: (id: number) => void;
   onClose: () => void;
   onDelete: (id: number) => void;
   onExport: (id: number) => void;
@@ -20,10 +21,11 @@ export type { MenuState };
 
 export function PhotoContextMenu({
   menu,
-  onOpenExplorer,
+  onAddToAlbum,
+  onClose,
   onDelete,
   onExport,
-  onClose,
+  onOpenExplorer,
 }: PhotoContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -120,6 +122,32 @@ export function PhotoContextMenu({
         复制路径
       </button>
       <div className="my-1 h-px bg-border" />
+      <button
+        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        disabled={menu.photoId === null}
+        onClick={() => {
+          if (menu.photoId !== null) {
+            onAddToAlbum(menu.photoId);
+          }
+          onClose();
+        }}
+      >
+        <svg
+          fill="none"
+          height="14"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+          width="14"
+        >
+          <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+          <path d="M3 9h18" />
+          <path d="M9 21V9" />
+        </svg>
+        添加到相册
+      </button>
       <button
         className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-white/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={menu.photoId === null}

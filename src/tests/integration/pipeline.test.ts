@@ -110,9 +110,9 @@ interface TimingResult {
 class MetricsCollector {
   private timings: TimingResult[] = [];
 
-  time<T>(label: string, fn: () => T): T {
+  async time<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
     const start = performance.now();
-    const result = fn();
+    const result = await fn();
     const elapsed = performance.now() - start;
 
     const existing = this.timings.find((t) => t.label === label);
@@ -211,7 +211,7 @@ describe("Pipeline Integration Test (500 images)", () => {
       const exifr = (await import("exifr")).default;
       const sampleFile = path.join(TEST_IMAGES_DIR, fs.readdirSync(TEST_IMAGES_DIR)[0]);
 
-      const exif = metrics.time("exif-single", () =>
+      const exif = await metrics.time("exif-single", () =>
         exifr.parse(sampleFile, {
           pick: [
             "Make",
@@ -235,7 +235,7 @@ describe("Pipeline Integration Test (500 images)", () => {
       const files = fs.readdirSync(TEST_IMAGES_DIR).slice(0, 100); // Test with 100 for speed
 
       let extractedCount = 0;
-      const elapsed = metrics.time("exif-batch-100", () => {
+      const elapsed = await metrics.time("exif-batch-100", () => {
         for (const f of files) {
           const fullPath = path.join(TEST_IMAGES_DIR, f);
           try {
@@ -275,14 +275,14 @@ describe("Pipeline Integration Test (500 images)", () => {
         .webp({ quality: 85 })
         .toBuffer();
       const elapsed = performance.now() - t0;
-      metrics.time("thumbnail-single", () => elapsed);
+      await metrics.time("thumbnail-single", () => elapsed);
 
       console.log(`[Test] Single thumbnail: ${elapsed.toFixed(1)}ms`);
       // PDR target: <45ms/张
       // Note: first call may be slower due to sharp startup
     });
 
-    it("应能批量生成500张缩略图并在合理时间内完成", async () => {
+    it("应能批量生成500张缩略图并在合理时间内完成", { timeout: 30000 }, async () => {
       const sharp = (await import("sharp")).default;
       const files = fs.readdirSync(TEST_IMAGES_DIR).slice(0, 50); // Test 50 for speed
 
@@ -302,7 +302,7 @@ describe("Pipeline Integration Test (500 images)", () => {
         }
       }
       const elapsed = performance.now() - t0;
-      metrics.time("thumbnail-batch-50", () => elapsed);
+      await metrics.time("thumbnail-batch-50", () => elapsed);
 
       const avgMs =
         results.length > 0
@@ -353,10 +353,10 @@ describe("Pipeline Integration Test (500 images)", () => {
       console.log(`[Test] DB initialized, ${folderCount} folders`);
     });
 
-    it("应能索引测试目录中的所有500张图片", async () => {
+    it("应能索引测试目录中的所有500张图片", { timeout: 120000 }, async () => {
       const { scanFolder } = await import("@/services/indexer");
 
-      const result = metrics.time("index-500", async () => {
+      const result = await metrics.time("index-500", async () => {
         return await scanFolder(TEST_IMAGES_DIR, (progress) => {
           if (progress.phase === "indexing" && progress.scanned % 50 === 0) {
             console.log(

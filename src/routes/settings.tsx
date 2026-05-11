@@ -1,10 +1,34 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
 import { ipc } from "@/ipc/manager";
+
+const WM_SETTINGS_KEY = "watermark_settings";
+
+interface WatermarkSettings {
+  enabled: boolean;
+  text: string;
+  position: "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | "center";
+  opacity: number;
+  fontSize: number;
+}
+
+function loadWatermarkSettings(): WatermarkSettings {
+  try {
+    const saved = localStorage.getItem(WM_SETTINGS_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  return {
+    enabled: false,
+    text: "",
+    position: "bottomRight",
+    opacity: 50,
+    fontSize: 24,
+  };
+}
 
 function SettingsPage() {
   const { t } = useTranslation();
@@ -12,6 +36,13 @@ function SettingsPage() {
   const [clearCacheStatus, setClearCacheStatus] = useState("");
   const [cleanupStatus, setCleanupStatus] = useState("");
   const [cleanupCount, setCleanupCount] = useState(0);
+  const [wm, setWm] = useState<WatermarkSettings>(loadWatermarkSettings);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WM_SETTINGS_KEY, JSON.stringify(wm));
+    } catch { /* ignore */ }
+  }, [wm]);
 
   async function handleClearCache() {
     setClearCacheStatus(t("settingsClearing"));
@@ -122,6 +153,82 @@ function SettingsPage() {
         </section>
 
         <section className="space-y-3">
+          <h2 className="font-[590] text-foreground text-[14px]">水印设置</h2>
+          <div className="rounded-[8px] border border-border bg-secondary p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-[13px]">启用水印</span>
+              <button
+                className={`h-5 w-9 rounded-full transition-colors ${
+                  wm.enabled ? "bg-primary" : "bg-muted"
+                }`}
+                onClick={() => setWm((prev) => ({ ...prev, enabled: !prev.enabled }))}
+              >
+                <div
+                  className={`h-4 w-4 rounded-full bg-white transition-transform ${
+                    wm.enabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+            </div>
+            {wm.enabled && (
+              <>
+                <div className="border-border border-t pt-3">
+                  <label className="mb-1 block text-[#6b6b75] text-[11px]">水印文字</label>
+                  <input
+                    className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                    onChange={(e) => setWm((prev) => ({ ...prev, text: e.target.value }))}
+                    placeholder="例如: © 2026 Your Name"
+                    value={wm.text}
+                  />
+                </div>
+                <div className="border-border border-t pt-3">
+                  <label className="mb-1 block text-[#6b6b75] text-[11px]">位置</label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(["topLeft", "topRight", "bottomLeft", "bottomRight", "center"] as const).map((pos) => (
+                      <button
+                        className={`rounded-[4px] px-2 py-1 text-[11px] transition-colors ${
+                          wm.position === pos
+                            ? "bg-primary/20 text-primary"
+                            : "text-muted-foreground hover:bg-foreground/5"
+                        }`}
+                        key={pos}
+                        onClick={() => setWm((prev) => ({ ...prev, position: pos }))}
+                      >
+                        {pos === "topLeft" ? "左上" : pos === "topRight" ? "右上" : pos === "bottomLeft" ? "左下" : pos === "bottomRight" ? "右下" : "居中"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="border-border border-t pt-3">
+                  <label className="mb-1 block text-[#6b6b75] text-[11px]">透明度: {wm.opacity}%</label>
+                  <input
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                    max={100}
+                    min={10}
+                    onChange={(e) => setWm((prev) => ({ ...prev, opacity: Number(e.target.value) }))}
+                    step={5}
+                    type="range"
+                    value={wm.opacity}
+                  />
+                </div>
+                <div className="border-border border-t pt-3">
+                  <label className="mb-1 block text-[#6b6b75] text-[11px]">字号: {wm.fontSize}px</label>
+                  <input
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                    max={72}
+                    min={12}
+                    onChange={(e) => setWm((prev) => ({ ...prev, fontSize: Number(e.target.value) }))}
+                    step={2}
+                    type="range"
+                    value={wm.fontSize}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-3">
           <h2 className="font-[590] text-foreground text-[14px]">
             {t("settingsAbout")}
           </h2>
@@ -130,7 +237,7 @@ function SettingsPage() {
               <span className="text-muted-foreground text-[13px]">
                 {t("settingsVersion")}
               </span>
-              <span className="text-foreground text-[13px]">0.1.0</span>
+              <span className="text-foreground text-[13px]">0.4.0</span>
             </div>
             <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
               <span className="text-muted-foreground text-[13px]">

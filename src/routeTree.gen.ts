@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as DuplicatesRouteImport } from './routes/duplicates'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
+import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -29,6 +31,16 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AlbumsRoute = AlbumsRouteImport.update({
+  id: '/albums',
+  path: '/albums',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlbumsAlbumIdRoute = AlbumsAlbumIdRouteImport.update({
+  id: '/albums/$albumId',
+  path: '/albums/$albumId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -37,12 +49,16 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/albums': typeof AlbumsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/albums': typeof AlbumsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
@@ -50,20 +66,24 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/albums': typeof AlbumsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/duplicates' | '/settings'
+  fullPaths: '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/duplicates' | '/settings'
-  id: '__root__' | '/' | '/dashboard' | '/duplicates' | '/settings'
+  to: '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
+  id: '__root__' | '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AlbumsRoute: typeof AlbumsRoute
+  AlbumsAlbumIdRoute: typeof AlbumsAlbumIdRoute
   DashboardRoute: typeof DashboardRoute
   DuplicatesRoute: typeof DuplicatesRoute
   SettingsRoute: typeof SettingsRoute
@@ -92,6 +112,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/albums/$albumId': {
+      id: '/albums/$albumId'
+      path: '/albums/$albumId'
+      fullPath: '/albums/$albumId'
+      preLoaderRoute: typeof AlbumsAlbumIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/albums': {
+      id: '/albums'
+      path: '/albums'
+      fullPath: '/albums'
+      preLoaderRoute: typeof AlbumsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -104,6 +138,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AlbumsRoute: AlbumsRoute,
+  AlbumsAlbumIdRoute: AlbumsAlbumIdRoute,
   DashboardRoute: DashboardRoute,
   DuplicatesRoute: DuplicatesRoute,
   SettingsRoute: SettingsRoute,
