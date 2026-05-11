@@ -180,7 +180,10 @@ function embedImageInWorker(
     );
 
     const workerScript = findWorkerScript();
-    const child = spawn("node", [workerScript, inputFile, outputFile], {
+    // Use Electron's Node.js (via ELECTRON_RUN_AS_NODE=1) so that native
+    // modules (sharp, etc.) match the Electron-compiled versions in node_modules.
+    const child = spawn(process.execPath, [workerScript, inputFile, outputFile], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
       stdio: ["ignore", "inherit", "pipe"],
       timeout: WORKER_TIMEOUT,
     });
