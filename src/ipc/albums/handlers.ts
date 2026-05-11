@@ -1,8 +1,9 @@
 import { os } from "@orpc/server";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { albums, albumPhotos, photos } from "@/db/schema";
+import { evaluateSmartAlbum, validateSmartRules } from "@/services/smart-album-engine";
 
 // --- Zod Schemas ---
 
@@ -63,7 +64,37 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
     throw new Error("相册不存在");
   }
 
-  // Fetch associated photos with their metadata
+  // Smart album: evaluate rules dynamically
+  if (album.isSmart && album.smartRules) {
+    try {
+      const rules = JSON.parse(album.smartRules);
+      const photoIds = evaluateSmartAlbum(rules);
+      if (photoIds.length > 0) {
+        const photoRows = db
+          .select({
+            id: photos.id,
+            filename: photos.filename,
+            path: photos.path,
+            width: photos.width,
+            height: photos.height,
+            fileSize: photos.fileSize,
+            format: photos.format,
+            thumbnailPath: photos.thumbnailPath,
+            fileDate: photos.fileDate,
+          })
+          .from(photos)
+          .where(inArray(photos.id, photoIds))
+          .orderBy(desc(photos.fileDate))
+          .all();
+        return { ...album, photos: photoRows, matchCount: photoIds.length };
+      }
+    } catch {
+      // Rules parse error — fall through to return empty
+    }
+    return { ...album, photos: [], matchCount: 0 };
+  }
+
+  // Manual album: fetch albumPhotos
   const photoRows = db
     .select({
       id: photos.id,
@@ -174,6 +205,9 @@ export const addPhotosToAlbum = os
     if (!album) {
       throw new Error("相册不存在");
     }
+    if (album.isSmart) {
+      throw new Error("智能相册的图片由规则自动匹配，无法手动添加");
+    }
 
     // Get current max sort order
     const maxOrder = db
@@ -260,6 +294,11 @@ export const reorderAlbumPhotos = os
     const db = getDatabase();
     const { albumId, photoIds } = input;
 
+    const album = db.select().from(albums).where(eq(albums.id, albumId)).get();
+    if (album?.isSmart) {
+      throw new Error("智能相册不支持手动排序");
+    }
+
     for (let i = 0; i < photoIds.length; i++) {
       db.update(albumPhotos)
         .set({ sortOrder: i })
@@ -270,4 +309,48 @@ export const reorderAlbumPhotos = os
     }
 
     return { success: true };
+  });
+
+export const evaluateSmartAlbumHandler = os
+  .input(z.object({ albumId: z.number() }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const album = db
+      .select()
+      .from(albums)
+      .where(eq(albums.id, input.albumId))
+      .get();
+    if (!album) throw new Error("相册不存在");
+    if (!album.smartRules) return { photos: [], total: 0 };
+
+    const rules = JSON.parse(album.smartRules);
+    const photoIds = evaluateSmartAlbum(rules);
+
+    if (!photoIds.length) return { photos: [], total: 0 };
+
+    const photoRows = db
+      .select({
+        id: photos.id,
+        filename: photos.filename,
+        path: photos.path,
+        width: photos.width,
+        height: photos.height,
+        fileSize: photos.fileSize,
+        format: photos.format,
+        thumbnailPath: photos.thumbnailPath,
+        thumbnailSize: photos.thumbnailSize,
+        fileDate: photos.fileDate,
+      })
+      .from(photos)
+      .where(inArray(photos.id, photoIds))
+      .orderBy(desc(photos.fileDate))
+      .all();
+
+    return { photos: photoRows, total: photoIds.length };
+  });
+
+export const validateSmartAlbumRules = os
+  .input(z.object({ smartRules: z.string() }))
+  .handler(async ({ input }) => {
+    return validateSmartRules(input.smartRules);
   });

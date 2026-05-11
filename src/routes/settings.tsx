@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CloudConfigPanel } from "@/components/CloudConfigPanel";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
 import { ipc } from "@/ipc/manager";
@@ -229,6 +230,11 @@ function SettingsPage() {
               </>
             )}
           </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-[590] text-foreground text-[14px]">云同步</h2>
+          <CloudConfigPanel />
         </section>
 
         <section className="space-y-3">

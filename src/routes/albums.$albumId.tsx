@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
@@ -19,6 +20,8 @@ interface AlbumDetail {
   name: string;
   description: string | null;
   coverPhotoId: number | null;
+  isSmart?: boolean;
+  matchCount?: number;
   photos: PhotoInfo[];
 }
 
@@ -75,19 +78,29 @@ function AlbumDetailPage() {
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div>
-          <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
-            {album?.name || "加载中..."}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+              {album?.name || "加载中..."}
+            </h1>
+            {(album as any)?.isSmart && (
+              <span className="flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                <Zap className="h-2.5 w-2.5" />
+                智能
+              </span>
+            )}
+          </div>
           {album?.description && (
             <p className="mt-0.5 text-[#6b6b75] text-[12px]">
               {album.description}
             </p>
           )}
           <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-            {photos.length} 张照片
+            {(album as any)?.isSmart
+              ? `智能匹配 ${(album as any)?.matchCount ?? photos.length} 张照片`
+              : `${photos.length} 张照片`}
           </p>
         </div>
-        {selectedIds.size > 0 && (
+        {selectedIds.size > 0 && !(album as any)?.isSmart && (
           <button
             className="rounded-[6px] bg-[#e5484d] px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
             onClick={handleRemoveSelected}

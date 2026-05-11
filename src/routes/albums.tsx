@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
 import { ipc } from "@/ipc/manager";
 
 interface AlbumInfo {
@@ -25,6 +27,7 @@ function AlbumsPage() {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showSmartDialog, setShowSmartDialog] = useState(false);
 
   const loadAlbums = useCallback(async () => {
     try {
@@ -101,12 +104,21 @@ function AlbumsPage() {
             {albums.length} 个相册
           </p>
         </div>
-        <button
-          className="rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
-          onClick={() => setShowCreate(true)}
-        >
-          新建相册
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="flex items-center gap-1.5 rounded-[6px] border border-primary/40 px-4 py-1.5 text-[13px] font-[510] text-primary transition-colors hover:border-primary hover:bg-primary/5"
+            onClick={() => setShowSmartDialog(true)}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            智能相册
+          </button>
+          <button
+            className="rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
+            onClick={() => setShowCreate(true)}
+          >
+            新建相册
+          </button>
+        </div>
       </div>
 
       {/* Create dialog inline */}
@@ -190,7 +202,11 @@ function AlbumsPage() {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
             {albums.map((album) => (
               <Link
-                className="group overflow-hidden rounded-[8px] border border-border bg-card transition-colors hover:border-primary/30"
+                className={`group overflow-hidden rounded-[8px] bg-card transition-colors hover:border-primary/30 ${
+                  album.isSmart
+                    ? "border border-primary/20"
+                    : "border border-border"
+                }`}
                 key={album.id}
                 to="/albums/$albumId"
                 params={{ albumId: album.id.toString() }}
@@ -204,34 +220,43 @@ function AlbumsPage() {
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                      <svg
-                        fill="none"
-                        height="32"
-                        stroke="currentColor"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1"
-                        viewBox="0 0 24 24"
-                        width="32"
-                      >
-                        <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
-                        <path d="M3 9h18" />
-                        <path d="M9 21V9" />
-                      </svg>
+                      {album.isSmart ? (
+                        <Zap className="h-8 w-8 text-primary/30" />
+                      ) : (
+                        <svg
+                          fill="none"
+                          height="32"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1"
+                          viewBox="0 0 24 24"
+                          width="32"
+                        >
+                          <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+                          <path d="M3 9h18" />
+                          <path d="M9 21V9" />
+                        </svg>
+                      )}
                     </div>
                   )}
                 </div>
                 <div className="p-3">
-                  <h3 className="truncate font-[510] text-[14px] text-foreground">
-                    {album.name}
-                  </h3>
+                  <div className="flex items-center gap-1.5">
+                    {album.isSmart && (
+                      <Zap className="h-3 w-3 text-primary" />
+                    )}
+                    <h3 className="truncate font-[510] text-[14px] text-foreground">
+                      {album.name}
+                    </h3>
+                  </div>
                   {album.description && (
                     <p className="mt-0.5 truncate text-[#6b6b75] text-[11px]">
                       {album.description}
                     </p>
                   )}
                   <p className="mt-1 text-[#6b6b75] text-[10px]">
-                    {new Date(album.createdAt).toLocaleDateString("zh-CN")}
+                    {album.isSmart ? "智能相册" : new Date(album.createdAt).toLocaleDateString("zh-CN")}
                   </p>
                 </div>
               </Link>
@@ -239,6 +264,12 @@ function AlbumsPage() {
           </div>
         )}
       </div>
+
+      <SmartAlbumDialog
+        onClose={() => setShowSmartDialog(false)}
+        onCreated={loadAlbums}
+        open={showSmartDialog}
+      />
     </div>
   );
 }

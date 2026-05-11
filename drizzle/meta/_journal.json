@@ -15,6 +15,13 @@
       "when": 1778500167933,
       "tag": "0001_red_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778501067543,
+      "tag": "0002_amused_nehzno",
+      "breakpoints": true
     }
   ]
 }

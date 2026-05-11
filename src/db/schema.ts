@@ -148,3 +148,80 @@ export const appSettings = sqliteTable("app_settings", {
     .notNull()
     .$defaultFn(() => Date.now()),
 });
+
+export const faceVectors = sqliteTable("face_vectors", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  photoId: integer("photo_id")
+    .references(() => photos.id, { onDelete: "cascade" })
+    .notNull(),
+  faceIndex: integer("face_index").notNull().default(0),
+  bboxX: real("bbox_x").notNull(),
+  bboxY: real("bbox_y").notNull(),
+  bboxWidth: real("bbox_width").notNull(),
+  bboxHeight: real("bbox_height").notNull(),
+  vectorId: text("vector_id"),
+  createdAt: integer("created_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+export const faceIdentities = sqliteTable("face_identities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name"),
+  representativePhotoId: integer("representative_photo_id").references(
+    () => photos.id,
+    { onDelete: "set null" }
+  ),
+  representativeVectorId: text("representative_vector_id"),
+  faceCount: integer("face_count").notNull().default(0),
+  createdAt: integer("created_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+export const faceIdentityMembers = sqliteTable(
+  "face_identity_members",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    identityId: integer("identity_id")
+      .references(() => faceIdentities.id, { onDelete: "cascade" })
+      .notNull(),
+    faceVectorId: integer("face_vector_id")
+      .references(() => faceVectors.id, { onDelete: "cascade" })
+      .notNull(),
+  },
+  (table) => ({
+    uniqueFaceIdMember: uniqueIndex("idx_face_id_member").on(
+      table.identityId,
+      table.faceVectorId
+    ),
+  })
+);
+
+export const cloudConfigs = sqliteTable("cloud_configs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  provider: text("provider").notNull(),
+  name: text("name").notNull(),
+  configJson: text("config_json").notNull(),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+export const cloudSyncLog = sqliteTable("cloud_sync_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  photoId: integer("photo_id").references(() => photos.id, {
+    onDelete: "set null",
+  }),
+  providerId: integer("provider_id").references(() => cloudConfigs.id, {
+    onDelete: "cascade",
+  }),
+  action: text("action").notNull(),
+  status: text("status").notNull(),
+  remotePath: text("remote_path"),
+  error: text("error"),
+  createdAt: integer("created_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
