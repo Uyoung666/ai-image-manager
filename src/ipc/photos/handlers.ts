@@ -678,6 +678,53 @@ export const deletePhotos = os
     return { deleted: input.ids.length };
   });
 
+// Clean up orphan photos: photos with folderId=NULL or folderId pointing
+// to a deleted folder. Also recalculates folder photoCounts.
+export const cleanupOrphanPhotos = os.handler(async () => {
+  const db = getDatabase();
+
+  const orphanIds = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(
+      sql`${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (SELECT id FROM folders)`
+    )
+    .all()
+    .map((p) => p.id);
+
+  if (orphanIds.length > 0) {
+    db.delete(exifData)
+      .where(inArray(exifData.photoId, orphanIds))
+      .run();
+    db.delete(photoTags)
+      .where(inArray(photoTags.photoId, orphanIds))
+      .run();
+    db.delete(photos)
+      .where(inArray(photos.id, orphanIds))
+      .run();
+    deletePhotoVectors(orphanIds).catch((err) =>
+      console.error("[AI] cleanupOrphanPhotos vector cleanup failed:", err)
+    );
+  }
+
+  // Recalculate all folder photoCounts
+  const allFolders = db.select({ id: folders.id }).from(folders).all();
+  for (const f of allFolders) {
+    const count =
+      db
+        .select({ c: sql<number>`count(*)` })
+        .from(photos)
+        .where(eq(photos.folderId, f.id))
+        .get()?.c ?? 0;
+    db.update(folders)
+      .set({ photoCount: count })
+      .where(eq(folders.id, f.id))
+      .run();
+  }
+
+  return { removed: orphanIds.length };
+});
+
 function hammingDistance(a: string, b: string): number {
   let dist = 0;
   for (let i = 0; i < Math.min(a.length, b.length); i++) {
