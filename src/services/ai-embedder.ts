@@ -45,6 +45,13 @@ let currentProgress: EmbedProgress = {
   currentFile: "",
 };
 
+// --- Constants ---
+
+// Minimum vectors required before creating an IVF_PQ index.
+// LanceDB IVF_PQ needs enough data for meaningful partitions; below this
+// threshold brute-force flat search is both faster and more accurate.
+const MIN_VECTORS_FOR_INDEX = 256;
+
 // --- Helpers ---
 
 function disposeTensors(output: Record<string, any>): void {
@@ -105,7 +112,7 @@ export async function initVectorDB(): Promise<void> {
         console.log("[AI] Vector index already exists");
       } else {
         const rowCount = await photoTable.countRows();
-        if (rowCount > 1) {
+        if (rowCount >= MIN_VECTORS_FOR_INDEX) {
           console.log(`[AI] Creating vector index on ${rowCount} rows...`);
           await photoTable.createIndex("vector", {
             config: lancedb.Index.ivfPq({
@@ -114,6 +121,10 @@ export async function initVectorDB(): Promise<void> {
             }),
           });
           console.log("[AI] Vector index created");
+        } else {
+          console.log(
+            `[AI] Skipping index: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
+          );
         }
       }
 
@@ -521,7 +532,7 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     status.lancedb === "ok" &&
     status.vectorTable === "ok" &&
     status.vectorTableRows > 1 &&
-    status.vectorIndex === "ok" &&
+    (status.vectorIndex === "ok" || status.vectorTableRows < MIN_VECTORS_FOR_INDEX) &&
     status.textModel === "ok"
   ) {
     status.overall = "healthy";
@@ -837,7 +848,7 @@ export async function embedAllPhotos(
   if (processed > 0 && photoTable) {
     try {
       const rowCount = await photoTable.countRows();
-      if (rowCount > 1) {
+      if (rowCount >= MIN_VECTORS_FOR_INDEX) {
         const { Index: LIdx } = await import("@lancedb/lancedb");
         console.log(`[AI] Building vector index on ${rowCount} rows...`);
         await photoTable.createIndex("vector", {
@@ -847,6 +858,10 @@ export async function embedAllPhotos(
           }),
         });
         console.log("[AI] Vector index built successfully");
+      } else {
+        console.log(
+          `[AI] Skipping index build: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
+        );
       }
     } catch (err: any) {
       console.error("[AI] Failed to create vector index:", err?.message);
@@ -990,7 +1005,7 @@ export async function searchByText(
     );
     if (!hasIndex) {
       const rowCount = await photoTable.countRows();
-      if (rowCount > 1) {
+      if (rowCount >= MIN_VECTORS_FOR_INDEX) {
         const { Index: LIdx } = await import("@lancedb/lancedb");
         console.log(
           `[AI] Creating vector index on ${rowCount} rows before search...`
@@ -1002,6 +1017,10 @@ export async function searchByText(
           }),
         });
         console.log("[AI] Vector index created for search");
+      } else {
+        console.log(
+          `[AI] Using brute-force search: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
+        );
       }
     }
   } catch (err: any) {

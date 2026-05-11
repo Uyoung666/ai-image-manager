@@ -95,6 +95,7 @@ function cleanupTestDirs(): void {
 
 // ── Imports (after mocks) ──────────────────────────────────────────
 import { getDatabase, initDatabase } from "@/db";
+import { exifData, folders, photos } from "@/db/schema";
 
 // Track performance metrics
 interface TimingResult {
@@ -157,13 +158,13 @@ const metrics = new MetricsCollector();
 describe("Pipeline Integration Test (500 images)", () => {
   const TEST_IMAGES_DIR = "D:\\8806\\ai-image-manager测试用例";
 
-  beforeAll(() => {
+  beforeAll(async () => {
     cleanupTestDirs();
     setupTestDirs();
 
     // Initialize database and thumbnailer
     initDatabase();
-    const { initThumbnailer } = require("@/services/thumbnailer");
+    const { initThumbnailer } = await import("@/services/thumbnailer");
     initThumbnailer();
 
     console.log("[Test] Environment ready");
@@ -268,13 +269,13 @@ describe("Pipeline Integration Test (500 images)", () => {
       const files = fs.readdirSync(TEST_IMAGES_DIR);
       const testFile = path.join(TEST_IMAGES_DIR, files[250]); // mid-sample
 
-      const elapsed = metrics.time("thumbnail-single", async () => {
-        const buffer = await sharp(testFile)
-          .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-          .webp({ quality: 85 })
-          .toBuffer();
-        return buffer;
-      });
+      const t0 = performance.now();
+      await sharp(testFile)
+        .resize(512, 512, { fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 85 })
+        .toBuffer();
+      const elapsed = performance.now() - t0;
+      metrics.time("thumbnail-single", () => elapsed);
 
       console.log(`[Test] Single thumbnail: ${elapsed.toFixed(1)}ms`);
       // PDR target: <45ms/张
@@ -286,22 +287,22 @@ describe("Pipeline Integration Test (500 images)", () => {
       const files = fs.readdirSync(TEST_IMAGES_DIR).slice(0, 50); // Test 50 for speed
 
       const results: number[] = [];
-      const elapsed = metrics.time("thumbnail-batch-50", async () => {
-        for (const f of files) {
-          const fullPath = path.join(TEST_IMAGES_DIR, f);
-          try {
-            const t0 = performance.now();
-            await sharp(fullPath)
-              .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-              .webp({ quality: 85 })
-              .toBuffer();
-            results.push(performance.now() - t0);
-          } catch {
-            /* skip */
-          }
+      const t0 = performance.now();
+      for (const f of files) {
+        const fullPath = path.join(TEST_IMAGES_DIR, f);
+        try {
+          const it0 = performance.now();
+          await sharp(fullPath)
+            .resize(512, 512, { fit: "inside", withoutEnlargement: true })
+            .webp({ quality: 85 })
+            .toBuffer();
+          results.push(performance.now() - it0);
+        } catch {
+          /* skip */
         }
-        return results;
-      });
+      }
+      const elapsed = performance.now() - t0;
+      metrics.time("thumbnail-batch-50", () => elapsed);
 
       const avgMs =
         results.length > 0
@@ -348,7 +349,6 @@ describe("Pipeline Integration Test (500 images)", () => {
       expect(db).toBeDefined();
 
       // Verify tables exist by querying
-      const { folders, photos, exifData } = require("@/db/schema");
       const folderCount = db.select().from(folders).all().length;
       console.log(`[Test] DB initialized, ${folderCount} folders`);
     });
@@ -377,7 +377,6 @@ describe("Pipeline Integration Test (500 images)", () => {
 
     it("应正确写入缩略图缓存路径", () => {
       const db = getDatabase();
-      const { photos } = require("@/db/schema");
 
       const allPhotos = db.select().from(photos).all();
       const withThumbnails = allPhotos.filter(
@@ -391,7 +390,6 @@ describe("Pipeline Integration Test (500 images)", () => {
 
     it("应正确提取并存储EXIF数据", () => {
       const db = getDatabase();
-      const { exifData } = require("@/db/schema");
 
       const allExif = db.select().from(exifData).all();
       console.log(`[Test] ${allExif.length} photos have EXIF records`);
@@ -440,7 +438,6 @@ describe("Pipeline Integration Test (500 images)", () => {
   describe("Step 6: pHash 感知哈希计算", () => {
     it("应为每张图片生成pHash值", () => {
       const db = getDatabase();
-      const { photos } = require("@/db/schema");
       const allPhotos = db.select().from(photos).all();
 
       const withHash = allPhotos.filter((p: any) => p.phash);
@@ -452,7 +449,6 @@ describe("Pipeline Integration Test (500 images)", () => {
 
     it("pHash应为16字符十六进制字符串", () => {
       const db = getDatabase();
-      const { photos } = require("@/db/schema");
       const allPhotos = db.select().from(photos).all();
 
       for (const p of allPhotos) {
@@ -471,7 +467,6 @@ describe("Pipeline Integration Test (500 images)", () => {
       console.log(metrics.report());
 
       const db = getDatabase();
-      const { photos, exifData } = require("@/db/schema");
       const allPhotos = db.select().from(photos).all();
       const allExif = db.select().from(exifData).all();
 
