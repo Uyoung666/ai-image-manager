@@ -572,7 +572,9 @@ export async function searchByText(
   const queryVector = await embeddingModel.embedText(query);
   console.log(`[AI] searchByText: query="${query}" vecLen=${queryVector.length}`);
 
-  const rawResults = await photoTable.search(queryVector).limit(limit).execute();
+  // Use vectorSearch() instead of search() — the latter auto-detects
+  // between full-text and vector search and can misroute number arrays.
+  const rawResults = await photoTable.vectorSearch(queryVector).limit(limit).execute();
   const results: Array<Record<string, unknown>> = Array.isArray(rawResults)
     ? (rawResults as Array<Record<string, unknown>>)
     : [];
@@ -622,7 +624,7 @@ export async function searchByImage(
   }
 
   const queryVector = await embeddingModel.embedImage(imagePath);
-  const rawResults = await photoTable.search(queryVector).limit(limit).execute();
+  const rawResults = await photoTable.vectorSearch(queryVector).limit(limit).execute();
   const results: Array<Record<string, unknown>> = Array.isArray(rawResults)
     ? (rawResults as Array<Record<string, unknown>>)
     : [];
