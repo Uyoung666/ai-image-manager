@@ -9,6 +9,8 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[App] FATAL - unhandled rejection:", reason);
 });
+
+import { inArray, sql } from "drizzle-orm";
 import {
   app,
   BrowserWindow,
@@ -22,9 +24,10 @@ import {
 import { ipcMain } from "electron/main";
 import Store from "electron-store";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
-import { initDatabase } from "@/db";
+import { getDatabase, initDatabase } from "@/db";
+import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
-import { initVectorDB } from "@/services/ai-embedder";
+import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import { startWatching } from "@/services/indexer";
 import { initThumbnailer } from "@/services/thumbnailer";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
@@ -129,7 +132,9 @@ function registerGlobalShortcuts() {
     console.warn("[App] Failed to register global shortcut Ctrl+Shift+H");
   }
 
-  console.log("[App] Global shortcuts registered: Ctrl+Shift+F (search), Ctrl+Shift+H (hide)");
+  console.log(
+    "[App] Global shortcuts registered: Ctrl+Shift+F (search), Ctrl+Shift+H (hide)"
+  );
 }
 
 function getMimeType(ext: string): string {
@@ -353,13 +358,75 @@ app.whenReady().then(async () => {
     initThumbnailer();
     console.log("[App] Database and thumbnailer initialized");
 
+    // Clean up orphan records from previously deleted folders.
+    // (folderId=NULL or dangling references due to ON DELETE SET NULL)
+    try {
+      const db = getDatabase();
+      const orphanIds = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(
+          sql`${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (SELECT id FROM folders)`
+        )
+        .all()
+        .map((p) => p.id);
+
+      if (orphanIds.length > 0) {
+        db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
+        db.delete(photoTags).where(inArray(photoTags.photoId, orphanIds)).run();
+        db.delete(photos).where(inArray(photos.id, orphanIds)).run();
+        console.log(
+          `[App] Startup cleanup: removed ${orphanIds.length} orphan photo records`
+        );
+
+        // Best-effort vector cleanup — initVectorDB runs later, but we
+        // schedule removal so stale vectors are cleared once the DB is ready.
+        initVectorDB()
+          .then(() => deletePhotoVectors(orphanIds))
+          .catch(() => {
+            /* best-effort — vector DB may not be ready yet */
+          });
+      }
+    } catch (err) {
+      console.warn(
+        "[App] Orphan cleanup skipped:",
+        (err as Error)?.message
+      );
+    }
+
+    // Recalculate folder photoCounts to correct any drift from
+    // watcher double-counting bug on previous starts.
+    try {
+      const db = getDatabase();
+      const allFolders = db.select({ id: folders.id }).from(folders).all();
+      for (const f of allFolders) {
+        const count =
+          db
+            .select({ c: sql<number>`count(*)` })
+            .from(photos)
+            .where(sql`${photos.folderId} = ${f.id}`)
+            .get()?.c ?? 0;
+        db.update(folders)
+          .set({ photoCount: count })
+          .where(sql`${folders.id} = ${f.id}`)
+          .run();
+      }
+    } catch (err) {
+      console.warn(
+        "[App] photoCount recalculation skipped:",
+        (err as Error)?.message
+      );
+    }
+
     // Ensure AI model is available before initializing vector DB
     await ensureModelAvailable();
 
     // Initialize AI vector DB in background (non-blocking)
     initVectorDB()
       .then(() => console.log("[App] AI vector DB initialized"))
-      .catch((err) => console.warn("[App] AI vector DB init skipped:", err?.message));
+      .catch((err) =>
+        console.warn("[App] AI vector DB init skipped:", err?.message)
+      );
 
     startWatching((photoId, event) => {
       console.log(`[Watcher] File ${event}: photoId=${photoId}`);

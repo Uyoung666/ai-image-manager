@@ -53,12 +53,33 @@ process.on("message", async (msg) => {
       env,
     } = await import("@xenova/transformers");
 
-    // Helper: read image via project-level sharp (already electron-rebuilt),
-    // then construct a RawImage so the processor can handle preprocessing.
-    // Avoids RawImage.read() which calls @xenova/transformers' nested sharp
-    // whose native binary is not electron-rebuilt.
+    // Helper: read raw RGBA pixels from an image file.
+    // Uses failOn:"none" to avoid native VIPS assertions on unusual color spaces.
+    // Falls back to direct raw read if intermediate PNG conversion fails.
     async function readImage(filePath) {
-      const { data, info } = await sharp(filePath)
+      // Try direct raw RGBA read first (avoids colorspace conversion crashes)
+      try {
+        const { data, info } = await sharp(filePath, { failOn: "none" })
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+        if (info.width > 0 && info.height > 0 && data.length > 0) {
+          return new RawImage(
+            new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
+            info.width,
+            info.height,
+            info.channels,
+          );
+        }
+      } catch {
+        // fall through to PNG conversion
+      }
+
+      // Fallback: convert via PNG to normalize
+      const pngBuffer = await sharp(filePath, { failOn: "none" })
+        .png()
+        .toBuffer();
+      const { data, info } = await sharp(pngBuffer)
         .ensureAlpha()
         .raw()
         .toBuffer({ resolveWithObject: true });

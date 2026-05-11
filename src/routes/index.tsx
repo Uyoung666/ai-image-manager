@@ -138,10 +138,16 @@ function HomePage() {
       const scanResult = await ipc.client.photos.scanFolder({
         path: folderPath,
       });
+      const skipped = (scanResult as any).skipped || 0;
       setScanProgress(
-        t("scanningComplete", {
-          count: (scanResult as any).photoIds?.length || 0,
-        })
+        skipped > 0
+          ? t("scanningSkipped", {
+              count: (scanResult as any).photoIds?.length || 0,
+              skipped,
+            })
+          : t("scanningComplete", {
+              count: (scanResult as any).photoIds?.length || 0,
+            })
       );
       await loadFolders();
       await loadPhotos();

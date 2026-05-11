@@ -13,9 +13,11 @@ import {
   deletePhotoVectors,
   embedAllPhotos,
   getEmbeddingProgress,
+  getPhotoVectors,
   stopEmbedding,
 } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService } from "@/services/indexer";
+import { clearThumbnailDiskCache } from "@/services/thumbnailer";
 
 const FolderSchema = z.object({ path: z.string().min(1) });
 const SearchSchema = z.object({
@@ -25,7 +27,7 @@ const SearchSchema = z.object({
 
 // Time-decay scoring: blends vector similarity with photo recency.
 // Newer photos get a moderate boost; older photos are not penalized below their vector score.
-const TIME_DECAY_ALPHA = 0.10; // Light recency boost — prioritizes semantic relevance over freshness
+const TIME_DECAY_ALPHA = 0.1; // Light recency boost — prioritizes semantic relevance over freshness
 const MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 function applyTimeDecay<
@@ -82,14 +84,17 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
       .all()
       .map((p) => p.id);
 
-    // Also find orphan photos (folderId=NULL or dangling) whose path is under this folder
+    // Also find orphan photos (folderId=NULL or dangling) whose path is under this folder.
+    // Normalize both path separators so the LIKE matches on Windows (backslash) and Unix.
+    const escapedPath = folder.path.replace(/'/g, "''");
+    const normalizedPath = escapedPath.replace(/\\/g, "/");
     const orphanPhotoIds = db
       .select({ id: photos.id })
       .from(photos)
       .where(
         sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
           SELECT id FROM folders
-        )) AND ${photos.path} LIKE ${folder.path.replace(/'/g, "''") + "/%"}`
+        )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${normalizedPath + "/%"}`
       )
       .all()
       .map((p) => p.id);
@@ -97,15 +102,9 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
 
     if (allPhotoIds.length > 0) {
-      db.delete(exifData)
-        .where(inArray(exifData.photoId, allPhotoIds))
-        .run();
-      db.delete(photoTags)
-        .where(inArray(photoTags.photoId, allPhotoIds))
-        .run();
-      db.delete(photos)
-        .where(inArray(photos.id, allPhotoIds))
-        .run();
+      db.delete(exifData).where(inArray(exifData.photoId, allPhotoIds)).run();
+      db.delete(photoTags).where(inArray(photoTags.photoId, allPhotoIds)).run();
+      db.delete(photos).where(inArray(photos.id, allPhotoIds)).run();
       deletePhotoVectors(allPhotoIds).catch((err) =>
         console.error("[AI] deleteFolder vector cleanup failed:", err)
       );
@@ -665,7 +664,7 @@ export const deletePhotos = os
       if (p.folderId) {
         countsByFolder.set(
           p.folderId,
-          (countsByFolder.get(p.folderId) || 0) + 1,
+          (countsByFolder.get(p.folderId) || 0) + 1
         );
       }
     }
@@ -693,15 +692,9 @@ export const cleanupOrphanPhotos = os.handler(async () => {
     .map((p) => p.id);
 
   if (orphanIds.length > 0) {
-    db.delete(exifData)
-      .where(inArray(exifData.photoId, orphanIds))
-      .run();
-    db.delete(photoTags)
-      .where(inArray(photoTags.photoId, orphanIds))
-      .run();
-    db.delete(photos)
-      .where(inArray(photos.id, orphanIds))
-      .run();
+    db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
+    db.delete(photoTags).where(inArray(photoTags.photoId, orphanIds)).run();
+    db.delete(photos).where(inArray(photos.id, orphanIds)).run();
     deletePhotoVectors(orphanIds).catch((err) =>
       console.error("[AI] cleanupOrphanPhotos vector cleanup failed:", err)
     );
@@ -726,18 +719,27 @@ export const cleanupOrphanPhotos = os.handler(async () => {
 });
 
 function hammingDistance(a: string, b: string): number {
-  let dist = 0;
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    const xor = Number.parseInt(a[i], 16) ^ Number.parseInt(b[i], 16);
-    // Count set bits in the xor'd nibble
-    dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
+  if (a.length !== b.length) {
+    return 64; // Different lengths → max distance
   }
-  return dist;
+  try {
+    const va = BigInt(`0x${a}`);
+    const vb = BigInt(`0x${b}`);
+    let xor = va ^ vb;
+    let dist = 0;
+    while (xor > 0n) {
+      dist += Number(xor & 1n);
+      xor >>= 1n;
+    }
+    return dist;
+  } catch {
+    return 64;
+  }
 }
 
 export const findDuplicates = os
   .input(z.object({ threshold: z.number().optional().default(8) }))
-  .handler(({ input }) => {
+  .handler(async ({ input }) => {
     const db = getDatabase();
     const allPhotos = db
       .select({
@@ -750,7 +752,8 @@ export const findDuplicates = os
       .where(sql`${photos.phash} IS NOT NULL`)
       .all();
 
-    const duplicates: Array<{
+    // Phase 1: pHash screening — O(n²) pairwise hamming distance
+    const candidates: Array<{
       photoA: { id: number; path: string; filename: string };
       photoB: { id: number; path: string; filename: string };
       distance: number;
@@ -764,7 +767,7 @@ export const findDuplicates = os
             allPhotos[j].phash!
           );
           if (dist <= input.threshold) {
-            duplicates.push({
+            candidates.push({
               photoA: {
                 id: allPhotos[i].id,
                 path: allPhotos[i].path,
@@ -782,7 +785,63 @@ export const findDuplicates = os
       }
     }
 
-    return { duplicates: duplicates.slice(0, 200) };
+    // Phase 2: CLIP vector verification for top candidates.
+    // PDR §7.3: candidates → CLIP cosine similarity > 0.95 → confirmed duplicate.
+    const topCandidates = candidates.slice(0, 200);
+    const duplicates: Array<{
+      photoA: { id: number; path: string; filename: string };
+      photoB: { id: number; path: string; filename: string };
+      distance: number;
+      clipSimilarity?: number;
+    }> = [];
+
+    if (topCandidates.length > 0) {
+      // Collect unique photo IDs from all candidates
+      const uniqueIds = new Set<number>();
+      for (const c of topCandidates) {
+        uniqueIds.add(c.photoA.id);
+        uniqueIds.add(c.photoB.id);
+      }
+
+      // Batch-fetch CLIP vectors
+      let vectors: Map<number, number[]> = new Map();
+      try {
+        vectors = await getPhotoVectors(Array.from(uniqueIds));
+      } catch {
+        // LanceDB unavailable — fall through to pHash-only results
+      }
+
+      for (const c of topCandidates) {
+        const vecA = vectors.get(c.photoA.id);
+        const vecB = vectors.get(c.photoB.id);
+
+        if (vecA && vecB && vecA.length === vecB.length) {
+          // Both vectors available — CLIP verification
+          let dot = 0;
+          let normA = 0;
+          let normB = 0;
+          for (let k = 0; k < vecA.length; k++) {
+            dot += vecA[k] * vecB[k];
+            normA += vecA[k] * vecA[k];
+            normB += vecB[k] * vecB[k];
+          }
+          const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+
+          if (sim > 0.95) {
+            duplicates.push({
+              ...c,
+              clipSimilarity: Math.round(sim * 10_000) / 10_000,
+            });
+          }
+          // else: pHash false positive — drop it
+        } else {
+          // Vectors not available for one or both — keep pHash result unverified
+          duplicates.push(c);
+        }
+      }
+    }
+
+    return { duplicates };
   });
 
 export const renamePhotos = os
@@ -949,6 +1008,10 @@ export const getAiHealth = os.handler(async () => {
   return checkAiHealth();
 });
 
+export const clearThumbCache = os.handler(() => {
+  return clearThumbnailDiskCache();
+});
+
 // AI tag suggestion
 export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
@@ -961,7 +1024,7 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
   try {
-    const suggestions = await aiSuggestTags(photo.path, 0.28);
+    const suggestions = await aiSuggestTags(photo.path, 0.28, input.id);
     return { photoId: input.id, suggestions };
   } catch {
     return { photoId: input.id, suggestions: [] };

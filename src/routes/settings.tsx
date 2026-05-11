@@ -13,10 +13,22 @@ function SettingsPage() {
   const [cleanupStatus, setCleanupStatus] = useState("");
   const [cleanupCount, setCleanupCount] = useState(0);
 
-  function handleClearCache() {
+  async function handleClearCache() {
     setClearCacheStatus(t("settingsClearing"));
-    setTimeout(() => setClearCacheStatus(t("settingsCleared")), 1000);
-    setTimeout(() => setClearCacheStatus(""), 3000);
+    try {
+      const result = await ipc.client.photos.clearThumbCache({});
+      const data = result as { fileCount?: number; freedMB?: number } | null;
+      if (data?.fileCount !== undefined) {
+        setClearCacheStatus(
+          `已清理 ${data.fileCount} 个缓存文件，释放 ${data.freedMB ?? 0} MB`
+        );
+      } else {
+        setClearCacheStatus(t("settingsCleared"));
+      }
+    } catch {
+      setClearCacheStatus("清理失败");
+    }
+    setTimeout(() => setClearCacheStatus(""), 4000);
   }
 
   const handleCleanupOrphans = useCallback(async () => {

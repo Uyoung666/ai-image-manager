@@ -59,33 +59,96 @@ function shouldIndex(filePath: string): boolean {
   return true;
 }
 
+// --- pHash (Perceptual Hash) — DCT-based ---
+// Resize → 32×32 grayscale → 2D DCT → top-left 8×8 low-freq → median threshold → 64-bit hex.
+// More robust than aHash against scaling, compression, and brightness changes.
+
+function dct1D(input: Float64Array): Float64Array {
+  const N = input.length;
+  const output = new Float64Array(N);
+  const piOver2N = Math.PI / (2 * N);
+  for (let k = 0; k < N; k++) {
+    let sum = 0;
+    for (let n = 0; n < N; n++) {
+      sum += input[n] * Math.cos((2 * n + 1) * k * piOver2N);
+    }
+    output[k] = sum;
+  }
+  return output;
+}
+
+function dct2D(matrix: Float64Array[], size: number): Float64Array[] {
+  // DCT on rows
+  const rowTransformed: Float64Array[] = [];
+  for (let i = 0; i < size; i++) {
+    rowTransformed.push(dct1D(matrix[i]));
+  }
+  // DCT on columns
+  const result: Float64Array[] = Array.from(
+    { length: size },
+    () => new Float64Array(size)
+  );
+  for (let j = 0; j < size; j++) {
+    const col = new Float64Array(size);
+    for (let i = 0; i < size; i++) {
+      col[i] = rowTransformed[i][j];
+    }
+    const colDct = dct1D(col);
+    for (let i = 0; i < size; i++) {
+      result[i][j] = colDct[i];
+    }
+  }
+  return result;
+}
+
 async function computePHash(filePath: string): Promise<string | null> {
   try {
+    const SIZE = 32;
     const { data } = await sharp(filePath)
-      .resize(16, 16, { fit: "fill" })
+      .resize(SIZE, SIZE, { fit: "fill" })
       .grayscale()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // Average hash: compare each pixel to the mean
-    // data is a Buffer (extends Uint8Array) — convert directly
     const pixels = new Uint8Array(data);
-    let sum = 0;
-    for (let i = 0; i < pixels.length; i++) {
-      sum += pixels[i];
-    }
-    const avg = sum / pixels.length;
 
-    // Build hex hash string
-    let hash = "";
-    for (let i = 0; i < pixels.length; i += 4) {
-      let val = 0;
-      for (let j = 0; j < 4 && i + j < pixels.length; j++) {
-        val = (val << 1) | (pixels[i + j] >= avg ? 1 : 0);
+    // Build 32×32 float matrix
+    const matrix: Float64Array[] = [];
+    for (let i = 0; i < SIZE; i++) {
+      const row = new Float64Array(SIZE);
+      for (let j = 0; j < SIZE; j++) {
+        row[j] = pixels[i * SIZE + j];
       }
-      hash += val.toString(16);
+      matrix.push(row);
     }
-    return hash;
+
+    // 2D DCT
+    const dct = dct2D(matrix, SIZE);
+
+    // Extract top-left 8×8 (lowest frequency coefficients, excluding DC at [0][0])
+    const lowFreq: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 8; j++) {
+        if (i === 0 && j === 0) {
+          continue; // skip DC component
+        }
+        lowFreq.push(dct[i][j]);
+      }
+    }
+
+    // Median threshold
+    const sorted = [...lowFreq].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+
+    // 64-bit hash (63 values from 8×8 minus DC = 63, pad to 64)
+    let hash = 0n;
+    for (let i = 0; i < lowFreq.length; i++) {
+      if (lowFreq[i] > median) {
+        hash |= 1n << BigInt(i);
+      }
+    }
+
+    return hash.toString(16).padStart(16, "0");
   } catch {
     return null;
   }
@@ -165,6 +228,7 @@ async function indexSingleFile(
   const stat = fs.statSync(filePath);
   const meta = await readBasicMeta(filePath);
   if (!meta) {
+    console.warn(`[Indexer] Skipped unreadable file (sharp metadata failed): ${filePath}`);
     return null;
   }
 
@@ -243,7 +307,7 @@ async function indexSingleFile(
 export async function scanFolder(
   folderPath: string,
   onProgress?: ProgressCallback
-): Promise<{ folderId: number; photoIds: number[] }> {
+): Promise<{ folderId: number; photoIds: number[]; skipped: number }> {
   const db = getDatabase();
   isScanning = true;
 
@@ -295,6 +359,7 @@ export async function scanFolder(
   // Index each file
   const photoIds: number[] = [];
   let scanned = 0;
+  let skipped = 0;
 
   for (const file of files) {
     if (!isScanning) {
@@ -312,12 +377,21 @@ export async function scanFolder(
       const photoId = await indexSingleFile(file, folder.id);
       if (photoId) {
         photoIds.push(photoId);
+      } else {
+        skipped++;
       }
     } catch (error) {
       console.error(`[Indexer] Error indexing ${file}:`, error);
+      skipped++;
     }
 
     scanned++;
+  }
+
+  if (skipped > 0) {
+    console.warn(
+      `[Indexer] Folder scan summary: ${photoIds.length} indexed, ${skipped} skipped (${files.length} total files found)`
+    );
   }
 
   // Clean up photos whose files no longer exist on disk
@@ -359,7 +433,7 @@ export async function scanFolder(
   });
 
   isScanning = false;
-  return { folderId: folder.id, photoIds };
+  return { folderId: folder.id, photoIds, skipped };
 }
 
 export function startWatching(
@@ -400,8 +474,17 @@ export function startWatching(
             }
           }
         }
+        // Check if file was already indexed before calling indexSingleFile.
+        // chokidar emits "add" for all existing files on startup — we must
+        // NOT increment photoCount for files that are already in the DB.
+        const alreadyIndexed = db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(eq(photos.path, filePath))
+          .get();
+
         const photoId = await indexSingleFile(filePath, matchedFolderId);
-        if (matchedFolderId && photoId) {
+        if (matchedFolderId && photoId && !alreadyIndexed) {
           db.update(folders)
             .set({ photoCount: sql`photo_count + 1` })
             .where(eq(folders.id, matchedFolderId))

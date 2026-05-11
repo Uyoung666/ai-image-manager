@@ -82,20 +82,19 @@ export async function generateThumbnail(
 
   // L3: generate
   const targetSize = getThumbnailSize(size);
-  const thumbBuffer = await sharp(imagePath)
+  const pipeline = sharp(imagePath, { failOn: "none" })
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 85, effort: 4 })
-    .sharpen({ sigma: 0.5 })
-    .toBuffer();
+    .webp({ quality: 80, effort: 1 });
+  const { data: thumbBuffer, info } = await pipeline
+    .toBuffer({ resolveWithObject: true });
 
   fs.writeFileSync(thumbPath, thumbBuffer);
   memoryCache?.set(cacheKey, thumbBuffer);
 
-  const meta = await sharp(thumbPath).metadata();
   return {
     thumbnailPath: thumbPath,
-    width: meta.width || 0,
-    height: meta.height || 0,
+    width: info.width,
+    height: info.height,
   };
 }
 
@@ -117,4 +116,34 @@ export function getThumbnailSizes(): Record<ThumbSize, number> {
 
 export function clearThumbnailCache(): void {
   memoryCache?.clear();
+}
+
+export function clearThumbnailDiskCache(): {
+  fileCount: number;
+  freedMB: number;
+} {
+  let fileCount = 0;
+  let totalBytes = 0;
+
+  if (thumbnailDir && fs.existsSync(thumbnailDir)) {
+    const entries = fs.readdirSync(thumbnailDir);
+    for (const entry of entries) {
+      const entryPath = path.join(thumbnailDir, entry);
+      try {
+        const stat = fs.statSync(entryPath);
+        totalBytes += stat.size;
+        fs.unlinkSync(entryPath);
+        fileCount++;
+      } catch {
+        /* skip locked / inaccessible files */
+      }
+    }
+  }
+
+  memoryCache?.clear();
+
+  return {
+    fileCount,
+    freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
+  };
 }

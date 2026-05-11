@@ -17,6 +17,8 @@ vi.mock("react-i18next", () => ({
         photosCount: `{{count}} 张照片`,
         photosSelected: " · {{count}} 张已选",
         scanningComplete: "扫描完成，共索引 {{count}} 张照片",
+        scanningSkipped:
+          "扫描完成，共索引 {{count}} 张照片，{{skipped}} 个文件被跳过（非有效图片）",
         scanningPath: "路径: {{path}}",
         noPhotos: "还没有照片，请先添加文件夹",
         photoDetail: "照片详情",

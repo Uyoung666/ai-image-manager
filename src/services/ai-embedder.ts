@@ -158,6 +158,32 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
   }
 }
 
+export async function getPhotoVectors(
+  photoIds: number[]
+): Promise<Map<number, number[]>> {
+  const map = new Map<number, number[]>();
+  if (!(isVectorDBReady && photoTable) || photoIds.length === 0) {
+    return map;
+  }
+  try {
+    const idList = photoIds.join(", ");
+    const rows = (await photoTable
+      .query()
+      .where(`photo_id IN (${idList})`)
+      .toArray()) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const pid = row.photo_id as number;
+      const vec = row.vector as number[];
+      if (pid != null && vec?.length > 0) {
+        map.set(pid, vec);
+      }
+    }
+  } catch (err: any) {
+    console.error("[AI] getPhotoVectors failed:", err?.message);
+  }
+  return map;
+}
+
 // --- Single-image worker embedding (avoids loading vision model in main process) ---
 
 function embedImageInWorker(
@@ -196,7 +222,9 @@ function embedImageInWorker(
     child.on("close", (code) => {
       if (code !== 0) {
         reject(
-          new Error(`Image embed worker exited with code ${code}: ${stderr.slice(-300)}`)
+          new Error(
+            `Image embed worker exited with code ${code}: ${stderr.slice(-300)}`
+          )
         );
       }
     });
@@ -555,7 +583,7 @@ interface EmbedResult {
 
 function runEmbedBatch(
   photos: Array<{ id: number; path: string }>,
-  modelPath: string,
+  modelPath: string
 ): Promise<EmbedResult[]> {
   return new Promise((resolve, reject) => {
     const workerScript = findWorkerScript();
@@ -713,6 +741,59 @@ export async function embedAllPhotos(
     `[AI] Starting embedding for ${total} photos (batch size: ${BATCH_SIZE})`
   );
 
+  // Process a batch with progressive fallback: if the worker crashes (e.g.,
+  // due to a sharp/libvips native assertion on a corrupted image), split the
+  // batch and retry each half. Single-photo batches that crash are skipped.
+  async function processBatch(
+    batch: Array<{ id: number; path: string }>,
+  ): Promise<number> {
+    if (batch.length === 0) return 0;
+
+    try {
+      const results = await runEmbedBatch(batch, _localModelPath!);
+      let count = 0;
+
+      const batchIds = results.filter((r) => r.vector).map((r) => r.id);
+      if (batchIds.length > 0) {
+        try {
+          await photoTable.delete(`photo_id IN (${batchIds.join(", ")})`);
+        } catch {
+          // Best-effort dedup
+        }
+      }
+
+      for (const result of results) {
+        if (result.vector && result.vector.length > 0) {
+          await photoTable.add([
+            { photo_id: result.id, vector: result.vector, created_at: Date.now() },
+          ]);
+          db.update(photos)
+            .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
+            .where(eq(photos.id, result.id))
+            .run();
+          count++;
+        } else if (result.error) {
+          console.warn(
+            `[AI] Photo ${result.id} embedding failed: ${result.error}`
+          );
+        }
+      }
+      return count;
+    } catch (err: any) {
+      // Worker crashed — isolate the problematic photo(s)
+      if (batch.length === 1) {
+        console.warn(
+          `[AI] Skipping photo ${batch[0].id} — worker crash (likely corrupted image): ${err.message}`
+        );
+        return 0;
+      }
+      const mid = Math.floor(batch.length / 2);
+      const left = await processBatch(batch.slice(0, mid));
+      const right = await processBatch(batch.slice(mid));
+      return left + right;
+    }
+  }
+
   // Process in batches, each batch in a fresh child process
   for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
     if (!isEmbedding) {
@@ -730,58 +811,24 @@ export async function embedAllPhotos(
     };
     onProgress?.(currentProgress);
 
-    try {
-      const results = await runEmbedBatch(batch, _localModelPath);
+    const batchCount = await processBatch(batch);
+    processed += batchCount;
 
-      // Deduplicate: delete existing vectors for this batch before inserting
-      const batchIds = results.filter((r) => r.vector).map((r) => r.id);
-      if (batchIds.length > 0) {
-        try {
-          await photoTable.delete(`photo_id IN (${batchIds.join(", ")})`);
-        } catch {
-          // Best-effort dedup — ignore if delete fails
-        }
-      }
-
-      // Store successful results
-      for (const result of results) {
-        if (result.vector && result.vector.length > 0) {
-          await photoTable.add([
-            {
-              photo_id: result.id,
-              vector: result.vector,
-              created_at: Date.now(),
-            },
-          ]);
-
-          db.update(photos)
-            .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
-            .where(eq(photos.id, result.id))
-            .run();
-
-          processed++;
-        } else if (result.error) {
-          console.warn(
-            `[AI] Photo ${result.id} embedding failed in worker: ${result.error}`
-          );
-        }
-      }
-
-      console.log(`[AI] Batch complete: ${processed}/${total}`);
-    } catch (err: any) {
-      // Worker process crashed — log and continue with next batch
-      console.error(`[AI] Worker batch failed: ${err.message}`);
-      // Individual photos in this batch won't be retried automatically;
-      // they'll remain unprocessed for the next run.
+    if (batchCount < batch.length) {
+      console.warn(
+        `[AI] Batch: ${batchCount}/${batch.length} succeeded, ${batch.length - batchCount} skipped`
+      );
     }
+    console.log(`[AI] Batch complete: ${processed}/${total}`);
   }
 
-  currentProgress = {
-    processed,
-    total,
-    phase: "complete",
-    currentFile: "",
-  };
+  // If there were no photos at all, stay in "idle" phase so the UI
+  // allows restarting after the user imports photos.
+  if (total === 0 && totalPhotos === 0) {
+    currentProgress = { processed: 0, total: 0, phase: "idle", currentFile: "" };
+  } else {
+    currentProgress = { processed, total, phase: "complete", currentFile: "" };
+  }
   onProgress?.(currentProgress);
   isEmbedding = false;
 
@@ -816,101 +863,101 @@ export async function embedAllPhotos(
 // produce poor alignment. We translate known Chinese terms to English before
 // embedding to improve search accuracy.
 const ZH_TO_EN_SEARCH: Record<string, string> = {
-  "猫": "cat kitten",
-  "猫咪": "cat kitten",
-  "狗": "dog puppy",
-  "狗狗": "dog puppy",
-  "人": "person people human",
-  "人物": "person people human portrait",
-  "花": "flower blossom",
-  "花卉": "flower blossom",
-  "车": "car vehicle automobile",
-  "汽车": "car vehicle automobile",
-  "建筑": "building architecture",
-  "海": "ocean sea beach water",
-  "海滩": "beach sand ocean",
-  "山": "mountain hill",
-  "山脉": "mountain hill",
-  "树": "tree plant forest",
-  "树木": "tree plant forest",
-  "天空": "sky clouds",
-  "云": "clouds sky",
-  "日落": "sunset evening dusk",
-  "日出": "sunrise dawn morning",
-  "夜景": "night scene dark",
-  "夜晚": "night dark",
-  "食物": "food meal dish",
-  "美食": "food meal dish",
-  "室内": "indoor room inside",
-  "户外": "outdoor outside",
-  "城市": "city urban street",
-  "黑白": "black and white monochrome",
-  "雪": "snow winter cold",
-  "鸟": "bird",
-  "鸟类": "bird",
-  "鱼": "fish underwater",
-  "昆虫": "insect bug",
-  "桥": "bridge",
-  "路": "road street path",
-  "街道": "street road urban",
-  "门": "door entrance",
-  "窗": "window",
-  "桌子": "table desk furniture",
-  "椅子": "chair furniture",
-  "书": "book reading",
-  "书籍": "book reading",
-  "手机": "phone smartphone cellphone",
-  "电脑": "computer laptop pc",
-  "红色": "red color",
-  "蓝色": "blue color",
-  "绿色": "green color",
-  "黄色": "yellow color",
-  "白色": "white color bright",
-  "黑色": "black color dark",
-  "秋天": "autumn fall season",
-  "春天": "spring season",
-  "夏天": "summer season",
-  "冬天": "winter snow season",
-  "风景": "landscape scenery nature",
-  "自然风景": "landscape scenery nature",
-  "人像": "portrait person face",
-  "微距": "macro close-up detail",
-  "逆光": "backlight silhouette",
-  "动物": "animal wildlife",
-  "文字": "text document writing",
-  "截图": "screenshot screen ui",
-  "屏幕截图": "screenshot screen ui",
-  "水": "water lake river ocean",
-  "水面": "water surface reflection",
-  "草地": "grass field meadow green",
-  "沙滩": "beach sand shore",
-  "夕阳": "sunset evening dusk",
-  "森林": "forest woods trees nature",
-  "花园": "garden flowers park",
-  "湖": "lake water reflection",
-  "湖泊": "lake water reflection",
-  "河": "river stream water",
-  "河流": "river stream water",
-  "雾": "fog mist atmosphere",
-  "飞机": "airplane aircraft sky",
-  "船": "boat ship water",
-  "自行车": "bicycle bike",
-  "摩托车": "motorcycle bike",
-  "花海": "flower field garden colorful",
-  "红叶": "red leaf autumn fall",
-  "雪景": "snow winter landscape white",
-  "蓝天": "blue sky clear",
-  "白云": "white clouds sky",
-  "绿树": "green tree forest",
-  "大海": "ocean sea blue water",
-  "高山": "tall mountain peak",
-  "小溪": "stream creek water",
-  "瀑布": "waterfall water cascade",
-  "彩虹": "rainbow sky colorful",
-  "闪电": "lightning storm sky",
-  "星空": "starry night sky stars",
-  "月亮": "moon night sky",
-  "太阳": "sun bright sky daytime",
+  猫: "cat kitten",
+  猫咪: "cat kitten",
+  狗: "dog puppy",
+  狗狗: "dog puppy",
+  人: "person people human",
+  人物: "person people human portrait",
+  花: "flower blossom",
+  花卉: "flower blossom",
+  车: "car vehicle automobile",
+  汽车: "car vehicle automobile",
+  建筑: "building architecture",
+  海: "ocean sea beach water",
+  海滩: "beach sand ocean",
+  山: "mountain hill",
+  山脉: "mountain hill",
+  树: "tree plant forest",
+  树木: "tree plant forest",
+  天空: "sky clouds",
+  云: "clouds sky",
+  日落: "sunset evening dusk",
+  日出: "sunrise dawn morning",
+  夜景: "night scene dark",
+  夜晚: "night dark",
+  食物: "food meal dish",
+  美食: "food meal dish",
+  室内: "indoor room inside",
+  户外: "outdoor outside",
+  城市: "city urban street",
+  黑白: "black and white monochrome",
+  雪: "snow winter cold",
+  鸟: "bird",
+  鸟类: "bird",
+  鱼: "fish underwater",
+  昆虫: "insect bug",
+  桥: "bridge",
+  路: "road street path",
+  街道: "street road urban",
+  门: "door entrance",
+  窗: "window",
+  桌子: "table desk furniture",
+  椅子: "chair furniture",
+  书: "book reading",
+  书籍: "book reading",
+  手机: "phone smartphone cellphone",
+  电脑: "computer laptop pc",
+  红色: "red color",
+  蓝色: "blue color",
+  绿色: "green color",
+  黄色: "yellow color",
+  白色: "white color bright",
+  黑色: "black color dark",
+  秋天: "autumn fall season",
+  春天: "spring season",
+  夏天: "summer season",
+  冬天: "winter snow season",
+  风景: "landscape scenery nature",
+  自然风景: "landscape scenery nature",
+  人像: "portrait person face",
+  微距: "macro close-up detail",
+  逆光: "backlight silhouette",
+  动物: "animal wildlife",
+  文字: "text document writing",
+  截图: "screenshot screen ui",
+  屏幕截图: "screenshot screen ui",
+  水: "water lake river ocean",
+  水面: "water surface reflection",
+  草地: "grass field meadow green",
+  沙滩: "beach sand shore",
+  夕阳: "sunset evening dusk",
+  森林: "forest woods trees nature",
+  花园: "garden flowers park",
+  湖: "lake water reflection",
+  湖泊: "lake water reflection",
+  河: "river stream water",
+  河流: "river stream water",
+  雾: "fog mist atmosphere",
+  飞机: "airplane aircraft sky",
+  船: "boat ship water",
+  自行车: "bicycle bike",
+  摩托车: "motorcycle bike",
+  花海: "flower field garden colorful",
+  红叶: "red leaf autumn fall",
+  雪景: "snow winter landscape white",
+  蓝天: "blue sky clear",
+  白云: "white clouds sky",
+  绿树: "green tree forest",
+  大海: "ocean sea blue water",
+  高山: "tall mountain peak",
+  小溪: "stream creek water",
+  瀑布: "waterfall water cascade",
+  彩虹: "rainbow sky colorful",
+  闪电: "lightning storm sky",
+  星空: "starry night sky stars",
+  月亮: "moon night sky",
+  太阳: "sun bright sky daytime",
 };
 
 export async function searchByText(
@@ -964,7 +1011,10 @@ export async function searchByText(
     );
   }
 
-  // Translate Chinese queries to English for better CLIP alignment
+  // Translate Chinese queries to English for better CLIP alignment.
+  // CLIP ViT-B/32 was trained on natural-language image captions, not keyword
+  // lists. We wrap translated terms in a CLIP-friendly prompt template and
+  // deduplicate repeated words to produce cleaner embeddings.
   let searchText = query.trim();
   const hasChinese = /[一-鿿]/.test(searchText);
   if (hasChinese) {
@@ -974,12 +1024,27 @@ export async function searchByText(
       (a, b) => b.length - a.length
     );
     for (const zh of sortedKeys) {
-      if (searchText.includes(zh)) {
-        translated = translated.replace(new RegExp(zh, "g"), ZH_TO_EN_SEARCH[zh]);
+      if (translated.includes(zh)) {
+        translated = translated.replace(
+          new RegExp(zh, "g"),
+          ZH_TO_EN_SEARCH[zh]
+        );
       }
     }
-    console.log(`[AI] searchByText: zh→en "${searchText}" → "${translated}"`);
-    searchText = translated;
+    // Deduplicate repeated keywords from overlapping translations
+    const words = translated.split(/\s+/);
+    const seen = new Set<string>();
+    const unique = words.filter((w) => {
+      const lower = w.toLowerCase();
+      if (seen.has(lower)) {
+        return false;
+      }
+      seen.add(lower);
+      return true;
+    });
+    // Wrap in CLIP prompt template for better alignment with training distribution
+    searchText = `A photo showing ${unique.join(" ")}`;
+    console.log(`[AI] searchByText: zh→en "${query.trim()}" → "${searchText}"`);
   }
 
   const queryVector = await embeddingModel.embedText(searchText);
@@ -1060,8 +1125,7 @@ export async function searchByText(
         const scored = (allRows as Array<Record<string, unknown>>)
           .filter(
             (r) =>
-              Array.isArray(r.vector) &&
-              r.vector.length === queryVector.length
+              Array.isArray(r.vector) && r.vector.length === queryVector.length
           )
           .map((r) => {
             const vec = r.vector as number[];
@@ -1243,9 +1307,15 @@ let cachedTagEmbeddings: Array<{
   vector: number[];
 }> | null = null;
 
+// In-memory LRU cache for recently queried image vectors (tag suggestion).
+// Avoids repeated LanceDB lookups or worker embedding for the same photo.
+const imageVecCache = new Map<number, number[]>();
+const IMAGE_VEC_CACHE_MAX = 100;
+
 export async function suggestTags(
   imagePath: string,
-  threshold = 0.28
+  threshold = 0.28,
+  photoId?: number
 ): Promise<Array<{ tag: string; confidence: number }>> {
   try {
     await loadModel();
@@ -1276,10 +1346,7 @@ export async function suggestTags(
         const textVec = await embeddingModel.embedText(en);
         fresh.push({ tag: en, displayName: zh, vector: textVec });
       } catch (err: any) {
-        console.error(
-          `[AI] Tag embedding failed for "${en}":`,
-          err?.message
-        );
+        console.error(`[AI] Tag embedding failed for "${en}":`, err?.message);
       }
     }
     if (fresh.length > 0) {
@@ -1290,14 +1357,56 @@ export async function suggestTags(
     );
   }
 
-  // Image embedding via worker process — keeps WASM heap within limits
-  // by isolating the vision model (~89MB ONNX) in a child process.
-  let imageVec: number[];
-  try {
-    imageVec = await embedImageInWorker(imagePath, _localModelPath);
-  } catch (err: any) {
-    console.error("[AI] suggestTags: image embedding failed:", err?.message);
-    return [];
+  // Resolve image vector: check in-memory cache → LanceDB → worker embedding
+  let imageVec: number[] | null = null;
+
+  if (photoId != null) {
+    // 1) In-memory LRU cache
+    const cached = imageVecCache.get(photoId);
+    if (cached) {
+      imageVec = cached;
+    }
+  }
+
+  if (!imageVec && photoId != null) {
+    // 2) LanceDB lookup (already-computed embedding from embedAllPhotos)
+    try {
+      await initVectorDB();
+      const vectors = await getPhotoVectors([photoId]);
+      const vec = vectors.get(photoId);
+      if (vec) {
+        imageVec = vec;
+        // Promote to in-memory cache
+        if (imageVecCache.size >= IMAGE_VEC_CACHE_MAX) {
+          const firstKey = imageVecCache.keys().next().value;
+          if (firstKey !== undefined) {
+            imageVecCache.delete(firstKey);
+          }
+        }
+        imageVecCache.set(photoId, vec);
+      }
+    } catch {
+      // LanceDB unavailable — fall through to worker
+    }
+  }
+
+  if (!imageVec) {
+    // 3) Worker embedding (no cached vector available)
+    try {
+      imageVec = await embedImageInWorker(imagePath, _localModelPath);
+      if (photoId != null && imageVec) {
+        if (imageVecCache.size >= IMAGE_VEC_CACHE_MAX) {
+          const firstKey = imageVecCache.keys().next().value;
+          if (firstKey !== undefined) {
+            imageVecCache.delete(firstKey);
+          }
+        }
+        imageVecCache.set(photoId, imageVec);
+      }
+    } catch (err: any) {
+      console.error("[AI] suggestTags: image embedding failed:", err?.message);
+      return [];
+    }
   }
 
   const results: Array<{ tag: string; confidence: number }> = [];

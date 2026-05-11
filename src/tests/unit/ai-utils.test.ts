@@ -54,14 +54,24 @@ describe("cosineSimilarity", () => {
   });
 });
 
-// hammingDistance (as used in handlers.ts for duplicate detection)
+// hammingDistance — BigInt implementation matching handlers.ts
 function hammingDistance(a: string, b: string): number {
-  let dist = 0;
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    const xor = Number.parseInt(a[i], 16) ^ Number.parseInt(b[i], 16);
-    dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
+  if (a.length !== b.length) {
+    return 64;
   }
-  return dist;
+  try {
+    const va = BigInt(`0x${a}`);
+    const vb = BigInt(`0x${b}`);
+    let xor = va ^ vb;
+    let dist = 0;
+    while (xor > 0n) {
+      dist += Number(xor & 1n);
+      xor >>= 1n;
+    }
+    return dist;
+  } catch {
+    return 64;
+  }
 }
 
 describe("hammingDistance", () => {
@@ -85,8 +95,8 @@ describe("hammingDistance", () => {
     expect(hammingDistance(a, b)).toBe(hammingDistance(b, a));
   });
 
-  it("handles different-length strings gracefully", () => {
-    expect(() => hammingDistance("abc", "abcdef123")).not.toThrow();
+  it("returns 64 (max) for different-length phash strings", () => {
+    expect(hammingDistance("abc", "abcdef123")).toBe(64);
   });
 
   it("returns small distance for visually similar phashes", () => {

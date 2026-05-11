@@ -1,6 +1,7 @@
 import {
   addTag,
   cleanupOrphanPhotos,
+  clearThumbCache,
   convertPhotos,
   deleteFolder,
   deletePhoto,
@@ -32,6 +33,7 @@ import {
 export const photos = {
   addTag,
   cleanupOrphanPhotos,
+  clearThumbCache,
   convertPhotos,
   deleteFolder,
   deletePhoto,

@@ -43,6 +43,8 @@ i18n.use(initReactI18next).init({
         scanningPath: "路径: {{path}}",
         scanningProgress: "已扫描 {{scanned}} / {{total}} 张",
         scanningComplete: "扫描完成，共索引 {{count}} 张照片",
+        scanningSkipped:
+          "扫描完成，共索引 {{count}} 张照片，{{skipped}} 个文件被跳过（非有效图片）",
         aiIndexingStarted: "AI 索引已启动...",
         aiIndexedCount: "已 AI 索引 {{count}} 张照片",
 
@@ -138,6 +140,8 @@ i18n.use(initReactI18next).init({
         scanningPath: "Path: {{path}}",
         scanningProgress: "Scanned {{scanned}} / {{total}}",
         scanningComplete: "Scan complete, {{count}} photos indexed",
+        scanningSkipped:
+          "Scan complete, {{count}} photos indexed, {{skipped}} files skipped (invalid images)",
         aiIndexingStarted: "AI indexing started...",
         aiIndexedCount: "AI indexed {{count}} photos",
 

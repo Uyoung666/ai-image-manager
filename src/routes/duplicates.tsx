@@ -11,6 +11,7 @@ interface DupPhoto {
 }
 
 interface DuplicatePair {
+  clipSimilarity?: number;
   distance: number;
   photoA: DupPhoto;
   photoB: DupPhoto;
@@ -150,6 +151,11 @@ function DuplicatesPage() {
                 <span className="font-[510] text-muted-foreground text-[11px]">
                   相似度: {Math.round((1 - pair.distance / 64) * 100)}%
                   &nbsp;&nbsp;汉明距离: {pair.distance}
+                  {pair.clipSimilarity != null && (
+                    <span className="text-[#46a758]">
+                      &nbsp;&nbsp;CLIP: {Math.round(pair.clipSimilarity * 100)}%
+                    </span>
+                  )}
                 </span>
                 <button
                   className="text-[#6b6b75] text-[11px] hover:text-muted-foreground"
