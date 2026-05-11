@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BatchRenameDialog } from "@/components/BatchRenameDialog";
+import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
@@ -61,6 +63,8 @@ function HomePage() {
     photoId: null,
     photoPath: null,
   });
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -355,6 +359,34 @@ function HomePage() {
     setSelectedIds(new Set());
   }
 
+  async function handleRenameSelected(pattern: string) {
+    const ids = Array.from(selectedIds);
+    const result = await ipc.client.photos.renamePhotos({
+      ids,
+      pattern,
+    });
+    // Reload photos to reflect new names
+    loadPhotos();
+    return result as { renamed: number; errors: number; results: Array<{ id: number; oldName: string; newName: string; error?: string }> };
+  }
+
+  async function handleConvertSelected(options: {
+    format: "jpg" | "png" | "webp" | "avif";
+    quality: number;
+    maxWidth: number;
+    outputDir: string;
+  }) {
+    const ids = Array.from(selectedIds);
+    const result = await ipc.client.photos.convertPhotos({
+      ids,
+      format: options.format,
+      quality: options.quality,
+      maxWidth: options.maxWidth || undefined,
+      outputDir: options.outputDir,
+    });
+    return result as { converted: number; outputDir: string };
+  }
+
   async function handleImageSearch(imagePath: string) {
     setSearchQuery("[以图搜图]");
     try {
@@ -367,6 +399,74 @@ function HomePage() {
       /* ignore */
     }
   }
+
+  // Keyboard shortcuts for batch operations
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Don't intercept when typing in inputs
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
+
+      // Ctrl+A: Select all visible photos
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        setSelectedIds(new Set(photos.map((p) => p.id)));
+        return;
+      }
+
+      // Delete: Delete selected photos
+      if (e.key === "Delete" && selectedIds.size > 0) {
+        e.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      // F2: Rename selected photos
+      if (e.key === "F2" && selectedIds.size > 0) {
+        e.preventDefault();
+        setRenameDialogOpen(true);
+        return;
+      }
+
+      // Ctrl+Shift+E: Export selected
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "E") {
+        e.preventDefault();
+        if (selectedIds.size > 0) {
+          handleExportSelected();
+        }
+        return;
+      }
+
+      // Ctrl+Shift+C: Convert selected
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        if (selectedIds.size > 0) {
+          setConvertDialogOpen(true);
+        }
+        return;
+      }
+
+      // Escape: Clear selection and close dialogs
+      if (e.key === "Escape") {
+        if (renameDialogOpen) {
+          setRenameDialogOpen(false);
+          return;
+        }
+        if (convertDialogOpen) {
+          setConvertDialogOpen(false);
+          return;
+        }
+        if (selectedIds.size > 0) {
+          setSelectedIds(new Set());
+          return;
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [photos, selectedIds, renameDialogOpen, convertDialogOpen]);
 
   const hasPhotos = photos.length > 0 || (loading && photos.length === 0);
 
@@ -386,21 +486,33 @@ function HomePage() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
+          imageSearchActive={searchQuery.startsWith("[以图搜图]")}
           onClear={() => {
             setSearchQuery("");
             loadPhotos();
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
+          resultCount={searchQuery ? photos.length : undefined}
         />
         {hasPhotos ? (
           <div className="flex min-h-0 flex-1">
             <PhotoGrid
               loading={loading}
               onContextMenu={handleContextMenu}
+              onConvertSelected={
+                selectedIds.size > 0
+                  ? () => setConvertDialogOpen(true)
+                  : undefined
+              }
               onDeleteSelected={handleDeleteSelected}
               onDoubleClick={handleDoubleClick}
               onExportSelected={handleExportSelected}
+              onRenameSelected={
+                selectedIds.size > 0
+                  ? () => setRenameDialogOpen(true)
+                  : undefined
+              }
               onSelect={handleSelect}
               photos={photos}
               searchQuery={searchQuery}
@@ -435,6 +547,25 @@ function HomePage() {
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
+      />
+      <BatchRenameDialog
+        onClose={() => {
+          setRenameDialogOpen(false);
+          setSelectedIds(new Set());
+        }}
+        onRename={handleRenameSelected}
+        open={renameDialogOpen}
+        photoCount={selectedIds.size}
+        sampleFilename={photos[0]?.filename ?? "photo.jpg"}
+      />
+      <FormatConvertDialog
+        onClose={() => {
+          setConvertDialogOpen(false);
+          setSelectedIds(new Set());
+        }}
+        onConvert={handleConvertSelected}
+        open={convertDialogOpen}
+        photoCount={selectedIds.size}
       />
     </div>
   );

@@ -16,9 +16,11 @@ interface Photo {
 interface PhotoGridProps {
   loading: boolean;
   onContextMenu: (e: React.MouseEvent) => void;
+  onConvertSelected?: () => void;
   onDeleteSelected?: () => void;
   onDoubleClick: (id: number) => void;
   onExportSelected?: () => void;
+  onRenameSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   photos: Photo[];
   searchQuery?: string;
@@ -58,8 +60,10 @@ export function PhotoGrid({
   onSelect,
   onDoubleClick,
   onContextMenu,
+  onConvertSelected,
   onDeleteSelected,
   onExportSelected,
+  onRenameSelected,
 }: PhotoGridProps) {
   const { t } = useTranslation();
   const [densityIdx, setDensityIdx] = useState(1); // default "中" / 220px
@@ -174,6 +178,22 @@ export function PhotoGrid({
             t("photosSelected", { count: selectedIds.size })}
         </span>
         <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && onRenameSelected && (
+            <button
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              onClick={onRenameSelected}
+            >
+              {compact ? "重命名" : `重命名 (${selectedIds.size})`}
+            </button>
+          )}
+          {selectedIds.size > 0 && onConvertSelected && (
+            <button
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              onClick={onConvertSelected}
+            >
+              {compact ? "转换" : `格式转换 (${selectedIds.size})`}
+            </button>
+          )}
           {selectedIds.size > 0 && onExportSelected && (
             <button
               className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"

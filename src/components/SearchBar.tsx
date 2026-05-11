@@ -1,6 +1,6 @@
-import { Clock, Filter, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 
 const HISTORY_KEY = "search_history";
 const MAX_HISTORY = 20;
@@ -38,24 +38,30 @@ export interface ExifFilters {
 }
 
 interface SearchBarProps {
+  imageSearchActive?: boolean;
   onClear: () => void;
   onImageSearch?: (imagePath: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
+  resultCount?: number;
 }
 
 export function SearchBar({
+  imageSearchActive,
   onSearch,
   onClear,
   onImageSearch,
+  resultCount,
 }: SearchBarProps) {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(imageSearchActive ? "[以图搜图]" : "");
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [showHistory, setShowHistory] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [locallyDragging, setLocallyDragging] = useState(false);
 
   // Filter state
   const [filters, setFilters] = useState<ExifFilters>({});
@@ -225,18 +231,49 @@ export function SearchBar({
             )}
           </form>
 
-          <button
-            className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
-              showFilters || hasActiveFilters
-                ? "bg-primary/10 text-primary"
-                : "text-[#6b6b75] hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => setShowFilters((prev) => !prev)}
-            title="EXIF 筛选"
-          >
-            <Filter className="h-4 w-4" />
-          </button>
-        </div>
+          {onImageSearch && (
+              <>
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const filePath = (file as any).path;
+                      if (filePath) {
+                        onImageSearch(filePath);
+                      }
+                    }
+                    e.target.value = "";
+                  }}
+                  ref={fileInputRef}
+                  type="file"
+                />
+                <button
+                  className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
+                    imageSearchActive
+                      ? "bg-primary/10 text-primary"
+                      : "text-[#6b6b75] hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="以图搜图 — 选择参考图片寻找相似照片"
+                >
+                  <ImageUp className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            <button
+              className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
+                showFilters || hasActiveFilters
+                  ? "bg-primary/10 text-primary"
+                  : "text-[#6b6b75] hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => setShowFilters((prev) => !prev)}
+              title="EXIF 筛选"
+            >
+              <Filter className="h-4 w-4" />
+            </button>
+          </div>
 
         {/* Active filter chips */}
         {hasActiveFilters && !showFilters && (
