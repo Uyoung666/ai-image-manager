@@ -207,7 +207,11 @@ async function loadModel(): Promise<void> {
   }
 
   env.allowRemoteModels = true;
-  console.log("[AI] Using ONNX Web (WASM) backend — no native dependencies");
+  // Prevent WASM memory exhaustion when loading both vision (89MB) and text (64MB)
+  // models in the same process. Single-threaded mode avoids SharedArrayBuffer workers
+  // that can crash the Electron main process.
+  env.backends.onnx.wasm.numThreads = 1;
+  console.log("[AI] Using ONNX Web (WASM) backend — single-threaded");
 
   const modelId = "Xenova/clip-vit-base-patch32";
   const processor = await AutoProcessor.from_pretrained(modelId);
@@ -222,6 +226,8 @@ async function loadModel(): Promise<void> {
     embedImage: async (imagePath: string) => {
       const image = await RawImage.read(imagePath);
       const inputs = await processor(image);
+      // Use visionModel directly instead of the combined CLIPModel to avoid
+      // "Missing input_ids" errors from the monolithic ONNX file.
       const output = await visionModel(inputs);
       try {
         const { image_embeds } = output;
@@ -567,7 +573,9 @@ export async function searchByText(
   console.log(`[AI] searchByText: query="${query}" vecLen=${queryVector.length}`);
 
   const rawResults = await photoTable.search(queryVector).limit(limit).execute();
-  const results = rawResults as Array<Record<string, unknown>>;
+  const results: Array<Record<string, unknown>> = Array.isArray(rawResults)
+    ? (rawResults as Array<Record<string, unknown>>)
+    : [];
 
   console.log(
     `[AI] searchByText: LanceDB returned ${results.length} results` +
@@ -575,6 +583,10 @@ export async function searchByText(
         ? `, top distance=${results[0]._distance}`
         : "")
   );
+
+  if (results.length === 0) {
+    return [];
+  }
 
   return results.map((r: Record<string, unknown>) => {
     const distance = r._distance as number;
@@ -610,7 +622,14 @@ export async function searchByImage(
   }
 
   const queryVector = await embeddingModel.embedImage(imagePath);
-  const results = await photoTable.search(queryVector).limit(limit).execute();
+  const rawResults = await photoTable.search(queryVector).limit(limit).execute();
+  const results: Array<Record<string, unknown>> = Array.isArray(rawResults)
+    ? (rawResults as Array<Record<string, unknown>>)
+    : [];
+
+  if (results.length === 0) {
+    return [];
+  }
 
   return results.map((r: Record<string, unknown>) => {
     const distance = r._distance as number;
@@ -687,7 +706,14 @@ export async function suggestTags(
     console.log(`[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`);
   }
 
-  const imageVec = await embeddingModel.embedImage(imagePath);
+  let imageVec: number[];
+  try {
+    imageVec = await embeddingModel.embedImage(imagePath);
+  } catch (err: any) {
+    console.error("[AI] suggestTags: image embedding failed:", err?.message);
+    return [];
+  }
+
   const results: Array<{ tag: string; confidence: number }> = [];
 
   if (cachedTagEmbeddings) {
