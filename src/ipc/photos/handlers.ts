@@ -863,7 +863,7 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
   try {
-    const suggestions = await aiSuggestTags(photo.path, 0.22);
+    const suggestions = await aiSuggestTags(photo.path, 0.25);
     return { photoId: input.id, suggestions };
   } catch {
     return { photoId: input.id, suggestions: [] };

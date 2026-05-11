@@ -111,6 +111,7 @@ export async function initVectorDB(): Promise<void> {
           await photoTable.createIndex("vector", {
             config: lancedb.Index.ivfPq({
               numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+              distanceType: "cosine",
             }),
           });
           console.log("[AI] Vector index created");
@@ -862,6 +863,7 @@ export async function embedAllPhotos(
         await photoTable.createIndex("vector", {
           config: LIdx.ivfPq({
             numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+            distanceType: "cosine",
           }),
         });
         console.log("[AI] Vector index built successfully");
@@ -914,6 +916,7 @@ export async function searchByText(
         await photoTable.createIndex("vector", {
           config: LIdx.ivfPq({
             numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+            distanceType: "cosine",
           }),
         });
         console.log("[AI] Vector index created for search");
@@ -934,19 +937,32 @@ export async function searchByText(
   let rawResults: Array<Record<string, unknown>> = [];
 
   try {
-    // Use vectorSearch() with toArray() — LanceDB JS v0.18 API
-    const vq = photoTable.vectorSearch(queryVector).limit(limit);
+    // Cosine distance + refineFactor for accurate ranking.
+    // refineFactor(5) fetches 5× candidates, then re-ranks with uncompressed
+    // vectors to correct IVF_PQ quantization errors. For small datasets we
+    // skip the index and use exact flat search.
+    const rowCount = await photoTable.countRows();
+    const vq = photoTable
+      .vectorSearch(queryVector)
+      .distanceType("cosine")
+      .refineFactor(rowCount < 1000 ? 0 : 5)
+      .limit(limit);
     rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
   } catch (err: any) {
     console.error("[AI] vectorSearch failed:", err?.message);
   }
 
-  console.log(
-    `[AI] searchByText: LanceDB returned ${rawResults.length} results` +
-      (rawResults.length > 0 ? `, top distance=${rawResults[0]._distance}` : "")
-  );
+  if (rawResults.length > 0) {
+    const top5 = rawResults
+      .slice(0, 5)
+      .map((r) => Math.round((r._distance as number) * 10_000) / 10_000);
+    console.log(
+      `[AI] searchByText: LanceDB returned ${rawResults.length} results` +
+        `, top-5 cosine-distances=[${top5.join(", ")}]`
+    );
+  }
 
-  // Fallback: if vectorSearch returns 0 but table has data, try brute-force via query()
+  // Fallback: brute-force scan when vectorSearch returns nothing
   if (rawResults.length === 0) {
     const rowCount = await photoTable.countRows();
     if (rowCount > 1) {
@@ -958,15 +974,17 @@ export async function searchByText(
         const scored = (allRows as Array<Record<string, unknown>>)
           .filter(
             (r) =>
-              Array.isArray(r.vector) && r.vector.length === queryVector.length
+              Array.isArray(r.vector) &&
+              r.vector.length === queryVector.length
           )
           .map((r) => {
             const vec = r.vector as number[];
+            // Normalized vectors: dot = cosine similarity, 1-dot = cosine distance
             let dot = 0;
             for (let i = 0; i < vec.length; i++) {
               dot += vec[i] * queryVector[i];
             }
-            return { ...r, _distance: 1 - dot }; // cosine distance approximation
+            return { ...r, _distance: 1 - dot };
           })
           .sort((a, b) => (a._distance as number) - (b._distance as number))
           .slice(0, limit);
@@ -987,9 +1005,11 @@ export async function searchByText(
     return [];
   }
 
+  // cosine distance ∈ [0, 2]: 0 = identical, 1 = orthogonal, 2 = opposite.
+  // Cosine similarity = 1 - cosine_distance
   return rawResults.map((r: Record<string, unknown>) => {
-    const distance = r._distance as number;
-    const similarity = 1 / (1 + distance);
+    const cosDist = r._distance as number;
+    const similarity = Math.max(0, 1 - cosDist);
     return {
       photoId: r.photo_id as number,
       similarity: Math.round(similarity * 10_000) / 10_000,
@@ -1026,7 +1046,10 @@ export async function searchByImage(
     return [];
   }
 
-  const vq = photoTable.vectorSearch(queryVector).limit(limit);
+  const vq = photoTable
+    .vectorSearch(queryVector)
+    .distanceType("cosine")
+    .limit(limit);
   const rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
 
   if (rawResults.length === 0) {
@@ -1034,8 +1057,8 @@ export async function searchByImage(
   }
 
   return rawResults.map((r: Record<string, unknown>) => {
-    const distance = r._distance as number;
-    const similarity = 1 / (1 + distance);
+    const cosDist = r._distance as number;
+    const similarity = Math.max(0, 1 - cosDist);
     return {
       photoId: r.photo_id as number,
       similarity: Math.round(similarity * 10_000) / 10_000,
@@ -1044,59 +1067,69 @@ export async function searchByImage(
 }
 
 // --- Zero-shot tag suggestion ---
+//
+// CLIP ViT-B/32 was trained on English image-text pairs. English tags
+// produce far better alignment with image embeddings than Chinese tags.
+// We embed English text but display Chinese labels to the user.
 
-const CANDIDATE_TAGS = [
+const CANDIDATE_TAGS: Array<{ en: string; zh: string }> = [
   // Scenes
-  "室内",
-  "户外",
-  "城市",
-  "自然风景",
-  "海滩",
-  "山脉",
-  "森林",
-  "街道",
-  "建筑",
-  "花园",
-  "田野",
-  "湖泊",
-  "河流",
-  "天空",
-  "夜景",
+  { en: "indoor room", zh: "室内" },
+  { en: "outdoor outside", zh: "户外" },
+  { en: "city urban", zh: "城市" },
+  { en: "nature landscape scenery", zh: "自然风景" },
+  { en: "beach ocean sea", zh: "海滩" },
+  { en: "mountain hill", zh: "山脉" },
+  { en: "forest woods trees", zh: "森林" },
+  { en: "street road", zh: "街道" },
+  { en: "architecture building", zh: "建筑" },
+  { en: "garden flowers", zh: "花园" },
+  { en: "field meadow grass", zh: "田野" },
+  { en: "lake water", zh: "湖泊" },
+  { en: "river stream", zh: "河流" },
+  { en: "sky clouds", zh: "天空" },
+  { en: "night scene dark", zh: "夜景" },
   // Subjects
-  "人物",
-  "动物",
-  "猫咪",
-  "狗狗",
-  "鸟类",
-  "汽车",
-  "花卉",
-  "食物",
-  "树木",
-  "水面",
-  "文字",
-  "屏幕截图",
-  "文档",
+  { en: "person people human", zh: "人物" },
+  { en: "animal wildlife", zh: "动物" },
+  { en: "cat kitten", zh: "猫咪" },
+  { en: "dog puppy", zh: "狗狗" },
+  { en: "bird", zh: "鸟类" },
+  { en: "car vehicle automobile", zh: "汽车" },
+  { en: "flower blossom", zh: "花卉" },
+  { en: "food meal dish", zh: "食物" },
+  { en: "tree plant", zh: "树木" },
+  { en: "water surface reflection", zh: "水面" },
+  { en: "text document writing", zh: "文字" },
+  { en: "screenshot screen ui", zh: "屏幕截图" },
+  { en: "document paper", zh: "文档" },
+  // Objects
+  { en: "cup glass mug drink beverage", zh: "杯具饮品" },
+  { en: "phone smartphone cellphone", zh: "手机" },
+  { en: "computer laptop pc", zh: "电脑" },
+  { en: "book reading", zh: "书籍" },
+  { en: "chair table furniture", zh: "家具" },
   // Time / Lighting
-  "白天",
-  "夜晚",
-  "黄昏",
-  "日出",
-  "日落",
-  "逆光",
+  { en: "daytime sunny bright", zh: "白天" },
+  { en: "night dark", zh: "夜晚" },
+  { en: "sunset dusk evening", zh: "黄昏" },
+  { en: "sunrise dawn morning", zh: "日出" },
+  { en: "sunset evening", zh: "日落" },
+  { en: "backlight silhouette", zh: "逆光" },
   // Style
-  "黑白",
-  "鲜艳",
-  "暗调",
-  "亮调",
-  "微距",
-  "虚化背景",
+  { en: "black and white monochrome", zh: "黑白" },
+  { en: "vivid colorful saturated", zh: "鲜艳" },
+  { en: "dark moody low key", zh: "暗调" },
+  { en: "bright high key", zh: "亮调" },
+  { en: "macro close-up detail", zh: "微距" },
+  { en: "blurred background bokeh depth of field", zh: "虚化背景" },
   // Colors
-  "红色调",
-  "蓝色调",
-  "绿色调",
-  "黄色调",
-  "白色调",
-  "黑色调",
+  { en: "red color", zh: "红色调" },
+  { en: "blue color", zh: "蓝色调" },
+  { en: "green color", zh: "绿色调" },
+  { en: "yellow color", zh: "黄色调" },
+  { en: "white color", zh: "白色调" },
+  { en: "black color", zh: "黑色调" },
 ];
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -1112,11 +1145,15 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // Pre-computed text embeddings for candidate tags (computed once after model load)
-let cachedTagEmbeddings: Array<{ tag: string; vector: number[] }> | null = null;
+let cachedTagEmbeddings: Array<{
+  tag: string;
+  displayName: string;
+  vector: number[];
+}> | null = null;
 
 export async function suggestTags(
   imagePath: string,
-  threshold = 0.22
+  threshold = 0.25
 ): Promise<Array<{ tag: string; confidence: number }>> {
   try {
     await loadModel();
@@ -1134,22 +1171,30 @@ export async function suggestTags(
     _localModelPath = await ensureLocalModel();
   }
 
-  // Pre-compute tag text embeddings once (main process, text model only)
+  // Pre-compute tag text embeddings once (main process, text model only).
+  // Embed English text for CLIP compatibility; display Chinese to the user.
   if (cachedTagEmbeddings === null) {
-    const fresh: Array<{ tag: string; vector: number[] }> = [];
-    for (const tag of CANDIDATE_TAGS) {
+    const fresh: Array<{
+      tag: string;
+      displayName: string;
+      vector: number[];
+    }> = [];
+    for (const { en, zh } of CANDIDATE_TAGS) {
       try {
-        const textVec = await embeddingModel.embedText(tag);
-        fresh.push({ tag, vector: textVec });
+        const textVec = await embeddingModel.embedText(en);
+        fresh.push({ tag: en, displayName: zh, vector: textVec });
       } catch (err: any) {
-        console.error(`[AI] Tag embedding failed for "${tag}":`, err?.message);
+        console.error(
+          `[AI] Tag embedding failed for "${en}":`,
+          err?.message
+        );
       }
     }
     if (fresh.length > 0) {
       cachedTagEmbeddings = fresh;
     }
     console.log(
-      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`
+      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (English text)`
     );
   }
 
@@ -1166,10 +1211,13 @@ export async function suggestTags(
   const results: Array<{ tag: string; confidence: number }> = [];
 
   if (cachedTagEmbeddings) {
-    for (const { tag, vector } of cachedTagEmbeddings) {
+    for (const { displayName, vector } of cachedTagEmbeddings) {
       const sim = cosineSimilarity(imageVec, vector);
       if (sim >= threshold) {
-        results.push({ tag, confidence: Math.round(sim * 100) / 100 });
+        results.push({
+          tag: displayName,
+          confidence: Math.round(sim * 100) / 100,
+        });
       }
     }
   }
