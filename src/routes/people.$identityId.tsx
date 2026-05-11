@@ -76,8 +76,8 @@ function PersonDetailPage() {
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <span className="font-[590] text-[18px] text-primary">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <span className="font-[590] text-[18px] text-muted-foreground">
               {(identity?.name || "?")[0]}
             </span>
           </div>

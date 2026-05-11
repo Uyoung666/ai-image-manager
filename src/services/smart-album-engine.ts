@@ -276,9 +276,11 @@ function evaluateRule(rule: SmartRule): number[] {
 
 function intersectIds(idSets: number[][]): number[] {
   if (!idSets.length) return [];
-  let result = idSets[0];
-  for (let i = 1; i < idSets.length; i++) {
-    const set = new Set(idSets[i]);
+  // Start with the smallest set to minimize filter passes
+  const sorted = [...idSets].sort((a, b) => a.length - b.length);
+  let result = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const set = new Set(sorted[i]);
     result = result.filter((id) => set.has(id));
   }
   return result;

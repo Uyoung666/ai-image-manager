@@ -1,6 +1,6 @@
 import { fork } from "node:child_process";
 import path from "node:path";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { faceIdentityMembers, faceIdentities, faceVectors, photos } from "@/db/schema";
 import type { ChildProcess } from "node:child_process";
@@ -84,7 +84,7 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
     const photoRows = db
       .select({ id: photos.id, path: photos.path })
       .from(photos)
-      .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+      .where(inArray(photos.id, photoIds))
       .all();
 
     if (!photoRows.length) {
@@ -129,10 +129,10 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
       }
     }
 
-    // Auto-cluster into identities (simple heuristic: group by photo)
-    // Faces from the same photo are likely different people;
-    // faces from many photos clustered by similarity are the same person.
-    // For the basic implementation, create default "未命名" identities per face count.
+    // Identity assignment: without face embeddings for similarity-based
+    // clustering, the safest default is one identity per unassigned face.
+    // Faces from the same photo are likely different people; future ONNX
+    // embedding + LanceDB clustering will merge identities properly.
     const unassignedFaces = db
       .select({
         id: faceVectors.id,
@@ -143,31 +143,28 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
         faceIdentityMembers,
         eq(faceVectors.id, faceIdentityMembers.faceVectorId)
       )
-      .where(sql`${faceIdentityMembers.id} IS NULL`)
+      .where(isNull(faceIdentityMembers.id))
       .all();
 
-    if (unassignedFaces.length >= 2) {
-      // Create a default identity for unassigned faces
+    for (const face of unassignedFaces) {
       const result = db
         .insert(faceIdentities)
         .values({
           name: null,
-          faceCount: unassignedFaces.length,
-          representativePhotoId: unassignedFaces[0].photoId,
+          faceCount: 1,
+          representativePhotoId: face.photoId,
         })
         .returning({ insertedId: faceIdentities.id })
         .get();
 
       if (result) {
-        for (const f of unassignedFaces) {
-          db.insert(faceIdentityMembers)
-            .values({
-              identityId: result.insertedId,
-              faceVectorId: f.id,
-            })
-            .onConflictDoNothing()
-            .run();
-        }
+        db.insert(faceIdentityMembers)
+          .values({
+            identityId: result.insertedId,
+            faceVectorId: face.id,
+          })
+          .onConflictDoNothing()
+          .run();
       }
     }
 

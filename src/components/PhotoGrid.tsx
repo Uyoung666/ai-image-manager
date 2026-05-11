@@ -36,7 +36,8 @@ const DENSITY_CONFIGS = [
 const MIN_COLUMNS = 2;
 const BATCH_SIZE = 120;
 const GAP = 8;
-const PRELOAD_MARGIN = "1000px"; // ~3 screens ahead for smooth scrolling
+const PRELOAD_MARGIN = "1000px";
+const VIEWPORT_CULL_RATIO = 3; // unload items scrolled >3 viewports above
 
 function distributePhotos(photos: Photo[], columnCount: number): Photo[][] {
   const columns: Photo[][] = Array.from({ length: columnCount }, () => []);
@@ -50,6 +51,57 @@ function distributePhotos(photos: Photo[], columnCount: number): Photo[][] {
   }
 
   return columns;
+}
+
+function useViewportCull(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  photoCount: number,
+  columnCount: number,
+  targetColWidth: number,
+): { startIdx: number; endIdx: number } {
+  const [startIdx, setStartIdx] = useState(0);
+  const [endIdx, setEndIdx] = useState(BATCH_SIZE);
+  const scrollRAF = useRef(0);
+
+  useEffect(() => {
+    setEndIdx(Math.min(BATCH_SIZE, photoCount));
+    setStartIdx(0);
+  }, [photoCount]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    function onScroll() {
+      if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current);
+      scrollRAF.current = requestAnimationFrame(() => {
+        if (!el) return;
+        const viewH = el.clientHeight;
+        const scrollTop = el.scrollTop;
+        const cullThreshold = viewH * VIEWPORT_CULL_RATIO;
+        const approxRowH = targetColWidth * 0.75; // ~4:3 avg aspect
+        const itemsPerRow = columnCount;
+        const visibleRows = Math.ceil(viewH / approxRowH) + 2;
+        const topRows = Math.max(0, Math.floor(scrollTop / approxRowH) - visibleRows);
+        const newStart = Math.max(0, topRows * itemsPerRow - itemsPerRow);
+        const newEnd = Math.min(photoCount, (topRows + visibleRows * VIEWPORT_CULL_RATIO) * itemsPerRow + itemsPerRow);
+
+        // Only update if significant change (>1 row)
+        if (Math.abs(newStart - startIdx) > itemsPerRow || Math.abs(newEnd - endIdx) > itemsPerRow * 2) {
+          setStartIdx(Math.max(0, newStart));
+          setEndIdx(Math.min(photoCount, Math.max(newEnd, BATCH_SIZE)));
+        }
+      });
+    }
+
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current);
+    };
+  }, [containerRef, photoCount, columnCount, targetColWidth, startIdx, endIdx]);
+
+  return { startIdx, endIdx };
 }
 
 export function PhotoGrid({
@@ -69,18 +121,13 @@ export function PhotoGrid({
   const [densityIdx, setDensityIdx] = useState(1); // default "中" / 220px
   const [columnCount, setColumnCount] = useState(4);
   const [compact, setCompact] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const containerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const lastScrollY = useRef(0);
   const targetColWidth = DENSITY_CONFIGS[densityIdx].targetColWidth;
 
   // Responsive columns via ResizeObserver
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) {
-      return;
-    }
+    if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
       const width = entry.contentRect.width;
       const cols = Math.max(MIN_COLUMNS, Math.floor(width / targetColWidth));
@@ -91,32 +138,34 @@ export function PhotoGrid({
     return () => observer.disconnect();
   }, [targetColWidth]);
 
-  // Progressive render
-  useEffect(() => {
-    setVisibleCount(BATCH_SIZE);
-  }, []);
-
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisibleCount((prev) => Math.min(prev + BATCH_SIZE, photos.length));
-        }
-      },
-      { rootMargin: PRELOAD_MARGIN }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [photos.length]);
+  // Viewport-culled windowing: keeps DOM bounded regardless of photo count.
+  const { startIdx, endIdx } = useViewportCull(
+    containerRef as React.RefObject<HTMLDivElement>,
+    photos.length,
+    columnCount,
+    targetColWidth,
+  );
 
   const visiblePhotos = useMemo(
-    () => photos.slice(0, visibleCount),
-    [photos, visibleCount]
+    () => photos.slice(startIdx, endIdx),
+    [photos, startIdx, endIdx]
   );
+
+  // Spacer heights to maintain scrollbar accuracy
+  const topSpacerHeight = useMemo(() => {
+    if (startIdx === 0) return 0;
+    const estCardH = targetColWidth * 1.33; // ~4:3 avg aspect
+    const itemsPerRow = columnCount;
+    return Math.floor(startIdx / itemsPerRow) * estCardH;
+  }, [startIdx, columnCount, targetColWidth]);
+
+  const bottomSpacerHeight = useMemo(() => {
+    const remaining = photos.length - endIdx;
+    if (remaining <= 0) return 0;
+    const estCardH = targetColWidth * 1.33;
+    const itemsPerRow = columnCount;
+    return Math.ceil(remaining / itemsPerRow) * estCardH;
+  }, [endIdx, photos.length, columnCount, targetColWidth]);
 
   const columns = useMemo(
     () => distributePhotos(visiblePhotos, columnCount),
@@ -232,12 +281,15 @@ export function PhotoGrid({
         </div>
       </div>
 
-      {/* Masonry grid — JS shortest-column-first, each column is a flex-col */}
+      {/* Masonry grid — viewport-culled windowed rendering */}
       <div
         className="flex-1 overflow-y-auto px-2 pt-2"
         onContextMenu={onContextMenu}
         ref={containerRef}
       >
+        {/* Top spacer: maintains scroll position for culled items */}
+        {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+
         <div className="flex gap-2" style={{ gap: GAP }}>
           {columns.map((col, ci) => (
             <div className="flex flex-1 flex-col" key={ci} style={{ gap: GAP }}>
@@ -260,15 +312,8 @@ export function PhotoGrid({
           ))}
         </div>
 
-        {/* Sentinel for progressive loading */}
-        {visibleCount < photos.length && (
-          <div
-            className="flex h-12 items-center justify-center py-4"
-            ref={sentinelRef}
-          >
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        )}
+        {/* Bottom spacer: maintains scrollbar for items below viewport */}
+        {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
       </div>
 
       {/* Loading overlay for subsequent loads */}

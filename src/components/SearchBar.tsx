@@ -494,7 +494,7 @@ export function SearchBar({
       {/* Search history dropdown */}
       {showHistory && history.length > 0 && (
         <div
-          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-white/5"
           ref={dropdownRef}
         >
           <div className="px-3 py-1.5 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">

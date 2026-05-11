@@ -221,7 +221,7 @@ function AlbumsPage() {
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                       {album.isSmart ? (
-                        <Zap className="h-8 w-8 text-primary/30" />
+                        <Zap className="h-8 w-8 text-muted-foreground/20" />
                       ) : (
                         <svg
                           fill="none"

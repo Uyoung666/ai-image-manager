@@ -1514,11 +1514,24 @@ export const exportPhotos = os
               destName = path.basename(destName, path.extname(destName)) + ".jpg";
               fs.writeFileSync(path.join(photosDir, destName), buffer);
             } else {
-              // Original format + watermark: output as PNG to preserve alpha
-              const buffer = wm.enabled
-                ? await pipeline.png().toBuffer()
-                : await pipeline.toBuffer();
-              fs.writeFileSync(destPath, buffer);
+              // Watermark in original format: preserve source format
+              // JPG → JPG (no alpha to preserve), PNG → PNG, else → PNG safe fallback
+              if (wm.enabled) {
+                const srcFormat = (meta.format || "").toLowerCase();
+                if (srcFormat === "jpeg" || srcFormat === "jpg") {
+                  const buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                } else if (srcFormat === "webp") {
+                  const buffer = await pipeline.webp({ quality: 92 }).toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                } else {
+                  const buffer = await pipeline.png().toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                }
+              } else {
+                const buffer = await pipeline.toBuffer();
+                fs.writeFileSync(destPath, buffer);
+              }
             }
           } catch {
             // Fallback: copy original on sharp failure

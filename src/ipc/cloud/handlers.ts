@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDatabase } from "@/db";
 import { cloudConfigs } from "@/db/schema";
 import { testConnection, uploadPhoto } from "@/services/cloud/cloud-manager";
+import { encrypt } from "@/services/credential-vault";
 
 export const listCloudConfigs = os.handler(() => {
   const db = getDatabase();
@@ -26,7 +27,7 @@ export const createCloudConfig = os
       .values({
         name: input.name,
         provider: input.provider,
-        configJson: JSON.stringify(input.config),
+        configJson: encrypt(JSON.stringify(input.config)),
         isDefault: input.isDefault ?? false,
       })
       .returning({ insertedId: cloudConfigs.id })

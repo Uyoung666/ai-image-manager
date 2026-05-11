@@ -83,7 +83,7 @@ function AlbumDetailPage() {
               {album?.name || "加载中..."}
             </h1>
             {(album as any)?.isSmart && (
-              <span className="flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+              <span className="flex items-center gap-1 rounded-[4px] bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 <Zap className="h-2.5 w-2.5" />
                 智能
               </span>

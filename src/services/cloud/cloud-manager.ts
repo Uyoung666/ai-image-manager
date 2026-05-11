@@ -3,6 +3,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { cloudConfigs, cloudSyncLog, photos } from "@/db/schema";
+import { decrypt } from "@/services/credential-vault";
 import { type CloudProvider, type CloudProviderType } from "./abstract-provider";
 import { s3Provider } from "./s3-provider";
 import { webdavProvider } from "./webdav-provider";
@@ -16,7 +17,7 @@ export async function testConnection(configId: number) {
   const cfg = db.select().from(cloudConfigs).where(eq(cloudConfigs.id, configId)).get();
   if (!cfg) throw new Error("云配置不存在");
 
-  const config = JSON.parse(cfg.configJson);
+  const config = JSON.parse(decrypt(cfg.configJson));
   const provider = getProvider(cfg.provider as CloudProviderType);
   return provider.checkConnection(config);
 }
@@ -29,7 +30,7 @@ export async function uploadPhoto(photoId: number, configId: number): Promise<st
   const cfg = db.select().from(cloudConfigs).where(eq(cloudConfigs.id, configId)).get();
   if (!cfg) throw new Error("云配置不存在");
 
-  const config = JSON.parse(cfg.configJson);
+  const config = JSON.parse(decrypt(cfg.configJson));
   const provider = getProvider(cfg.provider as CloudProviderType);
 
   const buffer = fs.readFileSync(photo.path);

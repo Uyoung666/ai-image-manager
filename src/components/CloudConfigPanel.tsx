@@ -186,14 +186,14 @@ export function CloudConfigPanel() {
                   </span>
                 )}
                 <button
-                  className="rounded-[3px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
                   disabled={testing}
                   onClick={() => handleTestConnection(cfg.id)}
                 >
                   测试
                 </button>
                 <button
-                  className="rounded-[3px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-[#e5484d]"
+                  className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-[#e5484d]"
                   onClick={() => handleDelete(cfg.id)}
                 >
                   <Trash2 className="h-3 w-3" />

@@ -225,7 +225,13 @@ async function indexSingleFile(
     return existing.id;
   }
 
-  const stat = fs.statSync(filePath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    console.warn(`[Indexer] File disappeared before indexing: ${filePath}`);
+    return null;
+  }
   const meta = await readBasicMeta(filePath);
   if (!meta) {
     console.warn(`[Indexer] Skipped unreadable file (sharp metadata failed): ${filePath}`);
@@ -233,7 +239,13 @@ async function indexSingleFile(
   }
 
   // Generate thumbnail (md=320px for crisp display in grid)
-  const thumb = await generateThumbnail(filePath, "md");
+  let thumb;
+  try {
+    thumb = await generateThumbnail(filePath, "md");
+  } catch {
+    console.warn(`[Indexer] Thumbnail generation failed for: ${filePath}`);
+    thumb = { thumbnailPath: null, width: 0, height: 0 };
+  }
 
   // Compute perceptual hash for dedup
   const phash = await computePHash(filePath);

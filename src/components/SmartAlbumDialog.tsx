@@ -175,7 +175,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
       onClick={handleOverlayClick}
       ref={overlayRef}
     >
-      <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
+      <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
         {/* Header */}
         <div className="flex items-center justify-between border-border border-b px-5 py-4">
           <div className="flex items-center gap-2">
