@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
+import { fork } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   Field,
@@ -166,25 +165,11 @@ function embedImageInWorker(
   modelPath: string
 ): Promise<number[]> {
   return new Promise((resolve, reject) => {
-    const tmpDir = os.tmpdir();
-    const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const inputFile = path.join(tmpDir, `embed-single-${batchId}.json`);
-    const outputFile = path.join(tmpDir, `embed-single-out-${batchId}.json`);
-
-    fs.writeFileSync(
-      inputFile,
-      JSON.stringify({
-        modelPath,
-        photos: [{ id: 1, path: imagePath }],
-      })
-    );
-
     const workerScript = findWorkerScript();
-    // Use Electron's Node.js (via ELECTRON_RUN_AS_NODE=1) so that native
-    // modules (sharp, etc.) match the Electron-compiled versions in node_modules.
-    const child = spawn(process.execPath, [workerScript, inputFile, outputFile], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      stdio: ["ignore", "inherit", "pipe"],
+
+    // fork() inherits Electron's Node.js — no native-module version mismatch
+    const child = fork(workerScript, [], {
+      stdio: ["ignore", "inherit", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
     });
 
@@ -193,32 +178,9 @@ function embedImageInWorker(
       stderr += data.toString();
     });
 
-    child.on("close", (code) => {
-      try {
-        fs.unlinkSync(inputFile);
-      } catch {
-        /* ok */
-      }
-
-      if (code !== 0) {
-        try {
-          fs.unlinkSync(outputFile);
-        } catch {
-          /* ok */
-        }
-        reject(new Error(`Image embed worker crashed: ${stderr.slice(-300)}`));
-        return;
-      }
-
-      try {
-        const data = JSON.parse(fs.readFileSync(outputFile, "utf-8"));
-        try {
-          fs.unlinkSync(outputFile);
-        } catch {
-          /* ok */
-        }
-
-        const result = data.results?.[0];
+    child.on("message", (msg: any) => {
+      if (msg.type === "result") {
+        const result = msg.results?.[0];
         if (result?.vector && result.vector.length > 0) {
           resolve(result.vector);
         } else {
@@ -228,23 +190,23 @@ function embedImageInWorker(
             )
           );
         }
-      } catch (err: any) {
-        reject(new Error(`Failed to read image embed output: ${err.message}`));
       }
     });
 
-    child.on("error", (err) => {
-      try {
-        fs.unlinkSync(inputFile);
-      } catch {
-        /* ok */
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(`Image embed worker exited with code ${code}: ${stderr.slice(-300)}`)
+        );
       }
-      try {
-        fs.unlinkSync(outputFile);
-      } catch {
-        /* ok */
-      }
-      reject(err);
+    });
+
+    child.on("error", reject);
+
+    child.send({
+      type: "embed",
+      modelPath,
+      photos: [{ id: 1, path: imagePath }],
     });
   });
 }
@@ -593,24 +555,18 @@ interface EmbedResult {
 
 function runEmbedBatch(
   photos: Array<{ id: number; path: string }>,
-  modelPath: string
+  modelPath: string,
 ): Promise<EmbedResult[]> {
   return new Promise((resolve, reject) => {
-    const tmpDir = os.tmpdir();
-    const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const inputFile = path.join(tmpDir, `embed-in-${batchId}.json`);
-    const outputFile = path.join(tmpDir, `embed-out-${batchId}.json`);
-
-    fs.writeFileSync(inputFile, JSON.stringify({ modelPath, photos }));
-
     const workerScript = findWorkerScript();
 
     console.log(
-      `[AI] Spawning worker for ${photos.length} photos: ${workerScript}`
+      `[AI] Forking worker for ${photos.length} photos: ${workerScript}`
     );
 
-    const child = spawn("node", [workerScript, inputFile, outputFile], {
-      stdio: ["ignore", "inherit", "pipe"],
+    // fork() inherits Electron's Node.js — no native-module version mismatch
+    const child = fork(workerScript, [], {
+      stdio: ["ignore", "inherit", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
     });
 
@@ -619,51 +575,25 @@ function runEmbedBatch(
       stderr += data.toString();
     });
 
+    child.on("message", (msg: any) => {
+      if (msg.type === "result") {
+        resolve(msg.results as EmbedResult[]);
+      }
+    });
+
     child.on("close", (code) => {
-      // Clean up input file
-      try {
-        fs.unlinkSync(inputFile);
-      } catch {
-        /* ok */
-      }
-
       if (code !== 0) {
-        try {
-          fs.unlinkSync(outputFile);
-        } catch {
-          /* ok */
-        }
-        const errMsg = stderr.slice(-500) || `exit code ${code}`;
-        reject(new Error(`Worker crashed: ${errMsg}`));
-        return;
-      }
-
-      try {
-        const data = JSON.parse(fs.readFileSync(outputFile, "utf-8"));
-        try {
-          fs.unlinkSync(outputFile);
-        } catch {
-          /* ok */
-        }
-        resolve(data.results as EmbedResult[]);
-      } catch (err: any) {
-        reject(new Error(`Failed to read worker output: ${err.message}`));
+        reject(
+          new Error(
+            `Worker crashed: ${stderr.slice(-500) || `exit code ${code}`}`
+          )
+        );
       }
     });
 
-    child.on("error", (err) => {
-      try {
-        fs.unlinkSync(inputFile);
-      } catch {
-        /* ok */
-      }
-      try {
-        fs.unlinkSync(outputFile);
-      } catch {
-        /* ok */
-      }
-      reject(err);
-    });
+    child.on("error", reject);
+
+    child.send({ type: "embed", modelPath, photos });
   });
 }
 
