@@ -109,6 +109,14 @@ export function PhotoDetailPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset AI suggestions when photo changes
+  useEffect(() => {
+    setAiSuggestions(null);
+    setAiLoading(false);
+    setNewTagName("");
+    setShowTagInput(false);
+  }, [photo?.id]);
+
   // Keep ref in sync for resize callback closure
   useEffect(() => {
     currentWidth.current = panelWidth;
@@ -512,7 +520,17 @@ export function PhotoDetailPanel({
               <span className="text-[#6b6b75] text-[11px]">AI 分析中...</span>
             </div>
           ) : aiSuggestions!.length === 0 ? (
-            <p className="text-[#6b6b75] text-[11px]">未识别到合适的标签</p>
+            <div className="flex items-center gap-2">
+              <p className="text-[#6b6b75] text-[11px]">未识别到合适的标签</p>
+              <button
+                className="text-[#5e6ad2] text-[11px] hover:underline"
+                onClick={() => {
+                  setAiSuggestions(null);
+                }}
+              >
+                重试
+              </button>
+            </div>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {aiSuggestions!.map((s) => {

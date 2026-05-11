@@ -79,11 +79,11 @@ function useViewportCull(
         const viewH = el.clientHeight;
         const scrollTop = el.scrollTop;
         const cullThreshold = viewH * VIEWPORT_CULL_RATIO;
-        const approxRowH = targetColWidth * 0.75; // ~4:3 avg aspect
+        const estCardH = targetColWidth * 1.05;
         const itemsPerRow = columnCount;
-        const visibleRows = Math.ceil(viewH / approxRowH) + 2;
-        const topRows = Math.max(0, Math.floor(scrollTop / approxRowH) - visibleRows);
-        const newStart = Math.max(0, topRows * itemsPerRow - itemsPerRow);
+        const visibleRows = Math.ceil(viewH / estCardH) + 2;
+        const topRows = Math.max(0, Math.floor(scrollTop / estCardH) - visibleRows);
+        const newStart = Math.min(photoCount, Math.max(0, topRows * itemsPerRow - itemsPerRow));
         const newEnd = Math.min(photoCount, (topRows + visibleRows * VIEWPORT_CULL_RATIO) * itemsPerRow + itemsPerRow);
 
         // Only update if significant change (>1 row)
@@ -154,7 +154,7 @@ export function PhotoGrid({
   // Spacer heights to maintain scrollbar accuracy
   const topSpacerHeight = useMemo(() => {
     if (startIdx === 0) return 0;
-    const estCardH = targetColWidth * 1.33; // ~4:3 avg aspect
+    const estCardH = targetColWidth * 1.05;
     const itemsPerRow = columnCount;
     return Math.floor(startIdx / itemsPerRow) * estCardH;
   }, [startIdx, columnCount, targetColWidth]);
@@ -162,7 +162,7 @@ export function PhotoGrid({
   const bottomSpacerHeight = useMemo(() => {
     const remaining = photos.length - endIdx;
     if (remaining <= 0) return 0;
-    const estCardH = targetColWidth * 1.33;
+    const estCardH = targetColWidth * 1.05;
     const itemsPerRow = columnCount;
     return Math.ceil(remaining / itemsPerRow) * estCardH;
   }, [endIdx, photos.length, columnCount, targetColWidth]);

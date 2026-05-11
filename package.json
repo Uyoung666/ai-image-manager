@@ -26,8 +26,8 @@
   "author": "Uyoung",
   "license": "MIT",
   "dependencies": {
-    "@fontsource-variable/geist": "^5.2.8",
-    "@fontsource-variable/geist-mono": "^5.2.7",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@icons-pack/react-simple-icons": "^13.13.0",
     "@lancedb/lancedb": "^0.18.2",
     "@orpc/client": "^1.13.14",

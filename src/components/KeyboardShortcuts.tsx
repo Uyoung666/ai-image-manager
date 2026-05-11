@@ -50,7 +50,7 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
         }
       }}
     >
-      <div className="w-[400px] overflow-hidden rounded-[12px] border border-[#2c2c30] bg-[#1c1e22] shadow-[0_16px_60px_rgba(0,0,0,0.5)]">
+      <div className="w-[400px] overflow-hidden rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
         <div className="flex items-center justify-between border-[rgba(255,255,255,0.06)] border-b px-5 py-4">
           <h2 className="font-[590] text-[#f7f8f8] text-[16px]">键盘快捷键</h2>
           <button

@@ -951,7 +951,7 @@ export const convertPhotos = os
       format: z.enum(["jpg", "png", "webp", "avif"]),
       quality: z.number().min(10).max(100).default(80),
       maxWidth: z.number().optional(),
-      outputDir: z.string().min(1),
+      outputDir: z.string().optional().default(""),
     })
   )
   .handler(async ({ input }) => {
@@ -959,8 +959,11 @@ export const convertPhotos = os
     const sharp = (await import("sharp")).default;
     let converted = 0;
 
-    if (!fs.existsSync(input.outputDir)) {
-      fs.mkdirSync(input.outputDir, { recursive: true });
+    const outputDir =
+      input.outputDir ||
+      path.join(os.tmpdir(), `convert-${Date.now()}`);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
     }
 
     for (const id of input.ids) {
@@ -986,7 +989,7 @@ export const convertPhotos = os
             ? `${path.basename(photo.filename, path.extname(photo.filename))}_converted.${input.format}`
             : `${path.basename(photo.filename, path.extname(photo.filename))}.${input.format}`;
 
-        const outPath = path.join(input.outputDir, outName);
+        const outPath = path.join(outputDir, outName);
         const buffer = await pipeline
           .toFormat(input.format, { quality: input.quality })
           .toBuffer();
@@ -997,7 +1000,7 @@ export const convertPhotos = os
       }
     }
 
-    return { converted, outputDir: input.outputDir };
+    return { converted, outputDir };
   });
 
 export const getAiProgress = os.handler(() => {
@@ -1583,7 +1586,7 @@ export const exportPhotos = os
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
       // Create ZIP
-      const archiver = (await import("archiver")).default;
+      const { Archiver } = (await import("archiver")) as any;
       const zipPath =
         outputPath ||
         path.join(
@@ -1591,7 +1594,7 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
       const output = fs.createWriteStream(zipPath);
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive: any = new Archiver("zip", { zlib: { level: 9 } });
 
       await new Promise<string>((resolve, reject) => {
         output.on("close", () => resolve(zipPath));

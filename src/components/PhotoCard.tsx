@@ -95,13 +95,18 @@ export const PhotoCard = memo(function PhotoCard({
     <div
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
         isSelected
-          ? "shadow-[0_0_20px_rgba(94,106,210,0.15)] ring-2 ring-ring ring-offset-1 ring-offset-background"
-          : "hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:ring-1 hover:ring-white/10"
+          ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
+          : "hover:brightness-110 hover:ring-1 hover:ring-white/10"
       }
       `}
       onClick={(e) => onClick(id, e)}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+      }}
       onDoubleClick={() => onDoubleClick(id)}
       style={{ aspectRatio }}
+      data-photo-id={id}
+      data-photo-path={path}
     >
       {!loaded && <div className="absolute inset-0 bg-muted" />}
       <img
@@ -132,7 +137,7 @@ export const PhotoCard = memo(function PhotoCard({
 
       {/* Selection indicator */}
       {isSelected && (
-        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#5e6ad2] shadow-lg">
+        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary ring-1 ring-white/20">
           <svg fill="none" height="12" viewBox="0 0 12 12" width="12">
             <path
               d="M2.5 6L5 8.5L9.5 3.5"

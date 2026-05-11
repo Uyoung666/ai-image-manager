@@ -29,6 +29,10 @@ import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import { startWatching } from "@/services/indexer";
+import {
+  getSendToFilePaths,
+  setupSendToShortcut,
+} from "@/services/sendto-integration";
 import { initThumbnailer } from "@/services/thumbnailer";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
@@ -437,6 +441,22 @@ app.whenReady().then(async () => {
     registerGlobalShortcuts();
     checkForUpdates();
     await setupORPC();
+
+    // Setup SendTo integration (Windows right-click "发送到" menu)
+    setupSendToShortcut();
+
+    // Handle files sent via SendTo or command-line
+    const sentFilePaths = getSendToFilePaths();
+    if (sentFilePaths.length > 0) {
+      console.log(
+        `[App] Received ${sentFilePaths.length} file(s) via SendTo/CLI`
+      );
+      // Import files into the default folder or prompt user
+      // For now, log and notify renderer after window is ready
+      mainWindow?.webContents.once("did-finish-load", () => {
+        mainWindow?.webContents.send("sendto:files", sentFilePaths);
+      });
+    }
   } catch (error) {
     console.error("Error during app initialization:", error);
   }

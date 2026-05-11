@@ -838,7 +838,14 @@ export async function embedAllPhotos(
   if (total === 0 && totalPhotos === 0) {
     currentProgress = { processed: 0, total: 0, phase: "idle", currentFile: "" };
   } else {
-    currentProgress = { processed, total, phase: "complete", currentFile: "" };
+    // Normalize total to processed so progress shows 100% even with
+    // uncorrectable failures (corrupted images, worker crashes, etc.)
+    currentProgress = {
+      processed,
+      total: processed > 0 ? processed : total,
+      phase: "complete",
+      currentFile: "",
+    };
   }
   onProgress?.(currentProgress);
   isEmbedding = false;
@@ -973,6 +980,96 @@ const ZH_TO_EN_SEARCH: Record<string, string> = {
   星空: "starry night sky stars",
   月亮: "moon night sky",
   太阳: "sun bright sky daytime",
+  // Extended vocabulary
+  草莓: "strawberry fruit red berry food",
+  水果: "fruit fresh produce food",
+  蔬菜: "vegetable greens produce food",
+  蛋糕: "cake dessert sweet pastry food",
+  面包: "bread bakery baked food",
+  咖啡: "coffee cup drink beverage",
+  饮料: "drink beverage cup",
+  孩子: "child kid baby young person",
+  婴儿: "baby infant newborn person",
+  老人: "elderly senior old person",
+  婚礼: "wedding ceremony bride groom celebration",
+  生日: "birthday celebration party cake",
+  聚会: "party gathering celebration group people",
+  运动: "sports exercise activity game",
+  舞蹈: "dance dancing performance person",
+  音乐: "music concert performance instrument",
+  眼镜: "glasses eyewear spectacles person face",
+  帽子: "hat cap headwear person",
+  鞋子: "shoes footwear sneakers",
+  衣服: "clothing outfit dress garment",
+  包: "bag handbag backpack purse",
+  灯: "lamp light lighting illumination",
+  蜡烛: "candle flame light fire",
+  玩具: "toy doll plaything child",
+  乐器: "musical instrument guitar piano music",
+  吉他: "guitar musical instrument string music",
+  钢琴: "piano keyboard musical instrument",
+  相机: "camera photography lens equipment",
+  叶子: "leaf plant green nature",
+  火焰: "fire flame burn hot",
+  沙漠: "desert sand dry arid nature",
+  极光: "aurora northern lights sky night nature",
+  雨天: "rain wet weather umbrella water",
+  枫叶: "maple leaf autumn fall red nature",
+  樱花: "cherry blossom pink flower spring nature",
+  教堂: "church cathedral building architecture",
+  寺庙: "temple building architecture religious",
+  城堡: "castle building architecture historic",
+  塔: "tower tall building structure architecture",
+  公园: "park garden green nature outdoor",
+  市场: "market shopping bazaar stall people",
+  餐厅: "restaurant dining food table indoor",
+  厨房: "kitchen cooking room indoor food",
+  卧室: "bedroom bed sleeping room indoor",
+  办公室: "office desk workspace computer indoor",
+  兔子: "rabbit bunny animal pet",
+  熊猫: "panda bear animal black white",
+  老虎: "tiger animal wild cat predator",
+  狮子: "lion animal wild cat predator",
+  大象: "elephant animal large wild",
+  猴子: "monkey animal primate wild",
+  蛇: "snake reptile animal wild",
+  蝴蝶: "butterfly insect colorful wings nature",
+  马: "horse animal running field",
+  牛: "cow cattle animal farm",
+  羊: "sheep lamb animal wool farm",
+  紫色: "purple violet color",
+  橙色: "orange color warm",
+  粉色: "pink color soft",
+  棕色: "brown color earth",
+  鲜艳: "vivid bright colorful saturated",
+  柔和: "soft gentle pastel muted color",
+  模糊: "blurry bokeh out of focus soft",
+  清晰: "sharp clear detailed crisp",
+  倒影: "reflection mirror water surface",
+  剪影: "silhouette shadow dark outline shape",
+  特写: "close-up macro detail zoom",
+  广角: "wide angle panorama expansive view",
+  节日: "festival celebration holiday decoration",
+  烟花: "fireworks celebration night sky colorful",
+  路灯: "streetlight lamp post night urban",
+  钟楼: "clock tower bell building architecture",
+  雕塑: "sculpture statue art monument",
+  喷泉: "fountain water spray garden urban",
+  涂鸦: "graffiti street art urban wall colorful",
+  壁画: "mural wall painting art colorful",
+  屋顶: "roof top building architecture",
+  窗户: "window glass building architecture",
+  阳台: "balcony terrace outdoor building",
+  楼梯: "staircase stairs steps indoor architecture",
+  走廊: "corridor hallway passage indoor architecture",
+  拱门: "arch doorway entrance architecture",
+  柱子: "pillar column architecture building",
+  栅栏: "fence barrier wood metal outdoor",
+  旗帜: "flag banner symbol wind outdoor",
+  灯笼: "lantern light decoration red festive",
+  气球: "balloon colorful celebration party decoration",
+  礼物: "gift present box package celebration",
+  彩带: "ribbon streamer decoration colorful celebration",
 };
 
 export async function searchByText(
@@ -1061,8 +1158,17 @@ export async function searchByText(
       seen.add(lower);
       return true;
     });
-    // Wrap in CLIP prompt template for better alignment with training distribution
-    searchText = `A photo showing ${unique.join(" ")}`;
+    // Strip any remaining untranslated CJK characters — CLIP VIT-B/32
+    // only understands English, embedding Chinese produces noise.
+    const englishOnly = unique.filter(
+      (w) => !/[一-鿿㄀-鿿㐀-䶿]/.test(w)
+    );
+    if (englishOnly.length === 0) {
+      // If nothing translated, use the raw query but let CLIP try
+      searchText = query.trim();
+    } else {
+      searchText = `A photo showing ${englishOnly.join(" ")}`;
+    }
     console.log(`[AI] searchByText: zh→en "${query.trim()}" → "${searchText}"`);
   }
 
@@ -1225,7 +1331,35 @@ export async function searchByImage(
     .distanceType("cosine")
     .refineFactor(adaptiveRefine)
     .limit(limit);
-  const rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+  let rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+
+  // Brute-force fallback when vector index search returns empty
+  if (rawResults.length === 0) {
+    console.log("[AI] searchByImage: index search empty, trying brute-force...");
+    try {
+      const allRows = await photoTable.query().toArray();
+      const allData = allRows.map((r: any) => ({
+        photo_id: r.photo_id as number,
+        vector: Array.from(r.vector as Float32Array),
+      }));
+      const scored = allData.map((r) => {
+        let dot = 0;
+        let normA = 0;
+        let normB = 0;
+        for (let i = 0; i < queryVector.length; i++) {
+          dot += queryVector[i] * r.vector[i];
+          normA += queryVector[i] * queryVector[i];
+          normB += r.vector[i] * r.vector[i];
+        }
+        const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+        return { photo_id: r.photo_id, _distance: 1 - sim };
+      });
+      scored.sort((a, b) => a._distance - b._distance);
+      rawResults = scored.slice(0, limit) as any;
+    } catch (bfErr: any) {
+      console.warn("[AI] searchByImage: brute-force fallback failed:", bfErr?.message);
+    }
+  }
 
   if (rawResults.length === 0) {
     return [];

@@ -81,6 +81,7 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
             format: photos.format,
             thumbnailPath: photos.thumbnailPath,
             fileDate: photos.fileDate,
+            isIndexed: photos.isIndexed,
           })
           .from(photos)
           .where(inArray(photos.id, photoIds))
@@ -106,6 +107,7 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
       format: photos.format,
       thumbnailPath: photos.thumbnailPath,
       fileDate: photos.fileDate,
+      isIndexed: photos.isIndexed,
       sortOrder: albumPhotos.sortOrder,
     })
     .from(albumPhotos)

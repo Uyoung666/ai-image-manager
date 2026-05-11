@@ -107,7 +107,7 @@ export function BatchRenameDialog({
         }}
       />
       {/* Dialog */}
-      <div className="relative w-[560px] max-h-[85vh] overflow-auto rounded-xl border border-[#2c2c30] bg-[#1c1e22] shadow-2xl">
+      <div className="relative w-[560px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-white/5">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] px-6 py-4">
           <h2 className="text-[16px] font-[510] text-[#f7f8f8]">

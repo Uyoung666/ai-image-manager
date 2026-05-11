@@ -10,6 +10,7 @@ import {
   ScanSearch,
   Settings,
   Trash2,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -115,7 +116,7 @@ export function Sidebar({
           <PanelLeftOpen className="h-4 w-4" />
         </button>
 
-        <div className="flex flex-1 flex-col items-center gap-1 px-1.5">
+        <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
           <button
             className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
               activeFolderId === null
@@ -183,6 +184,14 @@ export function Sidebar({
             title="重复照片检测"
           >
             <ScanSearch className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/people" })}
+            title="人物识别"
+          >
+            <Users className="h-4 w-4" />
           </button>
 
           <button
@@ -318,7 +327,7 @@ export function Sidebar({
                 )
                 .map((tag) => (
                   <button
-                    className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+                    className={`group/tag flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
                       activeTagId === tag.id
                         ? "bg-primary/15 text-primary"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -328,6 +337,22 @@ export function Sidebar({
                       const nextId = activeTagId === tag.id ? null : tag.id;
                       setActiveTagId(nextId);
                       onSelectTag?.(nextId);
+                    }}
+                    onContextMenu={async (e) => {
+                      e.preventDefault();
+                      if (confirm(`删除标签 "${tag.name}"？`)) {
+                        try {
+                          await ipc.client.photos.deleteTag({ id: tag.id });
+                          const updated = await ipc.client.photos.getTags({});
+                          setTags((updated as TagInfo[]) || []);
+                          if (activeTagId === tag.id) {
+                            setActiveTagId(null);
+                            onSelectTag?.(null);
+                          }
+                        } catch {
+                          /* ignore delete errors */
+                        }
+                      }
                     }}
                   >
                     <span
@@ -348,7 +373,8 @@ export function Sidebar({
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/dashboard" })}
         >
-          ⚙ {t("sidebarDashboard")}
+          <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
+          {t("sidebarDashboard")}
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
@@ -361,20 +387,29 @@ export function Sidebar({
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/duplicates" })}
         >
-          ⟲ 重复照片检测
+          <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
+          重复照片检测
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/people" })}
+        >
+          <Users className="mr-2 inline h-3.5 w-3.5" />
+          人物识别
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={() => navigate({ to: "/settings" })}
         >
-          ⚙ {t("sidebarSettings")}
+          <Settings className="mr-2 inline h-3.5 w-3.5" />
+          {t("sidebarSettings")}
         </button>
       </div>
 
       {/* Folder context menu */}
       {folderCtx && (
         <div
-          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-[#2c2c30] bg-[#1c1e22] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-white/5"
           ref={ctxRef}
           style={{ left: folderCtx.x, top: folderCtx.y }}
         >

@@ -10,15 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as PeopleRouteImport } from './routes/people'
 import { Route as DuplicatesRouteImport } from './routes/duplicates'
 import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
 import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityId'
+import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PeopleRoute = PeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DuplicatesRoute = DuplicatesRouteImport.update({
@@ -36,56 +43,92 @@ const AlbumsRoute = AlbumsRouteImport.update({
   path: '/albums',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AlbumsAlbumIdRoute = AlbumsAlbumIdRouteImport.update({
-  id: '/albums/$albumId',
-  path: '/albums/$albumId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PeopleIdentityIdRoute = PeopleIdentityIdRouteImport.update({
+  id: '/$identityId',
+  path: '/$identityId',
+  getParentRoute: () => PeopleRoute,
+} as any)
+const AlbumsAlbumIdRoute = AlbumsAlbumIdRouteImport.update({
+  id: '/$albumId',
+  path: '/$albumId',
+  getParentRoute: () => AlbumsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/albums': typeof AlbumsRoute
-  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/albums': typeof AlbumsRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
+  '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/albums': typeof AlbumsRoute
-  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/albums': typeof AlbumsRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
+  '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/albums': typeof AlbumsRoute
-  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/albums': typeof AlbumsRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
+  '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
+  fullPaths:
+    | '/'
+    | '/albums'
+    | '/dashboard'
+    | '/duplicates'
+    | '/people'
+    | '/settings'
+    | '/albums/$albumId'
+    | '/people/$identityId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
-  id: '__root__' | '/' | '/albums' | '/albums/$albumId' | '/dashboard' | '/duplicates' | '/settings'
+  to:
+    | '/'
+    | '/albums'
+    | '/dashboard'
+    | '/duplicates'
+    | '/people'
+    | '/settings'
+    | '/albums/$albumId'
+    | '/people/$identityId'
+  id:
+    | '__root__'
+    | '/'
+    | '/albums'
+    | '/dashboard'
+    | '/duplicates'
+    | '/people'
+    | '/settings'
+    | '/albums/$albumId'
+    | '/people/$identityId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AlbumsRoute: typeof AlbumsRoute
-  AlbumsAlbumIdRoute: typeof AlbumsAlbumIdRoute
+  AlbumsRoute: typeof AlbumsRouteWithChildren
   DashboardRoute: typeof DashboardRoute
   DuplicatesRoute: typeof DuplicatesRoute
+  PeopleRoute: typeof PeopleRouteWithChildren
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -96,6 +139,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/people': {
+      id: '/people'
+      path: '/people'
+      fullPath: '/people'
+      preLoaderRoute: typeof PeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/duplicates': {
@@ -112,13 +162,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/albums/$albumId': {
-      id: '/albums/$albumId'
-      path: '/albums/$albumId'
-      fullPath: '/albums/$albumId'
-      preLoaderRoute: typeof AlbumsAlbumIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/albums': {
       id: '/albums'
       path: '/albums'
@@ -133,15 +176,51 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/people/$identityId': {
+      id: '/people/$identityId'
+      path: '/$identityId'
+      fullPath: '/people/$identityId'
+      preLoaderRoute: typeof PeopleIdentityIdRouteImport
+      parentRoute: typeof PeopleRoute
+    }
+    '/albums/$albumId': {
+      id: '/albums/$albumId'
+      path: '/$albumId'
+      fullPath: '/albums/$albumId'
+      preLoaderRoute: typeof AlbumsAlbumIdRouteImport
+      parentRoute: typeof AlbumsRoute
+    }
   }
 }
 
+interface AlbumsRouteChildren {
+  AlbumsAlbumIdRoute: typeof AlbumsAlbumIdRoute
+}
+
+const AlbumsRouteChildren: AlbumsRouteChildren = {
+  AlbumsAlbumIdRoute: AlbumsAlbumIdRoute,
+}
+
+const AlbumsRouteWithChildren =
+  AlbumsRoute._addFileChildren(AlbumsRouteChildren)
+
+interface PeopleRouteChildren {
+  PeopleIdentityIdRoute: typeof PeopleIdentityIdRoute
+}
+
+const PeopleRouteChildren: PeopleRouteChildren = {
+  PeopleIdentityIdRoute: PeopleIdentityIdRoute,
+}
+
+const PeopleRouteWithChildren =
+  PeopleRoute._addFileChildren(PeopleRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AlbumsRoute: AlbumsRoute,
-  AlbumsAlbumIdRoute: AlbumsAlbumIdRoute,
+  AlbumsRoute: AlbumsRouteWithChildren,
   DashboardRoute: DashboardRoute,
   DuplicatesRoute: DuplicatesRoute,
+  PeopleRoute: PeopleRouteWithChildren,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport
