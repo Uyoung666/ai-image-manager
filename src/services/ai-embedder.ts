@@ -564,7 +564,17 @@ export async function searchByText(
   }
 
   const queryVector = await embeddingModel.embedText(query);
-  const results = await photoTable.search(queryVector).limit(limit).execute();
+  console.log(`[AI] searchByText: query="${query}" vecLen=${queryVector.length}`);
+
+  const rawResults = await photoTable.search(queryVector).limit(limit).execute();
+  const results = rawResults as Array<Record<string, unknown>>;
+
+  console.log(
+    `[AI] searchByText: LanceDB returned ${results.length} results` +
+      (results.length > 0
+        ? `, top distance=${results[0]._distance}`
+        : "")
+  );
 
   return results.map((r: Record<string, unknown>) => {
     const distance = r._distance as number;
