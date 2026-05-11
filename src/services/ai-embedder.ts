@@ -64,15 +64,16 @@ export async function initVectorDB(): Promise<void> {
 
   const tableNames = await vectordb.tableNames();
   if (tableNames.includes("photo_embeddings")) {
-    photoTable = await vectordb.openTable("photo_embeddings");
-    console.log("[AI] Opened existing photo_embeddings table");
-  } else {
-    // Use cosine distance for CLIP embeddings (vectors are L2-normalized)
-    photoTable = await vectordb.createTable("photo_embeddings", [
-      { photo_id: 0, vector: new Array(512).fill(0), created_at: Date.now() },
-    ]);
-    console.log("[AI] Created photo_embeddings table");
+    // Drop and recreate: old tables from LanceDB <0.18 may have schema issues
+    // where the vector column isn't properly recognized for vectorSearch().
+    await vectordb.dropTable("photo_embeddings");
+    console.log("[AI] Dropped stale photo_embeddings table (will recreate)");
   }
+
+  photoTable = await vectordb.createTable("photo_embeddings", [
+    { photo_id: 0, vector: new Array(512).fill(0), created_at: Date.now() },
+  ]);
+  console.log("[AI] Created fresh photo_embeddings table (512-dim vector)");
 
   isVectorDBReady = true;
 }
