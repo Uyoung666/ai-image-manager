@@ -427,26 +427,37 @@ export async function embedAllPhotos(
     .where(eq(photos.isAiProcessed, true))
     .get();
 
+  const totalRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(photos)
+    .get();
+
+  const totalPhotos: number = totalRow?.count ?? 0;
   const processedCount: number = processedRow?.count ?? 0;
 
-  if (processedCount > 0) {
-    let vectorCount = 0;
-    try {
-      vectorCount = await photoTable.countRows();
-    } catch {
-      vectorCount = 0;
-    }
+  let vectorCount = 0;
+  try {
+    vectorCount = await photoTable.countRows();
+  } catch {
+    vectorCount = 0;
+  }
 
-    // Allow small mismatch (init row), but large gaps indicate crash damage
-    if (vectorCount <= 1 || vectorCount < processedCount * 0.5) {
-      console.log(
-        `[AI] Repair: SQLite has ${processedCount} processed but LanceDB has ${vectorCount} vectors. Resetting all flags.`
-      );
-      db.update(photos)
-        .set({ isAiProcessed: false })
-        .where(eq(photos.isAiProcessed, true))
-        .run();
-    }
+  console.log(
+    `[AI] DB state: ${totalPhotos} total photos, ${processedCount} processed, ${vectorCount} vectors`
+  );
+
+  const needsRepair =
+    processedCount > 0 &&
+    (vectorCount <= 1 || vectorCount < processedCount * 0.5);
+
+  if (needsRepair) {
+    console.log(
+      `[AI] Repair: mismatch detected — resetting all isAiProcessed flags`
+    );
+    db.update(photos)
+      .set({ isAiProcessed: false })
+      .where(eq(photos.isAiProcessed, true))
+      .run();
   }
 
   const unprocessed = db
