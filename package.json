@@ -21,7 +21,7 @@
     "test:all": "vitest run && playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node ./scripts/migrate.ts",
-    "postinstall": "electron-rebuild -f -w better-sqlite3,sharp,@lancedb/lancedb"
+    "postinstall": "electron-rebuild -f -w better-sqlite3,sharp,@lancedb/lancedb,@xenova/transformers"
   },
   "author": "Uyoung",
   "license": "MIT",

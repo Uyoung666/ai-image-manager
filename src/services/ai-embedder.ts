@@ -109,7 +109,7 @@ export async function initVectorDB(): Promise<void> {
           console.log(`[AI] Creating vector index on ${rowCount} rows...`);
           await photoTable.createIndex("vector", {
             config: lancedb.Index.ivfPq({
-              numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+              numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
               distanceType: "cosine",
             }),
           });
@@ -795,7 +795,7 @@ export async function embedAllPhotos(
         console.log(`[AI] Building vector index on ${rowCount} rows...`);
         await photoTable.createIndex("vector", {
           config: LIdx.ivfPq({
-            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
             distanceType: "cosine",
           }),
         });
@@ -810,6 +810,108 @@ export async function embedAllPhotos(
 }
 
 // --- Search ---
+
+// Chinese → English search keyword mapping.
+// CLIP ViT-B/32 was trained on English image-text pairs, so Chinese queries
+// produce poor alignment. We translate known Chinese terms to English before
+// embedding to improve search accuracy.
+const ZH_TO_EN_SEARCH: Record<string, string> = {
+  "猫": "cat kitten",
+  "猫咪": "cat kitten",
+  "狗": "dog puppy",
+  "狗狗": "dog puppy",
+  "人": "person people human",
+  "人物": "person people human portrait",
+  "花": "flower blossom",
+  "花卉": "flower blossom",
+  "车": "car vehicle automobile",
+  "汽车": "car vehicle automobile",
+  "建筑": "building architecture",
+  "海": "ocean sea beach water",
+  "海滩": "beach sand ocean",
+  "山": "mountain hill",
+  "山脉": "mountain hill",
+  "树": "tree plant forest",
+  "树木": "tree plant forest",
+  "天空": "sky clouds",
+  "云": "clouds sky",
+  "日落": "sunset evening dusk",
+  "日出": "sunrise dawn morning",
+  "夜景": "night scene dark",
+  "夜晚": "night dark",
+  "食物": "food meal dish",
+  "美食": "food meal dish",
+  "室内": "indoor room inside",
+  "户外": "outdoor outside",
+  "城市": "city urban street",
+  "黑白": "black and white monochrome",
+  "雪": "snow winter cold",
+  "鸟": "bird",
+  "鸟类": "bird",
+  "鱼": "fish underwater",
+  "昆虫": "insect bug",
+  "桥": "bridge",
+  "路": "road street path",
+  "街道": "street road urban",
+  "门": "door entrance",
+  "窗": "window",
+  "桌子": "table desk furniture",
+  "椅子": "chair furniture",
+  "书": "book reading",
+  "书籍": "book reading",
+  "手机": "phone smartphone cellphone",
+  "电脑": "computer laptop pc",
+  "红色": "red color",
+  "蓝色": "blue color",
+  "绿色": "green color",
+  "黄色": "yellow color",
+  "白色": "white color bright",
+  "黑色": "black color dark",
+  "秋天": "autumn fall season",
+  "春天": "spring season",
+  "夏天": "summer season",
+  "冬天": "winter snow season",
+  "风景": "landscape scenery nature",
+  "自然风景": "landscape scenery nature",
+  "人像": "portrait person face",
+  "微距": "macro close-up detail",
+  "逆光": "backlight silhouette",
+  "动物": "animal wildlife",
+  "文字": "text document writing",
+  "截图": "screenshot screen ui",
+  "屏幕截图": "screenshot screen ui",
+  "水": "water lake river ocean",
+  "水面": "water surface reflection",
+  "草地": "grass field meadow green",
+  "沙滩": "beach sand shore",
+  "夕阳": "sunset evening dusk",
+  "森林": "forest woods trees nature",
+  "花园": "garden flowers park",
+  "湖": "lake water reflection",
+  "湖泊": "lake water reflection",
+  "河": "river stream water",
+  "河流": "river stream water",
+  "雾": "fog mist atmosphere",
+  "飞机": "airplane aircraft sky",
+  "船": "boat ship water",
+  "自行车": "bicycle bike",
+  "摩托车": "motorcycle bike",
+  "花海": "flower field garden colorful",
+  "红叶": "red leaf autumn fall",
+  "雪景": "snow winter landscape white",
+  "蓝天": "blue sky clear",
+  "白云": "white clouds sky",
+  "绿树": "green tree forest",
+  "大海": "ocean sea blue water",
+  "高山": "tall mountain peak",
+  "小溪": "stream creek water",
+  "瀑布": "waterfall water cascade",
+  "彩虹": "rainbow sky colorful",
+  "闪电": "lightning storm sky",
+  "星空": "starry night sky stars",
+  "月亮": "moon night sky",
+  "太阳": "sun bright sky daytime",
+};
 
 export async function searchByText(
   query: string,
@@ -848,7 +950,7 @@ export async function searchByText(
         );
         await photoTable.createIndex("vector", {
           config: LIdx.ivfPq({
-            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount) / 4)),
+            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
             distanceType: "cosine",
           }),
         });
@@ -862,23 +964,45 @@ export async function searchByText(
     );
   }
 
-  const queryVector = await embeddingModel.embedText(query);
+  // Translate Chinese queries to English for better CLIP alignment
+  let searchText = query.trim();
+  const hasChinese = /[一-鿿]/.test(searchText);
+  if (hasChinese) {
+    let translated = searchText;
+    // Sort keys by length descending so longer phrases match first
+    const sortedKeys = Object.keys(ZH_TO_EN_SEARCH).sort(
+      (a, b) => b.length - a.length
+    );
+    for (const zh of sortedKeys) {
+      if (searchText.includes(zh)) {
+        translated = translated.replace(new RegExp(zh, "g"), ZH_TO_EN_SEARCH[zh]);
+      }
+    }
+    console.log(`[AI] searchByText: zh→en "${searchText}" → "${translated}"`);
+    searchText = translated;
+  }
+
+  const queryVector = await embeddingModel.embedText(searchText);
   console.log(
-    `[AI] searchByText: query="${query}" vecLen=${queryVector.length}`
+    `[AI] searchByText: query="${searchText}" vecLen=${queryVector.length}`
   );
 
   let rawResults: Array<Record<string, unknown>> = [];
+  const rowCount = await photoTable.countRows();
 
   try {
-    // Cosine distance + refineFactor for accurate ranking.
-    // refineFactor(5) fetches 5× candidates, then re-ranks with uncompressed
-    // vectors to correct IVF_PQ quantization errors. For small datasets we
-    // skip the index and use exact flat search.
-    const rowCount = await photoTable.countRows();
+    // Cosine distance + adaptive refineFactor for accurate ranking.
+    // refineFactor re-ranks candidates with uncompressed vectors to correct
+    // IVF_PQ quantization errors. Smaller datasets need MORE refinement
+    // because fewer partitions mean coarser quantization.
+    const adaptiveRefine = Math.min(
+      10,
+      Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
+    );
     const vq = photoTable
       .vectorSearch(queryVector)
       .distanceType("cosine")
-      .refineFactor(rowCount < 1000 ? 0 : 5)
+      .refineFactor(adaptiveRefine)
       .limit(limit);
     rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
   } catch (err: any) {
@@ -897,10 +1021,39 @@ export async function searchByText(
 
   // Fallback: brute-force scan when vectorSearch returns nothing
   if (rawResults.length === 0) {
-    const rowCount = await photoTable.countRows();
-    if (rowCount > 1) {
+    // First fallback: if Chinese was translated but returned no results,
+    // try embedding the original Chinese query directly
+    if (hasChinese && searchText !== query.trim()) {
       console.log(
-        `[AI] vectorSearch returned 0, falling back to brute-force scan (${rowCount} rows)`
+        `[AI] Translated search returned 0, trying original Chinese: "${query.trim()}"`
+      );
+      try {
+        const zhVector = await embeddingModel.embedText(query.trim());
+        const zhVq = photoTable
+          .vectorSearch(zhVector)
+          .distanceType("cosine")
+          .refineFactor(
+            Math.min(10, Math.max(3, Math.ceil(100 / Math.sqrt(rowCount))))
+          )
+          .limit(limit);
+        rawResults = (await zhVq.toArray()) as Array<Record<string, unknown>>;
+        if (rawResults.length > 0) {
+          console.log(
+            `[AI] Chinese fallback returned ${rawResults.length} results`
+          );
+        }
+      } catch (fallbackErr: any) {
+        console.error("[AI] Chinese fallback failed:", fallbackErr?.message);
+      }
+    }
+  }
+
+  // Second fallback: brute-force scan when both translated and Chinese return nothing
+  if (rawResults.length === 0) {
+    const rowCount2 = await photoTable.countRows();
+    if (rowCount2 > 1) {
+      console.log(
+        `[AI] vectorSearch returned 0, falling back to brute-force scan (${rowCount2} rows)`
       );
       try {
         const allRows = await photoTable.query().toArray();
@@ -979,9 +1132,15 @@ export async function searchByImage(
     return [];
   }
 
+  const rowCount = await photoTable.countRows();
+  const adaptiveRefine = Math.min(
+    10,
+    Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
+  );
   const vq = photoTable
     .vectorSearch(queryVector)
     .distanceType("cosine")
+    .refineFactor(adaptiveRefine)
     .limit(limit);
   const rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
 
@@ -1086,7 +1245,7 @@ let cachedTagEmbeddings: Array<{
 
 export async function suggestTags(
   imagePath: string,
-  threshold = 0.25
+  threshold = 0.28
 ): Promise<Array<{ tag: string; confidence: number }>> {
   try {
     await loadModel();

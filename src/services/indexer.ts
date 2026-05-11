@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import exifr from "exifr";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
@@ -320,6 +320,31 @@ export async function scanFolder(
     scanned++;
   }
 
+  // Clean up photos whose files no longer exist on disk
+  const dbPhotos = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(eq(photos.folderId, folder.id))
+    .all();
+  const removedIds: number[] = [];
+  for (const p of dbPhotos) {
+    if (!fs.existsSync(p.path)) {
+      db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
+      db.delete(photos).where(eq(photos.id, p.id)).run();
+      removedIds.push(p.id);
+      const idx = photoIds.indexOf(p.id);
+      if (idx >= 0) {
+        photoIds.splice(idx, 1);
+      }
+      console.log(`[Indexer] Removed stale record: ${p.path}`);
+    }
+  }
+  if (removedIds.length > 0) {
+    console.log(
+      `[Indexer] Cleaned up ${removedIds.length} deleted files from index`
+    );
+  }
+
   // Update folder metadata
   db.update(folders)
     .set({ photoCount: photoIds.length, lastScannedAt: Date.now() })
@@ -356,7 +381,32 @@ export function startWatching(
         return;
       }
       try {
-        const photoId = await indexSingleFile(filePath, null);
+        // Match the closest parent folder from our indexed folders
+        let matchedFolderId: number | null = null;
+        const indexedFolders = db
+          .select({ id: folders.id, path: folders.path })
+          .from(folders)
+          .all();
+        for (const f of indexedFolders) {
+          const normalizedFolder = f.path.replace(/\\/g, "/") + "/";
+          const normalizedFile = filePath.replace(/\\/g, "/");
+          if (normalizedFile.startsWith(normalizedFolder)) {
+            // Keep the longest (most specific) match
+            if (
+              matchedFolderId === null ||
+              f.path.length > (matchedFolderId ? 1 : 0)
+            ) {
+              matchedFolderId = f.id;
+            }
+          }
+        }
+        const photoId = await indexSingleFile(filePath, matchedFolderId);
+        if (matchedFolderId && photoId) {
+          db.update(folders)
+            .set({ photoCount: sql`photo_count + 1` })
+            .where(eq(folders.id, matchedFolderId))
+            .run();
+        }
         onChange(photoId, "add");
       } catch {
         /* ignore */

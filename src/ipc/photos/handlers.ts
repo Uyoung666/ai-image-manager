@@ -25,7 +25,7 @@ const SearchSchema = z.object({
 
 // Time-decay scoring: blends vector similarity with photo recency.
 // Newer photos get a moderate boost; older photos are not penalized below their vector score.
-const TIME_DECAY_ALPHA = 0.25; // How much recency boosts the score (0 = off, 1 = strong)
+const TIME_DECAY_ALPHA = 0.10; // Light recency boost — prioritizes semantic relevance over freshness
 const MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 function applyTimeDecay<
@@ -74,22 +74,44 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     .where(eq(folders.id, input.id))
     .get();
   if (folder) {
-    // Collect photo IDs for vector cleanup before deleting photos
-    const photoIds = db
+    // Collect photo IDs for both folder-linked and orphan records
+    const folderPhotoIds = db
       .select({ id: photos.id })
       .from(photos)
       .where(eq(photos.folderId, input.id))
       .all()
       .map((p) => p.id);
 
-    db.delete(photos).where(eq(photos.folderId, input.id)).run();
-    db.delete(folders).where(eq(folders.id, input.id)).run();
+    // Also find orphan photos (folderId=NULL or dangling) whose path is under this folder
+    const orphanPhotoIds = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(
+        sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
+          SELECT id FROM folders
+        )) AND ${photos.path} LIKE ${folder.path.replace(/'/g, "''") + "/%"}`
+      )
+      .all()
+      .map((p) => p.id);
 
-    if (photoIds.length > 0) {
-      deletePhotoVectors(photoIds).catch((err) =>
+    const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
+
+    if (allPhotoIds.length > 0) {
+      db.delete(exifData)
+        .where(inArray(exifData.photoId, allPhotoIds))
+        .run();
+      db.delete(photoTags)
+        .where(inArray(photoTags.photoId, allPhotoIds))
+        .run();
+      db.delete(photos)
+        .where(inArray(photos.id, allPhotoIds))
+        .run();
+      deletePhotoVectors(allPhotoIds).catch((err) =>
         console.error("[AI] deleteFolder vector cleanup failed:", err)
       );
     }
+
+    db.delete(folders).where(eq(folders.id, input.id)).run();
   }
   return { success: true };
 });
@@ -597,7 +619,7 @@ export const stopAiIndexing = os.handler(() => {
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const photo = db
-    .select({ path: photos.path })
+    .select({ path: photos.path, folderId: photos.folderId })
     .from(photos)
     .where(eq(photos.id, input.id))
     .get();
@@ -608,6 +630,13 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
     deletePhotoVectors([input.id]).catch((err) =>
       console.error("[AI] deletePhoto vector cleanup failed:", err)
     );
+    // Decrement folder photoCount
+    if (photo.folderId) {
+      db.update(folders)
+        .set({ photoCount: sql`MAX(0, photo_count - 1)` })
+        .where(eq(folders.id, photo.folderId))
+        .run();
+    }
   }
   return { success: true };
 });
@@ -616,6 +645,12 @@ export const deletePhotos = os
   .input(z.object({ ids: z.array(z.number()) }))
   .handler(async ({ input }) => {
     const db = getDatabase();
+    // Collect folderId info before deletion for count updates
+    const deletedPhotos = db
+      .select({ id: photos.id, folderId: photos.folderId })
+      .from(photos)
+      .where(inArray(photos.id, input.ids))
+      .all();
     for (const id of input.ids) {
       db.delete(exifData).where(eq(exifData.photoId, id)).run();
       db.delete(photos).where(eq(photos.id, id)).run();
@@ -624,6 +659,22 @@ export const deletePhotos = os
     deletePhotoVectors(input.ids).catch((err) =>
       console.error("[AI] deletePhotos vector cleanup failed:", err)
     );
+    // Decrement folder photoCount by group
+    const countsByFolder = new Map<number, number>();
+    for (const p of deletedPhotos) {
+      if (p.folderId) {
+        countsByFolder.set(
+          p.folderId,
+          (countsByFolder.get(p.folderId) || 0) + 1,
+        );
+      }
+    }
+    for (const [fid, count] of countsByFolder) {
+      db.update(folders)
+        .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
+        .where(eq(folders.id, fid))
+        .run();
+    }
     return { deleted: input.ids.length };
   });
 
@@ -863,7 +914,7 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
   try {
-    const suggestions = await aiSuggestTags(photo.path, 0.25);
+    const suggestions = await aiSuggestTags(photo.path, 0.28);
     return { photoId: input.id, suggestions };
   } catch {
     return { photoId: input.id, suggestions: [] };

@@ -12,6 +12,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 
 // --- Force WASM backend ---
 // Must happen BEFORE any @xenova/transformers import.
@@ -52,6 +53,23 @@ process.on("message", async (msg) => {
       env,
     } = await import("@xenova/transformers");
 
+    // Helper: read image via project-level sharp (already electron-rebuilt),
+    // then construct a RawImage so the processor can handle preprocessing.
+    // Avoids RawImage.read() which calls @xenova/transformers' nested sharp
+    // whose native binary is not electron-rebuilt.
+    async function readImage(filePath) {
+      const { data, info } = await sharp(filePath)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      return new RawImage(
+        new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength),
+        info.width,
+        info.height,
+        info.channels,
+      );
+    }
+
     env.localModelPath = modelPath;
     env.allowRemoteModels = true;
     env.backends.onnx.wasm.numThreads = 1;
@@ -80,7 +98,7 @@ process.on("message", async (msg) => {
     for (let i = 0; i < photos.length; i++) {
       const photo = photos[i];
       try {
-        const image = await RawImage.read(photo.path);
+        const image = await readImage(photo.path);
         const inputs = await processor(image);
         const output = await model(inputs);
 

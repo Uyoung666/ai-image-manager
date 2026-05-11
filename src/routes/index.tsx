@@ -42,6 +42,7 @@ function loadSidebarState(): boolean {
 function HomePage() {
   const { t } = useTranslation();
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [totalPhotos, setTotalPhotos] = useState(0);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -96,6 +97,7 @@ function HomePage() {
           limit: 500,
         });
         setPhotos((result as any).items || []);
+        setTotalPhotos((result as any).total || 0);
       } catch {
         /* ignore */
       } finally {
@@ -250,7 +252,9 @@ function HomePage() {
       const result = await ipc.client.photos.searchCompound(
         searchParams as any
       );
-      setPhotos((result as any).results || []);
+      const data = result as any;
+      setPhotos(data.results || []);
+      setTotalPhotos(data.total || data.results?.length || 0);
     } catch {
       const fallback = await ipc.client.photos.listPhotos({
         search: query.trim() || undefined,
@@ -260,6 +264,7 @@ function HomePage() {
         limit: 500,
       });
       setPhotos((fallback as any).items || []);
+      setTotalPhotos((fallback as any).total || 0);
     }
   }
 
@@ -371,7 +376,7 @@ function HomePage() {
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}
-        totalPhotos={photos.length}
+        totalPhotos={totalPhotos}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
