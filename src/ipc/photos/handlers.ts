@@ -8,11 +8,12 @@ import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
+  suggestTags as aiSuggestTags,
+  checkAiHealth,
   deletePhotoVectors,
   embedAllPhotos,
   getEmbeddingProgress,
   stopEmbedding,
-  suggestTags as aiSuggestTags,
 } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService } from "@/services/indexer";
 
@@ -27,15 +28,15 @@ const SearchSchema = z.object({
 const TIME_DECAY_ALPHA = 0.25; // How much recency boosts the score (0 = off, 1 = strong)
 const MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
-function applyTimeDecay<T extends { similarity: number; fileDate?: number | null }>(
-  results: T[],
-): Array<T & { score: number }> {
+function applyTimeDecay<
+  T extends { similarity: number; fileDate?: number | null },
+>(results: T[]): Array<T & { score: number }> {
   const now = Date.now();
   const scored = results.map((r) => {
-    const age = r.fileDate != null ? Math.max(0, now - r.fileDate) : 0;
+    const age = r.fileDate == null ? 0 : Math.max(0, now - r.fileDate);
     const recency = Math.max(0, 1 - age / MAX_AGE_MS);
     const score = r.similarity * (1 + TIME_DECAY_ALPHA * recency);
-    return { ...r, score: Math.round(score * 10000) / 10000 };
+    return { ...r, score: Math.round(score * 10_000) / 10_000 };
   });
   scored.sort((a, b) => b.score - a.score);
   return scored;
@@ -298,7 +299,9 @@ export const searchByText = os
     const merged = results
       .map((r) => {
         const photo = photoMap.get(r.photoId);
-        if (!photo) return null;
+        if (!photo) {
+          return null;
+        }
         return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
@@ -329,7 +332,9 @@ export const searchByImage = os
     const merged = results
       .map((r) => {
         const photo = photoMap.get(r.photoId);
-        if (!photo) return null;
+        if (!photo) {
+          return null;
+        }
         return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
@@ -401,13 +406,25 @@ export const searchCompound = os
         const merged = aiResults
           .map((r) => {
             const photo = photoMap.get(r.photoId);
-            if (!photo) return null;
-            return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+            if (!photo) {
+              return null;
+            }
+            return {
+              ...photo,
+              similarity: r.similarity,
+              fileDate: photo.fileDate,
+            };
           })
-          .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
+          .filter(
+            (p): p is NonNullable<typeof p> => p !== null && p.id != null
+          );
 
         const scored = applyTimeDecay(merged);
-        return { results: scored.slice(0, limit), query: query.trim(), total: scored.length };
+        return {
+          results: scored.slice(0, limit),
+          query: query.trim(),
+          total: scored.length,
+        };
       }
 
       // Apply EXIF filters on AI results
@@ -474,13 +491,23 @@ export const searchCompound = os
       const merged = filtered
         .map((r) => {
           const photo = photoMap.get(r.photoId);
-          if (!photo) return null;
-          return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+          if (!photo) {
+            return null;
+          }
+          return {
+            ...photo,
+            similarity: r.similarity,
+            fileDate: photo.fileDate,
+          };
         })
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
       const scored = applyTimeDecay(merged);
-      return { results: scored.slice(0, limit), query: query.trim(), total: scored.length };
+      return {
+        results: scored.slice(0, limit),
+        query: query.trim(),
+        total: scored.length,
+      };
     }
 
     // No text query: EXIF-only filter
@@ -820,10 +847,18 @@ export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
 });
 
+export const getAiHealth = os.handler(async () => {
+  return checkAiHealth();
+});
+
 // AI tag suggestion
 export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
-  const photo = db.select({ path: photos.path }).from(photos).where(eq(photos.id, input.id)).get();
+  const photo = db
+    .select({ path: photos.path })
+    .from(photos)
+    .where(eq(photos.id, input.id))
+    .get();
   if (!photo) {
     return { photoId: input.id, suggestions: [] };
   }
@@ -1102,155 +1137,158 @@ footer a{color:var(--accent);text-decoration:none}
 </html>`;
 }
 
-export const exportPhotos = os.input(ExportSchema).handler(async ({ input }) => {
-  const db = getDatabase();
-  const { ids, format, maxWidth, quality, outputPath } = input;
+export const exportPhotos = os
+  .input(ExportSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const { ids, format, maxWidth, quality, outputPath } = input;
 
-  const photoList = db
-    .select()
-    .from(photos)
-    .where(inArray(photos.id, ids))
-    .all();
+    const photoList = db
+      .select()
+      .from(photos)
+      .where(inArray(photos.id, ids))
+      .all();
 
-  if (photoList.length === 0) {
-    return { success: false, error: "No photos found" };
-  }
-
-  // Prepare temp directory
-  const os = await import("node:os");
-  const tmpDir = path.join(os.tmpdir(), `ai-image-gallery-${Date.now()}`);
-  const photosDir = path.join(tmpDir, "photos");
-  fs.mkdirSync(photosDir, { recursive: true });
-
-  const galleryPhotos: Array<{
-    filename: string;
-    width: number;
-    height: number;
-    tags: string[];
-    exif: {
-      camera?: string;
-      lens?: string;
-      focalLength?: string;
-      aperture?: string;
-      shutter?: string;
-      iso?: number;
-      dateTaken?: string;
-    } | null;
-  }> = [];
-
-  try {
-    const sharp = format === "compressed" ? (await import("sharp")).default : null;
-
-    for (const photo of photoList) {
-      // Resolve filename collision
-      let destName = photo.filename;
-      let counter = 1;
-      while (fs.existsSync(path.join(photosDir, destName))) {
-        const ext = path.extname(photo.filename);
-        const base = path.basename(photo.filename, ext);
-        destName = `${base}_${counter}${ext}`;
-        counter++;
-      }
-
-      const destPath = path.join(photosDir, destName);
-
-      if (sharp && format === "compressed") {
-        try {
-          let pipeline = sharp(photo.path);
-          const meta = await pipeline.metadata();
-          if (meta.width && meta.width > maxWidth) {
-            pipeline = pipeline.resize(maxWidth);
-          }
-          const buffer = await pipeline.jpeg({ quality }).toBuffer();
-          // Change extension to .jpg for compressed output
-          destName = path.basename(destName, path.extname(destName)) + ".jpg";
-          fs.writeFileSync(path.join(photosDir, destName), buffer);
-        } catch {
-          // Fallback: copy original on sharp failure
-          fs.copyFileSync(photo.path, path.join(photosDir, destName));
-        }
-      } else {
-        fs.copyFileSync(photo.path, destPath);
-      }
-
-      // Gather tags
-      const photoTagRows = db
-        .select({ name: tags.name })
-        .from(photoTags)
-        .innerJoin(tags, eq(photoTags.tagId, tags.id))
-        .where(eq(photoTags.photoId, photo.id))
-        .all();
-      const tagNames = photoTagRows.map((t) => t.name);
-
-      // Gather EXIF
-      const exif = db
-        .select()
-        .from(exifData)
-        .where(eq(exifData.photoId, photo.id))
-        .get();
-
-      galleryPhotos.push({
-        filename: destName,
-        width: photo.width ?? 0,
-        height: photo.height ?? 0,
-        tags: tagNames,
-        exif: exif
-          ? {
-              camera: exif.cameraModel ?? undefined,
-              lens: exif.lensModel ?? undefined,
-              focalLength: exif.focalLength?.toString(),
-              aperture: exif.aperture?.toString(),
-              shutter: exif.shutterSpeed ?? undefined,
-              iso: exif.iso ?? undefined,
-              dateTaken: exif.dateTaken
-                ? new Date(exif.dateTaken).toLocaleDateString("zh-CN")
-                : undefined,
-            }
-          : null,
-      });
+    if (photoList.length === 0) {
+      return { success: false, error: "No photos found" };
     }
 
-    // Generate HTML gallery
-    const html = buildHtmlGallery(galleryPhotos);
-    fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
+    // Prepare temp directory
+    const os = await import("node:os");
+    const tmpDir = path.join(os.tmpdir(), `ai-image-gallery-${Date.now()}`);
+    const photosDir = path.join(tmpDir, "photos");
+    fs.mkdirSync(photosDir, { recursive: true });
 
-    // Create ZIP
-    const archiver = (await import("archiver")).default;
-    const zipPath =
-      outputPath ||
-      path.join(
-        os.tmpdir(),
-        `gallery-${new Date().toISOString().slice(0, 10)}.zip`
-      );
-    const output = fs.createWriteStream(zipPath);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    const galleryPhotos: Array<{
+      filename: string;
+      width: number;
+      height: number;
+      tags: string[];
+      exif: {
+        camera?: string;
+        lens?: string;
+        focalLength?: string;
+        aperture?: string;
+        shutter?: string;
+        iso?: number;
+        dateTaken?: string;
+      } | null;
+    }> = [];
 
-    await new Promise<string>((resolve, reject) => {
-      output.on("close", () => resolve(zipPath));
-      archive.on("error", reject);
-      archive.pipe(output);
-      archive.directory(tmpDir, false);
-      archive.finalize();
-    });
-
-    // Cleanup temp directory
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-
-    const sizeMB = (fs.statSync(zipPath).size / (1024 * 1024)).toFixed(1);
-    return {
-      success: true,
-      path: zipPath,
-      filename: path.basename(zipPath),
-      photoCount: photoList.length,
-      sizeMB: Number.parseFloat(sizeMB),
-    };
-  } catch (e: any) {
-    // Cleanup on error
     try {
+      const sharp =
+        format === "compressed" ? (await import("sharp")).default : null;
+
+      for (const photo of photoList) {
+        // Resolve filename collision
+        let destName = photo.filename;
+        let counter = 1;
+        while (fs.existsSync(path.join(photosDir, destName))) {
+          const ext = path.extname(photo.filename);
+          const base = path.basename(photo.filename, ext);
+          destName = `${base}_${counter}${ext}`;
+          counter++;
+        }
+
+        const destPath = path.join(photosDir, destName);
+
+        if (sharp && format === "compressed") {
+          try {
+            let pipeline = sharp(photo.path);
+            const meta = await pipeline.metadata();
+            if (meta.width && meta.width > maxWidth) {
+              pipeline = pipeline.resize(maxWidth);
+            }
+            const buffer = await pipeline.jpeg({ quality }).toBuffer();
+            // Change extension to .jpg for compressed output
+            destName = path.basename(destName, path.extname(destName)) + ".jpg";
+            fs.writeFileSync(path.join(photosDir, destName), buffer);
+          } catch {
+            // Fallback: copy original on sharp failure
+            fs.copyFileSync(photo.path, path.join(photosDir, destName));
+          }
+        } else {
+          fs.copyFileSync(photo.path, destPath);
+        }
+
+        // Gather tags
+        const photoTagRows = db
+          .select({ name: tags.name })
+          .from(photoTags)
+          .innerJoin(tags, eq(photoTags.tagId, tags.id))
+          .where(eq(photoTags.photoId, photo.id))
+          .all();
+        const tagNames = photoTagRows.map((t) => t.name);
+
+        // Gather EXIF
+        const exif = db
+          .select()
+          .from(exifData)
+          .where(eq(exifData.photoId, photo.id))
+          .get();
+
+        galleryPhotos.push({
+          filename: destName,
+          width: photo.width ?? 0,
+          height: photo.height ?? 0,
+          tags: tagNames,
+          exif: exif
+            ? {
+                camera: exif.cameraModel ?? undefined,
+                lens: exif.lensModel ?? undefined,
+                focalLength: exif.focalLength?.toString(),
+                aperture: exif.aperture?.toString(),
+                shutter: exif.shutterSpeed ?? undefined,
+                iso: exif.iso ?? undefined,
+                dateTaken: exif.dateTaken
+                  ? new Date(exif.dateTaken).toLocaleDateString("zh-CN")
+                  : undefined,
+              }
+            : null,
+        });
+      }
+
+      // Generate HTML gallery
+      const html = buildHtmlGallery(galleryPhotos);
+      fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
+
+      // Create ZIP
+      const archiver = (await import("archiver")).default;
+      const zipPath =
+        outputPath ||
+        path.join(
+          os.tmpdir(),
+          `gallery-${new Date().toISOString().slice(0, 10)}.zip`
+        );
+      const output = fs.createWriteStream(zipPath);
+      const archive = archiver("zip", { zlib: { level: 9 } });
+
+      await new Promise<string>((resolve, reject) => {
+        output.on("close", () => resolve(zipPath));
+        archive.on("error", reject);
+        archive.pipe(output);
+        archive.directory(tmpDir, false);
+        archive.finalize();
+      });
+
+      // Cleanup temp directory
       fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
+
+      const sizeMB = (fs.statSync(zipPath).size / (1024 * 1024)).toFixed(1);
+      return {
+        success: true,
+        path: zipPath,
+        filename: path.basename(zipPath),
+        photoCount: photoList.length,
+        sizeMB: Number.parseFloat(sizeMB),
+      };
+    } catch (e: any) {
+      // Cleanup on error
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+      return { success: false, error: e.message };
     }
-    return { success: false, error: e.message };
-  }
-});
+  });
