@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
@@ -416,6 +416,37 @@ export async function embedAllPhotos(
     };
     onProgress?.(currentProgress);
     return 0;
+  }
+
+  // Repair: detect orphaned isAiProcessed flags from previous worker crashes.
+  // Compare SQLite processed count vs LanceDB vector count; if they diverge
+  // significantly, reset all flags to force a clean re-embed.
+  const processedRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(photos)
+    .where(eq(photos.isAiProcessed, true))
+    .get();
+
+  const processedCount: number = processedRow?.count ?? 0;
+
+  if (processedCount > 0) {
+    let vectorCount = 0;
+    try {
+      vectorCount = await photoTable.countRows();
+    } catch {
+      vectorCount = 0;
+    }
+
+    // Allow small mismatch (init row), but large gaps indicate crash damage
+    if (vectorCount <= 1 || vectorCount < processedCount * 0.5) {
+      console.log(
+        `[AI] Repair: SQLite has ${processedCount} processed but LanceDB has ${vectorCount} vectors. Resetting all flags.`
+      );
+      db.update(photos)
+        .set({ isAiProcessed: false })
+        .where(eq(photos.isAiProcessed, true))
+        .run();
+    }
   }
 
   const unprocessed = db
