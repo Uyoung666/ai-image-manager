@@ -1,0 +1,127 @@
+import { os } from "@orpc/server";
+import { desc, eq, inArray, like, sql } from "drizzle-orm";
+import { getDatabase } from "@/db";
+import { exifData, folders, photos, photoTags } from "@/db/schema";
+import {
+  deletePhotoVectors,
+} from "@/services/ai-embedder";
+import { scanFolder as scanFolderService } from "@/services/indexer";
+import { FolderSchema, IdSchema, ListSchema } from "./shared";
+
+// Folder management
+export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
+  const result = await scanFolderService(input.path);
+  return result;
+});
+
+export const getFolders = os.handler(() => {
+  const db = getDatabase();
+  return db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
+});
+
+export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
+  const db = getDatabase();
+  const folder = db
+    .select({ path: folders.path })
+    .from(folders)
+    .where(eq(folders.id, input.id))
+    .get();
+  if (folder) {
+    const folderPhotoIds = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.folderId, input.id))
+      .all()
+      .map((p) => p.id);
+
+    const escapedPath = folder.path.replace(/'/g, "''");
+    const normalizedPath = escapedPath.replace(/\\/g, "/");
+    const orphanPhotoIds = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(
+        sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
+          SELECT id FROM folders
+        )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${normalizedPath + "/%"}`
+      )
+      .all()
+      .map((p) => p.id);
+    const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
+
+    if (allPhotoIds.length > 0) {
+      db.delete(exifData).where(inArray(exifData.photoId, allPhotoIds)).run();
+      db.delete(photoTags).where(inArray(photoTags.photoId, allPhotoIds)).run();
+      db.delete(photos).where(inArray(photos.id, allPhotoIds)).run();
+      deletePhotoVectors(allPhotoIds).catch((err) =>
+        console.error("[AI] deleteFolder vector cleanup failed:", err)
+      );
+    }
+
+    db.delete(folders).where(eq(folders.id, input.id)).run();
+  }
+  return { success: true };
+});
+
+// Photo listing
+export const listPhotos = os.input(ListSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const { folderId, tagId, search, sort, order, offset, limit } = input;
+
+  let query = db.select().from(photos).$dynamic();
+
+  if (folderId) {
+    query = query.where(eq(photos.folderId, folderId));
+  }
+  if (tagId) {
+    query = query.where(
+      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
+    );
+  }
+  if (search) {
+    query = query.where(like(photos.filename, `%${search}%`));
+  }
+
+  const sortCol =
+    sort === "name"
+      ? photos.filename
+      : sort === "size"
+        ? photos.fileSize
+        : photos.fileDate;
+  query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
+
+  // Build filtered count query with same conditions
+  let countQuery = db
+    .select({ count: sql<number>`count(*)` })
+    .from(photos)
+    .$dynamic();
+  if (folderId) {
+    countQuery = countQuery.where(eq(photos.folderId, folderId));
+  }
+  if (tagId) {
+    countQuery = countQuery.where(
+      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
+    );
+  }
+  if (search) {
+    countQuery = countQuery.where(like(photos.filename, `%${search}%`));
+  }
+  const total = countQuery.get()?.count || 0;
+  const items = query.limit(limit).offset(offset).all();
+
+  return { items, total, offset, limit };
+});
+
+// Photo detail
+export const getPhotoDetail = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
+  return photo || null;
+});
+
+export const getPhotoExif = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  return (
+    db.select().from(exifData).where(eq(exifData.photoId, input.id)).get() ||
+    null
+  );
+});
