@@ -1,4 +1,4 @@
-import { ipcRenderer, webUtils } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC_CHANNELS } from "./constants";
 
 window.addEventListener("message", (event) => {
@@ -17,7 +17,7 @@ ipcRenderer.on(IPC_CHANNELS.FILE_CHANGE, (_event, payload) => {
   window.postMessage({ channel: IPC_CHANNELS.FILE_CHANGE, ...payload }, "*");
 });
 
-// Expose getPathForFile for drag-and-drop (File.path removed in contextIsolation)
-(window as any).__electronGetFilePath = (file: File): string => {
-  return webUtils.getPathForFile(file);
-};
+// Expose getPathForFile via contextBridge (contextIsolation requires this)
+contextBridge.exposeInMainWorld("electronAPI", {
+  getFilePath: (file: File): string => webUtils.getPathForFile(file),
+});
