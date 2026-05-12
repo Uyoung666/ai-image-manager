@@ -70,7 +70,7 @@ function SettingsPage() {
     setCleanupStatus("正在清理...");
     try {
       const result = await ipc.client.photos.cleanupOrphanPhotos({});
-      const removed = (result as any)?.removed ?? 0;
+      const removed = result?.removed ?? 0;
       setCleanupCount(removed);
       setCleanupStatus(`已清除 ${removed} 条无效记录`);
     } catch {

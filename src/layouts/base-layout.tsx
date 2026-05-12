@@ -1,9 +1,20 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import DragWindowRegion from "@/components/drag-window-region";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
+
+function isPerfMonitorEnabled() {
+  try {
+    return localStorage.getItem("DEV_PERF_MONITOR") === "true";
+  } catch {
+    return false;
+  }
+}
 
 export default function BaseLayout({ children }: { children: ReactNode }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [perfOn] = useState(isPerfMonitorEnabled);
+  const { metrics, memory } = usePerfMonitor(perfOn);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -41,6 +52,7 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
         onClose={() => setShortcutsOpen(false)}
         open={shortcutsOpen}
       />
+      {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
     </div>
   );
 }

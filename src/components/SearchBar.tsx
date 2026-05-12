@@ -38,19 +38,33 @@ export interface ExifFilters {
 }
 
 interface SearchBarProps {
+  aiStatus?: {
+    model: string;
+    vectorDB: string;
+    hasVectors: boolean;
+    vectorCount: number;
+    indexReady: boolean;
+    isEmbedding: boolean;
+    embeddingProgress: { processed: number; total: number; phase: string };
+  } | null;
   imageSearchActive?: boolean;
   onClear: () => void;
   onImageSearch?: (imagePath: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
   resultCount?: number;
+  searchMode?: "text" | "image" | "exif" | null;
+  searchTime?: number;
 }
 
 export function SearchBar({
+  aiStatus,
   imageSearchActive,
   onSearch,
   onClear,
   onImageSearch,
   resultCount,
+  searchMode,
+  searchTime,
 }: SearchBarProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState(imageSearchActive ? "[以图搜图]" : "");
@@ -163,7 +177,7 @@ export function SearchBar({
     }
     const file = e.dataTransfer.files[0];
     if (file?.type.startsWith("image/")) {
-      const filePath = (file as any).path;
+      const filePath = (file as File & { path?: string }).path;
       if (filePath) {
         onImageSearch(filePath);
       }
@@ -186,6 +200,21 @@ export function SearchBar({
         hasActiveFilters || undefined ? filters : undefined
       );
     }
+  }
+
+  // Determine search placeholder based on AI status
+  function getPlaceholder(): string {
+    if (imageSearchActive) return "[以图搜图模式]";
+    if (!aiStatus) return t("searchPlaceholder");
+    if (aiStatus.isEmbedding) {
+      const p = aiStatus.embeddingProgress;
+      return `AI 索引中... (${p.processed}/${p.total}) — 完成后即可搜索`;
+    }
+    if (aiStatus.model === "loading") return "AI 模型加载中...";
+    if (aiStatus.model === "error") return "AI 模型加载失败，搜索不可用";
+    if (aiStatus.vectorDB !== "ready") return "向量数据库未就绪...";
+    if (!aiStatus.hasVectors) return "尚无 AI 索引，请先导入并索引照片";
+    return t("searchPlaceholder");
   }
 
   const filterInputClass =
@@ -215,7 +244,7 @@ export function SearchBar({
               className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-[#6b6b75] focus:border-primary focus:ring-1 focus:ring-ring"
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => setShowHistory(history.length > 0)}
-              placeholder={t("searchPlaceholder")}
+              placeholder={getPlaceholder()}
               ref={inputRef}
               type="text"
               value={query}
@@ -239,7 +268,7 @@ export function SearchBar({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      const filePath = (file as any).path;
+                      const filePath = (file as File & { path?: string }).path;
                       if (filePath) {
                         onImageSearch(filePath);
                       }
@@ -274,6 +303,31 @@ export function SearchBar({
               <Filter className="h-4 w-4" />
             </button>
           </div>
+
+        {/* Search status line — shows mode, timing, and result count */}
+        {(searchMode || searchTime !== undefined || resultCount !== undefined) && (
+          <div className="mt-2 flex items-center gap-2 text-[11px]">
+            {searchMode && (
+              <span className="rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary">
+                {searchMode === "text" ? "语义搜索" : searchMode === "image" ? "以图搜图" : "EXIF筛选"}
+              </span>
+            )}
+            {searchTime !== undefined && (
+              <span className="text-[#6b6b75]">
+                {searchTime < 1000
+                  ? `${searchTime}ms`
+                  : `${(searchTime / 1000).toFixed(1)}s`}
+              </span>
+            )}
+            {resultCount !== undefined && (
+              <span className="text-[#a1a1aa]">
+                {resultCount > 0
+                  ? `${resultCount} 个结果`
+                  : searchMode ? "无匹配结果" : ""}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Active filter chips */}
         {hasActiveFilters && !showFilters && (

@@ -59,13 +59,13 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         quality: format === "compressed" ? quality : undefined,
         outputPath: savePath,
       });
-      const data = res as any;
+      const data = res as { success: boolean; path?: string; filename?: string; photoCount?: number; sizeMB?: number };
       if (data.success) {
         setResult({
-          path: data.path,
-          filename: data.filename,
-          photoCount: data.photoCount,
-          sizeMB: data.sizeMB,
+          path: data.path ?? "",
+          filename: data.filename ?? "",
+          photoCount: data.photoCount ?? 0,
+          sizeMB: data.sizeMB ?? 0,
         });
         await ipc.client.shell.openInExplorer({ path: data.path });
       } else {

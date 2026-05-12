@@ -11,6 +11,7 @@ interface Photo {
   id: number;
   isIndexed: boolean;
   path: string;
+  similarity?: number;
   thumbnailPath: string | null;
   width: number;
 }
@@ -37,27 +38,21 @@ const DENSITY_CONFIGS = [
 const MIN_COLUMNS = 2;
 const GAP = 8;
 
-// --- Waterfall distribution (masonry layout) ---
-// Distributes photos into balanced columns using shortest-column-first placement.
-// Applied once on the full dataset and memoized — react-virtuoso handles the
-// viewport rendering so this only recomputes when photos or columnCount change.
-
-function distributePhotos(photos: Photo[], columnCount: number): Photo[][] {
+// Distribute photos into balanced columns (shortest-column-first).
+// Then build rows where each row has exactly columnCount items (null-padded).
+// Row height is set to the tallest item's height at the current column width,
+// and shorter items fill that row height with a flex container.
+function buildMasonry(photos: Photo[], columnCount: number) {
   const columns: Photo[][] = Array.from({ length: columnCount }, () => []);
   const heights: number[] = new Array(columnCount).fill(0);
 
   for (const photo of photos) {
     const shortestCol = heights.indexOf(Math.min(...heights));
-    const ar =
-      photo.width && photo.height ? photo.width / photo.height : 4 / 3;
+    const ar = photo.width && photo.height ? photo.width / photo.height : 4 / 3;
     columns[shortestCol].push(photo);
     heights[shortestCol] += 1 / ar;
   }
 
-  return columns;
-}
-
-function buildRows(columns: Photo[][], columnCount: number): (Photo | null)[][] {
   const maxRows = Math.max(...columns.map((c) => c.length), 0);
   const rows: (Photo | null)[][] = [];
   for (let r = 0; r < maxRows; r++) {
@@ -67,7 +62,8 @@ function buildRows(columns: Photo[][], columnCount: number): (Photo | null)[][] 
     }
     rows.push(row);
   }
-  return rows;
+
+  return { rows, columns };
 }
 
 export function PhotoGrid({
@@ -84,13 +80,13 @@ export function PhotoGrid({
   onRenameSelected,
 }: PhotoGridProps) {
   const { t } = useTranslation();
-  const [densityIdx, setDensityIdx] = useState(1); // default "中" / 220px
+  const [densityIdx, setDensityIdx] = useState(1);
   const [columnCount, setColumnCount] = useState(4);
   const [compact, setCompact] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const targetColWidth = DENSITY_CONFIGS[densityIdx].targetColWidth;
 
-  // --- Responsive column count via ResizeObserver ---
+  // Responsive column count via ResizeObserver
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -104,32 +100,25 @@ export function PhotoGrid({
     return () => observer.disconnect();
   }, [targetColWidth]);
 
-  // --- Build masonry rows from all photos (not just visible ones) ---
-  const columns = useMemo(
-    () => distributePhotos(photos, columnCount),
-    [photos, columnCount]
+  // Build masonry rows from all photos
+  const { rows } = useMemo(
+    () => buildMasonry(photos, columnCount),
+    [photos, columnCount],
   );
 
-  const rows = useMemo(
-    () => buildRows(columns, columnCount),
-    [columns, columnCount]
-  );
-
-  // Pre-calculate row heights for accurate Virtuoso scroll estimation.
-  // Without this, variable-height masonry rows cause visible gaps and
-  // scrollbar jumps as Virtuoso re-measures after images load.
+  // Pre-calculate row heights. Each row's height = max item height.
+  // Item height = colWidth / aspectRatio. Shorter items fill with flex.
   const { defaultItemHeight } = useMemo(() => {
     if (!containerRef.current || rows.length === 0) {
-      return { rowHeights: [] as number[], defaultItemHeight: 250 };
+      return { defaultItemHeight: 250 };
     }
     const cw = containerRef.current.clientWidth;
-    const padX = 16; // px-2 * 2
-    const colW =
-      (cw - padX - (columnCount - 1) * GAP) / columnCount;
+    const padX = 16;
+    const colW = (cw - padX - (columnCount - 1) * GAP) / columnCount;
     const heights = rows.map((row) => {
       let maxH = 0;
       for (const photo of row) {
-        if (!photo || !photo.width || !photo.height) continue;
+        if (!photo?.width || !photo?.height) continue;
         const ar = photo.width / photo.height;
         const h = colW / ar;
         if (h > maxH) maxH = h;
@@ -140,16 +129,16 @@ export function PhotoGrid({
     return { defaultItemHeight: Math.round(avg) };
   }, [rows, columnCount]);
 
-  // --- Skeleton aspect ratios for loading state ---
+  // Skeleton aspect ratios
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
-    []
+    [],
   );
 
-  // --- Skeleton screen ---
+  // Skeleton screen
   if (loading && photos.length === 0) {
     const skelCols = Array.from({ length: columnCount }, (_, ci) =>
-      Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
+      Array.from({ length: 3 }, (_, ri) => ci * 3 + ri),
     );
     return (
       <div className="flex flex-1 flex-col">
@@ -157,10 +146,7 @@ export function PhotoGrid({
           <Skeleton className="h-4 w-24 bg-card" />
           <div className="flex items-center gap-1">
             {DENSITY_CONFIGS.map((cfg) => (
-              <Skeleton
-                className="h-5 w-6 rounded-[4px] bg-card"
-                key={cfg.label}
-              />
+              <Skeleton className="h-5 w-6 rounded-[4px] bg-card" key={cfg.label} />
             ))}
           </div>
         </div>
@@ -172,10 +158,7 @@ export function PhotoGrid({
                   <Skeleton
                     className="w-full rounded-[8px] bg-muted"
                     key={i}
-                    style={{
-                      aspectRatio:
-                        skeletonAspects()[i % skeletonAspects().length],
-                    }}
+                    style={{ aspectRatio: skeletonAspects()[i % skeletonAspects().length] }}
                   />
                 ))}
               </div>
@@ -186,7 +169,7 @@ export function PhotoGrid({
     );
   }
 
-  // --- Empty state ---
+  // Empty state
   if (!loading && photos.length === 0) {
     return (
       <div className="flex flex-1 flex-col">
@@ -196,23 +179,19 @@ export function PhotoGrid({
           </span>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <span className="text-[13px] text-[#6b6b75]">
-            {t("noPhotos")}
-          </span>
+          <span className="text-[13px] text-[#6b6b75]">{t("noPhotos")}</span>
         </div>
       </div>
     );
   }
 
-  // --- Normal render with react-virtuoso ---
   return (
     <div className="flex flex-1 flex-col">
       {/* Toolbar */}
       <div className="flex items-center justify-between border-border border-b px-4 py-2">
         <span className="truncate text-[12px] text-muted-foreground">
           {t("photosCount", { count: photos.length.toLocaleString() })}
-          {selectedIds.size > 0 &&
-            t("photosSelected", { count: selectedIds.size })}
+          {selectedIds.size > 0 && t("photosSelected", { count: selectedIds.size })}
         </span>
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && onRenameSelected && (
@@ -244,9 +223,7 @@ export function PhotoGrid({
               className="rounded-[4px] px-2 py-1 text-[#e5484d] text-[11px] transition-colors hover:bg-[#e5484d]/10"
               onClick={onDeleteSelected}
             >
-              {compact
-                ? `-${selectedIds.size}`
-                : `删除选中 (${selectedIds.size})`}
+              {compact ? `-${selectedIds.size}` : `删除选中 (${selectedIds.size})`}
             </button>
           )}
           {!compact && (
@@ -269,29 +246,23 @@ export function PhotoGrid({
         </div>
       </div>
 
-      {/* Virtual-scrolled masonry grid */}
-      <div
-        className="flex-1"
-        onContextMenu={onContextMenu}
-        ref={containerRef}
-      >
+      {/* Virtual-scrolled masonry rows */}
+      <div className="flex-1" onContextMenu={onContextMenu} ref={containerRef}>
         <Virtuoso
           className="scrollbar-thin"
-          computeItemKey={(index) => index}
+          computeItemKey={(index) => {
+            const row = rows[index];
+            return row?.[0]?.id ?? `empty-${index}`;
+          }}
           defaultItemHeight={defaultItemHeight}
           increaseViewportBy={{ top: 400, bottom: 400 }}
           itemContent={(index) => {
             const row = rows[index];
+            if (!row) return null;
             return (
-              <div
-                className="flex px-2"
-                style={{ gap: GAP, paddingBottom: GAP }}
-              >
+              <div className="flex px-2" style={{ gap: GAP, paddingBottom: GAP }}>
                 {row.map((photo, ci) => (
-                  <div
-                    className="flex-1"
-                    key={photo?.id ?? `empty-${ci}`}
-                  >
+                  <div className="flex-1" key={photo?.id ?? `empty-${ci}`}>
                     {photo && (
                       <PhotoCard
                         filename={photo.filename}
@@ -302,6 +273,7 @@ export function PhotoGrid({
                         onDoubleClick={onDoubleClick}
                         path={photo.path}
                         searchQuery={searchQuery}
+                        similarity={photo.similarity}
                         thumbnailPath={photo.thumbnailPath}
                         width={photo.width}
                       />
@@ -316,7 +288,7 @@ export function PhotoGrid({
         />
       </div>
 
-      {/* Loading overlay for subsequent loads */}
+      {/* Loading overlay */}
       {loading && photos.length > 0 && (
         <div className="pointer-events-none absolute top-[41px] right-0 bottom-0 left-0 flex items-start justify-center bg-background/30 pt-4">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />

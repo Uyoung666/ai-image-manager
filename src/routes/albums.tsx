@@ -292,4 +292,4 @@ function AlbumsLayout() {
   return <AlbumsPage />;
 }
 
-export const Route = createFileRoute("/albums" as any)({ component: AlbumsLayout });
+export const Route = createFileRoute("/albums" as "/albums")({ component: AlbumsLayout });

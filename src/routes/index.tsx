@@ -14,6 +14,7 @@ import type { ExifFilters } from "@/components/SearchBar";
 import { SearchBar } from "@/components/SearchBar";
 import { Sidebar } from "@/components/Sidebar";
 import { Welcome } from "@/components/Welcome";
+import type { AiReadiness } from "@/services/ai-embedder";
 import { ipc } from "@/ipc/manager";
 
 interface Photo {
@@ -55,6 +56,8 @@ function HomePage() {
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<"text" | "image" | "exif" | null>(null);
+  const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
@@ -72,6 +75,15 @@ function HomePage() {
   const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportIds, setExportIds] = useState<number[]>([]);
+  const [aiStatus, setAiStatus] = useState<{
+    model: string;
+    vectorDB: string;
+    hasVectors: boolean;
+    vectorCount: number;
+    indexReady: boolean;
+    isEmbedding: boolean;
+    embeddingProgress: { processed: number; total: number; phase: string };
+  } | null>(null);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -126,6 +138,20 @@ function HomePage() {
     loadPhotos(true);
   }, [loadPhotos, loadFolders]);
 
+  // Poll AI readiness every 3s so search bar can show accurate state
+  useEffect(() => {
+    let running = true;
+    async function poll() {
+      try {
+        const status = await ipc.client.photos.getAiStatus({});
+        if (running) setAiStatus(status);
+      } catch { /* ignore */ }
+    }
+    poll();
+    const iv = setInterval(poll, 3000);
+    return () => { running = false; clearInterval(iv); };
+  }, []);
+
   // Sync detail panel with selection
   useEffect(() => {
     if (selectedIds.size === 1) {
@@ -147,7 +173,7 @@ function HomePage() {
 
   async function handleAddFolder() {
     const result = await ipc.client.shell.openFolderDialog({});
-    const folderPath = (result as any)?.path;
+    const folderPath = result?.path;
     if (!folderPath) {
       return;
     }
@@ -158,15 +184,15 @@ function HomePage() {
       const scanResult = await ipc.client.photos.scanFolder({
         path: folderPath,
       });
-      const skipped = (scanResult as any).skipped || 0;
+      const skipped = scanResult.skipped || 0;
       setScanProgress(
         skipped > 0
           ? t("scanningSkipped", {
-              count: (scanResult as any).photoIds?.length || 0,
+              count: scanResult.photoIds?.length || 0,
               skipped,
             })
           : t("scanningComplete", {
-              count: (scanResult as any).photoIds?.length || 0,
+              count: scanResult.photoIds?.length || 0,
             })
       );
       await loadFolders();
@@ -234,12 +260,29 @@ function HomePage() {
     const hasFilters = filters && Object.values(filters).some((v) => v);
 
     if (!(query.trim() || hasFilters)) {
+      setSearchMode(null);
+      setSearchTime(undefined);
       loadPhotos();
       return;
     }
 
+    const startTime = performance.now();
+    setSearchMode(query.trim() ? "text" : "exif");
+
     try {
-      const searchParams: Record<string, unknown> = { limit: 100 };
+      const searchParams: {
+        query?: string;
+        dateFrom?: number;
+        dateTo?: number;
+        cameraModel?: string;
+        focalMin?: number;
+        focalMax?: number;
+        apertureMin?: number;
+        apertureMax?: number;
+        isoMin?: number;
+        isoMax?: number;
+        limit: number;
+      } = { limit: 100 };
       if (query.trim()) {
         searchParams.query = query.trim();
       }
@@ -276,11 +319,11 @@ function HomePage() {
       }
 
       const result = await ipc.client.photos.searchCompound(
-        searchParams as any
+        searchParams
       );
-      const data = result as any;
-      setPhotos(data.results || []);
-      setTotalPhotos(data.total || data.results?.length || 0);
+      setPhotos((result as any).results || []);
+      setTotalPhotos((result as any).total || (result as any).results?.length || 0);
+      setSearchTime(Math.round(performance.now() - startTime));
     } catch {
       const fallback = await ipc.client.photos.listPhotos({
         search: query.trim() || undefined,
@@ -291,6 +334,7 @@ function HomePage() {
       });
       setPhotos((fallback as any).items || []);
       setTotalPhotos((fallback as any).total || 0);
+      setSearchTime(Math.round(performance.now() - startTime));
     }
   }
 
@@ -385,23 +429,24 @@ function HomePage() {
 
   async function handleImageSearch(imagePath: string) {
     setSearchQuery("[以图搜图]");
+    setSearchMode("image");
     setLoading(true);
+    const startTime = performance.now();
     try {
       const result = await ipc.client.photos.searchByImage({
         imagePath,
         limit: 100,
       });
-      const data = result as any;
-      if (data.error) {
-        console.warn("[ImageSearch]", data.error);
-      }
-      const results = data.results || [];
+      if (result.error) console.warn("[ImageSearch]", result.error);
+      const results = (result as any).results || [];
       setPhotos(results);
       setTotalPhotos(results.length);
+      setSearchTime(Math.round(performance.now() - startTime));
     } catch (err: any) {
       console.error("[ImageSearch] failed:", err?.message || err);
       setPhotos([]);
       setTotalPhotos(0);
+      setSearchTime(Math.round(performance.now() - startTime));
     } finally {
       setLoading(false);
     }
@@ -494,14 +539,19 @@ function HomePage() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
+          aiStatus={aiStatus}
           imageSearchActive={searchQuery.startsWith("[以图搜图]")}
           onClear={() => {
             setSearchQuery("");
+            setSearchMode(null);
+            setSearchTime(undefined);
             loadPhotos();
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
           resultCount={searchQuery ? photos.length : undefined}
+          searchMode={searchMode}
+          searchTime={searchTime}
         />
         {hasPhotos ? (
           <div className="flex min-h-0 flex-1">

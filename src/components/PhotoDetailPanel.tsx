@@ -271,7 +271,7 @@ export function PhotoDetailPanel({
     setAiSuggestions(null);
     try {
       const result = await ipc.client.photos.suggestTags({ id: photo.id });
-      setAiSuggestions((result as any)?.suggestions || []);
+      setAiSuggestions((result as { suggestions?: Array<{ tag: string; confidence: number }> })?.suggestions || []);
     } catch {
       setAiSuggestions([]);
     } finally {

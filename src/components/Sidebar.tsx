@@ -69,10 +69,33 @@ export function Sidebar({
   const ctxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    ipc.client.photos
-      .getTags({})
-      .then((result) => setTags((result as TagInfo[]) || []))
-      .catch(() => {});
+    let running = true;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    async function loadTags() {
+      try {
+        const result = await ipc.client.photos.getTags({});
+        if (!running) return;
+        const tagList = (result as TagInfo[]) || [];
+        setTags(tagList);
+        // Stop polling once tags appear
+        if (tagList.length > 0 && interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      } catch { /* ignore */ }
+    }
+
+    loadTags();
+    // Poll for tags if photos exist but tags haven't loaded yet
+    if (totalPhotos > 0) {
+      interval = setInterval(loadTags, 5000);
+    }
+
+    return () => {
+      running = false;
+      if (interval) clearInterval(interval);
+    };
   }, [totalPhotos]);
 
   const closeCtx = useCallback(() => setFolderCtx(null), []);
@@ -172,7 +195,7 @@ export function Sidebar({
 
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() => navigate({ to: "/albums" as any })}
+            onClick={() => navigate({ to: "/albums" as "/albums" })}
             title="相册"
           >
             <Album className="h-4 w-4" />
@@ -378,7 +401,7 @@ export function Sidebar({
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-          onClick={() => navigate({ to: "/albums" as any })}
+          onClick={() => navigate({ to: "/albums" as "/albums" })}
         >
           <Album className="mr-2 inline h-3.5 w-3.5" />
           相册

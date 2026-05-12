@@ -24,16 +24,15 @@ import {
 import { ipcMain } from "electron/main";
 import Store from "electron-store";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
-import { getDatabase, initDatabase } from "@/db";
+import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
-import { startWatching } from "@/services/indexer";
 import {
   getSendToFilePaths,
   setupSendToShortcut,
 } from "@/services/sendto-integration";
-import { initThumbnailer } from "@/services/thumbnailer";
+import { registry, ServiceLevel } from "@/services/registry";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { getBasePath } from "./utils/path";
 
@@ -341,12 +340,44 @@ app.whenReady().then(async () => {
   try {
     // Register custom protocol handler for local file access
     // (Chromium blocks file:// from http:// origins in dev mode)
+    // Security: only serve files within indexed folders — reject all others
+    // to prevent path traversal from reading arbitrary system files.
     protocol.handle("local-media", async (request) => {
       try {
         const encodedPath = request.url.slice("local-media://".length);
         const filePath = decodeURIComponent(encodedPath);
-        const ext = path.extname(filePath).toLowerCase();
-        const buffer = await fs.promises.readFile(filePath);
+
+        // Normalize to catch path traversal attempts (e.g. ../../etc/passwd)
+        const resolved = path.resolve(filePath);
+
+        // Whitelist: only allow files under indexed folders or app userData
+        const db = getDatabase();
+        const indexedFolders = db
+          .select({ path: folders.path })
+          .from(folders)
+          .all();
+        const allowedPaths = [
+          app.getPath("userData"), // thumbnails are stored here
+          ...indexedFolders.map((f) => f.path),
+        ];
+
+        const isAllowed = allowedPaths.some((allowed) => {
+          const normalized = allowed.replace(/\\/g, "/") + "/";
+          const normalizedFile = resolved.replace(/\\/g, "/");
+          return normalizedFile.startsWith(normalized);
+        });
+
+        if (!isAllowed) {
+          console.warn(`[Security] local-media blocked: ${filePath}`);
+          return new Response(null, { status: 403 });
+        }
+
+        if (!fs.existsSync(resolved)) {
+          return new Response(null, { status: 404 });
+        }
+
+        const ext = path.extname(resolved).toLowerCase();
+        const buffer = await fs.promises.readFile(resolved);
         return new Response(buffer, {
           headers: {
             "content-type": getMimeType(ext),
@@ -358,9 +389,9 @@ app.whenReady().then(async () => {
       }
     });
 
-    initDatabase();
-    initThumbnailer();
-    console.log("[App] Database and thumbnailer initialized");
+    // ── L1: Critical services (database + thumbnailer) ────────────────
+    await registry.startLevel(ServiceLevel.Critical);
+    console.log("[App] Critical services started");
 
     // Clean up orphan records from previously deleted folders.
     // (folderId=NULL or dangling references due to ON DELETE SET NULL)
@@ -422,19 +453,12 @@ app.whenReady().then(async () => {
       );
     }
 
-    // Ensure AI model is available before initializing vector DB
+    // Ensure AI model is available before starting AI services
     await ensureModelAvailable();
 
-    // Initialize AI vector DB in background (non-blocking)
-    initVectorDB()
-      .then(() => console.log("[App] AI vector DB initialized"))
-      .catch((err) =>
-        console.warn("[App] AI vector DB init skipped:", err?.message)
-      );
-
-    startWatching((photoId, event) => {
-      console.log(`[Watcher] File ${event}: photoId=${photoId}`);
-    });
+    // ── L2-L3: Remaining services (fileWatcher + AI vector DB) ────────
+    await registry.startRemaining();
+    console.log("[App] All services started");
 
     createWindow();
     createTray();
@@ -477,10 +501,11 @@ app.on("activate", () => {
   }
 });
 
-app.on("will-quit", () => {
+app.on("will-quit", async () => {
   globalShortcut.unregisterAll();
   if (tray) {
     tray.destroy();
     tray = null;
   }
+  await registry.stop();
 });

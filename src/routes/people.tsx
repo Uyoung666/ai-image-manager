@@ -38,13 +38,13 @@ function PeoplePage() {
     setDetecting(true);
     setProgress("正在启动人脸检测...");
     try {
-      const result = await ipc.client.faces.startFaceDetection({}) as any;
+      const result = await ipc.client.faces.startFaceDetection({}) as { started: boolean; photoCount?: number; message?: string };
       if (result.started) {
         setProgress(`正在检测 ${result.photoCount} 张照片中的人脸...`);
         // Poll for progress
         const poll = setInterval(async () => {
           try {
-            const p = await ipc.client.faces.getDetectionProgress({}) as any;
+            const p = await ipc.client.faces.getDetectionProgress({}) as { phase: string; processed: number; total?: number };
             if (p.phase === "complete") {
               setProgress(`检测完成！已处理 ${p.processed} 张照片`);
               clearInterval(poll);
@@ -222,6 +222,6 @@ function PeopleLayout() {
   return <PeoplePage />;
 }
 
-export const Route = createFileRoute("/people" as any)({
+export const Route = createFileRoute("/people" as "/people")({
   component: PeopleLayout,
 });

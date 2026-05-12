@@ -32,7 +32,7 @@ interface IdentityDetail {
 }
 
 function PersonDetailPage() {
-  const { identityId } = Route.useParams() as any as { identityId: string };
+  const { identityId } = Route.useParams() as { identityId: string };
   const navigate = useNavigate();
   const [identity, setIdentity] = useState<IdentityDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,7 +80,7 @@ function PersonDetailPage() {
         <div className="flex items-center gap-3">
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() => navigate({ to: "/people" as any })}
+            onClick={() => navigate({ to: "/people" as "/people" })}
             type="button"
           >
             <ArrowLeft className="h-5 w-5" />
@@ -139,6 +139,6 @@ function PersonDetailPage() {
   );
 }
 
-export const Route = createFileRoute("/people/$identityId" as any)({
+export const Route = createFileRoute("/people/$identityId" as "/people/$identityId")({
   component: PersonDetailPage,
 });

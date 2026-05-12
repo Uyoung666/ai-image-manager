@@ -9,6 +9,7 @@ interface PhotoCardProps {
   onDoubleClick: (id: number) => void;
   path: string;
   searchQuery?: string;
+  similarity?: number;
   thumbnailPath: string | null;
   width: number;
 }
@@ -32,7 +33,8 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   );
 }
 
-function toLocalMediaUrl(filePath: string): string {
+function toLocalMediaUrl(filePath: string | null | undefined): string {
+  if (!filePath) return "";
   const encoded = filePath
     .replace(/\\/g, "/")
     .split("/")
@@ -50,6 +52,7 @@ export const PhotoCard = memo(function PhotoCard({
   height,
   isSelected,
   searchQuery,
+  similarity,
   onClick,
   onDoubleClick,
 }: PhotoCardProps) {
@@ -132,6 +135,13 @@ export const PhotoCard = memo(function PhotoCard({
           )}
         </div>
       </div>
+
+      {/* Similarity badge — shown on AI search results */}
+      {similarity !== undefined && similarity > 0 && (
+        <div className="absolute top-2 left-2 rounded-[4px] bg-primary/80 px-1.5 py-0.5 font-[510] text-white text-[10px] backdrop-blur-sm">
+          {Math.round(similarity * 100)}%
+        </div>
+      )}
 
       {/* Selection indicator */}
       {isSelected && (

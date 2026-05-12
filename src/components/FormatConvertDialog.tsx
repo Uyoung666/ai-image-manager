@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ipc } from "@/ipc/manager";
 
 interface ConvertResult {
   converted: number;
@@ -39,9 +40,16 @@ export function FormatConvertDialog({
   );
   const [quality, setQuality] = useState(85);
   const [maxWidth, setMaxWidth] = useState(""); // empty = no resize
+  const [outputDir, setOutputDir] = useState("");
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<ConvertResult | null>(null);
   const [error, setError] = useState("");
+
+  async function pickOutputDir() {
+    const result = await ipc.client.shell.openFolderDialog({});
+    const pickedPath = (result as { path?: string })?.path;
+    if (pickedPath) setOutputDir(pickedPath);
+  }
 
   // Reset state each time dialog opens
   useEffect(() => {
@@ -49,6 +57,7 @@ export function FormatConvertDialog({
       setFormat("webp");
       setQuality(85);
       setMaxWidth("");
+      setOutputDir("");
       setResult(null);
       setError("");
     }
@@ -62,7 +71,7 @@ export function FormatConvertDialog({
         format,
         quality,
         maxWidth: Number.parseInt(maxWidth, 10) || 0,
-        outputDir: "", // Backend will use a default
+        outputDir, // User-selected or empty (backend falls back to temp)
       });
       setResult(res);
     } catch (e: any) {
@@ -185,6 +194,25 @@ export function FormatConvertDialog({
                 placeholder="不限制"
                 value={maxWidth}
               />
+            </div>
+
+            {/* Output directory */}
+            <div className="mb-5">
+              <label className="mb-1.5 block text-[12px] font-[400] text-[#a1a1aa]">
+                输出目录
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate rounded-md border border-border bg-secondary px-3 py-2 text-[12px] text-[#6b6b75] font-mono">
+                  {outputDir || "默认临时目录"}
+                </span>
+                <button
+                  className="flex-shrink-0 rounded-md border border-border px-3 py-2 text-[12px] text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
+                  onClick={pickOutputDir}
+                  type="button"
+                >
+                  选择...
+                </button>
+              </div>
             </div>
 
             {/* Error */}

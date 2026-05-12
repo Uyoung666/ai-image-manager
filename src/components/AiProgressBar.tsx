@@ -22,7 +22,7 @@ export function AiProgressBar() {
   const fetchProgress = useCallback(async () => {
     try {
       const result = await ipc.client.photos.getAiProgress({});
-      return result as any as AiProgress;
+      return result as AiProgress;
     } catch {
       return null;
     }

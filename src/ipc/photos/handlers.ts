@@ -13,12 +13,13 @@ import {
   checkAiHealth,
   deletePhotoVectors,
   embedAllPhotos,
+  getAiReadiness,
   getEmbeddingProgress,
   getPhotoVectors,
   stopEmbedding,
 } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService } from "@/services/indexer";
-import { getThumbnailPath } from "@/services/thumbnailer";
+import { generateThumbnail, getThumbnailPath } from "@/services/thumbnailer";
 import { clearThumbnailDiskCache } from "@/services/thumbnailer";
 
 const FolderSchema = z.object({ path: z.string().min(1) });
@@ -129,9 +130,8 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     query = query.where(eq(photos.folderId, folderId));
   }
   if (tagId) {
-    query = query.innerJoin(
-      photoTags,
-      sql`${photos.id} = ${photoTags.photoId} AND ${photoTags.tagId} = ${tagId}`
+    query = query.where(
+      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
     );
   }
   if (search) {
@@ -155,9 +155,8 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     countQuery = countQuery.where(eq(photos.folderId, folderId));
   }
   if (tagId) {
-    countQuery = countQuery.innerJoin(
-      photoTags,
-      sql`${photos.id} = ${photoTags.photoId} AND ${photoTags.tagId} = ${tagId}`
+    countQuery = countQuery.where(
+      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
     );
   }
   if (search) {
@@ -262,21 +261,36 @@ export const getStats = os.handler(() => {
     }
   }
 
-  // Shooting time heatmap (hour of day)
-  const hourData = db
+  // Lens model distribution
+  const lensStats = db
     .select({
-      dateTaken: exifData.dateTaken,
+      model: exifData.lensModel,
+      count: sql<number>`count(*)`,
     })
+    .from(exifData)
+    .where(sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`)
+    .groupBy(exifData.lensModel)
+    .orderBy(desc(sql`count(*)`))
+    .limit(8)
+    .all();
+
+  // Shooting time heatmap — 24-hour distribution
+  const hourData = db
+    .select({ dateTaken: exifData.dateTaken })
     .from(exifData)
     .where(sql`${exifData.dateTaken} IS NOT NULL`)
     .all();
 
-  const hourBuckets: Record<string, number> = {};
+  const hourLabels = [
+    "00时", "01时", "02时", "03时", "04时", "05时",
+    "06时", "07时", "08时", "09时", "10时", "11时",
+    "12时", "13时", "14时", "15时", "16时", "17时",
+    "18时", "19时", "20时", "21时", "22时", "23时",
+  ];
+  const hourBuckets24 = new Array(24).fill(0);
   for (const row of hourData) {
     const hour = new Date(row.dateTaken!).getHours();
-    const period =
-      hour < 6 ? "夜间" : hour < 12 ? "上午" : hour < 18 ? "下午" : "傍晚";
-    hourBuckets[period] = (hourBuckets[period] || 0) + 1;
+    hourBuckets24[hour]++;
   }
 
   const dateRange = db
@@ -298,14 +312,15 @@ export const getStats = os.handler(() => {
     totalPhotos,
     aiProcessed,
     cameraStats: cameraStats.filter((c) => c.model),
+    lensStats: lensStats.filter((l) => l.model),
     focalStats: focalStats.filter((f) => f.focalLength),
     apertureStats: apertureStats.filter((a) => a.aperture),
     isoDistribution: Object.entries(isoBuckets).map(([range, count]) => ({
       range,
       count,
     })),
-    timeHeatmap: Object.entries(hourBuckets).map(([period, count]) => ({
-      period,
+    timeHeatmap: hourBuckets24.map((count, hour) => ({
+      period: hourLabels[hour],
       count,
     })),
     dateRange,
@@ -973,8 +988,25 @@ export const renamePhotos = os
           });
           continue;
         }
+        const oldThumbPath = photo.thumbnailPath;
         fs.renameSync(photo.path, newPath);
         const newThumbPath = getThumbnailPath(newPath, "md");
+
+        // Migrate thumbnail: try renaming old thumbnail file first
+        let thumbMigrated = false;
+        if (oldThumbPath && fs.existsSync(oldThumbPath)) {
+          try {
+            fs.renameSync(oldThumbPath, newThumbPath);
+            thumbMigrated = true;
+          } catch {
+            // Cross-device or permission error — generate fresh instead
+          }
+        }
+        if (!thumbMigrated) {
+          // Generate new thumbnail asynchronously (don't block rename)
+          generateThumbnail(newPath, "md").catch(() => {});
+        }
+
         db.update(photos)
           .set({ path: newPath, filename: newFilename, thumbnailPath: newThumbPath })
           .where(eq(photos.id, photo.id))
@@ -1062,6 +1094,10 @@ export const convertPhotos = os
 
 export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
+});
+
+export const getAiStatus = os.handler(async () => {
+  return getAiReadiness();
 });
 
 export const getAiHealth = os.handler(async () => {
@@ -1642,17 +1678,33 @@ export const exportPhotos = os
       const html = buildHtmlGallery(galleryPhotos);
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
-      // Create ZIP
-      const archiverModule = await import("archiver");
-      const createArchive = archiverModule.default || archiverModule;
+      // Create ZIP — handle archiver ESM/CJS compatibility in Electron
+      const { createRequire } = await import("node:module");
+      const req = createRequire(import.meta.url);
+      let createArchive: any;
+      try {
+        // Try CJS require first (most reliable in Electron main process)
+        const archiverCjs = req("archiver");
+        createArchive = typeof archiverCjs === "function" ? archiverCjs : archiverCjs.default;
+      } catch {
+        // Fallback: dynamic ESM import
+        const am = await import("archiver");
+        createArchive = (am as any).default || am;
+      }
+
       const zipPath =
         outputPath ||
         path.join(
           nodeOs.tmpdir(),
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
-      const output = fs.createWriteStream(zipPath);
+
+      if (typeof createArchive !== "function") {
+        return { success: false, error: "archiver 模块加载失败，无法创建 ZIP 包" };
+      }
+
       const archive = createArchive("zip", { zlib: { level: 9 } });
+      const output = fs.createWriteStream(zipPath);
 
       await new Promise<string>((resolve, reject) => {
         output.on("close", () => resolve(zipPath));

@@ -104,7 +104,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
     const timer = setTimeout(async () => {
       try {
         const rulesJson = buildRulesJson();
-        const result = await ipc.client.albums.validateSmartAlbumRules({ smartRules: rulesJson }) as any;
+        const result = await ipc.client.albums.validateSmartAlbumRules({ smartRules: rulesJson }) as { matchCount?: number };
         setPreviewCount(result.matchCount ?? 0);
       } catch {
         setPreviewCount(null);

@@ -13,28 +13,17 @@ import {
 } from "recharts";
 import { ipc } from "@/ipc/manager";
 
-interface CameraStat {
-  count: number;
-  model: string;
-}
-interface FocalStat {
-  count: number;
-  focalLength: string;
-}
-interface ApertureStat {
-  aperture: number;
-  count: number;
-}
-interface BucketStat {
-  count: number;
-  range?: string;
-  period?: string;
-}
+interface CameraStat { count: number; model: string; }
+interface LensStat { count: number; model: string; }
+interface FocalStat { count: number; focalLength: string; }
+interface ApertureStat { aperture: number; count: number; }
+interface BucketStat { count: number; range?: string; period?: string; }
 interface DashboardData {
   aiProcessed: number;
   apertureStats: ApertureStat[];
   avgIso: number;
   cameraStats: CameraStat[];
+  lensStats: LensStat[];
   dateRange: { earliest: number; latest: number } | null;
   focalStats: FocalStat[];
   isoDistribution: BucketStat[];
@@ -72,11 +61,7 @@ function DashboardPage() {
       try {
         const result = await ipc.client.photos.getStats({});
         setData(result as DashboardData);
-      } catch {
-        /* ignore */
-      } finally {
-        setLoading(false);
-      }
+      } catch { /* ignore */ } finally { setLoading(false); }
     })();
   }, []);
 
@@ -91,6 +76,11 @@ function DashboardPage() {
   const cameraData = (data?.cameraStats || []).map((c) => ({
     name: c.model || "Unknown",
     count: c.count,
+  }));
+
+  const lensData = (data?.lensStats || []).map((l) => ({
+    name: l.model,
+    count: l.count,
   }));
 
   const focalData = (data?.focalStats || [])
@@ -116,215 +106,118 @@ function DashboardPage() {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center gap-4 border-border border-b px-6 py-4">
-        <button
-          className="text-muted-foreground hover:text-foreground"
-          onClick={() => navigate({ to: "/" })}
-        >
+        <button className="text-muted-foreground hover:text-foreground" onClick={() => navigate({ to: "/" })}>
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="font-[590] text-foreground text-[18px]">
-          {t("dashboardTitle")}
-        </h1>
+        <h1 className="font-[590] text-foreground text-[18px]">{t("dashboardTitle")}</h1>
       </div>
 
       <div className="space-y-6 p-6">
         {/* Stat Cards */}
         <div className="grid grid-cols-4 gap-4">
-          <StatCard
-            label={t("totalPhotos")}
-            value={data?.totalPhotos.toLocaleString() || "0"}
-          />
-          <StatCard
-            label={t("aiProcessed")}
-            value={data?.aiProcessed.toLocaleString() || "0"}
-          />
+          <StatCard label={t("totalPhotos")} value={data?.totalPhotos.toLocaleString() || "0"} />
+          <StatCard label={t("aiProcessed")} value={data?.aiProcessed.toLocaleString() || "0"} />
           <StatCard
             label={t("dateRange")}
-            value={
-              data?.dateRange
-                ? `${new Date(data.dateRange.earliest).getFullYear()} - ${new Date(data.dateRange.latest).getFullYear()}`
-                : "—"
-            }
+            value={data?.dateRange
+              ? `${new Date(data.dateRange.earliest).getFullYear()} - ${new Date(data.dateRange.latest).getFullYear()}`
+              : "—"}
           />
-          <StatCard
-            label={t("avgIso")}
-            value={data?.avgIso ? Math.round(data.avgIso).toString() : "—"}
-          />
+          <StatCard label={t("avgIso")} value={data?.avgIso ? Math.round(data.avgIso).toString() : "—"} />
         </div>
 
         {/* Camera Usage */}
         <ChartSection title={t("cameraUsage")}>
           {cameraData.length > 0 ? (
-            <ResponsiveContainer
-              height={cameraData.length * 36 + 20}
-              width="100%"
-            >
-              <BarChart
-                data={cameraData}
-                layout="vertical"
-                margin={{ top: 0, right: 20, left: 140, bottom: 0 }}
-              >
-                <XAxis
-                  axisLine={false}
-                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                  tickLine={false}
-                  type="number"
-                />
-                <YAxis
-                  axisLine={false}
-                  dataKey="name"
-                  tick={{ fill: TEXT_SECONDARY, fontSize: 12 }}
-                  tickLine={false}
-                  type="category"
-                  width={130}
-                />
+            <ResponsiveContainer height={cameraData.length * 36 + 20} width="100%">
+              <BarChart data={cameraData} layout="vertical" margin={{ top: 0, right: 20, left: 140, bottom: 0 }}>
+                <XAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} type="number" />
+                <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 12 }} tickLine={false} type="category" width={130} />
                 <Tooltip {...chartTooltipStyle} />
                 <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-                  {cameraData.map((_, i) => (
-                    <Cell fill={CHART_1} key={i} />
-                  ))}
+                  {cameraData.map((_, i) => (<Cell fill={CHART_1} key={i} />))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          ) : (
-            <EmptyHint text={t("noCameraData")} />
-          )}
+          ) : (<EmptyHint text={t("noCameraData")} />)}
         </ChartSection>
 
-        {/* Charts Grid */}
+        {/* Lens Usage */}
+        {lensData.length > 0 && (
+          <ChartSection title="镜头使用频率">
+            <ResponsiveContainer height={lensData.length * 36 + 20} width="100%">
+              <BarChart data={lensData} layout="vertical" margin={{ top: 0, right: 20, left: 160, bottom: 0 }}>
+                <XAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} type="number" />
+                <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 11 }} tickLine={false} type="category" width={150} />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                  {lensData.map((_, i) => (<Cell fill={CHART_5} key={i} />))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartSection>
+        )}
+
+        {/* Charts Grid 2×2 */}
         <div className="grid grid-cols-2 gap-4">
-          {/* Focal Distribution */}
           <ChartSection title={t("focalDistribution")}>
             {focalData.length > 0 ? (
               <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={focalData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    angle={-45}
-                    axisLine={false}
-                    dataKey="name"
-                    height={40}
-                    textAnchor="end"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
+                <BarChart data={focalData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis angle={-45} axisLine={false} dataKey="name" height={40} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {focalData.map((_, i) => (
-                      <Cell fill={CHART_2} key={i} />
-                    ))}
+                    {focalData.map((_, i) => (<Cell fill={CHART_2} key={i} />))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            ) : (
-              <EmptyHint text={t("noFocalData")} />
-            )}
+            ) : (<EmptyHint text={t("noFocalData")} />)}
           </ChartSection>
 
-          {/* Aperture Preference */}
           <ChartSection title="光圈偏好">
             {apertureData.length > 0 ? (
               <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={apertureData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    angle={-45}
-                    axisLine={false}
-                    dataKey="name"
-                    height={40}
-                    textAnchor="end"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
+                <BarChart data={apertureData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis angle={-45} axisLine={false} dataKey="name" height={40} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {apertureData.map((_, i) => (
-                      <Cell fill={CHART_3} key={i} />
-                    ))}
+                    {apertureData.map((_, i) => (<Cell fill={CHART_3} key={i} />))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            ) : (
-              <EmptyHint text="暂无光圈数据" />
-            )}
+            ) : (<EmptyHint text="暂无光圈数据" />)}
           </ChartSection>
 
-          {/* ISO Distribution */}
           <ChartSection title="ISO 分布">
             {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
               <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={isoData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
+                <BarChart data={isoData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {isoData.map((_, i) => (
-                      <Cell fill={CHART_4} key={i} />
-                    ))}
+                    {isoData.map((_, i) => (<Cell fill={CHART_4} key={i} />))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            ) : (
-              <EmptyHint text="暂无 ISO 数据" />
-            )}
+            ) : (<EmptyHint text="暂无 ISO 数据" />)}
           </ChartSection>
 
-          {/* Shooting Time Heatmap */}
-          <ChartSection title="拍摄时段分布">
+          <ChartSection title="24小时拍摄分布">
             {timeData.length > 0 && timeData.some((d) => d.count > 0) ? (
               <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={timeData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
+                <BarChart data={timeData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis angle={-90} axisLine={false} dataKey="name" height={40} interval={2} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 9 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {timeData.map((_, i) => (
-                      <Cell fill={CHART_5} key={i} />
-                    ))}
+                  <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                    {timeData.map((_, i) => (<Cell fill={CHART_1} key={i} />))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            ) : (
-              <EmptyHint text="暂无拍摄时间数据" />
-            )}
+            ) : (<EmptyHint text="暂无拍摄时间数据" />)}
           </ChartSection>
         </div>
       </div>
@@ -335,21 +228,13 @@ function DashboardPage() {
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-4">
-      <p className="font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
-        {label}
-      </p>
+      <p className="font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">{label}</p>
       <p className="mt-1 font-[590] text-foreground text-[24px]">{value}</p>
     </div>
   );
 }
 
-function ChartSection({
-  title,
-  children,
-}: {
-  children: React.ReactNode;
-  title: string;
-}) {
+function ChartSection({ title, children }: { children: React.ReactNode; title: string }) {
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-5">
       <h2 className="mb-4 font-[590] text-foreground text-[16px]">{title}</h2>
@@ -362,6 +247,4 @@ function EmptyHint({ text }: { text: string }) {
   return <p className="text-[#6b6b75] text-[13px]">{text}</p>;
 }
 
-export const Route = createFileRoute("/dashboard")({
-  component: DashboardPage,
-});
+export const Route = createFileRoute("/dashboard")({ component: DashboardPage });

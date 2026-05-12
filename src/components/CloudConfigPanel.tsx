@@ -83,7 +83,7 @@ export function CloudConfigPanel() {
     setTesting(true);
     setTestResult("测试中...");
     try {
-      const result = await ipc.client.cloud.testCloudConnection({ id }) as any;
+      const result = await ipc.client.cloud.testCloudConnection({ id }) as { success: boolean; latencyMs?: number; error?: string };
       if (result.success) {
         setTestResult(`连接成功 (${result.latencyMs}ms)`);
       } else {
