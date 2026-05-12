@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MenuState } from "@/components/PhotoContextMenu";
@@ -62,6 +63,8 @@ function HomePage() {
   const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportIds, setExportIds] = useState<number[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
   // --- TanStack Query hooks ---
@@ -339,22 +342,9 @@ function HomePage() {
     await ipc.client.shell.openInExplorer({ path: filePath });
   }
 
-  async function handleDeletePhoto(id: number) {
-    try {
-      await ipc.client.photos.deletePhoto({ id });
-      setSelectedIds((prev) => {
-        const n = new Set(prev);
-        n.delete(id);
-        return n;
-      });
-      if (isSearching) {
-        setSearchResults((prev) => prev?.filter((p) => p.id !== id) ?? null);
-      } else {
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
-      }
-    } catch {
-      toast.error("删除照片失败");
-    }
+  function handleDeletePhoto(id: number) {
+    setPendingDeleteIds([id]);
+    setDeleteConfirmOpen(true);
   }
 
   function handleAddToAlbum(id: number) {
@@ -371,23 +361,39 @@ function HomePage() {
     setExportIds(Array.from(selectedIds));
     setExportDialogOpen(true);
   }
-  async function handleDeleteSelected() {
+  function handleDeleteSelected() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) {
       return;
     }
+    setPendingDeleteIds(ids);
+    setDeleteConfirmOpen(true);
+  }
+
+  async function executeDelete() {
+    const ids = pendingDeleteIds;
+    setDeleteConfirmOpen(false);
+    setPendingDeleteIds([]);
     try {
-      await ipc.client.photos.deletePhotos({ ids });
-      setSelectedIds(new Set());
+      if (ids.length === 1) {
+        await ipc.client.photos.deletePhoto({ id: ids[0] });
+      } else {
+        await ipc.client.photos.deletePhotos({ ids });
+      }
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.delete(id);
+        return n;
+      });
       if (isSearching) {
         setSearchResults(
-          (prev) => prev?.filter((p) => !selectedIds.has(p.id)) ?? null
+          (prev) => prev?.filter((p) => !ids.includes(p.id)) ?? null
         );
       } else {
         queryClient.invalidateQueries({ queryKey: ["photos"] });
       }
     } catch {
-      toast.error("批量删除失败");
+      toast.error("删除照片失败");
     }
   }
 
@@ -637,6 +643,15 @@ function HomePage() {
         onClose={() => setExportDialogOpen(false)}
         open={exportDialogOpen}
         photoIds={exportIds}
+      />
+      <ConfirmDeleteDialog
+        count={pendingDeleteIds.length}
+        onCancel={() => {
+          setDeleteConfirmOpen(false);
+          setPendingDeleteIds([]);
+        }}
+        onConfirm={executeDelete}
+        open={deleteConfirmOpen}
       />
     </div>
   );

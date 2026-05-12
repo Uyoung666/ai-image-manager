@@ -2,6 +2,7 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
+import { shell } from "electron";
 import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -21,6 +22,10 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
     .where(eq(photos.id, input.id))
     .get();
   if (photo) {
+    // Move file to system recycle bin
+    if (fs.existsSync(photo.path)) {
+      await shell.trashItem(photo.path);
+    }
     db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
     db.delete(photos).where(eq(photos.id, input.id)).run();
     // Clean up LanceDB vector
@@ -43,10 +48,16 @@ export const deletePhotos = os
   .handler(async ({ input }) => {
     const db = getDatabase();
     const deletedPhotos = db
-      .select({ id: photos.id, folderId: photos.folderId })
+      .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
       .from(photos)
       .where(inArray(photos.id, input.ids))
       .all();
+    // Move files to system recycle bin
+    for (const p of deletedPhotos) {
+      if (fs.existsSync(p.path)) {
+        await shell.trashItem(p.path);
+      }
+    }
     for (const id of input.ids) {
       db.delete(exifData).where(eq(exifData.photoId, id)).run();
       db.delete(photos).where(eq(photos.id, id)).run();
