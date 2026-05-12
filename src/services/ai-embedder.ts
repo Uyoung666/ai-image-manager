@@ -1449,9 +1449,9 @@ export async function searchByText(
 
   // cosine distance ∈ [0, 2]: 0 = identical, 1 = orthogonal, 2 = opposite.
   // Cosine similarity = 1 - cosine_distance
-  // Filter out results with cosine distance > 0.55 (similarity < 0.45)
-  // CLIP typically returns 0.2-0.4 for good matches, 0.6+ for irrelevant
-  const MAX_COSINE_DISTANCE = 0.55;
+  // CLIP ViT-B/32: good matches typically cosine similarity 0.25-0.40
+  //   → cosine distance 0.60-0.75. Threshold 0.75 = similarity ≥ 0.25.
+  const MAX_COSINE_DISTANCE = 0.75;
   const filtered = rawResults.filter(
     (r: Record<string, unknown>) => (r._distance as number) <= MAX_COSINE_DISTANCE
   );
@@ -1636,6 +1636,18 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
 }
 
+// Scene tags are broad concepts that tend to match almost any photo with
+// moderate similarity. We apply a higher threshold to prevent them from
+// dominating every photo's suggested tags (e.g. "indoor/outdoor/city" on every image).
+const SCENE_TAG_NAMES = new Set([
+  "indoor room", "outdoor outside", "city urban",
+  "nature landscape scenery", "beach ocean sea", "mountain hill",
+  "forest woods trees", "street road", "sky clouds",
+  "night scene dark", "field meadow grass", "lake water", "river stream",
+]);
+
+const SUGGEST_SCENE_MULTIPLIER = 1.4;
+
 // Pre-computed text embeddings for candidate tags (computed once after model load)
 let cachedTagEmbeddings: Array<{
   tag: string;
@@ -1748,9 +1760,12 @@ export async function suggestTags(
   const results: Array<{ tag: string; confidence: number }> = [];
 
   if (cachedTagEmbeddings) {
-    for (const { displayName, vector } of cachedTagEmbeddings) {
+    for (const { tag, displayName, vector } of cachedTagEmbeddings) {
       const sim = cosineSimilarity(imageVec, vector);
-      if (sim >= threshold) {
+      const effectiveThreshold = SCENE_TAG_NAMES.has(tag)
+        ? threshold * SUGGEST_SCENE_MULTIPLIER
+        : threshold;
+      if (sim >= effectiveThreshold) {
         results.push({
           tag: displayName,
           confidence: Math.round(sim * 100) / 100,
@@ -1763,19 +1778,27 @@ export async function suggestTags(
 
   // If no results above threshold, return top 5 with highest similarity
   // as low-confidence suggestions so the user has a starting point.
+  // Scene tags still get a multiplier in the fallback to avoid always
+  // returning "indoor/outdoor/city" for every photo.
   if (results.length === 0 && cachedTagEmbeddings) {
-    const allScores = cachedTagEmbeddings.map(({ displayName, vector }) => ({
-      tag: displayName,
-      confidence: Math.round(cosineSimilarity(imageVec!, vector) * 100) / 100,
-    }));
+    const allScores = cachedTagEmbeddings
+      .map(({ tag, displayName, vector }) => ({
+        tag: displayName,
+        confidence: Math.round(cosineSimilarity(imageVec!, vector) * 100) / 100,
+        isScene: SCENE_TAG_NAMES.has(tag),
+      }));
     allScores.sort((a, b) => b.confidence - a.confidence);
-    const fallback = allScores.slice(0, 5).filter((s) => s.confidence > 0.10);
+    const fallback = allScores
+      .slice(0, 8)
+      .filter((s) => {
+        const minScore = s.isScene ? 0.15 * SUGGEST_SCENE_MULTIPLIER : 0.15;
+        return s.confidence >= minScore;
+      })
+      .slice(0, 3);
     if (fallback.length > 0) {
-      return fallback;
+      return fallback.map(({ tag, confidence }) => ({ tag, confidence }));
     }
-    // Even if ALL scores are below 0.10, return top 3 with a flag
-    // so the UI isn't empty (user can judge relevance themselves).
-    return allScores.slice(0, 3);
+    return [];
   }
 
   return results.slice(0, 10);
@@ -1853,13 +1876,6 @@ export async function getAiReadiness(): Promise<AiReadiness> {
 // Scene tags (indoor/outdoor/city) get a higher threshold to prevent
 // every photo from being tagged with them.
 
-const SCENE_TAGS = new Set([
-  "indoor room", "outdoor outside", "city urban",
-  "nature landscape scenery", "beach ocean sea", "mountain hill",
-  "forest woods trees", "street road", "sky clouds",
-  "night scene dark", "field meadow grass", "lake water", "river stream",
-]);
-
 const BASE_THRESHOLD = 0.30;
 const SCENE_THRESHOLD_MULTIPLIER = 1.4;
 const MAX_AUTO_TAGS_PER_PHOTO = 5;
@@ -1914,7 +1930,7 @@ export async function batchSuggestTags(
     const scored: Array<{ displayName: string; tag: string; confidence: number }> = [];
     for (const { tag, displayName, vector } of cachedTagEmbeddings) {
       const sim = cosineSimilarity(imageVec, vector);
-      const threshold = SCENE_TAGS.has(tag)
+      const threshold = SCENE_TAG_NAMES.has(tag)
         ? BASE_THRESHOLD * SCENE_THRESHOLD_MULTIPLIER
         : BASE_THRESHOLD;
       if (sim >= threshold) {
