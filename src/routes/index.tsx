@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { ExportDialog } from "@/components/ExportDialog";
@@ -14,25 +15,12 @@ import type { ExifFilters } from "@/components/SearchBar";
 import { SearchBar } from "@/components/SearchBar";
 import { Sidebar } from "@/components/Sidebar";
 import { Welcome } from "@/components/Welcome";
-import type { AiReadiness } from "@/services/ai-embedder";
+import { useAiStatus } from "@/hooks/useAiStatus";
+import { useFolders } from "@/hooks/useFolders";
+import { usePhotos } from "@/hooks/usePhotos";
 import { ipc } from "@/ipc/manager";
-
-interface Photo {
-  filename: string;
-  fileSize: number;
-  height: number;
-  id: number;
-  isIndexed: boolean;
-  path: string;
-  thumbnailPath: string | null;
-  width: number;
-}
-interface Folder {
-  displayName: string;
-  id: number;
-  path: string;
-  photoCount: number;
-}
+import { queryClient } from "@/providers/QueryProvider";
+import type { Photo } from "@/types/photo";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
@@ -46,18 +34,17 @@ function loadSidebarState(): boolean {
 
 function HomePage() {
   const { t } = useTranslation();
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [totalPhotos, setTotalPhotos] = useState(0);
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchMode, setSearchMode] = useState<"text" | "image" | "exif" | null>(null);
+  const [searchMode, setSearchMode] = useState<
+    "text" | "image" | "exif" | null
+  >(null);
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
+  const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
@@ -75,15 +62,55 @@ function HomePage() {
   const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportIds, setExportIds] = useState<number[]>([]);
-  const [aiStatus, setAiStatus] = useState<{
-    model: string;
-    vectorDB: string;
-    hasVectors: boolean;
-    vectorCount: number;
-    indexReady: boolean;
-    isEmbedding: boolean;
-    embeddingProgress: { processed: number; total: number; phase: string };
-  } | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  // --- TanStack Query hooks ---
+  const isSearching = searchMode !== null;
+
+  // Listen for file-change events from main process (chokidar watcher)
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.channel === "file-change") {
+        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["folders"] });
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  const {
+    data: photosData,
+    fetchNextPage,
+    hasNextPage,
+    isLoading: photosLoading,
+    isFetchingNextPage,
+  } = usePhotos({
+    folderId: activeFolderId,
+    tagId: activeTagId,
+    enabled: !isSearching,
+  });
+
+  const { data: folders = [] } = useFolders();
+  const { data: aiStatus } = useAiStatus();
+
+  // Flatten paginated photos
+  const pagedPhotos = useMemo(
+    () => photosData?.pages.flatMap((p) => p.items) ?? [],
+    [photosData]
+  );
+  const totalFromQuery = photosData?.pages[0]?.total ?? 0;
+
+  // Active photo list: search results or paginated query
+  const photos = isSearching ? (searchResults ?? []) : pagedPhotos;
+  const totalPhotos = isSearching ? photos.length : totalFromQuery;
+  const loading = isSearching ? searchLoading : photosLoading;
+
+  const handleEndReached = useCallback(() => {
+    if (!isSearching && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -95,61 +122,6 @@ function HomePage() {
       }
       return next;
     });
-  }, []);
-
-  const loadFolders = useCallback(async () => {
-    try {
-      const result = await ipc.client.photos.getFolders({});
-      setFolders(result as Folder[]);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const loadPhotos = useCallback(
-    async (showLoading = false) => {
-      if (showLoading) {
-        setLoading(true);
-      }
-      try {
-        const result = await ipc.client.photos.listPhotos({
-          folderId: activeFolderId || undefined,
-          tagId: activeTagId || undefined,
-          sort: "date",
-          order: "desc",
-          offset: 0,
-          limit: 500,
-        });
-        setPhotos((result as any).items || []);
-        setTotalPhotos((result as any).total || 0);
-      } catch {
-        /* ignore */
-      } finally {
-        if (showLoading) {
-          setLoading(false);
-        }
-      }
-    },
-    [activeFolderId, activeTagId]
-  );
-
-  useEffect(() => {
-    loadFolders();
-    loadPhotos(true);
-  }, [loadPhotos, loadFolders]);
-
-  // Poll AI readiness every 3s so search bar can show accurate state
-  useEffect(() => {
-    let running = true;
-    async function poll() {
-      try {
-        const status = await ipc.client.photos.getAiStatus({});
-        if (running) setAiStatus(status);
-      } catch { /* ignore */ }
-    }
-    poll();
-    const iv = setInterval(poll, 3000);
-    return () => { running = false; clearInterval(iv); };
   }, []);
 
   // Sync detail panel with selection
@@ -165,7 +137,6 @@ function HomePage() {
 
   function handleSelectTag(tagId: number | null) {
     setActiveTagId(tagId);
-    // When selecting a tag, deselect the folder to avoid conflicting filters
     if (tagId !== null) {
       setActiveFolderId(null);
     }
@@ -195,23 +166,27 @@ function HomePage() {
               count: scanResult.photoIds?.length || 0,
             })
       );
-      await loadFolders();
-      await loadPhotos();
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
     } catch {
       setScanProgress("");
+      toast.error("扫描文件夹失败");
     } finally {
       setScanningFolder(null);
       setTimeout(() => setScanProgress(""), 3000);
     }
   }
-
   async function handleDeleteFolder(id: number) {
-    await ipc.client.photos.deleteFolder({ id });
-    if (activeFolderId === id) {
-      setActiveFolderId(null);
+    try {
+      await ipc.client.photos.deleteFolder({ id });
+      if (activeFolderId === id) {
+        setActiveFolderId(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+    } catch {
+      toast.error("删除文件夹失败");
     }
-    await loadFolders();
-    await loadPhotos();
   }
 
   const handleSelect = useCallback(
@@ -254,7 +229,6 @@ function HomePage() {
     },
     [photos]
   );
-
   async function handleSearch(query: string, filters?: ExifFilters) {
     setSearchQuery(query);
     const hasFilters = filters && Object.values(filters).some((v) => v);
@@ -262,12 +236,13 @@ function HomePage() {
     if (!(query.trim() || hasFilters)) {
       setSearchMode(null);
       setSearchTime(undefined);
-      loadPhotos();
+      setSearchResults(null);
       return;
     }
 
     const startTime = performance.now();
     setSearchMode(query.trim() ? "text" : "exif");
+    setSearchLoading(true);
 
     try {
       const searchParams: {
@@ -287,12 +262,10 @@ function HomePage() {
         searchParams.query = query.trim();
       }
       if (filters?.dateFrom) {
-        // Parse as local date at start of day
         const [y, m, d] = filters.dateFrom.split("-").map(Number);
         searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
       }
       if (filters?.dateTo) {
-        // Parse as local date at end of day
         const [y, m, d] = filters.dateTo.split("-").map(Number);
         searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
       }
@@ -318,26 +291,28 @@ function HomePage() {
         searchParams.isoMax = Number(filters.isoMax);
       }
 
-      const result = await ipc.client.photos.searchCompound(
-        searchParams
-      );
-      setPhotos((result as any).results || []);
-      setTotalPhotos((result as any).total || (result as any).results?.length || 0);
+      const result = await ipc.client.photos.searchCompound(searchParams);
+      setSearchResults((result as any).results || []);
       setSearchTime(Math.round(performance.now() - startTime));
     } catch {
-      const fallback = await ipc.client.photos.listPhotos({
-        search: query.trim() || undefined,
-        sort: "date",
-        order: "desc",
-        offset: 0,
-        limit: 500,
-      });
-      setPhotos((fallback as any).items || []);
-      setTotalPhotos((fallback as any).total || 0);
-      setSearchTime(Math.round(performance.now() - startTime));
+      try {
+        const fallback = await ipc.client.photos.listPhotos({
+          search: query.trim() || undefined,
+          sort: "date",
+          order: "desc",
+          offset: 0,
+          limit: 500,
+        });
+        setSearchResults((fallback as any).items || []);
+        setSearchTime(Math.round(performance.now() - startTime));
+      } catch {
+        toast.error("搜索失败");
+        setSearchResults([]);
+      }
+    } finally {
+      setSearchLoading(false);
     }
   }
-
   function handleContextMenu(e: React.MouseEvent) {
     const card = (e.target as HTMLElement).closest(
       "[data-photo-id]"
@@ -365,13 +340,21 @@ function HomePage() {
   }
 
   async function handleDeletePhoto(id: number) {
-    await ipc.client.photos.deletePhoto({ id });
-    setPhotos((prev) => prev.filter((p) => p.id !== id));
-    setSelectedIds((prev) => {
-      const n = new Set(prev);
-      n.delete(id);
-      return n;
-    });
+    try {
+      await ipc.client.photos.deletePhoto({ id });
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        n.delete(id);
+        return n;
+      });
+      if (isSearching) {
+        setSearchResults((prev) => prev?.filter((p) => p.id !== id) ?? null);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["photos"] });
+      }
+    } catch {
+      toast.error("删除照片失败");
+    }
   }
 
   function handleAddToAlbum(id: number) {
@@ -388,26 +371,45 @@ function HomePage() {
     setExportIds(Array.from(selectedIds));
     setExportDialogOpen(true);
   }
-
   async function handleDeleteSelected() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) {
       return;
     }
-    await ipc.client.photos.deletePhotos({ ids });
-    setPhotos((prev) => prev.filter((p) => !selectedIds.has(p.id)));
-    setSelectedIds(new Set());
+    try {
+      await ipc.client.photos.deletePhotos({ ids });
+      setSelectedIds(new Set());
+      if (isSearching) {
+        setSearchResults(
+          (prev) => prev?.filter((p) => !selectedIds.has(p.id)) ?? null
+        );
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["photos"] });
+      }
+    } catch {
+      toast.error("批量删除失败");
+    }
   }
 
   async function handleRenameSelected(pattern: string) {
     const ids = Array.from(selectedIds);
-    const result = await ipc.client.photos.renamePhotos({
-      ids,
-      pattern,
-    });
-    // Reload photos to reflect new names
-    loadPhotos();
-    return result as { renamed: number; errors: number; results: Array<{ id: number; oldName: string; newName: string; error?: string }> };
+    try {
+      const result = await ipc.client.photos.renamePhotos({ ids, pattern });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      return result as {
+        renamed: number;
+        errors: number;
+        results: Array<{
+          id: number;
+          oldName: string;
+          newName: string;
+          error?: string;
+        }>;
+      };
+    } catch {
+      toast.error("重命名失败");
+      return { renamed: 0, errors: ids.length, results: [] };
+    }
   }
 
   async function handleConvertSelected(options: {
@@ -417,72 +419,73 @@ function HomePage() {
     outputDir: string;
   }) {
     const ids = Array.from(selectedIds);
-    const result = await ipc.client.photos.convertPhotos({
-      ids,
-      format: options.format,
-      quality: options.quality,
-      maxWidth: options.maxWidth || undefined,
-      outputDir: options.outputDir,
-    });
-    return result as { converted: number; outputDir: string };
+    try {
+      const result = await ipc.client.photos.convertPhotos({
+        ids,
+        format: options.format,
+        quality: options.quality,
+        maxWidth: options.maxWidth || undefined,
+        outputDir: options.outputDir,
+      });
+      return result as { converted: number; outputDir: string };
+    } catch {
+      toast.error("格式转换失败");
+      return { converted: 0, outputDir: options.outputDir };
+    }
   }
 
   async function handleImageSearch(imagePath: string) {
     setSearchQuery("[以图搜图]");
     setSearchMode("image");
-    setLoading(true);
+    setSearchLoading(true);
     const startTime = performance.now();
     try {
       const result = await ipc.client.photos.searchByImage({
         imagePath,
         limit: 100,
       });
-      if (result.error) console.warn("[ImageSearch]", result.error);
+      if (result.error) {
+        console.warn("[ImageSearch]", result.error);
+      }
       const results = (result as any).results || [];
-      setPhotos(results);
-      setTotalPhotos(results.length);
+      setSearchResults(results);
       setSearchTime(Math.round(performance.now() - startTime));
     } catch (err: any) {
       console.error("[ImageSearch] failed:", err?.message || err);
-      setPhotos([]);
-      setTotalPhotos(0);
+      toast.error("以图搜图失败");
+      setSearchResults([]);
       setSearchTime(Math.round(performance.now() - startTime));
     } finally {
-      setLoading(false);
+      setSearchLoading(false);
     }
   }
-
   // Keyboard shortcuts for batch operations
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Don't intercept when typing in inputs
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
         return;
       }
 
-      // Ctrl+A: Select all visible photos
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
         setSelectedIds(new Set(photos.map((p) => p.id)));
         return;
       }
 
-      // Delete: Delete selected photos
       if (e.key === "Delete" && selectedIds.size > 0) {
         e.preventDefault();
         handleDeleteSelected();
         return;
       }
 
-      // F2: Rename selected photos
       if (e.key === "F2" && selectedIds.size > 0) {
         e.preventDefault();
         setRenameDialogOpen(true);
         return;
       }
 
-      // Ctrl+Shift+E: Export selected
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "E") {
         e.preventDefault();
         if (selectedIds.size > 0) {
@@ -491,7 +494,6 @@ function HomePage() {
         return;
       }
 
-      // Ctrl+Shift+C: Convert selected
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
         e.preventDefault();
         if (selectedIds.size > 0) {
@@ -500,7 +502,6 @@ function HomePage() {
         return;
       }
 
-      // Escape: Clear selection and close dialogs
       if (e.key === "Escape") {
         if (renameDialogOpen) {
           setRenameDialogOpen(false);
@@ -539,13 +540,13 @@ function HomePage() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
-          aiStatus={aiStatus}
+          aiStatus={aiStatus ?? null}
           imageSearchActive={searchQuery.startsWith("[以图搜图]")}
           onClear={() => {
             setSearchQuery("");
             setSearchMode(null);
             setSearchTime(undefined);
-            loadPhotos();
+            setSearchResults(null);
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
@@ -565,6 +566,7 @@ function HomePage() {
               }
               onDeleteSelected={handleDeleteSelected}
               onDoubleClick={handleDoubleClick}
+              onEndReached={handleEndReached}
               onExportSelected={handleExportSelected}
               onRenameSelected={
                 selectedIds.size > 0

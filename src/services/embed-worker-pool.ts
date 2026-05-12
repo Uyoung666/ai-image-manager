@@ -149,6 +149,25 @@ export function shutdownPool(): void {
   initialized = false;
 }
 
+export function isPoolReady(): boolean {
+  return initialized && workers.length > 0;
+}
+
+export async function embedSingleImage(
+  imagePath: string,
+  mp: string,
+): Promise<number[]> {
+  if (!initialized || workers.length === 0) {
+    await initWorkerPool(mp);
+  }
+  const results = await dispatchBatch([{ id: 0, path: imagePath }]);
+  const result = results[0];
+  if (result?.vector && result.vector.length > 0) {
+    return result.vector;
+  }
+  throw new Error(result?.error || "Empty vector from pool");
+}
+
 /**
  * Embed all given photos using the persistent worker pool.
  * Returns the full results array with vectors for persistence.

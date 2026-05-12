@@ -1,14 +1,6 @@
-import {
-  type ComponentProps,
-  forwardRef,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Virtuoso } from "react-virtuoso";
+import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
 import { Skeleton } from "./ui/skeleton";
 
@@ -29,6 +21,7 @@ interface PhotoGridProps {
   onConvertSelected?: () => void;
   onDeleteSelected?: () => void;
   onDoubleClick: (id: number) => void;
+  onEndReached?: () => void;
   onExportSelected?: () => void;
   onRenameSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
@@ -46,32 +39,6 @@ const DENSITY_CONFIGS = [
 const MIN_COLUMNS = 2;
 const GAP = 8;
 
-// CSS-columns masonry List — items flow top-to-bottom within each column,
-// which yields a gapless Pinterest-style waterfall layout.
-const MasonryList = forwardRef<
-  HTMLDivElement,
-  ComponentProps<"div"> & { columnCount: number }
->(({ columnCount, style, children, ...rest }, ref) => (
-  <div
-    {...rest}
-    ref={ref}
-    style={{
-      ...style,
-      columnCount,
-      columnGap: GAP,
-    }}
-  >
-    {children}
-  </div>
-));
-MasonryList.displayName = "MasonryList";
-
-function renderMasonryList(columnCount: number) {
-  return function List(props: ComponentProps<"div">) {
-    return <MasonryList {...props} columnCount={columnCount} />;
-  };
-}
-
 export function PhotoGrid({
   photos,
   loading,
@@ -82,6 +49,7 @@ export function PhotoGrid({
   onContextMenu,
   onConvertSelected,
   onDeleteSelected,
+  onEndReached,
   onExportSelected,
   onRenameSelected,
 }: PhotoGridProps) {
@@ -89,17 +57,16 @@ export function PhotoGrid({
   const [densityIdx, setDensityIdx] = useState(1);
   const [columnCount, setColumnCount] = useState(4);
   const [compact, setCompact] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const targetColWidth = DENSITY_CONFIGS[densityIdx].targetColWidth;
 
-  // Responsive column count
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) {
-      return;
-    }
+    if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
       const width = entry.contentRect.width;
+      setContainerWidth(width);
       const cols = Math.max(MIN_COLUMNS, Math.floor(width / targetColWidth));
       setColumnCount(cols);
       setCompact(width < 500);
@@ -108,33 +75,44 @@ export function PhotoGrid({
     return () => observer.disconnect();
   }, [targetColWidth]);
 
-  // Estimated item height — used by Virtuoso for scrollbar / initial measurements.
-  // CSS columns compact items, so the effective list height ≈ (itemCount * estimatedHeight) / columnCount.
-  // Virtuoso uses defaultItemHeight × itemCount as the total estimate, so we pass
-  // a down-scaled value so the scrollbar closely matches the real column-based height.
-  const defaultItemHeight = useMemo(() => {
-    if (!containerRef.current) {
-      return 200;
-    }
-    const cw = containerRef.current.clientWidth;
-    const colW = (cw - 16 - (columnCount - 1) * GAP) / columnCount;
-    // Assume average aspect ratio ~1.33 (4:3 landscape-ish).
-    // Item height = gap + container (colW / 1.33) + gap.
-    const base = colW / 1.33 + GAP;
-    // Scale down because CSS columns compact N items into one column height.
-    return Math.max(80, Math.round(base / columnCount));
-  }, [columnCount]);
-
-  // Skeleton aspect ratios
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
-    []
+    [],
   );
 
-  // Skeleton screen — keep column-based skeleton
+  const renderItem = useCallback(
+    (photo: Photo) => (
+      <PhotoCard
+        filename={photo.filename}
+        height={photo.height}
+        id={photo.id}
+        isSelected={selectedIds.has(photo.id)}
+        onClick={onSelect}
+        onDoubleClick={onDoubleClick}
+        path={photo.path}
+        searchQuery={searchQuery}
+        similarity={photo.similarity}
+        thumbnailPath={photo.thumbnailPath}
+        width={photo.width}
+      />
+    ),
+    [selectedIds, onSelect, onDoubleClick, searchQuery],
+  );
+
+  const masonryItems = useMemo(
+    () =>
+      photos.map((p) => ({
+        ...p,
+        width: p.width,
+        height: p.height,
+        id: p.id,
+      })),
+    [photos],
+  );
+
   if (loading && photos.length === 0) {
     const skelCols = Array.from({ length: columnCount }, (_, ci) =>
-      Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
+      Array.from({ length: 3 }, (_, ri) => ci * 3 + ri),
     );
     return (
       <div className="flex flex-1 flex-col">
@@ -171,7 +149,6 @@ export function PhotoGrid({
     );
   }
 
-  // Empty state
   if (!loading && photos.length === 0) {
     return (
       <div className="flex flex-1 flex-col">
@@ -251,35 +228,16 @@ export function PhotoGrid({
         </div>
       </div>
 
-      {/* Masonry grid with virtual scrolling */}
+      {/* Masonry grid */}
       <div className="flex-1" onContextMenu={onContextMenu} ref={containerRef}>
-        <Virtuoso
+        <MasonryGrid
           className="scrollbar-thin px-2"
-          components={{
-            List: renderMasonryList(columnCount),
-          }}
-          computeItemKey={(_index, photo) => photo.id}
-          data={photos}
-          defaultItemHeight={defaultItemHeight}
-          increaseViewportBy={{ top: 400, bottom: 400 }}
-          itemContent={(_index, photo) => (
-            <div className="pb-2" style={{ breakInside: "avoid" }}>
-              <PhotoCard
-                filename={photo.filename}
-                height={photo.height}
-                id={photo.id}
-                isSelected={selectedIds.has(photo.id)}
-                onClick={onSelect}
-                onDoubleClick={onDoubleClick}
-                path={photo.path}
-                searchQuery={searchQuery}
-                similarity={photo.similarity}
-                thumbnailPath={photo.thumbnailPath}
-                width={photo.width}
-              />
-            </div>
-          )}
-          style={{ height: "100%" }}
+          columnCount={columnCount}
+          containerWidth={containerWidth - 16}
+          gap={GAP}
+          items={masonryItems}
+          onEndReached={onEndReached}
+          renderItem={renderItem}
         />
       </div>
 

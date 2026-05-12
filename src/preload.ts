@@ -9,7 +9,10 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Forward global shortcut events from main process to renderer
 ipcRenderer.on("global-shortcut:search", () => {
   window.postMessage("global-shortcut:search", "*");
+});
+
+ipcRenderer.on(IPC_CHANNELS.FILE_CHANGE, (_event, payload) => {
+  window.postMessage({ channel: IPC_CHANNELS.FILE_CHANGE, ...payload }, "*");
 });

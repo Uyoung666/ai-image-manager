@@ -456,6 +456,20 @@ export const searchCompound = os
       const photoIds = aiResults.map((r) => r.photoId);
 
       if (photoIds.length === 0) {
+        const fallbackResults = db
+          .select()
+          .from(photos)
+          .where(like(photos.filename, `%${query.trim()}%`))
+          .limit(limit)
+          .all();
+        if (fallbackResults.length > 0) {
+          return {
+            results: fallbackResults.map((p) => ({ ...p, similarity: 0 })),
+            query: query.trim(),
+            total: fallbackResults.length,
+            fallback: "filename" as const,
+          };
+        }
         return { results: [], query: query.trim(), total: 0 };
       }
 

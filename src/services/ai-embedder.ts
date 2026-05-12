@@ -1495,13 +1495,24 @@ export async function searchByImage(
     _localModelPath = await ensureLocalModel();
   }
 
-  // Image embedding via worker process to keep WASM heap within limits
+  // Image embedding: prefer persistent worker pool, fallback to single fork
   let queryVector: number[];
   try {
-    queryVector = await embedImageInWorker(imagePath, _localModelPath);
+    const { embedSingleImage, isPoolReady } = await import(
+      "@/services/embed-worker-pool"
+    );
+    if (isPoolReady()) {
+      queryVector = await embedSingleImage(imagePath, _localModelPath);
+    } else {
+      queryVector = await embedImageInWorker(imagePath, _localModelPath);
+    }
   } catch (err: any) {
-    console.error("[AI] searchByImage: image embedding failed:", err?.message);
-    return [];
+    try {
+      queryVector = await embedImageInWorker(imagePath, _localModelPath);
+    } catch (fallbackErr: any) {
+      console.error("[AI] searchByImage: image embedding failed:", fallbackErr?.message);
+      return [];
+    }
   }
 
   const rowCount = await photoTable.countRows();

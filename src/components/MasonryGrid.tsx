@@ -1,0 +1,174 @@
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useMasonryLayout } from "@/hooks/useMasonryLayout";
+
+interface MasonryGridProps {
+  items: Array<{ id: number; width: number; height: number; [key: string]: any }>;
+  containerWidth: number;
+  columnCount: number;
+  gap: number;
+  overscan?: number;
+  renderItem: (item: any, index: number, style: React.CSSProperties) => ReactNode;
+  onEndReached?: () => void;
+  className?: string;
+}
+
+function binarySearchStart(
+  positions: Array<{ top: number; height: number }>,
+  threshold: number,
+): number {
+  let lo = 0;
+  let hi = positions.length - 1;
+  let result = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (positions[mid].top + positions[mid].height < threshold) {
+      lo = mid + 1;
+      result = lo;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
+
+export function MasonryGrid({
+  items,
+  containerWidth,
+  columnCount,
+  gap,
+  overscan = 5,
+  renderItem,
+  onEndReached,
+  className,
+}: MasonryGridProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+
+  const { positions, totalHeight } = useMasonryLayout(
+    items,
+    containerWidth,
+    columnCount,
+    gap,
+  );
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      setScrollTop(el.scrollTop);
+      setViewportHeight(el.clientHeight);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setViewportHeight(el.clientHeight);
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setViewportHeight(el.clientHeight);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !onEndReached) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          onEndReached();
+        }
+      },
+      { root: scrollRef.current, rootMargin: "200px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onEndReached, totalHeight]);
+
+  const overscanPx = useMemo(() => {
+    if (positions.length === 0) return 400;
+    const avgHeight =
+      positions.reduce((sum, p) => sum + p.height, 0) / positions.length;
+    return avgHeight * overscan;
+  }, [positions, overscan]);
+
+  const visibleItems = useMemo(() => {
+    if (positions.length === 0) return [];
+
+    const top = scrollTop - overscanPx;
+    const bottom = scrollTop + viewportHeight + overscanPx;
+
+    const startIdx = Math.max(0, binarySearchStart(positions, top) - columnCount);
+    const result: Array<{ index: number; style: React.CSSProperties }> = [];
+
+    for (let i = startIdx; i < positions.length; i++) {
+      const pos = positions[i];
+      if (pos.top > bottom) {
+        break;
+      }
+      if (pos.top + pos.height >= top) {
+        result.push({
+          index: i,
+          style: {
+            position: "absolute",
+            top: pos.top,
+            left: pos.left,
+            width: pos.width,
+            height: pos.height,
+          },
+        });
+      }
+    }
+
+    return result;
+  }, [positions, scrollTop, viewportHeight, overscanPx, columnCount]);
+
+  if (containerWidth <= 0) {
+    return <div className={className} ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
+  }
+
+  return (
+    <div
+      className={className}
+      ref={scrollRef}
+      style={{ height: "100%", overflowY: "auto" }}
+    >
+      <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
+        {visibleItems.map(({ index, style }) => (
+          <div key={items[index].id} style={style}>
+            {renderItem(items[index], index, style)}
+          </div>
+        ))}
+        {onEndReached && totalHeight > 0 && (
+          <div
+            ref={sentinelRef}
+            style={{
+              position: "absolute",
+              top: Math.max(0, totalHeight - 200),
+              left: 0,
+              width: 1,
+              height: 1,
+              pointerEvents: "none",
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

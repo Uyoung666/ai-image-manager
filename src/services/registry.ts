@@ -254,8 +254,11 @@ registry.register({
   level: ServiceLevel.Essential,
   dependencies: ["database", "thumbnailer"],
   start: async () => {
+    const { BrowserWindow } = await import("electron");
     startWatching((photoId, event) => {
-      console.log(`[Watcher] File ${event}: photoId=${photoId}`);
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("file-change", { type: event, photoId });
+      }
     });
   },
   stop: async () => {
@@ -263,7 +266,6 @@ registry.register({
     stopWatching();
   },
   health: async () => {
-    // File watcher is stateless — if chokidar fails, it throws at start time
     return { status: "ok" as const };
   },
 });
