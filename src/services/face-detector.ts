@@ -1,12 +1,40 @@
 import { fork } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { eq, inArray, isNull, sql } from "drizzle-orm";
+import { app } from "electron";
 import { getDatabase } from "@/db";
 import { faceIdentityMembers, faceIdentities, faceVectors, photos } from "@/db/schema";
 import type { ChildProcess } from "node:child_process";
 
 const BATCH_SIZE = 30;
 let detectionRunning = false;
+
+function findWorkerScript(): string {
+  if (app.isPackaged) {
+    const bundled = path.join(
+      process.resourcesPath,
+      "scripts",
+      "face-worker.mjs"
+    );
+    if (fs.existsSync(bundled)) {
+      return bundled;
+    }
+  } else {
+    const cwd = process.cwd();
+    const candidate = path.join(cwd, "scripts", "face-worker.mjs");
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    const alt = path.join(app.getAppPath(), "scripts", "face-worker.mjs");
+    if (fs.existsSync(alt)) {
+      return alt;
+    }
+  }
+  throw new Error(
+    "Cannot find face-worker.mjs — expected in scripts/ directory"
+  );
+}
 
 interface FaceDetectionResult {
   id: number;
@@ -34,7 +62,7 @@ export function isFaceDetectionRunning(): boolean {
 
 function runWorker(photoBatch: Array<{ id: number; path: string }>): Promise<FaceDetectionResult[]> {
   return new Promise((resolve, reject) => {
-    const workerPath = path.join(__dirname, "..", "..", "scripts", "face-worker.mjs");
+    const workerPath = findWorkerScript();
     let worker: ChildProcess;
 
     try {

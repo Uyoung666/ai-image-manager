@@ -42,7 +42,11 @@ interface DashboardData {
   totalPhotos: number;
 }
 
-const ACCENT = "#5e6ad2";
+const CHART_1 = "var(--chart-1)";
+const CHART_2 = "var(--chart-2)";
+const CHART_3 = "var(--chart-3)";
+const CHART_4 = "var(--chart-4)";
+const CHART_5 = "var(--chart-5)";
 const TEXT_SECONDARY = "#a1a1aa";
 const TEXT_TERTIARY = "#6b6b75";
 
@@ -177,7 +181,7 @@ function DashboardPage() {
                 <Tooltip {...chartTooltipStyle} />
                 <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                   {cameraData.map((_, i) => (
-                    <Cell fill={ACCENT} key={i} />
+                    <Cell fill={CHART_1} key={i} />
                   ))}
                 </Bar>
               </BarChart>
@@ -214,7 +218,7 @@ function DashboardPage() {
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {focalData.map((_, i) => (
-                      <Cell fill={ACCENT} key={i} />
+                      <Cell fill={CHART_2} key={i} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -249,7 +253,7 @@ function DashboardPage() {
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {apertureData.map((_, i) => (
-                      <Cell fill="#7c7fe0" key={i} />
+                      <Cell fill={CHART_3} key={i} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -281,7 +285,7 @@ function DashboardPage() {
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {isoData.map((_, i) => (
-                      <Cell fill="#46a758" key={i} />
+                      <Cell fill={CHART_4} key={i} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -313,7 +317,7 @@ function DashboardPage() {
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {timeData.map((_, i) => (
-                      <Cell fill="#ffb224" key={i} />
+                      <Cell fill={CHART_5} key={i} />
                     ))}
                   </Bar>
                 </BarChart>

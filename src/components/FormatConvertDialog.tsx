@@ -101,7 +101,7 @@ export function FormatConvertDialog({
             </div>
             <div className="flex justify-end">
               <button
-                className="rounded-md bg-[#5e6ad2] px-4 py-2 text-[13px] font-[510] text-white hover:opacity-90"
+                className="rounded-md bg-primary px-4 py-2 text-[13px] font-[510] text-primary-foreground hover:opacity-90"
                 onClick={onClose}
                 type="button"
               >
@@ -122,7 +122,7 @@ export function FormatConvertDialog({
                   <button
                     className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
                       format === f.value
-                        ? "border-[#5e6ad2] bg-[#5e6ad2]/10 text-foreground"
+                        ? "border-primary bg-primary/10 text-foreground"
                         : "border-border text-[#a1a1aa] hover:bg-foreground/5"
                     }`}
                     key={f.value}
@@ -149,10 +149,11 @@ export function FormatConvertDialog({
                 </span>
               </div>
               <input
-                className="w-full accent-[#5e6ad2]"
+                className="w-full"
                 max={100}
                 min={10}
                 onChange={(e) => setQuality(Number(e.target.value))}
+                style={{ accentColor: "var(--primary)" }}
                 type="range"
                 value={quality}
               />
@@ -168,7 +169,7 @@ export function FormatConvertDialog({
                 最大宽度 (px，留空不缩放)
               </label>
               <input
-                className="w-32 rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-[#5e6ad2]"
+                className="w-32 rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-primary"
                 onChange={(e) => setMaxWidth(e.target.value.replace(/\D/g, ""))}
                 placeholder="不限制"
                 value={maxWidth}
@@ -192,7 +193,7 @@ export function FormatConvertDialog({
                 取消
               </button>
               <button
-                className="rounded-md bg-[#5e6ad2] px-4 py-2 text-[13px] font-[510] text-white hover:opacity-90 disabled:opacity-50"
+                className="rounded-md bg-primary px-4 py-2 text-[13px] font-[510] text-primary-foreground hover:opacity-90 disabled:opacity-50"
                 disabled={executing}
                 onClick={handleConvert}
                 type="button"

@@ -156,7 +156,7 @@ function AlbumsPage() {
               value={newDesc}
             />
             <button
-              className="rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="rounded-[6px] border border-input px-4 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
               disabled={!newName.trim() || creating}
               onClick={handleCreate}
             >
@@ -201,7 +201,7 @@ function AlbumsPage() {
             </svg>
             <p className="text-[13px]">还没有相册</p>
             <button
-              className="rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
+              className="rounded-[6px] border border-input px-4 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
               onClick={() => setShowCreate(true)}
             >
               创建第一个相册

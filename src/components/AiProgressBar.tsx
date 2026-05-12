@@ -99,12 +99,12 @@ export function AiProgressBar() {
         <p className="text-[#e5484d] text-[11px]">{lastError}</p>
         <p className="mt-1 text-[#6b6b75] text-[10px]">
           国内用户可设置 HuggingFace 镜像：启动时设置环境变量
-          <code className="mx-0.5 rounded-[3px] bg-card px-1 text-[#a1a1aa] text-[10px]">
+          <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[#a1a1aa] text-[10px]">
             HF_MIRROR=hf-mirror.com
           </code>
         </p>
         <button
-          className="mt-2 w-full rounded-[4px] bg-[#5e6ad2]/10 px-2 py-1 font-[510] text-[#5e6ad2] text-[11px] transition-colors hover:bg-[#5e6ad2]/20"
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-primary text-[11px] transition-colors hover:bg-primary/20"
           onClick={handleStart}
         >
           重试
@@ -120,7 +120,7 @@ export function AiProgressBar() {
   ) {
     return (
       <button
-        className="mt-2 w-full rounded-[6px] bg-[#5e6ad2]/10 px-3 py-1.5 font-[510] text-[#5e6ad2] text-[12px] transition-colors hover:bg-[#5e6ad2]/15"
+        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-primary text-[12px] transition-colors hover:bg-primary/15"
         onClick={handleStart}
       >
         开始AI索引
@@ -145,11 +145,11 @@ export function AiProgressBar() {
     <div className="mt-2 rounded-[6px] border border-[#2c2c30] bg-[#1c1e22] px-2 py-2">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[#a1a1aa] text-[11px]">{phaseLabel}</span>
-        <span className="font-[510] text-[#5e6ad2] text-[11px]">{pct}%</span>
+        <span className="font-[510] text-primary text-[11px]">{pct}%</span>
       </div>
       <div className="h-1 overflow-hidden rounded-full bg-[#121214]">
         <div
-          className="h-full rounded-full bg-[#5e6ad2] transition-all duration-300 ease-out"
+          className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -162,7 +162,7 @@ export function AiProgressBar() {
         <div className="mt-2 flex gap-1">
           {paused ? (
             <button
-              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#5e6ad2] text-[11px] transition-colors hover:bg-[#5e6ad2]/10"
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-primary text-[11px] transition-colors hover:bg-primary/10"
               onClick={handleResume}
             >
               继续

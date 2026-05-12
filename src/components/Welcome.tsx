@@ -12,7 +12,7 @@ export function Welcome({ onAddFolder }: WelcomeProps) {
     <div className="flex h-full items-center justify-center p-8">
       <div className="flex max-w-[420px] flex-col items-center space-y-8 text-center">
         {/* Icon */}
-        <div className="flex h-20 w-20 items-center justify-center rounded-[20px] bg-primary/10">
+        <div className="flex h-20 w-20 items-center justify-center rounded-[12px] bg-card">
           <FolderOpen className="h-9 w-9 text-primary" />
         </div>
 

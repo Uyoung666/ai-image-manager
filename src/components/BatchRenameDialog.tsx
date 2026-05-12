@@ -154,7 +154,7 @@ export function BatchRenameDialog({
             )}
             <div className="flex justify-end">
               <button
-                className="rounded-md bg-[#5e6ad2] px-4 py-2 text-[13px] font-[510] text-white hover:opacity-90"
+                className="rounded-md bg-primary px-4 py-2 text-[13px] font-[510] text-primary-foreground hover:opacity-90"
                 onClick={onClose}
                 type="button"
               >
@@ -190,7 +190,7 @@ export function BatchRenameDialog({
                 命名模式
               </label>
               <input
-                className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2]"
+                className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder="输入命名模式..."
                 value={pattern}
@@ -239,7 +239,7 @@ export function BatchRenameDialog({
                   取消
                 </button>
                 <button
-                  className="rounded-md bg-[#5e6ad2] px-4 py-2 text-[13px] font-[510] text-white hover:opacity-90 disabled:opacity-50"
+                  className="rounded-md bg-primary px-4 py-2 text-[13px] font-[510] text-primary-foreground hover:opacity-90 disabled:opacity-50"
                   disabled={executing || !pattern.trim()}
                   onClick={handleRename}
                   type="button"

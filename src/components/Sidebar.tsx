@@ -357,7 +357,7 @@ export function Sidebar({
                   >
                     <span
                       className="h-2 w-2 flex-shrink-0 rounded-full"
-                      style={{ background: tag.color || "#5e6ad2" }}
+                      style={{ background: tag.color || "var(--primary)" }}
                     />
                     <span className="truncate">{tag.name}</span>
                   </button>

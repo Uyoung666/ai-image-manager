@@ -421,7 +421,7 @@ export function PhotoDetailPanel({
                     style={
                       unconfirmed
                         ? undefined
-                        : { background: tag.color || "#5e6ad2" }
+                        : { background: tag.color || "var(--primary)" }
                     }
                     title={
                       unconfirmed
@@ -523,7 +523,7 @@ export function PhotoDetailPanel({
             <div className="flex items-center gap-2">
               <p className="text-[#6b6b75] text-[11px]">未识别到合适的标签</p>
               <button
-                className="text-[#5e6ad2] text-[11px] hover:underline"
+                className="text-primary text-[11px] hover:underline"
                 onClick={() => {
                   setAiSuggestions(null);
                 }}
@@ -546,7 +546,7 @@ export function PhotoDetailPanel({
                     title={`置信度: ${Math.round(s.confidence * 100)}%`}
                   >
                     <span
-                      className="rounded-[3px] px-1 py-0.5"
+                      className="rounded-[4px] px-1 py-0.5"
                       style={{
                         background: alreadyApplied
                           ? "rgba(255,255,255,0.08)"
@@ -569,7 +569,7 @@ export function PhotoDetailPanel({
               {t("exifInfo")}
             </h4>
             <div className="flex items-center justify-center py-6">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#5e6ad2] border-t-transparent" />
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
           </section>
         ) : exif ? (
