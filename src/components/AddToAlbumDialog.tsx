@@ -127,7 +127,7 @@ export function AddToAlbumDialog({
           ) : (
             albums.map((album) => (
               <button
-                className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-white/5"
+                className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-foreground/5"
                 disabled={adding.has(album.id)}
                 key={album.id}
                 onClick={() => handleAdd(album.id)}
@@ -183,7 +183,7 @@ export function AddToAlbumDialog({
             </div>
           ) : (
             <button
-              className="flex w-full items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="flex w-full items-center gap-2 rounded-[6px] px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
               onClick={() => setShowCreate(true)}
             >
               <Plus className="h-4 w-4" />

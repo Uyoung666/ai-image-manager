@@ -416,7 +416,7 @@ export function Sidebar({
           <div className="truncate px-3 py-1 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
             {folderCtx.displayName}
           </div>
-          <div className="mx-2 my-1 border-[rgba(255,255,255,0.06)] border-t" />
+          <div className="mx-2 my-1 border-border border-t" />
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#e5484d] text-[13px] transition-colors hover:bg-[#e5484d]/10"
             onClick={() => {

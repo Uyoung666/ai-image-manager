@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Sparkles, Zap } from "lucide-react";
+import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
 import { ipc } from "@/ipc/manager";
@@ -28,6 +28,7 @@ function AlbumsPage() {
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
   const [showSmartDialog, setShowSmartDialog] = useState(false);
+  const navigate = useNavigate();
 
   const loadAlbums = useCallback(async () => {
     try {
@@ -96,13 +97,21 @@ function AlbumsPage() {
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div>
-          <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
-            相册
-          </h1>
-          <p className="mt-0.5 text-[#6b6b75] text-[12px]">
-            {albums.length} 个相册
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/" })}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+              相册
+            </h1>
+            <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+              {albums.length} 个相册
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -274,4 +283,12 @@ function AlbumsPage() {
   );
 }
 
-export const Route = createFileRoute("/albums" as any)({ component: AlbumsPage });
+function AlbumsLayout() {
+  const childMatch = useMatch({ from: "/albums/$albumId", shouldThrow: false });
+  if (childMatch) {
+    return <Outlet />;
+  }
+  return <AlbumsPage />;
+}
+
+export const Route = createFileRoute("/albums" as any)({ component: AlbumsLayout });

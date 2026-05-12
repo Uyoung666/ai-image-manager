@@ -62,10 +62,16 @@ function useViewportCull(
   const [startIdx, setStartIdx] = useState(0);
   const [endIdx, setEndIdx] = useState(BATCH_SIZE);
   const scrollRAF = useRef(0);
+  const stateRef = useRef({ startIdx: 0, endIdx: BATCH_SIZE });
+
+  useEffect(() => {
+    stateRef.current = { startIdx, endIdx };
+  }, [startIdx, endIdx]);
 
   useEffect(() => {
     setEndIdx(Math.min(BATCH_SIZE, photoCount));
     setStartIdx(0);
+    stateRef.current = { startIdx: 0, endIdx: Math.min(BATCH_SIZE, photoCount) };
   }, [photoCount]);
 
   useEffect(() => {
@@ -78,18 +84,21 @@ function useViewportCull(
         if (!el) return;
         const viewH = el.clientHeight;
         const scrollTop = el.scrollTop;
-        const cullThreshold = viewH * VIEWPORT_CULL_RATIO;
         const estCardH = targetColWidth * 1.05;
         const itemsPerRow = columnCount;
-        const visibleRows = Math.ceil(viewH / estCardH) + 2;
-        const topRows = Math.max(0, Math.floor(scrollTop / estCardH) - visibleRows);
-        const newStart = Math.min(photoCount, Math.max(0, topRows * itemsPerRow - itemsPerRow));
-        const newEnd = Math.min(photoCount, (topRows + visibleRows * VIEWPORT_CULL_RATIO) * itemsPerRow + itemsPerRow);
+        const visibleRows = Math.ceil(viewH / estCardH) + 4;
+        const topRow = Math.max(0, Math.floor(scrollTop / estCardH) - 2);
+        const newStart = Math.max(0, topRow * itemsPerRow);
+        const newEnd = Math.min(photoCount, (topRow + visibleRows * VIEWPORT_CULL_RATIO) * itemsPerRow);
 
-        // Only update if significant change (>1 row)
-        if (Math.abs(newStart - startIdx) > itemsPerRow || Math.abs(newEnd - endIdx) > itemsPerRow * 2) {
-          setStartIdx(Math.max(0, newStart));
-          setEndIdx(Math.min(photoCount, Math.max(newEnd, BATCH_SIZE)));
+        const cur = stateRef.current;
+        const threshold = itemsPerRow * 3;
+        if (Math.abs(newStart - cur.startIdx) > threshold || Math.abs(newEnd - cur.endIdx) > threshold) {
+          const s = Math.max(0, newStart);
+          const e = Math.min(photoCount, Math.max(newEnd, BATCH_SIZE));
+          setStartIdx(s);
+          setEndIdx(e);
+          stateRef.current = { startIdx: s, endIdx: e };
         }
       });
     }
@@ -99,7 +108,7 @@ function useViewportCull(
       el.removeEventListener("scroll", onScroll);
       if (scrollRAF.current) cancelAnimationFrame(scrollRAF.current);
     };
-  }, [containerRef, photoCount, columnCount, targetColWidth, startIdx, endIdx]);
+  }, [containerRef, photoCount, columnCount, targetColWidth]);
 
   return { startIdx, endIdx };
 }
@@ -229,7 +238,7 @@ export function PhotoGrid({
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && onRenameSelected && (
             <button
-              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-foreground/5"
               onClick={onRenameSelected}
             >
               {compact ? "重命名" : `重命名 (${selectedIds.size})`}
@@ -237,7 +246,7 @@ export function PhotoGrid({
           )}
           {selectedIds.size > 0 && onConvertSelected && (
             <button
-              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-foreground/5"
               onClick={onConvertSelected}
             >
               {compact ? "转换" : `格式转换 (${selectedIds.size})`}
@@ -245,7 +254,7 @@ export function PhotoGrid({
           )}
           {selectedIds.size > 0 && onExportSelected && (
             <button
-              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-white/5"
+              className="rounded-[4px] px-2 py-1 text-foreground text-[11px] transition-colors hover:bg-foreground/5"
               onClick={onExportSelected}
             >
               {compact ? "导出" : `导出选中 (${selectedIds.size})`}
@@ -268,7 +277,7 @@ export function PhotoGrid({
                   className={`rounded-[4px] px-2 py-1 text-[11px] transition-colors ${
                     i === densityIdx
                       ? "bg-primary/20 text-primary"
-                      : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   }`}
                   key={cfg.label}
                   onClick={() => setDensityIdx(i)}

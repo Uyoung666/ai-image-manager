@@ -100,9 +100,7 @@ export const PhotoCard = memo(function PhotoCard({
       }
       `}
       onClick={(e) => onClick(id, e)}
-      onContextMenu={(e) => {
-        e.stopPropagation();
-      }}
+      onContextMenu={undefined}
       onDoubleClick={() => onDoubleClick(id)}
       style={{ aspectRatio }}
       data-photo-id={id}

@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Play, User } from "lucide-react";
+import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft, Play, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ipc } from "@/ipc/manager";
 
@@ -17,6 +17,7 @@ function PeoplePage() {
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
   const [progress, setProgress] = useState<string>("");
+  const navigate = useNavigate();
 
   const loadIdentities = useCallback(async () => {
     try {
@@ -84,15 +85,23 @@ function PeoplePage() {
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div>
-          <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
-            人物
-          </h1>
-          <p className="mt-0.5 text-[#6b6b75] text-[12px]">
-            {identities.length > 0
-              ? `${identities.length} 个人物分组`
-              : "人脸识别与人物管理"}
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/" })}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+              人物
+            </h1>
+            <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+              {identities.length > 0
+                ? `${identities.length} 个人物分组`
+                : "人脸识别与人物管理"}
+            </p>
+          </div>
         </div>
         <button
           className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
@@ -179,6 +188,14 @@ function PeoplePage() {
   );
 }
 
+function PeopleLayout() {
+  const childMatch = useMatch({ from: "/people/$identityId", shouldThrow: false });
+  if (childMatch) {
+    return <Outlet />;
+  }
+  return <PeoplePage />;
+}
+
 export const Route = createFileRoute("/people" as any)({
-  component: PeoplePage,
+  component: PeopleLayout,
 });

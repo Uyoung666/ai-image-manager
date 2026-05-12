@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
 import { desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
@@ -961,7 +962,7 @@ export const convertPhotos = os
 
     const outputDir =
       input.outputDir ||
-      path.join(os.tmpdir(), `convert-${Date.now()}`);
+      path.join(nodeOs.tmpdir(), `convert-${Date.now()}`);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
@@ -1027,7 +1028,7 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
   try {
-    const suggestions = await aiSuggestTags(photo.path, 0.28, input.id);
+    const suggestions = await aiSuggestTags(photo.path, 0.22, input.id);
     return { photoId: input.id, suggestions };
   } catch {
     return { photoId: input.id, suggestions: [] };
@@ -1412,7 +1413,7 @@ export const exportPhotos = os
 
     // Prepare temp directory
     const os = await import("node:os");
-    const tmpDir = path.join(os.tmpdir(), `ai-image-gallery-${Date.now()}`);
+    const tmpDir = path.join(nodeOs.tmpdir(), `ai-image-gallery-${Date.now()}`);
     const photosDir = path.join(tmpDir, "photos");
     fs.mkdirSync(photosDir, { recursive: true });
 
@@ -1586,15 +1587,16 @@ export const exportPhotos = os
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
       // Create ZIP
-      const { Archiver } = (await import("archiver")) as any;
+      const archiverModule = await import("archiver");
+      const createArchive = archiverModule.default || archiverModule;
       const zipPath =
         outputPath ||
         path.join(
-          os.tmpdir(),
+          nodeOs.tmpdir(),
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
       const output = fs.createWriteStream(zipPath);
-      const archive: any = new Archiver("zip", { zlib: { level: 9 } });
+      const archive = createArchive("zip", { zlib: { level: 9 } });
 
       await new Promise<string>((resolve, reject) => {
         output.on("close", () => resolve(zipPath));

@@ -76,12 +76,12 @@ export function FormatConvertDialog({
       />
       <div className="relative w-[480px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-white/5">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] px-6 py-4">
-          <h2 className="text-[16px] font-[510] text-[#f7f8f8]">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h2 className="text-[16px] font-[510] text-foreground">
             格式转换 ({photoCount} 张)
           </h2>
           <button
-            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-white/5"
+            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-foreground/5"
             onClick={onClose}
             type="button"
           >
@@ -97,7 +97,7 @@ export function FormatConvertDialog({
             </div>
             <div className="mb-4 text-[12px] text-[#a1a1aa]">
               输出目录:{" "}
-              <span className="font-mono text-[#f7f8f8]">{result.outputDir}</span>
+              <span className="font-mono text-foreground">{result.outputDir}</span>
             </div>
             <div className="flex justify-end">
               <button
@@ -122,8 +122,8 @@ export function FormatConvertDialog({
                   <button
                     className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
                       format === f.value
-                        ? "border-[#5e6ad2] bg-[#5e6ad2]/10 text-[#f7f8f8]"
-                        : "border-[rgba(255,255,255,0.06)] text-[#a1a1aa] hover:bg-white/5"
+                        ? "border-[#5e6ad2] bg-[#5e6ad2]/10 text-foreground"
+                        : "border-border text-[#a1a1aa] hover:bg-foreground/5"
                     }`}
                     key={f.value}
                     onClick={() => setFormat(f.value)}
@@ -144,7 +144,7 @@ export function FormatConvertDialog({
                 <label className="text-[12px] font-[400] text-[#a1a1aa]">
                   画质
                 </label>
-                <span className="text-[13px] font-mono text-[#f7f8f8]">
+                <span className="text-[13px] font-mono text-foreground">
                   {quality}%
                 </span>
               </div>
@@ -168,7 +168,7 @@ export function FormatConvertDialog({
                 最大宽度 (px，留空不缩放)
               </label>
               <input
-                className="w-32 rounded-md border border-[rgba(255,255,255,0.06)] bg-[#121214] px-3 py-2 text-[14px] text-[#f7f8f8] font-mono outline-none focus:border-[#5e6ad2]"
+                className="w-32 rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-[#5e6ad2]"
                 onChange={(e) => setMaxWidth(e.target.value.replace(/\D/g, ""))}
                 placeholder="不限制"
                 value={maxWidth}
@@ -185,7 +185,7 @@ export function FormatConvertDialog({
             {/* Actions */}
             <div className="flex justify-end gap-2">
               <button
-                className="rounded-md border border-[rgba(255,255,255,0.06)] px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-white/5"
+                className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-foreground/5"
                 onClick={onClose}
                 type="button"
               >

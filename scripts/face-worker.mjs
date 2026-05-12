@@ -115,10 +115,13 @@ async function detectFaces(filePath) {
         const rw = maxX - minX + 1;
         const rh = maxY - minY + 1;
         const aspectRatio = rw / Math.max(rh, 1);
+        const area = rw * rh;
+        const fillRatio = count / Math.max(area, 1);
 
-        // Face-like region: reasonable size and aspect ratio
-        if (count >= 20 && rw >= 5 && rh >= 5 && aspectRatio >= 0.3 && aspectRatio <= 3.0) {
-          regions.push({ minX, minY, maxX, maxY, count, aspectRatio });
+        // Face-like region: must be substantial, roughly oval/square, and well-filled
+        // A real face region should fill at least 40% of its bounding box
+        if (count >= 80 && rw >= 12 && rh >= 14 && aspectRatio >= 0.6 && aspectRatio <= 1.6 && fillRatio >= 0.4) {
+          regions.push({ minX, minY, maxX, maxY, count, aspectRatio, fillRatio });
         }
       }
     }
@@ -127,12 +130,12 @@ async function detectFaces(filePath) {
     const scaleX = imgW / width;
     const scaleY = imgH / height;
 
-    // Filter: keep only regions that are face-like (roughly round/square aspect ratio)
-    // Merge nearby regions that might be parts of the same face
+    // Filter: keep only regions that are face-like (roughly oval aspect ratio ~0.7-1.4)
+    // Real faces are slightly taller than wide
     const faceCandidates = regions
-      .filter((r) => r.aspectRatio >= 0.5 && r.aspectRatio <= 2.0)
+      .filter((r) => r.aspectRatio >= 0.65 && r.aspectRatio <= 1.5 && r.fillRatio >= 0.45)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 20); // max 20 faces
+      .slice(0, 10); // max 10 faces per image
 
     // Merge overlapping regions
     const merged = [];
@@ -169,8 +172,10 @@ async function detectFaces(filePath) {
       .filter((r) => {
         const rw = r.maxX - r.minX;
         const rh = r.maxY - r.minY;
-        // Must be at least 2% of image size
-        return rw > imgW * 0.02 && rh > imgH * 0.02;
+        const aspect = rw / Math.max(rh, 1);
+        // Must be at least 5% of image size in both dimensions
+        // and have face-like proportions (slightly taller than wide)
+        return rw > width * 0.05 && rh > height * 0.06 && aspect >= 0.6 && aspect <= 1.5;
       })
       .map((r, idx) => ({
         faceIndex: idx,

@@ -375,14 +375,21 @@ function HomePage() {
 
   async function handleImageSearch(imagePath: string) {
     setSearchQuery("[以图搜图]");
+    setLoading(true);
     try {
       const result = await ipc.client.photos.searchByImage({
         imagePath,
         limit: 100,
       });
-      setPhotos((result as any).results || []);
-    } catch {
-      /* ignore */
+      const results = (result as any).results || [];
+      setPhotos(results);
+      setTotalPhotos(results.length);
+    } catch (err) {
+      console.error("[ImageSearch] failed:", err);
+      setPhotos([]);
+      setTotalPhotos(0);
+    } finally {
+      setLoading(false);
     }
   }
 

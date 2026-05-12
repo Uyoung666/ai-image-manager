@@ -109,12 +109,12 @@ export function BatchRenameDialog({
       {/* Dialog */}
       <div className="relative w-[560px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-white/5">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] px-6 py-4">
-          <h2 className="text-[16px] font-[510] text-[#f7f8f8]">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <h2 className="text-[16px] font-[510] text-foreground">
             批量重命名 ({photoCount} 张)
           </h2>
           <button
-            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-white/5"
+            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-foreground/5"
             onClick={onClose}
             type="button"
           >
@@ -136,10 +136,10 @@ export function BatchRenameDialog({
               )}
             </div>
             {errorResults.length > 0 && (
-              <div className="mb-4 max-h-[200px] overflow-auto rounded-md border border-[rgba(255,255,255,0.06)]">
+              <div className="mb-4 max-h-[200px] overflow-auto rounded-md border border-border">
                 {errorResults.map((r) => (
                   <div
-                    className="border-b border-[rgba(255,255,255,0.04)] px-3 py-2 text-[12px] text-[#a1a1aa] last:border-b-0"
+                    className="border-b border-border px-3 py-2 text-[12px] text-muted-foreground last:border-b-0"
                     key={r.id}
                   >
                     <span className="text-[#e5484d]">{r.oldName}</span>
@@ -173,7 +173,7 @@ export function BatchRenameDialog({
               <div className="flex flex-wrap gap-2">
                 {TEMPLATES.map((tpl) => (
                   <button
-                    className="rounded-md border border-[rgba(255,255,255,0.06)] px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8]"
+                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
                     key={tpl.value}
                     onClick={() => setPattern(tpl.value)}
                     type="button"
@@ -190,7 +190,7 @@ export function BatchRenameDialog({
                 命名模式
               </label>
               <input
-                className="w-full rounded-md border border-[rgba(255,255,255,0.06)] bg-[#121214] px-3 py-2 text-[14px] text-[#f7f8f8] font-mono outline-none focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2]"
+                className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-[14px] text-foreground font-mono outline-none focus:border-[#5e6ad2] focus:ring-1 focus:ring-[#5e6ad2]"
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder="输入命名模式..."
                 value={pattern}
@@ -213,7 +213,7 @@ export function BatchRenameDialog({
               <div className="flex flex-wrap gap-1.5">
                 {TOKENS.map((t) => (
                   <button
-                    className="rounded-md border border-[rgba(255,255,255,0.06)] bg-[#121214] px-2.5 py-1.5 text-[11px] font-mono text-[#a1a1aa] hover:bg-white/5 hover:text-[#f7f8f8]"
+                    className="rounded-md border border-border bg-secondary px-2.5 py-1.5 text-[11px] font-mono text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
                     key={t.token}
                     onClick={() => insertToken(t.token)}
                     title={`${t.description} — 例如: ${t.example}`}
@@ -232,7 +232,7 @@ export function BatchRenameDialog({
               </span>
               <div className="flex gap-2">
                 <button
-                  className="rounded-md border border-[rgba(255,255,255,0.06)] px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-white/5"
+                  className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-foreground/5"
                   onClick={onClose}
                   type="button"
                 >

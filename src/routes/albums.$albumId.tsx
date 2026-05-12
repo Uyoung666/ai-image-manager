@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Zap } from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
@@ -27,6 +27,7 @@ interface AlbumDetail {
 
 function AlbumDetailPage() {
   const { albumId } = Route.useParams() as any as { albumId: string };
+  const navigate = useNavigate();
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -77,28 +78,36 @@ function AlbumDetailPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
-              {album?.name || "加载中..."}
-            </h1>
-            {(album as any)?.isSmart && (
-              <span className="flex items-center gap-1 rounded-[4px] bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                <Zap className="h-2.5 w-2.5" />
-                智能
-              </span>
+        <div className="flex items-center gap-3">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/albums" as any })}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+                {album?.name || "加载中..."}
+              </h1>
+              {(album as any)?.isSmart && (
+                <span className="flex items-center gap-1 rounded-[4px] bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  <Zap className="h-2.5 w-2.5" />
+                  智能
+                </span>
+              )}
+            </div>
+            {album?.description && (
+              <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+                {album.description}
+              </p>
             )}
-          </div>
-          {album?.description && (
-            <p className="mt-0.5 text-[#6b6b75] text-[12px]">
-              {album.description}
+            <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+              {(album as any)?.isSmart
+                ? `智能匹配 ${(album as any)?.matchCount ?? photos.length} 张照片`
+                : `${photos.length} 张照片`}
             </p>
-          )}
-          <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-            {(album as any)?.isSmart
-              ? `智能匹配 ${(album as any)?.matchCount ?? photos.length} 张照片`
-              : `${photos.length} 张照片`}
-          </p>
+          </div>
         </div>
         {selectedIds.size > 0 && !(album as any)?.isSmart && (
           <button

@@ -211,12 +211,24 @@ function embedImageInWorker(
     });
 
     let stderr = "";
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        child.kill();
+        reject(new Error("Image embed worker timed out"));
+      }
+    }, WORKER_TIMEOUT);
+
     child.stderr?.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
     child.on("message", (msg: any) => {
-      if (msg.type === "result") {
+      if (msg.type === "result" && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
         const result = msg.results?.[0];
         if (result?.vector && result.vector.length > 0) {
           resolve(result.vector);
@@ -231,7 +243,9 @@ function embedImageInWorker(
     });
 
     child.on("close", (code) => {
-      if (code !== 0) {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
         reject(
           new Error(
             `Image embed worker exited with code ${code}: ${stderr.slice(-300)}`
@@ -240,7 +254,13 @@ function embedImageInWorker(
       }
     });
 
-    child.on("error", reject);
+    child.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
 
     child.send({
       type: "embed",
@@ -981,13 +1001,13 @@ const ZH_TO_EN_SEARCH: Record<string, string> = {
   月亮: "moon night sky",
   太阳: "sun bright sky daytime",
   // Extended vocabulary
-  草莓: "strawberry fruit red berry food",
-  水果: "fruit fresh produce food",
-  蔬菜: "vegetable greens produce food",
-  蛋糕: "cake dessert sweet pastry food",
-  面包: "bread bakery baked food",
-  咖啡: "coffee cup drink beverage",
-  饮料: "drink beverage cup",
+  草莓: "strawberry",
+  水果: "fruit",
+  蔬菜: "vegetable",
+  蛋糕: "cake dessert",
+  面包: "bread",
+  咖啡: "coffee",
+  饮料: "drink beverage",
   孩子: "child kid baby young person",
   婴儿: "baby infant newborn person",
   老人: "elderly senior old person",
@@ -1167,7 +1187,9 @@ export async function searchByText(
       // If nothing translated, use the raw query but let CLIP try
       searchText = query.trim();
     } else {
-      searchText = `A photo showing ${englishOnly.join(" ")}`;
+      // CLIP works best with short, natural descriptions
+      const keywords = englishOnly.slice(0, 4).join(" ");
+      searchText = `a photo of ${keywords}`;
     }
     console.log(`[AI] searchByText: zh→en "${query.trim()}" → "${searchText}"`);
   }
@@ -1282,7 +1304,31 @@ export async function searchByText(
 
   // cosine distance ∈ [0, 2]: 0 = identical, 1 = orthogonal, 2 = opposite.
   // Cosine similarity = 1 - cosine_distance
-  return rawResults.map((r: Record<string, unknown>) => {
+  // Filter out results with cosine distance > 0.55 (similarity < 0.45)
+  // CLIP typically returns 0.2-0.4 for good matches, 0.6+ for irrelevant
+  const MAX_COSINE_DISTANCE = 0.55;
+  const filtered = rawResults.filter(
+    (r: Record<string, unknown>) => (r._distance as number) <= MAX_COSINE_DISTANCE
+  );
+
+  if (filtered.length === 0 && rawResults.length > 0) {
+    // If all results are above threshold, return top 5 with best distances
+    // so user gets some feedback rather than empty results
+    const top5 = rawResults.slice(0, 5);
+    console.log(
+      `[AI] searchByText: all ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning top 5`
+    );
+    return top5.map((r: Record<string, unknown>) => {
+      const cosDist = r._distance as number;
+      const similarity = Math.max(0, 1 - cosDist);
+      return {
+        photoId: r.photo_id as number,
+        similarity: Math.round(similarity * 10_000) / 10_000,
+      };
+    });
+  }
+
+  return filtered.map((r: Record<string, unknown>) => {
     const cosDist = r._distance as number;
     const similarity = Math.max(0, 1 - cosDist);
     return {
@@ -1342,7 +1388,7 @@ export async function searchByImage(
         photo_id: r.photo_id as number,
         vector: Array.from(r.vector as Float32Array),
       }));
-      const scored = allData.map((r) => {
+      const scored = allData.map((r: { photo_id: number; vector: number[] }) => {
         let dot = 0;
         let normA = 0;
         let normB = 0;
@@ -1354,7 +1400,7 @@ export async function searchByImage(
         const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
         return { photo_id: r.photo_id, _distance: 1 - sim };
       });
-      scored.sort((a, b) => a._distance - b._distance);
+      scored.sort((a: { _distance: number }, b: { _distance: number }) => a._distance - b._distance);
       rawResults = scored.slice(0, limit) as any;
     } catch (bfErr: any) {
       console.warn("[AI] searchByImage: brute-force fallback failed:", bfErr?.message);
@@ -1577,5 +1623,16 @@ export async function suggestTags(
   }
 
   results.sort((a, b) => b.confidence - a.confidence);
+
+  // If no results above threshold, return top 5 with highest similarity
+  if (results.length === 0 && cachedTagEmbeddings) {
+    const allScores = cachedTagEmbeddings.map(({ displayName, vector }) => ({
+      tag: displayName,
+      confidence: Math.round(cosineSimilarity(imageVec!, vector) * 100) / 100,
+    }));
+    allScores.sort((a, b) => b.confidence - a.confidence);
+    return allScores.slice(0, 5).filter((s) => s.confidence > 0.15);
+  }
+
   return results.slice(0, 10);
 }

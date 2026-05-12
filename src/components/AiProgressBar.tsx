@@ -169,7 +169,7 @@ export function AiProgressBar() {
             </button>
           ) : (
             <button
-              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#a1a1aa] text-[11px] transition-colors hover:bg-white/5 hover:text-[#f7f8f8]"
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#a1a1aa] text-[11px] transition-colors hover:bg-foreground/5 hover:text-foreground"
               onClick={handlePause}
             >
               暂停
