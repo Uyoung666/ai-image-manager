@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
+import archiver from "archiver";
 import { os } from "@orpc/server";
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -276,26 +277,6 @@ export const exportPhotos = os
       const html = buildHtmlGallery(galleryPhotos);
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
-      // Create ZIP — handle archiver ESM/CJS compatibility in Electron
-      const { createRequire } = await import("node:module");
-      const requirePath =
-        typeof __filename !== "undefined"
-          ? __filename
-          : typeof import.meta !== "undefined" && import.meta.url
-            ? import.meta.url
-            : `file://${process.cwd()}/dummy.js`;
-      const req = createRequire(requirePath);
-      let createArchive: any;
-      try {
-        // Try CJS require first (most reliable in Electron main process)
-        const archiverCjs = req("archiver");
-        createArchive = typeof archiverCjs === "function" ? archiverCjs : archiverCjs.default;
-      } catch {
-        // Fallback: dynamic ESM import
-        const am = await import("archiver");
-        createArchive = (am as any).default || am;
-      }
-
       const zipPath =
         outputPath ||
         path.join(
@@ -303,11 +284,7 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      if (typeof createArchive !== "function") {
-        return { success: false, error: "archiver 模块加载失败，无法创建 ZIP 包" };
-      }
-
-      const archive = createArchive("zip", { zlib: { level: 9 } });
+      const archive = archiver("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<string>((resolve, reject) => {
