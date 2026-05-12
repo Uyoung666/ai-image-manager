@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Local AI-powered image manager — browse, search, and organize photos with natural language",
   "main": ".vite/build/main.js",
+  "type": "module",
   "private": true,
   "scripts": {
     "start": "electron-forge start",
@@ -38,7 +39,7 @@
     "@tanstack/react-router-devtools": "^1.166.11",
     "@tanstack/react-virtual": "^3.13.24",
     "@xenova/transformers": "^2.17.2",
-    "archiver": "^6.0.2",
+    "archiver": "^8.0.0",
     "better-sqlite3": "^12.9.0",
     "chokidar": "^5.0.0",
     "class-variance-authority": "^0.7.1",

@@ -8,6 +8,11 @@ export default defineConfig({
     },
   },
   build: {
+    lib: {
+      entry: "src/main.ts",
+      formats: ["es"],
+      fileName: () => "[name].js",
+    },
     rollupOptions: {
       external: [
         "electron",
