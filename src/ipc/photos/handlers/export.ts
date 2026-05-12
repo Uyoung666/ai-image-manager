@@ -278,7 +278,13 @@ export const exportPhotos = os
 
       // Create ZIP — handle archiver ESM/CJS compatibility in Electron
       const { createRequire } = await import("node:module");
-      const req = createRequire(import.meta.url);
+      const requirePath =
+        typeof __filename !== "undefined"
+          ? __filename
+          : typeof import.meta !== "undefined" && import.meta.url
+            ? import.meta.url
+            : `file://${process.cwd()}/dummy.js`;
+      const req = createRequire(requirePath);
       let createArchive: any;
       try {
         // Try CJS require first (most reliable in Electron main process)
