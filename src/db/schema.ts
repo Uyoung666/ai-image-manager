@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   real,
   sqliteTable,
@@ -17,34 +18,45 @@ export const folders = sqliteTable("folders", {
     .$defaultFn(() => Date.now()),
 });
 
-export const photos = sqliteTable("photos", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  path: text("path").notNull().unique(),
-  folderId: integer("folder_id").references(() => folders.id, {
-    onDelete: "set null",
-  }),
-  filename: text("filename").notNull(),
-  fileSize: integer("file_size"),
-  fileDate: integer("file_date"),
-  width: integer("width"),
-  height: integer("height"),
-  format: text("format"),
-  colorSpace: text("color_space"),
-  hasAlpha: integer("has_alpha", { mode: "boolean" }),
-  thumbnailPath: text("thumbnail_path"),
-  thumbnailSize: text("thumbnail_size"),
-  phash: text("phash"),
-  vectorId: text("vector_id"),
-  isIndexed: integer("is_indexed", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  isAiProcessed: integer("is_ai_processed", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  createdAt: integer("created_at")
-    .notNull()
-    .$defaultFn(() => Date.now()),
-});
+export const photos = sqliteTable(
+  "photos",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    path: text("path").notNull().unique(),
+    folderId: integer("folder_id").references(() => folders.id, {
+      onDelete: "set null",
+    }),
+    filename: text("filename").notNull(),
+    fileSize: integer("file_size"),
+    fileDate: integer("file_date"),
+    width: integer("width"),
+    height: integer("height"),
+    format: text("format"),
+    colorSpace: text("color_space"),
+    hasAlpha: integer("has_alpha", { mode: "boolean" }),
+    thumbnailPath: text("thumbnail_path"),
+    thumbnailSize: text("thumbnail_size"),
+    phash: text("phash"),
+    vectorId: text("vector_id"),
+    isIndexed: integer("is_indexed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    isAiProcessed: integer("is_ai_processed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    folderIdIdx: index("idx_photos_folder_id").on(table.folderId),
+    isAiProcessedIdx: index("idx_photos_is_ai_processed").on(
+      table.isAiProcessed
+    ),
+    fileDateIdx: index("idx_photos_file_date").on(table.fileDate),
+    phashIdx: index("idx_photos_phash").on(table.phash),
+  })
+);
 
 export const exifData = sqliteTable(
   "exif_data",
@@ -106,6 +118,8 @@ export const photoTags = sqliteTable(
   },
   (table) => ({
     uniquePhotoTag: uniqueIndex("idx_photo_tag").on(table.photoId, table.tagId),
+    photoIdIdx: index("idx_pt_photo_id").on(table.photoId),
+    tagIdIdx: index("idx_pt_tag_id").on(table.tagId),
   })
 );
 

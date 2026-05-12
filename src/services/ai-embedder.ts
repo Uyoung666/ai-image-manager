@@ -630,27 +630,51 @@ function runEmbedBatch(
     });
 
     let stderr = "";
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        child.kill();
+        reject(
+          new Error(
+            `Worker timed out after ${WORKER_TIMEOUT}ms: ${stderr.slice(-300)}`
+          )
+        );
+      }
+    }, WORKER_TIMEOUT);
+
     child.stderr?.on("data", (data: Buffer) => {
       stderr += data.toString();
     });
 
     child.on("message", (msg: any) => {
-      if (msg.type === "result") {
+      if (msg.type === "result" && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
         resolve(msg.results as EmbedResult[]);
       }
     });
 
     child.on("close", (code) => {
-      if (code !== 0) {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
         reject(
           new Error(
-            `Worker crashed: ${stderr.slice(-500) || `exit code ${code}`}`
+            `Worker exited unexpectedly (code ${code}): ${stderr.slice(-500) || "no stderr"}`
           )
         );
       }
     });
 
-    child.on("error", reject);
+    child.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
 
     child.send({ type: "embed", modelPath, photos });
   });
@@ -795,13 +819,29 @@ export async function embedAllPhotos(
 
       for (const result of results) {
         if (result.vector && result.vector.length > 0) {
-          await photoTable.add([
-            { photo_id: result.id, vector: result.vector, created_at: Date.now() },
-          ]);
-          db.update(photos)
-            .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
-            .where(eq(photos.id, result.id))
-            .run();
+          try {
+            // Write LanceDB first — if this fails, skip SQLite to stay consistent
+            await photoTable.add([
+              { photo_id: result.id, vector: result.vector, created_at: Date.now() },
+            ]);
+          } catch (lanceErr: any) {
+            console.warn(
+              `[AI] Photo ${result.id} LanceDB write failed, skipping SQLite update: ${lanceErr?.message}`
+            );
+            continue;
+          }
+          // Only update SQLite after LanceDB write succeeds
+          try {
+            db.update(photos)
+              .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
+              .where(eq(photos.id, result.id))
+              .run();
+          } catch (dbErr: any) {
+            console.warn(
+              `[AI] Photo ${result.id} SQLite update failed (vector already written): ${dbErr?.message}`
+            );
+            // Vector is in LanceDB but SQLite flag failed — repair will reconcile later
+          }
           count++;
         } else if (result.error) {
           console.warn(

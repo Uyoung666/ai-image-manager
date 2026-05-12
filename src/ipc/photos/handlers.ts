@@ -753,36 +753,65 @@ export const findDuplicates = os
       .where(sql`${photos.phash} IS NOT NULL`)
       .all();
 
-    // Phase 1: pHash screening — O(n²) pairwise hamming distance
+    // Phase 1: pHash screening — chunked async to avoid blocking the main process.
+    // Each chunk runs a subset of pairwise comparisons then yields via setImmediate.
+    const CHUNK_SIZE = 300;
     const candidates: Array<{
       photoA: { id: number; path: string; filename: string };
       photoB: { id: number; path: string; filename: string };
       distance: number;
     }> = [];
 
-    for (let i = 0; i < allPhotos.length; i++) {
-      for (let j = i + 1; j < allPhotos.length; j++) {
-        if (allPhotos[i].phash && allPhotos[j].phash) {
-          const dist = hammingDistance(
-            allPhotos[i].phash!,
-            allPhotos[j].phash!
-          );
-          if (dist <= input.threshold) {
-            candidates.push({
-              photoA: {
-                id: allPhotos[i].id,
-                path: allPhotos[i].path,
-                filename: allPhotos[i].filename,
-              },
-              photoB: {
-                id: allPhotos[j].id,
-                path: allPhotos[j].path,
-                filename: allPhotos[j].filename,
-              },
-              distance: dist,
-            });
+    let compared = 0;
+    const totalPairs = (allPhotos.length * (allPhotos.length - 1)) / 2;
+
+    for (let ci = 0; ci < allPhotos.length; ci += CHUNK_SIZE) {
+      const chunkEnd = Math.min(ci + CHUNK_SIZE, allPhotos.length);
+      const chunk = allPhotos.slice(ci, chunkEnd);
+
+      // Offload each chunk's work into a microtask to keep the UI responsive
+      await new Promise<void>((resolve) => {
+        setImmediate(() => {
+          for (const photoA of chunk) {
+            for (const photoB of allPhotos) {
+              if (photoA.id >= photoB.id) continue;
+              compared++;
+              if (photoA.phash && photoB.phash) {
+                const dist = hammingDistance(photoA.phash, photoB.phash);
+                if (dist <= input.threshold) {
+                  candidates.push({
+                    photoA: {
+                      id: photoA.id,
+                      path: photoA.path,
+                      filename: photoA.filename,
+                    },
+                    photoB: {
+                      id: photoB.id,
+                      path: photoB.path,
+                      filename: photoB.filename,
+                    },
+                    distance: dist,
+                  });
+                }
+              }
+            }
           }
-        }
+          resolve();
+        });
+      });
+
+      // Log progress periodically
+      if (
+        ci % (CHUNK_SIZE * 5) === 0 ||
+        ci + CHUNK_SIZE >= allPhotos.length
+      ) {
+        const pct =
+          totalPairs > 0
+            ? Math.round((compared / totalPairs) * 100)
+            : 0;
+        console.log(
+          `[Dedup] pHash screening: ~${pct}% (${compared}/${totalPairs} pairs, ${candidates.length} candidates)`
+        );
       }
     }
 

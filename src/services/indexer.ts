@@ -353,20 +353,29 @@ export async function scanFolder(
     };
   }
 
-  // Walk directory
+  // Async walk — avoids blocking the main process on large folders.
+  // Each directory level yields the event loop via setImmediate to keep the UI responsive.
   const files: string[] = [];
-  function walk(dir: string) {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+  async function walk(dir: string): Promise<void> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      // Permission denied or directory removed — skip silently
+      return;
+    }
+    // Yield the event loop after reading each directory to prevent UI jank
+    await new Promise<void>((r) => setImmediate(r));
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(fullPath);
+        await walk(fullPath);
       } else if (entry.isFile() && shouldIndex(fullPath)) {
         files.push(fullPath);
       }
     }
   }
-  walk(resolvedPath);
+  await walk(resolvedPath);
 
   // Index each file
   const photoIds: number[] = [];
