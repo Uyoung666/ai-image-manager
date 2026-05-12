@@ -229,7 +229,7 @@ export function PhotoGrid({
       </div>
 
       {/* Masonry grid */}
-      <div className="flex-1" onContextMenu={onContextMenu} ref={containerRef}>
+      <div className="min-h-0 flex-1" onContextMenu={onContextMenu} ref={containerRef}>
         <MasonryGrid
           className="scrollbar-thin px-2"
           columnCount={columnCount}
