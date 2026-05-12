@@ -48,8 +48,9 @@ function AlbumsPage() {
         );
         const coverMap = new Map<number, string>();
         photoResults.forEach((p: any) => {
-          if (p?.id && p?.thumbnailPath) {
-            coverMap.set(p.id, p.thumbnailPath);
+          if (p?.id) {
+            // Fall back to original path when thumbnail is not yet generated
+            coverMap.set(p.id, p.thumbnailPath || p.path);
           }
         });
         setCovers(coverMap);

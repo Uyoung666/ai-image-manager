@@ -1,5 +1,6 @@
 import {
   createFaceIdentity,
+  deleteFaceIdentity,
   getDetectionProgress,
   getFaceIdentity,
   listFaceIdentities,
@@ -10,6 +11,7 @@ import {
 
 export const faces = {
   createFaceIdentity,
+  deleteFaceIdentity,
   getDetectionProgress,
   getFaceIdentity,
   listFaceIdentities,

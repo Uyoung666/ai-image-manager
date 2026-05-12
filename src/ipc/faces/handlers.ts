@@ -223,3 +223,13 @@ export const mergeIdentities = os
     }
     return { ok: true };
   });
+
+export const deleteFaceIdentity = os.input(IdSchema).handler(({ input }) => {
+  const db = getDatabase();
+  // Remove face identity members first (FK constraint)
+  db.delete(faceIdentityMembers)
+    .where(eq(faceIdentityMembers.identityId, input.id))
+    .run();
+  db.delete(faceIdentities).where(eq(faceIdentities.id, input.id)).run();
+  return { ok: true };
+});

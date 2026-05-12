@@ -42,7 +42,7 @@ function getThumbnailSize(size: ThumbSize): number {
   return THUMBNAIL_BASE_SIZES[size] * dprScale;
 }
 
-function getThumbnailPath(imagePath: string, size: ThumbSize): string {
+export function getThumbnailPath(imagePath: string, size: ThumbSize): string {
   const hash = crypto
     .createHash("md5")
     .update(`${imagePath}_${size}_v2_${dprScale}`)

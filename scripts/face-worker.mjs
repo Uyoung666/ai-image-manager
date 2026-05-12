@@ -118,9 +118,9 @@ async function detectFaces(filePath) {
         const area = rw * rh;
         const fillRatio = count / Math.max(area, 1);
 
-        // Face-like region: must be substantial, roughly oval/square, and well-filled
-        // A real face region should fill at least 40% of its bounding box
-        if (count >= 80 && rw >= 12 && rh >= 14 && aspectRatio >= 0.6 && aspectRatio <= 1.6 && fillRatio >= 0.4) {
+        // Face-like region: must be substantial, roughly oval/square, and well-filled.
+        // Tightened thresholds to reduce false positives from background textures.
+        if (count >= 120 && rw >= 16 && rh >= 18 && aspectRatio >= 0.7 && aspectRatio <= 1.4 && fillRatio >= 0.5) {
           regions.push({ minX, minY, maxX, maxY, count, aspectRatio, fillRatio });
         }
       }
@@ -130,10 +130,9 @@ async function detectFaces(filePath) {
     const scaleX = imgW / width;
     const scaleY = imgH / height;
 
-    // Filter: keep only regions that are face-like (roughly oval aspect ratio ~0.7-1.4)
-    // Real faces are slightly taller than wide
+    // Filter: keep only regions that are face-like (real faces are slightly taller than wide)
     const faceCandidates = regions
-      .filter((r) => r.aspectRatio >= 0.65 && r.aspectRatio <= 1.5 && r.fillRatio >= 0.45)
+      .filter((r) => r.aspectRatio >= 0.7 && r.aspectRatio <= 1.4 && r.fillRatio >= 0.5)
       .sort((a, b) => b.count - a.count)
       .slice(0, 10); // max 10 faces per image
 
@@ -173,9 +172,9 @@ async function detectFaces(filePath) {
         const rw = r.maxX - r.minX;
         const rh = r.maxY - r.minY;
         const aspect = rw / Math.max(rh, 1);
-        // Must be at least 5% of image size in both dimensions
+        // Must be at least 7% of image size in both dimensions
         // and have face-like proportions (slightly taller than wide)
-        return rw > width * 0.05 && rh > height * 0.06 && aspect >= 0.6 && aspect <= 1.5;
+        return rw > width * 0.07 && rh > height * 0.07 && aspect >= 0.7 && aspect <= 1.4;
       })
       .map((r, idx) => ({
         faceIndex: idx,

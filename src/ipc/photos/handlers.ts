@@ -18,6 +18,7 @@ import {
   stopEmbedding,
 } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService } from "@/services/indexer";
+import { getThumbnailPath } from "@/services/thumbnailer";
 import { clearThumbnailDiskCache } from "@/services/thumbnailer";
 
 const FolderSchema = z.object({ path: z.string().min(1) });
@@ -50,6 +51,7 @@ const ImageSearchSchema = z.object({
 });
 const ListSchema = z.object({
   folderId: z.number().optional(),
+  tagId: z.number().optional(),
   search: z.string().optional(),
   sort: z.enum(["date", "name", "size"]).optional().default("date"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
@@ -119,12 +121,18 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 // Photo listing
 export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const db = getDatabase();
-  const { folderId, search, sort, order, offset, limit } = input;
+  const { folderId, tagId, search, sort, order, offset, limit } = input;
 
   let query = db.select().from(photos).$dynamic();
 
   if (folderId) {
     query = query.where(eq(photos.folderId, folderId));
+  }
+  if (tagId) {
+    query = query.innerJoin(
+      photoTags,
+      sql`${photos.id} = ${photoTags.photoId} AND ${photoTags.tagId} = ${tagId}`
+    );
   }
   if (search) {
     query = query.where(like(photos.filename, `%${search}%`));
@@ -145,6 +153,12 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     .$dynamic();
   if (folderId) {
     countQuery = countQuery.where(eq(photos.folderId, folderId));
+  }
+  if (tagId) {
+    countQuery = countQuery.innerJoin(
+      photoTags,
+      sql`${photos.id} = ${photoTags.photoId} AND ${photoTags.tagId} = ${tagId}`
+    );
   }
   if (search) {
     countQuery = countQuery.where(like(photos.filename, `%${search}%`));
@@ -337,11 +351,23 @@ export const searchByImage = os
   .input(ImageSearchSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    const results = await aiSearchByImage(input.imagePath, input.limit);
+
+    // Verify the image file exists before attempting AI search
+    if (!fs.existsSync(input.imagePath)) {
+      return { results: [], error: "图片文件不存在" };
+    }
+
+    let results: Array<{ photoId: number; similarity: number }> = [];
+    try {
+      results = await aiSearchByImage(input.imagePath, input.limit);
+    } catch (err: any) {
+      console.error("[searchByImage] AI search failed:", err?.message);
+      return { results: [], error: `AI 搜索失败: ${err?.message || "未知错误"}` };
+    }
 
     const photoIds = results.map((r) => r.photoId);
     if (photoIds.length === 0) {
-      return { results: [] };
+      return { results: [], error: "未找到相似图片（请确认 AI 模型已就绪且图片已索引）" };
     }
 
     const photoList = db
@@ -881,7 +907,7 @@ export const renamePhotos = os
       pattern: z.string().min(1),
     })
   )
-  .handler(({ input }) => {
+  .handler(async ({ input }) => {
     const db = getDatabase();
     const results: Array<{
       id: number;
@@ -948,8 +974,9 @@ export const renamePhotos = os
           continue;
         }
         fs.renameSync(photo.path, newPath);
+        const newThumbPath = getThumbnailPath(newPath, "md");
         db.update(photos)
-          .set({ path: newPath, filename: newFilename })
+          .set({ path: newPath, filename: newFilename, thumbnailPath: newThumbPath })
           .where(eq(photos.id, photo.id))
           .run();
         results.push({
@@ -1057,7 +1084,7 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
   try {
-    const suggestions = await aiSuggestTags(photo.path, 0.22, input.id);
+    const suggestions = await aiSuggestTags(photo.path, 0.25, input.id);
     return { photoId: input.id, suggestions };
   } catch {
     return { photoId: input.id, suggestions: [] };

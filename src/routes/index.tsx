@@ -51,6 +51,7 @@ function HomePage() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
+  const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,6 +102,7 @@ function HomePage() {
       try {
         const result = await ipc.client.photos.listPhotos({
           folderId: activeFolderId || undefined,
+          tagId: activeTagId || undefined,
           sort: "date",
           order: "desc",
           offset: 0,
@@ -116,7 +118,7 @@ function HomePage() {
         }
       }
     },
-    [activeFolderId]
+    [activeFolderId, activeTagId]
   );
 
   useEffect(() => {
@@ -134,6 +136,14 @@ function HomePage() {
       setDetailPhoto(null);
     }
   }, [selectedIds, photos]);
+
+  function handleSelectTag(tagId: number | null) {
+    setActiveTagId(tagId);
+    // When selecting a tag, deselect the folder to avoid conflicting filters
+    if (tagId !== null) {
+      setActiveFolderId(null);
+    }
+  }
 
   async function handleAddFolder() {
     const result = await ipc.client.shell.openFolderDialog({});
@@ -381,11 +391,15 @@ function HomePage() {
         imagePath,
         limit: 100,
       });
-      const results = (result as any).results || [];
+      const data = result as any;
+      if (data.error) {
+        console.warn("[ImageSearch]", data.error);
+      }
+      const results = data.results || [];
       setPhotos(results);
       setTotalPhotos(results.length);
-    } catch (err) {
-      console.error("[ImageSearch] failed:", err);
+    } catch (err: any) {
+      console.error("[ImageSearch] failed:", err?.message || err);
       setPhotos([]);
       setTotalPhotos(0);
     } finally {
@@ -472,6 +486,7 @@ function HomePage() {
         onAddFolder={handleAddFolder}
         onDeleteFolder={handleDeleteFolder}
         onSelectFolder={setActiveFolderId}
+        onSelectTag={handleSelectTag}
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}

@@ -115,6 +115,31 @@ export function PhotoGrid({
     [columns, columnCount]
   );
 
+  // Pre-calculate row heights for accurate Virtuoso scroll estimation.
+  // Without this, variable-height masonry rows cause visible gaps and
+  // scrollbar jumps as Virtuoso re-measures after images load.
+  const { defaultItemHeight } = useMemo(() => {
+    if (!containerRef.current || rows.length === 0) {
+      return { rowHeights: [] as number[], defaultItemHeight: 250 };
+    }
+    const cw = containerRef.current.clientWidth;
+    const padX = 16; // px-2 * 2
+    const colW =
+      (cw - padX - (columnCount - 1) * GAP) / columnCount;
+    const heights = rows.map((row) => {
+      let maxH = 0;
+      for (const photo of row) {
+        if (!photo || !photo.width || !photo.height) continue;
+        const ar = photo.width / photo.height;
+        const h = colW / ar;
+        if (h > maxH) maxH = h;
+      }
+      return maxH > 0 ? maxH + GAP : 220 + GAP;
+    });
+    const avg = heights.reduce((a, b) => a + b, 0) / heights.length;
+    return { defaultItemHeight: Math.round(avg) };
+  }, [rows, columnCount]);
+
   // --- Skeleton aspect ratios for loading state ---
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
@@ -253,6 +278,8 @@ export function PhotoGrid({
         <Virtuoso
           className="scrollbar-thin"
           computeItemKey={(index) => index}
+          defaultItemHeight={defaultItemHeight}
+          increaseViewportBy={{ top: 400, bottom: 400 }}
           itemContent={(index) => {
             const row = rows[index];
             return (

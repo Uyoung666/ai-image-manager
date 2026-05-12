@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface ConvertResult {
   converted: number;
@@ -42,6 +42,17 @@ export function FormatConvertDialog({
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<ConvertResult | null>(null);
   const [error, setError] = useState("");
+
+  // Reset state each time dialog opens
+  useEffect(() => {
+    if (open) {
+      setFormat("webp");
+      setQuality(85);
+      setMaxWidth("");
+      setResult(null);
+      setError("");
+    }
+  }, [open]);
 
   const handleConvert = async () => {
     setExecuting(true);

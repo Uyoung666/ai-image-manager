@@ -89,7 +89,7 @@ export const exifData = sqliteTable(
     rawJson: text("raw_json"),
   },
   (table) => ({
-    dateTakenIdx: uniqueIndex("idx_exif_date_taken").on(table.dateTaken),
+    dateTakenIdx: index("idx_exif_date_taken").on(table.dateTaken),
   })
 );
 

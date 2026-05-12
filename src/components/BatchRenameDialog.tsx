@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface RenameResult {
   id: number;
@@ -54,6 +54,14 @@ export function BatchRenameDialog({
     errors: number;
     results: RenameResult[];
   } | null>(null);
+
+  // Reset state each time dialog opens
+  useEffect(() => {
+    if (open) {
+      setPattern("{yyyy}{mm}{dd}_{index:3}");
+      setResult(null);
+    }
+  }, [open]);
 
   const previewName = useCallback(() => {
     let name = pattern;

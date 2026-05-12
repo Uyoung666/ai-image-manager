@@ -22,6 +22,7 @@ export default defineConfig({
         "p-queue",
         "electron-store",
         "@claudiu-ceia/dhash",
+        "archiver",
       ],
     },
   },

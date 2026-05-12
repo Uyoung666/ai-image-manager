@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Play, User } from "lucide-react";
+import { ArrowLeft, Play, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ipc } from "@/ipc/manager";
 
@@ -69,6 +69,16 @@ function PeoplePage() {
     } catch {
       setProgress("启动人脸检测失败");
       setDetecting(false);
+    }
+  }
+
+  async function handleDeleteIdentity(id: number, name: string | null) {
+    if (!confirm(`确定删除人物"${name || "未命名"}"？此操作不可撤销。`)) return;
+    try {
+      await ipc.client.faces.deleteFaceIdentity({ id });
+      loadIdentities();
+    } catch {
+      /* ignore */
     }
   }
 
@@ -152,34 +162,50 @@ function PeoplePage() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
             {identities.map((identity) => (
-              <Link
-                className="group overflow-hidden rounded-[8px] border border-border bg-card transition-colors hover:border-primary/30"
+              <div
+                className="group relative overflow-hidden rounded-[8px] border border-border bg-card transition-colors hover:border-primary/30"
                 key={identity.id}
-                to="/people/$identityId"
-                params={{ identityId: identity.id.toString() }}
               >
-                <div className="aspect-[3/4] bg-muted">
-                  {identity.coverThumbnailPath ? (
-                    <img
-                      alt={identity.name || "未命名"}
-                      className="h-full w-full object-cover"
-                      src={toLocalMediaUrl(identity.coverThumbnailPath)}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center">
-                      <User className="h-12 w-12 text-muted-foreground/30" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  <h3 className="truncate font-[510] text-[13px] text-foreground">
-                    {identity.name || "未命名"}
-                  </h3>
-                  <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-                    {identity.faceCount} 张照片
-                  </p>
-                </div>
-              </Link>
+                <Link
+                  className="block"
+                  to="/people/$identityId"
+                  params={{ identityId: identity.id.toString() }}
+                >
+                  <div className="aspect-[3/4] bg-muted">
+                    {identity.coverThumbnailPath ? (
+                      <img
+                        alt={identity.name || "未命名"}
+                        className="h-full w-full object-cover"
+                        src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center">
+                        <User className="h-12 w-12 text-muted-foreground/30" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <h3 className="truncate font-[510] text-[13px] text-foreground">
+                      {identity.name || "未命名"}
+                    </h3>
+                    <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                      {identity.faceCount} 张照片
+                    </p>
+                  </div>
+                </Link>
+                <button
+                  className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeleteIdentity(identity.id, identity.name);
+                  }}
+                  title="删除此人物"
+                  type="button"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             ))}
           </div>
         )}

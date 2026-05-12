@@ -1,4 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
@@ -32,6 +33,7 @@ interface IdentityDetail {
 
 function PersonDetailPage() {
   const { identityId } = Route.useParams() as any as { identityId: string };
+  const navigate = useNavigate();
   const [identity, setIdentity] = useState<IdentityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
@@ -76,6 +78,13 @@ function PersonDetailPage() {
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/people" as any })}
+            type="button"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <span className="font-[590] text-[18px] text-muted-foreground">
               {(identity?.name || "?")[0]}

@@ -1130,7 +1130,63 @@ const ZH_TO_EN_SEARCH: Record<string, string> = {
   气球: "balloon colorful celebration party decoration",
   礼物: "gift present box package celebration",
   彩带: "ribbon streamer decoration colorful celebration",
+  // Botanicals & nature
+  蒲公英: "dandelion flower fluffy seed white",
+  贝壳: "seashell shell beach ocean sand",
+  海螺: "seashell conch shell spiral ocean",
+  松树: "pine tree evergreen conifer forest",
+  竹子: "bamboo plant green tall forest",
+  荷花: "lotus flower water lily pond blossom",
+  莲花: "lotus flower water lily pond blossom",
+  玫瑰: "rose flower red romantic blossom",
+  向日葵: "sunflower yellow flower bright field",
+  郁金香: "tulip flower colorful spring blossom",
+  菊花: "chrysanthemum flower yellow autumn blossom",
+  蘑菇: "mushroom fungus forest ground plant",
+  珊瑚: "coral reef underwater ocean colorful",
+  海星: "starfish sea ocean beach marine",
+  // Animals extended
+  鸽子: "pigeon dove bird white grey urban",
+  猫头鹰: "owl bird nocturnal wise predator",
+  松鼠: "squirrel animal rodent tree forest",
+  鹿: "deer animal wildlife forest antler",
+  狐狸: "fox animal wild orange clever predator",
+  老鹰: "eagle hawk bird predator sky wildlife",
+  蚂蚁: "ant insect small ground macro",
+  蜜蜂: "bee insect honey flower yellow macro",
+  蜻蜓: "dragonfly insect wings colorful macro nature",
+  // People & activities
+  自拍: "selfie person face camera phone portrait",
+  跑步: "running jogging exercise sport person",
+  游泳: "swimming pool water sport person",
+  滑雪: "skiing snow winter sport mountain person",
+  钓鱼: "fishing angling water outdoor person",
+  骑车: "cycling bicycle riding sport outdoor person",
+  露营: "camping tent outdoor nature campfire",
+  烧烤: "barbecue grill food cooking outdoor fire",
+  阅读: "reading book person indoor study",
+  唱歌: "singing karaoke performance microphone music person",
+  // Objects & scenes
+  火堆: "campfire bonfire fire flame outdoor",
+  篝火: "bonfire campfire fire flame night outdoor",
+  码头: "dock pier harbor water boat seaside",
+  灯塔: "lighthouse tower light ocean coast seaside",
+  风车: "windmill wind turbine tower outdoor",
+  热气球: "hot air balloon sky colorful outdoor",
+  铁轨: "railroad railway train track transportation",
+  隧道: "tunnel underground passage dark",
+  悬崖: "cliff rock steep nature ocean landscape",
+  峡谷: "canyon valley gorge rock nature landscape",
+  冰山: "iceberg ice snow cold ocean polar",
+  火山: "volcano mountain lava eruption nature",
+  草原: "grassland prairie field meadow vast nature",
+  麦田: "wheat field grain crop agriculture golden landscape",
 };
+
+// Minimum number of English keywords required for a valid translation.
+// If we can't produce at least this many keywords, the query is likely
+// too obscure for CLIP and we fall back to the raw Chinese text.
+const MIN_TRANSLATION_KEYWORDS = 2;
 
 export async function searchByText(
   query: string,
@@ -1352,20 +1408,12 @@ export async function searchByText(
   );
 
   if (filtered.length === 0 && rawResults.length > 0) {
-    // If all results are above threshold, return top 5 with best distances
-    // so user gets some feedback rather than empty results
-    const top5 = rawResults.slice(0, 5);
+    // No results pass the similarity threshold — return empty instead of
+    // showing irrelevant photos. The user can refine their search terms.
     console.log(
-      `[AI] searchByText: all ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning top 5`
+      `[AI] searchByText: all ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning empty (no relevant matches)`
     );
-    return top5.map((r: Record<string, unknown>) => {
-      const cosDist = r._distance as number;
-      const similarity = Math.max(0, 1 - cosDist);
-      return {
-        photoId: r.photo_id as number,
-        similarity: Math.round(similarity * 10_000) / 10_000,
-      };
-    });
+    return [];
   }
 
   return filtered.map((r: Record<string, unknown>) => {
@@ -1665,13 +1713,20 @@ export async function suggestTags(
   results.sort((a, b) => b.confidence - a.confidence);
 
   // If no results above threshold, return top 5 with highest similarity
+  // as low-confidence suggestions so the user has a starting point.
   if (results.length === 0 && cachedTagEmbeddings) {
     const allScores = cachedTagEmbeddings.map(({ displayName, vector }) => ({
       tag: displayName,
       confidence: Math.round(cosineSimilarity(imageVec!, vector) * 100) / 100,
     }));
     allScores.sort((a, b) => b.confidence - a.confidence);
-    return allScores.slice(0, 5).filter((s) => s.confidence > 0.15);
+    const fallback = allScores.slice(0, 5).filter((s) => s.confidence > 0.10);
+    if (fallback.length > 0) {
+      return fallback;
+    }
+    // Even if ALL scores are below 0.10, return top 3 with a flag
+    // so the UI isn't empty (user can judge relevance themselves).
+    return allScores.slice(0, 3);
   }
 
   return results.slice(0, 10);
