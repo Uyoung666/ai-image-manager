@@ -177,7 +177,8 @@ export function SearchBar({
     }
     const file = e.dataTransfer.files[0];
     if (file?.type.startsWith("image/")) {
-      const filePath = (file as File & { path?: string }).path;
+      const getPath = (window as any).__electronGetFilePath;
+      const filePath = getPath ? getPath(file) : (file as any).path;
       if (filePath) {
         onImageSearch(filePath);
       }
@@ -268,7 +269,8 @@ export function SearchBar({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      const filePath = (file as File & { path?: string }).path;
+                      const getPath = (window as any).__electronGetFilePath;
+                      const filePath = getPath ? getPath(file) : (file as any).path;
                       if (filePath) {
                         onImageSearch(filePath);
                       }
