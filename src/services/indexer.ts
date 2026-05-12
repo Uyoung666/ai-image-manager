@@ -258,7 +258,7 @@ async function indexSingleFile(
       folderId,
       filename: path.basename(filePath),
       fileSize: stat.size,
-      fileDate: Math.floor(stat.mtimeMs),
+      fileDate: Math.floor(Math.min(stat.birthtimeMs, stat.mtimeMs)),
       width: meta.width,
       height: meta.height,
       format: meta.format,

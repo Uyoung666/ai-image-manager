@@ -33,25 +33,28 @@ export function PhotoContextMenu({
     if (!menu.open) {
       return;
     }
-    const handler = (e: MouseEvent) => {
+    const dismiss = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose();
       }
     };
-    // Delay to avoid the same right-click event closing it
-    const timer = setTimeout(
-      () => document.addEventListener("click", handler),
-      0
-    );
     const keyHandler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
       }
     };
+    // Use mousedown instead of click — works even inside virtualized containers
+    // that may swallow click events. Also listen for contextmenu so a second
+    // right-click elsewhere dismisses the menu.
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", dismiss, true);
+      document.addEventListener("contextmenu", dismiss, true);
+    }, 0);
     document.addEventListener("keydown", keyHandler);
     return () => {
       clearTimeout(timer);
-      document.removeEventListener("click", handler);
+      document.removeEventListener("mousedown", dismiss, true);
+      document.removeEventListener("contextmenu", dismiss, true);
       document.removeEventListener("keydown", keyHandler);
     };
   }, [menu.open, onClose]);

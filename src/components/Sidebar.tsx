@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
   Album,
+  CircleHelp,
   Folder,
   LayoutDashboard,
   Loader2,
@@ -224,6 +225,14 @@ export function Sidebar({
           >
             <Settings className="h-4 w-4" />
           </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))}
+            title="快捷键帮助 (?)"
+          >
+            <CircleHelp className="h-4 w-4" />
+          </button>
         </div>
       </div>
     );
@@ -426,6 +435,13 @@ export function Sidebar({
         >
           <Settings className="mr-2 inline h-3.5 w-3.5" />
           {t("sidebarSettings")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))}
+        >
+          <CircleHelp className="mr-2 inline h-3.5 w-3.5" />
+          快捷键帮助
         </button>
       </div>
 
