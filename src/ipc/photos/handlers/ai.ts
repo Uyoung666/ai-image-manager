@@ -1,11 +1,15 @@
 import { os } from "@orpc/server";
+import { eq, sql } from "drizzle-orm";
 import {
+  batchSuggestTags,
   checkAiHealth,
   embedAllPhotos,
   getAiReadiness,
   getEmbeddingProgress,
   stopEmbedding,
 } from "@/services/ai-embedder";
+import { getDatabase } from "@/db";
+import { photos } from "@/db/schema";
 
 export const startAiIndexing = os.handler(() => {
   // Fire-and-forget: launch embedding in background, poll progress via getAiProgress
@@ -34,4 +38,21 @@ export const getAiStatus = os.handler(async () => {
 
 export const getAiHealth = os.handler(async () => {
   return checkAiHealth();
+});
+
+export const batchGenerateTags = os.handler(async () => {
+  const db = getDatabase();
+  const indexed = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(eq(photos.isAiProcessed, true))
+    .all()
+    .map((p) => p.id);
+
+  if (indexed.length === 0) {
+    return { tagged: 0, skipped: 0, total: 0 };
+  }
+
+  const result = await batchSuggestTags(indexed);
+  return { ...result, total: indexed.length };
 });

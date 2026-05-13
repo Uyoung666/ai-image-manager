@@ -397,6 +397,29 @@ export function Sidebar({
             </div>
           </>
         )}
+        {tags.length === 0 && totalPhotos > 0 && (
+          <>
+            <div className="mx-3 my-2 border-border border-t" />
+            <p className="px-3 py-1 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+              标签
+            </p>
+            <div className="px-3 py-1">
+              <button
+                className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                onClick={async () => {
+                  try {
+                    await ipc.client.photos.batchGenerateTags({});
+                    const updated = await ipc.client.photos.getTags({});
+                    setTags((updated as TagInfo[]) || []);
+                  } catch { /* ignore */ }
+                }}
+              >
+                <ScanSearch className="h-3.5 w-3.5" />
+                批量生成 AI 标签
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Footer */}

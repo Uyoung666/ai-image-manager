@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(sed *)"
+      "Bash(sed *)",
+      "Bash(ls package.json)",
+      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(JSON.stringify\\({deps: p.dependencies && p.dependencies.archiver, devDeps: p.devDependencies && p.devDependencies.archiver}, null, 2\\)\\)\")",
+      "Bash(ls node_modules/archiver/index.js node_modules/archiver/package.json)",
+      "Bash(node -e \"const p = require\\('./node_modules/archiver/package.json'\\); console.log\\(p.main, p.exports ? JSON.stringify\\(p.exports\\) : 'no exports', p.type || 'no type'\\)\")",
+      "Bash(dir *)",
+      "Bash(cat \"/c/Users/刘炎/AppData/Roaming/AI Image Manager/orpc-debug.log\")",
+      "Bash(head -30 \"/c/Users/刘炎/AppData/Roaming/AI Image Manager/debug.log\")",
+      "Bash(tasklist)",
+      "Bash(node_modules/.bin/electron .vite/build/main.js)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(taskkill //F //IM electron.exe)",
+      "Bash(rm -f \"/c/Users/刘炎/AppData/Roaming/AI Image Manager/startup.log\")",
+      "Bash(cmd //c \"start /b npx electron-forge start\")"
     ]
   }
 }

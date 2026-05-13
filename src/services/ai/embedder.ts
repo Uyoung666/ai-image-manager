@@ -427,13 +427,14 @@ export async function embedAllPhotos(
 
   // Run batch auto-tagging only for newly embedded photos (incremental).
   if (successfulIds.length > 0) {
-    batchSuggestTags(successfulIds)
-      .then((r) =>
-        console.log(
-          `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
-        )
-      )
-      .catch((err) => console.error("[AI] Auto-tag failed:", err?.message));
+    try {
+      const r = await batchSuggestTags(successfulIds);
+      console.log(
+        `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
+      );
+    } catch (err: any) {
+      console.error("[AI] Auto-tag failed:", err?.message);
+    }
   }
 
   // Create / rebuild vector index via unified entry point.
