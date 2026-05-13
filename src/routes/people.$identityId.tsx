@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { ipc } from "@/ipc/manager";
 import type { Photo } from "@/types/photo";
 
@@ -41,6 +42,7 @@ function PersonDetailPage() {
   const [ctxMenu, setCtxMenu] = useState<CtxMenu>({ open: false, photoId: null, photoPath: null, x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
+  const [lightboxIndex, setLightboxIndex] = useState(-1);
 
   const loadIdentity = useCallback(async () => {
     try {
@@ -141,6 +143,11 @@ function PersonDetailPage() {
     });
   }
 
+  function handleDoubleClick(id: number) {
+    const idx = photos.findIndex((p) => p.id === id);
+    if (idx >= 0) setLightboxIndex(idx);
+  }
+
   function handleOpenExplorer(path: string) {
     ipc.client.shell.openInExplorer({ path }).catch(() => {});
   }
@@ -209,12 +216,21 @@ function PersonDetailPage() {
         <PhotoGrid
           loading={loading}
           onContextMenu={handleContextMenu}
-          onDoubleClick={() => {}}
+          onDoubleClick={handleDoubleClick}
           onSelect={handleSelect}
           photos={photos as any}
           selectedIds={selectedIds}
         />
       </div>
+
+      {lightboxIndex >= 0 && (
+        <PhotoLightbox
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(-1)}
+          open={lightboxIndex >= 0}
+          photos={photos as any}
+        />
+      )}
 
       {ctxMenu.open && (
         <div

@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { ipc } from "@/ipc/manager";
 
 interface PhotoInfo {
@@ -32,6 +33,7 @@ function AlbumDetailPage() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(-1);
 
   const loadAlbum = useCallback(async () => {
     try {
@@ -78,6 +80,11 @@ function AlbumDetailPage() {
     if (!album) return;
     await ipc.client.albums.deleteAlbum({ id: album.id });
     navigate({ to: "/albums" as "/albums" });
+  }
+
+  function handleDoubleClick(id: number) {
+    const idx = photos.findIndex((p) => p.id === id);
+    if (idx >= 0) setLightboxIndex(idx);
   }
 
   const photos = album?.photos || [];
@@ -158,12 +165,20 @@ function AlbumDetailPage() {
         <PhotoGrid
           loading={loading}
           onContextMenu={() => {}}
-          onDoubleClick={() => {}}
+          onDoubleClick={handleDoubleClick}
           onSelect={handleSelect}
           photos={photos}
           selectedIds={selectedIds}
         />
       </div>
+      {lightboxIndex >= 0 && (
+        <PhotoLightbox
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(-1)}
+          open={lightboxIndex >= 0}
+          photos={photos}
+        />
+      )}
     </div>
   );
 }
