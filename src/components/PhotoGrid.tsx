@@ -59,21 +59,35 @@ export function PhotoGrid({
   const [compact, setCompact] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const targetColWidth = DENSITY_CONFIGS[densityIdx].targetColWidth;
+  const targetColWidthRef = useRef(targetColWidth);
+  targetColWidthRef.current = targetColWidth;
+
+  const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    containerRef.current = node;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      setContainerWidth(width);
+      const cols = Math.max(MIN_COLUMNS, Math.floor(width / targetColWidthRef.current));
+      setColumnCount(cols);
+      setCompact(width < 500);
+    });
+    observer.observe(node);
+    observerRef.current = observer;
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
-      setContainerWidth(width);
-      const cols = Math.max(MIN_COLUMNS, Math.floor(width / targetColWidth));
-      setColumnCount(cols);
-      setCompact(width < 500);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [targetColWidth]);
+    const cols = Math.max(MIN_COLUMNS, Math.floor(containerWidth / targetColWidth));
+    setColumnCount(cols);
+  }, [targetColWidth, containerWidth]);
 
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
@@ -229,7 +243,7 @@ export function PhotoGrid({
       </div>
 
       {/* Masonry grid */}
-      <div className="min-h-0 flex-1" onContextMenu={onContextMenu} ref={containerRef}>
+      <div className="min-h-0 flex-1" onContextMenu={onContextMenu} ref={containerCallbackRef}>
         <MasonryGrid
           className="scrollbar-thin px-2"
           columnCount={columnCount}
