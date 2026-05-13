@@ -2,7 +2,6 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import archiver from "archiver";
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -311,7 +310,8 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const { Archiver } = await import("archiver") as any;
+      const archive = new Archiver("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<string>((resolve, reject) => {

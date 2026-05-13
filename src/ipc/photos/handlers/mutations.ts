@@ -2,16 +2,17 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { shell } from "electron";
 import { eq, inArray, sql } from "drizzle-orm";
+import { shell } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
+import { deletePhotoVectors } from "@/services/ai-embedder";
 import {
-  deletePhotoVectors,
-} from "@/services/ai-embedder";
-import { generateThumbnail, getThumbnailPath } from "@/services/thumbnailer";
-import { clearThumbnailDiskCache } from "@/services/thumbnailer";
+  clearThumbnailDiskCache,
+  generateThumbnail,
+  getThumbnailPath,
+} from "@/services/thumbnailer";
 import { IdSchema } from "./shared";
 
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
@@ -216,7 +217,11 @@ export const renamePhotos = os
           generateThumbnail(newPath, "md").catch(() => {});
         }
         db.update(photos)
-          .set({ path: newPath, filename: newFilename, thumbnailPath: newThumbPath })
+          .set({
+            path: newPath,
+            filename: newFilename,
+            thumbnailPath: newThumbPath,
+          })
           .where(eq(photos.id, photo.id))
           .run();
         results.push({
@@ -257,8 +262,7 @@ export const convertPhotos = os
     let converted = 0;
 
     const outputDir =
-      input.outputDir ||
-      path.join(nodeOs.tmpdir(), `convert-${Date.now()}`);
+      input.outputDir || path.join(nodeOs.tmpdir(), `convert-${Date.now()}`);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }

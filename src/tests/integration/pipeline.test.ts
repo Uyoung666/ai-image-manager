@@ -235,11 +235,11 @@ describe("Pipeline Integration Test (500 images)", () => {
       const files = fs.readdirSync(TEST_IMAGES_DIR).slice(0, 100); // Test with 100 for speed
 
       let extractedCount = 0;
-      const elapsed = await metrics.time("exif-batch-100", () => {
+      const elapsed = await metrics.time("exif-batch-100", async () => {
         for (const f of files) {
           const fullPath = path.join(TEST_IMAGES_DIR, f);
           try {
-            const exif = exifr.parseSync(fullPath, {
+            const exif = await exifr.parse(fullPath, {
               pick: ["Make", "Model", "ISO", "DateTimeOriginal"],
             });
             if (exif && Object.keys(exif).length > 0) {

@@ -44,7 +44,7 @@ interface FaceDetectionResult {
   }>;
 }
 
-interface DetectionProgress {
+export interface DetectionProgress {
   processed: number;
   total: number;
   phase: "idle" | "running" | "complete";

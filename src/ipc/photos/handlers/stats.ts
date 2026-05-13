@@ -1,14 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { os } from "@orpc/server";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { detectionRuns, duplicatePairs, exifData, photos } from "@/db/schema";
-import {
-  getPhotoVectors,
-} from "@/services/ai-embedder";
-import { BKTree, hammingDistance } from "@/services/bk-tree";
+import { getPhotoVectors } from "@/services/ai-embedder";
+import { BKTree } from "@/services/bk-tree";
 
 // Statistics for dashboard
 export const getStats = os.handler(() => {
@@ -94,7 +92,9 @@ export const getStats = os.handler(() => {
       count: sql<number>`count(*)`,
     })
     .from(exifData)
-    .where(sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`)
+    .where(
+      sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`
+    )
     .groupBy(exifData.lensModel)
     .orderBy(desc(sql`count(*)`))
     .limit(8)
@@ -108,10 +108,30 @@ export const getStats = os.handler(() => {
     .all();
 
   const hourLabels = [
-    "00时", "01时", "02时", "03时", "04时", "05时",
-    "06时", "07时", "08时", "09时", "10时", "11时",
-    "12时", "13时", "14时", "15时", "16时", "17时",
-    "18时", "19时", "20时", "21时", "22时", "23时",
+    "00时",
+    "01时",
+    "02时",
+    "03时",
+    "04时",
+    "05时",
+    "06时",
+    "07时",
+    "08时",
+    "09时",
+    "10时",
+    "11时",
+    "12时",
+    "13时",
+    "14时",
+    "15时",
+    "16时",
+    "17时",
+    "18时",
+    "19时",
+    "20时",
+    "21时",
+    "22时",
+    "23时",
   ];
   const hourBuckets24 = new Array(24).fill(0);
   for (const row of hourData) {
@@ -224,7 +244,18 @@ export const findDuplicates = os
           photoIds.add(pair.photoAId);
           photoIds.add(pair.photoBId);
         }
-        const photoMap = new Map<number, { id: number; path: string; filename: string; fileSize: number | null; width: number | null; height: number | null; createdAt: number }>();
+        const photoMap = new Map<
+          number,
+          {
+            id: number;
+            path: string;
+            filename: string;
+            fileSize: number | null;
+            width: number | null;
+            height: number | null;
+            createdAt: number;
+          }
+        >();
         const photoRows = db
           .select({
             id: photos.id,
@@ -246,11 +277,29 @@ export const findDuplicates = os
           .map((pair) => {
             const a = photoMap.get(pair.photoAId);
             const b = photoMap.get(pair.photoBId);
-            if (!a || !b) return null;
+            if (!(a && b)) {
+              return null;
+            }
             return {
               pairId: pair.id,
-              photoA: { id: a.id, path: a.path, filename: a.filename, fileSize: a.fileSize, width: a.width, height: a.height, createdAt: a.createdAt },
-              photoB: { id: b.id, path: b.path, filename: b.filename, fileSize: b.fileSize, width: b.width, height: b.height, createdAt: b.createdAt },
+              photoA: {
+                id: a.id,
+                path: a.path,
+                filename: a.filename,
+                fileSize: a.fileSize,
+                width: a.width,
+                height: a.height,
+                createdAt: a.createdAt,
+              },
+              photoB: {
+                id: b.id,
+                path: b.path,
+                filename: b.filename,
+                fileSize: b.fileSize,
+                width: b.width,
+                height: b.height,
+                createdAt: b.createdAt,
+              },
               matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
               distance: pair.phashDistance ?? 0,
               clipSimilarity: pair.clipSimilarity,
@@ -288,24 +337,29 @@ export const findDuplicates = os
     for (const p of allPhotos) {
       if (p.fileSize && p.fileSize > 0) {
         const group = sizeGroups.get(p.fileSize);
-        if (group) group.push(p);
-        else sizeGroups.set(p.fileSize, [p]);
+        if (group) {
+          group.push(p);
+        } else {
+          sizeGroups.set(p.fileSize, [p]);
+        }
       }
     }
 
     interface CandidatePair {
-      photoAId: number;
-      photoBId: number;
+      clipSimilarity: number | null;
       matchType: "exact" | "phash" | "clip_confirmed";
       phashDistance: number;
-      clipSimilarity: number | null;
+      photoAId: number;
+      photoBId: number;
     }
 
     const candidates: CandidatePair[] = [];
     const seenPairs = new Set<string>();
 
     for (const group of sizeGroups.values()) {
-      if (group.length < 2) continue;
+      if (group.length < 2) {
+        continue;
+      }
 
       // Compute content hash for photos in this group that don't have one yet
       for (const p of group) {
@@ -324,20 +378,29 @@ export const findDuplicates = os
       // Group by content hash
       const hashGroups = new Map<string, typeof group>();
       for (const p of group) {
-        if (!p.contentHash) continue;
+        if (!p.contentHash) {
+          continue;
+        }
         const hg = hashGroups.get(p.contentHash);
-        if (hg) hg.push(p);
-        else hashGroups.set(p.contentHash, [p]);
+        if (hg) {
+          hg.push(p);
+        } else {
+          hashGroups.set(p.contentHash, [p]);
+        }
       }
 
       for (const hGroup of hashGroups.values()) {
-        if (hGroup.length < 2) continue;
+        if (hGroup.length < 2) {
+          continue;
+        }
         for (let i = 0; i < hGroup.length; i++) {
           for (let j = i + 1; j < hGroup.length; j++) {
             const aId = Math.min(hGroup[i].id, hGroup[j].id);
             const bId = Math.max(hGroup[i].id, hGroup[j].id);
             const key = `${aId}_${bId}`;
-            if (seenPairs.has(key)) continue;
+            if (seenPairs.has(key)) {
+              continue;
+            }
             seenPairs.add(key);
             candidates.push({
               photoAId: aId,
@@ -363,11 +426,15 @@ export const findDuplicates = os
       phashProcessed++;
       const neighbors = bkTree.query(p.phash!, input.threshold);
       for (const n of neighbors) {
-        if (n.photoId === p.id) continue;
+        if (n.photoId === p.id) {
+          continue;
+        }
         const aId = Math.min(p.id, n.photoId);
         const bId = Math.max(p.id, n.photoId);
         const key = `${aId}_${bId}`;
-        if (seenPairs.has(key)) continue;
+        if (seenPairs.has(key)) {
+          continue;
+        }
         seenPairs.add(key);
         candidates.push({
           photoAId: aId,
@@ -443,7 +510,10 @@ export const findDuplicates = os
             matchType: pair.matchType,
             phashDistance: pair.phashDistance,
             clipSimilarity: pair.clipSimilarity,
-            status: pair.matchType === "exact" || pair.matchType === "clip_confirmed" ? "confirmed" : "pending",
+            status:
+              pair.matchType === "exact" || pair.matchType === "clip_confirmed"
+                ? "confirmed"
+                : "pending",
           })
           .onConflictDoNothing()
           .run();
@@ -470,15 +540,36 @@ export const findDuplicates = os
       .map((pair) => {
         const a = photoMap.get(pair.photoAId);
         const b = photoMap.get(pair.photoBId);
-        if (!a || !b) return null;
+        if (!(a && b)) {
+          return null;
+        }
         return {
           pairId: null as number | null,
-          photoA: { id: a.id, path: a.path, filename: a.filename, fileSize: a.fileSize, width: a.width, height: a.height, createdAt: a.createdAt },
-          photoB: { id: b.id, path: b.path, filename: b.filename, fileSize: b.fileSize, width: b.width, height: b.height, createdAt: b.createdAt },
+          photoA: {
+            id: a.id,
+            path: a.path,
+            filename: a.filename,
+            fileSize: a.fileSize,
+            width: a.width,
+            height: a.height,
+            createdAt: a.createdAt,
+          },
+          photoB: {
+            id: b.id,
+            path: b.path,
+            filename: b.filename,
+            fileSize: b.fileSize,
+            width: b.width,
+            height: b.height,
+            createdAt: b.createdAt,
+          },
           matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
           distance: pair.phashDistance,
           clipSimilarity: pair.clipSimilarity,
-          status: (pair.matchType === "exact" || pair.matchType === "clip_confirmed" ? "confirmed" : "pending") as "pending" | "confirmed",
+          status: (pair.matchType === "exact" ||
+          pair.matchType === "clip_confirmed"
+            ? "confirmed"
+            : "pending") as "pending" | "confirmed",
         };
       })
       .filter(Boolean);
@@ -499,25 +590,27 @@ export const dismissDuplicate = os
 
 export const getDuplicateStats = os.handler(() => {
   const db = getDatabase();
-  const total = db
-    .select({ count: sql<number>`count(*)` })
-    .from(duplicatePairs)
-    .get()?.count || 0;
-  const pending = db
-    .select({ count: sql<number>`count(*)` })
-    .from(duplicatePairs)
-    .where(eq(duplicatePairs.status, "pending"))
-    .get()?.count || 0;
-  const confirmed = db
-    .select({ count: sql<number>`count(*)` })
-    .from(duplicatePairs)
-    .where(eq(duplicatePairs.status, "confirmed"))
-    .get()?.count || 0;
-  const dismissed = db
-    .select({ count: sql<number>`count(*)` })
-    .from(duplicatePairs)
-    .where(eq(duplicatePairs.status, "dismissed"))
-    .get()?.count || 0;
+  const total =
+    db.select({ count: sql<number>`count(*)` }).from(duplicatePairs).get()
+      ?.count || 0;
+  const pending =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(duplicatePairs)
+      .where(eq(duplicatePairs.status, "pending"))
+      .get()?.count || 0;
+  const confirmed =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(duplicatePairs)
+      .where(eq(duplicatePairs.status, "confirmed"))
+      .get()?.count || 0;
+  const dismissed =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(duplicatePairs)
+      .where(eq(duplicatePairs.status, "dismissed"))
+      .get()?.count || 0;
   const lastRun = db
     .select()
     .from(detectionRuns)

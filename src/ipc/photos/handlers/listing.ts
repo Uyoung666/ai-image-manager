@@ -2,9 +2,7 @@ import { os } from "@orpc/server";
 import { desc, eq, inArray, like, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
-import {
-  deletePhotoVectors,
-} from "@/services/ai-embedder";
+import { deletePhotoVectors } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService } from "@/services/indexer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
 
