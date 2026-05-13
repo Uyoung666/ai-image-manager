@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
@@ -34,7 +35,6 @@ export function setupSendToShortcut(): boolean {
     }
 
     // Write a minimal .lnk file via PowerShell (reliable way to create shortcuts)
-    const { execSync } = require("node:child_process");
     const psScript = `
 $ws = New-Object -ComObject WScript.Shell
 $sc = $ws.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
