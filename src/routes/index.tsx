@@ -631,7 +631,8 @@ function HomePage() {
         onRename={handleRenameSelected}
         open={renameDialogOpen}
         photoCount={selectedIds.size}
-        sampleFilename={photos[0]?.filename ?? "photo.jpg"}
+        sampleFilename={photos.find((p) => selectedIds.has(p.id))?.filename ?? photos[0]?.filename ?? "photo.jpg"}
+        samplePhotoId={photos.find((p) => selectedIds.has(p.id))?.id ?? photos[0]?.id}
       />
       <FormatConvertDialog
         onClose={() => {

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ipc } from "@/ipc/manager";
 
 interface RenameResult {
   id: number;
@@ -17,6 +18,7 @@ interface BatchRenameDialogProps {
   open: boolean;
   photoCount: number;
   sampleFilename: string;
+  samplePhotoId?: number;
 }
 
 const TOKENS: Array<{ token: string; description: string; example: string }> =
@@ -46,6 +48,7 @@ export function BatchRenameDialog({
   open,
   photoCount,
   sampleFilename,
+  samplePhotoId,
 }: BatchRenameDialogProps) {
   const [pattern, setPattern] = useState("{yyyy}{mm}{dd}_{index:3}");
   const [executing, setExecuting] = useState(false);
@@ -54,14 +57,37 @@ export function BatchRenameDialog({
     errors: number;
     results: RenameResult[];
   } | null>(null);
+  const [serverPreview, setServerPreview] = useState<string | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset state each time dialog opens
   useEffect(() => {
     if (open) {
       setPattern("{yyyy}{mm}{dd}_{index:3}");
       setResult(null);
+      setServerPreview(null);
     }
   }, [open]);
+
+  // Fetch server-side preview with debounce
+  useEffect(() => {
+    if (!open || !samplePhotoId || !pattern.trim()) {
+      setServerPreview(null);
+      return;
+    }
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await ipc.client.photos.previewRename({ id: samplePhotoId, pattern });
+        setServerPreview((res as { preview: string }).preview || null);
+      } catch {
+        setServerPreview(null);
+      }
+    }, 200);
+    return () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, [open, samplePhotoId, pattern]);
 
   const previewName = useCallback(() => {
     let name = pattern;
@@ -209,7 +235,7 @@ export function BatchRenameDialog({
             <div className="mb-4">
               <span className="text-[11px] text-[#6b6b75]">预览: </span>
               <span className="text-[13px] font-mono text-[#a1a1aa]">
-                {previewName()}
+                {serverPreview || previewName()}
               </span>
             </div>
 

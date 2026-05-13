@@ -1,5 +1,5 @@
 import { scanFolder, getFolders, deleteFolder, listPhotos, getPhotoDetail, getPhotoExif } from "./handlers/listing";
-import { deletePhoto, deletePhotos, cleanupOrphanPhotos, renamePhotos, convertPhotos, clearThumbCache } from "./handlers/mutations";
+import { deletePhoto, deletePhotos, cleanupOrphanPhotos, previewRename, renamePhotos, convertPhotos, clearThumbCache } from "./handlers/mutations";
 import { searchByText, searchByImage, searchCompound } from "./handlers/search";
 import { startAiIndexing, stopAiIndexing, getAiProgress, getAiStatus, getAiHealth, batchGenerateTags } from "./handlers/ai";
 import { suggestTags, getTags, getPhotoTags, addTag, setPhotoTag, removePhotoTag, confirmPhotoTag, deleteTag } from "./handlers/tags";
@@ -32,6 +32,7 @@ export const photos = {
   getTags,
   getWatermarkSettings,
   listPhotos,
+  previewRename,
   removePhotoTag,
   renamePhotos,
   scanFolder,

@@ -126,6 +126,50 @@ export const cleanupOrphanPhotos = os.handler(async () => {
   return { removed: orphanIds.length };
 });
 
+function applyRenamePattern(
+  pattern: string,
+  filename: string,
+  index: number,
+  exif: Record<string, any> | null | undefined,
+  fileDate: number | string | null,
+): string {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  const date = exif?.dateTaken
+    ? new Date(exif.dateTaken)
+    : new Date(fileDate ?? Date.now());
+  let newBase = pattern
+    .replace(/\{yyyy\}/g, date.getFullYear().toString())
+    .replace(/\{mm\}/g, String(date.getMonth() + 1).padStart(2, "0"))
+    .replace(/\{dd\}/g, String(date.getDate()).padStart(2, "0"))
+    .replace(
+      /\{camera\}/g,
+      (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, "")
+    )
+    .replace(/\{iso\}/g, exif?.iso?.toString() || "")
+    .replace(/\{focal\}/g, (exif?.focalLength || "").toString())
+    .replace(/\{index\}/g, (index + 1).toString())
+    .replace(/\{index:(\d+)\}/g, (_, pad) =>
+      String(index + 1).padStart(Number.parseInt(pad, 10), "0")
+    )
+    .replace(/\{orig\}/g, base)
+    .replace(/\{ext\}/g, ext);
+
+  newBase = newBase.replace(/[<>:"/\\|?*]/g, "").trim() || base;
+  return newBase + ext;
+}
+
+export const previewRename = os
+  .input(z.object({ id: z.number(), pattern: z.string().min(1) }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
+    if (!photo) return { preview: "" };
+    const exif = db.select().from(exifData).where(eq(exifData.photoId, photo.id)).get() || null;
+    const preview = applyRenamePattern(input.pattern, photo.filename, 0, exif, photo.fileDate);
+    return { preview };
+  });
+
 export const renamePhotos = os
   .input(
     z.object({
@@ -152,36 +196,12 @@ export const renamePhotos = os
         continue;
       }
 
-      const ext = path.extname(photo.filename);
-      const base = path.basename(photo.filename, ext);
       const exif = db
         .select()
         .from(exifData)
         .where(eq(exifData.photoId, photo.id))
         .get();
-      const date = exif?.dateTaken
-        ? new Date(exif.dateTaken)
-        : new Date(photo.fileDate ?? Date.now());
-      let newBase = input.pattern
-        .replace(/\{yyyy\}/g, date.getFullYear().toString())
-        .replace(/\{mm\}/g, String(date.getMonth() + 1).padStart(2, "0"))
-        .replace(/\{dd\}/g, String(date.getDate()).padStart(2, "0"))
-        .replace(
-          /\{camera\}/g,
-          (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, "")
-        )
-        .replace(/\{iso\}/g, exif?.iso?.toString() || "")
-        .replace(/\{focal\}/g, (exif?.focalLength || "").toString())
-        .replace(/\{index\}/g, (i + 1).toString())
-        .replace(/\{index:(\d+)\}/g, (_, pad) =>
-          String(i + 1).padStart(Number.parseInt(pad, 10), "0")
-        )
-        .replace(/\{orig\}/g, base)
-        .replace(/\{ext\}/g, ext);
-
-      // Clean invalid filename chars
-      newBase = newBase.replace(/[<>:"/\\|?*]/g, "").trim() || base;
-      const newFilename = newBase + ext;
+      const newFilename = applyRenamePattern(input.pattern, photo.filename, i, exif || null, photo.fileDate);
 
       if (newFilename === photo.filename) {
         continue;
