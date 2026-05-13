@@ -192,6 +192,9 @@ export const faceIdentities = sqliteTable("face_identities", {
   representativeVectorId: text("representative_vector_id"),
   centroidEmbedding: text("centroid_embedding"),
   faceCount: integer("face_count").notNull().default(0),
+  isConfirmed: integer("is_confirmed", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at")
     .notNull()
     .$defaultFn(() => Date.now()),

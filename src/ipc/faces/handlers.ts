@@ -28,10 +28,52 @@ export const startFaceDetection = os
     let ids = input.photoIds;
 
     if (input.rescan) {
-      // Rescan mode: clear all existing face data and re-detect everything
-      db.delete(faceIdentityMembers).run();
-      db.delete(faceIdentities).run();
-      db.delete(faceVectors).run();
+      // Rescan mode: re-detect all photos, but preserve confirmed identities
+      // 1. Get confirmed identity member face vector IDs (to preserve their photo associations)
+      const confirmedIds = db
+        .select({ id: faceIdentities.id })
+        .from(faceIdentities)
+        .where(eq(faceIdentities.isConfirmed, true))
+        .all()
+        .map((r) => r.id);
+
+      if (confirmedIds.length > 0) {
+        // Delete unconfirmed identities and their members
+        const unconfirmedIdentities = db
+          .select({ id: faceIdentities.id })
+          .from(faceIdentities)
+          .where(eq(faceIdentities.isConfirmed, false))
+          .all();
+        for (const ui of unconfirmedIdentities) {
+          db.delete(faceIdentityMembers)
+            .where(eq(faceIdentityMembers.identityId, ui.id))
+            .run();
+        }
+        db.delete(faceIdentities)
+          .where(eq(faceIdentities.isConfirmed, false))
+          .run();
+        // Keep confirmed identities + their members + their face vectors
+        // Delete face vectors NOT belonging to confirmed identities
+        const confirmedFaceVectorIds = db
+          .select({ faceVectorId: faceIdentityMembers.faceVectorId })
+          .from(faceIdentityMembers)
+          .all()
+          .map((r) => r.faceVectorId);
+        const allFaceVectors = db.select({ id: faceVectors.id }).from(faceVectors).all();
+        for (const fv of allFaceVectors) {
+          if (!confirmedFaceVectorIds.includes(fv.id)) {
+            db.delete(faceVectors).where(eq(faceVectors.id, fv.id)).run();
+          }
+        }
+      } else {
+        // No confirmed identities — clear everything
+        db.delete(faceIdentityMembers).run();
+        db.delete(faceIdentities).run();
+        db.delete(faceVectors).run();
+      }
+
+      // Re-detect all photos (already-detected faces for confirmed identities
+      // will be skipped via the duplicate check in detectFaces)
       const all = db.select({ id: photos.id }).from(photos).all();
       ids = all.map((p) => p.id);
     } else if (!ids || !ids.length) {
@@ -218,7 +260,7 @@ export const updateFaceIdentity = os
   .handler(({ input }) => {
     const db = getDatabase();
     db.update(faceIdentities)
-      .set({ name: input.name })
+      .set({ name: input.name, isConfirmed: true })
       .where(eq(faceIdentities.id, input.id))
       .run();
     return db
@@ -250,16 +292,17 @@ export const mergeIdentities = os
           .where(eq(faceIdentityMembers.id, m.id))
           .run();
       }
-      // Update face count on target
-      db.update(faceIdentities)
-        .set({
-          faceCount: sql`(SELECT COUNT(*) FROM ${faceIdentityMembers} WHERE ${faceIdentityMembers.identityId} = ${input.targetId})`,
-        })
-        .where(eq(faceIdentities.id, input.targetId))
-        .run();
       // Delete source identity
       db.delete(faceIdentities).where(eq(faceIdentities.id, srcId)).run();
     }
+    // Update face count and mark as confirmed (user manually merged)
+    db.update(faceIdentities)
+      .set({
+        isConfirmed: true,
+        faceCount: sql`(SELECT COUNT(*) FROM ${faceIdentityMembers} WHERE ${faceIdentityMembers.identityId} = ${input.targetId})`,
+      })
+      .where(eq(faceIdentities.id, input.targetId))
+      .run();
     return { ok: true };
   });
 

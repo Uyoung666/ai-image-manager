@@ -1,0 +1,1 @@
+ALTER TABLE `face_identities` ADD `is_confirmed` integer DEFAULT false NOT NULL;

@@ -256,13 +256,22 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
   let totalFaces = 0;
 
   try {
+    // Skip photos that already have face vectors (from confirmed identities)
+    const existingPhotoIds = new Set(
+      db.select({ photoId: faceVectors.photoId }).from(faceVectors).all().map((r) => r.photoId)
+    );
+
     const photoRows = db
       .select({ id: photos.id, path: photos.path })
       .from(photos)
       .where(inArray(photos.id, photoIds))
-      .all();
+      .all()
+      .filter((p) => !existingPhotoIds.has(p.id));
 
     if (!photoRows.length) {
+      // Still need to cluster any unassigned faces
+      await clusterUnassignedFaces();
+      currentProgress.phase = "complete";
       detectionRunning = false;
       return 0;
     }
@@ -464,11 +473,36 @@ function updateIdentityCentroid(identityId: number): void {
 export async function reclusterAllFaces(): Promise<{ merged: number }> {
   const db = getDatabase();
 
-  // Clear all identity assignments
-  db.delete(faceIdentityMembers).run();
-  db.delete(faceIdentities).run();
+  // Preserve confirmed identities (manually merged/named by user)
+  // Only clear unconfirmed identity assignments
+  const confirmedIds = db
+    .select({ id: faceIdentities.id })
+    .from(faceIdentities)
+    .where(eq(faceIdentities.isConfirmed, true))
+    .all()
+    .map((r) => r.id);
 
-  // Re-cluster from scratch
+  if (confirmedIds.length > 0) {
+    // Delete members of unconfirmed identities only
+    const unconfirmedIdentities = db
+      .select({ id: faceIdentities.id })
+      .from(faceIdentities)
+      .where(eq(faceIdentities.isConfirmed, false))
+      .all();
+    for (const ui of unconfirmedIdentities) {
+      db.delete(faceIdentityMembers)
+        .where(eq(faceIdentityMembers.identityId, ui.id))
+        .run();
+    }
+    db.delete(faceIdentities)
+      .where(eq(faceIdentities.isConfirmed, false))
+      .run();
+  } else {
+    db.delete(faceIdentityMembers).run();
+    db.delete(faceIdentities).run();
+  }
+
+  // Re-cluster unassigned faces (confirmed members stay intact)
   await clusterUnassignedFaces();
 
   const count = db.select({ id: faceIdentities.id }).from(faceIdentities).all().length;
