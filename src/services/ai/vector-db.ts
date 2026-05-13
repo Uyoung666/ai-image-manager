@@ -114,17 +114,29 @@ export async function getPhotoVectors(
     const rows = (await photoTable.query().where(filter).toArray()) as Array<
       Record<string, unknown>
     >;
+    let logged = false;
     for (const row of rows) {
       const pid = row.photo_id as number;
       const rawVec = row.vector;
       if (pid == null || !rawVec) continue;
 
-      // LanceDB may return Float32Array, Float64Array, or nested array — normalize to number[]
+      if (!logged) {
+        logged = true;
+        console.log(`[AI] getPhotoVectors: rawVec type=${Object.prototype.toString.call(rawVec)}, constructor=${(rawVec as any)?.constructor?.name}, isArray=${Array.isArray(rawVec)}, isView=${ArrayBuffer.isView(rawVec)}, len=${(rawVec as any)?.length ?? (rawVec as any)?.size ?? 'N/A'}`);
+      }
+
+      // Normalize to number[] — handle Array, TypedArray, or any iterable with numeric indexing
       let vec: number[];
-      if (ArrayBuffer.isView(rawVec)) {
-        vec = Array.from(rawVec as Float32Array);
-      } else if (Array.isArray(rawVec)) {
+      if (Array.isArray(rawVec)) {
         vec = rawVec as number[];
+      } else if (ArrayBuffer.isView(rawVec)) {
+        vec = Array.from(rawVec as Float32Array);
+      } else if (typeof (rawVec as any).toArray === "function") {
+        vec = (rawVec as any).toArray();
+      } else if (typeof (rawVec as any)[Symbol.iterator] === "function") {
+        vec = Array.from(rawVec as Iterable<number>);
+      } else if (typeof (rawVec as any).length === "number") {
+        vec = Array.from({ length: (rawVec as any).length }, (_, i) => +(rawVec as any)[i]);
       } else {
         continue;
       }
