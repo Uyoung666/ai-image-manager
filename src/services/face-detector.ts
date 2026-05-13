@@ -9,7 +9,7 @@ import { faceIdentityMembers, faceIdentities, faceVectors, photos } from "@/db/s
 import type { ChildProcess } from "node:child_process";
 
 const BATCH_SIZE = 20;
-const CLUSTERING_THRESHOLD = 0.55;
+const CLUSTERING_THRESHOLD = 0.68;
 let detectionRunning = false;
 
 function findWorkerScript(): string {

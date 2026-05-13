@@ -42,9 +42,10 @@ let embeddingSession = null;
 // --- UltraFace constants ---
 const DET_INPUT_W = 320;
 const DET_INPUT_H = 240;
-const CONFIDENCE_THRESHOLD = 0.75;
+const CONFIDENCE_THRESHOLD = 0.85;
 const IOU_THRESHOLD = 0.3;
 const MAX_FACES_PER_IMAGE = 20;
+const MIN_FACE_SIZE = 40; // minimum face width/height in pixels
 
 // --- ArcFace constants ---
 const EMBED_SIZE = 112; // ArcFace expects 112x112 input
@@ -117,12 +118,14 @@ function nms(boxes, scores, iouThreshold) {
   const kept = [];
   const suppressed = new Set();
 
-  for (const i of indices) {
+  for (let pos = 0; pos < indices.length; pos++) {
+    const i = indices[pos];
     if (suppressed.has(i)) continue;
     kept.push(i);
 
-    for (const j of indices) {
-      if (j <= i || suppressed.has(j)) continue;
+    for (let pos2 = pos + 1; pos2 < indices.length; pos2++) {
+      const j = indices[pos2];
+      if (suppressed.has(j)) continue;
       const iou = computeIoU(boxes[i], boxes[j]);
       if (iou > iouThreshold) {
         suppressed.add(j);
@@ -203,7 +206,7 @@ async function detectFacesInImage(filePath) {
       },
       confidence: candidateScores[idx],
     };
-  });
+  }).filter((f) => f.bbox.width >= MIN_FACE_SIZE && f.bbox.height >= MIN_FACE_SIZE);
 }
 
 /**
