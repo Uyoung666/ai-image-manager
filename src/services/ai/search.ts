@@ -2,8 +2,9 @@ import { fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
-import { MIN_VECTORS_FOR_INDEX, WORKER_TIMEOUT } from "./constants";
-import { loadModel, ensureLocalModel } from "./model-loader";
+import { WORKER_TIMEOUT } from "./constants";
+import { ensureLocalModel, loadModel } from "./model-loader";
+import { generateSearchPrompts, parseChineseQuery } from "./query-parser";
 import {
   _localModelPath,
   embeddingModel,
@@ -11,14 +12,11 @@ import {
   setLocalModelPath,
 } from "./state";
 import { initVectorDB } from "./vector-db";
-import { ZH_TO_EN_SEARCH } from "./zh-en-dict";
 
 // --- Single-image worker embedding (avoids loading vision model in main process) ---
 
 function findWorkerScript(): string {
-  // In dev mode, the .mjs file lives in the project's scripts/ directory
   if (app.isPackaged) {
-    // Production: scripts are bundled as extraResources
     const bundled = path.join(
       process.resourcesPath,
       "scripts",
@@ -33,7 +31,6 @@ function findWorkerScript(): string {
     if (fs.existsSync(candidate)) {
       return candidate;
     }
-    // Fallback: relative to app path
     const alt = path.join(app.getAppPath(), "scripts", "embed-worker.mjs");
     if (fs.existsSync(alt)) {
       return alt;
@@ -48,8 +45,6 @@ export function embedImageInWorker(
 ): Promise<number[]> {
   return new Promise((resolve, reject) => {
     const workerScript = findWorkerScript();
-
-    // fork() inherits Electron's Node.js — no native-module version mismatch
     const child = fork(workerScript, [], {
       stdio: ["ignore", "inherit", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
@@ -115,7 +110,158 @@ export function embedImageInWorker(
   });
 }
 
-// --- Search ---
+// --- Paginated fallback search (never loads all vectors at once) ---
+
+async function fallbackSearch(
+  queryVector: number[],
+  limit: number
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!photoTable) {
+    return [];
+  }
+
+  const rowCount = await photoTable.countRows();
+
+  if (rowCount > 1000) {
+    console.log(
+      `[AI] No results from index search. Library too large (${rowCount}) for brute-force. Returning empty.`
+    );
+    return [];
+  }
+
+  console.log(
+    `[AI] Small library (${rowCount} rows), attempting paginated brute-force`
+  );
+  const PAGE_SIZE = 200;
+  const MAX_PAGES = 5;
+  const allScored: Array<{ photoId: number; distance: number }> = [];
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const rows = await photoTable
+      .query()
+      .limit(PAGE_SIZE)
+      .offset(page * PAGE_SIZE)
+      .toArray();
+
+    if (rows.length === 0) {
+      break;
+    }
+
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const vec = row.vector as number[];
+      if (!vec || vec.length !== queryVector.length) {
+        continue;
+      }
+      let dot = 0;
+      for (let i = 0; i < vec.length; i++) {
+        dot += vec[i] * queryVector[i];
+      }
+      allScored.push({ photoId: row.photo_id as number, distance: 1 - dot });
+    }
+  }
+
+  allScored.sort((a, b) => a.distance - b.distance);
+
+  const MAX_DISTANCE = 0.75;
+  return allScored
+    .filter((r) => r.distance <= MAX_DISTANCE)
+    .slice(0, limit)
+    .map((r) => ({
+      photoId: r.photoId,
+      similarity: Math.round(Math.max(0, 1 - r.distance) * 10_000) / 10_000,
+    }));
+}
+
+// --- Single vector search (one prompt → one embedding → LanceDB query) ---
+
+async function singleVectorSearch(
+  text: string,
+  limit: number
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!(embeddingModel && photoTable)) {
+    return [];
+  }
+
+  const queryVector = await embeddingModel.embedText(text);
+
+  const rowCount = await photoTable.countRows();
+  const adaptiveRefine = Math.min(
+    10,
+    Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
+  );
+
+  let rawResults: Array<Record<string, unknown>> = [];
+  try {
+    const vq = photoTable
+      .vectorSearch(queryVector)
+      .distanceType("cosine")
+      .refineFactor(adaptiveRefine)
+      .limit(limit);
+    rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+  } catch (err: any) {
+    console.error("[AI] vectorSearch failed:", err?.message);
+  }
+
+  if (rawResults.length === 0) {
+    return fallbackSearch(queryVector, limit);
+  }
+
+  const MAX_COSINE_DISTANCE = 0.75;
+  const filtered = rawResults.filter(
+    (r) => (r._distance as number) <= MAX_COSINE_DISTANCE
+  );
+
+  if (filtered.length === 0) {
+    console.log(
+      `[AI] All ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning empty`
+    );
+    return [];
+  }
+
+  return filtered.map((r) => {
+    const cosDist = r._distance as number;
+    const similarity = Math.max(0, 1 - cosDist);
+    return {
+      photoId: r.photo_id as number,
+      similarity: Math.round(similarity * 10_000) / 10_000,
+    };
+  });
+}
+
+// --- Multi-prompt search with Reciprocal Rank Fusion ---
+
+async function multiPromptSearch(
+  prompts: string[],
+  limit: number
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  const resultSets = await Promise.all(
+    prompts.map((p) => singleVectorSearch(p, limit * 2))
+  );
+
+  const weights = [1.0, 0.7, 0.5];
+  const k = 60;
+  const scores = new Map<number, number>();
+
+  for (let i = 0; i < resultSets.length; i++) {
+    const w = weights[Math.min(i, weights.length - 1)];
+    for (let rank = 0; rank < resultSets[i].length; rank++) {
+      const { photoId, similarity } = resultSets[i][rank];
+      const rrfScore = w / (k + rank + 1);
+      const combined = rrfScore + similarity * w * 0.05;
+      scores.set(photoId, (scores.get(photoId) || 0) + combined);
+    }
+  }
+
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([photoId, score]) => ({
+      photoId,
+      similarity: Math.round(score * 10_000) / 10_000,
+    }));
+}
+
+// --- Public API ---
 
 export async function searchByText(
   query: string,
@@ -139,220 +285,31 @@ export async function searchByText(
     return [];
   }
 
-  // Ensure vector index exists before searching
-  try {
-    const indices = await photoTable.listIndices();
-    const hasIndex = indices.some(
-      (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
-    );
-    if (!hasIndex) {
-      const rowCount = await photoTable.countRows();
-      if (rowCount >= MIN_VECTORS_FOR_INDEX) {
-        const { Index: LIdx } = await import("@lancedb/lancedb");
-        console.log(
-          `[AI] Creating vector index on ${rowCount} rows before search...`
-        );
-        await photoTable.createIndex("vector", {
-          config: LIdx.ivfPq({
-            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
-            distanceType: "cosine",
-          }),
-        });
-        console.log("[AI] Vector index created for search");
-      } else {
-        console.log(
-          `[AI] Using brute-force search: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
-        );
-      }
-    }
-  } catch (err: any) {
-    console.warn(
-      "[AI] Index check failed, attempting search anyway:",
-      err?.message
-    );
-  }
+  const hasChinese = /[一-鿿]/.test(query);
 
-  // Translate Chinese queries to English for better CLIP alignment.
-  // CLIP ViT-B/32 was trained on natural-language image captions, not keyword
-  // lists. We wrap translated terms in a CLIP-friendly prompt template and
-  // deduplicate repeated words to produce cleaner embeddings.
-  let searchText = query.trim();
-  const hasChinese = /[一-鿿]/.test(searchText);
   if (hasChinese) {
-    let translated = searchText;
-    // Sort keys by length descending so longer phrases match first
-    const sortedKeys = Object.keys(ZH_TO_EN_SEARCH).sort(
-      (a, b) => b.length - a.length
-    );
-    for (const zh of sortedKeys) {
-      if (translated.includes(zh)) {
-        translated = translated.replace(
-          new RegExp(zh, "g"),
-          ZH_TO_EN_SEARCH[zh]
-        );
-      }
-    }
-    // Deduplicate repeated keywords from overlapping translations
-    const words = translated.split(/\s+/);
-    const seen = new Set<string>();
-    const unique = words.filter((w) => {
-      const lower = w.toLowerCase();
-      if (seen.has(lower)) {
-        return false;
-      }
-      seen.add(lower);
-      return true;
-    });
-    // Strip any remaining untranslated CJK characters — CLIP VIT-B/32
-    // only understands English, embedding Chinese produces noise.
-    const englishOnly = unique.filter(
-      (w) => !/[一-鿿㄀-鿿㐀-䶿]/.test(w)
-    );
-    if (englishOnly.length === 0) {
-      // If nothing translated, use the raw query but let CLIP try
-      searchText = query.trim();
-    } else {
-      // CLIP works best with short, natural descriptions
-      const keywords = englishOnly.slice(0, 4).join(" ");
-      searchText = `a photo of ${keywords}`;
-    }
-    console.log(`[AI] searchByText: zh→en "${query.trim()}" → "${searchText}"`);
-  }
+    const parsed = parseChineseQuery(query);
+    const prompts = generateSearchPrompts(parsed);
 
-  const queryVector = await embeddingModel.embedText(searchText);
-  console.log(
-    `[AI] searchByText: query="${searchText}" vecLen=${queryVector.length}`
-  );
-
-  let rawResults: Array<Record<string, unknown>> = [];
-  const rowCount = await photoTable.countRows();
-
-  try {
-    // Cosine distance + adaptive refineFactor for accurate ranking.
-    // refineFactor re-ranks candidates with uncompressed vectors to correct
-    // IVF_PQ quantization errors. Smaller datasets need MORE refinement
-    // because fewer partitions mean coarser quantization.
-    const adaptiveRefine = Math.min(
-      10,
-      Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
-    );
-    const vq = photoTable
-      .vectorSearch(queryVector)
-      .distanceType("cosine")
-      .refineFactor(adaptiveRefine)
-      .limit(limit);
-    rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
-  } catch (err: any) {
-    console.error("[AI] vectorSearch failed:", err?.message);
-  }
-
-  if (rawResults.length > 0) {
-    const top5 = rawResults
-      .slice(0, 5)
-      .map((r) => Math.round((r._distance as number) * 10_000) / 10_000);
     console.log(
-      `[AI] searchByText: LanceDB returned ${rawResults.length} results` +
-        `, top-5 cosine-distances=[${top5.join(", ")}]`
+      `[AI] searchByText: "${query}" → ${prompts.length} prompts: ${JSON.stringify(prompts)}`
     );
-  }
 
-  // Fallback: brute-force scan when vectorSearch returns nothing
-  if (rawResults.length === 0) {
-    // First fallback: if Chinese was translated but returned no results,
-    // try embedding the original Chinese query directly
-    if (hasChinese && searchText !== query.trim()) {
-      console.log(
-        `[AI] Translated search returned 0, trying original Chinese: "${query.trim()}"`
-      );
-      try {
-        const zhVector = await embeddingModel.embedText(query.trim());
-        const zhVq = photoTable
-          .vectorSearch(zhVector)
-          .distanceType("cosine")
-          .refineFactor(
-            Math.min(10, Math.max(3, Math.ceil(100 / Math.sqrt(rowCount))))
-          )
-          .limit(limit);
-        rawResults = (await zhVq.toArray()) as Array<Record<string, unknown>>;
-        if (rawResults.length > 0) {
-          console.log(
-            `[AI] Chinese fallback returned ${rawResults.length} results`
-          );
-        }
-      } catch (fallbackErr: any) {
-        console.error("[AI] Chinese fallback failed:", fallbackErr?.message);
-      }
+    let results = await multiPromptSearch(prompts, limit);
+
+    // Fallback: try raw query directly if multi-prompt returned nothing
+    if (results.length === 0) {
+      console.log("[AI] Multi-prompt returned 0, trying raw query embedding");
+      results = await singleVectorSearch(query, limit);
     }
+
+    return results;
   }
 
-  // Second fallback: brute-force scan when both translated and Chinese return nothing
-  if (rawResults.length === 0) {
-    const rowCount2 = await photoTable.countRows();
-    if (rowCount2 > 1) {
-      console.log(
-        `[AI] vectorSearch returned 0, falling back to brute-force scan (${rowCount2} rows)`
-      );
-      try {
-        const allRows = await photoTable.query().toArray();
-        const scored = (allRows as Array<Record<string, unknown>>)
-          .filter(
-            (r) =>
-              Array.isArray(r.vector) && r.vector.length === queryVector.length
-          )
-          .map((r) => {
-            const vec = r.vector as number[];
-            // Normalized vectors: dot = cosine similarity, 1-dot = cosine distance
-            let dot = 0;
-            for (let i = 0; i < vec.length; i++) {
-              dot += vec[i] * queryVector[i];
-            }
-            return { ...r, _distance: 1 - dot };
-          })
-          .sort((a, b) => (a._distance as number) - (b._distance as number))
-          .slice(0, limit);
-        rawResults = scored;
-        console.log(
-          `[AI] Brute-force fallback returned ${rawResults.length} results`
-        );
-      } catch (fallbackErr: any) {
-        console.error(
-          "[AI] Brute-force fallback also failed:",
-          fallbackErr?.message
-        );
-      }
-    }
-  }
-
-  if (rawResults.length === 0) {
-    return [];
-  }
-
-  // cosine distance ∈ [0, 2]: 0 = identical, 1 = orthogonal, 2 = opposite.
-  // Cosine similarity = 1 - cosine_distance
-  // CLIP ViT-B/32: good matches typically cosine similarity 0.25-0.40
-  //   → cosine distance 0.60-0.75. Threshold 0.75 = similarity ≥ 0.25.
-  const MAX_COSINE_DISTANCE = 0.75;
-  const filtered = rawResults.filter(
-    (r: Record<string, unknown>) => (r._distance as number) <= MAX_COSINE_DISTANCE
-  );
-
-  if (filtered.length === 0 && rawResults.length > 0) {
-    // No results pass the similarity threshold — return empty instead of
-    // showing irrelevant photos. The user can refine their search terms.
-    console.log(
-      `[AI] searchByText: all ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning empty (no relevant matches)`
-    );
-    return [];
-  }
-
-  return filtered.map((r: Record<string, unknown>) => {
-    const cosDist = r._distance as number;
-    const similarity = Math.max(0, 1 - cosDist);
-    return {
-      photoId: r.photo_id as number,
-      similarity: Math.round(similarity * 10_000) / 10_000,
-    };
-  });
+  // English query: single prompt
+  const searchText = `a photo of ${query.trim()}`;
+  console.log(`[AI] searchByText: en query → "${searchText}"`);
+  return singleVectorSearch(searchText, limit);
 }
 
 export async function searchByImage(
@@ -377,7 +334,6 @@ export async function searchByImage(
     setLocalModelPath(localModelPath);
   }
 
-  // Image embedding: prefer persistent worker pool, fallback to single fork
   let queryVector: number[];
   try {
     const { embedSingleImage, isPoolReady } = await import(
@@ -388,11 +344,14 @@ export async function searchByImage(
     } else {
       queryVector = await embedImageInWorker(imagePath, localModelPath);
     }
-  } catch (err: any) {
+  } catch {
     try {
       queryVector = await embedImageInWorker(imagePath, localModelPath);
     } catch (fallbackErr: any) {
-      console.error("[AI] searchByImage: image embedding failed:", fallbackErr?.message);
+      console.error(
+        "[AI] searchByImage: image embedding failed:",
+        fallbackErr?.message
+      );
       return [];
     }
   }
@@ -402,46 +361,24 @@ export async function searchByImage(
     10,
     Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
   );
-  const vq = photoTable
-    .vectorSearch(queryVector)
-    .distanceType("cosine")
-    .refineFactor(adaptiveRefine)
-    .limit(limit);
-  let rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+  let rawResults: Array<Record<string, unknown>> = [];
 
-  // Brute-force fallback when vector index search returns empty
-  if (rawResults.length === 0) {
-    console.log("[AI] searchByImage: index search empty, trying brute-force...");
-    try {
-      const allRows = await photoTable.query().toArray();
-      const allData = allRows.map((r: any) => ({
-        photo_id: r.photo_id as number,
-        vector: Array.from(r.vector as Float32Array),
-      }));
-      const scored = allData.map((r: { photo_id: number; vector: number[] }) => {
-        let dot = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < queryVector.length; i++) {
-          dot += queryVector[i] * r.vector[i];
-          normA += queryVector[i] * queryVector[i];
-          normB += r.vector[i] * r.vector[i];
-        }
-        const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-        return { photo_id: r.photo_id, _distance: 1 - sim };
-      });
-      scored.sort((a: { _distance: number }, b: { _distance: number }) => a._distance - b._distance);
-      rawResults = scored.slice(0, limit) as unknown as Array<Record<string, unknown>>;
-    } catch (bfErr: any) {
-      console.warn("[AI] searchByImage: brute-force fallback failed:", bfErr?.message);
-    }
+  try {
+    const vq = photoTable
+      .vectorSearch(queryVector)
+      .distanceType("cosine")
+      .refineFactor(adaptiveRefine)
+      .limit(limit);
+    rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+  } catch (err: any) {
+    console.error("[AI] searchByImage vectorSearch failed:", err?.message);
   }
 
   if (rawResults.length === 0) {
-    return [];
+    return fallbackSearch(queryVector, limit);
   }
 
-  return rawResults.map((r: Record<string, unknown>) => {
+  return rawResults.map((r) => {
     const cosDist = r._distance as number;
     const similarity = Math.max(0, 1 - cosDist);
     return {

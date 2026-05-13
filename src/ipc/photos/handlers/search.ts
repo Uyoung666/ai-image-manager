@@ -4,14 +4,18 @@ import { desc, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos } from "@/db/schema";
 import {
+  extractTemporalContext,
+  parseChineseQuery,
+} from "@/services/ai/query-parser";
+import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
 } from "@/services/ai-embedder";
 import {
-  SearchSchema,
-  ImageSearchSchema,
-  CompoundSearchSchema,
   applyTimeDecay,
+  CompoundSearchSchema,
+  ImageSearchSchema,
+  SearchSchema,
 } from "./shared";
 
 // AI Search
@@ -43,8 +47,15 @@ export const searchByText = os
       })
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-    // Apply time-decay scoring
-    const scored = applyTimeDecay(merged);
+    // Extract temporal boost from query if it contains time keywords
+    const hasChinese = /[一-鿿]/.test(input.query);
+    let temporalBoost: ReturnType<typeof extractTemporalContext> | undefined;
+    if (hasChinese) {
+      const parsed = parseChineseQuery(input.query);
+      temporalBoost = extractTemporalContext(parsed);
+    }
+
+    const scored = applyTimeDecay(merged, { temporalBoost });
     return { results: scored, query: input.query };
   });
 
@@ -62,12 +73,18 @@ export const searchByImage = os
       results = await aiSearchByImage(input.imagePath, input.limit);
     } catch (err: any) {
       console.error("[searchByImage] AI search failed:", err?.message);
-      return { results: [], error: `AI 搜索失败: ${err?.message || "未知错误"}` };
+      return {
+        results: [],
+        error: `AI 搜索失败: ${err?.message || "未知错误"}`,
+      };
     }
 
     const photoIds = results.map((r) => r.photoId);
     if (photoIds.length === 0) {
-      return { results: [], error: "未找到相似图片（请确认 AI 模型已就绪且图片已索引）" };
+      return {
+        results: [],
+        error: "未找到相似图片（请确认 AI 模型已就绪且图片已索引）",
+      };
     }
 
     const photoList = db

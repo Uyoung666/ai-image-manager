@@ -3,9 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos, photoTags, tags } from "@/db/schema";
-import {
-  suggestTags as aiSuggestTags,
-} from "@/services/ai-embedder";
+import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
 import { IdSchema } from "./shared";
 
 // AI tag suggestion

@@ -1,5 +1,5 @@
-import { embeddingModel } from "./state";
 import { loadModel } from "./model-loader";
+import { embeddingModel } from "./state";
 
 export async function embedText(text: string): Promise<number[]> {
   await loadModel();

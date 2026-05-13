@@ -50,32 +50,7 @@ export async function initVectorDB(): Promise<void> {
 
     if (schemaValid) {
       console.log("[AI] Opened existing photo_embeddings table (schema OK)");
-
-      // Ensure vector index exists
-      const indices = await table.listIndices();
-      const hasVectorIndex = indices.some(
-        (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
-      );
-      if (hasVectorIndex) {
-        console.log("[AI] Vector index already exists");
-      } else {
-        const rowCount = await table.countRows();
-        if (rowCount >= MIN_VECTORS_FOR_INDEX) {
-          console.log(`[AI] Creating vector index on ${rowCount} rows...`);
-          await table.createIndex("vector", {
-            config: lancedb.Index.ivfPq({
-              numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
-              distanceType: "cosine",
-            }),
-          });
-          console.log("[AI] Vector index created");
-        } else {
-          console.log(
-            `[AI] Skipping index: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
-          );
-        }
-      }
-
+      await ensureVectorIndex();
       setIsVectorDBReady(true);
       return;
     }
@@ -105,13 +80,22 @@ export async function initVectorDB(): Promise<void> {
   setIsVectorDBReady(true);
 }
 
+export function buildPhotoIdFilter(ids: number[]): string {
+  const validated = ids.filter(
+    (id) => Number.isInteger(id) && id > 0 && id < 2_147_483_647
+  );
+  if (validated.length === 0) {
+    throw new Error("[AI] buildPhotoIdFilter: no valid IDs");
+  }
+  return `photo_id IN (${validated.join(", ")})`;
+}
+
 export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
   if (!(isVectorDBReady && photoTable) || photoIds.length === 0) {
     return;
   }
   try {
-    const idList = photoIds.join(", ");
-    await photoTable.delete(`photo_id IN (${idList})`);
+    await photoTable.delete(buildPhotoIdFilter(photoIds));
     console.log(`[AI] Deleted ${photoIds.length} vectors from LanceDB`);
   } catch (err: any) {
     console.error("[AI] Failed to delete vectors:", err?.message);
@@ -126,11 +110,10 @@ export async function getPhotoVectors(
     return map;
   }
   try {
-    const idList = photoIds.join(", ");
-    const rows = (await photoTable
-      .query()
-      .where(`photo_id IN (${idList})`)
-      .toArray()) as Array<Record<string, unknown>>;
+    const filter = buildPhotoIdFilter(photoIds);
+    const rows = (await photoTable.query().where(filter).toArray()) as Array<
+      Record<string, unknown>
+    >;
     for (const row of rows) {
       const pid = row.photo_id as number;
       const vec = row.vector as number[];
@@ -142,6 +125,47 @@ export async function getPhotoVectors(
     console.error("[AI] getPhotoVectors failed:", err?.message);
   }
   return map;
+}
+
+export async function ensureVectorIndex(force = false): Promise<boolean> {
+  if (!photoTable) {
+    return false;
+  }
+
+  try {
+    const indices = await photoTable.listIndices();
+    const hasIndex = indices.some(
+      (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
+    );
+
+    if (hasIndex && !force) {
+      return true;
+    }
+
+    const rowCount = await photoTable.countRows();
+    if (rowCount < MIN_VECTORS_FOR_INDEX) {
+      console.log(
+        `[AI] Index not needed: ${rowCount} < ${MIN_VECTORS_FOR_INDEX} threshold`
+      );
+      return false;
+    }
+
+    const { Index: LIdx } = await import("@lancedb/lancedb");
+    console.log(
+      `[AI] ${force ? "Rebuilding" : "Creating"} vector index on ${rowCount} rows...`
+    );
+    await photoTable.createIndex("vector", {
+      config: LIdx.ivfPq({
+        numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
+        distanceType: "cosine",
+      }),
+    });
+    console.log("[AI] Vector index ready");
+    return true;
+  } catch (err: any) {
+    console.error("[AI] Index creation failed:", err?.message);
+    return false;
+  }
 }
 
 export function isVectorDBInitialized(): boolean {

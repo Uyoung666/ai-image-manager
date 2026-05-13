@@ -5,8 +5,9 @@ import { eq, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
-import { BATCH_SIZE, MIN_VECTORS_FOR_INDEX, WORKER_TIMEOUT } from "./constants";
+import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel } from "./model-loader";
+import type { EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
   currentProgress,
@@ -16,9 +17,12 @@ import {
   setIsEmbedding,
   setLocalModelPath,
 } from "./state";
-import type { EmbedProgressCallback } from "./state";
 import { batchSuggestTags } from "./tag-suggester";
-import { initVectorDB } from "./vector-db";
+import {
+  buildPhotoIdFilter,
+  ensureVectorIndex,
+  initVectorDB,
+} from "./vector-db";
 
 // --- Worker script location ---
 
@@ -229,15 +233,14 @@ export async function embedAllPhotos(
 
   const total = unprocessed.length;
   let processed = 0;
+  const successfulIds: number[] = [];
 
-  console.log(
-    `[AI] Starting embedding for ${total} photos via Worker Pool`
-  );
+  console.log(`[AI] Starting embedding for ${total} photos via Worker Pool`);
 
   // Use persistent worker pool
   let poolReady = false;
   try {
-    const { initWorkerPool, embedWithPool, shutdownPool } = await import(
+    const { initWorkerPool, embedWithPool } = await import(
       "@/services/embed-worker-pool"
     );
     await initWorkerPool(_localModelPath!);
@@ -252,31 +255,55 @@ export async function embedAllPhotos(
       });
       onProgress?.(currentProgress);
     });
-    // Persist results to LanceDB and SQLite
-    const successResults = poolResults.filter((r) => r.vector && r.vector.length > 0);
+    // Persist results to LanceDB and SQLite — batch write
+    const successResults = poolResults.filter(
+      (r) => r.vector && r.vector.length > 0
+    );
     if (successResults.length > 0 && photoTable) {
       const batchIds = successResults.map((r) => r.id);
-      try { await photoTable.delete(`photo_id IN (${batchIds.join(", ")})`); } catch { /* ok */ }
 
-      for (const result of successResults) {
-        try {
-          await photoTable.add([
-            { photo_id: result.id, vector: result.vector, created_at: Date.now() },
-          ]);
-        } catch (lanceErr: any) {
-          console.warn(`[AI] Photo ${result.id} LanceDB write failed: ${lanceErr?.message}`);
-          continue;
-        }
-        try {
-          db.update(photos)
-            .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
-            .where(eq(photos.id, result.id))
-            .run();
-        } catch (dbErr: any) {
-          console.warn(`[AI] Photo ${result.id} SQLite update failed: ${dbErr?.message}`);
+      // 1. Batch delete old vectors
+      try {
+        await photoTable.delete(buildPhotoIdFilter(batchIds));
+      } catch {
+        /* first write — table may be empty */
+      }
+
+      // 2. Batch add new vectors
+      const records = successResults.map((r) => ({
+        photo_id: r.id,
+        vector: r.vector,
+        created_at: Date.now(),
+      }));
+      try {
+        await photoTable.add(records);
+      } catch (lanceErr: any) {
+        console.warn(
+          `[AI] Batch add failed (${lanceErr?.message}), falling back to individual writes`
+        );
+        for (const record of records) {
+          try {
+            await photoTable.add([record]);
+          } catch {
+            /* skip */
+          }
         }
       }
+
+      // 3. Batch update SQLite
+      for (const id of batchIds) {
+        try {
+          db.update(photos)
+            .set({ isAiProcessed: true, vectorId: `vec_${id}` })
+            .where(eq(photos.id, id))
+            .run();
+        } catch {
+          /* skip */
+        }
+      }
+
       processed = successResults.length;
+      successfulIds.push(...batchIds);
     }
   } catch (poolErr: any) {
     console.error("[AI] Worker pool failed:", poolErr?.message);
@@ -285,48 +312,62 @@ export async function embedAllPhotos(
   // If pool is not available, fall back to legacy per-batch fork
   if (!poolReady) {
     async function processBatch(
-      batch: Array<{ id: number; path: string }>,
+      batch: Array<{ id: number; path: string }>
     ): Promise<number> {
-      if (batch.length === 0) return 0;
+      if (batch.length === 0) {
+        return 0;
+      }
 
       try {
         const results = await runEmbedBatch(batch, _localModelPath!);
-        let count = 0;
+        const successBatch = results.filter(
+          (r) => r.vector && r.vector.length > 0
+        );
 
-        const batchIds = results.filter((r) => r.vector).map((r) => r.id);
-        if (batchIds.length > 0) {
+        if (successBatch.length > 0) {
+          const ids = successBatch.map((r) => r.id);
           try {
-            await photoTable.delete(`photo_id IN (${batchIds.join(", ")})`);
-          } catch { /* best-effort */ }
-        }
+            await photoTable.delete(buildPhotoIdFilter(ids));
+          } catch {
+            /* best-effort */
+          }
 
-        for (const result of results) {
-          if (result.vector && result.vector.length > 0) {
-            try {
-              await photoTable.add([
-                { photo_id: result.id, vector: result.vector, created_at: Date.now() },
-              ]);
-            } catch (lanceErr: any) {
-              console.warn(`[AI] Photo ${result.id} LanceDB write failed: ${lanceErr?.message}`);
-              continue;
+          const records = successBatch.map((r) => ({
+            photo_id: r.id,
+            vector: r.vector,
+            created_at: Date.now(),
+          }));
+          try {
+            await photoTable.add(records);
+          } catch {
+            for (const record of records) {
+              try {
+                await photoTable.add([record]);
+              } catch {
+                /* skip */
+              }
             }
+          }
+
+          for (const id of ids) {
             try {
               db.update(photos)
-                .set({ isAiProcessed: true, vectorId: `vec_${result.id}` })
-                .where(eq(photos.id, result.id))
+                .set({ isAiProcessed: true, vectorId: `vec_${id}` })
+                .where(eq(photos.id, id))
                 .run();
-            } catch (dbErr: any) {
-              console.warn(`[AI] Photo ${result.id} SQLite update failed: ${dbErr?.message}`);
+            } catch {
+              /* skip */
             }
-            count++;
-          } else if (result.error) {
-            console.warn(`[AI] Photo ${result.id} embedding failed: ${result.error}`);
           }
+          successfulIds.push(...ids);
+          return successBatch.length;
         }
-        return count;
+        return 0;
       } catch (err: any) {
         if (batch.length === 1) {
-          console.warn(`[AI] Skipping photo ${batch[0].id} — worker crash: ${err.message}`);
+          console.warn(
+            `[AI] Skipping photo ${batch[0].id} — worker crash: ${err.message}`
+          );
           return 0;
         }
         const mid = Math.floor(batch.length / 2);
@@ -336,10 +377,14 @@ export async function embedAllPhotos(
       }
     }
     for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
-      if (!isEmbedding) { console.log("[AI] Embedding stopped by user"); break; }
+      if (!isEmbedding) {
+        console.log("[AI] Embedding stopped by user");
+        break;
+      }
       const batch = unprocessed.slice(i, i + BATCH_SIZE);
       setCurrentProgress({
-        processed, total,
+        processed,
+        total,
         phase: "embedding",
         currentFile: `batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(total / BATCH_SIZE)}`,
       });
@@ -355,7 +400,12 @@ export async function embedAllPhotos(
   // If there were no photos at all, stay in "idle" phase so the UI
   // allows restarting after the user imports photos.
   if (total === 0 && totalPhotos === 0) {
-    setCurrentProgress({ processed: 0, total: 0, phase: "idle", currentFile: "" });
+    setCurrentProgress({
+      processed: 0,
+      total: 0,
+      phase: "idle",
+      currentFile: "",
+    });
   } else {
     setCurrentProgress({
       processed,
@@ -367,40 +417,20 @@ export async function embedAllPhotos(
   onProgress?.(currentProgress);
   setIsEmbedding(false);
 
-  // Run batch auto-tagging now that all vectors are in LanceDB.
-  if (processed > 0) {
-    const allDbPhotos = db
-      .select({ id: photos.id })
-      .from(photos)
-      .all();
-    const allIds = allDbPhotos.map((p) => p.id);
-    batchSuggestTags(allIds)
-      .then((r) => console.log(`[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`))
+  // Run batch auto-tagging only for newly embedded photos (incremental).
+  if (successfulIds.length > 0) {
+    batchSuggestTags(successfulIds)
+      .then((r) =>
+        console.log(
+          `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
+        )
+      )
       .catch((err) => console.error("[AI] Auto-tag failed:", err?.message));
   }
 
-  // Create / rebuild vector index now that all data is in place.
+  // Create / rebuild vector index via unified entry point.
   if (processed > 0 && photoTable) {
-    try {
-      const rowCount = await photoTable.countRows();
-      if (rowCount >= MIN_VECTORS_FOR_INDEX) {
-        const { Index: LIdx } = await import("@lancedb/lancedb");
-        console.log(`[AI] Building vector index on ${rowCount} rows...`);
-        await photoTable.createIndex("vector", {
-          config: LIdx.ivfPq({
-            numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
-            distanceType: "cosine",
-          }),
-        });
-        console.log("[AI] Vector index built successfully");
-      } else {
-        console.log(
-          `[AI] Skipping index build: ${rowCount} vectors < ${MIN_VECTORS_FOR_INDEX} threshold`
-        );
-      }
-    } catch (err: any) {
-      console.error("[AI] Failed to create vector index:", err?.message);
-    }
+    await ensureVectorIndex(true);
   }
 
   return processed;

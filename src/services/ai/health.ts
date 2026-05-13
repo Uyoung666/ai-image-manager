@@ -113,7 +113,8 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     status.lancedb === "ok" &&
     status.vectorTable === "ok" &&
     status.vectorTableRows > 1 &&
-    (status.vectorIndex === "ok" || status.vectorTableRows < MIN_VECTORS_FOR_INDEX) &&
+    (status.vectorIndex === "ok" ||
+      status.vectorTableRows < MIN_VECTORS_FOR_INDEX) &&
     status.textModel === "ok"
   ) {
     status.overall = "healthy";
@@ -138,13 +139,13 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
 // --- AI Readiness ---
 
 export interface AiReadiness {
-  model: "loading" | "ready" | "error";
-  vectorDB: "loading" | "ready" | "error";
+  embeddingProgress: { processed: number; total: number; phase: string };
   hasVectors: boolean;
-  vectorCount: number;
   indexReady: boolean;
   isEmbedding: boolean;
-  embeddingProgress: { processed: number; total: number; phase: string };
+  model: "loading" | "ready" | "error";
+  vectorCount: number;
+  vectorDB: "loading" | "ready" | "error";
 }
 
 export async function getAiReadiness(): Promise<AiReadiness> {

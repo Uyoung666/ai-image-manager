@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ScoringOptions } from "@/services/ai/query-parser";
 
 export const FolderSchema = z.object({ path: z.string().min(1) });
 export const SearchSchema = z.object({
@@ -20,19 +21,25 @@ export const ListSchema = z.object({
 });
 export const IdSchema = z.object({ id: z.number() });
 
-// Time-decay scoring: blends vector similarity with photo recency.
-// Newer photos get a moderate boost; older photos are not penalized below their vector score.
-const TIME_DECAY_ALPHA = 0.1; // Light recency boost — prioritizes semantic relevance over freshness
-const MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
-
 export function applyTimeDecay<
   T extends { similarity: number; fileDate?: number | null },
->(results: T[]): Array<T & { score: number }> {
-  const now = Date.now();
+>(results: T[], options?: ScoringOptions): Array<T & { score: number }> {
   const scored = results.map((r) => {
-    const age = r.fileDate == null ? 0 : Math.max(0, now - r.fileDate);
-    const recency = Math.max(0, 1 - age / MAX_AGE_MS);
-    const score = r.similarity * (1 + TIME_DECAY_ALPHA * recency);
+    let score = r.similarity;
+
+    if (options?.timeDecay?.enabled && r.fileDate != null) {
+      const age = Math.max(0, Date.now() - r.fileDate);
+      const recency = Math.max(0, 1 - age / options.timeDecay.maxAgeMs);
+      score *= 1 + options.timeDecay.alpha * recency;
+    }
+
+    if (options?.temporalBoost && r.fileDate != null) {
+      const { targetFrom, targetTo, factor } = options.temporalBoost;
+      if (r.fileDate >= targetFrom && r.fileDate <= targetTo) {
+        score *= factor;
+      }
+    }
+
     return { ...r, score: Math.round(score * 10_000) / 10_000 };
   });
   scored.sort((a, b) => b.score - a.score);

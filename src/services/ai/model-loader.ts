@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { disposeTensors } from "./constants";
+import type { EmbedProgress } from "./state";
 import {
   _localModelPath,
   currentProgress,
@@ -13,7 +14,6 @@ import {
   setIsModelLoaded,
   setLocalModelPath,
 } from "./state";
-import type { EmbedProgress } from "./state";
 
 function copyDir(src: string, dest: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -159,7 +159,9 @@ export async function loadModel(): Promise<void> {
       try {
         const { text_embeds } = output;
         const vec = Array.from(text_embeds.data as Float32Array);
-        const norm = Math.sqrt(vec.reduce((s: number, v: number) => s + v * v, 0));
+        const norm = Math.sqrt(
+          vec.reduce((s: number, v: number) => s + v * v, 0)
+        );
         return vec.map((v: number) => v / (norm || 1));
       } finally {
         disposeTensors(output);
