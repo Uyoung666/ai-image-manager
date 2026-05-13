@@ -66,9 +66,16 @@ export function embedImageInWorker(
     });
 
     child.on("message", (msg: any) => {
-      if (msg.type === "result" && !resolved) {
+      if (msg.type === "ready") {
+        child.send({
+          type: "embed",
+          modelPath,
+          photos: [{ id: 1, path: imagePath }],
+        });
+      } else if (msg.type === "result" && !resolved) {
         resolved = true;
         clearTimeout(timeout);
+        child.kill();
         const result = msg.results?.[0];
         if (result?.vector && result.vector.length > 0) {
           resolve(result.vector);
@@ -102,11 +109,7 @@ export function embedImageInWorker(
       }
     });
 
-    child.send({
-      type: "embed",
-      modelPath,
-      photos: [{ id: 1, path: imagePath }],
-    });
+    child.send({ type: "init", modelPath });
   });
 }
 

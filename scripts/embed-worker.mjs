@@ -118,7 +118,20 @@ async function handleInit(msg) {
 
 // --- Embed handler: process a batch ---
 async function handleEmbed(msg) {
-  const { photos } = msg;
+  const { photos, modelPath } = msg;
+
+  // Auto-init if model not loaded yet (single-shot mode from embedImageInWorker)
+  if (!cachedModel && modelPath) {
+    await handleInit({ modelPath });
+  }
+  if (!cachedModel || !Tensor) {
+    process.send?.({
+      type: "result",
+      results: (photos || []).map((p) => ({ id: p.id, error: "Model not initialized" })),
+    });
+    return;
+  }
+
   const results = [];
 
   for (let i = 0; i < photos.length; i++) {

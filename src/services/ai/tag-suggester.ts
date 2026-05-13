@@ -483,6 +483,7 @@ export async function batchSuggestTags(
 
   let tagged = 0;
   let skipped = 0;
+  let firstDiag = true;
   const tagColors = [
     "#5e6ad2",
     "#46a758",
@@ -499,6 +500,15 @@ export async function batchSuggestTags(
     if (!imageVec) {
       skipped++;
       continue;
+    }
+
+    if (firstDiag) {
+      firstDiag = false;
+      const sampleTag = cachedTagEmbeddings[0];
+      const sim = cosineSimilarity(imageVec, sampleTag.vector);
+      console.log(`[AI] batchSuggestTags diag: imageVec type=${Object.prototype.toString.call(imageVec)}, len=${imageVec.length}, first3=[${imageVec.slice(0,3)}]`);
+      console.log(`[AI] batchSuggestTags diag: tagVec type=${Object.prototype.toString.call(sampleTag.vector)}, len=${sampleTag.vector.length}, first3=[${sampleTag.vector.slice(0,3)}]`);
+      console.log(`[AI] batchSuggestTags diag: sample similarity=${sim}`);
     }
 
     const scores = cachedTagEmbeddings.map(
