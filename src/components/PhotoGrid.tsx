@@ -245,7 +245,7 @@ export function PhotoGrid({
       {/* Masonry grid */}
       <div className="min-h-0 flex-1" onContextMenu={onContextMenu} ref={containerCallbackRef}>
         <MasonryGrid
-          className="scrollbar-thin px-2"
+          className="scrollbar-thin px-2 pt-2"
           columnCount={columnCount}
           containerWidth={containerWidth - 16}
           gap={GAP}

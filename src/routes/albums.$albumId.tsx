@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Zap } from "lucide-react";
+import { ArrowLeft, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
@@ -31,6 +31,7 @@ function AlbumDetailPage() {
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const loadAlbum = useCallback(async () => {
     try {
@@ -73,6 +74,12 @@ function AlbumDetailPage() {
     setSelectedIds(new Set());
   }
 
+  async function handleDeleteAlbum() {
+    if (!album) return;
+    await ipc.client.albums.deleteAlbum({ id: album.id });
+    navigate({ to: "/albums" as "/albums" });
+  }
+
   const photos = album?.photos || [];
 
   return (
@@ -109,14 +116,42 @@ function AlbumDetailPage() {
             </p>
           </div>
         </div>
-        {selectedIds.size > 0 && !album?.isSmart && (
-          <button
-            className="rounded-[6px] bg-[#e5484d] px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
-            onClick={handleRemoveSelected}
-          >
-            移除 {selectedIds.size} 张
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && !album?.isSmart && (
+            <button
+              className="rounded-[6px] bg-[#e5484d] px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
+              onClick={handleRemoveSelected}
+            >
+              移除 {selectedIds.size} 张
+            </button>
+          )}
+          {album && !confirmDelete && (
+            <button
+              className="flex items-center gap-1.5 rounded-[6px] border border-[#e5484d]/30 px-3 py-1.5 text-[12px] text-[#e5484d] transition-colors hover:border-[#e5484d] hover:bg-[#e5484d]/5"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              删除相册
+            </button>
+          )}
+          {confirmDelete && (
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-[#e5484d]">确认删除？</span>
+              <button
+                className="rounded-[6px] bg-[#e5484d] px-3 py-1 text-[12px] text-white hover:opacity-90"
+                onClick={handleDeleteAlbum}
+              >
+                确认
+              </button>
+              <button
+                className="rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground"
+                onClick={() => setConfirmDelete(false)}
+              >
+                取消
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
