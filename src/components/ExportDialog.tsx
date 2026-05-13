@@ -59,7 +59,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         quality: format === "compressed" ? quality : undefined,
         outputPath: savePath,
       });
-      const data = res as { success: boolean; path?: string; filename?: string; photoCount?: number; sizeMB?: number };
+      const data = res as { success: boolean; path?: string; filename?: string; photoCount?: number; sizeMB?: number; error?: string };
       if (data.success) {
         setResult({
           path: data.path ?? "",
@@ -71,7 +71,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           await ipc.client.shell.openInExplorer({ path: data.path });
         }
       } else {
-        setResult({ error: "导出失败" });
+        setResult({ error: data.error || "导出失败" });
       }
     } catch {
       setResult({ error: "导出过程发生异常" });

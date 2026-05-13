@@ -310,9 +310,8 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      const archiverModule = await import("archiver");
-      const createArchive = (archiverModule as any).default || archiverModule;
-      const archive = createArchive("zip", { zlib: { level: 9 } });
+      const { ZipArchive } = await import("archiver");
+      const archive = new ZipArchive({ zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<void>((resolve, reject) => {
