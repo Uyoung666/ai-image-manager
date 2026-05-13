@@ -6,6 +6,7 @@ interface AlbumInfo {
   id: number;
   name: string;
   description: string | null;
+  isSmart?: boolean;
   photoCount?: number;
 }
 
@@ -30,7 +31,7 @@ export function AddToAlbumDialog({
   const loadAlbums = useCallback(async () => {
     try {
       const result = await ipc.client.albums.listAlbums({});
-      setAlbums(result as AlbumInfo[]);
+      setAlbums((result as AlbumInfo[]).filter((a) => !a.isSmart));
     } catch {
       /* ignore */
     }
