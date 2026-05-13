@@ -11,7 +11,7 @@ export const openExternalLink = os
   });
 
 export const openFolderDialog = os.handler(async () => {
-  const win = BrowserWindow.getFocusedWindow();
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
   if (!win) {
     return { path: null };
   }
@@ -36,7 +36,7 @@ export const saveFileDialog = os
     })
   )
   .handler(async ({ input }) => {
-    const win = BrowserWindow.getFocusedWindow();
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (!win) {
       return { path: null };
     }
