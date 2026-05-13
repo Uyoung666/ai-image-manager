@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -71,21 +71,52 @@ export const listFaceIdentities = os.handler(() => {
     .orderBy(desc(faceIdentities.faceCount))
     .all();
 
-  // Load representative photo thumbnails
   const result = [];
   for (const identity of identities) {
     let coverPath: string | null = null;
+    let coverBbox: { x: number; y: number; width: number; height: number } | null = null;
+    let coverPhotoWidth: number | null = null;
+    let coverPhotoHeight: number | null = null;
+
     if (identity.representativePhotoId) {
       const photo = db
-        .select({ thumbnailPath: photos.thumbnailPath })
+        .select({ thumbnailPath: photos.thumbnailPath, width: photos.width, height: photos.height })
         .from(photos)
         .where(eq(photos.id, identity.representativePhotoId))
         .get();
       coverPath = photo?.thumbnailPath ?? null;
+      coverPhotoWidth = photo?.width ?? null;
+      coverPhotoHeight = photo?.height ?? null;
+
+      // Get the face bbox for this identity's representative face
+      const memberFace = db
+        .select({
+          bboxX: faceVectors.bboxX,
+          bboxY: faceVectors.bboxY,
+          bboxWidth: faceVectors.bboxWidth,
+          bboxHeight: faceVectors.bboxHeight,
+        })
+        .from(faceIdentityMembers)
+        .innerJoin(faceVectors, eq(faceIdentityMembers.faceVectorId, faceVectors.id))
+        .where(eq(faceIdentityMembers.identityId, identity.id))
+        .limit(1)
+        .get();
+
+      if (memberFace) {
+        coverBbox = {
+          x: memberFace.bboxX,
+          y: memberFace.bboxY,
+          width: memberFace.bboxWidth,
+          height: memberFace.bboxHeight,
+        };
+      }
     }
     result.push({
       ...identity,
       coverThumbnailPath: coverPath,
+      coverBbox,
+      coverPhotoWidth,
+      coverPhotoHeight,
     });
   }
 
@@ -116,7 +147,7 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
     ? db
         .select()
         .from(faceVectors)
-        .where(sql`${faceVectors.id} IN (${faceIds.join(",")})`)
+        .where(inArray(faceVectors.id, faceIds))
         .all()
     : [];
 
@@ -135,7 +166,7 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
           fileDate: photos.fileDate,
         })
         .from(photos)
-        .where(sql`${photos.id} IN (${photoIds.join(",")})`)
+        .where(inArray(photos.id, photoIds))
         .orderBy(desc(photos.fileDate))
         .all()
     : [];

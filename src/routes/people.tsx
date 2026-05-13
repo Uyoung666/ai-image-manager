@@ -9,6 +9,9 @@ interface FaceIdentity {
   faceCount: number;
   representativePhotoId: number | null;
   coverThumbnailPath: string | null;
+  coverBbox: { x: number; y: number; width: number; height: number } | null;
+  coverPhotoWidth: number | null;
+  coverPhotoHeight: number | null;
   createdAt: number;
 }
 
@@ -213,13 +216,38 @@ function PeoplePage() {
                   to="/people/$identityId"
                   params={{ identityId: identity.id.toString() }}
                 >
-                  <div className="aspect-[3/4] bg-muted">
+                  <div className="aspect-square overflow-hidden bg-muted">
                     {identity.coverThumbnailPath ? (
-                      <img
-                        alt={identity.name || "未命名"}
-                        className="h-full w-full object-cover"
-                        src={toLocalMediaUrl(identity.coverThumbnailPath)}
-                      />
+                      (() => {
+                        const bbox = identity.coverBbox;
+                        const pw = identity.coverPhotoWidth;
+                        const ph = identity.coverPhotoHeight;
+                        if (bbox && pw && ph) {
+                          const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
+                          const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
+                          const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
+                          const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
+                          return (
+                            <img
+                              alt={identity.name || "未命名"}
+                              className="h-full w-full object-cover"
+                              style={{
+                                objectPosition: `${cx}% ${cy}%`,
+                                transform: `scale(${zoom})`,
+                                transformOrigin: `${cx}% ${cy}%`,
+                              }}
+                              src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                            />
+                          );
+                        }
+                        return (
+                          <img
+                            alt={identity.name || "未命名"}
+                            className="h-full w-full object-cover"
+                            src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                          />
+                        );
+                      })()
                     ) : (
                       <div className="flex h-full w-full items-center justify-center">
                         <User className="h-12 w-12 text-muted-foreground/30" />
