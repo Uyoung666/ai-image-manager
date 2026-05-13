@@ -70,6 +70,12 @@ export function SearchBar({
   const [query, setQuery] = useState(imageSearchActive ? "[以图搜图]" : "");
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    if (imageSearchActive) {
+      setQuery("[以图搜图]");
+    }
+  }, [imageSearchActive]);
   const [dragOver, setDragOver] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -249,7 +255,7 @@ export function SearchBar({
               type="text"
               value={query}
             />
-            {query && (
+            {(query || imageSearchActive) && (
               <button
                 className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#6b6b75] hover:text-foreground"
                 onClick={handleClear}
