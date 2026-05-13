@@ -49,7 +49,35 @@ export const listAlbums = os
     if (input.isSmart !== undefined) {
       query = query.where(eq(albums.isSmart, input.isSmart));
     }
-    return query.all();
+    const list = query.all();
+
+    // Auto-assign covers for smart albums that have no cover yet
+    for (const album of list) {
+      if (album.isSmart && !album.coverPhotoId && album.smartRules) {
+        try {
+          const rules = JSON.parse(album.smartRules);
+          const photoIds = evaluateSmartAlbum(rules);
+          if (photoIds.length > 0) {
+            const firstPhoto = db
+              .select({ id: photos.id })
+              .from(photos)
+              .where(inArray(photos.id, photoIds))
+              .orderBy(desc(photos.fileDate))
+              .limit(1)
+              .get();
+            if (firstPhoto) {
+              db.update(albums)
+                .set({ coverPhotoId: firstPhoto.id })
+                .where(eq(albums.id, album.id))
+                .run();
+              album.coverPhotoId = firstPhoto.id;
+            }
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    return list;
   });
 
 export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
@@ -87,7 +115,18 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
           .where(inArray(photos.id, photoIds))
           .orderBy(desc(photos.fileDate))
           .all();
-        return { ...album, photos: photoRows, matchCount: photoIds.length };
+
+        // Auto-set cover to the first matched photo if not set
+        let coverPhotoId = album.coverPhotoId;
+        if (!coverPhotoId && photoRows.length > 0) {
+          coverPhotoId = photoRows[0].id;
+          db.update(albums)
+            .set({ coverPhotoId })
+            .where(eq(albums.id, input.id))
+            .run();
+        }
+
+        return { ...album, coverPhotoId, photos: photoRows, matchCount: photoIds.length };
       }
     } catch {
       // Rules parse error — fall through to return empty

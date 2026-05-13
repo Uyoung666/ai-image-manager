@@ -1,6 +1,12 @@
-import { Sparkles, X, Plus, Trash2 } from "lucide-react";
+import { Sparkles, X, Plus, Trash2, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ipc } from "@/ipc/manager";
+
+interface TagInfo {
+  id: number;
+  name: string;
+  color: string | null;
+}
 
 type RuleType = "dateRange" | "cameraModel" | "lensModel" | "tags" | "focalLength" | "aperture" | "iso" | "fileFormat";
 type DatePreset = "去年今日" | "最近7天" | "最近30天" | "今年" | "自定义";
@@ -32,6 +38,67 @@ const RULE_LABELS: Record<RuleType, string> = {
 const DATE_PRESETS: DatePreset[] = ["去年今日", "最近7天", "最近30天", "今年", "自定义"];
 const FORMATS = ["jpg", "jpeg", "png", "webp", "avif", "tiff", "heic", "gif", "bmp"];
 
+function TagSelector({ existingTags, value, onChange }: {
+  existingTags: TagInfo[];
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const selected = value.split(/[,，]\s*/).filter(Boolean);
+  const [filterText, setFilterText] = useState("");
+
+  function toggleTag(tagName: string) {
+    const set = new Set(selected);
+    if (set.has(tagName)) {
+      set.delete(tagName);
+    } else {
+      set.add(tagName);
+    }
+    onChange([...set].join(", "));
+  }
+
+  const filtered = existingTags.filter(
+    (t) => !filterText || t.name.toLowerCase().includes(filterText.toLowerCase())
+  );
+
+  return (
+    <div className="flex flex-1 flex-col gap-1">
+      <input
+        className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+        onChange={(e) => setFilterText(e.target.value)}
+        placeholder="搜索标签..."
+        value={filterText}
+      />
+      {existingTags.length > 0 ? (
+        <div className="flex max-h-[80px] flex-wrap gap-1 overflow-y-auto rounded-[4px] border border-input bg-card p-1.5">
+          {filtered.map((tag) => {
+            const isSelected = selected.includes(tag.name);
+            return (
+              <button
+                className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+                  isSelected
+                    ? "bg-primary/20 text-primary"
+                    : "bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                }`}
+                key={tag.id}
+                onClick={() => toggleTag(tag.name)}
+                type="button"
+              >
+                {isSelected && <Check className="h-2.5 w-2.5" />}
+                {tag.name}
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <span className="px-1 text-[10px] text-muted-foreground">无匹配标签</span>
+          )}
+        </div>
+      ) : (
+        <span className="px-1 text-[10px] text-muted-foreground">暂无标签，请先进行 AI 索引</span>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -45,6 +112,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewTimer, setPreviewTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [existingTags, setExistingTags] = useState<TagInfo[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,6 +122,9 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
       setRules([]);
       setPreviewCount(null);
       setCreating(false);
+      ipc.client.photos.getTags().then((result: any) => {
+        setExistingTags(result as TagInfo[]);
+      }).catch(() => {});
     }
   }, [open]);
 
@@ -286,6 +357,12 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                       <option value="">选择格式</option>
                       {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
                     </select>
+                  ) : rule.type === "tags" ? (
+                    <TagSelector
+                      existingTags={existingTags}
+                      onChange={(val) => updateRule(idx, { value: val })}
+                      value={rule.value}
+                    />
                   ) : rule.type !== "dateRange" ? (
                     <div className="flex flex-1 items-center gap-1">
                       <input
