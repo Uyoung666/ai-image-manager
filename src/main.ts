@@ -460,11 +460,11 @@ app.whenReady().then(async () => {
     await registry.startRemaining();
     console.log("[App] All services started");
 
+    await setupORPC();
     createWindow();
     createTray();
     registerGlobalShortcuts();
     checkForUpdates();
-    await setupORPC();
 
     // Setup SendTo integration (Windows right-click "发送到" menu)
     setupSendToShortcut();
