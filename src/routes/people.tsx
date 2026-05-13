@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Play, RefreshCw, Trash2, User } from "lucide-react";
+import { ArrowLeft, Check, Merge, Play, RefreshCw, Trash2, User, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ipc } from "@/ipc/manager";
 
@@ -20,6 +20,8 @@ function PeoplePage() {
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
   const [progress, setProgress] = useState<string>("");
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const navigate = useNavigate();
 
   const loadIdentities = useCallback(async () => {
@@ -103,6 +105,41 @@ function PeoplePage() {
     }
   }
 
+  async function handleMerge() {
+    if (selected.size < 2) return;
+    const ids = [...selected];
+    // Pick the one with most faces as target
+    const sorted = ids
+      .map((id) => identities.find((i) => i.id === id)!)
+      .filter(Boolean)
+      .sort((a, b) => b.faceCount - a.faceCount);
+    const targetId = sorted[0].id;
+    const sourceIds = ids.filter((id) => id !== targetId);
+
+    try {
+      await ipc.client.faces.mergeIdentities({ targetId, sourceIds });
+      setSelectMode(false);
+      setSelected(new Set());
+      loadIdentities();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelected(new Set());
+  }
+
   function toLocalMediaUrl(filePath: string): string {
     const encoded = filePath
       .replace(/\\/g, "/")
@@ -135,36 +172,72 @@ function PeoplePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {identities.length > 0 && (
+          {selectMode ? (
             <>
+              <span className="text-[13px] text-muted-foreground">
+                已选 {selected.size} 个
+              </span>
               <button
-                className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                disabled={detecting}
-                onClick={handleRecluster}
-                title="重新聚类现有人脸数据"
+                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                disabled={selected.size < 2}
+                onClick={handleMerge}
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                重新聚类
+                <Merge className="h-3.5 w-3.5" />
+                合并为同一人
               </button>
               <button
-                className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                disabled={detecting}
-                onClick={() => handleStartDetection(true)}
-                title="清除所有数据并重新扫描"
+                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={exitSelectMode}
+                title="取消选择"
               >
-                <RefreshCw className="h-3.5 w-3.5" />
-                重新扫描
+                <X className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              {identities.length > 1 && (
+                <button
+                  className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                  disabled={detecting}
+                  onClick={() => setSelectMode(true)}
+                  title="选择多个人物进行合并"
+                >
+                  <Merge className="h-3.5 w-3.5" />
+                  合并人物
+                </button>
+              )}
+              {identities.length > 0 && (
+                <>
+                  <button
+                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                    disabled={detecting}
+                    onClick={handleRecluster}
+                    title="重新聚类现有人脸数据"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    重新聚类
+                  </button>
+                  <button
+                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                    disabled={detecting}
+                    onClick={() => handleStartDetection(true)}
+                    title="清除所有数据并重新扫描"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    重新扫描
+                  </button>
+                </>
+              )}
+              <button
+                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                disabled={detecting}
+                onClick={() => handleStartDetection(false)}
+              >
+                <Play className="h-3.5 w-3.5" />
+                {detecting ? "检测中..." : "开始人脸检测"}
               </button>
             </>
           )}
-          <button
-            className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-            disabled={detecting}
-            onClick={() => handleStartDetection(false)}
-          >
-            <Play className="h-3.5 w-3.5" />
-            {detecting ? "检测中..." : "开始人脸检测"}
-          </button>
         </div>
       </div>
 
@@ -208,73 +281,136 @@ function PeoplePage() {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
             {identities.map((identity) => (
               <div
-                className="group relative overflow-hidden rounded-[8px] border border-border bg-card transition-colors hover:border-primary/30"
+                className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors ${
+                  selected.has(identity.id)
+                    ? "border-primary ring-2 ring-primary/30"
+                    : "border-border hover:border-primary/30"
+                } ${selectMode ? "cursor-pointer" : ""}`}
                 key={identity.id}
+                onClick={selectMode ? () => toggleSelect(identity.id) : undefined}
               >
-                <Link
-                  className="block"
-                  to="/people/$identityId"
-                  params={{ identityId: identity.id.toString() }}
-                >
-                  <div className="aspect-square overflow-hidden bg-muted">
-                    {identity.coverThumbnailPath ? (
-                      (() => {
-                        const bbox = identity.coverBbox;
-                        const pw = identity.coverPhotoWidth;
-                        const ph = identity.coverPhotoHeight;
-                        if (bbox && pw && ph) {
-                          const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
-                          const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
-                          const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
-                          const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
+                {selectMode ? (
+                  <div className="block">
+                    <div className="aspect-square overflow-hidden bg-muted">
+                      {identity.coverThumbnailPath ? (
+                        (() => {
+                          const bbox = identity.coverBbox;
+                          const pw = identity.coverPhotoWidth;
+                          const ph = identity.coverPhotoHeight;
+                          if (bbox && pw && ph) {
+                            const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
+                            const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
+                            const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
+                            const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
+                            return (
+                              <img
+                                alt={identity.name || "未命名"}
+                                className="h-full w-full object-cover"
+                                style={{
+                                  objectPosition: `${cx}% ${cy}%`,
+                                  transform: `scale(${zoom})`,
+                                  transformOrigin: `${cx}% ${cy}%`,
+                                }}
+                                src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                              />
+                            );
+                          }
                           return (
                             <img
                               alt={identity.name || "未命名"}
                               className="h-full w-full object-cover"
-                              style={{
-                                objectPosition: `${cx}% ${cy}%`,
-                                transform: `scale(${zoom})`,
-                                transformOrigin: `${cx}% ${cy}%`,
-                              }}
                               src={toLocalMediaUrl(identity.coverThumbnailPath)}
                             />
                           );
-                        }
-                        return (
-                          <img
-                            alt={identity.name || "未命名"}
-                            className="h-full w-full object-cover"
-                            src={toLocalMediaUrl(identity.coverThumbnailPath)}
-                          />
-                        );
-                      })()
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center">
-                        <User className="h-12 w-12 text-muted-foreground/30" />
+                        })()
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <User className="h-12 w-12 text-muted-foreground/30" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3">
+                      <h3 className="truncate font-[510] text-[13px] text-foreground">
+                        {identity.name || "未命名"}
+                      </h3>
+                      <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                        {identity.faceCount} 张照片
+                      </p>
+                    </div>
+                    {selected.has(identity.id) && (
+                      <div className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white">
+                        <Check className="h-3.5 w-3.5" />
                       </div>
                     )}
                   </div>
-                  <div className="p-3">
-                    <h3 className="truncate font-[510] text-[13px] text-foreground">
-                      {identity.name || "未命名"}
-                    </h3>
-                    <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-                      {identity.faceCount} 张照片
-                    </p>
-                  </div>
-                </Link>
-                <button
-                  className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleDeleteIdentity(identity.id, identity.name);
-                  }}
-                  title="删除此人物"
-                  type="button"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                ) : (
+                  <>
+                    <Link
+                      className="block"
+                      to="/people/$identityId"
+                      params={{ identityId: identity.id.toString() }}
+                    >
+                      <div className="aspect-square overflow-hidden bg-muted">
+                        {identity.coverThumbnailPath ? (
+                          (() => {
+                            const bbox = identity.coverBbox;
+                            const pw = identity.coverPhotoWidth;
+                            const ph = identity.coverPhotoHeight;
+                            if (bbox && pw && ph) {
+                              const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
+                              const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
+                              const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
+                              const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
+                              return (
+                                <img
+                                  alt={identity.name || "未命名"}
+                                  className="h-full w-full object-cover"
+                                  style={{
+                                    objectPosition: `${cx}% ${cy}%`,
+                                    transform: `scale(${zoom})`,
+                                    transformOrigin: `${cx}% ${cy}%`,
+                                  }}
+                                  src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                                />
+                              );
+                            }
+                            return (
+                              <img
+                                alt={identity.name || "未命名"}
+                                className="h-full w-full object-cover"
+                                src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                              />
+                            );
+                          })()
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <User className="h-12 w-12 text-muted-foreground/30" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3">
+                        <h3 className="truncate font-[510] text-[13px] text-foreground">
+                          {identity.name || "未命名"}
+                        </h3>
+                        <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                          {identity.faceCount} 张照片
+                        </p>
+                      </div>
+                    </Link>
+                    <button
+                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDeleteIdentity(identity.id, identity.name);
+                      }}
+                      title="删除此人物"
+                      type="button"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
