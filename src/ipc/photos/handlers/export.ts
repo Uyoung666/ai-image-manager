@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
-import archiver from "archiver";
 import { os } from "@orpc/server";
+import { Archiver } from "archiver";
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -13,7 +13,13 @@ import { buildHtmlGallery } from "./gallery-template";
 const WatermarkSchema = z.object({
   enabled: z.boolean(),
   text: z.string(),
-  position: z.enum(["topLeft", "topRight", "bottomLeft", "bottomRight", "center"]),
+  position: z.enum([
+    "topLeft",
+    "topRight",
+    "bottomLeft",
+    "bottomRight",
+    "center",
+  ]),
   opacity: z.number().min(10).max(100),
   fontSize: z.number().min(12).max(72),
 });
@@ -80,7 +86,13 @@ export const exportPhotos = os
       position: string;
       opacity: number;
       fontSize: number;
-    } = { enabled: false, text: "", position: "bottomRight", opacity: 50, fontSize: 24 };
+    } = {
+      enabled: false,
+      text: "",
+      position: "bottomRight",
+      opacity: 50,
+      fontSize: 24,
+    };
     try {
       const wmRow = db
         .select({ value: appSettings.value })
@@ -126,11 +138,19 @@ export const exportPhotos = os
     }> = [];
 
     // Build watermark SVG overlay once
-    function buildWatermarkSvg(imgWidth: number, imgHeight: number): Buffer | null {
-      if (!(wm.enabled && wm.text.trim())) return null;
+    function buildWatermarkSvg(
+      imgWidth: number,
+      imgHeight: number
+    ): Buffer | null {
+      if (!(wm.enabled && wm.text.trim())) {
+        return null;
+      }
       const opacity = wm.opacity / 100;
       const fontSize = wm.fontSize;
-      const margin = Math.max(16, Math.floor(Math.min(imgWidth, imgHeight) * 0.03));
+      const margin = Math.max(
+        16,
+        Math.floor(Math.min(imgWidth, imgHeight) * 0.03)
+      );
       const textAnchor =
         wm.position === "topLeft" || wm.position === "bottomLeft"
           ? "start"
@@ -161,7 +181,9 @@ export const exportPhotos = os
 
     try {
       const sharp =
-        format === "compressed" || wm.enabled ? (await import("sharp")).default : null;
+        format === "compressed" || wm.enabled
+          ? (await import("sharp")).default
+          : null;
 
       for (const photo of photoList) {
         // Resolve filename collision
@@ -207,17 +229,22 @@ export const exportPhotos = os
 
             if (format === "compressed") {
               const buffer = await pipeline.jpeg({ quality }).toBuffer();
-              destName = path.basename(destName, path.extname(destName)) + ".jpg";
+              destName =
+                path.basename(destName, path.extname(destName)) + ".jpg";
               fs.writeFileSync(path.join(photosDir, destName), buffer);
             } else {
               // Watermark in original format: preserve source format
               if (wm.enabled) {
                 const srcFormat = (meta.format || "").toLowerCase();
                 if (srcFormat === "jpeg" || srcFormat === "jpg") {
-                  const buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
+                  const buffer = await pipeline
+                    .jpeg({ quality: 92 })
+                    .toBuffer();
                   fs.writeFileSync(destPath, buffer);
                 } else if (srcFormat === "webp") {
-                  const buffer = await pipeline.webp({ quality: 92 }).toBuffer();
+                  const buffer = await pipeline
+                    .webp({ quality: 92 })
+                    .toBuffer();
                   fs.writeFileSync(destPath, buffer);
                 } else {
                   const buffer = await pipeline.png().toBuffer();
@@ -284,7 +311,7 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive = new Archiver("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<string>((resolve, reject) => {
