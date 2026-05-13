@@ -4,6 +4,7 @@ export interface Photo {
   fileSize: number;
   height: number;
   id: number;
+  isFavorite?: boolean;
   isIndexed: boolean;
   path: string;
   score?: number;

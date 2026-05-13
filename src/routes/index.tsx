@@ -72,6 +72,7 @@ function HomePage() {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
@@ -105,6 +106,7 @@ function HomePage() {
   } = usePhotos({
     folderId: activeFolderId,
     tagId: activeTagId,
+    favoriteOnly: favoriteOnly || undefined,
     sort: sortField,
     order: sortOrder,
     enabled: !isSearching,
@@ -130,6 +132,17 @@ function HomePage() {
       fetchNextPage();
     }
   }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const handleToggleFavorite = useCallback(
+    async (id: number) => {
+      const photo = photos.find((p) => p.id === id);
+      if (!photo) return;
+      const newVal = !photo.isFavorite;
+      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+    },
+    [photos],
+  );
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -158,6 +171,7 @@ function HomePage() {
     setActiveTagId(tagId);
     if (tagId !== null) {
       setActiveFolderId(null);
+      setFavoriteOnly(false);
     }
   }
 
@@ -550,6 +564,28 @@ function HomePage() {
         if (idx >= 0) setQuickPreviewIndex(idx);
         return;
       }
+
+      if (e.key === "f" && selectedIds.size > 0 && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const ids = [...selectedIds];
+        const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
+        ipc.client.photos.toggleFavorite({ ids, favorite: !allFav }).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["photos"] });
+        });
+        return;
+      }
+
+      if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (detailPhoto) {
+          setDetailPhoto(null);
+        } else if (selectedIds.size === 1) {
+          const id = selectedIds.values().next().value as number;
+          const p = photos.find((ph) => ph.id === id);
+          if (p) setDetailPhoto(p);
+        }
+        return;
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -562,10 +598,19 @@ function HomePage() {
       <Sidebar
         activeFolderId={activeFolderId}
         collapsed={sidebarCollapsed}
+        favoriteActive={favoriteOnly}
         folders={folders}
         onAddFolder={handleAddFolder}
         onDeleteFolder={handleDeleteFolder}
-        onSelectFolder={setActiveFolderId}
+        onSelectFavorites={() => {
+          setFavoriteOnly((v) => !v);
+          setActiveFolderId(null);
+          setActiveTagId(null);
+        }}
+        onSelectFolder={(id) => {
+          setActiveFolderId(id);
+          setFavoriteOnly(false);
+        }}
         onSelectTag={handleSelectTag}
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
@@ -612,22 +657,21 @@ function HomePage() {
                 setSortField(s);
                 setSortOrder(o);
               }}
+              onToggleFavorite={handleToggleFavorite}
               photos={photos}
               searchQuery={searchQuery}
               selectedIds={selectedIds}
               sort={sortField}
               sortOrder={sortOrder}
             />
-            {detailPhoto && (
-              <PhotoDetailPanel
-                onClose={() => {
-                  setDetailPhoto(null);
-                  setSelectedIds(new Set());
-                }}
-                onOpenExplorer={handleOpenExplorer}
-                photo={detailPhoto}
-              />
-            )}
+            <PhotoDetailPanel
+              onClose={() => {
+                setDetailPhoto(null);
+                setSelectedIds(new Set());
+              }}
+              onOpenExplorer={handleOpenExplorer}
+              photo={detailPhoto}
+            />
           </div>
         ) : (
           <Welcome onAddFolder={handleAddFolder} />

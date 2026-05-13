@@ -15,7 +15,9 @@
       "Bash(taskkill //F //IM node.exe)",
       "Bash(taskkill //F //IM electron.exe)",
       "Bash(rm -f \"/c/Users/刘炎/AppData/Roaming/AI Image Manager/startup.log\")",
-      "Bash(cmd //c \"start /b npx electron-forge start\")"
+      "Bash(cmd //c \"start /b npx electron-forge start\")",
+      "PowerShell(npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"people\" })",
+      "PowerShell(git push *)"
     ]
   }
 }

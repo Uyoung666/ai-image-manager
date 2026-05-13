@@ -45,6 +45,9 @@ export const photos = sqliteTable(
     isAiProcessed: integer("is_ai_processed", { mode: "boolean" })
       .notNull()
       .default(false),
+    isFavorite: integer("is_favorite", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),

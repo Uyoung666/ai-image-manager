@@ -12,6 +12,7 @@ interface Photo {
   fileSize: number;
   height: number;
   id: number;
+  isFavorite?: boolean;
   isIndexed: boolean;
   path: string;
   similarity?: number;
@@ -32,6 +33,7 @@ interface PhotoGridProps {
   onRenameSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
+  onToggleFavorite?: (id: number) => void;
   photos: Photo[];
   searchQuery?: string;
   selectedIds: Set<number>;
@@ -64,6 +66,7 @@ export function PhotoGrid({
   onExportSelected,
   onRenameSelected,
   onSortChange,
+  onToggleFavorite,
 }: PhotoGridProps) {
   const { t } = useTranslation();
   const [densityIdx, setDensityIdx] = useState(1);
@@ -112,9 +115,11 @@ export function PhotoGrid({
         filename={photo.filename}
         height={photo.height}
         id={photo.id}
+        isFavorite={photo.isFavorite}
         isSelected={selectedIds.has(photo.id)}
         onClick={onSelect}
         onDoubleClick={onDoubleClick}
+        onToggleFavorite={onToggleFavorite}
         path={photo.path}
         searchQuery={searchQuery}
         similarity={photo.similarity}
@@ -122,7 +127,7 @@ export function PhotoGrid({
         width={photo.width}
       />
     ),
-    [selectedIds, onSelect, onDoubleClick, searchQuery],
+    [selectedIds, onSelect, onDoubleClick, onToggleFavorite, searchQuery],
   );
 
   const masonryItems = useMemo(

@@ -1,12 +1,15 @@
-import { memo, useState } from "react";
+import { memo, useCallback, useState } from "react";
+import { ipc } from "@/ipc/manager";
 
 interface PhotoCardProps {
   filename: string;
   height: number;
   id: number;
+  isFavorite?: boolean;
   isSelected: boolean;
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
+  onToggleFavorite?: (id: number) => void;
   path: string;
   searchQuery?: string;
   similarity?: number;
@@ -51,13 +54,23 @@ export const PhotoCard = memo(function PhotoCard({
   width,
   height,
   isSelected,
+  isFavorite,
   searchQuery,
   similarity,
   onClick,
   onDoubleClick,
+  onToggleFavorite,
 }: PhotoCardProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      ipc.client.shell.startFileDrag({ filePath: path, iconPath: thumbnailPath || undefined });
+    },
+    [path, thumbnailPath],
+  );
 
   const src = thumbnailPath
     ? toLocalMediaUrl(thumbnailPath)
@@ -102,9 +115,11 @@ export const PhotoCard = memo(function PhotoCard({
           : "hover:brightness-110 hover:ring-1 hover:ring-white/10"
       }
       `}
+      draggable
       onClick={(e) => onClick(id, e)}
       onContextMenu={undefined}
       onDoubleClick={() => onDoubleClick(id)}
+      onDragStart={handleDragStart}
       style={{ aspectRatio }}
       data-photo-id={id}
       data-photo-path={path}
@@ -135,6 +150,31 @@ export const PhotoCard = memo(function PhotoCard({
           )}
         </div>
       </div>
+
+      {/* Favorite star */}
+      {onToggleFavorite && (
+        <button
+          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full transition-opacity ${
+            isFavorite
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-70 hover:!opacity-100"
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(id);
+          }}
+        >
+          <svg
+            className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
+            fill="currentFill"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
 
       {/* Similarity badge — shown on AI search results */}
       {similarity !== undefined && similarity > 0 && (

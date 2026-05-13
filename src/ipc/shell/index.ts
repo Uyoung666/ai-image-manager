@@ -3,6 +3,7 @@ import {
   openFolderDialog,
   openInExplorer,
   saveFileDialog,
+  startFileDrag,
 } from "./handlers";
 
 export const shell = {
@@ -10,4 +11,5 @@ export const shell = {
   openFolderDialog,
   openInExplorer,
   saveFileDialog,
+  startFileDrag,
 };

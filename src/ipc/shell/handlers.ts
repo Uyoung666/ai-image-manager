@@ -1,5 +1,6 @@
+import fs from "node:fs";
 import { os } from "@orpc/server";
-import { BrowserWindow, dialog, shell } from "electron";
+import { BrowserWindow, dialog, nativeImage, shell } from "electron";
 import { z } from "zod";
 import { openExternalLinkInputSchema } from "./schemas";
 
@@ -49,4 +50,24 @@ export const saveFileDialog = os
       ],
     });
     return { path: result.canceled ? null : result.filePath || null };
+  });
+
+export const startFileDrag = os
+  .input(z.object({ filePath: z.string().min(1), iconPath: z.string().optional() }))
+  .handler(({ input }) => {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+    if (!fs.existsSync(input.filePath)) return;
+
+    let icon: Electron.NativeImage;
+    if (input.iconPath && fs.existsSync(input.iconPath)) {
+      icon = nativeImage.createFromPath(input.iconPath).resize({ width: 64, height: 64 });
+    } else {
+      icon = nativeImage.createEmpty();
+    }
+
+    win.webContents.startDrag({
+      file: input.filePath,
+      icon,
+    });
   });

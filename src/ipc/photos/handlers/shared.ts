@@ -14,6 +14,7 @@ export const ListSchema = z.object({
   folderId: z.number().optional(),
   tagId: z.number().optional(),
   search: z.string().optional(),
+  favoriteOnly: z.boolean().optional(),
   sort: z.enum(["date", "name", "size"]).optional().default("date"),
   order: z.enum(["asc", "desc"]).optional().default("desc"),
   offset: z.number().optional().default(0),

@@ -90,7 +90,7 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 // Photo listing
 export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const db = getDatabase();
-  const { folderId, tagId, search, sort, order, offset, limit } = input;
+  const { folderId, tagId, search, favoriteOnly, sort, order, offset, limit } = input;
 
   let query = db.select().from(photos).$dynamic();
 
@@ -104,6 +104,9 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   }
   if (search) {
     query = query.where(like(photos.filename, `%${search}%`));
+  }
+  if (favoriteOnly) {
+    query = query.where(eq(photos.isFavorite, true));
   }
 
   const sortCol =
@@ -129,6 +132,9 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   }
   if (search) {
     countQuery = countQuery.where(like(photos.filename, `%${search}%`));
+  }
+  if (favoriteOnly) {
+    countQuery = countQuery.where(eq(photos.isFavorite, true));
   }
   const total = countQuery.get()?.count || 0;
   const items = query.limit(limit).offset(offset).all();

@@ -108,6 +108,22 @@ export function PhotoDetailPanel({
   const currentWidth = useRef(panelWidth);
   const panelRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const [visible, setVisible] = useState(false);
+  const lastPhotoRef = useRef<PhotoDetail | null>(null);
+
+  if (photo) {
+    lastPhotoRef.current = photo;
+  }
+
+  const displayPhoto = photo ?? lastPhotoRef.current;
+
+  useEffect(() => {
+    if (photo) {
+      requestAnimationFrame(() => setVisible(true));
+    } else {
+      setVisible(false);
+    }
+  }, [photo]);
 
   // Reset AI suggestions when photo changes
   useEffect(() => {
@@ -329,7 +345,7 @@ export function PhotoDetailPanel({
   );
   const photoTagIds = new Set(photoTags.map((t) => t.id));
 
-  if (!photo) {
+  if (!displayPhoto) {
     return null;
   }
 
@@ -341,14 +357,18 @@ export function PhotoDetailPanel({
       })
     : null;
 
-  const dirPath = photo.path.replace(/[/\\][^/\\]+$/, "");
+  const dirPath = displayPhoto.path.replace(/[/\\][^/\\]+$/, "");
 
   return (
     <div
-      className="relative flex h-full shrink-0 flex-col border-border border-l bg-secondary"
-      ref={panelRef}
-      style={{ width: panelWidth }}
+      className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+      style={{ width: visible ? panelWidth : 0 }}
     >
+      <div
+        className="relative flex h-full flex-col border-border border-l bg-secondary"
+        ref={panelRef}
+        style={{ width: panelWidth }}
+      >
       {/* Resize handle — drag left edge to resize */}
       <div
         className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
@@ -373,9 +393,9 @@ export function PhotoDetailPanel({
       <div className="border-border border-b bg-background p-4">
         <div className="flex items-center justify-center overflow-hidden rounded-[6px] bg-muted">
           <img
-            alt={photo.filename}
+            alt={displayPhoto.filename}
             className="max-h-[200px] object-contain"
-            src={toLocalMediaUrl(photo.path)}
+            src={toLocalMediaUrl(displayPhoto.path)}
           />
         </div>
       </div>
@@ -388,14 +408,14 @@ export function PhotoDetailPanel({
             {t("photoInfo")}
           </h4>
           <div className="space-y-1.5">
-            <InfoRow label={t("filePath")} value={photo.filename} />
+            <InfoRow label={t("filePath")} value={displayPhoto.filename} />
             <InfoRow
               label={t("dimensions")}
-              value={`${photo.width} × ${photo.height}`}
+              value={`${displayPhoto.width} × ${displayPhoto.height}`}
             />
             <InfoRow
               label={t("fileSize")}
-              value={formatFileSize(photo.fileSize)}
+              value={formatFileSize(displayPhoto.fileSize)}
             />
             {dateStr && <InfoRow label={t("dateTaken")} value={dateStr} />}
           </div>
@@ -642,12 +662,13 @@ export function PhotoDetailPanel({
           </p>
           <button
             className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
-            onClick={() => onOpenExplorer(photo.path)}
+            onClick={() => onOpenExplorer(displayPhoto.path)}
           >
             <FolderOpen className="h-3.5 w-3.5" />
             {t("openInExplorer")}
           </button>
         </section>
+      </div>
       </div>
     </div>
   );

@@ -326,3 +326,14 @@ export const convertPhotos = os
 export const clearThumbCache = os.handler(() => {
   return clearThumbnailDiskCache();
 });
+
+export const toggleFavorite = os
+  .input(z.object({ ids: z.array(z.number()), favorite: z.boolean() }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    db.update(photos)
+      .set({ isFavorite: input.favorite })
+      .where(inArray(photos.id, input.ids))
+      .run();
+    return { success: true };
+  });

@@ -1,7 +1,8 @@
-# CLAUDE.md — AI Image Manager
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > 本地 AI 图片管理器：Electron + React + TypeScript
-> 项目启动：2026-05-09
 > 版本：v0.2.0 — AI 核心就绪
 
 ---
@@ -10,55 +11,13 @@
 
 一款 Windows 桌面应用，提供本地 AI 图片浏览、搜索和管理能力。
 - 双击 exe 即用，100% 本地处理，零数据上传
-- **CLIP 语义搜索已打通**：自然语言搜索（中/英），延迟 <50ms（PDR 目标 <500ms）
+- CLIP 语义搜索（中/英自然语言）、以图搜图、智能去重、AI 自动标签
 - EXIF 仪表盘可视化拍摄习惯
-- 参考设计系统：Linear Dark（来自 awesome-design-md）
+- 参考设计系统：Linear Dark（详见 `DESIGN.md`）
 
-### v0.2 AI 核心能力
+**核心技术栈**: Electron 41 + React 19 + TypeScript 6 (strict) + Vite 8 + Tailwind 4 + oRPC + better-sqlite3/Drizzle ORM + sharp + Transformers.js/LanceDB
 
-| 能力 | 状态 | 指标 |
-|------|------|------|
-| CLIP ViT-B/32 模型加载 | ✅ | 文本模型 ~0.6s, 视觉模型 ~1.2s |
-| 文本嵌入 (搜索Query) | ✅ | avg 7ms/query |
-| 图像 CLIP 嵌入 | ✅ | avg 33ms/张 (PDR <100ms) |
-| LanceDB 向量存储 | ✅ | IVF_PQ 索引, cosine 距离 |
-| 自然语言搜索 | ✅ | avg 12ms (PDR <500ms, 超额42倍) |
-| 以图搜图 | ✅ | Worker 子进程 |
-| 智能去重 | ✅ | pHash 筛查 + CLIP 精排 |
-| AI 自动标签 | ✅ | 零样本分类, 46个候选标签 |
-
-> **已知限制**: ONNX WASM 后端与 sharp/libvips 共享 GLib, 在同一进程中加载会冲突。生产代码通过进程隔离 (Worker) 和渐进式批次拆分处理。测试中通过手工构建 Tensor 绕过。
-
----
-
-## 技术栈
-
-| 层 | 技术 | 版本 |
-|----|------|------|
-| 桌面壳 | Electron | 41.x |
-| 前端框架 | React | 19.2 |
-| 语言 | TypeScript | 6.x (strict) |
-| 构建 | Vite | 8.x |
-| 打包 | electron-forge | 7.11 |
-| CSS | Tailwind CSS | 4.x |
-| UI 组件 | shadcn/ui + Radix UI | latest |
-| 路由 | TanStack Router | 1.x (文件路由) |
-| 数据获取 | TanStack Query | 5.x |
-| IPC | oRPC | 1.x (类型安全) |
-| 国际化 | i18next | 26.x |
-| 数据库 | better-sqlite3 + Drizzle ORM | 12.x / 0.44 |
-| 图片处理 | sharp | 0.34 |
-| EXIF | exifr | 7.x |
-| AI 推理 | Transformers.js (ONNX) | 2.x |
-| 向量存储 | LanceDB | 0.18 |
-| 文件监听 | chokidar | 5.x (ESM) |
-| 图片去重 | @claudiu-ceia/dhash | latest |
-| 缓存 | lru-cache | 11.x |
-| 图表 | recharts | 2.x |
-| 虚拟滚动 | react-virtuoso | 4.x |
-| 灯箱 | yet-another-react-lightbox | 3.x |
-| 测试 | Vitest + Playwright | 4.x / 1.x |
-| Lint/Format | Biome | 2.x |
+> **已知限制**: ONNX WASM 后端与 sharp/libvips 共享 GLib，在同一进程中加载会冲突。生产代码通过进程隔离 (Worker) 处理。
 
 ---
 
@@ -73,76 +32,52 @@ src/
 ├── routeTree.gen.ts           # TanStack Router 自动生成的路由树
 │
 ├── actions/                   # 前端 action 封装（IPC 调用 + 状态管理）
-│   ├── app.ts                 # 应用信息
-│   ├── language.ts            # 语言切换
-│   ├── shell.ts               # Shell 操作
-│   ├── theme.ts               # 主题切换
-│   └── window.ts              # 窗口控制
-│
 ├── components/                # React 组件
-│   ├── ui/                    # shadcn/ui 组件（复制到项目中）
-│   │   ├── button.tsx
-│   │   ├── skeleton.tsx
-│   │   ├── toggle.tsx
-│   │   └── toggle-group.tsx
-│   ├── PhotoCard.tsx          # 图片缩略图卡片
-│   ├── PhotoGrid.tsx          # 瀑布流网格
-│   ├── SearchBar.tsx          # 搜索栏（Ctrl+K 唤起）
-│   ├── Sidebar.tsx            # 侧边栏（文件夹树 + 导航）
-│   ├── drag-window-region.tsx # 自定义标题栏拖拽区
-│   ├── toggle-theme.tsx       # 主题切换按钮
-│   └── lang-toggle.tsx        # 语言切换按钮
-│
+│   └── ui/                    # shadcn/ui 组件
 ├── routes/                    # TanStack Router 文件路由
-│   ├── __root.tsx             # 根路由（BaseLayout 包裹）
+│   ├── __root.tsx             # 根路由（BaseLayout）
 │   ├── index.tsx              # 主页：照片浏览 / 搜索
+│   ├── albums.tsx             # 相册列表
+│   ├── albums.$albumId.tsx    # 相册详情
+│   ├── people.tsx             # 人物识别列表
+│   ├── people.$identityId.tsx # 人物详情
+│   ├── duplicates.tsx         # 重复照片管理
 │   ├── dashboard.tsx          # EXIF 仪表盘
 │   └── settings.tsx           # 设置页面
-│
-├── layouts/
-│   └── base-layout.tsx        # 基础布局（标题栏 + 内容区）
+├── layouts/                   # 布局组件
 │
 ├── ipc/                       # oRPC IPC 层
-│   ├── router.ts              # 路由聚合（所有模块注册）
+│   ├── router.ts              # 路由聚合（albums, cloud, faces, photos, settings, shell, theme, window, app）
 │   ├── handler.ts             # RPCHandler 实例
 │   ├── manager.ts             # 渲染进程 IPC 客户端
 │   ├── context.ts             # IPC 上下文（主窗口引用）
-│   ├── app/                   # 应用信息模块
-│   ├── shell/                 # Shell 操作模块
-│   ├── theme/                 # 主题模块
-│   ├── window/                # 窗口控制模块
 │   └── photos/                # 照片管理模块（核心业务）
 │       ├── index.ts           # 导出全部 handler
-│       └── handlers.ts        # 照片 CRUD + 搜索 + AI 处理器
+│       └── handlers/          # 按职责拆分
+│           ├── listing.ts     # 扫描、文件夹、列表、详情
+│           ├── mutations.ts   # 删除、重命名、格式转换
+│           ├── search.ts      # 文本搜索、以图搜图、复合搜索
+│           ├── ai.ts          # AI 索引、标签生成
+│           ├── tags.ts        # 标签 CRUD
+│           ├── stats.ts       # 统计、去重
+│           ├── export.ts      # 导出 ZIP + HTML 画廊
+│           └── shared.ts      # 共享 schema
 │
 ├── db/                        # 数据库层
-│   ├── schema.ts              # Drizzle ORM Schema（8 张表）
+│   ├── schema.ts              # Drizzle ORM Schema
 │   └── index.ts               # 数据库初始化 + 连接管理
 │
 ├── services/                  # 核心服务（仅在主进程运行）
 │   ├── indexer.ts             # 索引引擎（扫描 + EXIF + 监听）
 │   ├── thumbnailer.ts         # 缩略图服务（三级缓存）
-│   └── ai-embedder.ts         # AI 嵌入服务（CLIP + LanceDB）
-│
-├── constants/
-│   └── index.ts               # IPC 频道 + 环境变量 + 本地存储键
+│   ├── ai-embedder.ts         # AI 嵌入服务（CLIP + LanceDB）
+│   ├── face-detector.ts       # 人脸检测 + 聚类
+│   ├── dedup-service.ts       # 重复检测（pHash + CLIP）
+│   ├── smart-album-engine.ts  # 智能相册规则引擎
+│   └── ai/                    # AI 子模块（模型加载/搜索/标签）
 │
 ├── localization/              # i18next 国际化
-│   ├── i18n.ts
-│   ├── langs.ts
-│   └── language.ts
-│
-├── styles/
-│   └── global.css             # Tailwind v4 + Linear 主题变量
-│
-├── types/
-│   └── theme-mode.ts
-│
-├── utils/
-│   ├── path.ts                # 基础路径工具
-│   ├── routes.ts              # TanStack Router 工具
-│   └── tailwind.ts            # Tailwind 工具（cn）
-│
+├── styles/                    # Tailwind v4 + Linear 主题变量
 └── tests/
     ├── unit/                  # Vitest 单元测试
     └── e2e/                   # Playwright 端到端测试
@@ -163,12 +98,18 @@ Main Process（主进程）
   ├── 缩略图生成：三级缓存（内存 LRU → 磁盘 → 按需）
   └── IPC Server：oRPC MessagePort
 
+AI Workers（独立进程，避免 ONNX/sharp 冲突）
+  ├── scripts/embed-worker.mjs  # CLIP 嵌入向量生成
+  └── scripts/face-worker.mjs   # 人脸检测 + 特征提取
+
 Renderer Process（渲染进程）
   ├── React 19 + TanStack Router
   ├── shadcn/ui 组件
   ├── IPC Client：oRPC Client（类型安全调用主进程）
   └── 状态管理：TanStack Query + React state
 ```
+
+Workers 通过 `forge.config.ts` 的 `extraResource` 打包，运行时从 `process.resourcesPath` 加载。
 
 ### 主进程构建（Vite ESM 输出）
 
@@ -178,19 +119,28 @@ Renderer Process（渲染进程）
 
 原因：如果一个 CJS 包（内部使用 `require()`）被 Vite 打包进 ESM 输出，运行时会报错 `Calling 'require' for "node:xxx" in an environment that doesn't expose the 'require' function`。将其标记为 external 后，Electron 运行时直接从 node_modules 加载，避免此问题。
 
-历史案例：`archiver`、`update-electron-app` 都因此报错过。
+**当前 external 列表**（`vite.main.config.mts` → `rollupOptions.external`）:
+`electron`, `better-sqlite3`, `sharp`, `@lancedb/lancedb`, `@lancedb/lancedb-win32-x64-msvc`, `@xenova/transformers`, `chokidar`, `exifr`, `lru-cache`, `p-queue`, `electron-store`, `@claudiu-ceia/dhash`, `archiver`, `update-electron-app`
+
+**已踩坑的包**:
+- `archiver` v8 — 纯 ESM，API 为 `new ZipArchive(options)`（不是工厂函数）
+- `update-electron-app` — CJS 包，必须 external
 
 ### IPC 通信模式
 
 本项目使用 **oRPC** 而非传统的 `ipcRenderer.invoke`。
 
-**主进程注册 handler**（`src/ipc/photos/handlers.ts`）:
+**主进程注册 handler**（`src/ipc/photos/handlers/*.ts`）:
 ```typescript
-export const listPhotos = os.handler(async ({ input }) => {
-  const db = getDatabase();
-  const items = db.select().from(photos).all();
-  return { items };
-}).input(z.object({ folderId: z.number().optional() }));
+import { os } from "@orpc/server";
+import { z } from "zod";
+
+export const listPhotos = os
+  .input(z.object({ folderId: z.number().optional() }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    return db.select().from(photos).where(eq(photos.folderId, input.folderId)).all();
+  });
 ```
 
 **渲染进程调用**:
@@ -200,10 +150,14 @@ const result = await ipc.client.photos.listPhotos({ folderId: 1 });
 ```
 
 **规则**:
-- Handler 必须使用 Zod schema 验证输入
+- Handler 必须使用 Zod schema 验证输入（`.input()` 在 `.handler()` 之前）
 - 所有数据库访问必须在主进程（handler 内）
 - 渲染进程不得直接引入 `better-sqlite3`、`sharp`、`chokidar` 等 Node.js 模块
-- 新模块在 `src/ipc/<模块名>/` 下创建，然后在 `router.ts` 注册
+- 新 handler 在 `src/ipc/photos/handlers/` 下按职责创建，然后在 `src/ipc/photos/index.ts` 导出
+- 新 IPC 模块在 `src/ipc/<模块名>/` 下创建，然后在 `router.ts` 注册
+
+**IPC 模块注册表**（`src/ipc/router.ts`）:
+`albums`, `cloud`, `faces`, `photos`, `settings`, `theme`, `window`, `app`, `shell`
 
 ### 数据库
 
@@ -243,6 +197,16 @@ const result = await ipc.client.photos.listPhotos({ folderId: 1 });
 - 文件路径验证（防止路径遍历）
 - 不收集遥测数据（opt-in 除外）
 
+### Native 模块重建
+
+`postinstall` 脚本自动执行 `electron-rebuild -f -w better-sqlite3,sharp,@lancedb/lancedb,@xenova/transformers`。如果 `npm install` 后运行时报 native 模块加载错误，手动执行 `npx electron-rebuild -f -w better-sqlite3,sharp`。
+
+### 打包注意事项
+
+- Native 模块通过 asar `unpackDir` 排除：`node_modules/{sharp,better-sqlite3,@lancedb,@img,node-*}`
+- AI Worker 脚本作为 `extraResource` 打包（`models/`、`scripts/embed-worker.mjs`、`scripts/face-worker.mjs`）
+- 打包工具：Electron Forge + Squirrel (Windows)
+
 ---
 
 ## 常用命令
@@ -251,13 +215,18 @@ const result = await ipc.client.photos.listPhotos({ folderId: 1 });
 npm run dev           # 启动开发模式（Vite HMR + Electron）
 npm run make          # 打包 Windows 安装包
 npm run test          # 运行 Vitest 单元测试
+npm run test:watch    # Vitest watch 模式
+npx vitest run src/tests/unit/foo.test.ts  # 运行单个测试文件
 npm run test:e2e      # 运行 Playwright 端到端测试
-npm run check         # Biome lint 检查
-npm run fix           # Biome 自动修复
+npm run check         # Biome lint 检查（通过 ultracite 封装）
+npm run fix           # Biome 自动修复（ultracite fix）
+npx tsc --noEmit      # 类型检查（忽略 node_modules 中的错误，只看 src/ 开头的输出）
 npm run db:generate   # 生成 Drizzle 迁移文件
 npm run db:migrate    # 执行数据库迁移
 npx shadcn add <comp> # 添加 shadcn/ui 组件
 ```
+
+**注意**: `npx tsc --noEmit` 会输出 node_modules 中第三方库的类型错误（@electron-forge、@orpc 等），这些可以忽略。只关注 `src/` 路径开头的错误。
 
 ---
 
@@ -286,6 +255,32 @@ git push origin main
 **注意**:
 - 不要推送 `node_modules/`、`data/`、`.vite/`、`out/`（已在 .gitignore）
 - 不要在 commit message 中写 `Co-Authored-By`（除非用户明确要求）
+
+---
+
+## 前端模式备忘
+
+### IME 输入处理
+
+中文输入法（IME）在组合过程中会触发 `keydown` 事件（如 Enter 确认候选词）。所有带 `onKeyDown` 快捷键的 `<input>` 必须使用 composition guard：
+
+```typescript
+const composingRef = useRef(false);
+// ...
+<input
+  onCompositionStart={() => { composingRef.current = true; }}
+  onCompositionEnd={(e) => { composingRef.current = false; setVal((e.target as HTMLInputElement).value); }}
+  onKeyDown={(e) => {
+    if (composingRef.current) return;
+    if (e.key === "Enter") handleSave();
+  }}
+/>
+```
+
+### 照片网格与灯箱
+
+- `PhotoGrid`：瀑布流布局，通过 `data-photo-id` / `data-photo-path` 属性支持右键菜单事件委托
+- `PhotoLightbox`：全屏查看器，需要 `{ id, filename, path, width, height }` 格式的 photos 数组
 
 ---
 
