@@ -151,8 +151,22 @@ async function fallbackSearch(
     }
 
     for (const row of rows as Array<Record<string, unknown>>) {
-      const vec = row.vector as number[];
-      if (!vec || vec.length !== queryVector.length) {
+      const rawVec = row.vector;
+      if (!rawVec) continue;
+
+      // LanceDB returns Apache Arrow Vector — normalize
+      let vec: number[];
+      if (Array.isArray(rawVec)) {
+        vec = rawVec as number[];
+      } else if (typeof (rawVec as any).toArray === "function") {
+        vec = Array.from((rawVec as any).toArray());
+      } else if (ArrayBuffer.isView(rawVec)) {
+        vec = Array.from(rawVec as Float32Array);
+      } else {
+        continue;
+      }
+
+      if (vec.length !== queryVector.length) {
         continue;
       }
       let dot = 0;

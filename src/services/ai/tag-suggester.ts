@@ -281,8 +281,6 @@ export async function suggestTags(
   threshold = 0.25,
   photoId?: number
 ): Promise<Array<{ tag: string; confidence: number }>> {
-  console.log(`[AI] suggestTags called: photoId=${photoId}, path=${imagePath}`);
-
   try {
     await loadModel();
   } catch (err: any) {
@@ -320,15 +318,10 @@ export async function suggestTags(
     }
     if (fresh.length > 0) {
       cachedTagEmbeddings = fresh;
-      const sample = fresh[0].vector;
-      console.log(
-        `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (sample dim=${sample.length}, type=${Object.prototype.toString.call(sample)}, first3=[${sample.slice(0,3)}])`
-      );
-    } else {
-      console.log(
-        `[AI] Pre-computed 0/${CANDIDATE_TAGS.length} tag embeddings — all failed`
-      );
     }
+    console.log(
+      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`
+    );
   }
 
   // Resolve image vector
@@ -356,7 +349,6 @@ export async function suggestTags(
           }
         }
         imageVecCache.set(photoId, vec);
-        console.log(`[AI] suggestTags: got vector from LanceDB for photo ${photoId} (dim=${vec.length}, type=${Object.prototype.toString.call(vec)}, first3=[${vec.slice(0,3)}])`);
       } else {
         console.log(`[AI] suggestTags: no vector in LanceDB for photo ${photoId}`);
       }
@@ -366,7 +358,6 @@ export async function suggestTags(
   }
 
   if (!imageVec) {
-    console.log(`[AI] suggestTags: falling back to worker embedding for photo ${photoId}`);
     try {
       imageVec = await embedImageInWorker(imagePath, localModelPath);
       if (photoId != null && imageVec) {
@@ -390,7 +381,6 @@ export async function suggestTags(
   }
 
   if (!cachedTagEmbeddings) {
-    console.error("[AI] suggestTags: no cached tag embeddings available");
     return [];
   }
 
@@ -403,14 +393,7 @@ export async function suggestTags(
     })
   );
 
-  const sorted = [...scores].sort((a, b) => b.similarity - a.similarity);
-  console.log(
-    `[AI] suggestTags: top 5 scores: ${sorted.slice(0, 5).map((s) => `${s.displayName}=${s.similarity.toFixed(3)}`).join(", ")}`
-  );
-
-  const result = selectTagsAdaptive(scores, 10);
-  console.log(`[AI] suggestTags: selected ${result.length} tags`);
-  return result;
+  return selectTagsAdaptive(scores, 10);
 }
 
 // --- Batch tag suggestion (incremental, post-embedding) ---
@@ -420,7 +403,6 @@ const MAX_AUTO_TAGS_PER_PHOTO = 5;
 export async function batchSuggestTags(
   photoIds: number[]
 ): Promise<{ tagged: number; skipped: number }> {
-  console.log(`[AI] batchSuggestTags: starting for ${photoIds.length} photos`);
   const db = getDatabase();
 
   try {
@@ -431,7 +413,6 @@ export async function batchSuggestTags(
   }
 
   if (!(embeddingModel && _localModelPath)) {
-    console.error("[AI] batchSuggestTags: model or path not available");
     return { tagged: 0, skipped: photoIds.length };
   }
 
@@ -445,11 +426,8 @@ export async function batchSuggestTags(
   const toProcess = photoIds.filter((id) => !alreadyTaggedSet.has(id));
 
   if (toProcess.length === 0) {
-    console.log(`[AI] batchSuggestTags: all ${photoIds.length} photos already have tags, skipping`);
     return { tagged: 0, skipped: photoIds.length };
   }
-
-  console.log(`[AI] batchSuggestTags: processing ${toProcess.length} photos (${alreadyTaggedSet.size} already tagged)`);
 
   // Pre-compute tag embeddings
   if (cachedTagEmbeddings === null) {
@@ -473,17 +451,14 @@ export async function batchSuggestTags(
   }
 
   if (!cachedTagEmbeddings) {
-    console.error("[AI] batchSuggestTags: failed to compute tag embeddings");
     return { tagged: 0, skipped: photoIds.length };
   }
 
   await initVectorDB();
   const vectors = await getPhotoVectors(toProcess);
-  console.log(`[AI] batchSuggestTags: got ${vectors.size}/${toProcess.length} vectors from LanceDB`);
 
   let tagged = 0;
   let skipped = 0;
-  let firstDiag = true;
   const tagColors = [
     "#5e6ad2",
     "#46a758",
@@ -500,15 +475,6 @@ export async function batchSuggestTags(
     if (!imageVec) {
       skipped++;
       continue;
-    }
-
-    if (firstDiag) {
-      firstDiag = false;
-      const sampleTag = cachedTagEmbeddings[0];
-      const sim = cosineSimilarity(imageVec, sampleTag.vector);
-      console.log(`[AI] batchSuggestTags diag: imageVec type=${Object.prototype.toString.call(imageVec)}, len=${imageVec.length}, first3=[${imageVec.slice(0,3)}]`);
-      console.log(`[AI] batchSuggestTags diag: tagVec type=${Object.prototype.toString.call(sampleTag.vector)}, len=${sampleTag.vector.length}, first3=[${sampleTag.vector.slice(0,3)}]`);
-      console.log(`[AI] batchSuggestTags diag: sample similarity=${sim}`);
     }
 
     const scores = cachedTagEmbeddings.map(
