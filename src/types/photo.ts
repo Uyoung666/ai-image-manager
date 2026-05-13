@@ -1,4 +1,5 @@
 export interface Photo {
+  fileDate?: number | null;
   filename: string;
   fileSize: number;
   height: number;

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { GroupHeader } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
+import { SortDropdown } from "./SortDropdown";
 import { Skeleton } from "./ui/skeleton";
 
 interface Photo {
+  fileDate?: number | null;
   filename: string;
   fileSize: number;
   height: number;
@@ -15,6 +18,9 @@ interface Photo {
   thumbnailPath: string | null;
   width: number;
 }
+export type SortField = "date" | "name" | "size";
+export type SortOrder = "asc" | "desc";
+
 interface PhotoGridProps {
   loading: boolean;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -25,9 +31,12 @@ interface PhotoGridProps {
   onExportSelected?: () => void;
   onRenameSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
+  onSortChange?: (sort: SortField, order: SortOrder) => void;
   photos: Photo[];
   searchQuery?: string;
   selectedIds: Set<number>;
+  sort?: SortField;
+  sortOrder?: SortOrder;
 }
 
 const DENSITY_CONFIGS = [
@@ -44,6 +53,8 @@ export function PhotoGrid({
   loading,
   selectedIds,
   searchQuery,
+  sort = "date",
+  sortOrder = "desc",
   onSelect,
   onDoubleClick,
   onContextMenu,
@@ -52,6 +63,7 @@ export function PhotoGrid({
   onEndReached,
   onExportSelected,
   onRenameSelected,
+  onSortChange,
 }: PhotoGridProps) {
   const { t } = useTranslation();
   const [densityIdx, setDensityIdx] = useState(1);
@@ -123,6 +135,26 @@ export function PhotoGrid({
       })),
     [photos],
   );
+
+  const groupHeaders = useMemo((): GroupHeader[] => {
+    if (sort !== "date" || photos.length === 0) return [];
+    const headers: GroupHeader[] = [];
+    let lastKey = "";
+    for (let i = 0; i < photos.length; i++) {
+      const ts = photos[i].fileDate;
+      if (!ts) continue;
+      const d = new Date(ts);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (key !== lastKey) {
+        lastKey = key;
+        headers.push({
+          beforeIndex: i,
+          label: `${d.getFullYear()}年${d.getMonth() + 1}月`,
+        });
+      }
+    }
+    return headers;
+  }, [photos, sort]);
 
   if (loading && photos.length === 0) {
     const skelCols = Array.from({ length: columnCount }, (_, ci) =>
@@ -222,6 +254,13 @@ export function PhotoGrid({
                 : `删除选中 (${selectedIds.size})`}
             </button>
           )}
+          {!compact && onSortChange && (
+            <SortDropdown
+              onChange={onSortChange}
+              order={sortOrder}
+              sort={sort}
+            />
+          )}
           {!compact && (
             <div className="flex items-center gap-1">
               {DENSITY_CONFIGS.map((cfg, i) => (
@@ -249,6 +288,7 @@ export function PhotoGrid({
           columnCount={columnCount}
           containerWidth={containerWidth - 16}
           gap={GAP}
+          groupHeaders={groupHeaders}
           items={masonryItems}
           onEndReached={onEndReached}
           renderItem={renderItem}

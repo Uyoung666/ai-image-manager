@@ -8,11 +8,17 @@ import {
 } from "react";
 import { useMasonryLayout } from "@/hooks/useMasonryLayout";
 
+export interface GroupHeader {
+  beforeIndex: number;
+  label: string;
+}
+
 interface MasonryGridProps {
   items: Array<{ id: number; width: number; height: number; [key: string]: any }>;
   containerWidth: number;
   columnCount: number;
   gap: number;
+  groupHeaders?: GroupHeader[];
   overscan?: number;
   renderItem: (item: any, index: number, style: React.CSSProperties) => ReactNode;
   onEndReached?: () => void;
@@ -43,6 +49,7 @@ export function MasonryGrid({
   containerWidth,
   columnCount,
   gap,
+  groupHeaders,
   overscan = 5,
   renderItem,
   onEndReached,
@@ -53,12 +60,40 @@ export function MasonryGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
 
-  const { positions, totalHeight } = useMasonryLayout(
+  const { positions: rawPositions, totalHeight: rawTotalHeight } = useMasonryLayout(
     items,
     containerWidth,
     columnCount,
     gap,
   );
+
+  const HEADER_HEIGHT = 36;
+
+  const { positions, totalHeight, headerPositions } = useMemo(() => {
+    if (!groupHeaders || groupHeaders.length === 0) {
+      return { positions: rawPositions, totalHeight: rawTotalHeight, headerPositions: [] };
+    }
+
+    const sortedHeaders = [...groupHeaders].sort((a, b) => a.beforeIndex - b.beforeIndex);
+    const headerSpace = HEADER_HEIGHT + gap;
+    const adjusted = rawPositions.map((p) => ({ ...p }));
+    const hdrPos: Array<{ top: number; label: string }> = [];
+
+    for (const header of sortedHeaders) {
+      const idx = header.beforeIndex;
+      if (idx >= adjusted.length) continue;
+
+      const headerTop = adjusted[idx].top;
+      hdrPos.push({ top: headerTop, label: header.label });
+
+      for (let i = idx; i < adjusted.length; i++) {
+        adjusted[i].top += headerSpace;
+      }
+    }
+
+    const newTotalHeight = rawTotalHeight + sortedHeaders.length * headerSpace;
+    return { positions: adjusted, totalHeight: newTotalHeight, headerPositions: hdrPos };
+  }, [rawPositions, rawTotalHeight, groupHeaders, gap]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -139,6 +174,15 @@ export function MasonryGrid({
     return result;
   }, [positions, scrollTop, viewportHeight, overscanPx, columnCount]);
 
+  const visibleHeaders = useMemo(() => {
+    if (headerPositions.length === 0) return [];
+    const top = scrollTop - overscanPx;
+    const bottom = scrollTop + viewportHeight + overscanPx;
+    return headerPositions.filter(
+      (h) => h.top + HEADER_HEIGHT >= top && h.top <= bottom,
+    );
+  }, [headerPositions, scrollTop, viewportHeight, overscanPx]);
+
   if (containerWidth <= 0) {
     return <div className={className} ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
   }
@@ -150,6 +194,21 @@ export function MasonryGrid({
       style={{ height: "100%", overflowY: "auto" }}
     >
       <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
+        {visibleHeaders.map((h) => (
+          <div
+            className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
+            key={h.label}
+            style={{
+              position: "absolute",
+              top: h.top,
+              left: 0,
+              width: "100%",
+              height: HEADER_HEIGHT,
+            }}
+          >
+            {h.label}
+          </div>
+        ))}
         {visibleItems.map(({ index, style }) => (
           <div key={items[index].id} style={style}>
             {renderItem(items[index], index, style)}

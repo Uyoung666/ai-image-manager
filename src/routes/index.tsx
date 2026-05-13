@@ -11,10 +11,13 @@ import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import { PhotoGrid } from "@/components/PhotoGrid";
+import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { QuickPreview } from "@/components/QuickPreview";
 import type { ExifFilters } from "@/components/SearchBar";
 import { SearchBar } from "@/components/SearchBar";
 import { Sidebar } from "@/components/Sidebar";
+import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
@@ -66,6 +69,9 @@ function HomePage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
@@ -99,6 +105,8 @@ function HomePage() {
   } = usePhotos({
     folderId: activeFolderId,
     tagId: activeTagId,
+    sort: sortField,
+    order: sortOrder,
     enabled: !isSearching,
   });
 
@@ -517,6 +525,10 @@ function HomePage() {
       }
 
       if (e.key === "Escape") {
+        if (quickPreviewIndex >= 0) {
+          setQuickPreviewIndex(-1);
+          return;
+        }
         if (renameDialogOpen) {
           setRenameDialogOpen(false);
           return;
@@ -530,10 +542,18 @@ function HomePage() {
           return;
         }
       }
+
+      if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
+        e.preventDefault();
+        const firstId = selectedIds.values().next().value as number;
+        const idx = photos.findIndex((p) => p.id === firstId);
+        if (idx >= 0) setQuickPreviewIndex(idx);
+        return;
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [photos, selectedIds, renameDialogOpen, convertDialogOpen]);
+  }, [photos, selectedIds, renameDialogOpen, convertDialogOpen, quickPreviewIndex]);
 
   const hasPhotos = photos.length > 0 || (loading && photos.length === 0);
 
@@ -588,9 +608,15 @@ function HomePage() {
                   : undefined
               }
               onSelect={handleSelect}
+              onSortChange={(s, o) => {
+                setSortField(s);
+                setSortOrder(o);
+              }}
               photos={photos}
               searchQuery={searchQuery}
               selectedIds={selectedIds}
+              sort={sortField}
+              sortOrder={sortOrder}
             />
             {detailPhoto && (
               <PhotoDetailPanel
@@ -606,6 +632,11 @@ function HomePage() {
         ) : (
           <Welcome onAddFolder={handleAddFolder} />
         )}
+        <StatusBar
+          aiStatus={aiStatus ?? null}
+          selectedCount={selectedIds.size}
+          totalPhotos={totalPhotos}
+        />
       </div>
       {lightboxIndex >= 0 && (
         <PhotoLightbox
@@ -613,6 +644,20 @@ function HomePage() {
           onClose={() => setLightboxIndex(-1)}
           open={lightboxIndex >= 0}
           photos={photos}
+        />
+      )}
+      {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
+        <QuickPreview
+          onClose={() => setQuickPreviewIndex(-1)}
+          onNavigate={(dir) => {
+            setQuickPreviewIndex((prev) => {
+              const next = prev + dir;
+              if (next < 0 || next >= photos.length) return prev;
+              setSelectedIds(new Set([photos[next].id]));
+              return next;
+            });
+          }}
+          photo={photos[quickPreviewIndex]}
         />
       )}
       <PhotoContextMenu
