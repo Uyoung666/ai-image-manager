@@ -586,6 +586,74 @@ export function startWatching(
   }
 }
 
+export function watchFolder(
+  folderPath: string,
+  onChange: (photoId: number | null, event: "add" | "remove") => void
+): void {
+  const db = getDatabase();
+  const watcher = chokidar.watch(folderPath, {
+    ignored: [/\.thumbnails/, /\.cache/],
+    ignorePermissionErrors: true,
+    awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
+    depth: 10,
+  });
+
+  watcher.on("add", async (filePath) => {
+    if (!shouldIndex(filePath)) {
+      return;
+    }
+    try {
+      let matchedFolderId: number | null = null;
+      const indexedFolders = db
+        .select({ id: folders.id, path: folders.path })
+        .from(folders)
+        .all();
+      for (const f of indexedFolders) {
+        const normalizedFolder = f.path.replace(/\\/g, "/") + "/";
+        const normalizedFile = filePath.replace(/\\/g, "/");
+        if (normalizedFile.startsWith(normalizedFolder)) {
+          if (
+            matchedFolderId === null ||
+            f.path.length > (matchedFolderId ? 1 : 0)
+          ) {
+            matchedFolderId = f.id;
+          }
+        }
+      }
+      const alreadyIndexed = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(eq(photos.path, filePath))
+        .get();
+
+      const photoId = await indexSingleFile(filePath, matchedFolderId);
+      if (matchedFolderId && photoId && !alreadyIndexed) {
+        db.update(folders)
+          .set({ photoCount: sql`photo_count + 1` })
+          .where(eq(folders.id, matchedFolderId))
+          .run();
+      }
+      onChange(photoId, "add");
+    } catch {
+      /* ignore */
+    }
+  });
+
+  watcher.on("unlink", (filePath) => {
+    const photo = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.path, filePath))
+      .get();
+    if (photo) {
+      db.delete(photos).where(eq(photos.id, photo.id)).run();
+      onChange(photo.id, "remove");
+    }
+  });
+
+  watchers.push(watcher);
+}
+
 export function stopWatching(): void {
   for (const watcher of watchers) {
     watcher.close();

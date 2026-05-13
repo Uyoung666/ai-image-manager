@@ -20,3 +20,7 @@ ipcRenderer.on("global-shortcut:search", () => {
 ipcRenderer.on(IPC_CHANNELS.FILE_CHANGE, (_event, payload) => {
   window.postMessage({ channel: IPC_CHANNELS.FILE_CHANGE, ...payload }, "*");
 });
+
+ipcRenderer.on("scan-progress", (_event, payload) => {
+  window.postMessage({ channel: "scan-progress", ...payload }, "*");
+});

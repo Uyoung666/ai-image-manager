@@ -77,6 +77,14 @@ function HomePage() {
         queryClient.invalidateQueries({ queryKey: ["photos"] });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
       }
+      if (event.data?.channel === "scan-progress") {
+        const { scanned, total, phase } = event.data;
+        if (phase === "indexing") {
+          setScanProgress(`正在索引 ${scanned}/${total}`);
+        } else if (phase === "complete") {
+          setScanProgress(`索引完成 (${total} 张)`);
+        }
+      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
@@ -153,7 +161,7 @@ function HomePage() {
     }
 
     setScanningFolder(folderPath);
-    setScanProgress(t("scanningProgress", { scanned: 0, total: 0 }));
+    setScanProgress(t("scanningProgress", { scanned: 0, total: "?" }));
     try {
       const scanResult = await ipc.client.photos.scanFolder({
         path: folderPath,

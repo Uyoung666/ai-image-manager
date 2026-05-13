@@ -406,6 +406,14 @@ export async function embedAllPhotos(
       phase: "idle",
       currentFile: "",
     });
+  } else if (total === 0 && totalPhotos > 0) {
+    // All photos already processed — report complete with actual counts
+    setCurrentProgress({
+      processed: processedCount,
+      total: processedCount,
+      phase: "complete",
+      currentFile: "",
+    });
   } else {
     setCurrentProgress({
       processed,

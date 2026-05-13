@@ -128,6 +128,26 @@ export function AiProgressBar() {
     );
   }
 
+  // Complete state: show re-index button for newly added photos
+  if (!progress.isActive && progress.phase === "complete") {
+    return (
+      <div className="mt-2 rounded-[6px] border border-[#2c2c30] bg-[#1c1e22] px-2 py-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[#a1a1aa] text-[11px]">
+            AI索引完成 ({progress.processed}/{progress.total})
+          </span>
+          <span className="font-[510] text-primary text-[11px]">100%</span>
+        </div>
+        <button
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-primary text-[11px] transition-colors hover:bg-primary/20"
+          onClick={handleStart}
+        >
+          索引新照片
+        </button>
+      </div>
+    );
+  }
+
   const pct =
     progress.total > 0
       ? Math.round((progress.processed / progress.total) * 100)

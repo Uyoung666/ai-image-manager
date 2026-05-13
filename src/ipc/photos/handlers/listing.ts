@@ -1,14 +1,41 @@
 import { os } from "@orpc/server";
+import { BrowserWindow } from "electron";
 import { desc, eq, inArray, like, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
-import { deletePhotoVectors } from "@/services/ai-embedder";
-import { scanFolder as scanFolderService } from "@/services/indexer";
+import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
+import { scanFolder as scanFolderService, watchFolder } from "@/services/indexer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
 
 // Folder management
 export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
-  const result = await scanFolderService(input.path);
+  // Send scan progress to all renderer windows
+  const result = await scanFolderService(input.path, (progress) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("scan-progress", progress);
+    }
+  });
+
+  // Start watching the newly added folder for future file changes
+  watchFolder(input.path, (photoId, event) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("file-change", { type: event, photoId });
+    }
+  });
+
+  // Auto-trigger AI embedding for newly scanned photos (fire-and-forget)
+  if (result.photoIds.length > 0) {
+    embedAllPhotos()
+      .then((count) => {
+        if (count > 0) {
+          console.log(`[AI] Auto-embedding after scan: ${count} photos processed`);
+        }
+      })
+      .catch((err) => {
+        console.warn("[AI] Auto-embedding after scan failed:", err?.message);
+      });
+  }
+
   return result;
 });
 
