@@ -310,12 +310,13 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      const { Archiver } = await import("archiver") as any;
-      const archive = new Archiver("zip", { zlib: { level: 9 } });
+      const archiverModule = await import("archiver");
+      const createArchive = (archiverModule as any).default || archiverModule;
+      const archive = createArchive("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
-      await new Promise<string>((resolve, reject) => {
-        output.on("close", () => resolve(zipPath));
+      await new Promise<void>((resolve, reject) => {
+        output.on("close", () => resolve());
         archive.on("error", reject);
         archive.pipe(output);
         archive.directory(tmpDir, false);
