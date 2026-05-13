@@ -1,5 +1,4 @@
 import { memo, useCallback, useState } from "react";
-import { ipc } from "@/ipc/manager";
 
 interface PhotoCardProps {
   filename: string;
@@ -67,7 +66,7 @@ export const PhotoCard = memo(function PhotoCard({
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      ipc.client.shell.startFileDrag({ filePath: path, iconPath: thumbnailPath || undefined });
+      (window as any).electronAPI?.startDrag?.(path, thumbnailPath || undefined);
     },
     [path, thumbnailPath],
   );
