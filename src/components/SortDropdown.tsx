@@ -55,7 +55,7 @@ export function SortDropdown({ sort, order, onChange }: SortDropdownProps) {
         {current.label}
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 min-w-[140px] rounded-[6px] border border-border bg-[#1c1e22] py-1 shadow-lg">
+        <div className="absolute top-full right-0 z-50 mt-1 min-w-[140px] rounded-[6px] border border-border bg-popover py-1 shadow-lg">
           {SORT_OPTIONS.map((opt) => (
             <button
               className={`w-full px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-foreground/5 ${
