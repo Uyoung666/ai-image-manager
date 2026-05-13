@@ -6,6 +6,7 @@ import exifr from "exifr";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
+import { checkNewPhotoDuplicates } from "./dedup-service";
 import { generateThumbnail } from "./thumbnailer";
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -276,6 +277,9 @@ async function indexSingleFile(
     return null;
   }
   const photoId = result.insertedId;
+
+  // Incremental duplicate detection
+  checkNewPhotoDuplicates(photoId, phash, filePath, stat.size);
 
   // Extract EXIF
   const exif = await readExif(filePath);

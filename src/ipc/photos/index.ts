@@ -3,7 +3,7 @@ import { deletePhoto, deletePhotos, cleanupOrphanPhotos, renamePhotos, convertPh
 import { searchByText, searchByImage, searchCompound } from "./handlers/search";
 import { startAiIndexing, stopAiIndexing, getAiProgress, getAiStatus, getAiHealth } from "./handlers/ai";
 import { suggestTags, getTags, getPhotoTags, addTag, setPhotoTag, removePhotoTag, confirmPhotoTag, deleteTag } from "./handlers/tags";
-import { getStats, findDuplicates } from "./handlers/stats";
+import { getStats, findDuplicates, dismissDuplicate, getDuplicateStats } from "./handlers/stats";
 import { exportPhotos, getWatermarkSettings, setWatermarkSettings } from "./handlers/export";
 
 export const photos = {
@@ -16,11 +16,13 @@ export const photos = {
   deletePhoto,
   deletePhotos,
   deleteTag,
+  dismissDuplicate,
   exportPhotos,
   findDuplicates,
   getAiHealth,
   getAiProgress,
   getAiStatus,
+  getDuplicateStats,
   getFolders,
   getPhotoDetail,
   getPhotoExif,

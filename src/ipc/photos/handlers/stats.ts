@@ -1,11 +1,14 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
 import { os } from "@orpc/server";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { exifData, photos } from "@/db/schema";
+import { detectionRuns, duplicatePairs, exifData, photos } from "@/db/schema";
 import {
   getPhotoVectors,
 } from "@/services/ai-embedder";
+import { BKTree, hammingDistance } from "@/services/bk-tree";
 
 // Statistics for dashboard
 export const getStats = os.handler(() => {
@@ -151,28 +154,116 @@ export const getStats = os.handler(() => {
   };
 });
 
-function hammingDistance(a: string, b: string): number {
-  if (a.length !== b.length) {
-    return 64; // Different lengths → max distance
-  }
+function computeFileHash(filePath: string): string | null {
   try {
-    const va = BigInt(`0x${a}`);
-    const vb = BigInt(`0x${b}`);
-    let xor = va ^ vb;
-    let dist = 0;
-    while (xor > 0n) {
-      dist += Number(xor & 1n);
-      xor >>= 1n;
+    const fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const size = stat.size;
+    const hash = crypto.createHash("sha256");
+
+    if (size <= 8192) {
+      const buf = Buffer.alloc(size);
+      fs.readSync(fd, buf, 0, size, 0);
+      hash.update(buf);
+    } else {
+      const head = Buffer.alloc(4096);
+      fs.readSync(fd, head, 0, 4096, 0);
+      hash.update(head);
+      const tail = Buffer.alloc(4096);
+      fs.readSync(fd, tail, 0, 4096, size - 4096);
+      hash.update(tail);
+      const sizeBuffer = Buffer.alloc(8);
+      sizeBuffer.writeBigInt64LE(BigInt(size));
+      hash.update(sizeBuffer);
     }
-    return dist;
+    fs.closeSync(fd);
+    return hash.digest("hex");
   } catch {
-    return 64;
+    return null;
   }
 }
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let k = 0; k < a.length; k++) {
+    dot += a[k] * b[k];
+    normA += a[k] * a[k];
+    normB += b[k] * b[k];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+}
+
 export const findDuplicates = os
-  .input(z.object({ threshold: z.number().optional().default(8) }))
+  .input(
+    z.object({
+      threshold: z.number().optional().default(8),
+      forceRescan: z.boolean().optional().default(false),
+    })
+  )
   .handler(async ({ input }) => {
     const db = getDatabase();
+
+    // If not forcing rescan, return persisted results
+    if (!input.forceRescan) {
+      const existing = db
+        .select()
+        .from(duplicatePairs)
+        .where(
+          or(
+            eq(duplicatePairs.status, "pending"),
+            eq(duplicatePairs.status, "confirmed")
+          )
+        )
+        .all();
+
+      if (existing.length > 0) {
+        const photoIds = new Set<number>();
+        for (const pair of existing) {
+          photoIds.add(pair.photoAId);
+          photoIds.add(pair.photoBId);
+        }
+        const photoMap = new Map<number, { id: number; path: string; filename: string; fileSize: number | null; width: number | null; height: number | null; createdAt: number }>();
+        const photoRows = db
+          .select({
+            id: photos.id,
+            path: photos.path,
+            filename: photos.filename,
+            fileSize: photos.fileSize,
+            width: photos.width,
+            height: photos.height,
+            createdAt: photos.createdAt,
+          })
+          .from(photos)
+          .where(inArray(photos.id, Array.from(photoIds)))
+          .all();
+        for (const p of photoRows) {
+          photoMap.set(p.id, p);
+        }
+
+        const duplicates = existing
+          .map((pair) => {
+            const a = photoMap.get(pair.photoAId);
+            const b = photoMap.get(pair.photoBId);
+            if (!a || !b) return null;
+            return {
+              pairId: pair.id,
+              photoA: { id: a.id, path: a.path, filename: a.filename, fileSize: a.fileSize, width: a.width, height: a.height, createdAt: a.createdAt },
+              photoB: { id: b.id, path: b.path, filename: b.filename, fileSize: b.fileSize, width: b.width, height: b.height, createdAt: b.createdAt },
+              matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
+              distance: pair.phashDistance ?? 0,
+              clipSimilarity: pair.clipSimilarity,
+              status: pair.status as "pending" | "confirmed",
+            };
+          })
+          .filter(Boolean);
+
+        return { duplicates, fromCache: true };
+      }
+    }
+
+    // Full detection scan
     const allPhotos = db
       .select({
         id: photos.id,
@@ -180,136 +271,258 @@ export const findDuplicates = os
         filename: photos.filename,
         fileSize: photos.fileSize,
         phash: photos.phash,
+        contentHash: photos.contentHash,
+        width: photos.width,
+        height: photos.height,
+        createdAt: photos.createdAt,
       })
       .from(photos)
       .all();
 
-    // Phase 0: Exact file-size match — fast O(n) grouping to catch identical files
-    // even when pHash is unavailable.
+    if (allPhotos.length === 0) {
+      return { duplicates: [], fromCache: false };
+    }
+
+    // --- Phase 0: Exact duplicate detection via content hash ---
     const sizeGroups = new Map<number, typeof allPhotos>();
     for (const p of allPhotos) {
       if (p.fileSize && p.fileSize > 0) {
         const group = sizeGroups.get(p.fileSize);
-        if (group) {
-          group.push(p);
-        } else {
-          sizeGroups.set(p.fileSize, [p]);
-        }
+        if (group) group.push(p);
+        else sizeGroups.set(p.fileSize, [p]);
       }
     }
 
-    const candidates: Array<{
-      photoA: { id: number; path: string; filename: string };
-      photoB: { id: number; path: string; filename: string };
-      distance: number;
-    }> = [];
+    interface CandidatePair {
+      photoAId: number;
+      photoBId: number;
+      matchType: "exact" | "phash" | "clip_confirmed";
+      phashDistance: number;
+      clipSimilarity: number | null;
+    }
+
+    const candidates: CandidatePair[] = [];
     const seenPairs = new Set<string>();
 
-    // Exact-size duplicates get distance 0 (very likely identical)
     for (const group of sizeGroups.values()) {
       if (group.length < 2) continue;
-      for (let i = 0; i < group.length; i++) {
-        for (let j = i + 1; j < group.length; j++) {
-          const a = group[i];
-          const b = group[j];
-          const key = `${Math.min(a.id, b.id)}_${Math.max(a.id, b.id)}`;
-          if (seenPairs.has(key)) continue;
-          seenPairs.add(key);
-          candidates.push({
-            photoA: { id: a.id, path: a.path, filename: a.filename },
-            photoB: { id: b.id, path: b.path, filename: b.filename },
-            distance: 0,
-          });
+
+      // Compute content hash for photos in this group that don't have one yet
+      for (const p of group) {
+        if (!p.contentHash) {
+          const hash = computeFileHash(p.path);
+          if (hash) {
+            p.contentHash = hash;
+            db.update(photos)
+              .set({ contentHash: hash })
+              .where(eq(photos.id, p.id))
+              .run();
+          }
+        }
+      }
+
+      // Group by content hash
+      const hashGroups = new Map<string, typeof group>();
+      for (const p of group) {
+        if (!p.contentHash) continue;
+        const hg = hashGroups.get(p.contentHash);
+        if (hg) hg.push(p);
+        else hashGroups.set(p.contentHash, [p]);
+      }
+
+      for (const hGroup of hashGroups.values()) {
+        if (hGroup.length < 2) continue;
+        for (let i = 0; i < hGroup.length; i++) {
+          for (let j = i + 1; j < hGroup.length; j++) {
+            const aId = Math.min(hGroup[i].id, hGroup[j].id);
+            const bId = Math.max(hGroup[i].id, hGroup[j].id);
+            const key = `${aId}_${bId}`;
+            if (seenPairs.has(key)) continue;
+            seenPairs.add(key);
+            candidates.push({
+              photoAId: aId,
+              photoBId: bId,
+              matchType: "exact",
+              phashDistance: 0,
+              clipSimilarity: null,
+            });
+          }
         }
       }
     }
 
-    // Phase 1: pHash screening for visually similar (but not byte-identical) photos
+    // --- Phase 1: BK-Tree pHash near-neighbor search ---
     const photosWithHash = allPhotos.filter((p) => p.phash);
-    const CHUNK_SIZE = 300;
-    let compared = 0;
-    const totalPairs = (photosWithHash.length * (photosWithHash.length - 1)) / 2;
+    const bkTree = new BKTree();
+    for (const p of photosWithHash) {
+      bkTree.insert(p.id, p.phash!);
+    }
 
-    for (let ci = 0; ci < photosWithHash.length; ci += CHUNK_SIZE) {
-      const chunkEnd = Math.min(ci + CHUNK_SIZE, photosWithHash.length);
-      const chunk = photosWithHash.slice(ci, chunkEnd);
-
-      await new Promise<void>((resolve) => {
-        setImmediate(() => {
-          for (const photoA of chunk) {
-            for (const photoB of photosWithHash) {
-              if (photoA.id >= photoB.id) continue;
-              compared++;
-              const key = `${photoA.id}_${photoB.id}`;
-              if (seenPairs.has(key)) continue;
-              const dist = hammingDistance(photoA.phash!, photoB.phash!);
-              if (dist <= input.threshold) {
-                seenPairs.add(key);
-                candidates.push({
-                  photoA: { id: photoA.id, path: photoA.path, filename: photoA.filename },
-                  photoB: { id: photoB.id, path: photoB.path, filename: photoB.filename },
-                  distance: dist,
-                });
-              }
-            }
-          }
-          resolve();
+    let phashProcessed = 0;
+    for (const p of photosWithHash) {
+      phashProcessed++;
+      const neighbors = bkTree.query(p.phash!, input.threshold);
+      for (const n of neighbors) {
+        if (n.photoId === p.id) continue;
+        const aId = Math.min(p.id, n.photoId);
+        const bId = Math.max(p.id, n.photoId);
+        const key = `${aId}_${bId}`;
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+        candidates.push({
+          photoAId: aId,
+          photoBId: bId,
+          matchType: "phash",
+          phashDistance: n.distance,
+          clipSimilarity: null,
         });
-      });
-      if (ci % (CHUNK_SIZE * 5) === 0 || ci + CHUNK_SIZE >= photosWithHash.length) {
-        const pct = totalPairs > 0 ? Math.round((compared / totalPairs) * 100) : 0;
-        console.log(
-          `[Dedup] pHash screening: ~${pct}% (${compared}/${totalPairs} pairs, ${candidates.length} candidates)`
-        );
+      }
+
+      // Yield event loop every 500 photos
+      if (phashProcessed % 500 === 0) {
+        await new Promise<void>((r) => setImmediate(r));
       }
     }
 
-    // Phase 2: CLIP vector verification for top candidates.
-    const topCandidates = candidates.slice(0, 200);
-    const duplicates: Array<{
-      photoA: { id: number; path: string; filename: string };
-      photoB: { id: number; path: string; filename: string };
-      distance: number;
-      clipSimilarity?: number;
-    }> = [];
+    // --- Phase 2: CLIP vector verification ---
+    // Sort by distance (lower = more likely duplicate)
+    candidates.sort((a, b) => a.phashDistance - b.phashDistance);
 
-    if (topCandidates.length > 0) {
-      const uniqueIds = new Set<number>();
-      for (const c of topCandidates) {
-        uniqueIds.add(c.photoA.id);
-        uniqueIds.add(c.photoB.id);
+    const uniqueIds = new Set<number>();
+    for (const c of candidates) {
+      uniqueIds.add(c.photoAId);
+      uniqueIds.add(c.photoBId);
+    }
+
+    let vectors: Map<number, number[]> = new Map();
+    try {
+      vectors = await getPhotoVectors(Array.from(uniqueIds));
+    } catch {
+      // LanceDB unavailable
+    }
+
+    const confirmedPairs: CandidatePair[] = [];
+
+    for (const c of candidates) {
+      if (c.matchType === "exact") {
+        // Exact SHA-256 match — no CLIP needed
+        confirmedPairs.push(c);
+        continue;
       }
 
-      let vectors: Map<number, number[]> = new Map();
-      try {
-        vectors = await getPhotoVectors(Array.from(uniqueIds));
-      } catch {
-        // LanceDB unavailable — fall through to pHash-only results
-      }
+      const vecA = vectors.get(c.photoAId);
+      const vecB = vectors.get(c.photoBId);
 
-      for (const c of topCandidates) {
-        const vecA = vectors.get(c.photoA.id);
-        const vecB = vectors.get(c.photoB.id);
-
-        if (vecA && vecB && vecA.length === vecB.length) {
-          let dot = 0;
-          let normA = 0;
-          let normB = 0;
-          for (let k = 0; k < vecA.length; k++) {
-            dot += vecA[k] * vecB[k];
-            normA += vecA[k] * vecA[k];
-            normB += vecB[k] * vecB[k];
-          }
-          const sim = dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
-          if (sim > 0.95) {
-            duplicates.push({ ...c, clipSimilarity: Math.round(sim * 10_000) / 10_000 });
-          }
-        } else {
-          // Vectors not available — keep candidate (pHash or size-match is sufficient)
-          duplicates.push(c);
+      if (vecA && vecB && vecA.length === vecB.length) {
+        const sim = cosineSimilarity(vecA, vecB);
+        if (sim > 0.95) {
+          c.clipSimilarity = Math.round(sim * 10_000) / 10_000;
+          c.matchType = "clip_confirmed";
+          confirmedPairs.push(c);
         }
+      } else {
+        // No vectors: use distance-based confidence
+        if (c.phashDistance <= 3) {
+          // High confidence without CLIP
+          confirmedPairs.push(c);
+        }
+        // distance 4-8 without vectors: skip (too uncertain)
       }
     }
 
-    return { duplicates };
+    // --- Persist results ---
+    // Clear old results before inserting new ones
+    db.delete(duplicatePairs).run();
+
+    if (confirmedPairs.length > 0) {
+      for (const pair of confirmedPairs) {
+        db.insert(duplicatePairs)
+          .values({
+            photoAId: pair.photoAId,
+            photoBId: pair.photoBId,
+            matchType: pair.matchType,
+            phashDistance: pair.phashDistance,
+            clipSimilarity: pair.clipSimilarity,
+            status: pair.matchType === "exact" || pair.matchType === "clip_confirmed" ? "confirmed" : "pending",
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+    }
+
+    // Record detection run
+    const maxId = allPhotos.reduce((max, p) => Math.max(max, p.id), 0);
+    db.insert(detectionRuns)
+      .values({
+        lastPhotoId: maxId,
+        photosProcessed: allPhotos.length,
+        pairsFound: confirmedPairs.length,
+      })
+      .run();
+
+    // Build response with photo metadata
+    const photoMap = new Map<number, (typeof allPhotos)[0]>();
+    for (const p of allPhotos) {
+      photoMap.set(p.id, p);
+    }
+
+    const duplicates = confirmedPairs
+      .map((pair) => {
+        const a = photoMap.get(pair.photoAId);
+        const b = photoMap.get(pair.photoBId);
+        if (!a || !b) return null;
+        return {
+          pairId: null as number | null,
+          photoA: { id: a.id, path: a.path, filename: a.filename, fileSize: a.fileSize, width: a.width, height: a.height, createdAt: a.createdAt },
+          photoB: { id: b.id, path: b.path, filename: b.filename, fileSize: b.fileSize, width: b.width, height: b.height, createdAt: b.createdAt },
+          matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
+          distance: pair.phashDistance,
+          clipSimilarity: pair.clipSimilarity,
+          status: (pair.matchType === "exact" || pair.matchType === "clip_confirmed" ? "confirmed" : "pending") as "pending" | "confirmed",
+        };
+      })
+      .filter(Boolean);
+
+    return { duplicates, fromCache: false };
   });
+
+export const dismissDuplicate = os
+  .input(z.object({ pairId: z.number() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    db.update(duplicatePairs)
+      .set({ status: "dismissed", resolvedAt: Date.now() })
+      .where(eq(duplicatePairs.id, input.pairId))
+      .run();
+    return { success: true };
+  });
+
+export const getDuplicateStats = os.handler(() => {
+  const db = getDatabase();
+  const total = db
+    .select({ count: sql<number>`count(*)` })
+    .from(duplicatePairs)
+    .get()?.count || 0;
+  const pending = db
+    .select({ count: sql<number>`count(*)` })
+    .from(duplicatePairs)
+    .where(eq(duplicatePairs.status, "pending"))
+    .get()?.count || 0;
+  const confirmed = db
+    .select({ count: sql<number>`count(*)` })
+    .from(duplicatePairs)
+    .where(eq(duplicatePairs.status, "confirmed"))
+    .get()?.count || 0;
+  const dismissed = db
+    .select({ count: sql<number>`count(*)` })
+    .from(duplicatePairs)
+    .where(eq(duplicatePairs.status, "dismissed"))
+    .get()?.count || 0;
+  const lastRun = db
+    .select()
+    .from(detectionRuns)
+    .orderBy(desc(detectionRuns.completedAt))
+    .limit(1)
+    .get();
+  return { total, pending, confirmed, dismissed, lastRun };
+});

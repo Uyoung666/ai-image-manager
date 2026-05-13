@@ -37,6 +37,7 @@ export const photos = sqliteTable(
     thumbnailPath: text("thumbnail_path"),
     thumbnailSize: text("thumbnail_size"),
     phash: text("phash"),
+    contentHash: text("content_hash"),
     vectorId: text("vector_id"),
     isIndexed: integer("is_indexed", { mode: "boolean" })
       .notNull()
@@ -211,6 +212,43 @@ export const faceIdentityMembers = sqliteTable(
     ),
   })
 );
+
+export const duplicatePairs = sqliteTable(
+  "duplicate_pairs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    photoAId: integer("photo_a_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    photoBId: integer("photo_b_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    matchType: text("match_type").notNull(), // 'exact' | 'phash' | 'clip_confirmed'
+    phashDistance: integer("phash_distance"),
+    clipSimilarity: real("clip_similarity"),
+    status: text("status").notNull().default("pending"), // 'pending' | 'confirmed' | 'dismissed'
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    resolvedAt: integer("resolved_at"),
+  },
+  (table) => ({
+    uniquePair: uniqueIndex("idx_dup_pair").on(table.photoAId, table.photoBId),
+    statusIdx: index("idx_dup_status").on(table.status),
+    photoAIdx: index("idx_dup_photo_a").on(table.photoAId),
+    photoBIdx: index("idx_dup_photo_b").on(table.photoBId),
+  })
+);
+
+export const detectionRuns = sqliteTable("detection_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  lastPhotoId: integer("last_photo_id").notNull(),
+  photosProcessed: integer("photos_processed").notNull().default(0),
+  pairsFound: integer("pairs_found").notNull().default(0),
+  completedAt: integer("completed_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
 
 export const cloudConfigs = sqliteTable("cloud_configs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
