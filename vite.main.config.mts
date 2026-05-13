@@ -28,6 +28,7 @@ export default defineConfig({
         "electron-store",
         "@claudiu-ceia/dhash",
         "archiver",
+        "update-electron-app",
       ],
     },
   },
