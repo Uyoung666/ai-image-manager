@@ -320,10 +320,15 @@ export async function suggestTags(
     }
     if (fresh.length > 0) {
       cachedTagEmbeddings = fresh;
+      const sample = fresh[0].vector;
+      console.log(
+        `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (sample dim=${sample.length}, type=${Object.prototype.toString.call(sample)}, first3=[${sample.slice(0,3)}])`
+      );
+    } else {
+      console.log(
+        `[AI] Pre-computed 0/${CANDIDATE_TAGS.length} tag embeddings — all failed`
+      );
     }
-    console.log(
-      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`
-    );
   }
 
   // Resolve image vector
@@ -351,7 +356,7 @@ export async function suggestTags(
           }
         }
         imageVecCache.set(photoId, vec);
-        console.log(`[AI] suggestTags: got vector from LanceDB for photo ${photoId} (dim=${vec.length})`);
+        console.log(`[AI] suggestTags: got vector from LanceDB for photo ${photoId} (dim=${vec.length}, type=${Object.prototype.toString.call(vec)}, first3=[${vec.slice(0,3)}])`);
       } else {
         console.log(`[AI] suggestTags: no vector in LanceDB for photo ${photoId}`);
       }

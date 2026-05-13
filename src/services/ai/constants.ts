@@ -25,13 +25,20 @@ export function disposeTensors(output: Record<string, any>): void {
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
+  if (!a || !b || a.length === 0 || b.length === 0 || a.length !== b.length) {
+    return 0;
+  }
   let dot = 0;
   let normA = 0;
   let normB = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+    const ai = +a[i];
+    const bi = +b[i];
+    if (Number.isNaN(ai) || Number.isNaN(bi)) return 0;
+    dot += ai * bi;
+    normA += ai * ai;
+    normB += bi * bi;
   }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom > 0 ? dot / denom : 0;
 }

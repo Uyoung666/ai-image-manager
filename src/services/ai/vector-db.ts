@@ -116,8 +116,20 @@ export async function getPhotoVectors(
     >;
     for (const row of rows) {
       const pid = row.photo_id as number;
-      const vec = row.vector as number[];
-      if (pid != null && vec?.length > 0) {
+      const rawVec = row.vector;
+      if (pid == null || !rawVec) continue;
+
+      // LanceDB may return Float32Array, Float64Array, or nested array — normalize to number[]
+      let vec: number[];
+      if (ArrayBuffer.isView(rawVec)) {
+        vec = Array.from(rawVec as Float32Array);
+      } else if (Array.isArray(rawVec)) {
+        vec = rawVec as number[];
+      } else {
+        continue;
+      }
+
+      if (vec.length > 0) {
         map.set(pid, vec);
       }
     }
