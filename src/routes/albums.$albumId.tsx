@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { ipc } from "@/ipc/manager";
@@ -34,6 +34,9 @@ function AlbumDetailPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const composingRef = useRef(false);
 
   const loadAlbum = useCallback(async () => {
     try {
@@ -82,6 +85,17 @@ function AlbumDetailPage() {
     navigate({ to: "/albums" as "/albums" });
   }
 
+  async function handleSaveName() {
+    if (!album || !nameInput.trim()) return;
+    try {
+      await ipc.client.albums.updateAlbum({ id: album.id, name: nameInput.trim() });
+      setAlbum((prev) => (prev ? { ...prev, name: nameInput.trim() } : prev));
+      setEditingName(false);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function handleDoubleClick(id: number) {
     const idx = photos.findIndex((p) => p.id === id);
     if (idx >= 0) setLightboxIndex(idx);
@@ -101,9 +115,40 @@ function AlbumDetailPage() {
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
-                {album?.name || "加载中..."}
-              </h1>
+              {editingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    className="h-8 rounded-[6px] border border-input bg-card px-3 text-[16px] font-[590] text-foreground outline-none focus:border-primary"
+                    onCompositionStart={() => { composingRef.current = true; }}
+                    onCompositionEnd={(e) => {
+                      composingRef.current = false;
+                      setNameInput((e.target as HTMLInputElement).value);
+                    }}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (composingRef.current) return;
+                      if (e.key === "Enter") handleSaveName();
+                      if (e.key === "Escape") setEditingName(false);
+                    }}
+                    value={nameInput}
+                  />
+                  <button
+                    className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                    onClick={handleSaveName}
+                    type="button"
+                  >
+                    保存
+                  </button>
+                </div>
+              ) : (
+                <h1
+                  className="cursor-pointer font-[590] text-[24px] text-foreground tracking-tight hover:text-primary"
+                  onClick={() => { setNameInput(album?.name || ""); setEditingName(true); }}
+                >
+                  {album?.name || "加载中..."}
+                </h1>
+              )}
               {album?.isSmart && (
                 <span className="flex items-center gap-1 rounded-[4px] bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   <Zap className="h-2.5 w-2.5" />
