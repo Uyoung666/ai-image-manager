@@ -293,6 +293,13 @@ function createWindow() {
 
   ipcContext.setMainWindow(mainWindow);
 
+  // Forward renderer/preload console to main stdout for debugging
+  mainWindow.webContents.on("console-message", (_e, _level, message) => {
+    if (message.includes("[IPC]") || message.includes("[Preload]")) {
+      fs.appendFileSync(path.join(app.getPath("userData"), "debug.log"), message + "\n");
+    }
+  });
+
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
@@ -312,14 +319,24 @@ function checkForUpdates() {
 }
 
 async function setupORPC() {
-  const { rpcHandler } = await import("./ipc/handler");
+  const logPath = path.join(app.getPath("userData"), "orpc-debug.log");
+  const debugLog = (msg: string) => { try { fs.appendFileSync(logPath, `${Date.now()} ${msg}\n`); } catch {} };
+  debugLog("setupORPC called");
+  try {
+    const { rpcHandler } = await import("./ipc/handler");
+    debugLog("handler imported OK");
 
-  ipcMain.on(IPC_CHANNELS.START_ORPC_SERVER, (event) => {
-    const [serverPort] = event.ports;
-
-    serverPort.start();
-    rpcHandler.upgrade(serverPort);
-  });
+    ipcMain.on(IPC_CHANNELS.START_ORPC_SERVER, (event) => {
+      debugLog("Received START_ORPC_SERVER, ports: " + event.ports.length);
+      const [serverPort] = event.ports;
+      rpcHandler.upgrade(serverPort);
+      serverPort.start();
+      debugLog("Handler upgraded");
+    });
+    debugLog("Listener registered");
+  } catch (err: any) {
+    debugLog("ERROR: " + (err?.message || err));
+  }
 }
 
 // Custom protocol must be registered as privileged before app.whenReady()
