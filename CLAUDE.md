@@ -170,6 +170,16 @@ Renderer Process（渲染进程）
   └── 状态管理：TanStack Query + React state
 ```
 
+### 主进程构建（Vite ESM 输出）
+
+主进程通过 Vite 构建，输出格式为 **ESM**（`formats: ["es"]`）。ESM 环境中 **没有 `require()` 函数**。
+
+**关键规则：在 `src/main.ts` 或主进程代码中新增 npm 依赖时，必须将其加入 `vite.main.config.mts` 的 `rollupOptions.external` 列表。**
+
+原因：如果一个 CJS 包（内部使用 `require()`）被 Vite 打包进 ESM 输出，运行时会报错 `Calling 'require' for "node:xxx" in an environment that doesn't expose the 'require' function`。将其标记为 external 后，Electron 运行时直接从 node_modules 加载，避免此问题。
+
+历史案例：`archiver`、`update-electron-app` 都因此报错过。
+
 ### IPC 通信模式
 
 本项目使用 **oRPC** 而非传统的 `ipcRenderer.invoke`。
