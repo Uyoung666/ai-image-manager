@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
 import type { Photo } from "@/types/photo";
@@ -22,6 +22,14 @@ interface IdentityDetail {
   photos: Photo[];
 }
 
+interface CtxMenu {
+  open: boolean;
+  photoId: number | null;
+  photoPath: string | null;
+  x: number;
+  y: number;
+}
+
 function PersonDetailPage() {
   const { identityId } = Route.useParams() as { identityId: string };
   const navigate = useNavigate();
@@ -29,6 +37,10 @@ function PersonDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu>({ open: false, photoId: null, photoPath: null, x: 0, y: 0 });
+  const menuRef = useRef<HTMLDivElement>(null);
+  const composingRef = useRef(false);
 
   const loadIdentity = useCallback(async () => {
     try {
@@ -48,6 +60,29 @@ function PersonDetailPage() {
   useEffect(() => {
     loadIdentity();
   }, [loadIdentity]);
+
+  useEffect(() => {
+    if (!ctxMenu.open) return;
+    const dismiss = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setCtxMenu((m) => ({ ...m, open: false }));
+      }
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxMenu((m) => ({ ...m, open: false }));
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", dismiss, true);
+      document.addEventListener("contextmenu", dismiss, true);
+    }, 0);
+    document.addEventListener("keydown", keyHandler);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", dismiss, true);
+      document.removeEventListener("contextmenu", dismiss, true);
+      document.removeEventListener("keydown", keyHandler);
+    };
+  }, [ctxMenu.open]);
 
   async function handleSaveName() {
     if (!identity || !nameInput.trim()) return;
@@ -83,16 +118,34 @@ function PersonDetailPage() {
     }
   }
 
-  const photos = identity?.photos || [];
-
-  function toLocalMediaUrl(filePath: string): string {
-    const encoded = filePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .map((s) => encodeURIComponent(s))
-      .join("/");
-    return `local-media://${encoded}`;
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    const target = (e.target as HTMLElement).closest("[data-photo-id]") as HTMLElement | null;
+    if (!target) return;
+    const photoId = Number(target.dataset.photoId);
+    const photoPath = target.dataset.photoPath || null;
+    setCtxMenu({ open: true, photoId, photoPath, x: e.clientX, y: e.clientY });
   }
+
+  function handleSelect(id: number, event: React.MouseEvent) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (event.ctrlKey || event.metaKey) {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+      } else {
+        next.clear();
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleOpenExplorer(path: string) {
+    ipc.client.shell.openInExplorer({ path }).catch(() => {});
+  }
+
+  const photos = identity?.photos || [];
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -116,8 +169,14 @@ function PersonDetailPage() {
                 <input
                   autoFocus
                   className="h-8 rounded-[6px] border border-input bg-card px-3 text-[16px] font-[590] text-foreground outline-none focus:border-primary"
+                  onCompositionStart={() => { composingRef.current = true; }}
+                  onCompositionEnd={(e) => {
+                    composingRef.current = false;
+                    setNameInput((e.target as HTMLInputElement).value);
+                  }}
                   onChange={(e) => setNameInput(e.target.value)}
                   onKeyDown={(e) => {
+                    if (composingRef.current) return;
                     if (e.key === "Enter") handleSaveName();
                     if (e.key === "Escape") setEditingName(false);
                   }}
@@ -126,6 +185,7 @@ function PersonDetailPage() {
                 <button
                   className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"
                   onClick={handleSaveName}
+                  type="button"
                 >
                   保存
                 </button>
@@ -145,50 +205,58 @@ function PersonDetailPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div className="aspect-square animate-pulse rounded-[8px] bg-card" key={i} />
-            ))}
-          </div>
-        ) : photos.length === 0 ? (
-          <div className="flex h-40 items-center justify-center text-[13px] text-muted-foreground">
-            该人物分组中没有照片
-          </div>
-        ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-            {photos.map((photo) => (
-              <div className="group relative overflow-hidden rounded-[8px] border border-border bg-card" key={photo.id}>
-                <div className="aspect-square overflow-hidden bg-muted">
-                  {photo.thumbnailPath ? (
-                    <img
-                      alt={photo.filename}
-                      className="h-full w-full object-cover"
-                      src={toLocalMediaUrl(photo.thumbnailPath)}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[11px] text-muted-foreground">
-                      {photo.filename}
-                    </div>
-                  )}
-                </div>
-                <div className="px-3 py-2">
-                  <p className="truncate text-[12px] text-foreground">{photo.filename}</p>
-                </div>
-                <button
-                  className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
-                  onClick={() => handleRemoveFace(photo.id)}
-                  title="从此人物分组中移除"
-                  type="button"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto">
+        <PhotoGrid
+          loading={loading}
+          onContextMenu={handleContextMenu}
+          onDoubleClick={() => {}}
+          onSelect={handleSelect}
+          photos={photos as any}
+          selectedIds={selectedIds}
+        />
       </div>
+
+      {ctxMenu.open && (
+        <div
+          className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+          ref={menuRef}
+          style={{
+            left: Math.min(ctxMenu.x, window.innerWidth - 190),
+            top: Math.min(ctxMenu.y, window.innerHeight - 180),
+          }}
+        >
+          <button
+            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10"
+            onClick={() => {
+              if (ctxMenu.photoPath) handleOpenExplorer(ctxMenu.photoPath);
+              setCtxMenu((m) => ({ ...m, open: false }));
+            }}
+          >
+            在资源管理器中打开
+          </button>
+          <button
+            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10"
+            onClick={() => {
+              if (ctxMenu.photoPath) {
+                navigator.clipboard.writeText(ctxMenu.photoPath).catch(() => {});
+              }
+              setCtxMenu((m) => ({ ...m, open: false }));
+            }}
+          >
+            复制路径
+          </button>
+          <div className="my-1 h-px bg-border" />
+          <button
+            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-foreground/10"
+            onClick={() => {
+              if (ctxMenu.photoId !== null) handleRemoveFace(ctxMenu.photoId);
+              setCtxMenu((m) => ({ ...m, open: false }));
+            }}
+          >
+            从此人物分组中移除
+          </button>
+        </div>
+      )}
     </div>
   );
 }
