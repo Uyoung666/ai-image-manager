@@ -293,13 +293,6 @@ function createWindow() {
 
   ipcContext.setMainWindow(mainWindow);
 
-  // Forward renderer/preload console to main stdout for debugging
-  mainWindow.webContents.on("console-message", (_e, _level, message) => {
-    if (message.includes("[IPC]") || message.includes("[Preload]")) {
-      fs.appendFileSync(path.join(app.getPath("userData"), "debug.log"), message + "\n");
-    }
-  });
-
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
@@ -319,24 +312,12 @@ function checkForUpdates() {
 }
 
 async function setupORPC() {
-  const logPath = path.join(app.getPath("userData"), "orpc-debug.log");
-  const debugLog = (msg: string) => { try { fs.appendFileSync(logPath, `${Date.now()} ${msg}\n`); } catch {} };
-  debugLog("setupORPC called");
-  try {
-    const { rpcHandler } = await import("./ipc/handler");
-    debugLog("handler imported OK");
-
-    ipcMain.on(IPC_CHANNELS.START_ORPC_SERVER, (event) => {
-      debugLog("Received START_ORPC_SERVER, ports: " + event.ports.length);
-      const [serverPort] = event.ports;
-      rpcHandler.upgrade(serverPort);
-      serverPort.start();
-      debugLog("Handler upgraded");
-    });
-    debugLog("Listener registered");
-  } catch (err: any) {
-    debugLog("ERROR: " + (err?.message || err));
-  }
+  const { rpcHandler } = await import("./ipc/handler");
+  ipcMain.on(IPC_CHANNELS.START_ORPC_SERVER, (event) => {
+    const [serverPort] = event.ports;
+    rpcHandler.upgrade(serverPort);
+    serverPort.start();
+  });
 }
 
 // Custom protocol must be registered as privileged before app.whenReady()
@@ -470,13 +451,7 @@ app.whenReady().then(async () => {
       );
     }
 
-    // Ensure AI model is available before starting AI services
-    await ensureModelAvailable();
-
-    // ── L2-L3: Remaining services (fileWatcher + AI vector DB) ────────
-    await registry.startRemaining();
-    console.log("[App] All services started");
-
+    // ── Window + IPC first (user sees UI immediately) ──────────────────
     await setupORPC();
     createWindow();
     createTray();
@@ -492,12 +467,18 @@ app.whenReady().then(async () => {
       console.log(
         `[App] Received ${sentFilePaths.length} file(s) via SendTo/CLI`
       );
-      // Import files into the default folder or prompt user
-      // For now, log and notify renderer after window is ready
       mainWindow?.webContents.once("did-finish-load", () => {
         mainWindow?.webContents.send("sendto:files", sentFilePaths);
       });
     }
+
+    // ── L2-L3: Non-critical services in background ───────────────────
+    ensureModelAvailable()
+      .then(() => registry.startRemaining())
+      .then(() => console.log("[App] All services started"))
+      .catch((err) =>
+        console.warn("[App] Non-critical services degraded:", (err as Error)?.message)
+      );
   } catch (error) {
     console.error("Error during app initialization:", error);
   }

@@ -19,9 +19,15 @@ export function getDbPath(): string {
 
 function getMigrationsFolder(): string {
   // In development, migrations are in the project root
-  const devPath = path.join(app.getAppPath(), "drizzle");
-  if (fs.existsSync(devPath)) {
-    return devPath;
+  const candidates = [
+    path.join(app.getAppPath(), "drizzle"),
+    path.join(process.cwd(), "drizzle"),
+    path.join(app.getAppPath(), "..", "..", "drizzle"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
   }
   // Fallback for packaged app
   const prodPath = path.join(process.resourcesPath, "drizzle");

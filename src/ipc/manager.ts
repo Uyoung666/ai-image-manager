@@ -43,13 +43,14 @@ class IPCManager {
 export const ipc = new IPCManager();
 
 // Defer initialization: preload must register its message listener first.
-function tryInitialize() {
+function tryInitialize(attempts = 0) {
   if ((window as any).electronAPI?.preloadReady) {
     console.log("[IPC] preloadReady detected, calling initialize");
     ipc.initialize();
+  } else if (attempts < 100) {
+    setTimeout(() => tryInitialize(attempts + 1), 10);
   } else {
-    console.log("[IPC] preloadReady not found, retrying in 10ms");
-    setTimeout(tryInitialize, 10);
+    console.error("[IPC] preloadReady never became available after 1s — oRPC will not work");
   }
 }
 tryInitialize();
