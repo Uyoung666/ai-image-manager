@@ -29,6 +29,13 @@
       "when": 1778630607370,
       "tag": "0003_fair_shaman",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1778666018066,
+      "tag": "0004_ancient_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

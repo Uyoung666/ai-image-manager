@@ -12,12 +12,13 @@ import {
   detectFaces,
   getFaceDetectionProgress,
   isFaceDetectionRunning,
+  reclusterAllFaces,
 } from "@/services/face-detector";
 
 const IdSchema = z.object({ id: z.number() });
 
 export const startFaceDetection = os
-  .input(z.object({ photoIds: z.array(z.number()).optional() }))
+  .input(z.object({ photoIds: z.array(z.number()).optional(), rescan: z.boolean().optional() }))
   .handler(async ({ input }) => {
     if (isFaceDetectionRunning()) {
       return { started: false, message: "人脸检测已在运行中" };
@@ -26,7 +27,14 @@ export const startFaceDetection = os
     const db = getDatabase();
     let ids = input.photoIds;
 
-    if (!ids || !ids.length) {
+    if (input.rescan) {
+      // Rescan mode: clear all existing face data and re-detect everything
+      db.delete(faceIdentityMembers).run();
+      db.delete(faceIdentities).run();
+      db.delete(faceVectors).run();
+      const all = db.select({ id: photos.id }).from(photos).all();
+      ids = all.map((p) => p.id);
+    } else if (!ids || !ids.length) {
       // Default: detect faces in all unprocessed photos
       const processed = db
         .select({ photoId: faceVectors.photoId })
@@ -232,4 +240,12 @@ export const deleteFaceIdentity = os.input(IdSchema).handler(({ input }) => {
     .run();
   db.delete(faceIdentities).where(eq(faceIdentities.id, input.id)).run();
   return { ok: true };
+});
+
+export const recluster = os.handler(async () => {
+  if (isFaceDetectionRunning()) {
+    return { ok: false, message: "人脸检测正在运行中，请稍后再试" };
+  }
+  const result = await reclusterAllFaces();
+  return { ok: true, identityCount: result.merged };
 });

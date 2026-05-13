@@ -5,6 +5,7 @@ import {
   getFaceIdentity,
   listFaceIdentities,
   mergeIdentities,
+  recluster,
   startFaceDetection,
   updateFaceIdentity,
 } from "./handlers";
@@ -16,6 +17,7 @@ export const faces = {
   getFaceIdentity,
   listFaceIdentities,
   mergeIdentities,
+  recluster,
   startFaceDetection,
   updateFaceIdentity,
 };

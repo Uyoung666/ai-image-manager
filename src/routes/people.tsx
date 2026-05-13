@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useMatch, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Play, Trash2, User } from "lucide-react";
+import { ArrowLeft, Play, RefreshCw, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ipc } from "@/ipc/manager";
 
@@ -34,11 +34,11 @@ function PeoplePage() {
     loadIdentities();
   }, [loadIdentities]);
 
-  async function handleStartDetection() {
+  async function handleStartDetection(rescan = false) {
     setDetecting(true);
-    setProgress("正在启动人脸检测...");
+    setProgress(rescan ? "正在重新扫描所有照片..." : "正在启动人脸检测...");
     try {
-      const result = await ipc.client.faces.startFaceDetection({}) as { started: boolean; photoCount?: number; message?: string };
+      const result = await ipc.client.faces.startFaceDetection({ rescan }) as { started: boolean; photoCount?: number; message?: string };
       if (result.started) {
         setProgress(`正在检测 ${result.photoCount} 张照片中的人脸...`);
         // Poll for progress
@@ -68,6 +68,24 @@ function PeoplePage() {
       }
     } catch {
       setProgress("启动人脸检测失败");
+      setDetecting(false);
+    }
+  }
+
+  async function handleRecluster() {
+    setDetecting(true);
+    setProgress("正在重新聚类...");
+    try {
+      const result = await ipc.client.faces.recluster({}) as { ok: boolean; identityCount?: number; message?: string };
+      if (result.ok) {
+        setProgress(`聚类完成！共 ${result.identityCount} 个人物分组`);
+        loadIdentities();
+      } else {
+        setProgress(result.message || "聚类失败");
+      }
+    } catch {
+      setProgress("重新聚类失败");
+    } finally {
       setDetecting(false);
     }
   }
@@ -113,14 +131,38 @@ function PeoplePage() {
             </p>
           </div>
         </div>
-        <button
-          className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-          disabled={detecting}
-          onClick={handleStartDetection}
-        >
-          <Play className="h-3.5 w-3.5" />
-          {detecting ? "检测中..." : "开始人脸检测"}
-        </button>
+        <div className="flex items-center gap-2">
+          {identities.length > 0 && (
+            <>
+              <button
+                className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                disabled={detecting}
+                onClick={handleRecluster}
+                title="重新聚类现有人脸数据"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                重新聚类
+              </button>
+              <button
+                className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[13px] font-[510] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                disabled={detecting}
+                onClick={() => handleStartDetection(true)}
+                title="清除所有数据并重新扫描"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                重新扫描
+              </button>
+            </>
+          )}
+          <button
+            className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            disabled={detecting}
+            onClick={() => handleStartDetection(false)}
+          >
+            <Play className="h-3.5 w-3.5" />
+            {detecting ? "检测中..." : "开始人脸检测"}
+          </button>
+        </div>
       </div>
 
       {/* Progress */}
@@ -154,7 +196,7 @@ function PeoplePage() {
             <button
               className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
               disabled={detecting}
-              onClick={handleStartDetection}
+              onClick={() => handleStartDetection(false)}
             >
               开始检测
             </button>

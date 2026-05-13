@@ -174,6 +174,8 @@ export const faceVectors = sqliteTable("face_vectors", {
   bboxY: real("bbox_y").notNull(),
   bboxWidth: real("bbox_width").notNull(),
   bboxHeight: real("bbox_height").notNull(),
+  confidence: real("confidence"),
+  embedding: text("embedding"),
   vectorId: text("vector_id"),
   createdAt: integer("created_at")
     .notNull()
@@ -188,6 +190,7 @@ export const faceIdentities = sqliteTable("face_identities", {
     { onDelete: "set null" }
   ),
   representativeVectorId: text("representative_vector_id"),
+  centroidEmbedding: text("centroid_embedding"),
   faceCount: integer("face_count").notNull().default(0),
   createdAt: integer("created_at")
     .notNull()
