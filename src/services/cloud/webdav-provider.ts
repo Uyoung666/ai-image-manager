@@ -35,7 +35,7 @@ export const webdavProvider: CloudProvider = {
       headers.Authorization = `Basic ${token}`;
     }
 
-    const res = await fetch(url, { method: "PUT", headers, body: buffer });
+    const res = await fetch(url, { method: "PUT", headers, body: new Uint8Array(buffer) });
     if (!res.ok) {
       throw new Error(`WebDAV upload failed: HTTP ${res.status}`);
     }

@@ -16,7 +16,7 @@ export const createCloudConfig = os
     z.object({
       name: z.string().min(1),
       provider: z.enum(["webdav", "s3"]),
-      config: z.record(z.string()),
+      config: z.record(z.string(), z.string()),
       isDefault: z.boolean().optional(),
     })
   )

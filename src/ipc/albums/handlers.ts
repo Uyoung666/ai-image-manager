@@ -45,7 +45,7 @@ export const listAlbums = os
   .input(ListAlbumsSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    let query = db.select().from(albums).orderBy(desc(albums.createdAt));
+    let query = db.select().from(albums).orderBy(desc(albums.createdAt)).$dynamic();
     if (input.isSmart !== undefined) {
       query = query.where(eq(albums.isSmart, input.isSmart));
     }

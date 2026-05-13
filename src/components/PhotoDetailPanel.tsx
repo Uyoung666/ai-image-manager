@@ -177,7 +177,7 @@ export function PhotoDetailPanel({
         ipc.client.photos.getTags({}),
       ]);
       setPhotoTags((pTags as TagInfo[]) || []);
-      setAllTags((aTags as TagInfo[]) || []);
+      setAllTags((aTags as unknown as TagInfo[]) || []);
     } catch {
       /* ignore */
     }

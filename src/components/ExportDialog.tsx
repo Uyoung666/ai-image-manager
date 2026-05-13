@@ -67,9 +67,11 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           photoCount: data.photoCount ?? 0,
           sizeMB: data.sizeMB ?? 0,
         });
-        await ipc.client.shell.openInExplorer({ path: data.path });
+        if (data.path) {
+          await ipc.client.shell.openInExplorer({ path: data.path });
+        }
       } else {
-        setResult({ error: data.error || "导出失败" });
+        setResult({ error: "导出失败" });
       }
     } catch {
       setResult({ error: "导出过程发生异常" });

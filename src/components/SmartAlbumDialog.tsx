@@ -286,7 +286,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                       <option value="">选择格式</option>
                       {FORMATS.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
                     </select>
-                  ) : rule.type !== "dateRange" && rule.type !== "fileFormat" ? (
+                  ) : rule.type !== "dateRange" ? (
                     <div className="flex flex-1 items-center gap-1">
                       <input
                         className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"

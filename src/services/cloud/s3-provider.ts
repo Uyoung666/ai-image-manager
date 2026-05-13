@@ -42,7 +42,7 @@ export const s3Provider: CloudProvider = {
         "x-amz-date": date,
         Authorization: `AWS ${accessKey}:${secretKey}`,
       },
-      body: buffer,
+      body: new Uint8Array(buffer),
     });
 
     if (!res.ok) {

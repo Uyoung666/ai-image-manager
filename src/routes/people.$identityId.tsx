@@ -3,16 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
-
-interface PhotoInfo {
-  filename: string;
-  fileSize: number;
-  height: number;
-  id: number;
-  path: string;
-  thumbnailPath: string | null;
-  width: number;
-}
+import type { Photo } from "@/types/photo";
 
 interface FaceInfo {
   id: number;
@@ -28,7 +19,7 @@ interface IdentityDetail {
   name: string | null;
   faceCount: number;
   faces: FaceInfo[];
-  photos: PhotoInfo[];
+  photos: Photo[];
 }
 
 function PersonDetailPage() {
