@@ -316,6 +316,39 @@ export const deleteFaceIdentity = os.input(IdSchema).handler(({ input }) => {
   return { ok: true };
 });
 
+export const removeFaceFromIdentity = os
+  .input(z.object({ identityId: z.number(), faceVectorId: z.number() }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+
+    // Remove the membership
+    db.delete(faceIdentityMembers)
+      .where(
+        sql`${faceIdentityMembers.identityId} = ${input.identityId} AND ${faceIdentityMembers.faceVectorId} = ${input.faceVectorId}`
+      )
+      .run();
+
+    // Update face count on the identity
+    const remaining = db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(faceIdentityMembers)
+      .where(eq(faceIdentityMembers.identityId, input.identityId))
+      .get();
+
+    const count = remaining?.count ?? 0;
+    if (count === 0) {
+      // No faces left — delete the identity
+      db.delete(faceIdentities).where(eq(faceIdentities.id, input.identityId)).run();
+    } else {
+      db.update(faceIdentities)
+        .set({ faceCount: count })
+        .where(eq(faceIdentities.id, input.identityId))
+        .run();
+    }
+
+    return { ok: true, remainingCount: count };
+  });
+
 export const recluster = os.handler(async () => {
   if (isFaceDetectionRunning()) {
     return { ok: false, message: "人脸检测正在运行中，请稍后再试" };

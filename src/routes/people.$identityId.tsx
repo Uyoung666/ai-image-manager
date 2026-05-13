@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
@@ -63,7 +63,36 @@ function PersonDetailPage() {
     }
   }
 
+  async function handleRemoveFace(photoId: number) {
+    if (!identity) return;
+    const face = identity.faces.find((f) => f.photoId === photoId);
+    if (!face) return;
+    if (!confirm("确定将此照片从该人物分组中移除？")) return;
+    try {
+      const result = await ipc.client.faces.removeFaceFromIdentity({
+        identityId: identity.id,
+        faceVectorId: face.id,
+      }) as { ok: boolean; remainingCount: number };
+      if (result.remainingCount === 0) {
+        navigate({ to: "/people" as "/people" });
+      } else {
+        loadIdentity();
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   const photos = identity?.photos || [];
+
+  function toLocalMediaUrl(filePath: string): string {
+    const encoded = filePath
+      .replace(/\\/g, "/")
+      .split("/")
+      .map((s) => encodeURIComponent(s))
+      .join("/");
+    return `local-media://${encoded}`;
+  }
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -110,21 +139,55 @@ function PersonDetailPage() {
               </h1>
             )}
             <p className="mt-0.5 text-[#6b6b75] text-[11px]">
-              {identity?.faceCount ?? 0} 张检测到该人物的照片
+              {photos.length} 张检测到该人物的照片
             </p>
           </div>
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <PhotoGrid
-          loading={loading}
-          onContextMenu={() => {}}
-          onDoubleClick={() => {}}
-          onSelect={() => {}}
-          photos={photos}
-          selectedIds={new Set()}
-        />
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div className="aspect-square animate-pulse rounded-[8px] bg-card" key={i} />
+            ))}
+          </div>
+        ) : photos.length === 0 ? (
+          <div className="flex h-40 items-center justify-center text-[13px] text-muted-foreground">
+            该人物分组中没有照片
+          </div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+            {photos.map((photo) => (
+              <div className="group relative overflow-hidden rounded-[8px] border border-border bg-card" key={photo.id}>
+                <div className="aspect-square overflow-hidden bg-muted">
+                  {photo.thumbnailPath ? (
+                    <img
+                      alt={photo.filename}
+                      className="h-full w-full object-cover"
+                      src={toLocalMediaUrl(photo.thumbnailPath)}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[11px] text-muted-foreground">
+                      {photo.filename}
+                    </div>
+                  )}
+                </div>
+                <div className="px-3 py-2">
+                  <p className="truncate text-[12px] text-foreground">{photo.filename}</p>
+                </div>
+                <button
+                  className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
+                  onClick={() => handleRemoveFace(photo.id)}
+                  title="从此人物分组中移除"
+                  type="button"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
