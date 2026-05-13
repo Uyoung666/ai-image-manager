@@ -57,7 +57,7 @@ async function initModels(modelsDir) {
   const { InferenceSession } = await loadOrt();
 
   const detModelPath = path.join(modelsDir, "face", "ultraface-320.onnx");
-  const embModelPath = path.join(modelsDir, "face", "arcface-int8.onnx");
+  const embModelPath = path.join(modelsDir, "face", "w600k_r50.onnx");
 
   if (!fs.existsSync(detModelPath)) {
     throw new Error(`Detection model not found: ${detModelPath}`);

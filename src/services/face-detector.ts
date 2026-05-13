@@ -9,7 +9,7 @@ import { faceIdentityMembers, faceIdentities, faceVectors, photos } from "@/db/s
 import type { ChildProcess } from "node:child_process";
 
 const BATCH_SIZE = 20;
-const CLUSTERING_THRESHOLD = 0.68;
+const CLUSTERING_THRESHOLD = 0.55;
 let detectionRunning = false;
 
 function findWorkerScript(): string {
@@ -57,8 +57,8 @@ const FACE_MODELS = [
     url: "https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB/raw/master/models/onnx/version-RFB-320.onnx",
   },
   {
-    filename: "arcface-int8.onnx",
-    url: "https://github.com/onnx/models/raw/main/validated/vision/body_analysis/arcface/model/arcfaceresnet100-11-int8.onnx",
+    filename: "w600k_r50.onnx",
+    url: "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
   },
 ];
 
@@ -99,11 +99,16 @@ async function ensureFaceModels(): Promise<boolean> {
     fs.mkdirSync(faceDir, { recursive: true });
   }
 
-  // At minimum, detection model must exist
-  const detPath = path.join(faceDir, "ultraface-320.onnx");
-  if (fs.existsSync(detPath)) return true;
+  let needsDownload = false;
+  for (const model of FACE_MODELS) {
+    if (!fs.existsSync(path.join(faceDir, model.filename))) {
+      needsDownload = true;
+      break;
+    }
+  }
+  if (!needsDownload) return true;
 
-  console.log("[FaceDetector] Downloading face detection models...");
+  console.log("[FaceDetector] Downloading face models...");
   for (const model of FACE_MODELS) {
     const dest = path.join(faceDir, model.filename);
     if (fs.existsSync(dest)) continue;
