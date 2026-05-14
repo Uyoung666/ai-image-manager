@@ -65,7 +65,9 @@ export const PhotoCard = memo(function PhotoCard({
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
-      e.preventDefault();
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData("text/plain", path);
+      // Trigger Electron native file drag (works alongside browser drag)
       (window as any).electronAPI?.startDrag?.(path, thumbnailPath || undefined);
     },
     [path, thumbnailPath],

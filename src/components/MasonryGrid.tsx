@@ -6,19 +6,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { useMasonryLayout } from "@/hooks/useMasonryLayout";
 
-export interface GroupHeader {
-  beforeIndex: number;
-  label: string;
-}
+import { type GroupHeaderInput, useMasonryLayout } from "@/hooks/useMasonryLayout";
+
+export type { GroupHeaderInput as GroupHeader };
 
 interface MasonryGridProps {
   items: Array<{ id: number; width: number; height: number; [key: string]: any }>;
   containerWidth: number;
   columnCount: number;
   gap: number;
-  groupHeaders?: GroupHeader[];
+  groupHeaders?: GroupHeaderInput[];
   overscan?: number;
   renderItem: (item: any, index: number, style: React.CSSProperties) => ReactNode;
   onEndReached?: () => void;
@@ -60,40 +58,15 @@ export function MasonryGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
 
-  const { positions: rawPositions, totalHeight: rawTotalHeight } = useMasonryLayout(
+  const { positions, totalHeight, headerPositions } = useMasonryLayout(
     items,
     containerWidth,
     columnCount,
     gap,
+    groupHeaders,
   );
 
   const HEADER_HEIGHT = 36;
-
-  const { positions, totalHeight, headerPositions } = useMemo(() => {
-    if (!groupHeaders || groupHeaders.length === 0) {
-      return { positions: rawPositions, totalHeight: rawTotalHeight, headerPositions: [] };
-    }
-
-    const sortedHeaders = [...groupHeaders].sort((a, b) => a.beforeIndex - b.beforeIndex);
-    const headerSpace = HEADER_HEIGHT + gap;
-    const adjusted = rawPositions.map((p) => ({ ...p }));
-    const hdrPos: Array<{ top: number; label: string }> = [];
-
-    for (const header of sortedHeaders) {
-      const idx = header.beforeIndex;
-      if (idx >= adjusted.length) continue;
-
-      const headerTop = adjusted[idx].top;
-      hdrPos.push({ top: headerTop, label: header.label });
-
-      for (let i = idx; i < adjusted.length; i++) {
-        adjusted[i].top += headerSpace;
-      }
-    }
-
-    const newTotalHeight = rawTotalHeight + sortedHeaders.length * headerSpace;
-    return { positions: adjusted, totalHeight: newTotalHeight, headerPositions: hdrPos };
-  }, [rawPositions, rawTotalHeight, groupHeaders, gap]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
