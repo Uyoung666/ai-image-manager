@@ -11,8 +11,8 @@ window.addEventListener("message", (event) => {
 contextBridge.exposeInMainWorld("electronAPI", {
   getFilePath: (file: File): string => webUtils.getPathForFile(file),
   preloadReady: true,
-  startDrag: (filePath: string, iconPath?: string): void => {
-    ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath, iconPath);
+  startDrag: (filePath: string): void => {
+    ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath);
   },
 });
 

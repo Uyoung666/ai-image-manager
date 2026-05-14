@@ -319,14 +319,9 @@ async function setupORPC() {
     serverPort.start();
   });
 
-  ipcMain.on(IPC_CHANNELS.NATIVE_FILE_DRAG, (event, filePath: string, iconPath?: string) => {
+  ipcMain.on(IPC_CHANNELS.NATIVE_FILE_DRAG, (event, filePath: string) => {
     if (!filePath || !fs.existsSync(filePath)) return;
-    let icon: NativeImage;
-    if (iconPath && fs.existsSync(iconPath)) {
-      icon = nativeImage.createFromPath(iconPath).resize({ width: 64, height: 64 });
-    } else {
-      icon = nativeImage.createEmpty();
-    }
+    const icon = nativeImage.createFromPath(filePath).resize({ width: 64, height: 64 });
     event.sender.startDrag({ file: filePath, icon });
   });
 }
