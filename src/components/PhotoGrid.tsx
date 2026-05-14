@@ -23,11 +23,14 @@ export type SortField = "date" | "name" | "size";
 export type SortOrder = "asc" | "desc";
 
 interface PhotoGridProps {
+  deletingIds?: Set<number>;
   emptyState?: React.ReactNode;
   loading: boolean;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onEndReached?: () => void;
+  onKeyboardSelect?: (id: number) => void;
+  onMarqueeSelect?: (ids: Set<number>) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
@@ -51,6 +54,7 @@ export function PhotoGrid({
   photos,
   loading,
   selectedIds,
+  deletingIds,
   searchQuery,
   sort = "date",
   sortOrder = "desc",
@@ -61,6 +65,8 @@ export function PhotoGrid({
   onEndReached,
   onSortChange,
   onToggleFavorite,
+  onKeyboardSelect,
+  onMarqueeSelect,
 }: PhotoGridProps) {
   const { t } = useTranslation();
   const [densityIdx, setDensityIdx] = useState(1);
@@ -104,6 +110,33 @@ export function PhotoGrid({
     return null;
   }, [selectedIds]);
 
+  // Keyboard navigation (arrow keys)
+  useEffect(() => {
+    if (!onKeyboardSelect || photos.length === 0) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const arrows = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+      if (!arrows.includes(e.key)) return;
+
+      e.preventDefault();
+      const currentId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+      let currentIdx = currentId ? photos.findIndex((p) => p.id === currentId) : -1;
+      if (currentIdx < 0) currentIdx = 0;
+
+      let nextIdx = currentIdx;
+      if (e.key === "ArrowRight") nextIdx = Math.min(photos.length - 1, currentIdx + 1);
+      else if (e.key === "ArrowLeft") nextIdx = Math.max(0, currentIdx - 1);
+      else if (e.key === "ArrowDown") nextIdx = Math.min(photos.length - 1, currentIdx + columnCount);
+      else if (e.key === "ArrowUp") nextIdx = Math.max(0, currentIdx - columnCount);
+
+      if (nextIdx !== currentIdx || currentId === null) {
+        onKeyboardSelect!(photos[nextIdx].id);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [photos, selectedIds, columnCount, onKeyboardSelect]);
+
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
     [],
@@ -112,6 +145,7 @@ export function PhotoGrid({
   const renderItem = useCallback(
     (photo: Photo) => (
       <PhotoCard
+        deleting={deletingIds?.has(photo.id)}
         filename={photo.filename}
         height={photo.height}
         id={photo.id}
@@ -128,7 +162,7 @@ export function PhotoGrid({
         width={photo.width}
       />
     ),
-    [selectedIds, onSelect, onDoubleClick, onToggleFavorite, searchQuery],
+    [selectedIds, deletingIds, onSelect, onDoubleClick, onToggleFavorite, searchQuery],
   );
 
   const masonryItems = useMemo(
@@ -265,6 +299,7 @@ export function PhotoGrid({
           groupHeaders={groupHeaders}
           items={masonryItems}
           onEndReached={onEndReached}
+          onMarqueeSelect={onMarqueeSelect}
           scrollToId={scrollToId}
           renderItem={renderItem}
         />

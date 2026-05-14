@@ -3,6 +3,7 @@ import Lightbox from "yet-another-react-lightbox";
 import { Captions } from "yet-another-react-lightbox/plugins";
 import { Counter } from "yet-another-react-lightbox/plugins";
 import { Fullscreen } from "yet-another-react-lightbox/plugins";
+import { Thumbnails } from "yet-another-react-lightbox/plugins";
 import { Zoom } from "yet-another-react-lightbox/plugins";
 // @ts-expect-error - no type declarations for lightbox CSS
 import "yet-another-react-lightbox/styles.css";
@@ -10,6 +11,8 @@ import "yet-another-react-lightbox/styles.css";
 import "yet-another-react-lightbox/plugins/captions.css";
 // @ts-expect-error - no type declarations for plugins CSS
 import "yet-another-react-lightbox/plugins/counter.css";
+// @ts-expect-error - no type declarations for plugins CSS
+import "yet-another-react-lightbox/plugins/thumbnails.css";
 
 interface Photo {
   filename: string;
@@ -138,7 +141,7 @@ export function PhotoLightbox({
       index={photoIndex}
       on={{ view: handleViewChange }}
       open={open}
-      plugins={[Captions, Counter, Fullscreen, Zoom]}
+      plugins={[Captions, Counter, Fullscreen, Thumbnails, Zoom]}
       slides={slides}
       toolbar={{
         buttons: [
@@ -187,12 +190,22 @@ export function PhotoLightbox({
         maxZoomPixelRatio: 5,
         scrollToZoom: true,
       }}
+      thumbnails={{
+        width: 60,
+        height: 40,
+        gap: 4,
+        borderRadius: 4,
+        border: 0,
+        showToggle: true,
+      }}
       styles={{
         container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
         toolbar: { padding: "8px 12px" },
         slide: { padding: "0 60px" },
         captionsTitleContainer: { padding: "0 60px" },
         captionsDescriptionContainer: { padding: "4px 60px 0" },
+        thumbnail: { border: "2px solid transparent", borderRadius: 4 },
+        thumbnailsTrack: { padding: "6px 0" },
       }}
     />
   );

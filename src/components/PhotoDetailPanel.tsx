@@ -1,4 +1,4 @@
-import { FolderOpen, Plus, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderOpen, Plus, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
@@ -39,6 +39,7 @@ interface TagInfo {
 
 interface PhotoDetailPanelProps {
   onClose: () => void;
+  onNavigate?: (direction: "prev" | "next") => void;
   onOpenExplorer: (path: string) => void;
   photo: PhotoDetail | null;
 }
@@ -88,6 +89,7 @@ function toLocalMediaUrl(filePath: string): string {
 export function PhotoDetailPanel({
   photo,
   onClose,
+  onNavigate,
   onOpenExplorer,
 }: PhotoDetailPanelProps) {
   const { t } = useTranslation();
@@ -132,6 +134,23 @@ export function PhotoDetailPanel({
     setNewTagName("");
     setShowTagInput(false);
   }, [photo?.id]);
+
+  // Keyboard navigation (↑/↓) when panel is visible
+  useEffect(() => {
+    if (!photo || !onNavigate) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "ArrowUp" || e.key === "k") {
+        e.preventDefault();
+        onNavigate!("prev");
+      } else if (e.key === "ArrowDown" || e.key === "j") {
+        e.preventDefault();
+        onNavigate!("next");
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [photo, onNavigate]);
 
   // Keep ref in sync for resize callback closure
   useEffect(() => {
@@ -383,12 +402,32 @@ export function PhotoDetailPanel({
         <h3 className="font-[590] text-[14px] text-foreground">
           {t("photoDetail")}
         </h3>
-        <button
-          className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onNavigate && (
+            <>
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                onClick={() => onNavigate("prev")}
+                title="上一张 (↑)"
+              >
+                <ChevronUp className="h-4 w-4" />
+              </button>
+              <button
+                className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                onClick={() => onNavigate("next")}
+                title="下一张 (↓)"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          <button
+            className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* Preview image */}

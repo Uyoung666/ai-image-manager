@@ -173,6 +173,7 @@ function DashboardPage() {
                 <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 12 }} tickLine={false} type="category" width={130} />
                 <Tooltip {...chartTooltipStyle} />
                 <Bar
+                  animationDuration={800}
                   className="cursor-pointer"
                   dataKey="count"
                   onClick={(entry) => {
@@ -198,6 +199,7 @@ function DashboardPage() {
                 <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 11 }} tickLine={false} type="category" width={150} />
                 <Tooltip {...chartTooltipStyle} />
                 <Bar
+                  animationDuration={800}
                   className="cursor-pointer"
                   dataKey="count"
                   onClick={() => {
@@ -223,6 +225,7 @@ function DashboardPage() {
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar
+                    animationDuration={800}
                     className="cursor-pointer"
                     dataKey="count"
                     onClick={(entry) => {
@@ -250,6 +253,7 @@ function DashboardPage() {
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar
+                    animationDuration={800}
                     className="cursor-pointer"
                     dataKey="count"
                     onClick={(entry) => {
@@ -277,6 +281,7 @@ function DashboardPage() {
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar
+                    animationDuration={800}
                     className="cursor-pointer"
                     dataKey="count"
                     onClick={(entry) => {
@@ -303,7 +308,7 @@ function DashboardPage() {
                   <XAxis angle={-90} axisLine={false} dataKey="name" height={40} interval={2} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 9 }} tickLine={false} />
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  <Bar animationDuration={800} dataKey="count" radius={[3, 3, 0, 0]}>
                     {timeData.map((_, i) => (<Cell fill={CHART_1} key={i} />))}
                   </Bar>
                 </BarChart>

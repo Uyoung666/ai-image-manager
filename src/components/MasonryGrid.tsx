@@ -21,6 +21,7 @@ interface MasonryGridProps {
   overscan?: number;
   renderItem: (item: any, index: number, style: React.CSSProperties) => ReactNode;
   onEndReached?: () => void;
+  onMarqueeSelect?: (ids: Set<number>) => void;
   scrollToId?: number | null;
   className?: string;
 }
@@ -53,6 +54,7 @@ export function MasonryGrid({
   overscan = 5,
   renderItem,
   onEndReached,
+  onMarqueeSelect,
   scrollToId,
   className,
 }: MasonryGridProps) {
@@ -60,6 +62,14 @@ export function MasonryGrid({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Marquee selection state
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; x: number; y: number } | null>(null);
+  const marqueeStartScroll = useRef(0);
+  const hasRenderedRef = useRef(false);
 
   const { positions, totalHeight, headerPositions } = useMasonryLayout(
     items,
@@ -76,6 +86,10 @@ export function MasonryGrid({
     if (el) {
       setScrollTop(el.scrollTop);
       setViewportHeight(el.clientHeight);
+      setShowScrollTop(el.scrollTop > el.clientHeight * 2);
+      setIsScrolling(true);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 1200);
     }
   }, []);
 
@@ -216,52 +230,173 @@ export function MasonryGrid({
     );
   }, [headerPositions, scrollTop, viewportHeight, overscanPx]);
 
+  useEffect(() => {
+    if (visibleItems.length > 0 && !hasRenderedRef.current) {
+      const timer = setTimeout(() => { hasRenderedRef.current = true; }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [visibleItems.length]);
+
+  const currentTimeLabel = useMemo(() => {
+    if (headerPositions.length === 0) return "";
+    let label = "";
+    for (let i = headerPositions.length - 1; i >= 0; i--) {
+      if (headerPositions[i].top <= scrollTop + 100) {
+        label = headerPositions[i].label;
+        break;
+      }
+    }
+    return label || headerPositions[0]?.label || "";
+  }, [headerPositions, scrollTop]);
+
+  // Marquee selection handlers
+  const handleMarqueeStart = useCallback((e: React.MouseEvent) => {
+    if (!onMarqueeSelect) return;
+    if (e.button !== 0) return;
+    // Only start marquee on empty space (not on a photo card)
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-photo-id]")) return;
+
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+    const rect = scrollEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top + scrollEl.scrollTop;
+    marqueeStartScroll.current = scrollEl.scrollTop;
+    setMarquee({ startX: x, startY: y, x, y });
+  }, [onMarqueeSelect]);
+
+  useEffect(() => {
+    if (!marquee || !onMarqueeSelect) return;
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
+
+    function handleMouseMove(e: MouseEvent) {
+      const rect = scrollEl!.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top + scrollEl!.scrollTop;
+      setMarquee((prev) => prev ? { ...prev, x, y } : null);
+    }
+
+    function handleMouseUp() {
+      if (!marquee) return;
+      // Calculate selection rect in content coordinates
+      const minX = Math.min(marquee.startX, marquee.x);
+      const maxX = Math.max(marquee.startX, marquee.x);
+      const minY = Math.min(marquee.startY, marquee.y);
+      const maxY = Math.max(marquee.startY, marquee.y);
+
+      // Only select if drag was meaningful (> 5px)
+      if (maxX - minX > 5 && maxY - minY > 5) {
+        const selected = new Set<number>();
+        for (let i = 0; i < positions.length; i++) {
+          const pos = positions[i];
+          const itemRight = pos.left + pos.width;
+          const itemBottom = pos.top + pos.height;
+          if (pos.left < maxX && itemRight > minX && pos.top < maxY && itemBottom > minY) {
+            selected.add(items[i].id);
+          }
+        }
+        onMarqueeSelect!(selected);
+      }
+      setMarquee(null);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [marquee, positions, items, onMarqueeSelect]);
+
   if (containerWidth <= 0) {
     return <div className={className} data-masonry-scroll="" ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
   }
 
+  const scrollToTop = () => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <div
-      className={className}
-      data-masonry-scroll=""
-      ref={scrollRef}
-      style={{ height: "100%", overflowY: "auto" }}
-    >
-      <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
-        {visibleHeaders.map((h) => (
-          <div
-            className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
-            key={h.label}
-            style={{
-              position: "absolute",
-              top: h.top,
-              left: 0,
-              width: "100%",
-              height: HEADER_HEIGHT,
-            }}
-          >
-            {h.label}
-          </div>
-        ))}
-        {visibleItems.map(({ index, style }) => (
-          <div key={items[index].id} style={style}>
-            {renderItem(items[index], index, style)}
-          </div>
-        ))}
-        {onEndReached && totalHeight > 0 && (
-          <div
-            ref={sentinelRef}
-            style={{
-              position: "absolute",
-              top: Math.max(0, totalHeight - 200),
-              left: 0,
-              width: 1,
-              height: 1,
-              pointerEvents: "none",
-            }}
-          />
-        )}
+    <div className="relative" style={{ height: "100%", overflow: "hidden" }}>
+      <div
+        className={className}
+        data-masonry-scroll=""
+        ref={scrollRef}
+        style={{ height: "100%", overflowY: "auto" }}
+        onMouseDown={handleMarqueeStart}
+      >
+        <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
+          {visibleHeaders.map((h) => (
+            <div
+              className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
+              key={h.label}
+              style={{
+                position: "absolute",
+                top: h.top,
+                left: 0,
+                width: "100%",
+                height: HEADER_HEIGHT,
+              }}
+            >
+              {h.label}
+            </div>
+          ))}
+          {visibleItems.map(({ index, style }, vi) => {
+            const shouldAnimate = !hasRenderedRef.current && vi < columnCount * 4;
+            return (
+              <div
+                key={items[index].id}
+                className={shouldAnimate ? "animate-card-enter" : undefined}
+                style={shouldAnimate ? { ...style, animationDelay: `${vi * 30}ms` } : style}
+              >
+                {renderItem(items[index], index, style)}
+              </div>
+            );
+          })}
+          {onEndReached && totalHeight > 0 && (
+            <div
+              ref={sentinelRef}
+              style={{
+                position: "absolute",
+                top: Math.max(0, totalHeight - 200),
+                left: 0,
+                width: 1,
+                height: 1,
+                pointerEvents: "none",
+              }}
+            />
+          )}
+          {marquee && (
+            <div
+              className="pointer-events-none absolute z-30 rounded-[2px] border border-primary/60 bg-primary/10"
+              style={{
+                left: Math.min(marquee.startX, marquee.x),
+                top: Math.min(marquee.startY, marquee.y),
+                width: Math.abs(marquee.x - marquee.startX),
+                height: Math.abs(marquee.y - marquee.startY),
+              }}
+            />
+          )}
+        </div>
       </div>
+      {showScrollTop && (
+        <button
+          className="absolute right-4 bottom-4 z-40 flex h-9 w-9 items-center justify-center rounded-full bg-popover/90 text-muted-foreground shadow-lg ring-1 ring-border backdrop-blur-sm transition-all hover:bg-popover hover:text-foreground"
+          onClick={scrollToTop}
+          aria-label="回到顶部"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 12V4M4 7l4-4 4 4" />
+          </svg>
+        </button>
+      )}
+      {isScrolling && currentTimeLabel && headerPositions.length > 1 && (
+        <div className="pointer-events-none absolute top-3 right-4 z-40 rounded-[6px] bg-popover/90 px-3 py-1.5 font-[510] text-[12px] text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
+          {currentTimeLabel}
+        </div>
+      )}
     </div>
   );
 }

@@ -241,3 +241,53 @@
   background-size: 200% 100%;
   animation: shimmer 1.8s ease-in-out infinite;
 }
+
+/* Favorite star bounce */
+@keyframes star-bounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+.animate-star-bounce {
+  animation: star-bounce 300ms ease-out;
+}
+
+/* Indeterminate progress bar */
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Lightbox active thumbnail highlight */
+.yarl__thumbnails_thumbnail_active {
+  border-color: rgba(94, 106, 210, 0.9) !important;
+  opacity: 1 !important;
+}
+
+.yarl__thumbnails_thumbnail {
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+}
+
+.yarl__thumbnails_thumbnail:hover {
+  opacity: 0.8;
+}
+
+/* Photo card stagger entrance */
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-card-enter {
+  animation: card-enter 250ms ease-out both;
+}

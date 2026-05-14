@@ -240,6 +240,16 @@ export function FormatConvertDialog({
                 {executing ? "转换中..." : `转换 ${photoCount} 张`}
               </button>
             </div>
+            {executing && (
+              <div className="mt-4">
+                <div className="mb-1.5 text-[11px] text-muted-foreground">
+                  正在转换 {photoCount} 张照片...
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full w-1/3 animate-[indeterminate_1.5s_ease-in-out_infinite] rounded-full bg-primary" />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -439,7 +439,7 @@ export function Sidebar({
                   <button
                     className={`group/tag flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
                       dragOverTagId === tag.id
-                        ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+                        ? "bg-primary/20 text-primary ring-1 ring-primary/50 animate-pulse"
                         : activeTagId === tag.id
                           ? "bg-primary/15 text-primary"
                           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -467,7 +467,11 @@ export function Sidebar({
                         }
                       }
                     }}
-                    onDragLeave={() => setDragOverTagId(null)}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                        setDragOverTagId(null);
+                      }
+                    }}
                     onDragOver={handlePhotoDragOver}
                     onDragEnter={() => setDragOverTagId(tag.id)}
                     onDrop={(e) => handleDropOnTag(e, tag.id)}
@@ -522,11 +526,15 @@ export function Sidebar({
         <button
           className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
             dragOverAlbumNav
-              ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+              ? "bg-primary/20 text-primary ring-1 ring-primary/50 animate-pulse"
               : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onDragEnter={() => setDragOverAlbumNav(true)}
-          onDragLeave={() => setDragOverAlbumNav(false)}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDragOverAlbumNav(false);
+            }
+          }}
           onDragOver={handlePhotoDragOver}
           onDrop={handleDropOnAlbumNav}
           onClick={() => navigate({ to: "/albums" as "/albums" })}

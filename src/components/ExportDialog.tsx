@@ -195,6 +195,16 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
               导出
             </button>
           </div>
+          {exporting && (
+            <div className="mt-4">
+              <div className="mb-1.5 text-[11px] text-muted-foreground">
+                正在导出 {photoIds.length} 张照片...
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-1/3 animate-[indeterminate_1.5s_ease-in-out_infinite] rounded-full bg-primary" />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

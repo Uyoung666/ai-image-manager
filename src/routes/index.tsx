@@ -71,6 +71,7 @@ function HomePage() {
   const [exportIds, setExportIds] = useState<number[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
+  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [searchLoading, setSearchLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -237,6 +238,24 @@ function HomePage() {
       return next;
     });
   }, []);
+
+  // Auto-collapse sidebar when window is narrow
+  const autoCollapsedRef = useRef(false);
+  useEffect(() => {
+    function handleResize() {
+      const narrow = window.innerWidth < 900;
+      if (narrow && !sidebarCollapsed) {
+        autoCollapsedRef.current = true;
+        setSidebarCollapsed(true);
+      } else if (!narrow && autoCollapsedRef.current) {
+        autoCollapsedRef.current = false;
+        setSidebarCollapsed(loadSidebarState());
+      }
+    }
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+  }, [sidebarCollapsed]);
 
   // Sync detail panel with selection
   const prevSelectedIdRef = useRef<number | null>(null);
@@ -461,6 +480,19 @@ function HomePage() {
     await ipc.client.shell.openInExplorer({ path: filePath });
   }
 
+  function handleDetailNavigate(direction: "prev" | "next") {
+    if (!detailPhoto) return;
+    const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
+    if (currentIdx < 0) return;
+    const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
+    if (nextIdx < 0 || nextIdx >= photos.length) return;
+    const nextPhoto = photos[nextIdx];
+    setSelectedIds(new Set([nextPhoto.id]));
+    setLastClickedIdx(nextIdx);
+    setDetailDismissed(false);
+    setDetailPhoto(nextPhoto);
+  }
+
   function handleDeletePhoto(id: number) {
     setPendingDeleteIds([id]);
     setDeleteConfirmOpen(true);
@@ -494,6 +526,10 @@ function HomePage() {
     const count = ids.length;
     setDeleteConfirmOpen(false);
     setPendingDeleteIds([]);
+    // Trigger exit animation
+    setDeletingIds(new Set(ids));
+    await new Promise((r) => setTimeout(r, 180));
+    setDeletingIds(new Set());
     try {
       if (ids.length === 1) {
         await ipc.client.photos.deletePhoto({ id: ids[0] });
@@ -752,11 +788,20 @@ function HomePage() {
           <div className="flex min-h-0 flex-1">
             <div className="relative flex min-w-0 flex-1">
               <PhotoGrid
+                deletingIds={deletingIds}
                 emptyState={emptyStateContent}
                 loading={loading}
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
                 onEndReached={handleEndReached}
+                onKeyboardSelect={(id) => {
+                  setSelectedIds(new Set([id]));
+                  const idx = photos.findIndex((p) => p.id === id);
+                  if (idx >= 0) setLastClickedIdx(idx);
+                }}
+                onMarqueeSelect={(ids) => {
+                  if (ids.size > 0) setSelectedIds(ids);
+                }}
                 onSelect={handleSelect}
                 onSortChange={(s, o) => {
                   setSortField(s);
@@ -808,6 +853,7 @@ function HomePage() {
                 setDetailDismissed(true);
                 setDetailPhoto(null);
               }}
+              onNavigate={handleDetailNavigate}
               onOpenExplorer={handleOpenExplorer}
               photo={detailPhoto}
             />

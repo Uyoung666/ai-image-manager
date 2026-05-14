@@ -1,6 +1,7 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 
 interface PhotoCardProps {
+  deleting?: boolean;
   filename: string;
   height: number;
   id: number;
@@ -55,6 +56,7 @@ export const PhotoCard = memo(function PhotoCard({
   height,
   isSelected,
   isFavorite,
+  deleting,
   searchQuery,
   selectedIds,
   similarity,
@@ -64,6 +66,7 @@ export const PhotoCard = memo(function PhotoCard({
 }: PhotoCardProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const starRef = useRef<HTMLButtonElement>(null);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
@@ -77,6 +80,16 @@ export const PhotoCard = memo(function PhotoCard({
       const ids = selectedIds?.has(id) ? [...selectedIds] : [id];
       e.dataTransfer.setData("application/x-photo-ids", JSON.stringify(ids));
       e.dataTransfer.effectAllowed = "move";
+
+      // Custom drag ghost with count badge
+      if (ids.length > 1) {
+        const ghost = document.createElement("div");
+        ghost.style.cssText = "position:fixed;top:-200px;left:-200px;display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(30,30,34,0.92);border-radius:8px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(4px);color:#f7f8f8;font-size:12px;font-weight:510;white-space:nowrap;";
+        ghost.textContent = `${ids.length} 张照片`;
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, 0, 0);
+        requestAnimationFrame(() => document.body.removeChild(ghost));
+      }
     },
     [id, path, selectedIds],
   );
@@ -119,9 +132,11 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
-        isSelected
-          ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
-          : "hover:brightness-110 hover:ring-1 hover:ring-white/10"
+        deleting
+          ? "scale-95 opacity-0 duration-180"
+          : isSelected
+            ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
+            : "hover:brightness-110 hover:ring-1 hover:ring-white/10"
       }
       `}
       draggable
@@ -169,6 +184,7 @@ export const PhotoCard = memo(function PhotoCard({
       {/* Favorite star */}
       {onToggleFavorite && (
         <button
+          ref={starRef}
           className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full transition-opacity ${
             isFavorite
               ? "opacity-100"
@@ -176,6 +192,11 @@ export const PhotoCard = memo(function PhotoCard({
           }`}
           onClick={(e) => {
             e.stopPropagation();
+            if (starRef.current) {
+              starRef.current.classList.remove("animate-star-bounce");
+              void starRef.current.offsetWidth;
+              starRef.current.classList.add("animate-star-bounce");
+            }
             onToggleFavorite(id);
           }}
         >
