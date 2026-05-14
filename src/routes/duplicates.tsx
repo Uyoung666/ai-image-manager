@@ -49,11 +49,11 @@ function formatResolution(w: number | null, h: number | null): string {
 function getMatchLabel(type: "exact" | "phash" | "clip_confirmed"): { text: string; color: string } {
   switch (type) {
     case "exact":
-      return { text: "完全相同", color: "text-[#e5484d] bg-[#e5484d]/10" };
+      return { text: "完全相同", color: "text-destructive bg-destructive/10" };
     case "clip_confirmed":
-      return { text: "视觉相同", color: "text-[#e5934a] bg-[#e5934a]/10" };
+      return { text: "视觉相同", color: "text-warning bg-warning/10" };
     case "phash":
-      return { text: "高度相似", color: "text-[#f5d90a] bg-[#f5d90a]/10" };
+      return { text: "高度相似", color: "text-warning bg-warning/10" };
   }
 }
 
@@ -192,7 +192,7 @@ function DuplicatesPage() {
           <h1 className="font-[590] text-foreground text-[18px]">
             重复照片检测
           </h1>
-          <span className="text-[#6b6b75] text-[13px]">
+          <span className="text-muted-foreground/70 text-[13px]">
             {pairs.length} 组重复
           </span>
         </div>
@@ -207,7 +207,7 @@ function DuplicatesPage() {
           </button>
           {selected.size > 0 && (
             <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[#e5484d] text-[12px] transition-colors hover:border-[#e5484d]/30 hover:bg-[#e5484d]/5"
+              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-destructive text-[12px] transition-colors hover:border-destructive/30 hover:bg-destructive/5"
               disabled={deleting}
               onClick={handleDeleteSelected}
             >
@@ -221,7 +221,7 @@ function DuplicatesPage() {
       {/* Strategy selector */}
       {pairs.length > 0 && (
         <div className="flex items-center gap-3 border-border border-b px-6 py-3">
-          <span className="text-[#6b6b75] text-[12px]">保留策略:</span>
+          <span className="text-muted-foreground/70 text-[12px]">保留策略:</span>
           {([
             ["manual", "手动选择"],
             ["larger", "保留更大文件"],
@@ -245,11 +245,11 @@ function DuplicatesPage() {
       {pairs.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-[#46a758]/60" />
+            <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
             <p className="mt-3 font-[510] text-foreground text-[16px]">
               未发现重复照片
             </p>
-            <p className="mt-2 text-[#6b6b75] text-[13px]">
+            <p className="mt-2 text-muted-foreground/70 text-[13px]">
               当索引的照片中存在视觉重复时将显示在此处
             </p>
           </div>
@@ -270,7 +270,7 @@ function DuplicatesPage() {
                   <span className={`rounded-[4px] px-2 py-0.5 text-[11px] font-[510] ${label.color}`}>
                     {title}
                   </span>
-                  <span className="text-[#6b6b75] text-[11px]">{items.length} 组</span>
+                  <span className="text-muted-foreground/70 text-[11px]">{items.length} 组</span>
                 </div>
                 <div className="space-y-3">
                   {items.map((pair) => (
@@ -319,18 +319,18 @@ function PairCard({
             {label.text}
           </span>
           {pair.matchType !== "exact" && (
-            <span className="text-[#6b6b75] text-[10px]">
+            <span className="text-muted-foreground/70 text-[10px]">
               汉明距离: {pair.distance}
             </span>
           )}
           {pair.clipSimilarity != null && (
-            <span className="text-[#46a758] text-[10px]">
+            <span className="text-success text-[10px]">
               CLIP: {Math.round(pair.clipSimilarity * 100)}%
             </span>
           )}
         </div>
         <button
-          className="text-[#6b6b75] text-[11px] hover:text-muted-foreground"
+          className="text-muted-foreground/70 text-[11px] hover:text-muted-foreground"
           onClick={onDismiss}
         >
           忽略
@@ -341,7 +341,7 @@ function PairCard({
           const isSelected = selected.has(photo.id);
           return (
             <div
-              className={`flex flex-col ${idx === 0 ? "border-border border-r" : ""} ${isSelected ? "bg-[#e5484d]/5" : ""}`}
+              className={`flex flex-col ${idx === 0 ? "border-border border-r" : ""} ${isSelected ? "bg-destructive/5" : ""}`}
               key={photo.id}
             >
               <div className="relative flex items-center justify-center bg-background p-4">
@@ -351,7 +351,7 @@ function PairCard({
                   src={toLocalMediaUrl(photo.path)}
                 />
                 {isSelected && (
-                  <div className="absolute top-2 right-2 rounded-full bg-[#e5484d] px-2 py-0.5 text-[10px] text-white font-[510]">
+                  <div className="absolute top-2 right-2 rounded-full bg-destructive px-2 py-0.5 text-[10px] text-white font-[510]">
                     待删除
                   </div>
                 )}
@@ -362,7 +362,7 @@ function PairCard({
                     {photo.filename}
                   </span>
                 </div>
-                <div className="mt-1 flex items-center gap-3 text-[10px] text-[#6b6b75]">
+                <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground/70">
                   <span>{formatFileSize(photo.fileSize)}</span>
                   <span>{formatResolution(photo.width, photo.height)}</span>
                 </div>
@@ -370,7 +370,7 @@ function PairCard({
                   <button
                     className={`rounded-[4px] px-2 py-0.5 text-[10px] transition-colors ${
                       isSelected
-                        ? "bg-[#e5484d]/10 text-[#e5484d] font-[510]"
+                        ? "bg-destructive/10 text-destructive font-[510]"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
                     onClick={() => onToggle(photo.id)}
@@ -378,7 +378,7 @@ function PairCard({
                     {isSelected ? "取消选中" : "选中删除"}
                   </button>
                   <button
-                    className="rounded-[4px] px-2 py-0.5 text-[#e5484d] text-[10px] transition-colors hover:bg-[#e5484d]/10"
+                    className="rounded-[4px] px-2 py-0.5 text-destructive text-[10px] transition-colors hover:bg-destructive/10"
                     disabled={deleting}
                     onClick={() => onDelete(photo.id)}
                   >

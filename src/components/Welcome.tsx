@@ -53,7 +53,7 @@ export function Welcome({ onAddFolder }: WelcomeProps) {
         </button>
 
         {/* Tip */}
-        <p className="text-[#6b6b75] text-[12px]">{t("welcomeTip")}</p>
+        <p className="text-muted-foreground/70 text-[12px]">{t("welcomeTip")}</p>
       </div>
     </div>
   );

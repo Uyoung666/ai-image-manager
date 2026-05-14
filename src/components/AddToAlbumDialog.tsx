@@ -108,7 +108,7 @@ export function AddToAlbumDialog({
       onClick={handleOverlayClick}
       ref={overlayRef}
     >
-      <div className="w-[360px] rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
+      <div className="w-[360px] rounded-[12px] border border-border bg-popover ring-1 ring-foreground/5">
         {/* Header */}
         <div className="flex items-center justify-between border-border border-b px-5 py-4">
           <h2 className="font-[590] text-[16px] text-foreground">
@@ -125,7 +125,7 @@ export function AddToAlbumDialog({
         {/* Album list */}
         <div className="max-h-[300px] overflow-y-auto p-2">
           {albums.length === 0 && !showCreate ? (
-            <p className="px-3 py-6 text-center text-[#6b6b75] text-[13px]">
+            <p className="px-3 py-6 text-center text-muted-foreground/70 text-[13px]">
               还没有相册，创建一个吧
             </p>
           ) : (
@@ -164,7 +164,7 @@ export function AddToAlbumDialog({
           {showCreate ? (
             <div className="flex items-center gap-2 px-3 py-2">
               <input
-                className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleCreateAndAdd();

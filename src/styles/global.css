@@ -192,6 +192,25 @@
     @apply font-sans;
   }
 
+  /* Themed scrollbar */
+  * {
+    scrollbar-color: var(--foreground-tertiary) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--foreground-tertiary);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground-secondary);
+  }
+
   /* Theme transition — smooth color shift on theme switch */
   html.transitioning *,
   html.transitioning *::before,

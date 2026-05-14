@@ -157,11 +157,11 @@ function AlbumDetailPage() {
               )}
             </div>
             {album?.description && (
-              <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+              <p className="mt-0.5 text-muted-foreground/70 text-[12px]">
                 {album.description}
               </p>
             )}
-            <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+            <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
               {album?.isSmart
                 ? `智能匹配 ${album?.matchCount ?? photos.length} 张照片`
                 : `${photos.length} 张照片`}
@@ -171,7 +171,7 @@ function AlbumDetailPage() {
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && !album?.isSmart && (
             <button
-              className="rounded-[6px] bg-[#e5484d] px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
+              className="rounded-[6px] bg-destructive px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
               onClick={handleRemoveSelected}
             >
               移除 {selectedIds.size} 张
@@ -179,7 +179,7 @@ function AlbumDetailPage() {
           )}
           {album && !confirmDelete && (
             <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-[#e5484d]/30 px-3 py-1.5 text-[12px] text-[#e5484d] transition-colors hover:border-[#e5484d] hover:bg-[#e5484d]/5"
+              className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
               onClick={() => setConfirmDelete(true)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -188,9 +188,9 @@ function AlbumDetailPage() {
           )}
           {confirmDelete && (
             <div className="flex items-center gap-2">
-              <span className="text-[12px] text-[#e5484d]">确认删除？</span>
+              <span className="text-[12px] text-destructive">确认删除？</span>
               <button
-                className="rounded-[6px] bg-[#e5484d] px-3 py-1 text-[12px] text-white hover:opacity-90"
+                className="rounded-[6px] bg-destructive px-3 py-1 text-[12px] text-white hover:opacity-90"
                 onClick={handleDeleteAlbum}
               >
                 确认

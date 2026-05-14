@@ -122,7 +122,7 @@ export const PhotoCard = memo(function PhotoCard({
           <circle cx="8.5" cy="8.5" r="1.5" />
           <polyline points="21 15 16 10 5 21" />
         </svg>
-        <span className="max-w-full truncate px-2 text-[#6b6b75] text-[10px]">
+        <span className="max-w-full truncate px-2 text-muted-foreground/70 text-[10px]">
           {filename}
         </span>
       </div>
@@ -136,7 +136,7 @@ export const PhotoCard = memo(function PhotoCard({
           ? "scale-95 opacity-0 duration-180"
           : isSelected
             ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
-            : "hover:brightness-110 hover:ring-1 hover:ring-white/10"
+            : "hover:brightness-110 hover:ring-1 hover:ring-foreground/10"
       }
       `}
       draggable
@@ -174,7 +174,7 @@ export const PhotoCard = memo(function PhotoCard({
             <HighlightText query={searchQuery} text={filename} />
           </p>
           {width > 0 && height > 0 && (
-            <p className="mt-0.5 text-[#a1a1aa] text-[10px]">
+            <p className="mt-0.5 text-muted-foreground text-[10px]">
               {width} × {height}
             </p>
           )}
@@ -221,7 +221,7 @@ export const PhotoCard = memo(function PhotoCard({
 
       {/* Selection indicator */}
       {isSelected && (
-        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary ring-1 ring-white/20">
+        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary ring-1 ring-primary-foreground/20">
           <svg fill="none" height="12" viewBox="0 0 12 12" width="12">
             <path
               d="M2.5 6L5 8.5L9.5 3.5"

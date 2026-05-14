@@ -74,7 +74,7 @@ export function PhotoContextMenu({
       style={{ left: x, top: y }}
     >
       <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -87,7 +87,7 @@ export function PhotoContextMenu({
         在资源管理器中打开
       </button>
       <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -103,7 +103,7 @@ export function PhotoContextMenu({
       </button>
       {onToggleFavorite && (
         <button
-          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
           disabled={menu.photoId === null}
           onClick={() => {
             if (menu.photoId !== null) {
@@ -118,7 +118,7 @@ export function PhotoContextMenu({
       )}
       <div className="my-1 h-px bg-border" />
       <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {
@@ -131,7 +131,7 @@ export function PhotoContextMenu({
         添加到相册
       </button>
       <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {
@@ -145,7 +145,7 @@ export function PhotoContextMenu({
       </button>
       <div className="my-1 h-px bg-border" />
       <button
-        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-destructive text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {

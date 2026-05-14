@@ -184,7 +184,7 @@ export function Sidebar({
     return (
       <div className="flex h-full w-12 flex-col items-center border-border border-r bg-secondary py-3">
         <button
-          className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-[#6b6b75] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={onToggleCollapse}
           title="展开侧边栏"
         >
@@ -320,12 +320,12 @@ export function Sidebar({
           <h2 className="font-[590] text-[14px] text-foreground">
             {t("appName")}
           </h2>
-          <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+          <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
             {t("photosCount", { count: totalPhotos.toLocaleString() })}
           </p>
         </div>
         <button
-          className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#6b6b75] transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={onToggleCollapse}
           title="折叠侧边栏"
         >
@@ -379,7 +379,7 @@ export function Sidebar({
           <div className="rounded-[6px] bg-card px-3 py-2">
             <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
             {scanningFolder && (
-              <p className="mt-0.5 truncate text-[#6b6b75] text-[10px]">
+              <p className="mt-0.5 truncate text-muted-foreground/70 text-[10px]">
                 {t("scanningPath", { path: scanningFolder })}
               </p>
             )}
@@ -392,7 +392,7 @@ export function Sidebar({
 
       {/* Folders */}
       <div className="flex-1 overflow-y-auto px-3">
-        <p className="px-3 py-1 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+        <p className="px-3 py-1 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
           {t("sidebarFolders")}
         </p>
         {folders.map((folder) => (
@@ -410,13 +410,13 @@ export function Sidebar({
           >
             <Folder className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">{folder.displayName}</span>
-            <span className="ml-auto text-[#6b6b75] text-[10px] tabular-nums">
+            <span className="ml-auto text-muted-foreground/70 text-[10px] tabular-nums">
               {folder.photoCount}
             </span>
           </button>
         ))}
         {folders.length === 0 && (
-          <p className="px-3 py-2 text-[#6b6b75] text-[12px]">
+          <p className="px-3 py-2 text-muted-foreground/70 text-[12px]">
             {t("sidebarNoFolders")}
           </p>
         )}
@@ -425,12 +425,12 @@ export function Sidebar({
         {tags.length > 0 && (
           <>
             <div className="mx-3 my-2 border-border border-t" />
-            <p className="px-3 py-1 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            <p className="px-3 py-1 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
               标签
             </p>
             <div className="px-1 pb-1">
               <input
-                className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75]"
+                className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
                 onChange={(e) => setTagSearch(e.target.value)}
                 placeholder="搜索标签..."
                 value={tagSearch}
@@ -497,7 +497,7 @@ export function Sidebar({
         {tags.length === 0 && totalPhotos > 0 && (
           <>
             <div className="mx-3 my-2 border-border border-t" />
-            <p className="px-3 py-1 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            <p className="px-3 py-1 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
               标签
             </p>
             <div className="px-3 py-1">
@@ -593,16 +593,16 @@ export function Sidebar({
       {/* Folder context menu */}
       {folderCtx && (
         <div
-          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-white/5"
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
           ref={ctxRef}
           style={{ left: folderCtx.x, top: folderCtx.y }}
         >
-          <div className="truncate px-3 py-1 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+          <div className="truncate px-3 py-1 font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
             {folderCtx.displayName}
           </div>
           <div className="mx-2 my-1 border-border border-t" />
           <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[#e5484d] text-[13px] transition-colors hover:bg-[#e5484d]/10"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-destructive text-[13px] transition-colors hover:bg-destructive/10"
             onClick={() => {
               onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
               closeCtx();

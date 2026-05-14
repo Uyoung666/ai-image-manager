@@ -94,14 +94,14 @@ export function FormatConvertDialog({
           if (e.key === "Escape" && !hasResult) onClose();
         }}
       />
-      <div className="relative w-[480px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-white/5">
+      <div className="relative w-[480px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-foreground/5">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-[16px] font-[510] text-foreground">
             格式转换 ({photoCount} 张)
           </h2>
           <button
-            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-foreground/5"
+            className="rounded-md px-2 py-1 text-muted-foreground text-[20px] leading-none hover:bg-foreground/5"
             onClick={onClose}
             type="button"
           >
@@ -112,10 +112,10 @@ export function FormatConvertDialog({
         {hasResult ? (
           /* Result */
           <div className="px-6 py-4">
-            <div className="mb-4 flex items-center gap-2 text-[14px] text-[#46a758]">
+            <div className="mb-4 flex items-center gap-2 text-[14px] text-success">
               成功转换: {result.converted} 张
             </div>
-            <div className="mb-4 text-[12px] text-[#a1a1aa]">
+            <div className="mb-4 text-[12px] text-muted-foreground">
               输出目录:{" "}
               <span className="font-mono text-foreground">{result.outputDir}</span>
             </div>
@@ -134,7 +134,7 @@ export function FormatConvertDialog({
           <div className="px-6 py-4">
             {/* Format selection */}
             <div className="mb-5">
-              <label className="mb-2 block text-[12px] font-[400] text-[#a1a1aa]">
+              <label className="mb-2 block text-[12px] font-[400] text-muted-foreground">
                 目标格式
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -143,7 +143,7 @@ export function FormatConvertDialog({
                     className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
                       format === f.value
                         ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-[#a1a1aa] hover:bg-foreground/5"
+                        : "border-border text-muted-foreground hover:bg-foreground/5"
                     }`}
                     key={f.value}
                     onClick={() => setFormat(f.value)}
@@ -161,7 +161,7 @@ export function FormatConvertDialog({
             {/* Quality slider */}
             <div className="mb-5">
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[12px] font-[400] text-[#a1a1aa]">
+                <label className="text-[12px] font-[400] text-muted-foreground">
                   画质
                 </label>
                 <span className="text-[13px] font-mono text-foreground">
@@ -177,7 +177,7 @@ export function FormatConvertDialog({
                 type="range"
                 value={quality}
               />
-              <div className="mt-1 flex justify-between text-[10px] text-[#6b6b75]">
+              <div className="mt-1 flex justify-between text-[10px] text-muted-foreground/70">
                 <span>最小体积</span>
                 <span>最佳画质</span>
               </div>
@@ -185,7 +185,7 @@ export function FormatConvertDialog({
 
             {/* Max width */}
             <div className="mb-5">
-              <label className="mb-1.5 block text-[12px] font-[400] text-[#a1a1aa]">
+              <label className="mb-1.5 block text-[12px] font-[400] text-muted-foreground">
                 最大宽度 (px，留空不缩放)
               </label>
               <input
@@ -198,15 +198,15 @@ export function FormatConvertDialog({
 
             {/* Output directory */}
             <div className="mb-5">
-              <label className="mb-1.5 block text-[12px] font-[400] text-[#a1a1aa]">
+              <label className="mb-1.5 block text-[12px] font-[400] text-muted-foreground">
                 输出目录
               </label>
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate rounded-md border border-border bg-secondary px-3 py-2 text-[12px] text-[#6b6b75] font-mono">
+                <span className="min-w-0 flex-1 truncate rounded-md border border-border bg-secondary px-3 py-2 text-[12px] text-muted-foreground/70 font-mono">
                   {outputDir || "默认临时目录"}
                 </span>
                 <button
-                  className="flex-shrink-0 rounded-md border border-border px-3 py-2 text-[12px] text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
+                  className="flex-shrink-0 rounded-md border border-border px-3 py-2 text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   onClick={pickOutputDir}
                   type="button"
                 >
@@ -217,7 +217,7 @@ export function FormatConvertDialog({
 
             {/* Error */}
             {error && (
-              <div className="mb-4 rounded-md border border-[#e5484d]/20 bg-[#e5484d]/10 px-3 py-2 text-[12px] text-[#e5484d]">
+              <div className="mb-4 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
                 {error}
               </div>
             )}
@@ -225,7 +225,7 @@ export function FormatConvertDialog({
             {/* Actions */}
             <div className="flex justify-end gap-2">
               <button
-                className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-foreground/5"
+                className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-muted-foreground hover:bg-foreground/5"
                 onClick={onClose}
                 type="button"
               >

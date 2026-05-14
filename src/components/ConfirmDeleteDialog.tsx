@@ -37,25 +37,25 @@ export function ConfirmDeleteDialog({
       onClick={onCancel}
     >
       <div
-        className="w-[360px] rounded-[12px] border border-border bg-[#1c1c1e] p-6 shadow-xl"
+        className="w-[360px] rounded-[12px] border border-border bg-popover p-6 shadow-xl ring-1 ring-foreground/5"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 text-[15px] font-medium text-[#f7f8f8]">
+        <h3 className="mb-2 text-[15px] font-medium text-foreground">
           确认删除
         </h3>
-        <p className="mb-5 text-[13px] text-[#a0a0ab]">
+        <p className="mb-5 text-[13px] text-muted-foreground">
           将{count > 1 ? ` ${count} 张照片` : "该照片"}移到系统回收站，此操作可从回收站恢复。
         </p>
         <div className="flex justify-end gap-2">
           <button
             ref={cancelRef}
-            className="rounded-[6px] border border-border px-3 py-1.5 text-[13px] text-[#a0a0ab] hover:bg-foreground/10"
+            className="rounded-[6px] border border-border px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-foreground/10"
             onClick={onCancel}
           >
             取消
           </button>
           <button
-            className="rounded-[6px] bg-[#e5484d] px-3 py-1.5 text-[13px] text-white hover:bg-[#d13438]"
+            className="rounded-[6px] bg-destructive px-3 py-1.5 text-[13px] text-white hover:opacity-90"
             onClick={onConfirm}
           >
             删除

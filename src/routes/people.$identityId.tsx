@@ -205,7 +205,7 @@ function PersonDetailPage() {
                 {identity?.name || "未命名"}
               </h1>
             )}
-            <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+            <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
               {photos.length} 张检测到该人物的照片
             </p>
           </div>
@@ -263,7 +263,7 @@ function PersonDetailPage() {
           </button>
           <div className="my-1 h-px bg-border" />
           <button
-            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-foreground/10"
+            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-destructive text-[13px] hover:bg-foreground/10"
             onClick={() => {
               if (ctxMenu.photoId !== null) handleRemoveFace(ctxMenu.photoId);
               setCtxMenu((m) => ({ ...m, open: false }));

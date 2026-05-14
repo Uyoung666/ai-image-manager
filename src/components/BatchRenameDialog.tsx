@@ -141,14 +141,14 @@ export function BatchRenameDialog({
         }}
       />
       {/* Dialog */}
-      <div className="relative w-[560px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-white/5">
+      <div className="relative w-[560px] max-h-[85vh] overflow-auto rounded-xl border border-border bg-popover ring-1 ring-foreground/5">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-[16px] font-[510] text-foreground">
             批量重命名 ({photoCount} 张)
           </h2>
           <button
-            className="rounded-md px-2 py-1 text-[#a1a1aa] text-[20px] leading-none hover:bg-foreground/5"
+            className="rounded-md px-2 py-1 text-muted-foreground text-[20px] leading-none hover:bg-foreground/5"
             onClick={onClose}
             type="button"
           >
@@ -160,11 +160,11 @@ export function BatchRenameDialog({
           /* Result View */
           <div className="px-6 py-4">
             <div className="mb-4 flex items-center gap-4 text-[14px]">
-              <span className="text-[#46a758]">
+              <span className="text-success">
                 重命名成功: {successResults.length}
               </span>
               {errorResults.length > 0 && (
-                <span className="text-[#e5484d]">
+                <span className="text-destructive">
                   失败/跳过: {errorResults.length}
                 </span>
               )}
@@ -176,11 +176,11 @@ export function BatchRenameDialog({
                     className="border-b border-border px-3 py-2 text-[12px] text-muted-foreground last:border-b-0"
                     key={r.id}
                   >
-                    <span className="text-[#e5484d]">{r.oldName}</span>
+                    <span className="text-destructive">{r.oldName}</span>
                     {" → "}
                     {r.newName}
                     {r.error && (
-                      <span className="ml-2 text-[#e5484d]">({r.error})</span>
+                      <span className="ml-2 text-destructive">({r.error})</span>
                     )}
                   </div>
                 ))}
@@ -201,13 +201,13 @@ export function BatchRenameDialog({
           <div className="px-6 py-4">
             {/* Presets */}
             <div className="mb-4">
-              <div className="mb-2 text-[11px] font-[510] text-[#6b6b75] uppercase tracking-[0.01em]">
+              <div className="mb-2 text-[11px] font-[510] text-muted-foreground/70 uppercase tracking-[0.01em]">
                 模板预设
               </div>
               <div className="flex flex-wrap gap-2">
                 {TEMPLATES.map((tpl) => (
                   <button
-                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
+                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     key={tpl.value}
                     onClick={() => setPattern(tpl.value)}
                     type="button"
@@ -220,7 +220,7 @@ export function BatchRenameDialog({
 
             {/* Pattern input */}
             <div className="mb-2">
-              <label className="mb-1.5 block text-[12px] font-[400] text-[#a1a1aa]">
+              <label className="mb-1.5 block text-[12px] font-[400] text-muted-foreground">
                 命名模式
               </label>
               <input
@@ -233,21 +233,21 @@ export function BatchRenameDialog({
 
             {/* Preview */}
             <div className="mb-4">
-              <span className="text-[11px] text-[#6b6b75]">预览: </span>
-              <span className="text-[13px] font-mono text-[#a1a1aa]">
+              <span className="text-[11px] text-muted-foreground/70">预览: </span>
+              <span className="text-[13px] font-mono text-muted-foreground">
                 {serverPreview || previewName()}
               </span>
             </div>
 
             {/* Token palette */}
             <div className="mb-4">
-              <div className="mb-2 text-[11px] font-[510] text-[#6b6b75] uppercase tracking-[0.01em]">
+              <div className="mb-2 text-[11px] font-[510] text-muted-foreground/70 uppercase tracking-[0.01em]">
                 可用变量
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {TOKENS.map((t) => (
                   <button
-                    className="rounded-md border border-border bg-secondary px-2.5 py-1.5 text-[11px] font-mono text-[#a1a1aa] hover:bg-foreground/5 hover:text-foreground"
+                    className="rounded-md border border-border bg-secondary px-2.5 py-1.5 text-[11px] font-mono text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     key={t.token}
                     onClick={() => insertToken(t.token)}
                     title={`${t.description} — 例如: ${t.example}`}
@@ -261,12 +261,12 @@ export function BatchRenameDialog({
 
             {/* Actions */}
             <div className="flex items-center justify-between">
-              <span className="text-[12px] text-[#6b6b75]">
+              <span className="text-[12px] text-muted-foreground/70">
                 原始文件不会被删除，仅重命名
               </span>
               <div className="flex gap-2">
                 <button
-                  className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-[#a1a1aa] hover:bg-foreground/5"
+                  className="rounded-md border border-border px-4 py-2 text-[13px] font-[510] text-muted-foreground hover:bg-foreground/5"
                   onClick={onClose}
                   type="button"
                 >

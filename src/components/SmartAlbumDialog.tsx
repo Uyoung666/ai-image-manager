@@ -63,7 +63,7 @@ function TagSelector({ existingTags, value, onChange }: {
   return (
     <div className="flex flex-1 flex-col gap-1">
       <input
-        className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+        className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
         onChange={(e) => setFilterText(e.target.value)}
         placeholder="搜索标签..."
         value={filterText}
@@ -246,7 +246,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
       onClick={handleOverlayClick}
       ref={overlayRef}
     >
-      <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
+      <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover ring-1 ring-foreground/5">
         {/* Header */}
         <div className="flex items-center justify-between border-border border-b px-5 py-4">
           <div className="flex items-center gap-2">
@@ -266,13 +266,13 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
           <div className="space-y-2">
             <input
               autoFocus
-              className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+              className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setName(e.target.value)}
               placeholder="相册名称"
               value={name}
             />
             <input
-              className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+              className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setDescription(e.target.value)}
               placeholder="描述 (可选)"
               value={description}
@@ -343,7 +343,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                   {/* Value */}
                   {rule.type === "dateRange" && (rule.datePreset === "自定义" || !rule.datePreset) ? (
                     <input
-                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                       onChange={(e) => updateRule(idx, { value: e.target.value })}
                       placeholder="YYYY-MM-DD 或 时间戳"
                       value={rule.value}
@@ -366,14 +366,14 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                   ) : rule.type !== "dateRange" ? (
                     <div className="flex flex-1 items-center gap-1">
                       <input
-                        className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                        className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                         onChange={(e) => updateRule(idx, { value: e.target.value })}
                         placeholder={rule.type === "tags" ? "风景, 海滩" : "值"}
                         value={rule.value}
                       />
                       {(rule.type === "focalLength" || rule.type === "aperture" || rule.type === "iso") && rule.numberOp === "范围" && (
                         <input
-                          className="h-7 w-20 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                          className="h-7 w-20 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                           onChange={(e) => updateRule(idx, { max: e.target.value })}
                           placeholder="最大值"
                           value={rule.max || ""}
@@ -403,7 +403,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
 
           {/* Preview */}
           {previewCount !== null && (
-            <div className="rounded-[6px] bg-[#46a758]/10 px-3 py-2 text-[12px] text-[#46a758]">
+            <div className="rounded-[6px] bg-success/10 px-3 py-2 text-[12px] text-success">
               匹配到 {previewCount} 张照片
             </div>
           )}

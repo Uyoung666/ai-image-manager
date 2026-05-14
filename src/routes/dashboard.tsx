@@ -324,7 +324,7 @@ function DashboardPage() {
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-4">
-      <p className="font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">{label}</p>
+      <p className="font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">{label}</p>
       <p className="mt-1 font-[590] text-foreground text-[24px]">{value}</p>
     </div>
   );
@@ -336,7 +336,7 @@ function ChartSection({ title, children, hint }: { children: React.ReactNode; hi
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-[590] text-foreground text-[16px]">{title}</h2>
         {hint && (
-          <span className="text-[#6b6b75] text-[10px]">{hint}</span>
+          <span className="text-muted-foreground/70 text-[10px]">{hint}</span>
         )}
       </div>
       {children}
@@ -345,7 +345,7 @@ function ChartSection({ title, children, hint }: { children: React.ReactNode; hi
 }
 
 function EmptyHint({ text }: { text: string }) {
-  return <p className="text-[#6b6b75] text-[13px]">{text}</p>;
+  return <p className="text-muted-foreground/70 text-[13px]">{text}</p>;
 }
 
 export const Route = createFileRoute("/dashboard")({ component: DashboardPage });

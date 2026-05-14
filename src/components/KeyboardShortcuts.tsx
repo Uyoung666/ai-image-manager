@@ -63,11 +63,11 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
         }
       }}
     >
-      <div className="w-[420px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
+      <div className="w-[420px] max-h-[80vh] overflow-y-auto rounded-[12px] border border-border bg-popover ring-1 ring-foreground/5">
         <div className="flex items-center justify-between border-border border-b px-5 py-4">
           <h2 className="font-[590] text-foreground text-[16px]">键盘快捷键</h2>
           <button
-            className="text-[#6b6b75] transition-colors hover:text-foreground"
+            className="text-muted-foreground transition-colors hover:text-foreground"
             onClick={onClose}
           >
             <svg
@@ -88,17 +88,17 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
         <div className="space-y-4 p-5">
           {sections.map((section) => (
             <div key={section}>
-              <h3 className="mb-1.5 font-[510] text-[11px] text-[#6b6b75] uppercase tracking-wider">
+              <h3 className="mb-1.5 font-[510] text-[11px] text-muted-foreground uppercase tracking-wider">
                 {section}
               </h3>
               <div className="space-y-0.5">
                 {SHORTCUTS.filter((s) => s.section === section).map((s) => (
                   <div className="flex items-center justify-between py-1" key={s.label}>
-                    <span className="text-[#a1a1aa] text-[13px]">{s.label}</span>
+                    <span className="text-muted-foreground text-[13px]">{s.label}</span>
                     <div className="flex items-center gap-1">
                       {s.keys.map((k, j) => (
                         <span
-                          className="min-w-[28px] rounded-[4px] border border-[#2c2c30] bg-[#121214] px-1.5 py-0.5 text-center font-[510] text-[#a1a1aa] text-[11px]"
+                          className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-[510] text-muted-foreground text-[11px]"
                           key={j}
                         >
                           {k}

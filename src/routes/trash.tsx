@@ -177,7 +177,7 @@ function TrashPage() {
                 恢复 ({selectedIds.size})
               </button>
               <button
-                className="flex items-center gap-1.5 rounded-[6px] bg-[#e5484d]/10 px-3 py-1.5 text-[13px] text-[#e5484d] transition-colors hover:bg-[#e5484d]/20 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-[6px] bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
                 disabled={deleting}
                 onClick={handlePermanentDelete}
               >
@@ -188,7 +188,7 @@ function TrashPage() {
           )}
           {photos.length > 0 && (
             <button
-              className="rounded-[6px] px-3 py-1.5 text-[13px] text-[#e5484d] transition-colors hover:bg-[#e5484d]/10 disabled:opacity-50"
+              className="rounded-[6px] px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
               disabled={deleting}
               onClick={handleEmptyTrash}
             >
@@ -263,7 +263,7 @@ function TrashPage() {
                     <span className="text-[10px] text-muted-foreground">
                       {formatTimeAgo(photo.deletedAt)}
                     </span>
-                    <span className="text-[10px] text-[#e5484d]/70">
+                    <span className="text-[10px] text-destructive/70">
                       {daysRemaining(photo.deletedAt)} 天后删除
                     </span>
                   </div>

@@ -94,9 +94,9 @@ export function PerfOverlay({
         >
           {metrics.fps}
         </span>
-        <span className="text-[#6b6b75]">FPS</span>
+        <span className="text-muted-foreground/70">FPS</span>
       </div>
-      <div className="mt-1 text-[#6b6b75]">
+      <div className="mt-1 text-muted-foreground/70">
         <div>avg {metrics.avgFps} / min {metrics.minFps}</div>
         <div>frames {metrics.frameCount}</div>
         {memory > 0 && <div>heap {memory.toFixed(0)} MB</div>}

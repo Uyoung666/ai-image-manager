@@ -124,7 +124,7 @@ export function CloudConfigPanel() {
               <option value="s3">Amazon S3</option>
             </select>
             <input
-              className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+              className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setName(e.target.value)}
               placeholder="配置名称"
               value={name}
@@ -133,20 +133,20 @@ export function CloudConfigPanel() {
 
           {provider === "webdav" ? (
             <>
-              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setUrl(e.target.value)} placeholder="WebDAV URL" value={url} />
+              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setUrl(e.target.value)} placeholder="WebDAV URL" value={url} />
               <div className="flex gap-2">
-                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setUsername(e.target.value)} placeholder="用户名" value={username} />
-                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setPassword(e.target.value)} placeholder="密码" type="password" value={password} />
+                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setUsername(e.target.value)} placeholder="用户名" value={username} />
+                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setPassword(e.target.value)} placeholder="密码" type="password" value={password} />
               </div>
             </>
           ) : (
             <>
-              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setEndpoint(e.target.value)} placeholder="Endpoint URL" value={endpoint} />
-              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setAccessKey(e.target.value)} placeholder="Access Key" value={accessKey} />
-              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setSecretKey(e.target.value)} placeholder="Secret Key" type="password" value={secretKey} />
+              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setEndpoint(e.target.value)} placeholder="Endpoint URL" value={endpoint} />
+              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setAccessKey(e.target.value)} placeholder="Access Key" value={accessKey} />
+              <input className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setSecretKey(e.target.value)} placeholder="Secret Key" type="password" value={secretKey} />
               <div className="flex gap-2">
-                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setBucket(e.target.value)} placeholder="Bucket" value={bucket} />
-                <input className="h-7 w-24 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary" onChange={(e) => setRegion(e.target.value)} placeholder="Region" value={region} />
+                <input className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setBucket(e.target.value)} placeholder="Bucket" value={bucket} />
+                <input className="h-7 w-24 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary" onChange={(e) => setRegion(e.target.value)} placeholder="Region" value={region} />
               </div>
             </>
           )}
@@ -177,7 +177,7 @@ export function CloudConfigPanel() {
               <div className="flex items-center gap-2">
                 <Link2 className="h-3 w-3 text-muted-foreground" />
                 <span className="text-[12px] text-foreground">{cfg.name}</span>
-                <span className="text-[10px] text-[#6b6b75]">{PROVIDER_LABELS[cfg.provider] || cfg.provider}</span>
+                <span className="text-[10px] text-muted-foreground/70">{PROVIDER_LABELS[cfg.provider] || cfg.provider}</span>
               </div>
               <div className="flex items-center gap-1">
                 {testResult && (
@@ -205,7 +205,7 @@ export function CloudConfigPanel() {
       )}
 
       {!loading && configs.length === 0 && !showAdd && (
-        <p className="text-[#6b6b75] text-[11px]">暂无云同步配置</p>
+        <p className="text-muted-foreground/70 text-[11px]">暂无云同步配置</p>
       )}
     </div>
   );

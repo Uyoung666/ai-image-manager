@@ -245,7 +245,7 @@ export function PhotoGrid({
         </div>
         <div className="flex flex-1 items-center justify-center">
           {emptyState ?? (
-            <span className="text-[#6b6b75] text-[13px]">{t("noPhotos")}</span>
+            <span className="text-muted-foreground/70 text-[13px]">{t("noPhotos")}</span>
           )}
         </div>
       </div>

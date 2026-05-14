@@ -164,7 +164,7 @@ function PeoplePage() {
             <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
               人物
             </h1>
-            <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+            <p className="mt-0.5 text-muted-foreground/70 text-[12px]">
               {identities.length > 0
                 ? `${identities.length} 个人物分组`
                 : "人脸识别与人物管理"}
@@ -263,10 +263,10 @@ function PeoplePage() {
             ))}
           </div>
         ) : identities.length === 0 ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-3 text-[#6b6b75]">
+          <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
             <User className="h-12 w-12 opacity-20" />
             <p className="text-[13px]">还没有检测到人物</p>
-            <p className="text-[11px] text-[#6b6b75]/60">
+            <p className="text-[11px] text-muted-foreground/70/60">
               点击"开始人脸检测"来分析照片中的人物
             </p>
             <button
@@ -333,7 +333,7 @@ function PeoplePage() {
                       <h3 className="truncate font-[510] text-[13px] text-foreground">
                         {identity.name || "未命名"}
                       </h3>
-                      <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                      <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
                         {identity.faceCount} 张照片
                       </p>
                     </div>
@@ -392,13 +392,13 @@ function PeoplePage() {
                         <h3 className="truncate font-[510] text-[13px] text-foreground">
                           {identity.name || "未命名"}
                         </h3>
-                        <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                        <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
                           {identity.faceCount} 张照片
                         </p>
                       </div>
                     </Link>
                     <button
-                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-[#e5484d] group-hover:opacity-100"
+                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();

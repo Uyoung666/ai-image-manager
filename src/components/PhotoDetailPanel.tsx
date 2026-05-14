@@ -445,7 +445,7 @@ export function PhotoDetailPanel({
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
         {/* Basic Info */}
         <section>
-          <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+          <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
             {t("photoInfo")}
           </h4>
           <div className="space-y-1.5">
@@ -464,7 +464,7 @@ export function PhotoDetailPanel({
 
         {/* Tags */}
         <section>
-          <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+          <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
             标签
           </h4>
           <div className="flex flex-wrap gap-1.5">
@@ -499,7 +499,7 @@ export function PhotoDetailPanel({
                   </button>
                   {unconfirmed && (
                     <button
-                      className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-[#6b6b75] opacity-0 transition-opacity hover:bg-[#e5484d] hover:text-white group-hover:opacity-100"
+                      className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-muted-foreground/70 opacity-0 transition-opacity hover:bg-destructive hover:text-white group-hover:opacity-100"
                       onClick={() => handleRemoveTag(tag.id)}
                       title="移除"
                     >
@@ -510,7 +510,7 @@ export function PhotoDetailPanel({
               );
             })}
             <button
-              className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[#6b6b75] text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
+              className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-muted-foreground/70 text-[11px] hover:border-muted-foreground hover:text-muted-foreground"
               onClick={() => setShowTagInput(true)}
             >
               + 添加
@@ -543,7 +543,7 @@ export function PhotoDetailPanel({
               )}
               <div className="flex items-center gap-1">
                 <input
-                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                   onChange={(e) => setNewTagName(e.target.value)}
                   onKeyDown={handleTagInputKeyDown}
                   placeholder="输入新标签名称..."
@@ -564,7 +564,7 @@ export function PhotoDetailPanel({
 
         {/* AI Tag Suggestions */}
         <section>
-          <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+          <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
             AI 建议标签
           </h4>
           {aiSuggestions === null && !aiLoading ? (
@@ -578,11 +578,11 @@ export function PhotoDetailPanel({
           ) : aiLoading ? (
             <div className="flex items-center gap-2 py-2">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              <span className="text-[#6b6b75] text-[11px]">AI 分析中...</span>
+              <span className="text-muted-foreground/70 text-[11px]">AI 分析中...</span>
             </div>
           ) : aiSuggestions!.length === 0 ? (
             <div className="flex items-center gap-2">
-              <p className="text-[#6b6b75] text-[11px]">未识别到合适的标签</p>
+              <p className="text-muted-foreground/70 text-[11px]">未识别到合适的标签</p>
               <button
                 className="text-primary text-[11px] hover:underline"
                 onClick={() => {
@@ -626,7 +626,7 @@ export function PhotoDetailPanel({
         {/* EXIF Info */}
         {loading ? (
           <section>
-            <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
               {t("exifInfo")}
             </h4>
             <div className="flex items-center justify-center py-6">
@@ -635,7 +635,7 @@ export function PhotoDetailPanel({
           </section>
         ) : exif ? (
           <section>
-            <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
               {t("exifInfo")}
             </h4>
             <div className="space-y-1.5">
@@ -686,16 +686,16 @@ export function PhotoDetailPanel({
           </section>
         ) : (
           <section>
-            <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+            <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
               {t("exifInfo")}
             </h4>
-            <p className="text-[#6b6b75] text-[12px]">{t("noExifData")}</p>
+            <p className="text-muted-foreground/70 text-[12px]">{t("noExifData")}</p>
           </section>
         )}
 
         {/* File Location */}
         <section>
-          <h4 className="mb-2 font-[510] text-[#6b6b75] text-[11px] uppercase tracking-wider">
+          <h4 className="mb-2 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
             {t("filePath")}
           </h4>
           <p className="mb-2 truncate text-[11px] text-muted-foreground">
@@ -718,8 +718,8 @@ export function PhotoDetailPanel({
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-2">
-      <span className="flex-shrink-0 text-[#6b6b75] text-[11px]">{label}</span>
-      <span className="truncate text-right text-[#a1a1aa] text-[11px]">
+      <span className="flex-shrink-0 text-muted-foreground/70 text-[11px]">{label}</span>
+      <span className="truncate text-right text-muted-foreground text-[11px]">
         {value}
       </span>
     </div>

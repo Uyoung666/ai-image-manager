@@ -110,7 +110,7 @@ function SettingsPage() {
                 <span className="text-muted-foreground text-[13px]">
                   {t("settingsTheme")}
                 </span>
-                <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
                   {themeMode === "dark"
                     ? "深色"
                     : themeMode === "light"
@@ -139,7 +139,7 @@ function SettingsPage() {
                 <span className="text-muted-foreground text-[13px]">
                   {t("settingsThumbnailCache")}
                 </span>
-                <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
                   {t("settingsThumbnailCacheHint")}
                 </p>
               </div>
@@ -155,13 +155,13 @@ function SettingsPage() {
                 <span className="text-muted-foreground text-[13px]">
                   清理无效索引记录
                 </span>
-                <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                <p className="mt-0.5 text-muted-foreground/70 text-[11px]">
                   移除文件夹已不存在或关联丢失的照片索引
                   {cleanupCount > 0 && `（上次清理: ${cleanupCount} 条）`}
                 </p>
               </div>
               <button
-                className="flex items-center gap-1.5 rounded-[6px] border border-[#e5484d]/30 px-3 py-1.5 text-[#e5484d] text-[12px] transition-colors hover:border-[#e5484d]/50 hover:bg-[#e5484d]/5"
+                className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-destructive text-[12px] transition-colors hover:border-destructive/50 hover:bg-destructive/5"
                 onClick={handleCleanupOrphans}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -192,16 +192,16 @@ function SettingsPage() {
             {wm.enabled && (
               <>
                 <div className="border-border border-t pt-3">
-                  <label className="mb-1 block text-[#6b6b75] text-[11px]">水印文字</label>
+                  <label className="mb-1 block text-muted-foreground/70 text-[11px]">水印文字</label>
                   <input
-                    className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+                    className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                     onChange={(e) => setWm((prev) => ({ ...prev, text: e.target.value }))}
                     placeholder="例如: © 2026 Your Name"
                     value={wm.text}
                   />
                 </div>
                 <div className="border-border border-t pt-3">
-                  <label className="mb-1 block text-[#6b6b75] text-[11px]">位置</label>
+                  <label className="mb-1 block text-muted-foreground/70 text-[11px]">位置</label>
                   <div className="grid grid-cols-3 gap-1">
                     {(["topLeft", "topRight", "bottomLeft", "bottomRight", "center"] as const).map((pos) => (
                       <button
@@ -219,7 +219,7 @@ function SettingsPage() {
                   </div>
                 </div>
                 <div className="border-border border-t pt-3">
-                  <label className="mb-1 block text-[#6b6b75] text-[11px]">透明度: {wm.opacity}%</label>
+                  <label className="mb-1 block text-muted-foreground/70 text-[11px]">透明度: {wm.opacity}%</label>
                   <input
                     className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
                     max={100}
@@ -231,7 +231,7 @@ function SettingsPage() {
                   />
                 </div>
                 <div className="border-border border-t pt-3">
-                  <label className="mb-1 block text-[#6b6b75] text-[11px]">字号: {wm.fontSize}px</label>
+                  <label className="mb-1 block text-muted-foreground/70 text-[11px]">字号: {wm.fontSize}px</label>
                   <input
                     className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
                     max={72}

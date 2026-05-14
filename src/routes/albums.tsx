@@ -109,7 +109,7 @@ function AlbumsPage() {
             <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
               相册
             </h1>
-            <p className="mt-0.5 text-[#6b6b75] text-[12px]">
+            <p className="mt-0.5 text-muted-foreground/70 text-[12px]">
               {albums.length} 个相册
             </p>
           </div>
@@ -137,7 +137,7 @@ function AlbumsPage() {
           <div className="flex gap-3">
             <input
               autoFocus
-              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCreate();
@@ -147,7 +147,7 @@ function AlbumsPage() {
               value={newName}
             />
             <input
-              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary"
+              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewDesc(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCreate();
@@ -187,7 +187,7 @@ function AlbumsPage() {
         ) : albums.length === 0 ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
             <svg
-              className="text-[#6b6b75]/40"
+              className="text-muted-foreground/70/40"
               fill="none"
               height="48"
               stroke="currentColor"
@@ -202,7 +202,7 @@ function AlbumsPage() {
               <path d="M9 21V9" />
             </svg>
             <p className="font-[510] text-[14px] text-foreground">还没有相册</p>
-            <p className="max-w-[260px] text-[12px] text-[#6b6b75]">
+            <p className="max-w-[260px] text-[12px] text-muted-foreground/70">
               创建相册来整理你的照片，也可以拖拽照片到侧边栏快速添加
             </p>
             <button
@@ -265,11 +265,11 @@ function AlbumsPage() {
                     </h3>
                   </div>
                   {album.description && (
-                    <p className="mt-0.5 truncate text-[#6b6b75] text-[11px]">
+                    <p className="mt-0.5 truncate text-muted-foreground/70 text-[11px]">
                       {album.description}
                     </p>
                   )}
-                  <p className="mt-1 text-[#6b6b75] text-[10px]">
+                  <p className="mt-1 text-muted-foreground/70 text-[10px]">
                     {album.isSmart ? "智能相册" : new Date(album.createdAt).toLocaleDateString("zh-CN")}
                   </p>
                 </div>

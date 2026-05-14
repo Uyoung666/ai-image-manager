@@ -173,12 +173,12 @@ function HomePage() {
     if (isSearching) {
       return (
         <div className="flex flex-col items-center gap-3 text-center">
-          <svg className="h-10 w-10 text-[#6b6b75]/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+          <svg className="h-10 w-10 text-muted-foreground/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.35-4.35" strokeLinecap="round" />
           </svg>
           <p className="font-[510] text-[14px] text-foreground">未找到匹配的照片</p>
-          <p className="max-w-[280px] text-[12px] text-[#6b6b75]">
+          <p className="max-w-[280px] text-[12px] text-muted-foreground/70">
             试试换个关键词，或使用 EXIF 筛选器缩小范围
           </p>
         </div>
@@ -187,11 +187,11 @@ function HomePage() {
     if (favoriteOnly) {
       return (
         <div className="flex flex-col items-center gap-3 text-center">
-          <svg className="h-10 w-10 text-[#6b6b75]/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+          <svg className="h-10 w-10 text-muted-foreground/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <p className="font-[510] text-[14px] text-foreground">还没有收藏的照片</p>
-          <p className="max-w-[280px] text-[12px] text-[#6b6b75]">
+          <p className="max-w-[280px] text-[12px] text-muted-foreground/70">
             浏览照片时点击星标即可收藏，收藏的照片会出现在这里
           </p>
         </div>

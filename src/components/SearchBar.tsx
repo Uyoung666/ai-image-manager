@@ -244,7 +244,7 @@ export function SearchBar({
   }
 
   const filterInputClass =
-    "h-8 w-full rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-[#6b6b75] focus:border-primary/40";
+    "h-8 w-full rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40";
 
   return (
     <div
@@ -265,9 +265,9 @@ export function SearchBar({
         {/* Search input row */}
         <div className="flex items-center gap-2">
           <form className="relative flex-1" onSubmit={handleSubmit}>
-            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#6b6b75]" />
+            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
             <input
-              className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-[#6b6b75] focus:border-primary focus:ring-1 focus:ring-ring"
+              className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring"
               onBlur={handleInputBlur}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -281,7 +281,7 @@ export function SearchBar({
             />
             {(query || imageSearchActive) && (
               <button
-                className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#6b6b75] hover:text-foreground"
+                className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-muted-foreground/70 hover:text-foreground"
                 onClick={handleClear}
                 type="button"
               >
@@ -312,7 +312,7 @@ export function SearchBar({
                   className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
                     imageSearchActive
                       ? "bg-primary/10 text-primary"
-                      : "text-[#6b6b75] hover:bg-foreground/5 hover:text-foreground"
+                      : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                   }`}
                   onClick={() => fileInputRef.current?.click()}
                   title="以图搜图 — 选择参考图片寻找相似照片"
@@ -325,7 +325,7 @@ export function SearchBar({
               className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
                 showFilters || hasActiveFilters
                   ? "bg-primary/10 text-primary"
-                  : "text-[#6b6b75] hover:bg-foreground/5 hover:text-foreground"
+                  : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => setShowFilters((prev) => !prev)}
               title="EXIF 筛选"
@@ -343,14 +343,14 @@ export function SearchBar({
               </span>
             )}
             {searchTime !== undefined && (
-              <span className="text-[#6b6b75]">
+              <span className="text-muted-foreground/70">
                 {searchTime < 1000
                   ? `${searchTime}ms`
                   : `${(searchTime / 1000).toFixed(1)}s`}
               </span>
             )}
             {resultCount !== undefined && (
-              <span className="text-[#a1a1aa]">
+              <span className="text-muted-foreground">
                 {resultCount > 0
                   ? `${resultCount} 个结果`
                   : searchMode ? "无匹配结果" : ""}
@@ -417,7 +417,7 @@ export function SearchBar({
               />
             )}
             <button
-              className="rounded-[4px] px-1.5 py-0.5 text-[#6b6b75] text-[10px] hover:text-foreground"
+              className="rounded-[4px] px-1.5 py-0.5 text-muted-foreground/70 text-[10px] hover:text-foreground"
               onClick={clearFilters}
             >
               清除全部
@@ -434,7 +434,7 @@ export function SearchBar({
             <div className="grid grid-cols-5 gap-3">
               {/* Date range */}
               <div>
-                <label className="mb-1 block font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+                <label className="mb-1 block font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
                   日期范围
                 </label>
                 <div className="space-y-1">
@@ -457,7 +457,7 @@ export function SearchBar({
 
               {/* Camera */}
               <div>
-                <label className="mb-1 block font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+                <label className="mb-1 block font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
                   相机型号
                 </label>
                 <input
@@ -470,7 +470,7 @@ export function SearchBar({
 
               {/* ISO range */}
               <div>
-                <label className="mb-1 block font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+                <label className="mb-1 block font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
                   ISO 范围
                 </label>
                 <div className="space-y-1">
@@ -493,7 +493,7 @@ export function SearchBar({
 
               {/* Aperture range */}
               <div>
-                <label className="mb-1 block font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+                <label className="mb-1 block font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
                   光圈 (f/)
                 </label>
                 <div className="space-y-1">
@@ -524,7 +524,7 @@ export function SearchBar({
 
               {/* Focal length range */}
               <div>
-                <label className="mb-1 block font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+                <label className="mb-1 block font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
                   焦段 (mm)
                 </label>
                 <div className="space-y-1">
@@ -547,12 +547,12 @@ export function SearchBar({
             </div>
 
             <div className="mt-3 flex items-center justify-between border-border border-t pt-2">
-              <span className="text-[#6b6b75] text-[10px]">
+              <span className="text-muted-foreground/70 text-[10px]">
                 按 Enter 执行搜索
               </span>
               <div className="flex items-center gap-2">
                 <button
-                  className="rounded-[4px] px-2 py-1 text-[#6b6b75] text-[11px] hover:text-foreground"
+                  className="rounded-[4px] px-2 py-1 text-muted-foreground/70 text-[11px] hover:text-foreground"
                   onClick={() => {
                     clearFilters();
                     setShowFilters(false);
@@ -578,10 +578,10 @@ export function SearchBar({
       {/* Search suggestions dropdown */}
       {showSuggestions && suggestions.length > 0 && (
         <div
-          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-white/5"
+          className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-foreground/5"
           ref={dropdownRef}
         >
-          <div className="px-3 py-1.5 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
+          <div className="px-3 py-1.5 font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
             {query.trim() ? "搜索建议" : "最近搜索"}
           </div>
           {suggestions.map((s, i) => (
@@ -598,13 +598,13 @@ export function SearchBar({
                     style={{ background: s.color }}
                   />
                   <span className="truncate">{s.text}</span>
-                  <span className="ml-auto flex-shrink-0 text-[#6b6b75] text-[10px]">
+                  <span className="ml-auto flex-shrink-0 text-muted-foreground/70 text-[10px]">
                     <Tag className="h-3 w-3" />
                   </span>
                 </>
               ) : (
                 <>
-                  <Clock className="h-3 w-3 flex-shrink-0 text-[#6b6b75]" />
+                  <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                   <span className="truncate">{s.text}</span>
                 </>
               )}

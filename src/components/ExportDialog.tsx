@@ -91,7 +91,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
       onClick={handleOverlayClick}
       ref={overlayRef}
     >
-      <div className="w-[400px] rounded-[12px] border border-border bg-popover ring-1 ring-white/5">
+      <div className="w-[400px] rounded-[12px] border border-border bg-popover ring-1 ring-foreground/5">
         <div className="flex items-center justify-between border-border border-b px-5 py-4">
           <h2 className="font-[590] text-[16px] text-foreground">
             导出 {photoIds.length} 张照片
@@ -166,8 +166,8 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
             <div
               className={`rounded-[6px] px-3 py-2 text-[12px] ${
                 result.error
-                  ? "bg-[#e5484d]/10 text-[#e5484d]"
-                  : "bg-[#46a758]/10 text-[#46a758]"
+                  ? "bg-destructive/10 text-destructive"
+                  : "bg-success/10 text-success"
               }`}
             >
               {result.error
