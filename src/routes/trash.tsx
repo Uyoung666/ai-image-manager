@@ -4,6 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 
+function toLocalMediaUrl(filePath: string | null | undefined): string {
+  if (!filePath) return "";
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `local-media://${encoded}`;
+}
+
 interface DeletedPhoto {
   id: number;
   filename: string;
@@ -234,7 +244,7 @@ function TrashPage() {
                       alt={photo.filename}
                       className="h-full w-full object-cover opacity-60"
                       loading="lazy"
-                      src={`file://${photo.thumbnailPath}`}
+                      src={toLocalMediaUrl(photo.thumbnailPath)}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground/30">

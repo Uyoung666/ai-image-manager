@@ -15,6 +15,16 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "@/ipc/manager";
 
+function toLocalMediaUrl(filePath: string | null | undefined): string {
+  if (!filePath) return "";
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `local-media://${encoded}`;
+}
+
 interface SearchResult {
   id: string;
   title: string;
@@ -239,7 +249,7 @@ export function SpotlightSearch() {
                       <img
                         alt=""
                         className="h-8 w-8 rounded-[4px] object-cover"
-                        src={`file://${photo.thumbnailPath}`}
+                        src={toLocalMediaUrl(photo.thumbnailPath)}
                       />
                     ) : (
                       <div className="flex h-8 w-8 items-center justify-center rounded-[4px] bg-card">
