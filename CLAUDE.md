@@ -43,6 +43,7 @@ src/
 │   ├── people.$identityId.tsx # 人物详情
 │   ├── duplicates.tsx         # 重复照片管理
 │   ├── dashboard.tsx          # EXIF 仪表盘
+│   ├── trash.tsx              # 最近删除（软删除恢复）
 │   └── settings.tsx           # 设置页面
 ├── layouts/                   # 布局组件
 │
@@ -260,6 +261,38 @@ git push origin main
 
 ## 前端模式备忘
 
+### 本地图片 URL
+
+渲染进程通过自定义协议 `local-media://` 加载本地图片（Electron 注册的 protocol handler）。**不要使用 `file://`**。
+
+```typescript
+function toLocalMediaUrl(filePath: string | null | undefined): string {
+  if (!filePath) return "";
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `local-media://${encoded}`;
+}
+```
+
+此函数在 `PhotoCard` 等组件中定义。新组件需要显示图片时，复用此模式。
+
+### TanStack Query 缓存
+
+- 照片列表 query key: `["photos", { folderId, tagId, favoriteOnly, sort, order }]`
+- 文件夹列表: `["folders"]`
+- 标签列表: `["tags"]`
+- AI 状态: `["aiStatus"]`
+- `queryClient` 从 `@/providers/QueryProvider` 导出
+- 修改数据后必须 invalidate 相关缓存：`queryClient.invalidateQueries({ queryKey: ["photos"] })`
+- 默认 staleTime 30s，refetchOnWindowFocus 关闭
+
+### 路由树自动生成
+
+`src/routeTree.gen.ts` 由 TanStack Router Vite 插件在 `npm run dev` 时自动生成。新增 `src/routes/*.tsx` 文件后启动 dev server 即可自动更新路由树，无需手动编辑。
+
 ### IME 输入处理
 
 中文输入法（IME）在组合过程中会触发 `keydown` 事件（如 Enter 确认候选词）。所有带 `onKeyDown` 快捷键的 `<input>` 必须使用 composition guard：
@@ -281,6 +314,25 @@ const composingRef = useRef(false);
 
 - `PhotoGrid`：瀑布流布局，通过 `data-photo-id` / `data-photo-path` 属性支持右键菜单事件委托
 - `PhotoLightbox`：全屏查看器，需要 `{ id, filename, path, width, height }` 格式的 photos 数组
+
+### 软删除模式
+
+照片删除使用软删除（`photos.deletedAt` 字段）：
+- `deletePhoto`/`deletePhotos` 设置 `deletedAt = Date.now()`，不移动文件
+- `listPhotos` 自动过滤 `deletedAt IS NOT NULL` 的记录
+- `restorePhotos` 将 `deletedAt` 置为 `null`
+- `permanentlyDeletePhotos`/`emptyTrash` 才真正移动文件到系统回收站并删除数据库记录
+- 恢复/永久删除后需 invalidate `["photos"]` 和 `["folders"]` 缓存
+
+---
+
+## 测试模式
+
+- 纯函数从 service 模块提取后独立测试（避免 Electron/native 模块依赖）
+- 组件测试使用 `@testing-library/react` + `@testing-library/user-event`
+- 集成测试通过 `vi.mock("electron")` 和 `vi.mock("electron-store")` 隔离 Electron 环境
+- 需要 Node.js API 的测试文件顶部加 `// @vitest-environment node`
+- 测试描述使用中文
 
 ---
 
