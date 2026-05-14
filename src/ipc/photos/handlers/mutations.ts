@@ -2,7 +2,7 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { eq, inArray, sql } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { shell } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -23,17 +23,10 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
     .where(eq(photos.id, input.id))
     .get();
   if (photo) {
-    // Move file to system recycle bin
-    if (fs.existsSync(photo.path)) {
-      await shell.trashItem(photo.path);
-    }
-    db.delete(exifData).where(eq(exifData.photoId, input.id)).run();
-    db.delete(photos).where(eq(photos.id, input.id)).run();
-    // Clean up LanceDB vector
-    deletePhotoVectors([input.id]).catch((err) =>
-      console.error("[AI] deletePhoto vector cleanup failed:", err)
-    );
-    // Decrement folder photoCount
+    db.update(photos)
+      .set({ deletedAt: Date.now() })
+      .where(eq(photos.id, input.id))
+      .run();
     if (photo.folderId) {
       db.update(folders)
         .set({ photoCount: sql`MAX(0, photo_count - 1)` })
@@ -48,28 +41,18 @@ export const deletePhotos = os
   .input(z.object({ ids: z.array(z.number()) }))
   .handler(async ({ input }) => {
     const db = getDatabase();
-    const deletedPhotos = db
-      .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
+    const targetPhotos = db
+      .select({ id: photos.id, folderId: photos.folderId })
       .from(photos)
       .where(inArray(photos.id, input.ids))
       .all();
-    // Move files to system recycle bin
-    for (const p of deletedPhotos) {
-      if (fs.existsSync(p.path)) {
-        await shell.trashItem(p.path);
-      }
-    }
-    for (const id of input.ids) {
-      db.delete(exifData).where(eq(exifData.photoId, id)).run();
-      db.delete(photos).where(eq(photos.id, id)).run();
-    }
-    // Clean up LanceDB vectors
-    deletePhotoVectors(input.ids).catch((err) =>
-      console.error("[AI] deletePhotos vector cleanup failed:", err)
-    );
+    db.update(photos)
+      .set({ deletedAt: Date.now() })
+      .where(inArray(photos.id, input.ids))
+      .run();
     // Decrement folder photoCount by group
     const countsByFolder = new Map<number, number>();
-    for (const p of deletedPhotos) {
+    for (const p of targetPhotos) {
       if (p.folderId) {
         countsByFolder.set(
           p.folderId,
@@ -337,3 +320,92 @@ export const toggleFavorite = os
       .run();
     return { success: true };
   });
+
+export const listDeletedPhotos = os.handler(() => {
+  const db = getDatabase();
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return db
+    .select()
+    .from(photos)
+    .where(sql`${photos.deletedAt} IS NOT NULL AND ${photos.deletedAt} > ${thirtyDaysAgo}`)
+    .orderBy(desc(photos.deletedAt))
+    .all();
+});
+
+export const restorePhotos = os
+  .input(z.object({ ids: z.array(z.number()) }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const targetPhotos = db
+      .select({ id: photos.id, folderId: photos.folderId })
+      .from(photos)
+      .where(inArray(photos.id, input.ids))
+      .all();
+    db.update(photos)
+      .set({ deletedAt: null })
+      .where(inArray(photos.id, input.ids))
+      .run();
+    // Restore folder photoCounts
+    const countsByFolder = new Map<number, number>();
+    for (const p of targetPhotos) {
+      if (p.folderId) {
+        countsByFolder.set(
+          p.folderId,
+          (countsByFolder.get(p.folderId) || 0) + 1
+        );
+      }
+    }
+    for (const [fid, count] of countsByFolder) {
+      db.update(folders)
+        .set({ photoCount: sql`photo_count + ${count}` })
+        .where(eq(folders.id, fid))
+        .run();
+    }
+    return { restored: input.ids.length };
+  });
+
+export const permanentlyDeletePhotos = os
+  .input(z.object({ ids: z.array(z.number()) }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const targetPhotos = db
+      .select({ id: photos.id, path: photos.path })
+      .from(photos)
+      .where(inArray(photos.id, input.ids))
+      .all();
+    for (const p of targetPhotos) {
+      if (fs.existsSync(p.path)) {
+        await shell.trashItem(p.path);
+      }
+    }
+    db.delete(exifData).where(inArray(exifData.photoId, input.ids)).run();
+    db.delete(photoTags).where(inArray(photoTags.photoId, input.ids)).run();
+    db.delete(photos).where(inArray(photos.id, input.ids)).run();
+    deletePhotoVectors(input.ids).catch((err) =>
+      console.error("[AI] permanentlyDeletePhotos vector cleanup failed:", err)
+    );
+    return { deleted: input.ids.length };
+  });
+
+export const emptyTrash = os.handler(async () => {
+  const db = getDatabase();
+  const deletedPhotos = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(sql`${photos.deletedAt} IS NOT NULL`)
+    .all();
+  const ids = deletedPhotos.map((p) => p.id);
+  if (ids.length === 0) return { deleted: 0 };
+  for (const p of deletedPhotos) {
+    if (fs.existsSync(p.path)) {
+      await shell.trashItem(p.path);
+    }
+  }
+  db.delete(exifData).where(inArray(exifData.photoId, ids)).run();
+  db.delete(photoTags).where(inArray(photoTags.photoId, ids)).run();
+  db.delete(photos).where(inArray(photos.id, ids)).run();
+  deletePhotoVectors(ids).catch((err) =>
+    console.error("[AI] emptyTrash vector cleanup failed:", err)
+  );
+  return { deleted: ids.length };
+});

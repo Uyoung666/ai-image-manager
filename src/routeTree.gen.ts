@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TrashRouteImport } from './routes/trash'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PeopleRouteImport } from './routes/people'
 import { Route as DuplicatesRouteImport } from './routes/duplicates'
@@ -18,6 +19,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityId'
 import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
 
+const TrashRoute = TrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/trash'
     | '/albums/$albumId'
     | '/people/$identityId'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/trash'
     | '/albums/$albumId'
     | '/people/$identityId'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/duplicates'
     | '/people'
     | '/settings'
+    | '/trash'
     | '/albums/$albumId'
     | '/people/$identityId'
   fileRoutesById: FileRoutesById
@@ -130,10 +142,18 @@ export interface RootRouteChildren {
   DuplicatesRoute: typeof DuplicatesRoute
   PeopleRoute: typeof PeopleRouteWithChildren
   SettingsRoute: typeof SettingsRoute
+  TrashRoute: typeof TrashRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/trash': {
+      id: '/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof TrashRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -222,6 +242,7 @@ const rootRouteChildren: RootRouteChildren = {
   DuplicatesRoute: DuplicatesRoute,
   PeopleRoute: PeopleRouteWithChildren,
   SettingsRoute: SettingsRoute,
+  TrashRoute: TrashRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

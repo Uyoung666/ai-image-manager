@@ -129,21 +129,13 @@ export function SearchBar({
   );
 
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    }
     function handleGlobalShortcut(e: MessageEvent) {
       if (e.data === "global-shortcut:search") {
         inputRef.current?.focus();
       }
     }
-    window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("message", handleGlobalShortcut);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("message", handleGlobalShortcut);
     };
   }, []);

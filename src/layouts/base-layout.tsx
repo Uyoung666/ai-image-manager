@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import DragWindowRegion from "@/components/drag-window-region";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
+import { SpotlightSearch } from "@/components/SpotlightSearch";
 
 function isPerfMonitorEnabled() {
   try {
@@ -48,6 +49,7 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden">
       <DragWindowRegion title="AI Image Manager" />
       <main className="flex-1 overflow-hidden">{children}</main>
+      <SpotlightSearch />
       <KeyboardShortcuts
         onClose={() => setShortcutsOpen(false)}
         open={shortcutsOpen}

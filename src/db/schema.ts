@@ -48,6 +48,7 @@ export const photos = sqliteTable(
     isFavorite: integer("is_favorite", { mode: "boolean" })
       .notNull()
       .default(false),
+    deletedAt: integer("deleted_at"),
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -59,6 +60,7 @@ export const photos = sqliteTable(
     ),
     fileDateIdx: index("idx_photos_file_date").on(table.fileDate),
     phashIdx: index("idx_photos_phash").on(table.phash),
+    deletedAtIdx: index("idx_photos_deleted_at").on(table.deletedAt),
   })
 );
 

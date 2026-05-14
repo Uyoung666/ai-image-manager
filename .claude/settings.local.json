@@ -20,7 +20,9 @@
       "PowerShell(git push *)",
       "Bash(Select-String -Pattern \"src/\")",
       "Bash(Select-Object -First 20)",
-      "PowerShell(npx tsc --noEmit 2>&1 | Select-String \"src/\" | Where-Object { $_ -notmatch \"SmartAlbumDialog|export\\\\.ts\" })"
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-String \"src/\" | Where-Object { $_ -notmatch \"SmartAlbumDialog|export\\\\.ts\" })",
+      "Bash(Select-String -Pattern \"^src/\")",
+      "Bash(Select-Object -First 30)"
     ]
   }
 }

@@ -20,7 +20,7 @@ const SHORTCUTS: Shortcut[] = [
   { section: "操作", keys: ["I"], label: "显示/隐藏详情面板" },
   { section: "操作", keys: ["右键"], label: "打开右键菜单" },
   { section: "界面", keys: ["["], label: "折叠/展开侧边栏" },
-  { section: "界面", keys: ["Ctrl", "K"], label: "聚焦搜索" },
+  { section: "界面", keys: ["Ctrl", "K"], label: "全局搜索" },
   { section: "界面", keys: ["?"], label: "显示/隐藏快捷键面板" },
   { section: "灯箱", keys: ["Space"], label: "播放/暂停幻灯片" },
   { section: "灯箱", keys: ["Esc"], label: "退出灯箱" },

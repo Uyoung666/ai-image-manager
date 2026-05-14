@@ -1,6 +1,6 @@
 import { os } from "@orpc/server";
 import { BrowserWindow } from "electron";
-import { desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
@@ -94,20 +94,25 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
 
   let query = db.select().from(photos).$dynamic();
 
+  // Always exclude soft-deleted photos
+  const conditions: ReturnType<typeof isNull>[] = [isNull(photos.deletedAt)];
+
   if (folderId) {
-    query = query.where(eq(photos.folderId, folderId));
+    conditions.push(eq(photos.folderId, folderId) as any);
   }
   if (tagId) {
-    query = query.where(
-      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
+    conditions.push(
+      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})` as any
     );
   }
   if (search) {
-    query = query.where(like(photos.filename, `%${search}%`));
+    conditions.push(like(photos.filename, `%${search}%`) as any);
   }
   if (favoriteOnly) {
-    query = query.where(eq(photos.isFavorite, true));
+    conditions.push(eq(photos.isFavorite, true) as any);
   }
+
+  query = query.where(and(...conditions));
 
   const sortCol =
     sort === "name"
@@ -122,20 +127,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     .select({ count: sql<number>`count(*)` })
     .from(photos)
     .$dynamic();
-  if (folderId) {
-    countQuery = countQuery.where(eq(photos.folderId, folderId));
-  }
-  if (tagId) {
-    countQuery = countQuery.where(
-      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})`
-    );
-  }
-  if (search) {
-    countQuery = countQuery.where(like(photos.filename, `%${search}%`));
-  }
-  if (favoriteOnly) {
-    countQuery = countQuery.where(eq(photos.isFavorite, true));
-  }
+  countQuery = countQuery.where(and(...conditions));
   const total = countQuery.get()?.count || 0;
   const items = query.limit(limit).offset(offset).all();
 
