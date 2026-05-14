@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { type ThemeMode, getCurrentTheme } from "@/actions/theme";
 import { CloudConfigPanel } from "@/components/CloudConfigPanel";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
@@ -31,6 +32,11 @@ function SettingsPage() {
   const [cleanupCount, setCleanupCount] = useState(0);
   const [wm, setWm] = useState<WatermarkSettings>(DEFAULT_WM);
   const [wmLoaded, setWmLoaded] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
+
+  useEffect(() => {
+    getCurrentTheme().then(setThemeMode);
+  }, []);
 
   // Load watermark settings from database via IPC
   useEffect(() => {
@@ -100,10 +106,19 @@ function SettingsPage() {
           </h2>
           <div className="rounded-[8px] border border-border bg-secondary p-4">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground text-[13px]">
-                {t("settingsTheme")}
-              </span>
-              <ToggleTheme />
+              <div>
+                <span className="text-muted-foreground text-[13px]">
+                  {t("settingsTheme")}
+                </span>
+                <p className="mt-0.5 text-[#6b6b75] text-[11px]">
+                  {themeMode === "dark"
+                    ? "深色"
+                    : themeMode === "light"
+                      ? "浅色"
+                      : "跟随系统"}
+                </p>
+              </div>
+              <ToggleTheme onChange={setThemeMode} />
             </div>
             <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
               <span className="text-muted-foreground text-[13px]">

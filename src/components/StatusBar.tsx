@@ -17,17 +17,17 @@ export function StatusBar({ totalPhotos, selectedCount, aiStatus }: StatusBarPro
     const { processed, total } = aiStatus.embeddingProgress;
     const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
     aiLabel = `AI 索引中 ${pct}%`;
-    aiColor = "text-[#ffb224]";
+    aiColor = "text-warning";
   } else if (aiStatus.indexReady) {
     aiLabel = `AI 就绪 (${aiStatus.vectorCount} 向量)`;
-    aiColor = "text-[#46a758]";
+    aiColor = "text-success";
   } else {
     aiLabel = "AI 未索引";
     aiColor = "text-foreground-tertiary";
   }
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between border-border-subtle border-t bg-[#121214] px-4 text-[11px]">
+    <div className="flex h-7 shrink-0 items-center justify-between border-border-subtle border-t bg-secondary px-4 text-[11px]">
       <div className="flex items-center gap-3 text-muted-foreground">
         <span>共 {totalPhotos.toLocaleString()} 张</span>
         {selectedCount > 0 && (

@@ -23,14 +23,11 @@ export type SortField = "date" | "name" | "size";
 export type SortOrder = "asc" | "desc";
 
 interface PhotoGridProps {
+  emptyState?: React.ReactNode;
   loading: boolean;
   onContextMenu: (e: React.MouseEvent) => void;
-  onConvertSelected?: () => void;
-  onDeleteSelected?: () => void;
   onDoubleClick: (id: number) => void;
   onEndReached?: () => void;
-  onExportSelected?: () => void;
-  onRenameSelected?: () => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
@@ -57,14 +54,11 @@ export function PhotoGrid({
   searchQuery,
   sort = "date",
   sortOrder = "desc",
+  emptyState,
   onSelect,
   onDoubleClick,
   onContextMenu,
-  onConvertSelected,
-  onDeleteSelected,
   onEndReached,
-  onExportSelected,
-  onRenameSelected,
   onSortChange,
   onToggleFavorite,
 }: PhotoGridProps) {
@@ -104,6 +98,12 @@ export function PhotoGrid({
     setColumnCount(cols);
   }, [targetColWidth, containerWidth]);
 
+  // Track the single selected photo id for scroll-to behavior
+  const scrollToId = useMemo(() => {
+    if (selectedIds.size === 1) return [...selectedIds][0];
+    return null;
+  }, [selectedIds]);
+
   const skeletonAspects = useCallback(
     () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
     [],
@@ -122,6 +122,7 @@ export function PhotoGrid({
         onToggleFavorite={onToggleFavorite}
         path={photo.path}
         searchQuery={searchQuery}
+        selectedIds={selectedIds}
         similarity={photo.similarity}
         thumbnailPath={photo.thumbnailPath}
         width={photo.width}
@@ -209,7 +210,9 @@ export function PhotoGrid({
           </span>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <span className="text-[#6b6b75] text-[13px]">{t("noPhotos")}</span>
+          {emptyState ?? (
+            <span className="text-[#6b6b75] text-[13px]">{t("noPhotos")}</span>
+          )}
         </div>
       </div>
     );
@@ -225,40 +228,6 @@ export function PhotoGrid({
             t("photosSelected", { count: selectedIds.size })}
         </span>
         <div className="flex items-center gap-2">
-          {selectedIds.size > 0 && onRenameSelected && (
-            <button
-              className="rounded-[4px] px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-foreground/5"
-              onClick={onRenameSelected}
-            >
-              {compact ? "重命名" : `重命名 (${selectedIds.size})`}
-            </button>
-          )}
-          {selectedIds.size > 0 && onConvertSelected && (
-            <button
-              className="rounded-[4px] px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-foreground/5"
-              onClick={onConvertSelected}
-            >
-              {compact ? "转换" : `格式转换 (${selectedIds.size})`}
-            </button>
-          )}
-          {selectedIds.size > 0 && onExportSelected && (
-            <button
-              className="rounded-[4px] px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-foreground/5"
-              onClick={onExportSelected}
-            >
-              {compact ? "导出" : `导出选中 (${selectedIds.size})`}
-            </button>
-          )}
-          {selectedIds.size > 0 && onDeleteSelected && (
-            <button
-              className="rounded-[4px] px-2 py-1 text-[#e5484d] text-[11px] transition-colors hover:bg-[#e5484d]/10"
-              onClick={onDeleteSelected}
-            >
-              {compact
-                ? `-${selectedIds.size}`
-                : `删除选中 (${selectedIds.size})`}
-            </button>
-          )}
           {!compact && onSortChange && (
             <SortDropdown
               onChange={onSortChange}
@@ -296,6 +265,7 @@ export function PhotoGrid({
           groupHeaders={groupHeaders}
           items={masonryItems}
           onEndReached={onEndReached}
+          scrollToId={scrollToId}
           renderItem={renderItem}
         />
       </div>

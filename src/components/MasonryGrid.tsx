@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,7 @@ interface MasonryGridProps {
   overscan?: number;
   renderItem: (item: any, index: number, style: React.CSSProperties) => ReactNode;
   onEndReached?: () => void;
+  scrollToId?: number | null;
   className?: string;
 }
 
@@ -51,6 +53,7 @@ export function MasonryGrid({
   overscan = 5,
   renderItem,
   onEndReached,
+  scrollToId,
   className,
 }: MasonryGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -109,6 +112,63 @@ export function MasonryGrid({
     return () => observer.disconnect();
   }, [onEndReached, totalHeight]);
 
+  // Anchor-based scroll preservation: when layout changes, keep the same
+  // item at the same visual position in the viewport.
+  const prevPositionsRef = useRef(positions);
+  const prevScrollToIdRef = useRef(scrollToId);
+
+  useLayoutEffect(() => {
+    const prevPositions = prevPositionsRef.current;
+    const prevScrollToId = prevScrollToIdRef.current;
+    prevPositionsRef.current = positions;
+    prevScrollToIdRef.current = scrollToId;
+
+    if (positions.length === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const positionsChanged = positions !== prevPositions;
+    const scrollToIdChanged = scrollToId !== prevScrollToId;
+
+    // Case 1: scrollToId is set and either it changed or layout changed
+    if (scrollToId != null && (scrollToIdChanged || positionsChanged)) {
+      const idx = items.findIndex((item) => item.id === scrollToId);
+      if (idx >= 0 && positions[idx]) {
+        const pos = positions[idx];
+        const itemTop = pos.top;
+        const itemBottom = pos.top + pos.height;
+        const viewTop = el.scrollTop;
+        const viewBottom = el.scrollTop + el.clientHeight;
+        if (itemTop < viewTop || itemBottom > viewBottom) {
+          el.scrollTop = Math.max(0, itemTop - (el.clientHeight - pos.height) / 2);
+        }
+      }
+      return;
+    }
+
+    // Case 2: layout changed without a scroll target — anchor-based preservation
+    if (!positionsChanged || prevPositions.length === 0) return;
+    const currentScrollTop = el.scrollTop;
+    if (currentScrollTop <= 0) return;
+
+    let anchorIdx = -1;
+    let anchorOffset = 0;
+    for (let i = 0; i < prevPositions.length; i++) {
+      const p = prevPositions[i];
+      if (p.top + p.height > currentScrollTop) {
+        anchorIdx = i;
+        anchorOffset = p.top - currentScrollTop;
+        break;
+      }
+    }
+    if (anchorIdx < 0 || !positions[anchorIdx]) return;
+
+    const newTop = positions[anchorIdx].top - anchorOffset;
+    if (Math.abs(newTop - currentScrollTop) > 1) {
+      el.scrollTop = Math.max(0, newTop);
+    }
+  }, [positions, scrollToId, items]);
+
   const overscanPx = useMemo(() => {
     if (positions.length === 0) return 400;
     const avgHeight =
@@ -157,12 +217,13 @@ export function MasonryGrid({
   }, [headerPositions, scrollTop, viewportHeight, overscanPx]);
 
   if (containerWidth <= 0) {
-    return <div className={className} ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
+    return <div className={className} data-masonry-scroll="" ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
   }
 
   return (
     <div
       className={className}
+      data-masonry-scroll=""
       ref={scrollRef}
       style={{ height: "100%", overflowY: "auto" }}
     >

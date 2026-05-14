@@ -27,3 +27,7 @@ ipcRenderer.on(IPC_CHANNELS.FILE_CHANGE, (_event, payload) => {
 ipcRenderer.on("scan-progress", (_event, payload) => {
   window.postMessage({ channel: "scan-progress", ...payload }, "*");
 });
+
+ipcRenderer.on("theme:system-changed", (_event, resolved) => {
+  window.postMessage({ channel: "theme:system-changed", resolved }, "*");
+});

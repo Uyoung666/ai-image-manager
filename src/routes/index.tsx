@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
@@ -13,6 +13,7 @@ import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { QuickPreview } from "@/components/QuickPreview";
 import type { ExifFilters } from "@/components/SearchBar";
 import { SearchBar } from "@/components/SearchBar";
@@ -38,6 +39,7 @@ function loadSidebarState(): boolean {
 
 function HomePage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [activeTagId, setActiveTagId] = useState<number | null>(null);
@@ -52,6 +54,7 @@ function HomePage() {
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
+  const [detailDismissed, setDetailDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarState);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
@@ -76,6 +79,44 @@ function HomePage() {
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
+
+  // Drill-down from dashboard: detect search params and auto-trigger EXIF search
+  const drillParams = Route.useSearch();
+  const drillConsumed = useRef(false);
+
+  useEffect(() => {
+    if (drillConsumed.current) return;
+    const hasParams = Object.values(drillParams).some((v) => v !== undefined);
+    if (!hasParams) return;
+    drillConsumed.current = true;
+
+    // Build filters and trigger search
+    const filters: ExifFilters = {};
+    if (drillParams.cameraModel) filters.cameraModel = drillParams.cameraModel;
+    if (drillParams.focalMin) filters.focalMin = drillParams.focalMin;
+    if (drillParams.focalMax) filters.focalMax = drillParams.focalMax;
+    if (drillParams.apertureMin) filters.apertureMin = drillParams.apertureMin;
+    if (drillParams.apertureMax) filters.apertureMax = drillParams.apertureMax;
+    if (drillParams.isoMin) filters.isoMin = drillParams.isoMin;
+    if (drillParams.isoMax) filters.isoMax = drillParams.isoMax;
+
+    // Clear URL params and trigger search
+    navigate({ to: "/", search: {}, replace: true });
+    handleSearch("", filters);
+  }, [drillParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for photo-drop:album event from sidebar
+  useEffect(() => {
+    function handler(e: Event) {
+      const detail = (e as CustomEvent).detail as { photoIds: number[] };
+      if (detail?.photoIds?.length > 0) {
+        setAddToAlbumIds(detail.photoIds);
+        setAddToAlbumOpen(true);
+      }
+    }
+    window.addEventListener("photo-drop:album", handler);
+    return () => window.removeEventListener("photo-drop:album", handler);
+  }, []);
 
   // Listen for file-change events from main process (chokidar watcher)
   useEffect(() => {
@@ -127,6 +168,37 @@ function HomePage() {
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
 
+  const emptyStateContent = useMemo(() => {
+    if (isSearching) {
+      return (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <svg className="h-10 w-10 text-[#6b6b75]/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" strokeLinecap="round" />
+          </svg>
+          <p className="font-[510] text-[14px] text-foreground">未找到匹配的照片</p>
+          <p className="max-w-[280px] text-[12px] text-[#6b6b75]">
+            试试换个关键词，或使用 EXIF 筛选器缩小范围
+          </p>
+        </div>
+      );
+    }
+    if (favoriteOnly) {
+      return (
+        <div className="flex flex-col items-center gap-3 text-center">
+          <svg className="h-10 w-10 text-[#6b6b75]/40" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="font-[510] text-[14px] text-foreground">还没有收藏的照片</p>
+          <p className="max-w-[280px] text-[12px] text-[#6b6b75]">
+            浏览照片时点击星标即可收藏，收藏的照片会出现在这里
+          </p>
+        </div>
+      );
+    }
+    return undefined;
+  }, [isSearching, favoriteOnly]);
+
   const handleEndReached = useCallback(() => {
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
@@ -137,9 +209,19 @@ function HomePage() {
     async (id: number) => {
       const photo = photos.find((p) => p.id === id);
       if (!photo) return;
-      const newVal = !photo.isFavorite;
+      const prevVal = !!photo.isFavorite;
+      const newVal = !prevVal;
       await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(newVal ? "已收藏" : "已取消收藏", {
+        action: {
+          label: "撤销",
+          onClick: async () => {
+            await ipc.client.photos.toggleFavorite({ ids: [id], favorite: prevVal });
+            queryClient.invalidateQueries({ queryKey: ["photos"] });
+          },
+        },
+      });
     },
     [photos],
   );
@@ -157,15 +239,24 @@ function HomePage() {
   }, []);
 
   // Sync detail panel with selection
+  const prevSelectedIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (selectedIds.size === 1) {
       const id = selectedIds.values().next().value as number;
-      const photo = photos.find((p) => p.id === id);
-      setDetailPhoto(photo || null);
+      // Reset dismissed state when selection changes to a different photo
+      if (id !== prevSelectedIdRef.current) {
+        setDetailDismissed(false);
+        prevSelectedIdRef.current = id;
+      }
+      if (!detailDismissed) {
+        const photo = photos.find((p) => p.id === id);
+        setDetailPhoto(photo || null);
+      }
     } else {
       setDetailPhoto(null);
+      prevSelectedIdRef.current = null;
     }
-  }, [selectedIds, photos]);
+  }, [selectedIds, photos, detailDismissed]);
 
   function handleSelectTag(tagId: number | null) {
     setActiveTagId(tagId);
@@ -189,16 +280,13 @@ function HomePage() {
         path: folderPath,
       });
       const skipped = scanResult.skipped || 0;
+      const count = scanResult.photoIds?.length || 0;
       setScanProgress(
         skipped > 0
-          ? t("scanningSkipped", {
-              count: scanResult.photoIds?.length || 0,
-              skipped,
-            })
-          : t("scanningComplete", {
-              count: scanResult.photoIds?.length || 0,
-            })
+          ? t("scanningSkipped", { count, skipped })
+          : t("scanningComplete", { count }),
       );
+      toast.success(`已索引 ${count} 张照片${skipped > 0 ? `，跳过 ${skipped} 张` : ""}`);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
     } catch {
@@ -217,6 +305,7 @@ function HomePage() {
       }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success("已移除文件夹");
     } catch {
       toast.error("删除文件夹失败");
     }
@@ -402,6 +491,7 @@ function HomePage() {
 
   async function executeDelete() {
     const ids = pendingDeleteIds;
+    const count = ids.length;
     setDeleteConfirmOpen(false);
     setPendingDeleteIds([]);
     try {
@@ -422,6 +512,7 @@ function HomePage() {
       } else {
         queryClient.invalidateQueries({ queryKey: ["photos"] });
       }
+      toast.success(`已删除 ${count} 张照片`);
     } catch {
       toast.error("删除照片失败");
     }
@@ -432,7 +523,7 @@ function HomePage() {
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
-      return result as {
+      const r = result as {
         renamed: number;
         errors: number;
         results: Array<{
@@ -442,6 +533,12 @@ function HomePage() {
           error?: string;
         }>;
       };
+      toast.success(
+        r.errors > 0
+          ? `已重命名 ${r.renamed} 张，${r.errors} 张失败`
+          : `已重命名 ${r.renamed} 张照片`,
+      );
+      return r;
     } catch {
       toast.error("重命名失败");
       return { renamed: 0, errors: ids.length, results: [] };
@@ -463,7 +560,9 @@ function HomePage() {
         maxWidth: options.maxWidth || undefined,
         outputDir: options.outputDir,
       });
-      return result as { converted: number; outputDir: string };
+      const r = result as { converted: number; outputDir: string };
+      toast.success(`已转换 ${r.converted} 张照片`);
+      return r;
     } catch {
       toast.error("格式转换失败");
       return { converted: 0, outputDir: options.outputDir };
@@ -569,8 +668,18 @@ function HomePage() {
         e.preventDefault();
         const ids = [...selectedIds];
         const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
-        ipc.client.photos.toggleFavorite({ ids, favorite: !allFav }).then(() => {
+        const newVal = !allFav;
+        ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
           queryClient.invalidateQueries({ queryKey: ["photos"] });
+          toast.success(newVal ? `已收藏 ${ids.length} 张` : "已取消收藏", {
+            action: {
+              label: "撤销",
+              onClick: async () => {
+                await ipc.client.photos.toggleFavorite({ ids, favorite: allFav });
+                queryClient.invalidateQueries({ queryKey: ["photos"] });
+              },
+            },
+          });
         });
         return;
       }
@@ -578,8 +687,10 @@ function HomePage() {
       if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (detailPhoto) {
+          setDetailDismissed(true);
           setDetailPhoto(null);
         } else if (selectedIds.size === 1) {
+          setDetailDismissed(false);
           const id = selectedIds.values().next().value as number;
           const p = photos.find((ph) => ph.id === id);
           if (p) setDetailPhoto(p);
@@ -591,7 +702,11 @@ function HomePage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [photos, selectedIds, renameDialogOpen, convertDialogOpen, quickPreviewIndex]);
 
-  const hasPhotos = photos.length > 0 || (loading && photos.length === 0);
+  const hasPhotos =
+    photos.length > 0 ||
+    (loading && photos.length === 0) ||
+    isSearching ||
+    favoriteOnly;
 
   return (
     <div className="flex h-full">
@@ -635,39 +750,63 @@ function HomePage() {
         />
         {hasPhotos ? (
           <div className="flex min-h-0 flex-1">
-            <PhotoGrid
-              loading={loading}
-              onContextMenu={handleContextMenu}
-              onConvertSelected={
-                selectedIds.size > 0
-                  ? () => setConvertDialogOpen(true)
-                  : undefined
-              }
-              onDeleteSelected={handleDeleteSelected}
-              onDoubleClick={handleDoubleClick}
-              onEndReached={handleEndReached}
-              onExportSelected={handleExportSelected}
-              onRenameSelected={
-                selectedIds.size > 0
-                  ? () => setRenameDialogOpen(true)
-                  : undefined
-              }
-              onSelect={handleSelect}
-              onSortChange={(s, o) => {
-                setSortField(s);
-                setSortOrder(o);
-              }}
-              onToggleFavorite={handleToggleFavorite}
-              photos={photos}
-              searchQuery={searchQuery}
-              selectedIds={selectedIds}
-              sort={sortField}
-              sortOrder={sortOrder}
-            />
+            <div className="relative flex min-w-0 flex-1">
+              <PhotoGrid
+                emptyState={emptyStateContent}
+                loading={loading}
+                onContextMenu={handleContextMenu}
+                onDoubleClick={handleDoubleClick}
+                onEndReached={handleEndReached}
+                onSelect={handleSelect}
+                onSortChange={(s, o) => {
+                  setSortField(s);
+                  setSortOrder(o);
+                }}
+                onToggleFavorite={handleToggleFavorite}
+                photos={photos}
+                searchQuery={searchQuery}
+                selectedIds={selectedIds}
+                sort={sortField}
+                sortOrder={sortOrder}
+              />
+              <SelectionActionBar
+                allFavorite={
+                  selectedIds.size > 0 &&
+                  [...selectedIds].every((id) => photos.find((p) => p.id === id)?.isFavorite)
+                }
+                onAddToAlbum={() => {
+                  setAddToAlbumIds(Array.from(selectedIds));
+                  setAddToAlbumOpen(true);
+                }}
+                onClearSelection={() => setSelectedIds(new Set())}
+                onConvert={() => setConvertDialogOpen(true)}
+                onDelete={handleDeleteSelected}
+                onExport={handleExportSelected}
+                onRename={() => setRenameDialogOpen(true)}
+                onToggleFavorite={() => {
+                  const ids = [...selectedIds];
+                  const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
+                  const newVal = !allFav;
+                  ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
+                    queryClient.invalidateQueries({ queryKey: ["photos"] });
+                    toast.success(newVal ? `已收藏 ${ids.length} 张` : "已取消收藏", {
+                      action: {
+                        label: "撤销",
+                        onClick: async () => {
+                          await ipc.client.photos.toggleFavorite({ ids, favorite: allFav });
+                          queryClient.invalidateQueries({ queryKey: ["photos"] });
+                        },
+                      },
+                    });
+                  });
+                }}
+                selectedCount={selectedIds.size}
+              />
+            </div>
             <PhotoDetailPanel
               onClose={() => {
+                setDetailDismissed(true);
                 setDetailPhoto(null);
-                setSelectedIds(new Set());
               }}
               onOpenExplorer={handleOpenExplorer}
               photo={detailPhoto}
@@ -685,7 +824,14 @@ function HomePage() {
       {lightboxIndex >= 0 && (
         <PhotoLightbox
           index={lightboxIndex}
-          onClose={() => setLightboxIndex(-1)}
+          onClose={(currentIndex) => {
+            setLightboxIndex(-1);
+            if (currentIndex >= 0 && currentIndex < photos.length) {
+              const photo = photos[currentIndex];
+              setSelectedIds(new Set([photo.id]));
+              setLastClickedIdx(currentIndex);
+            }
+          }}
           open={lightboxIndex >= 0}
           photos={photos}
         />
@@ -711,6 +857,7 @@ function HomePage() {
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
+        onToggleFavorite={handleToggleFavorite}
       />
       <BatchRenameDialog
         onClose={() => {
@@ -755,4 +902,25 @@ function HomePage() {
   );
 }
 
-export const Route = createFileRoute("/")({ component: HomePage });
+export const Route = createFileRoute("/")({
+  component: HomePage,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    apertureMax?: string;
+    apertureMin?: string;
+    cameraModel?: string;
+    focalMax?: string;
+    focalMin?: string;
+    isoMax?: string;
+    isoMin?: string;
+  } => ({
+    apertureMax: search.apertureMax as string | undefined,
+    apertureMin: search.apertureMin as string | undefined,
+    cameraModel: search.cameraModel as string | undefined,
+    focalMax: search.focalMax as string | undefined,
+    focalMin: search.focalMin as string | undefined,
+    isoMax: search.isoMax as string | undefined,
+    isoMin: search.isoMin as string | undefined,
+  }),
+});

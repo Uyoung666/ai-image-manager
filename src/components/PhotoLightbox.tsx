@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Lightbox from "yet-another-react-lightbox";
+import { Captions } from "yet-another-react-lightbox/plugins";
+import { Counter } from "yet-another-react-lightbox/plugins";
+import { Fullscreen } from "yet-another-react-lightbox/plugins";
+import { Zoom } from "yet-another-react-lightbox/plugins";
 // @ts-expect-error - no type declarations for lightbox CSS
 import "yet-another-react-lightbox/styles.css";
+// @ts-expect-error - no type declarations for plugins CSS
+import "yet-another-react-lightbox/plugins/captions.css";
+// @ts-expect-error - no type declarations for plugins CSS
+import "yet-another-react-lightbox/plugins/counter.css";
 
 interface Photo {
   filename: string;
@@ -13,7 +21,7 @@ interface Photo {
 
 interface PhotoLightboxProps {
   index: number;
-  onClose: () => void;
+  onClose: (currentIndex: number) => void;
   open: boolean;
   photos: Photo[];
 }
@@ -31,6 +39,12 @@ function toLocalMediaUrl(filePath: string): string {
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return `local-media://${encoded}`;
+}
+
+function formatDimensions(w: number, h: number): string {
+  if (!w || !h) return "";
+  const mp = ((w * h) / 1_000_000).toFixed(1);
+  return `${w} × ${h} · ${mp}MP`;
 }
 
 export function PhotoLightbox({
@@ -59,7 +73,6 @@ export function PhotoLightbox({
     }
   }, [open]);
 
-  // Clear timer when playing changes to false
   useEffect(() => {
     if (!playing && timerRef.current) {
       clearInterval(timerRef.current);
@@ -67,7 +80,6 @@ export function PhotoLightbox({
     }
   }, [playing]);
 
-  // Slideshow auto-advance
   useEffect(() => {
     if (!playing || !open) return;
 
@@ -94,7 +106,6 @@ export function PhotoLightbox({
     setDelay(SLIDESHOW_DELAYS[nextIdx].value);
   }, [delay]);
 
-  // Only stop slideshow on user-initiated navigation, not programmatic
   const handleViewChange = useCallback(
     ({ index: newIndex }: { index: number }) => {
       if (programmaticRef.current) {
@@ -104,13 +115,14 @@ export function PhotoLightbox({
       setPhotoIndex(newIndex);
       setPlaying(false);
     },
-    []
+    [],
   );
 
   const slides = photos.map((p) => ({
     src: toLocalMediaUrl(p.path),
     alt: p.filename,
     title: p.filename,
+    description: formatDimensions(p.width, p.height),
   }));
 
   const currentDelayLabel =
@@ -118,11 +130,15 @@ export function PhotoLightbox({
 
   return (
     <Lightbox
-      carousel={{ finite: false }}
-      close={onClose}
+      carousel={{
+        finite: false,
+        imageProps: { style: { transition: "opacity 250ms ease" } },
+      }}
+      close={() => onClose(photoIndex)}
       index={photoIndex}
       on={{ view: handleViewChange }}
       open={open}
+      plugins={[Captions, Counter, Fullscreen, Zoom]}
       slides={slides}
       toolbar={{
         buttons: [
@@ -163,8 +179,20 @@ export function PhotoLightbox({
           >
             {currentDelayLabel}
           </button>,
+          "fullscreen",
           "close",
         ],
+      }}
+      zoom={{
+        maxZoomPixelRatio: 5,
+        scrollToZoom: true,
+      }}
+      styles={{
+        container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
+        toolbar: { padding: "8px 12px" },
+        slide: { padding: "0 60px" },
+        captionsTitleContainer: { padding: "0 60px" },
+        captionsDescriptionContainer: { padding: "4px 60px 0" },
       }}
     />
   );

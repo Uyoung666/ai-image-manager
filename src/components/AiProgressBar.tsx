@@ -95,11 +95,11 @@ export function AiProgressBar() {
   // Error state: show retry button
   if (progress?.phase === "error" || lastError) {
     return (
-      <div className="mt-2 rounded-[6px] border border-[#e5484d]/30 bg-[#e5484d]/5 px-3 py-2">
-        <p className="text-[#e5484d] text-[11px]">{lastError}</p>
-        <p className="mt-1 text-[#6b6b75] text-[10px]">
+      <div className="mt-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
+        <p className="text-danger text-[11px]">{lastError}</p>
+        <p className="mt-1 text-muted-foreground text-[10px]">
           国内用户可设置 HuggingFace 镜像：启动时设置环境变量
-          <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[#a1a1aa] text-[10px]">
+          <code className="mx-0.5 rounded-[4px] bg-card px-1 text-muted-foreground text-[10px]">
             HF_MIRROR=hf-mirror.com
           </code>
         </p>
@@ -131,9 +131,9 @@ export function AiProgressBar() {
   // Complete state: show re-index button for newly added photos
   if (!progress.isActive && progress.phase === "complete") {
     return (
-      <div className="mt-2 rounded-[6px] border border-[#2c2c30] bg-[#1c1e22] px-2 py-2">
+      <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
         <div className="flex items-center justify-between">
-          <span className="text-[#a1a1aa] text-[11px]">
+          <span className="text-muted-foreground text-[11px]">
             AI索引完成 ({progress.processed}/{progress.total})
           </span>
           <span className="font-[510] text-primary text-[11px]">100%</span>
@@ -162,19 +162,19 @@ export function AiProgressBar() {
         : `正在索引 ${progress.processed}/${progress.total}`;
 
   return (
-    <div className="mt-2 rounded-[6px] border border-[#2c2c30] bg-[#1c1e22] px-2 py-2">
+    <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[#a1a1aa] text-[11px]">{phaseLabel}</span>
+        <span className="text-muted-foreground text-[11px]">{phaseLabel}</span>
         <span className="font-[510] text-primary text-[11px]">{pct}%</span>
       </div>
-      <div className="h-1 overflow-hidden rounded-full bg-[#121214]">
+      <div className="h-1 overflow-hidden rounded-full bg-secondary">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
       {progress.currentFile && (
-        <p className="mt-1 truncate text-[#6b6b75] text-[10px]">
+        <p className="mt-1 truncate text-muted-foreground text-[10px]">
           {progress.currentFile}
         </p>
       )}
@@ -189,7 +189,7 @@ export function AiProgressBar() {
             </button>
           ) : (
             <button
-              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[#a1a1aa] text-[11px] transition-colors hover:bg-foreground/5 hover:text-foreground"
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-muted-foreground text-[11px] transition-colors hover:bg-foreground/5 hover:text-foreground"
               onClick={handlePause}
             >
               暂停

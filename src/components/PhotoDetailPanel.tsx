@@ -361,11 +361,13 @@ export function PhotoDetailPanel({
 
   return (
     <div
-      className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+      className="shrink-0 overflow-hidden"
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div
-        className="relative flex h-full flex-col border-border border-l bg-secondary"
+        className={`relative flex h-full flex-col border-border border-l bg-secondary transition-[opacity,transform] duration-200 ease-out ${
+          visible ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0"
+        }`}
         ref={panelRef}
         style={{ width: panelWidth }}
       >

@@ -16,7 +16,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
 import { AiProgressBar } from "./AiProgressBar";
 
 interface FolderInfo {
@@ -73,6 +75,50 @@ export function Sidebar({
   const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [tagSearch, setTagSearch] = useState("");
   const ctxRef = useRef<HTMLDivElement>(null);
+  const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
+  const [dragOverAlbumNav, setDragOverAlbumNav] = useState(false);
+
+  // Drag-and-drop: album/tag drop targets
+  function handlePhotoDragOver(e: React.DragEvent) {
+    if (e.dataTransfer.types.includes("application/x-photo-ids")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  }
+
+  async function handleDropOnTag(e: React.DragEvent, tagId: number) {
+    setDragOverTagId(null);
+    const raw = e.dataTransfer.getData("application/x-photo-ids");
+    if (!raw) return;
+    const ids: number[] = JSON.parse(raw);
+    const tag = tags.find((t) => t.id === tagId);
+    let failed = 0;
+    for (const photoId of ids) {
+      try {
+        await ipc.client.photos.setPhotoTag({ photoId, tagId });
+      } catch {
+        failed++;
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    if (failed > 0) {
+      toast.success(`已为 ${ids.length - failed} 张照片添加标签「${tag?.name || ""}」`);
+    } else {
+      toast.success(`已为 ${ids.length} 张照片添加标签「${tag?.name || ""}」`);
+    }
+  }
+
+  async function handleDropOnAlbumNav(e: React.DragEvent) {
+    setDragOverAlbumNav(false);
+    const raw = e.dataTransfer.getData("application/x-photo-ids");
+    if (!raw) return;
+    const ids: number[] = JSON.parse(raw);
+    // Open AddToAlbumDialog — for now navigate to albums page as fallback
+    // Dispatch a custom event so the parent can intercept it
+    window.dispatchEvent(
+      new CustomEvent("photo-drop:album", { detail: { photoIds: ids } }),
+    );
+  }
 
   useEffect(() => {
     let running = true;
@@ -392,9 +438,11 @@ export function Sidebar({
                 .map((tag) => (
                   <button
                     className={`group/tag flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
-                      activeTagId === tag.id
-                        ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      dragOverTagId === tag.id
+                        ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+                        : activeTagId === tag.id
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
                     key={tag.id}
                     onClick={() => {
@@ -413,11 +461,16 @@ export function Sidebar({
                             setActiveTagId(null);
                             onSelectTag?.(null);
                           }
+                          toast.success(`已删除标签「${tag.name}」`);
                         } catch {
-                          /* ignore delete errors */
+                          toast.error("删除标签失败");
                         }
                       }
                     }}
+                    onDragLeave={() => setDragOverTagId(null)}
+                    onDragOver={handlePhotoDragOver}
+                    onDragEnter={() => setDragOverTagId(tag.id)}
+                    onDrop={(e) => handleDropOnTag(e, tag.id)}
                   >
                     <span
                       className="h-2 w-2 flex-shrink-0 rounded-full"
@@ -443,7 +496,10 @@ export function Sidebar({
                     await ipc.client.photos.batchGenerateTags({});
                     const updated = await ipc.client.photos.getTags({});
                     setTags((updated as TagInfo[]) || []);
-                  } catch { /* ignore */ }
+                    toast.success("AI 标签生成完成");
+                  } catch {
+                    toast.error("AI 标签生成失败");
+                  }
                 }}
               >
                 <ScanSearch className="h-3.5 w-3.5" />
@@ -464,11 +520,22 @@ export function Sidebar({
           {t("sidebarDashboard")}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            dragOverAlbumNav
+              ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onDragEnter={() => setDragOverAlbumNav(true)}
+          onDragLeave={() => setDragOverAlbumNav(false)}
+          onDragOver={handlePhotoDragOver}
+          onDrop={handleDropOnAlbumNav}
           onClick={() => navigate({ to: "/albums" as "/albums" })}
         >
           <Album className="mr-2 inline h-3.5 w-3.5" />
           相册
+          {dragOverAlbumNav && (
+            <span className="ml-auto text-[10px] text-primary">松手添加</span>
+          )}
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"

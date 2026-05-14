@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
+import { Clock, Filter, ImageUp, Search, Tag, X } from "lucide-react";
+import { ipc } from "@/ipc/manager";
 
 const HISTORY_KEY = "search_history";
 const MAX_HISTORY = 20;
+
+interface TagInfo {
+  color: string | null;
+  id: number;
+  name: string;
+}
 
 function loadHistory(): string[] {
   try {
@@ -69,7 +76,38 @@ export function SearchBar({
   const { t } = useTranslation();
   const [query, setQuery] = useState(imageSearchActive ? "[以图搜图]" : "");
   const [history, setHistory] = useState<string[]>(loadHistory);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [tags, setTags] = useState<TagInfo[]>([]);
+
+  // Load tags for autocomplete
+  useEffect(() => {
+    ipc.client.photos.getTags({}).then((result) => {
+      setTags((result as TagInfo[]) || []);
+    }).catch(() => { /* ignore */ });
+  }, []);
+
+  // Filter suggestions: matching tags + recent searches
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      // Empty query: show recent history only
+      return history.slice(0, 8).map((h) => ({ type: "history" as const, text: h }));
+    }
+    // With query: show matching tags first, then matching history
+    const matchingTags = tags
+      .filter((t) => t.name.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map((t) => ({
+        type: "tag" as const,
+        text: t.name,
+        color: t.color || "var(--primary)",
+      }));
+    const matchingHistory = history
+      .filter((h) => h.toLowerCase().includes(q) && h !== q)
+      .slice(0, 3)
+      .map((h) => ({ type: "history" as const, text: h }));
+    return [...matchingTags, ...matchingHistory];
+  }, [query, tags, history]);
 
   useEffect(() => {
     if (imageSearchActive) {
@@ -110,20 +148,10 @@ export function SearchBar({
     };
   }, []);
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node) &&
-        inputRef.current &&
-        !inputRef.current.contains(e.target as Node)
-      ) {
-        setShowHistory(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  // Close suggestions on blur (delay to allow click on suggestion items)
+  function handleInputBlur() {
+    setTimeout(() => setShowSuggestions(false), 150);
+  }
 
   const addToHistory = useCallback((q: string) => {
     if (!q.trim()) {
@@ -145,7 +173,7 @@ export function SearchBar({
       addToHistory(query.trim());
     }
     onSearch(query.trim(), hasActiveFilters ? filters : undefined);
-    setShowHistory(false);
+    setShowSuggestions(false);
   }
 
   function handleClear() {
@@ -154,11 +182,11 @@ export function SearchBar({
     inputRef.current?.focus();
   }
 
-  function handleHistoryClick(h: string) {
-    setQuery(h);
-    addToHistory(h);
-    onSearch(h, hasActiveFilters ? filters : undefined);
-    setShowHistory(false);
+  function handleSuggestionClick(suggestion: { type: "tag" | "history"; text: string }) {
+    setQuery(suggestion.text);
+    addToHistory(suggestion.text);
+    onSearch(suggestion.text, hasActiveFilters ? filters : undefined);
+    setShowSuggestions(false);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -248,8 +276,12 @@ export function SearchBar({
             <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#6b6b75]" />
             <input
               className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-[#6b6b75] focus:border-primary focus:ring-1 focus:ring-ring"
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setShowHistory(history.length > 0)}
+              onBlur={handleInputBlur}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(suggestions.length > 0)}
               placeholder={getPlaceholder()}
               ref={inputRef}
               type="text"
@@ -551,23 +583,39 @@ export function SearchBar({
         )}
       </div>
 
-      {/* Search history dropdown */}
-      {showHistory && history.length > 0 && (
+      {/* Search suggestions dropdown */}
+      {showSuggestions && suggestions.length > 0 && (
         <div
           className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-white/5"
           ref={dropdownRef}
         >
           <div className="px-3 py-1.5 font-[510] text-[#6b6b75] text-[10px] uppercase tracking-wider">
-            最近搜索
+            {query.trim() ? "搜索建议" : "最近搜索"}
           </div>
-          {history.slice(0, 8).map((h, i) => (
+          {suggestions.map((s, i) => (
             <button
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              key={i}
-              onClick={() => handleHistoryClick(h)}
+              key={`${s.type}-${i}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSuggestionClick(s)}
             >
-              <Clock className="h-3 w-3 flex-shrink-0 text-[#6b6b75]" />
-              <span className="truncate">{h}</span>
+              {s.type === "tag" ? (
+                <>
+                  <span
+                    className="h-2 w-2 flex-shrink-0 rounded-full"
+                    style={{ background: s.color }}
+                  />
+                  <span className="truncate">{s.text}</span>
+                  <span className="ml-auto flex-shrink-0 text-[#6b6b75] text-[10px]">
+                    <Tag className="h-3 w-3" />
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Clock className="h-3 w-3 flex-shrink-0 text-[#6b6b75]" />
+                  <span className="truncate">{s.text}</span>
+                </>
+              )}
             </button>
           ))}
         </div>

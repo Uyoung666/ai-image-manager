@@ -18,6 +18,7 @@ import {
   Menu,
   type NativeImage,
   nativeImage,
+  nativeTheme,
   protocol,
   Tray,
 } from "electron";
@@ -463,6 +464,14 @@ app.whenReady().then(async () => {
     createTray();
     registerGlobalShortcuts();
     checkForUpdates();
+
+    // Forward system theme changes to renderer (for "system" mode users)
+    nativeTheme.on("updated", () => {
+      mainWindow?.webContents.send(
+        "theme:system-changed",
+        nativeTheme.shouldUseDarkColors ? "dark" : "light",
+      );
+    });
 
     // Setup SendTo integration (Windows right-click "发送到" menu)
     setupSendToShortcut();

@@ -2,54 +2,78 @@ import { LOCAL_STORAGE_KEYS } from "@/constants";
 import { ipc } from "@/ipc/manager";
 import type { ThemeMode } from "@/types/theme-mode";
 
-export interface ThemePreferences {
-  local: ThemeMode | null;
-  system: ThemeMode;
+export type { ThemeMode };
+
+export async function getCurrentTheme(): Promise<ThemeMode> {
+  const local = localStorage.getItem(
+    LOCAL_STORAGE_KEYS.THEME,
+  ) as ThemeMode | null;
+  return local || "system";
 }
 
-export async function getCurrentTheme(): Promise<ThemePreferences> {
-  const currentTheme = await ipc.client.theme.getCurrentThemeMode();
-  const localTheme = localStorage.getItem(
-    LOCAL_STORAGE_KEYS.THEME
-  ) as ThemeMode | null;
-
-  return {
-    system: currentTheme,
-    local: localTheme,
-  };
+export async function getResolvedTheme(): Promise<"dark" | "light"> {
+  const mode = await getCurrentTheme();
+  if (mode === "system") {
+    const sys = await ipc.client.theme.getCurrentThemeMode();
+    return sys === "dark" ? "dark" : "light";
+  }
+  return mode;
 }
 
 export async function setTheme(newTheme: ThemeMode) {
-  const isDarkMode = newTheme === "dark";
   await ipc.client.theme.setThemeMode(newTheme);
   localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, newTheme);
-  updateDocumentTheme(isDarkMode);
+  applyResolvedTheme();
 }
 
 export async function toggleTheme() {
-  const isDarkMode = await ipc.client.theme.toggleThemeMode();
-  const newTheme = isDarkMode ? "dark" : "light";
-
-  updateDocumentTheme(isDarkMode);
-  localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, newTheme);
+  const current = await getCurrentTheme();
+  // Cycle: dark → light → system → dark
+  const order: ThemeMode[] = ["dark", "light", "system"];
+  const idx = order.indexOf(current);
+  const next = order[(idx + 1) % order.length];
+  await setTheme(next);
 }
 
 export async function syncWithLocalTheme() {
-  const { local } = await getCurrentTheme();
-  if (!local) {
-    setTheme("system");
-    return;
-  }
-
-  await setTheme(local);
+  const local = localStorage.getItem(
+    LOCAL_STORAGE_KEYS.THEME,
+  ) as ThemeMode | null;
+  await setTheme(local || "system");
 }
 
-function updateDocumentTheme(isDarkMode: boolean) {
-  if (isDarkMode) {
-    document.documentElement.classList.add("dark");
-    document.documentElement.classList.remove("light");
+async function applyResolvedTheme() {
+  const mode = await getCurrentTheme();
+  let isDark: boolean;
+  if (mode === "system") {
+    const sys = await ipc.client.theme.getCurrentThemeMode();
+    isDark = sys === "dark";
   } else {
-    document.documentElement.classList.remove("dark");
-    document.documentElement.classList.add("light");
+    isDark = mode === "dark";
   }
+  updateDocumentTheme(isDark);
+}
+
+export function listenSystemThemeChanges() {
+  function handler(event: MessageEvent) {
+    if (event.data?.channel === "theme:system-changed") {
+      getCurrentTheme().then((mode) => {
+        if (mode === "system") {
+          updateDocumentTheme(event.data.resolved === "dark");
+        }
+      });
+    }
+  }
+  window.addEventListener("message", handler);
+  return () => window.removeEventListener("message", handler);
+}
+
+function updateDocumentTheme(isDark: boolean) {
+  const html = document.documentElement;
+  // Enable transition class for smooth color shift
+  html.classList.add("transitioning");
+  html.classList.toggle("dark", isDark);
+  html.classList.toggle("light", !isDark);
+  // Remove transition class after animation completes
+  setTimeout(() => html.classList.remove("transitioning"), 300);
 }

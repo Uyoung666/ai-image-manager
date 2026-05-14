@@ -185,8 +185,9 @@ function AlbumsPage() {
             ))}
           </div>
         ) : albums.length === 0 ? (
-          <div className="flex h-64 flex-col items-center justify-center gap-3 text-[#6b6b75]">
+          <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
             <svg
+              className="text-[#6b6b75]/40"
               fill="none"
               height="48"
               stroke="currentColor"
@@ -200,9 +201,12 @@ function AlbumsPage() {
               <path d="M3 9h18" />
               <path d="M9 21V9" />
             </svg>
-            <p className="text-[13px]">还没有相册</p>
+            <p className="font-[510] text-[14px] text-foreground">还没有相册</p>
+            <p className="max-w-[260px] text-[12px] text-[#6b6b75]">
+              创建相册来整理你的照片，也可以拖拽照片到侧边栏快速添加
+            </p>
             <button
-              className="rounded-[6px] border border-input px-4 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+              className="mt-1 rounded-[6px] bg-primary px-4 py-1.5 text-[13px] font-[510] text-white transition-opacity hover:opacity-90"
               onClick={() => setShowCreate(true)}
             >
               创建第一个相册

@@ -1,5 +1,6 @@
 import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 
 interface AlbumInfo {
@@ -63,11 +64,13 @@ export function AddToAlbumDialog({
   }, [open, onClose]);
 
   async function handleAdd(albumId: number) {
+    const album = albums.find((a) => a.id === albumId);
     setAdding((prev) => new Set(prev).add(albumId));
     try {
       await ipc.client.albums.addPhotosToAlbum({ albumId, photoIds });
+      toast.success(`已添加 ${photoIds.length} 张照片到「${album?.name || ""}」`);
     } catch {
-      /* ignore */
+      toast.error("添加失败");
     }
     setAdding((prev) => {
       const next = new Set(prev);

@@ -11,6 +11,7 @@ interface PhotoCardProps {
   onToggleFavorite?: (id: number) => void;
   path: string;
   searchQuery?: string;
+  selectedIds?: Set<number>;
   similarity?: number;
   thumbnailPath: string | null;
   width: number;
@@ -55,6 +56,7 @@ export const PhotoCard = memo(function PhotoCard({
   isSelected,
   isFavorite,
   searchQuery,
+  selectedIds,
   similarity,
   onClick,
   onDoubleClick,
@@ -65,10 +67,18 @@ export const PhotoCard = memo(function PhotoCard({
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
-      e.preventDefault();
-      (window as any).electronAPI?.startDrag?.(path);
+      // Ctrl+drag → native file drag to desktop
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        (window as any).electronAPI?.startDrag?.(path);
+        return;
+      }
+      // Plain drag → internal DnD (sidebar albums/tags)
+      const ids = selectedIds?.has(id) ? [...selectedIds] : [id];
+      e.dataTransfer.setData("application/x-photo-ids", JSON.stringify(ids));
+      e.dataTransfer.effectAllowed = "move";
     },
-    [path],
+    [id, path, selectedIds],
   );
 
   const src = thumbnailPath
@@ -123,11 +133,17 @@ export const PhotoCard = memo(function PhotoCard({
       data-photo-id={id}
       data-photo-path={path}
     >
-      {!loaded && <div className="absolute inset-0 bg-muted" />}
+      {!loaded && (
+        <div className="absolute inset-0 animate-shimmer bg-muted">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent" />
+        </div>
+      )}
       <img
         alt={filename}
-        className={`h-full w-full object-cover transition-all duration-700 group-hover:scale-105 ${
-          loaded ? "scale-100 opacity-100" : "scale-105 opacity-0"
+        className={`h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105 ${
+          loaded
+            ? "scale-100 opacity-100 blur-0"
+            : "scale-[1.02] opacity-0 blur-[6px]"
         }`}
         loading="lazy"
         onError={() => setError(true)}

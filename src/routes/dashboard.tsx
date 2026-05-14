@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Bar,
@@ -46,9 +46,19 @@ const chartTooltipStyle = {
     borderRadius: 6,
     fontSize: 12,
   },
-  cursor: { fill: "rgba(255,255,255,0.03)" },
+  cursor: { fill: "rgba(255,255,255,0.05)" },
   labelStyle: { color: "hsl(180 8% 97%)" },
 };
+
+// Focal length to range mapping: "85" → { min: 75, max: 95 }
+function focalToRange(focalRaw: string): { min: number; max: number } | null {
+  const n = Number.parseFloat(focalRaw);
+  if (Number.isNaN(n) || n <= 0) return null;
+  // Round to nearest 5mm bucket
+  const bucket = Math.round(n / 5) * 5;
+  const half = bucket >= 50 ? 10 : 3;
+  return { min: bucket - half, max: bucket + half };
+}
 
 function DashboardPage() {
   const { t } = useTranslation();
@@ -65,6 +75,13 @@ function DashboardPage() {
     })();
   }, []);
 
+  const drillToHome = useCallback(
+    (params: Record<string, string>) => {
+      navigate({ to: "/", search: params });
+    },
+    [navigate],
+  );
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -76,27 +93,48 @@ function DashboardPage() {
   const cameraData = (data?.cameraStats || []).map((c) => ({
     name: c.model || "Unknown",
     count: c.count,
+    cameraModel: c.model,
   }));
 
   const lensData = (data?.lensStats || []).map((l) => ({
     name: l.model,
     count: l.count,
+    lensModel: l.model,
   }));
 
   const focalData = (data?.focalStats || [])
     .filter((f) => f.focalLength)
-    .map((f) => ({ name: `${f.focalLength}mm`, count: f.count }))
+    .map((f) => {
+      const range = focalToRange(f.focalLength);
+      return {
+        name: `${f.focalLength}mm`,
+        count: f.count,
+        focalMin: range?.min,
+        focalMax: range?.max,
+      };
+    })
     .slice(0, 12);
 
   const apertureData = (data?.apertureStats || [])
     .filter((a) => a.aperture)
-    .map((a) => ({ name: `f/${a.aperture}`, count: a.count }))
+    .map((a) => ({
+      name: `f/${a.aperture}`,
+      count: a.count,
+      apertureMin: (a.aperture - 0.2).toFixed(1),
+      apertureMax: (a.aperture + 0.2).toFixed(1),
+    }))
     .slice(0, 10);
 
-  const isoData = (data?.isoDistribution || []).map((b) => ({
-    name: b.range,
-    count: b.count,
-  }));
+  const isoData = (data?.isoDistribution || []).map((b) => {
+    // Parse "100-400" → { min: 100, max: 400 }
+    const parts = b.range?.split("-");
+    return {
+      name: b.range || "",
+      count: b.count,
+      isoMin: parts?.[0],
+      isoMax: parts?.[1],
+    };
+  });
 
   const timeData = (data?.timeHeatmap || []).map((b) => ({
     name: b.period,
@@ -127,14 +165,23 @@ function DashboardPage() {
         </div>
 
         {/* Camera Usage */}
-        <ChartSection title={t("cameraUsage")}>
+        <ChartSection hint="点击查看" title={t("cameraUsage")}>
           {cameraData.length > 0 ? (
             <ResponsiveContainer height={cameraData.length * 36 + 20} width="100%">
               <BarChart data={cameraData} layout="vertical" margin={{ top: 0, right: 20, left: 140, bottom: 0 }}>
                 <XAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} type="number" />
                 <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 12 }} tickLine={false} type="category" width={130} />
                 <Tooltip {...chartTooltipStyle} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                <Bar
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={(entry) => {
+                    if (entry.cameraModel) {
+                      drillToHome({ cameraModel: entry.cameraModel });
+                    }
+                  }}
+                  radius={[0, 4, 4, 0]}
+                >
                   {cameraData.map((_, i) => (<Cell fill={CHART_1} key={i} />))}
                 </Bar>
               </BarChart>
@@ -144,13 +191,21 @@ function DashboardPage() {
 
         {/* Lens Usage */}
         {lensData.length > 0 && (
-          <ChartSection title="镜头使用频率">
+          <ChartSection hint="点击查看" title="镜头使用频率">
             <ResponsiveContainer height={lensData.length * 36 + 20} width="100%">
               <BarChart data={lensData} layout="vertical" margin={{ top: 0, right: 20, left: 160, bottom: 0 }}>
                 <XAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} type="number" />
                 <YAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_SECONDARY, fontSize: 11 }} tickLine={false} type="category" width={150} />
                 <Tooltip {...chartTooltipStyle} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                <Bar
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={() => {
+                    // Lens drill-down — navigate with the lens model as camera filter
+                    // (lensModel filter not yet in ExifFilters, skip for now)
+                  }}
+                  radius={[0, 4, 4, 0]}
+                >
                   {lensData.map((_, i) => (<Cell fill={CHART_5} key={i} />))}
                 </Bar>
               </BarChart>
@@ -160,14 +215,26 @@ function DashboardPage() {
 
         {/* Charts Grid 2×2 */}
         <div className="grid grid-cols-2 gap-4">
-          <ChartSection title={t("focalDistribution")}>
+          <ChartSection hint="点击查看" title={t("focalDistribution")}>
             {focalData.length > 0 ? (
               <ResponsiveContainer height={180} width="100%">
                 <BarChart data={focalData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
                   <XAxis angle={-45} axisLine={false} dataKey="name" height={40} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} tickLine={false} />
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  <Bar
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.focalMin && entry.focalMax) {
+                        drillToHome({
+                          focalMin: String(entry.focalMin),
+                          focalMax: String(entry.focalMax),
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
                     {focalData.map((_, i) => (<Cell fill={CHART_2} key={i} />))}
                   </Bar>
                 </BarChart>
@@ -175,14 +242,26 @@ function DashboardPage() {
             ) : (<EmptyHint text={t("noFocalData")} />)}
           </ChartSection>
 
-          <ChartSection title="光圈偏好">
+          <ChartSection hint="点击查看" title="光圈偏好">
             {apertureData.length > 0 ? (
               <ResponsiveContainer height={180} width="100%">
                 <BarChart data={apertureData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
                   <XAxis angle={-45} axisLine={false} dataKey="name" height={40} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} tickLine={false} />
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  <Bar
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.apertureMin && entry.apertureMax) {
+                        drillToHome({
+                          apertureMin: entry.apertureMin,
+                          apertureMax: entry.apertureMax,
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
                     {apertureData.map((_, i) => (<Cell fill={CHART_3} key={i} />))}
                   </Bar>
                 </BarChart>
@@ -190,14 +269,26 @@ function DashboardPage() {
             ) : (<EmptyHint text="暂无光圈数据" />)}
           </ChartSection>
 
-          <ChartSection title="ISO 分布">
+          <ChartSection hint="点击查看" title="ISO 分布">
             {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
               <ResponsiveContainer height={180} width="100%">
                 <BarChart data={isoData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
                   <XAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  <Bar
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.isoMin && entry.isoMax) {
+                        drillToHome({
+                          isoMin: entry.isoMin,
+                          isoMax: entry.isoMax,
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
                     {isoData.map((_, i) => (<Cell fill={CHART_4} key={i} />))}
                   </Bar>
                 </BarChart>
@@ -234,10 +325,15 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ChartSection({ title, children }: { children: React.ReactNode; title: string }) {
+function ChartSection({ title, children, hint }: { children: React.ReactNode; hint?: string; title: string }) {
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-5">
-      <h2 className="mb-4 font-[590] text-foreground text-[16px]">{title}</h2>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-[590] text-foreground text-[16px]">{title}</h2>
+        {hint && (
+          <span className="text-[#6b6b75] text-[10px]">{hint}</span>
+        )}
+      </div>
       {children}
     </div>
   );

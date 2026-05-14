@@ -17,7 +17,10 @@
       "Bash(rm -f \"/c/Users/刘炎/AppData/Roaming/AI Image Manager/startup.log\")",
       "Bash(cmd //c \"start /b npx electron-forge start\")",
       "PowerShell(npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"people\" })",
-      "PowerShell(git push *)"
+      "PowerShell(git push *)",
+      "Bash(Select-String -Pattern \"src/\")",
+      "Bash(Select-Object -First 20)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-String \"src/\" | Where-Object { $_ -notmatch \"SmartAlbumDialog|export\\\\.ts\" })"
     ]
   }
 }

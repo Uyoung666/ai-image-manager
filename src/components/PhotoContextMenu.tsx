@@ -1,3 +1,4 @@
+import { Album, Copy, Download, FolderOpen, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 interface MenuState {
@@ -15,6 +16,7 @@ interface PhotoContextMenuProps {
   onDelete: (id: number) => void;
   onExport: (id: number) => void;
   onOpenExplorer: (path: string) => void;
+  onToggleFavorite?: (id: number) => void;
 }
 
 export type { MenuState };
@@ -26,6 +28,7 @@ export function PhotoContextMenu({
   onDelete,
   onExport,
   onOpenExplorer,
+  onToggleFavorite,
 }: PhotoContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -43,9 +46,6 @@ export function PhotoContextMenu({
         onClose();
       }
     };
-    // Use mousedown instead of click — works even inside virtualized containers
-    // that may swallow click events. Also listen for contextmenu so a second
-    // right-click elsewhere dismisses the menu.
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", dismiss, true);
       document.addEventListener("contextmenu", dismiss, true);
@@ -65,7 +65,7 @@ export function PhotoContextMenu({
 
   // Clamp position to viewport
   const x = Math.min(menu.x, window.innerWidth - 190);
-  const y = Math.min(menu.y, window.innerHeight - 150);
+  const y = Math.min(menu.y, window.innerHeight - 160);
 
   return (
     <div
@@ -74,7 +74,7 @@ export function PhotoContextMenu({
       style={{ left: x, top: y }}
     >
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -83,22 +83,11 @@ export function PhotoContextMenu({
           onClose();
         }}
       >
-        <svg
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="14"
-        >
-          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-        </svg>
+        <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
         在资源管理器中打开
       </button>
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
@@ -109,24 +98,27 @@ export function PhotoContextMenu({
           onClose();
         }}
       >
-        <svg
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="14"
-        >
-          <rect height="13" rx="2" ry="2" width="13" x="9" y="9" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </svg>
+        <Copy className="h-3.5 w-3.5 flex-shrink-0" />
         复制路径
       </button>
+      {onToggleFavorite && (
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+          disabled={menu.photoId === null}
+          onClick={() => {
+            if (menu.photoId !== null) {
+              onToggleFavorite(menu.photoId);
+            }
+            onClose();
+          }}
+        >
+          <Star className="h-3.5 w-3.5 flex-shrink-0" />
+          收藏 / 取消收藏
+        </button>
+      )}
       <div className="my-1 h-px bg-border" />
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {
@@ -135,24 +127,11 @@ export function PhotoContextMenu({
           onClose();
         }}
       >
-        <svg
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="14"
-        >
-          <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
-          <path d="M3 9h18" />
-          <path d="M9 21V9" />
-        </svg>
+        <Album className="h-3.5 w-3.5 flex-shrink-0" />
         添加到相册
       </button>
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {
@@ -161,25 +140,12 @@ export function PhotoContextMenu({
           onClose();
         }}
       >
-        <svg
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="14"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" x2="12" y1="15" y2="3" />
-        </svg>
+        <Download className="h-3.5 w-3.5 flex-shrink-0" />
         导出照片
       </button>
       <div className="my-1 h-px bg-border" />
       <button
-        className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
+        className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[#e5484d] text-[13px] hover:bg-foreground/10 disabled:text-[#6b6b75] disabled:hover:bg-transparent"
         disabled={menu.photoId === null}
         onClick={() => {
           if (menu.photoId !== null) {
@@ -188,19 +154,7 @@ export function PhotoContextMenu({
           onClose();
         }}
       >
-        <svg
-          fill="none"
-          height="14"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
-          width="14"
-        >
-          <polyline points="3 6 5 6 21 6" />
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        </svg>
+        <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
         删除照片
       </button>
     </div>
