@@ -3,6 +3,7 @@ import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
 
 function toLocalMediaUrl(filePath: string | null | undefined): string {
   if (!filePath) return "";
@@ -86,6 +87,8 @@ function TrashPage() {
       await ipc.client.photos.restorePhotos({ ids: [...selectedIds] });
       toast.success(`已恢复 ${selectedIds.size} 张照片`);
       setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
     } catch {
       toast.error("恢复失败");
