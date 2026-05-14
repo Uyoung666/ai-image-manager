@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { eq, sql } from "drizzle-orm";
+import { count, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos, photoTags, tags } from "@/db/schema";
@@ -26,10 +26,42 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
 });
 
 // Tags
-export const getTags = os.handler(() => {
-  const db = getDatabase();
-  return db.select().from(tags).orderBy(tags.name).all();
-});
+export const getTags = os
+  .input(z.object({ folderId: z.number().optional() }).optional())
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const folderId = input?.folderId;
+
+    if (folderId) {
+      return db
+        .select({
+          id: tags.id,
+          name: tags.name,
+          color: tags.color,
+          photoCount: count(photoTags.photoId).as("photoCount"),
+        })
+        .from(tags)
+        .innerJoin(photoTags, eq(photoTags.tagId, tags.id))
+        .innerJoin(photos, eq(photos.id, photoTags.photoId))
+        .where(eq(photos.folderId, folderId))
+        .groupBy(tags.id)
+        .orderBy(desc(sql`photoCount`), tags.name)
+        .all();
+    }
+
+    return db
+      .select({
+        id: tags.id,
+        name: tags.name,
+        color: tags.color,
+        photoCount: count(photoTags.photoId).as("photoCount"),
+      })
+      .from(tags)
+      .leftJoin(photoTags, eq(photoTags.tagId, tags.id))
+      .groupBy(tags.id)
+      .orderBy(desc(sql`photoCount`), tags.name)
+      .all();
+  });
 
 export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();

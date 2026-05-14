@@ -216,13 +216,37 @@ async function indexSingleFile(
 ): Promise<number | null> {
   const db = getDatabase();
 
-  // Check if already indexed
+  // Check if already indexed — update folderId to the more specific (deeper) folder
   const existing = db
-    .select({ id: photos.id })
+    .select({ id: photos.id, folderId: photos.folderId })
     .from(photos)
     .where(eq(photos.path, filePath))
     .get();
   if (existing) {
+    if (folderId !== null && existing.folderId !== folderId) {
+      // Only reassign if the new folder is more specific (deeper path) than the current one
+      const existingFolder = existing.folderId
+        ? db
+            .select({ path: folders.path })
+            .from(folders)
+            .where(eq(folders.id, existing.folderId))
+            .get()
+        : null;
+      const newFolder = db
+        .select({ path: folders.path })
+        .from(folders)
+        .where(eq(folders.id, folderId))
+        .get();
+      if (
+        newFolder &&
+        (!existingFolder || newFolder.path.length > existingFolder.path.length)
+      ) {
+        db.update(photos)
+          .set({ folderId })
+          .where(eq(photos.id, existing.id))
+          .run();
+      }
+    }
     return existing.id;
   }
 

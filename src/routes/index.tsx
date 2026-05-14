@@ -280,7 +280,6 @@ function HomePage() {
   function handleSelectTag(tagId: number | null) {
     setActiveTagId(tagId);
     if (tagId !== null) {
-      setActiveFolderId(null);
       setFavoriteOnly(false);
     }
   }
