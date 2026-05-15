@@ -151,8 +151,10 @@ export function MasonryGrid({
     const positionsChanged = positions !== prevPositions;
     const scrollToIdChanged = scrollToId !== prevScrollToId;
 
-    // Case 1: scrollToId changed — scroll to the selected item
-    if (scrollToId != null && scrollToIdChanged) {
+    // Case 1: scrollToId changed or positions shifted — scroll to the selected item
+    // Also re-scrolls when positions change (e.g. detail panel opens/closes, resize)
+    // to keep the selected card in view after layout reflow
+    if (scrollToId != null && (scrollToIdChanged || positionsChanged)) {
       const idx = items.findIndex((item) => item.id === scrollToId);
       if (idx >= 0 && positions[idx]) {
         const pos = positions[idx];
