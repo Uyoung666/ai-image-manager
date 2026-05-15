@@ -93,10 +93,17 @@ export function MasonryGrid({
     }
   }, []);
 
+  // Sync viewportHeight before paint to avoid blank waterfall on cold start
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && el.clientHeight > 0 && viewportHeight !== el.clientHeight) {
+      setViewportHeight(el.clientHeight);
+    }
+  });
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    setViewportHeight(el.clientHeight);
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
@@ -144,8 +151,8 @@ export function MasonryGrid({
     const positionsChanged = positions !== prevPositions;
     const scrollToIdChanged = scrollToId !== prevScrollToId;
 
-    // Case 1: scrollToId is set and either it changed or layout changed
-    if (scrollToId != null && (scrollToIdChanged || positionsChanged)) {
+    // Case 1: scrollToId changed — scroll to the selected item
+    if (scrollToId != null && scrollToIdChanged) {
       const idx = items.findIndex((item) => item.id === scrollToId);
       if (idx >= 0 && positions[idx]) {
         const pos = positions[idx];
@@ -193,8 +200,9 @@ export function MasonryGrid({
   const visibleItems = useMemo(() => {
     if (positions.length === 0) return [];
 
+    const effectiveHeight = viewportHeight > 0 ? viewportHeight : (scrollRef.current?.clientHeight ?? 0);
     const top = scrollTop - overscanPx;
-    const bottom = scrollTop + viewportHeight + overscanPx;
+    const bottom = scrollTop + effectiveHeight + overscanPx;
 
     const startIdx = Math.max(0, binarySearchStart(positions, top) - columnCount);
     const result: Array<{ index: number; style: React.CSSProperties }> = [];
@@ -223,8 +231,9 @@ export function MasonryGrid({
 
   const visibleHeaders = useMemo(() => {
     if (headerPositions.length === 0) return [];
+    const effectiveHeight = viewportHeight > 0 ? viewportHeight : (scrollRef.current?.clientHeight ?? 0);
     const top = scrollTop - overscanPx;
-    const bottom = scrollTop + viewportHeight + overscanPx;
+    const bottom = scrollTop + effectiveHeight + overscanPx;
     return headerPositions.filter(
       (h) => h.top + HEADER_HEIGHT >= top && h.top <= bottom,
     );
@@ -310,13 +319,11 @@ export function MasonryGrid({
     };
   }, [marquee, positions, items, onMarqueeSelect]);
 
-  if (containerWidth <= 0) {
-    return <div className={className} data-masonry-scroll="" ref={scrollRef} style={{ height: "100%", overflowY: "auto" }} />;
-  }
-
   const scrollToTop = () => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const layoutReady = containerWidth > 0 && columnCount > 0;
 
   return (
     <div className="relative" style={{ height: "100%", overflow: "hidden" }}>
@@ -327,59 +334,61 @@ export function MasonryGrid({
         style={{ height: "100%", overflowY: "auto" }}
         onMouseDown={handleMarqueeStart}
       >
-        <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
-          {visibleHeaders.map((h) => (
-            <div
-              className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
-              key={h.label}
-              style={{
-                position: "absolute",
-                top: h.top,
-                left: 0,
-                width: "100%",
-                height: HEADER_HEIGHT,
-              }}
-            >
-              {h.label}
-            </div>
-          ))}
-          {visibleItems.map(({ index, style }, vi) => {
-            const shouldAnimate = !hasRenderedRef.current && vi < columnCount * 4;
-            return (
+        {layoutReady && (
+          <div style={{ position: "relative", height: totalHeight, width: "100%" }}>
+            {visibleHeaders.map((h) => (
               <div
-                key={items[index].id}
-                className={shouldAnimate ? "animate-card-enter" : undefined}
-                style={shouldAnimate ? { ...style, animationDelay: `${vi * 30}ms` } : style}
+                className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
+                key={h.label}
+                style={{
+                  position: "absolute",
+                  top: h.top,
+                  left: 0,
+                  width: "100%",
+                  height: HEADER_HEIGHT,
+                }}
               >
-                {renderItem(items[index], index, style)}
+                {h.label}
               </div>
-            );
-          })}
-          {onEndReached && totalHeight > 0 && (
-            <div
-              ref={sentinelRef}
-              style={{
-                position: "absolute",
-                top: Math.max(0, totalHeight - 200),
-                left: 0,
-                width: 1,
-                height: 1,
-                pointerEvents: "none",
-              }}
-            />
-          )}
-          {marquee && (
-            <div
-              className="pointer-events-none absolute z-30 rounded-[2px] border border-primary/60 bg-primary/10"
-              style={{
-                left: Math.min(marquee.startX, marquee.x),
-                top: Math.min(marquee.startY, marquee.y),
-                width: Math.abs(marquee.x - marquee.startX),
-                height: Math.abs(marquee.y - marquee.startY),
-              }}
-            />
-          )}
-        </div>
+            ))}
+            {visibleItems.map(({ index, style }, vi) => {
+              const shouldAnimate = !hasRenderedRef.current && vi < columnCount * 4;
+              return (
+                <div
+                  key={items[index].id}
+                  className={shouldAnimate ? "animate-card-enter" : undefined}
+                  style={shouldAnimate ? { ...style, animationDelay: `${vi * 30}ms` } : style}
+                >
+                  {renderItem(items[index], index, style)}
+                </div>
+              );
+            })}
+            {onEndReached && totalHeight > 0 && (
+              <div
+                ref={sentinelRef}
+                style={{
+                  position: "absolute",
+                  top: Math.max(0, totalHeight - 200),
+                  left: 0,
+                  width: 1,
+                  height: 1,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+            {marquee && (
+              <div
+                className="pointer-events-none absolute z-30 rounded-[2px] border border-primary/60 bg-primary/10"
+                style={{
+                  left: Math.min(marquee.startX, marquee.x),
+                  top: Math.min(marquee.startY, marquee.y),
+                  width: Math.abs(marquee.x - marquee.startX),
+                  height: Math.abs(marquee.y - marquee.startY),
+                }}
+              />
+            )}
+          </div>
+        )}
       </div>
       {showScrollTop && (
         <button
