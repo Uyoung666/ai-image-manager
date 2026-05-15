@@ -413,7 +413,8 @@ function DashboardPage() {
                     animationDuration={800}
                     className="cursor-pointer"
                     dataKey="count"
-                    onClick={(entry) => {
+                    onClick={(entry: any) => {
+                      console.log("[yearlyChart] onClick entry:", JSON.stringify(entry));
                       if (entry.dateFrom && entry.dateTo) {
                         drillToHome({ dateFrom: entry.dateFrom, dateTo: entry.dateTo });
                       }
