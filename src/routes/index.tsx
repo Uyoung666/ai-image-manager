@@ -441,10 +441,12 @@ function HomePage() {
         searchParams.shutterMax = Number(filters.shutterMax);
       }
 
+      console.log("[drill] searchParams:", JSON.stringify(searchParams));
       const result = await ipc.client.photos.searchCompound(searchParams);
       setSearchResults((result as any).results || []);
       setSearchTime(Math.round(performance.now() - startTime));
-    } catch {
+    } catch (err) {
+      console.error("[drill] searchCompound failed:", err);
       try {
         const fallback = await ipc.client.photos.listPhotos({
           search: query.trim() || undefined,
