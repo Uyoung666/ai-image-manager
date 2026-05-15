@@ -127,6 +127,16 @@ Workers 通过 `forge.config.ts` 的 `extraResource` 打包，运行时从 `proc
 - `archiver` v8 — 纯 ESM，API 为 `new ZipArchive(options)`（不是工厂函数）
 - `update-electron-app` — CJS 包，必须 external
 
+### React Compiler（自动记忆化）
+
+渲染进程通过 `vite.renderer.config.mts` 配置了 `babel-plugin-react-compiler`（`reactCompilerPreset()`）。React Compiler 在编译期自动为组件和 hooks 插入 `useMemo`/`useCallback` 等效优化。
+
+**约束**:
+- 组件和 hooks 必须遵循 **Rules of React**：渲染期间不允许副作用（副作用必须在 `useEffect` 或 event handler 中）
+- ref 不能在渲染期间读写（除惰性初始化外）
+- 违反规则会导致该组件/hook 被静默跳过优化，产生比手动记忆化更差的性能。通过 `npx react-compiler-healthcheck` 检查
+- 安装了 React DevTools，可在 Components 面板看到 "Memo ✨" 标记验证编译结果
+
 ### IPC 通信模式
 
 本项目使用 **oRPC** 而非传统的 `ipcRenderer.invoke`。
@@ -217,10 +227,13 @@ npm run dev           # 启动开发模式（Vite HMR + Electron）
 npm run make          # 打包 Windows 安装包
 npm run test          # 运行 Vitest 单元测试
 npm run test:watch    # Vitest watch 模式
+npm run test:unit     # Vitest watch 模式（等同于 test:watch）
+npm run test:all      # 单元测试 + e2e 串联运行
 npx vitest run src/tests/unit/foo.test.ts  # 运行单个测试文件
 npm run test:e2e      # 运行 Playwright 端到端测试
 npm run check         # Biome lint 检查（通过 ultracite 封装）
 npm run fix           # Biome 自动修复（ultracite fix）
+npm run bump-ui       # 重新安装所有 shadcn/ui 组件（从 src/components/ui/ 读取列表）
 npx tsc --noEmit      # 类型检查（忽略 node_modules 中的错误，只看 src/ 开头的输出）
 npm run db:generate   # 生成 Drizzle 迁移文件
 npm run db:migrate    # 执行数据库迁移
@@ -256,6 +269,7 @@ git push origin main
 **注意**:
 - 不要推送 `node_modules/`、`data/`、`.vite/`、`out/`（已在 .gitignore）
 - 不要在 commit message 中写 `Co-Authored-By`（除非用户明确要求）
+- `react-virtuoso` 在 `dependencies` 中但**未被使用** — 项目使用自定义 `MasonryGrid` 虚拟滚动，不要引入此库
 
 ---
 
@@ -328,11 +342,29 @@ const composingRef = useRef(false);
 
 ## 测试模式
 
+### Vitest 单元测试
+
+- **配置**: `vitest.config.ts`
+- **默认环境**: `jsdom` — 需要 Node API 的测试文件顶部加 `// @vitest-environment node`
+- **全局变量**: `globals: true` — `describe`/`it`/`expect`/`vi` 无需 import
+- **路径别名**: `@/` 在测试中可用
+- **CSS**: `css: true` — Tailwind 类名不影响测试
+- **setup 文件**: `src/tests/unit/setup.ts` — 全局 mock `react-i18next`，所有组件测试中 `useTranslation()` 自动返回预设中文翻译
 - 纯函数从 service 模块提取后独立测试（避免 Electron/native 模块依赖）
 - 组件测试使用 `@testing-library/react` + `@testing-library/user-event`
 - 集成测试通过 `vi.mock("electron")` 和 `vi.mock("electron-store")` 隔离 Electron 环境
-- 需要 Node.js API 的测试文件顶部加 `// @vitest-environment node`
 - 测试描述使用中文
+
+### i18n Mock
+
+`src/tests/unit/setup.ts` 全局 mock 了 `react-i18next`。新增翻译键时，如果组件测试依赖该键的返回值，需在 setup 文件的 `translations` 字典中添加对应条目，否则测试中会返回 key 原文而非翻译文本。
+
+### Playwright e2e 测试
+
+- **配置**: `playwright.config.ts`
+- **测试目录**: `src/tests/e2e/`
+- **单浏览器**: 仅 `chromium`，串行执行（`fullyParallel: false`）
+- **启动**: 使用 `electron-playwright-helpers` 启动 Electron 窗口
 
 ---
 
