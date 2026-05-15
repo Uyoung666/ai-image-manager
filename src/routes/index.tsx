@@ -102,6 +102,8 @@ function HomePage() {
     if (drillParams.isoMax) filters.isoMax = drillParams.isoMax;
     if (drillParams.shutterMin) filters.shutterMin = drillParams.shutterMin;
     if (drillParams.shutterMax) filters.shutterMax = drillParams.shutterMax;
+    if (drillParams.dateFrom) filters.dateFrom = drillParams.dateFrom;
+    if (drillParams.dateTo) filters.dateTo = drillParams.dateTo;
 
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
