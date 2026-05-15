@@ -28,6 +28,9 @@ interface DashboardData {
   focalStats: FocalStat[];
   isoDistribution: BucketStat[];
   timeHeatmap: BucketStat[];
+  shutterSpeedDistribution: BucketStat[];
+  yearlyStats: { count: number; year: string }[];
+  monthlyStats: { count: number; month: string }[];
   totalPhotos: number;
 }
 
@@ -139,6 +142,59 @@ function DashboardPage() {
   const timeData = (data?.timeHeatmap || []).map((b) => ({
     name: b.period,
     count: b.count,
+  }));
+
+  const shutterData = (data?.shutterSpeedDistribution || []).map((b) => {
+    const parts = b.range?.split("-");
+    const getApproxSeconds = (label: string): number | undefined => {
+      if (label.startsWith(">")) {
+        // ">1/1000s" → 1/2000 as representative
+        const m = label.match(/>1\/(\d+)s/);
+        if (m) return 0.5 / Number.parseFloat(m[1]);
+      }
+      if (label.startsWith("<")) {
+        // "<1/30s" → 1/15 as representative
+        const m = label.match(/<1\/(\d+)s/);
+        if (m) return 2 / Number.parseFloat(m[1]);
+      }
+      const m = label.match(/1\/(\d+)s-1\/(\d+)s/);
+      if (m) {
+        const lo = Number.parseFloat(m[1]);
+        const hi = Number.parseFloat(m[2]);
+        return (1 / lo + 1 / hi) / 2;
+      }
+      return undefined;
+    };
+    const approxSec = getApproxSeconds(b.range || "");
+    return {
+      name: b.range || "",
+      count: b.count,
+      shutterMin: approxSec !== undefined ? approxSec * 0.7 : undefined,
+      shutterMax: approxSec !== undefined ? approxSec * 1.3 : undefined,
+    };
+  });
+
+  const yearlyData = (data?.yearlyStats || []).map((y) => {
+    const year = Number.parseInt(y.year, 10);
+    const yearStart = new Date(year, 0, 1).getTime();
+    const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999).getTime();
+    return {
+      name: y.year,
+      count: y.count,
+      dateFrom: String(yearStart),
+      dateTo: String(yearEnd),
+    };
+  });
+
+  const MONTH_LABELS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const monthCountMap = new Map<number, number>();
+  for (const m of data?.monthlyStats || []) {
+    const idx = Number.parseInt(m.month, 10);
+    if (idx >= 1 && idx <= 12) monthCountMap.set(idx, m.count);
+  }
+  const monthlyData = MONTH_LABELS.map((name, i) => ({
+    name,
+    count: monthCountMap.get(i + 1) || 0,
   }));
 
   return (
@@ -314,6 +370,78 @@ function DashboardPage() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (<EmptyHint text="暂无拍摄时间数据" />)}
+          </ChartSection>
+        </div>
+
+        {/* Shutter Speed Distribution */}
+        <ChartSection hint="点击查看" title={t("shutterDistribution")}>
+          {shutterData.length > 0 && shutterData.some((d) => d.count > 0) ? (
+            <ResponsiveContainer height={180} width="100%">
+              <BarChart data={shutterData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                <XAxis angle={-45} axisLine={false} dataKey="name" height={40} textAnchor="end" tick={{ fill: TEXT_TERTIARY, fontSize: 10 }} tickLine={false} />
+                <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar
+                  animationDuration={800}
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={(entry) => {
+                    if (entry.shutterMin !== undefined && entry.shutterMax !== undefined) {
+                      drillToHome({
+                        shutterMin: String(entry.shutterMin),
+                        shutterMax: String(entry.shutterMax),
+                      });
+                    }
+                  }}
+                  radius={[4, 4, 0, 0]}
+                >
+                  {shutterData.map((_, i) => (<Cell fill={CHART_5} key={i} />))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (<EmptyHint text="暂无快门速度数据" />)}
+        </ChartSection>
+
+        {/* Yearly & Monthly Distribution */}
+        <div className="grid grid-cols-2 gap-4">
+          <ChartSection hint="点击年份可查看" title={t("yearlyDistribution")}>
+            {yearlyData.length > 0 ? (
+              <ResponsiveContainer height={200} width="100%">
+                <BarChart data={yearlyData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.dateFrom && entry.dateTo) {
+                        drillToHome({ dateFrom: entry.dateFrom, dateTo: entry.dateTo });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {yearlyData.map((_, i) => (<Cell fill={CHART_2} key={i} />))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (<EmptyHint text="暂无拍摄年份数据" />)}
+          </ChartSection>
+
+          <ChartSection title={t("monthlyDistribution")}>
+            {monthlyData.some((d) => d.count > 0) ? (
+              <ResponsiveContainer height={200} width="100%">
+                <BarChart data={monthlyData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                  <XAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                  <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar animationDuration={800} dataKey="count" radius={[4, 4, 0, 0]}>
+                    {monthlyData.map((_, i) => (<Cell fill={CHART_4} key={i} />))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (<EmptyHint text="暂无拍摄月份数据" />)}
           </ChartSection>
         </div>
       </div>

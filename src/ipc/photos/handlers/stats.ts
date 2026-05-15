@@ -100,6 +100,34 @@ export const getStats = os.handler(() => {
     .limit(8)
     .all();
 
+  // Shutter speed distribution
+  const shutterData = db
+    .select({ shutterSpeed: exifData.shutterSpeed })
+    .from(exifData)
+    .where(sql`${exifData.shutterSpeed} IS NOT NULL`)
+    .all();
+
+  const shutterBuckets = {
+    ">1/1000s": 0,
+    "1/1000s-1/500s": 0,
+    "1/500s-1/250s": 0,
+    "1/250s-1/125s": 0,
+    "1/125s-1/60s": 0,
+    "1/60s-1/30s": 0,
+    "<1/30s": 0,
+  };
+  for (const row of shutterData) {
+    const val = Number.parseFloat(row.shutterSpeed ?? "");
+    if (Number.isNaN(val)) continue;
+    if (val < 0.001) shutterBuckets[">1/1000s"]++;
+    else if (val < 0.002) shutterBuckets["1/1000s-1/500s"]++;
+    else if (val < 0.004) shutterBuckets["1/500s-1/250s"]++;
+    else if (val < 0.008) shutterBuckets["1/250s-1/125s"]++;
+    else if (val < 0.0167) shutterBuckets["1/125s-1/60s"]++;
+    else if (val < 0.0333) shutterBuckets["1/60s-1/30s"]++;
+    else shutterBuckets["<1/30s"]++;
+  }
+
   // Shooting time heatmap — 24-hour distribution
   const hourData = db
     .select({ dateTaken: exifData.dateTaken })
@@ -147,6 +175,30 @@ export const getStats = os.handler(() => {
     .from(exifData)
     .get();
 
+  // Yearly shooting stats
+  const yearlyStats = db
+    .select({
+      year: sql<string>`strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch')`,
+      count: sql<number>`count(*)`,
+    })
+    .from(exifData)
+    .where(sql`${exifData.dateTaken} IS NOT NULL`)
+    .groupBy(sql`strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch')`)
+    .orderBy(sql`strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch')`)
+    .all();
+
+  // Monthly shooting stats (aggregated across all years)
+  const monthlyStats = db
+    .select({
+      month: sql<string>`strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch')`,
+      count: sql<number>`count(*)`,
+    })
+    .from(exifData)
+    .where(sql`${exifData.dateTaken} IS NOT NULL`)
+    .groupBy(sql`strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch')`)
+    .orderBy(sql`strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch')`)
+    .all();
+
   const avgIso =
     db
       .select({ avgIso: sql<number>`avg(${exifData.iso})` })
@@ -169,6 +221,11 @@ export const getStats = os.handler(() => {
       period: hourLabels[hour],
       count,
     })),
+    shutterSpeedDistribution: Object.entries(shutterBuckets).map(
+      ([range, count]) => ({ range, count })
+    ),
+    yearlyStats,
+    monthlyStats,
     dateRange,
     avgIso,
   };

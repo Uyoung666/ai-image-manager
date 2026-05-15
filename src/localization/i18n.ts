@@ -74,6 +74,9 @@ i18n.use(initReactI18next).init({
         focalDistribution: "焦段分布",
         noCameraData: "暂无相机数据，请先索引带有 EXIF 信息的照片",
         noFocalData: "暂无焦段信息",
+        shutterDistribution: "快门速度分布",
+        yearlyDistribution: "年度拍摄趋势",
+        monthlyDistribution: "月度拍摄分布",
 
         // Settings
         settingsTitle: "设置",
@@ -169,6 +172,9 @@ i18n.use(initReactI18next).init({
         focalDistribution: "Focal Length Distribution",
         noCameraData: "No camera data yet. Index photos with EXIF data.",
         noFocalData: "No focal length data yet.",
+        shutterDistribution: "Shutter Speed Distribution",
+        yearlyDistribution: "Yearly Shooting Trend",
+        monthlyDistribution: "Monthly Distribution",
 
         settingsTitle: "Settings",
         settingsAppearance: "Appearance",

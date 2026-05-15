@@ -42,6 +42,8 @@ export interface ExifFilters {
   focalMin?: string;
   isoMax?: string;
   isoMin?: string;
+  shutterMax?: string;
+  shutterMin?: string;
 }
 
 interface SearchBarProps {

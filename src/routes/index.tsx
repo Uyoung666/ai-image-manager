@@ -100,6 +100,8 @@ function HomePage() {
     if (drillParams.apertureMax) filters.apertureMax = drillParams.apertureMax;
     if (drillParams.isoMin) filters.isoMin = drillParams.isoMin;
     if (drillParams.isoMax) filters.isoMax = drillParams.isoMax;
+    if (drillParams.shutterMin) filters.shutterMin = drillParams.shutterMin;
+    if (drillParams.shutterMax) filters.shutterMax = drillParams.shutterMax;
 
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
@@ -396,6 +398,8 @@ function HomePage() {
         apertureMax?: number;
         isoMin?: number;
         isoMax?: number;
+        shutterMin?: number;
+        shutterMax?: number;
         limit: number;
       } = { limit: 100 };
       if (query.trim()) {
@@ -429,6 +433,12 @@ function HomePage() {
       }
       if (filters?.isoMax) {
         searchParams.isoMax = Number(filters.isoMax);
+      }
+      if (filters?.shutterMin) {
+        searchParams.shutterMin = Number(filters.shutterMin);
+      }
+      if (filters?.shutterMax) {
+        searchParams.shutterMax = Number(filters.shutterMax);
       }
 
       const result = await ipc.client.photos.searchCompound(searchParams);
@@ -959,6 +969,8 @@ export const Route = createFileRoute("/")({
     focalMin?: string;
     isoMax?: string;
     isoMin?: string;
+    shutterMax?: string;
+    shutterMin?: string;
   } => ({
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,
@@ -967,5 +979,7 @@ export const Route = createFileRoute("/")({
     focalMin: search.focalMin as string | undefined,
     isoMax: search.isoMax as string | undefined,
     isoMin: search.isoMin as string | undefined,
+    shutterMax: search.shutterMax as string | undefined,
+    shutterMin: search.shutterMin as string | undefined,
   }),
 });

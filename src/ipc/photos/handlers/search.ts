@@ -124,6 +124,8 @@ export const searchCompound = os
       apertureMax,
       isoMin,
       isoMax,
+      shutterMin,
+      shutterMax,
       limit,
     } = input;
     const hasExifFilters =
@@ -135,7 +137,9 @@ export const searchCompound = os
       apertureMin ||
       apertureMax ||
       isoMin ||
-      isoMax;
+      isoMax ||
+      shutterMin ||
+      shutterMax;
 
     // If text query: AI search first, then apply EXIF filters on the results
     if (query?.trim()) {
@@ -234,6 +238,16 @@ export const searchCompound = os
       if (isoMax !== undefined) {
         exifQuery = exifQuery.where(lte(exifData.iso, isoMax));
       }
+      if (shutterMin !== undefined) {
+        exifQuery = exifQuery.where(
+          sql`CAST(${exifData.shutterSpeed} AS REAL) >= ${shutterMin}`
+        );
+      }
+      if (shutterMax !== undefined) {
+        exifQuery = exifQuery.where(
+          sql`CAST(${exifData.shutterSpeed} AS REAL) <= ${shutterMax}`
+        );
+      }
 
       const filteredExif = exifQuery.all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
@@ -320,6 +334,16 @@ export const searchCompound = os
     }
     if (isoMax !== undefined) {
       exifQuery = exifQuery.where(lte(exifData.iso, isoMax));
+    }
+    if (shutterMin !== undefined) {
+      exifQuery = exifQuery.where(
+        sql`CAST(${exifData.shutterSpeed} AS REAL) >= ${shutterMin}`
+      );
+    }
+    if (shutterMax !== undefined) {
+      exifQuery = exifQuery.where(
+        sql`CAST(${exifData.shutterSpeed} AS REAL) <= ${shutterMax}`
+      );
     }
 
     const filteredExif = exifQuery.limit(limit).all();

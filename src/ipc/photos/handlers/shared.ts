@@ -58,5 +58,7 @@ export const CompoundSearchSchema = z.object({
   apertureMax: z.number().optional(),
   isoMin: z.number().optional(),
   isoMax: z.number().optional(),
+  shutterMin: z.number().optional(),
+  shutterMax: z.number().optional(),
   limit: z.number().optional().default(100),
 });
