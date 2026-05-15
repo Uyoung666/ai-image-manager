@@ -199,6 +199,8 @@ async function readExif(
         "GPSLatitude",
         "GPSLongitude",
         "GPSAltitude",
+        "latitude",
+        "longitude",
         "Software",
         "ImageDescription",
         "Artist",
@@ -330,8 +332,8 @@ async function indexSingleFile(
             : null,
           flash: exif.Flash as boolean,
           orientation: exif.Orientation as number,
-          gpsLatitude: exif.GPSLatitude as number,
-          gpsLongitude: exif.GPSLongitude as number,
+          gpsLatitude: (exif.latitude ?? exif.GPSLatitude) as number,
+          gpsLongitude: (exif.longitude ?? exif.GPSLongitude) as number,
           gpsAltitude: exif.GPSAltitude as number,
           software: exif.Software as string,
           imageDescription: exif.ImageDescription as string,
@@ -411,6 +413,28 @@ export async function scanFolder(
   }
   await walk(resolvedPath);
 
+  // Auto-discover subdirectories that contain images and create folder records
+  const dirToFolderId = new Map<string, number>();
+  dirToFolderId.set(resolvedPath, folder.id);
+
+  for (const f of files) {
+    const dir = path.dirname(f);
+    if (dir === resolvedPath || dirToFolderId.has(dir)) continue;
+    let subFolder = db.select({ id: folders.id }).from(folders).where(eq(folders.path, dir)).get();
+    if (!subFolder) {
+      const result = db
+        .insert(folders)
+        .values({ path: dir, displayName: path.basename(dir) })
+        .returning({ insertedId: folders.id })
+        .get();
+      if (result) {
+        dirToFolderId.set(dir, result.insertedId);
+      }
+    } else {
+      dirToFolderId.set(dir, subFolder.id);
+    }
+  }
+
   // Index each file with concurrency for speed.
   // Sharp/libvips uses the libuv thread pool internally, so overlapping
   // thumbnail generation + metadata reads yields ~3x throughput on typical
@@ -458,7 +482,9 @@ export async function scanFolder(
       });
 
       try {
-        const photoId = await indexSingleFile(file, folder.id);
+        const fileDir = path.dirname(file);
+        const fileFolderId = dirToFolderId.get(fileDir) || folder.id;
+        const photoId = await indexSingleFile(file, fileFolderId);
         scanned++;
         return photoId;
       } catch (error) {
@@ -487,36 +513,34 @@ export async function scanFolder(
     );
   }
 
-  // Clean up photos whose files no longer exist on disk
-  const dbPhotos = db
-    .select({ id: photos.id, path: photos.path })
-    .from(photos)
-    .where(eq(photos.folderId, folder.id))
-    .all();
-  const removedIds: number[] = [];
-  for (const p of dbPhotos) {
-    if (!fs.existsSync(p.path)) {
-      db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
-      db.delete(photos).where(eq(photos.id, p.id)).run();
-      removedIds.push(p.id);
-      const idx = photoIds.indexOf(p.id);
-      if (idx >= 0) {
-        photoIds.splice(idx, 1);
+  // Clean up photos whose files no longer exist on disk — check all folders
+  for (const [dirPath, fid] of dirToFolderId) {
+    const dbPhotos = db
+      .select({ id: photos.id, path: photos.path })
+      .from(photos)
+      .where(eq(photos.folderId, fid))
+      .all();
+    for (const p of dbPhotos) {
+      if (!fs.existsSync(p.path)) {
+        db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
+        db.delete(photos).where(eq(photos.id, p.id)).run();
+        const idx = photoIds.indexOf(p.id);
+        if (idx >= 0) photoIds.splice(idx, 1);
+        console.log(`[Indexer] Removed stale record: ${p.path}`);
       }
-      console.log(`[Indexer] Removed stale record: ${p.path}`);
     }
   }
-  if (removedIds.length > 0) {
-    console.log(
-      `[Indexer] Cleaned up ${removedIds.length} deleted files from index`
-    );
-  }
 
-  // Update folder metadata
-  db.update(folders)
-    .set({ photoCount: photoIds.length, lastScannedAt: Date.now() })
-    .where(eq(folders.id, folder.id))
-    .run();
+  // Update photo counts per folder
+  for (const [dirPath, fid] of dirToFolderId) {
+    const count = fileResults.filter(
+      (pid, i) => pid && dirToFolderId.get(path.dirname(files[i])) === fid
+    ).length;
+    db.update(folders)
+      .set({ photoCount: count, lastScannedAt: Date.now() })
+      .where(eq(folders.id, fid))
+      .run();
+  }
 
   onProgress?.({
     scanned: files.length,

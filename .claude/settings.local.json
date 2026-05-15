@@ -32,7 +32,9 @@
       "Bash(Select-Object -First 15)",
       "PowerShell(Test-Path *)",
       "Bash(Select-String \"src/ipc/photos/handlers/tags\")",
-      "Bash(Select-String -Pattern \"^src\\\\\\\\\")"
+      "Bash(Select-String -Pattern \"^src\\\\\\\\\")",
+      "PowerShell($files = @\\(\"DSCN0010.jpg\",\"DSCN0012.jpg\",\"DSCN0021.jpg\",\"DSCN0025.jpg\",\"DSCN0027.jpg\",\"DSCN0029.jpg\",\"DSCN0038.jpg\",\"DSCN0040.jpg\",\"DSCN0042.jpg\"\\); foreach \\($f in $files\\) { $url = \"https://raw.githubusercontent.com/ianare/exif-samples/master/jpg/gps/$f\"; $out = \"D:\\\\8806\\\\gps\\\\$f\"; Write-Host \"Downloading $f...\"; try { Invoke-WebRequest -Uri $url -OutFile $out; Write-Host \"  OK: $f\" } catch { Write-Host \"  FAIL: $f - $_\" } })",
+      "PowerShell(Get-ChildItem \"D:\\\\8806\\\\gps\" | Select-Object Name, @{N=\"Size\\(KB\\)\";E={[math]::Round\\($_.Length/1KB,1\\)}} | Format-Table -AutoSize)"
     ]
   }
 }
