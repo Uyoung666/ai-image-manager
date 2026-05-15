@@ -1,4 +1,5 @@
 import {
+  CloudUpload,
   Download,
   FolderPlus,
   Heart,
@@ -18,6 +19,7 @@ interface SelectionActionBarProps {
   onExport: () => void;
   onRename: () => void;
   onToggleFavorite: () => void;
+  onUploadToCloud: () => void;
   selectedCount: number;
 }
 
@@ -31,6 +33,7 @@ export function SelectionActionBar({
   onConvert,
   onDelete,
   onClearSelection,
+  onUploadToCloud,
 }: SelectionActionBarProps) {
   const [animating, setAnimating] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -85,6 +88,11 @@ export function SelectionActionBar({
           icon={<Download size={15} />}
           label="导出"
           onClick={onExport}
+        />
+        <ActionButton
+          icon={<CloudUpload size={15} />}
+          label="上传"
+          onClick={onUploadToCloud}
         />
         <ActionButton
           icon={<Pencil size={15} />}

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
+import { CloudUploadDialog } from "@/components/CloudUploadDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
@@ -69,6 +70,8 @@ function HomePage() {
   const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportIds, setExportIds] = useState<number[]>([]);
+  const [cloudUploadOpen, setCloudUploadOpen] = useState(false);
+  const [cloudUploadIds, setCloudUploadIds] = useState<number[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
@@ -282,6 +285,9 @@ function HomePage() {
   }, [selectedIds, photos, detailDismissed]);
 
   function handleSelectTag(tagId: number | null) {
+    setSearchMode(null);
+    setSearchQuery("");
+    setSearchTime(undefined);
     setActiveTagId(tagId);
     if (tagId !== null) {
       setFavoriteOnly(false);
@@ -523,6 +529,17 @@ function HomePage() {
     setExportIds(Array.from(selectedIds));
     setExportDialogOpen(true);
   }
+
+  function handleUploadToCloud(id: number) {
+    setCloudUploadIds([id]);
+    setCloudUploadOpen(true);
+  }
+
+  function handleUploadSelectedToCloud() {
+    setCloudUploadIds(Array.from(selectedIds));
+    setCloudUploadOpen(true);
+  }
+
   function handleDeleteSelected() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) {
@@ -765,11 +782,17 @@ function HomePage() {
         onAddFolder={handleAddFolder}
         onDeleteFolder={handleDeleteFolder}
         onSelectFavorites={() => {
+          setSearchMode(null);
+          setSearchQuery("");
+          setSearchTime(undefined);
           setFavoriteOnly((v) => !v);
           setActiveFolderId(null);
           setActiveTagId(null);
         }}
         onSelectFolder={(id) => {
+          setSearchMode(null);
+          setSearchQuery("");
+          setSearchTime(undefined);
           setActiveFolderId(id);
           setFavoriteOnly(false);
         }}
@@ -839,6 +862,7 @@ function HomePage() {
                 onDelete={handleDeleteSelected}
                 onExport={handleExportSelected}
                 onRename={() => setRenameDialogOpen(true)}
+                onUploadToCloud={handleUploadSelectedToCloud}
                 onToggleFavorite={() => {
                   const ids = [...selectedIds];
                   const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
@@ -915,6 +939,7 @@ function HomePage() {
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
         onToggleFavorite={handleToggleFavorite}
+        onUploadToCloud={handleUploadToCloud}
       />
       <BatchRenameDialog
         onClose={() => {
@@ -945,6 +970,11 @@ function HomePage() {
         onClose={() => setExportDialogOpen(false)}
         open={exportDialogOpen}
         photoIds={exportIds}
+      />
+      <CloudUploadDialog
+        onClose={() => setCloudUploadOpen(false)}
+        open={cloudUploadOpen}
+        photoIds={cloudUploadIds}
       />
       <ConfirmDeleteDialog
         count={pendingDeleteIds.length}

@@ -1,4 +1,4 @@
-import { Album, Copy, Download, FolderOpen, Star, Trash2 } from "lucide-react";
+import { Album, CloudUpload, Copy, Download, FolderOpen, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 interface MenuState {
@@ -17,6 +17,7 @@ interface PhotoContextMenuProps {
   onExport: (id: number) => void;
   onOpenExplorer: (path: string) => void;
   onToggleFavorite?: (id: number) => void;
+  onUploadToCloud?: (id: number) => void;
 }
 
 export type { MenuState };
@@ -29,6 +30,7 @@ export function PhotoContextMenu({
   onExport,
   onOpenExplorer,
   onToggleFavorite,
+  onUploadToCloud,
 }: PhotoContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -143,6 +145,21 @@ export function PhotoContextMenu({
         <Download className="h-3.5 w-3.5 flex-shrink-0" />
         导出照片
       </button>
+      {onUploadToCloud && (
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-foreground text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          disabled={menu.photoId === null}
+          onClick={() => {
+            if (menu.photoId !== null) {
+              onUploadToCloud(menu.photoId);
+            }
+            onClose();
+          }}
+        >
+          <CloudUpload className="h-3.5 w-3.5 flex-shrink-0" />
+          上传到云端
+        </button>
+      )}
       <div className="my-1 h-px bg-border" />
       <button
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-destructive text-[13px] hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
