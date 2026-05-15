@@ -50,7 +50,13 @@ interface TagInfo {
   color: string | null;
   id: number;
   name: string;
+  parentId: number | null;
   photoCount: number;
+}
+
+interface TagTreeNode {
+  children: TagTreeNode[];
+  tag: TagInfo;
 }
 interface SidebarProps {
   activeFolderId: number | null;
@@ -165,6 +171,97 @@ function renderFolderTree(
   });
 }
 
+function buildTagTree(tags: TagInfo[]): TagTreeNode[] {
+  const nodeMap = new Map<number, TagTreeNode>();
+  const roots: TagTreeNode[] = [];
+
+  for (const t of tags) {
+    nodeMap.set(t.id, { tag: t, children: [] });
+  }
+  for (const t of tags) {
+    if (t.parentId && nodeMap.has(t.parentId)) {
+      nodeMap.get(t.parentId)!.children.push(nodeMap.get(t.id)!);
+    } else {
+      roots.push(nodeMap.get(t.id)!);
+    }
+  }
+  return roots;
+}
+
+function renderTagTree(
+  nodes: TagTreeNode[],
+  depth: number,
+  expandedIds: Set<number>,
+  onToggle: (id: number) => void,
+  activeId: number | null,
+  onSelect: (id: number | null) => void,
+  onContextMenu: (e: React.MouseEvent, id: number, name: string) => void,
+  onDragOver: (e: React.DragEvent) => void,
+  onDragEnter: (id: number) => void,
+  onDragLeave: (e: React.DragEvent) => void,
+  onDrop: (e: React.DragEvent, id: number) => void,
+  dragOverId: number | null,
+): ReactNode[] {
+  return nodes.flatMap((node) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedIds.has(node.tag.id);
+    const isActive = activeId === node.tag.id;
+    const isDragOver = dragOverId === node.tag.id;
+
+    const row = (
+      <div className="flex items-center" key={node.tag.id}>
+        <button
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
+          style={{ marginLeft: depth * 14 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(node.tag.id);
+          }}
+        >
+          {hasChildren ? (
+            <ChevronRight
+              className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+            />
+          ) : (
+            <span className="w-3" />
+          )}
+        </button>
+        <button
+          className={`group/tag flex flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+            isDragOver
+              ? "bg-primary/20 text-primary ring-1 ring-primary/50 animate-pulse"
+              : isActive
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => {
+            const nextId = activeId === node.tag.id ? null : node.tag.id;
+            onSelect(nextId);
+          }}
+          onContextMenu={(e) => onContextMenu(e, node.tag.id, node.tag.name)}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDragEnter={() => onDragEnter(node.tag.id)}
+          onDrop={(e) => onDrop(e, node.tag.id)}
+        >
+          <span
+            className="h-2 w-2 flex-shrink-0 rounded-full"
+            style={{ background: node.tag.color || "var(--primary)" }}
+          />
+          <span className="truncate">{node.tag.name}</span>
+          <span className="ml-auto text-muted-foreground/70 text-[10px] tabular-nums">
+            {node.tag.photoCount}
+          </span>
+        </button>
+      </div>
+    );
+
+    return hasChildren && isExpanded
+      ? [row, ...renderTagTree(node.children, depth + 1, expandedIds, onToggle, activeId, onSelect, onContextMenu, onDragOver, onDragEnter, onDragLeave, onDrop, dragOverId)]
+      : [row];
+  });
+}
+
 export function Sidebar({
   folders,
   activeFolderId,
@@ -199,6 +296,7 @@ export function Sidebar({
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<number>>(
     new Set()
   );
+  const [expandedTagIds, setExpandedTagIds] = useState<Set<number>>(new Set());
   const [deleteTagTarget, setDeleteTagTarget] = useState<{
     id: number;
     name: string;
@@ -688,50 +786,56 @@ export function Sidebar({
                         />
                       </div>
                       <div className="flex-1 overflow-y-auto">
-                        {tags
-                          .filter((t) =>
+                        {(() => {
+                          const filtered = tags.filter((t) =>
                             tagSearch
                               ? t.name.toLowerCase().includes(tagSearch.toLowerCase())
                               : true
-                          )
-                          .map((tag) => (
-                            <button
-                              className={`group/tag flex w-full items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
-                                dragOverTagId === tag.id
-                                  ? "bg-primary/20 text-primary ring-1 ring-primary/50 animate-pulse"
-                                  : activeTagId === tag.id
-                                    ? "bg-primary/15 text-primary"
-                                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                              }`}
-                              key={tag.id}
-                              onClick={() => {
-                                const nextId = activeTagId === tag.id ? null : tag.id;
-                                setActiveTagId(nextId);
-                                onSelectTag?.(nextId);
-                              }}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                setDeleteTagTarget({ id: tag.id, name: tag.name });
-                              }}
-                              onDragLeave={(e) => {
-                                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                  setDragOverTagId(null);
-                                }
-                              }}
-                              onDragOver={handlePhotoDragOver}
-                              onDragEnter={() => setDragOverTagId(tag.id)}
-                              onDrop={(e) => handleDropOnTag(e, tag.id)}
-                            >
-                              <span
-                                className="h-2 w-2 flex-shrink-0 rounded-full"
-                                style={{ background: tag.color || "var(--primary)" }}
-                              />
-                              <span className="truncate">{tag.name}</span>
-                              <span className="ml-auto text-muted-foreground/70 text-[10px] tabular-nums">
-                                {tag.photoCount}
-                              </span>
-                            </button>
-                          ))}
+                          );
+                          // Build tree from filtered flat list, including ancestors
+                          const allIds = new Set(filtered.map((t) => t.id));
+                          // Include parents of filtered items so tree structure is preserved
+                          for (const t of filtered) {
+                            let cur = t.parentId;
+                            while (cur) {
+                              if (allIds.has(cur)) break;
+                              const parent = tags.find((p) => p.id === cur);
+                              if (parent) { allIds.add(cur); cur = parent.parentId; }
+                              else break;
+                            }
+                          }
+                          const visible = tags.filter((t) => allIds.has(t.id));
+                          const tree = buildTagTree(visible);
+                          return renderTagTree(
+                            tree,
+                            0,
+                            expandedTagIds,
+                            (id) => {
+                              const next = new Set(expandedTagIds);
+                              if (next.has(id)) next.delete(id);
+                              else next.add(id);
+                              setExpandedTagIds(next);
+                            },
+                            activeTagId,
+                            (nextId) => {
+                              setActiveTagId(nextId);
+                              onSelectTag?.(nextId);
+                            },
+                            (e, id, name) => {
+                              e.preventDefault();
+                              setDeleteTagTarget({ id, name });
+                            },
+                            handlePhotoDragOver,
+                            (id) => setDragOverTagId(id),
+                            (e) => {
+                              if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+                                setDragOverTagId(null);
+                              }
+                            },
+                            (e, id) => handleDropOnTag(e, id),
+                            dragOverTagId,
+                          );
+                        })()}
                       </div>
                     </>
                   ) : (

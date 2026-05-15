@@ -38,6 +38,7 @@ export const getTags = os
           id: tags.id,
           name: tags.name,
           color: tags.color,
+          parentId: tags.parentId,
           photoCount: count(photoTags.photoId).as("photoCount"),
         })
         .from(tags)
@@ -54,6 +55,7 @@ export const getTags = os
         id: tags.id,
         name: tags.name,
         color: tags.color,
+        parentId: tags.parentId,
         photoCount: count(photoTags.photoId).as("photoCount"),
       })
       .from(tags)
@@ -81,7 +83,11 @@ export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {
 
 export const addTag = os
   .input(
-    z.object({ name: z.string().min(1).max(50), color: z.string().optional() })
+    z.object({
+      name: z.string().min(1).max(50),
+      color: z.string().optional(),
+      parentId: z.number().optional(),
+    })
   )
   .handler(({ input }) => {
     const db = getDatabase();
@@ -95,13 +101,18 @@ export const addTag = os
     }
     const result = db
       .insert(tags)
-      .values({ name: input.name, color: input.color || null })
+      .values({
+        name: input.name,
+        color: input.color || null,
+        parentId: input.parentId || null,
+      })
       .returning({ insertedId: tags.id })
       .get();
     return {
       id: result?.insertedId,
       name: input.name,
       color: input.color || null,
+      parentId: input.parentId || null,
     };
   });
 
@@ -147,6 +158,11 @@ export const confirmPhotoTag = os
 
 export const deleteTag = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
+  // Re-parent child tags to root
+  db.update(tags)
+    .set({ parentId: null })
+    .where(eq(tags.parentId, input.id))
+    .run();
   db.delete(photoTags).where(eq(photoTags.tagId, input.id)).run();
   db.delete(tags).where(eq(tags.id, input.id)).run();
   return { ok: true };

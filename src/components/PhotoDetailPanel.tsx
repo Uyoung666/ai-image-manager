@@ -35,6 +35,7 @@ interface TagInfo {
   id: number;
   isConfirmed: boolean | null;
   name: string;
+  parentId?: number | null;
 }
 
 interface PhotoDetailPanelProps {
