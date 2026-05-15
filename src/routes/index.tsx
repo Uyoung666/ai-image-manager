@@ -965,6 +965,8 @@ export const Route = createFileRoute("/")({
     apertureMax?: string;
     apertureMin?: string;
     cameraModel?: string;
+    dateFrom?: string;
+    dateTo?: string;
     focalMax?: string;
     focalMin?: string;
     isoMax?: string;
@@ -975,6 +977,8 @@ export const Route = createFileRoute("/")({
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,
     cameraModel: search.cameraModel as string | undefined,
+    dateFrom: search.dateFrom as string | undefined,
+    dateTo: search.dateTo as string | undefined,
     focalMax: search.focalMax as string | undefined,
     focalMin: search.focalMin as string | undefined,
     isoMax: search.isoMax as string | undefined,

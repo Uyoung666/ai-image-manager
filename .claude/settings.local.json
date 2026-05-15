@@ -22,7 +22,14 @@
       "Bash(Select-Object -First 20)",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-String \"src/\" | Where-Object { $_ -notmatch \"SmartAlbumDialog|export\\\\.ts\" })",
       "Bash(Select-String -Pattern \"^src/\")",
-      "Bash(Select-Object -First 30)"
+      "Bash(Select-Object -First 30)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 40)",
+      "PowerShell(n *)",
+      "PowerShell(Write-Output \"n\" | npx shadcn add popover)",
+      "PowerShell(git add *)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 30)",
+      "Bash(Select-String \"src/\")",
+      "Bash(Select-Object -First 15)"
     ]
   }
 }

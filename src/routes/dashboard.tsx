@@ -176,13 +176,11 @@ function DashboardPage() {
 
   const yearlyData = (data?.yearlyStats || []).map((y) => {
     const year = Number.parseInt(y.year, 10);
-    const yearStart = new Date(year, 0, 1).getTime();
-    const yearEnd = new Date(year, 11, 31, 23, 59, 59, 999).getTime();
     return {
       name: y.year,
       count: y.count,
-      dateFrom: String(yearStart),
-      dateTo: String(yearEnd),
+      dateFrom: `${year}-01-01`,
+      dateTo: `${year}-12-31`,
     };
   });
 
