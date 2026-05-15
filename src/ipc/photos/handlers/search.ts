@@ -287,9 +287,6 @@ export const searchCompound = os
     }
 
     // No text query: EXIF-only filter
-    console.log("[searchCompound] EXIF-only mode, hasExifFilters:", hasExifFilters,
-      "dateFrom:", dateFrom, "dateTo:", dateTo,
-      "focalMin:", focalMin, "focalMax:", focalMax);
     if (!hasExifFilters) {
       const items = db
         .select()

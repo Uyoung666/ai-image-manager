@@ -195,9 +195,6 @@ function DashboardPage() {
     count: monthCountMap.get(i + 1) || 0,
   }));
 
-  console.log("[dashboard] yearlyData:", yearlyData.length, "items, first:", yearlyData[0]);
-  console.log("[dashboard] monthlyData (nonzero):", monthlyData.filter(d => d.count > 0).length, "months");
-
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center gap-4 border-border border-b px-6 py-4">
@@ -408,22 +405,22 @@ function DashboardPage() {
           <ChartSection hint="点击年份可查看" title={t("yearlyDistribution")}>
             {yearlyData.length > 0 ? (
               <ResponsiveContainer height={200} width="100%">
-                <BarChart data={yearlyData} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
+                <BarChart
+                  data={yearlyData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                  onClick={(entry: any) => {
+                    if (entry?.activePayload?.[0]?.payload) {
+                      const p = entry.activePayload[0].payload;
+                      if (p.dateFrom && p.dateTo) {
+                        drillToHome({ dateFrom: p.dateFrom, dateTo: p.dateTo });
+                      }
+                    }
+                  }}
+                >
                   <XAxis axisLine={false} dataKey="name" tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <YAxis axisLine={false} tick={{ fill: TEXT_TERTIARY, fontSize: 11 }} tickLine={false} />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
-                    className="cursor-pointer"
-                    dataKey="count"
-                    onClick={(entry: any) => {
-                      console.log("[yearlyChart] onClick entry:", JSON.stringify(entry));
-                      if (entry.dateFrom && entry.dateTo) {
-                        drillToHome({ dateFrom: entry.dateFrom, dateTo: entry.dateTo });
-                      }
-                    }}
-                    radius={[4, 4, 0, 0]}
-                  >
+                  <Bar animationDuration={800} className="cursor-pointer" dataKey="count" radius={[4, 4, 0, 0]}>
                     {yearlyData.map((_, i) => (<Cell fill={CHART_2} key={i} />))}
                   </Bar>
                 </BarChart>
