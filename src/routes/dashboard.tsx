@@ -195,6 +195,9 @@ function DashboardPage() {
     count: monthCountMap.get(i + 1) || 0,
   }));
 
+  console.log("[dashboard] yearlyData:", yearlyData.length, "items, first:", yearlyData[0]);
+  console.log("[dashboard] monthlyData (nonzero):", monthlyData.filter(d => d.count > 0).length, "months");
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center gap-4 border-border border-b px-6 py-4">
