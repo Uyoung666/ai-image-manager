@@ -301,6 +301,19 @@ export function Sidebar({
     id: number;
     name: string;
   } | null>(null);
+  const [tagCtx, setTagCtx] = useState<{
+    tagId: number;
+    tagName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [childTagParent, setChildTagParent] = useState<{
+    parentId: number;
+    parentName: string;
+  } | null>(null);
+  const [newChildTagName, setNewChildTagName] = useState("");
+  const childInputRef = useRef<HTMLInputElement>(null);
+  const childComposingRef = useRef(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
 
   // Drag-and-drop: album/tag drop targets
@@ -326,6 +339,13 @@ export function Sidebar({
       }
     }
     queryClient.invalidateQueries({ queryKey: ["photos"] });
+    // Refresh tag counts
+    try {
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+    } catch { /* ignore */ }
     if (failed > 0) {
       toast.success(`已为 ${ids.length - failed} 张照片添加标签「${tag?.name || ""}」`);
     } else {
@@ -382,7 +402,45 @@ export function Sidebar({
     };
   }, [totalPhotos, activeFolderId]);
 
+  // Listen for tag changes from other components (e.g. PhotoDetailPanel)
+  useEffect(() => {
+    function handleTagsChanged() {
+      ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      }).then((updated) => {
+        setTags((updated as TagInfo[]) || []);
+      }).catch(() => { /* ignore */ });
+    }
+    window.addEventListener("tags-changed", handleTagsChanged);
+    return () => window.removeEventListener("tags-changed", handleTagsChanged);
+  }, [activeFolderId]);
+
   const closeCtx = useCallback(() => setFolderCtx(null), []);
+
+  async function handleCreateChildTag() {
+    const name = newChildTagName.trim();
+    if (!name || !childTagParent) return;
+    const { parentId, parentName } = childTagParent;
+    setChildTagParent(null);
+    setNewChildTagName("");
+    try {
+      await ipc.client.photos.addTag({
+        name,
+        color: undefined,
+        parentId,
+      });
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+      // Auto-expand parent
+      setExpandedTagIds((prev) => new Set(prev).add(parentId));
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(`已创建子标签「${name}」（父标签: ${parentName}）`);
+    } catch {
+      toast.error("创建子标签失败");
+    }
+  }
 
   async function handleDeleteTag() {
     if (!deleteTagTarget) return;
@@ -405,14 +463,15 @@ export function Sidebar({
   }
 
   useEffect(() => {
-    if (!folderCtx) return;
+    if (!folderCtx && !tagCtx) return;
     function handleClick(e: MouseEvent) {
       if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
         closeCtx();
+        setTagCtx(null);
       }
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") closeCtx();
+      if (e.key === "Escape") { closeCtx(); setTagCtx(null); }
     }
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
@@ -420,7 +479,7 @@ export function Sidebar({
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [folderCtx, closeCtx]);
+  }, [folderCtx, tagCtx, closeCtx]);
 
   const folderTree = buildFolderTree(folders);
 
@@ -524,35 +583,33 @@ export function Sidebar({
                 className="w-48 p-0"
                 sideOffset={8}
               >
-                <div className="max-h-[280px] overflow-y-auto p-1.5">
+                <div className="max-h-[320px] overflow-y-auto p-1.5">
                   <p className="px-2 py-1 font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
-                    标签
+                    {t("sidebarTags")}
                   </p>
-                  {tags.map((tag) => (
-                    <button
-                      className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1 text-left text-[12px] transition-colors ${
-                        activeTagId === tag.id
-                          ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                      }`}
-                      key={tag.id}
-                      onClick={() => {
-                        const nextId = activeTagId === tag.id ? null : tag.id;
-                        setActiveTagId(nextId);
-                        onSelectTag?.(nextId);
-                        setTagPopoverOpen(false);
-                      }}
-                    >
-                      <span
-                        className="h-2 w-2 flex-shrink-0 rounded-full"
-                        style={{ background: tag.color || "var(--primary)" }}
-                      />
-                      <span className="truncate">{tag.name}</span>
-                      <span className="ml-auto text-muted-foreground/70 text-[10px] tabular-nums">
-                        {tag.photoCount}
-                      </span>
-                    </button>
-                  ))}
+                  {renderTagTree(
+                    buildTagTree(tags),
+                    0,
+                    expandedTagIds,
+                    (id) => {
+                      const next = new Set(expandedTagIds);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      setExpandedTagIds(next);
+                    },
+                    activeTagId,
+                    (nextId) => {
+                      setActiveTagId(nextId);
+                      onSelectTag?.(nextId);
+                      setTagPopoverOpen(false);
+                    },
+                    () => {},
+                    () => {},
+                    () => {},
+                    () => {},
+                    () => {},
+                    null,
+                  )}
                 </div>
               </PopoverContent>
             </Popover>
@@ -767,7 +824,7 @@ export function Sidebar({
                 onClick={() => setTagsCollapsed(!tagsCollapsed)}
               >
                 <p className="flex-1 font-[510] text-muted-foreground/70 text-[11px] uppercase tracking-wider">
-                  标签
+                  {t("sidebarTags")}
                 </p>
                 <ChevronDown
                   className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
@@ -781,7 +838,7 @@ export function Sidebar({
                         <input
                           className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
                           onChange={(e) => setTagSearch(e.target.value)}
-                          placeholder="搜索标签..."
+                          placeholder={t("tagSearchPlaceholder")}
                           value={tagSearch}
                         />
                       </div>
@@ -823,7 +880,7 @@ export function Sidebar({
                             },
                             (e, id, name) => {
                               e.preventDefault();
-                              setDeleteTagTarget({ id, name });
+                              setTagCtx({ tagId: id, tagName: name, x: e.clientX, y: e.clientY });
                             },
                             handlePhotoDragOver,
                             (id) => setDragOverTagId(id),
@@ -837,7 +894,27 @@ export function Sidebar({
                           );
                         })()}
                       </div>
-                    </>
+                    {!tags.some((t) => t.photoCount > 0) && (
+                      <div className="px-1 py-1">
+                        <button
+                          className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
+                          onClick={async () => {
+                            try {
+                              await ipc.client.photos.batchGenerateTags({});
+                              const updated = await ipc.client.photos.getTags({});
+                              setTags((updated as TagInfo[]) || []);
+                              toast.success("AI 标签生成完成");
+                            } catch {
+                              toast.error("AI 标签生成失败");
+                            }
+                          }}
+                        >
+                          <ScanSearch className="h-3.5 w-3.5" />
+                          {t("tagBatchGenerate")}
+                        </button>
+                      </div>
+                    )}
+                  </>
                   ) : (
                     <div className="px-3 py-1">
                       <button
@@ -854,7 +931,7 @@ export function Sidebar({
                         }}
                       >
                         <ScanSearch className="h-3.5 w-3.5" />
-                        批量生成 AI 标签
+                        {t("tagBatchGenerate")}
                       </button>
                     </div>
                   )}
@@ -893,7 +970,7 @@ export function Sidebar({
           <Album className="mr-2 inline h-3.5 w-3.5" />
           相册
           {dragOverAlbumNav && (
-            <span className="ml-auto text-[10px] text-primary">松手添加</span>
+            <span className="ml-auto text-[10px] text-primary">{t("tagDropHint")}</span>
           )}
         </button>
         <button
@@ -942,9 +1019,9 @@ export function Sidebar({
       >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>删除标签</AlertDialogTitle>
+            <AlertDialogTitle>{t("tagDeleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              确定要删除标签「{deleteTagTarget?.name}」吗？该操作不可撤销。
+              {t("tagDeleteDescription", { name: deleteTagTarget?.name ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -980,6 +1057,83 @@ export function Sidebar({
             <Trash2 className="h-3.5 w-3.5" />
             从索引中移除
           </button>
+        </div>
+      )}
+
+      {/* Tag context menu */}
+      {tagCtx && (
+        <div
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          ref={ctxRef}
+          style={{ left: tagCtx.x, top: tagCtx.y }}
+        >
+          <div className="truncate px-3 py-1 font-[510] text-muted-foreground/70 text-[10px] uppercase tracking-wider">
+            {tagCtx.tagName}
+          </div>
+          <div className="mx-2 my-1 border-border border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+            onClick={() => {
+              setChildTagParent({ parentId: tagCtx.tagId, parentName: tagCtx.tagName });
+              setTagCtx(null);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("tagCreateChild")}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-destructive text-[13px] transition-colors hover:bg-destructive/10"
+            onClick={() => {
+              setDeleteTagTarget({ id: tagCtx.tagId, name: tagCtx.tagName });
+              setTagCtx(null);
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("tagDeleteTitle")}
+          </button>
+        </div>
+      )}
+
+      {/* Create child tag dialog */}
+      {childTagParent && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/50">
+          <div className="w-[320px] rounded-[12px] border border-border bg-popover p-6 ring-1 ring-foreground/5">
+            <h3 className="font-[590] text-[14px] text-foreground">
+              {t("tagCreateChild")}
+            </h3>
+            <p className="mt-1 text-muted-foreground/70 text-[12px]">
+              父标签: {childTagParent.parentName}
+            </p>
+            <input
+              ref={childInputRef}
+              autoFocus
+              className="mt-3 w-full rounded-[6px] border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary/50"
+              onCompositionStart={() => { childComposingRef.current = true; }}
+              onCompositionEnd={(e) => { childComposingRef.current = false; setNewChildTagName((e.target as HTMLInputElement).value); }}
+              onChange={(e) => setNewChildTagName(e.target.value)}
+              onKeyDown={(e) => {
+                if (childComposingRef.current) return;
+                if (e.key === "Enter") handleCreateChildTag();
+                if (e.key === "Escape") { setChildTagParent(null); setNewChildTagName(""); }
+              }}
+              placeholder="输入子标签名称..."
+              value={newChildTagName}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded-[6px] bg-card px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
+                onClick={() => { setChildTagParent(null); setNewChildTagName(""); }}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                className="rounded-[6px] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground transition-colors hover:bg-primary/90"
+                onClick={handleCreateChildTag}
+              >
+                {t("confirm")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

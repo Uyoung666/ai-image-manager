@@ -77,6 +77,8 @@ i18n.use(initReactI18next).init({
         shutterDistribution: "快门速度分布",
         yearlyDistribution: "年度拍摄趋势",
         monthlyDistribution: "月度拍摄分布",
+        geoMap: "拍摄地点分布",
+        noGeoData: "暂无 GPS 地理数据，请先索引带有定位信息的照片",
 
         // Settings
         settingsTitle: "设置",
@@ -98,6 +100,16 @@ i18n.use(initReactI18next).init({
         openInExplorer: "在资源管理器中打开",
         deletePhoto: "删除照片",
         backToHome: "返回主页",
+
+        // Tags
+        sidebarTags: "标签",
+        tagSearchPlaceholder: "搜索标签...",
+        tagBatchGenerate: "批量生成 AI 标签",
+        tagDropHint: "松手添加",
+        tagDeleteTitle: "删除标签",
+        tagDeleteDescription:
+          "确定要删除标签「{{name}}」吗？该操作不可撤销。",
+        tagCreateChild: "创建子标签",
 
         // Common
         loading: "加载中…",
@@ -175,6 +187,8 @@ i18n.use(initReactI18next).init({
         shutterDistribution: "Shutter Speed Distribution",
         yearlyDistribution: "Yearly Shooting Trend",
         monthlyDistribution: "Monthly Distribution",
+        geoMap: "Photo Locations Map",
+        noGeoData: "No GPS data available. Index photos with location information.",
 
         settingsTitle: "Settings",
         settingsAppearance: "Appearance",
@@ -195,6 +209,16 @@ i18n.use(initReactI18next).init({
         openInExplorer: "Open in Explorer",
         deletePhoto: "Delete Photo",
         backToHome: "Back to Home",
+
+        // Tags
+        sidebarTags: "Tags",
+        tagSearchPlaceholder: "Search tags...",
+        tagBatchGenerate: "Batch Generate AI Tags",
+        tagDropHint: "Drop to add",
+        tagDeleteTitle: "Delete Tag",
+        tagDeleteDescription:
+          'Are you sure you want to delete tag "{{name}}"? This action cannot be undone.',
+        tagCreateChild: "Create Child Tag",
 
         loading: "Loading...",
         error: "Error",

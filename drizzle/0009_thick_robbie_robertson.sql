@@ -1,0 +1,1 @@
+CREATE INDEX `idx_tags_parent_id` ON `tags` (`parent_id`);

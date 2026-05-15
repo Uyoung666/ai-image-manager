@@ -206,6 +206,24 @@ export const getStats = os.handler(() => {
       .where(sql`${exifData.iso} IS NOT NULL`)
       .get()?.avgIso || 0;
 
+  // GPS geo-locations for map display
+  const geoLocations = db
+    .select({
+      photoId: exifData.photoId,
+      latitude: exifData.gpsLatitude,
+      longitude: exifData.gpsLongitude,
+      filename: photos.filename,
+      path: photos.path,
+      width: photos.width,
+      height: photos.height,
+    })
+    .from(exifData)
+    .innerJoin(photos, eq(exifData.photoId, photos.id))
+    .where(
+      sql`${exifData.gpsLatitude} IS NOT NULL AND ${exifData.gpsLongitude} IS NOT NULL AND ${photos.deletedAt} IS NULL`
+    )
+    .all();
+
   return {
     totalPhotos,
     aiProcessed,
@@ -228,6 +246,15 @@ export const getStats = os.handler(() => {
     monthlyStats,
     dateRange,
     avgIso,
+    geoLocations: geoLocations.map((g) => ({
+      photoId: g.photoId!,
+      latitude: g.latitude!,
+      longitude: g.longitude!,
+      filename: g.filename,
+      path: g.path,
+      width: g.width,
+      height: g.height,
+    })),
   };
 });
 

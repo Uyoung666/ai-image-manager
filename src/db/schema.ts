@@ -99,17 +99,23 @@ export const exifData = sqliteTable(
   })
 );
 
-export const tags = sqliteTable("tags", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull().unique(),
-  parentId: integer("parent_id").references((): any => tags.id, {
-    onDelete: "set null",
+export const tags = sqliteTable(
+  "tags",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull().unique(),
+    parentId: integer("parent_id").references((): any => tags.id, {
+      onDelete: "set null",
+    }),
+    color: text("color"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    parentIdIdx: index("idx_tags_parent_id").on(table.parentId),
   }),
-  color: text("color"),
-  createdAt: integer("created_at")
-    .notNull()
-    .$defaultFn(() => Date.now()),
-});
+);
 
 export const photoTags = sqliteTable(
   "photo_tags",

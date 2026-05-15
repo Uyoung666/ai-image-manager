@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { PhotoMap, type GeoLocation } from "@/components/PhotoMap";
 import { ipc } from "@/ipc/manager";
 
 interface CameraStat { count: number; model: string; }
@@ -26,6 +27,7 @@ interface DashboardData {
   lensStats: LensStat[];
   dateRange: { earliest: number; latest: number } | null;
   focalStats: FocalStat[];
+  geoLocations: GeoLocation[];
   isoDistribution: BucketStat[];
   timeHeatmap: BucketStat[];
   shutterSpeedDistribution: BucketStat[];
@@ -217,6 +219,11 @@ function DashboardPage() {
           />
           <StatCard label={t("avgIso")} value={data?.avgIso ? Math.round(data.avgIso).toString() : "—"} />
         </div>
+
+        {/* GPS Map */}
+        <ChartSection title={t("geoMap")}>
+          <PhotoMap locations={data?.geoLocations || []} />
+        </ChartSection>
 
         {/* Camera Usage */}
         <ChartSection hint="点击查看" title={t("cameraUsage")}>

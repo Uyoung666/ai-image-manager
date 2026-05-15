@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { count, desc, eq, sql } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { photos, photoTags, tags } from "@/db/schema";
@@ -32,37 +32,76 @@ export const getTags = os
     const db = getDatabase();
     const folderId = input?.folderId;
 
+    // Fetch all tags
+    const allTags = db
+      .select()
+      .from(tags)
+      .orderBy(tags.name)
+      .all();
+
+    // Fetch per-tag photo counts
+    type TagCountRow = { tagId: number; cnt: number };
+    let countRows: TagCountRow[];
     if (folderId) {
-      return db
+      countRows = db
         .select({
-          id: tags.id,
-          name: tags.name,
-          color: tags.color,
-          parentId: tags.parentId,
-          photoCount: count(photoTags.photoId).as("photoCount"),
+          tagId: photoTags.tagId,
+          cnt: count(photoTags.photoId).as("cnt"),
         })
-        .from(tags)
-        .innerJoin(photoTags, eq(photoTags.tagId, tags.id))
+        .from(photoTags)
         .innerJoin(photos, eq(photos.id, photoTags.photoId))
         .where(eq(photos.folderId, folderId))
-        .groupBy(tags.id)
-        .orderBy(desc(sql`photoCount`), tags.name)
-        .all();
+        .groupBy(photoTags.tagId)
+        .all() as TagCountRow[];
+    } else {
+      countRows = db
+        .select({
+          tagId: photoTags.tagId,
+          cnt: count(photoTags.photoId).as("cnt"),
+        })
+        .from(photoTags)
+        .groupBy(photoTags.tagId)
+        .all() as TagCountRow[];
     }
 
-    return db
-      .select({
-        id: tags.id,
-        name: tags.name,
-        color: tags.color,
-        parentId: tags.parentId,
-        photoCount: count(photoTags.photoId).as("photoCount"),
-      })
-      .from(tags)
-      .leftJoin(photoTags, eq(photoTags.tagId, tags.id))
-      .groupBy(tags.id)
-      .orderBy(desc(sql`photoCount`), tags.name)
-      .all();
+    const directCount = new Map<number, number>();
+    for (const r of countRows) {
+      directCount.set(r.tagId, r.cnt);
+    }
+
+    // Build children map
+    const childrenMap = new Map<number, number[]>();
+    for (const t of allTags) {
+      const pid = t.parentId;
+      if (pid != null) {
+        const list = childrenMap.get(pid);
+        if (list) list.push(t.id);
+        else childrenMap.set(pid, [t.id]);
+      }
+    }
+
+    // Recursively compute total count (self + descendants)
+    function totalCount(tagId: number, visited: Set<number>): number {
+      if (visited.has(tagId)) return 0;
+      visited.add(tagId);
+      let sum = directCount.get(tagId) || 0;
+      const kids = childrenMap.get(tagId);
+      if (kids) {
+        for (const kid of kids) sum += totalCount(kid, visited);
+      }
+      return sum;
+    }
+
+    const result = allTags.map((t) => ({
+      id: t.id,
+      name: t.name,
+      color: t.color,
+      parentId: t.parentId,
+      photoCount: totalCount(t.id, new Set()),
+    }));
+
+    result.sort((a, b) => b.photoCount - a.photoCount || a.name.localeCompare(b.name));
+    return result;
   });
 
 export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {

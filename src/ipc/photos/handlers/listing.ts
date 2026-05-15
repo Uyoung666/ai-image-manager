@@ -2,7 +2,7 @@ import { os } from "@orpc/server";
 import { BrowserWindow } from "electron";
 import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos, photoTags } from "@/db/schema";
+import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { scanFolder as scanFolderService, watchFolder } from "@/services/indexer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
@@ -101,8 +101,29 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     conditions.push(eq(photos.folderId, folderId) as any);
   }
   if (tagId) {
+    // Collect all descendant tag IDs (self + children recursively)
+    const allTags = db.select().from(tags).all();
+    const childrenMap = new Map<number, number[]>();
+    for (const t of allTags) {
+      if (t.parentId != null) {
+        const list = childrenMap.get(t.parentId);
+        if (list) list.push(t.id);
+        else childrenMap.set(t.parentId, [t.id]);
+      }
+    }
+    const descendantIds: number[] = [];
+    const visited = new Set<number>();
+    (function collect(pid: number) {
+      if (visited.has(pid)) return;
+      visited.add(pid);
+      descendantIds.push(pid);
+      const kids = childrenMap.get(pid);
+      if (kids) for (const kid of kids) collect(kid);
+    })(tagId);
+
+    const idList = descendantIds.join(",");
     conditions.push(
-      sql`${photos.id} IN (SELECT photo_id FROM photo_tags WHERE tag_id = ${tagId})` as any
+      sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${sql.raw(idList)}))` as any
     );
   }
   if (search) {

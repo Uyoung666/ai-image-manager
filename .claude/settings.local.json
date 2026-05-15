@@ -29,7 +29,10 @@
       "PowerShell(git add *)",
       "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 30)",
       "Bash(Select-String \"src/\")",
-      "Bash(Select-Object -First 15)"
+      "Bash(Select-Object -First 15)",
+      "PowerShell(Test-Path *)",
+      "Bash(Select-String \"src/ipc/photos/handlers/tags\")",
+      "Bash(Select-String -Pattern \"^src\\\\\\\\\")"
     ]
   }
 }

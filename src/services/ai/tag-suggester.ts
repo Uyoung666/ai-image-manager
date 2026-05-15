@@ -38,6 +38,18 @@ const CATEGORY_THRESHOLD_MULTIPLIERS: Record<TagCategory, number> = {
   activity: 1.0,
 };
 
+const CATEGORY_PARENTS: Record<TagCategory, string> = {
+  scene: "场景",
+  subject: "人物",
+  animal: "动物",
+  object: "物体",
+  activity: "活动",
+  lighting: "光影",
+  style: "风格",
+  color: "色彩",
+  weather: "天气",
+};
+
 export const CANDIDATE_TAGS: CandidateTag[] = [
   // === SCENES (25) ===
   { en: "indoor room interior", zh: "室内", category: "scene" },
@@ -225,7 +237,7 @@ function selectTagsAdaptive(
     category: TagCategory;
   }>,
   maxTags: number
-): Array<{ tag: string; confidence: number }> {
+): Array<{ tag: string; confidence: number; category: TagCategory }> {
   if (scores.length === 0) {
     return [];
   }
@@ -273,6 +285,7 @@ function selectTagsAdaptive(
   return selected.map((s) => ({
     tag: s.displayName,
     confidence: Math.round(s.similarity * 100) / 100,
+    category: s.category,
   }));
 }
 
@@ -454,6 +467,26 @@ export async function batchSuggestTags(
     return { tagged: 0, skipped: photoIds.length };
   }
 
+  // Ensure category parent tags exist
+  const categoryParentIds: Record<string, number> = {};
+  const parentColor = "#7c7fe0";
+  for (const [cat, zhName] of Object.entries(CATEGORY_PARENTS)) {
+    let parent = db
+      .select({ id: tags.id })
+      .from(tags)
+      .where(eq(tags.name, zhName))
+      .get();
+    if (!parent) {
+      const result = db
+        .insert(tags)
+        .values({ name: zhName, color: parentColor })
+        .returning({ insertedId: tags.id })
+        .get();
+      if (result) parent = { id: result.insertedId };
+    }
+    if (parent) categoryParentIds[cat] = parent.id;
+  }
+
   await initVectorDB();
   const vectors = await getPhotoVectors(toProcess);
 
@@ -506,12 +539,20 @@ export async function batchSuggestTags(
           .get();
 
         let tagId: number;
+        const parentId = categoryParentIds[s.category] || null;
         if (existingTag) {
           tagId = existingTag.id;
+          // Backfill parentId for existing tags that lack one (never self-reference)
+          if (parentId && tagId !== parentId) {
+            db.update(tags)
+              .set({ parentId })
+              .where(sql`${tags.id} = ${tagId} AND ${tags.parentId} IS NULL`)
+              .run();
+          }
         } else {
           const result = db
             .insert(tags)
-            .values({ name: s.tag, color: tagColor })
+            .values({ name: s.tag, color: tagColor, parentId })
             .returning({ insertedId: tags.id })
             .get();
           if (!result) {

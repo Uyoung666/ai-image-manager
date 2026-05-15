@@ -247,6 +247,7 @@ export function PhotoDetailPanel({
     try {
       await ipc.client.photos.setPhotoTag({ photoId: photo.id, tagId });
       loadTags();
+      window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
       /* ignore */
     }
@@ -259,6 +260,7 @@ export function PhotoDetailPanel({
     try {
       await ipc.client.photos.removePhotoTag({ photoId: photo.id, tagId });
       loadTags();
+      window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
       /* ignore */
     }
@@ -294,6 +296,7 @@ export function PhotoDetailPanel({
       setNewTagName("");
       setShowTagInput(false);
       loadTags();
+      window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
       /* ignore */
     }
@@ -341,6 +344,7 @@ export function PhotoDetailPanel({
         });
       }
       loadTags();
+      window.dispatchEvent(new CustomEvent("tags-changed"));
       // Remove applied suggestion from the list
       setAiSuggestions((prev) =>
         prev ? prev.filter((s) => s.tag !== tagName) : null

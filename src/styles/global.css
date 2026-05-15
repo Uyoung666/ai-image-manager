@@ -310,3 +310,59 @@
 .animate-card-enter {
   animation: card-enter 250ms ease-out both;
 }
+
+/* Leaflet dark theme overrides */
+.photo-map-wrapper .leaflet-container {
+  background: #1a1c1f;
+  font-family: "Inter Variable", system-ui, sans-serif;
+}
+
+.photo-map-wrapper .leaflet-control-attribution {
+  background: rgba(12, 13, 15, 0.85);
+  color: hsl(220 10% 50%);
+  font-size: 9px;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.photo-map-wrapper .leaflet-control-attribution a {
+  color: hsl(220 10% 60%);
+}
+
+.photo-map-wrapper .leaflet-popup-content-wrapper {
+  background: hsl(220 10% 10%);
+  color: #f7f8f8;
+  border-radius: 6px;
+  border: 1px solid hsl(240 4% 18%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.photo-map-wrapper .leaflet-popup-tip {
+  background: hsl(220 10% 10%);
+}
+
+.photo-map-wrapper .leaflet-popup-close-button {
+  color: hsl(220 10% 50%) !important;
+  font-size: 16px;
+}
+
+/* Custom dot marker */
+.photo-map-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.marker-dot {
+  width: 12px;
+  height: 12px;
+  background: #5E6AD2;
+  border: 2px solid #f7f8f8;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: transform 120ms ease;
+}
+
+.marker-dot:hover {
+  transform: scale(1.35);
+}

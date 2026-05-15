@@ -48,7 +48,17 @@ vi.mock("react-i18next", () => ({
         shutterDistribution: "快门速度分布",
         yearlyDistribution: "年度拍摄趋势",
         monthlyDistribution: "月度拍摄分布",
+        geoMap: "拍摄地点分布",
+        noGeoData: "暂无 GPS 地理数据",
         settingsTitle: "设置",
+        sidebarTags: "标签",
+        tagSearchPlaceholder: "搜索标签...",
+        tagBatchGenerate: "批量生成 AI 标签",
+        tagDropHint: "松手添加",
+        tagDeleteTitle: "删除标签",
+        tagDeleteDescription:
+          "确定要删除标签「{{name}}」吗？该操作不可撤销。",
+        tagCreateChild: "创建子标签",
         loading: "加载中…",
         backToHome: "返回主页",
       };

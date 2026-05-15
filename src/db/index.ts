@@ -58,6 +58,14 @@ export function initDatabase(): ReturnType<typeof drizzle> {
   migrate(dbInstance, { migrationsFolder });
   console.log("[DB] Migrations complete");
 
+  // Repair self-referencing tags (can happen if a category parent name matches a candidate tag)
+  const selfRef = sqlite
+    .prepare("UPDATE tags SET parent_id = NULL WHERE id = parent_id")
+    .run();
+  if (selfRef.changes > 0) {
+    console.log(`[DB] Repaired ${selfRef.changes} self-referencing tag(s)`);
+  }
+
   return dbInstance;
 }
 
