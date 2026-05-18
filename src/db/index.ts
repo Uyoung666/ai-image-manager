@@ -1,0 +1,165 @@
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { app } from "electron";
+import { getDataPath } from "@/utils/data-path";
+import * as schema from "./schema";
+
+let dbInstance: ReturnType<typeof drizzle> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let sqliteConnection: any = null;
+
+export function getDbPath(): string {
+  const dataPath = getDataPath();
+  const dbDir = path.join(dataPath, "data");
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+  return path.join(dbDir, "ai-image-manager.db");
+}
+
+function getMigrationsFolder(): string {
+  // In development, migrations are in the project root
+  const candidates = [
+    path.join(app.getAppPath(), "drizzle"),
+    path.join(process.cwd(), "drizzle"),
+    path.join(app.getAppPath(), "..", "..", "drizzle"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  // Fallback for packaged app
+  const prodPath = path.join(process.resourcesPath, "drizzle");
+  if (fs.existsSync(prodPath)) {
+    return prodPath;
+  }
+  throw new Error("Migrations folder not found");
+}
+
+export function initDatabase(): ReturnType<typeof drizzle> {
+  if (dbInstance) {
+    return dbInstance;
+  }
+
+  const dbPath = getDbPath();
+  console.log(`[DB] Initializing database at: ${dbPath}`);
+
+  const sqlite = new Database(dbPath);
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+  sqlite.pragma("busy_timeout = 5000");
+  sqliteConnection = sqlite;
+
+  dbInstance = drizzle(sqlite, { schema });
+
+  // Auto-run migrations on startup
+  const migrationsFolder = getMigrationsFolder();
+  console.log(`[DB] Running migrations from: ${migrationsFolder}`);
+  migrate(dbInstance, { migrationsFolder });
+  console.log("[DB] Migrations complete");
+
+  // Repair self-referencing tags (can happen if a category parent name matches a candidate tag)
+  const selfRef = sqlite
+    .prepare("UPDATE tags SET parent_id = NULL WHERE id = parent_id")
+    .run();
+  if (selfRef.changes > 0) {
+    console.log(`[DB] Repaired ${selfRef.changes} self-referencing tag(s)`);
+  }
+
+  // Heal stale thumbnail_path values. The thumbnailer stores absolute paths
+  // (e.g. "C:/.../AI Image Manager/thumbnails/<hash>.webp") in the DB, so a
+  // data-path migration leaves every row pointing at the old location. The
+  // local-media protocol then 403s those URLs and the gallery shows
+  // placeholders. Rewrite mismatched rows to the current thumbnails dir,
+  // preserving each row's hashed filename.
+  try {
+    const currentThumbDir = path.join(getDataPath(), "thumbnails");
+    const norm = currentThumbDir.replace(/\\/g, "/").toLowerCase();
+    const rows = sqlite
+      .prepare(
+        "SELECT id, thumbnail_path AS p FROM photos WHERE thumbnail_path IS NOT NULL AND thumbnail_path != ''"
+      )
+      .all() as { id: number; p: string }[];
+    const update = sqlite.prepare(
+      "UPDATE photos SET thumbnail_path = ? WHERE id = ?"
+    );
+    const healMany = sqlite.transaction((items: { id: number; p: string }[]) => {
+      let healed = 0;
+      for (const row of items) {
+        const rowNorm = row.p.replace(/\\/g, "/").toLowerCase();
+        if (rowNorm.startsWith(`${norm}/`)) continue;
+        const filename = path.basename(row.p);
+        const fixed = path.join(currentThumbDir, filename);
+        update.run(fixed, row.id);
+        healed++;
+      }
+      return healed;
+    });
+    const healedCount = healMany(rows);
+    if (healedCount > 0) {
+      console.log(
+        `[DB] Healed ${healedCount} stale thumbnail path(s) → ${currentThumbDir}`
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[DB] Thumbnail path heal skipped:",
+      (err as Error)?.message ?? err
+    );
+  }
+
+  return dbInstance;
+}
+
+export function getDatabase(): ReturnType<typeof drizzle> {
+  if (!dbInstance) {
+    return initDatabase();
+  }
+  return dbInstance;
+}
+
+function dbDiag(msg: string) {
+  try {
+    const dir = path.join(
+      process.env.APPDATA || "/tmp",
+      "AI Image Manager",
+      "logs"
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "migrate.log"),
+      `${new Date().toISOString()} ${msg}\n`,
+      { flag: "a" }
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+export function closeDatabase(): void {
+  if (sqliteConnection) {
+    try {
+      // Flush WAL to main database file so the copy captures all committed data
+      sqliteConnection.pragma("wal_checkpoint(TRUNCATE)");
+      dbDiag("closeDatabase: wal_checkpoint OK, calling close()");
+      sqliteConnection.close();
+      dbDiag("closeDatabase: OK");
+      console.log("[DB] Connection closed gracefully");
+    } catch (err) {
+      dbDiag(`closeDatabase: ERROR ${(err as Error)?.message ?? err}`);
+      console.error(
+        "[DB] Non-fatal error during close:",
+        (err as Error)?.message ?? err
+      );
+    }
+    sqliteConnection = null;
+  } else {
+    dbDiag("closeDatabase: sqliteConnection already null, skip");
+    console.warn("[DB] Connection was already null/undefined, skipping close");
+  }
+  dbInstance = null;
+}

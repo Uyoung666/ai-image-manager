@@ -1,0 +1,229 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import Lightbox from "yet-another-react-lightbox";
+import {
+  Captions,
+  Counter,
+  Fullscreen,
+  Thumbnails,
+  Zoom,
+} from "yet-another-react-lightbox/plugins";
+import "yet-another-react-lightbox/styles.css";
+import "yet-another-react-lightbox/plugins/captions.css";
+import "yet-another-react-lightbox/plugins/counter.css";
+import "yet-another-react-lightbox/plugins/thumbnails.css";
+
+interface Photo {
+  filename: string;
+  height: number;
+  id: number;
+  path: string;
+  width: number;
+}
+
+interface PhotoLightboxProps {
+  index: number;
+  onClose: (currentIndex: number) => void;
+  open: boolean;
+  photos: Photo[];
+}
+
+const SLIDESHOW_DELAYS = [
+  { label: "3s", value: 3000 },
+  { label: "5s", value: 5000 },
+  { label: "10s", value: 10_000 },
+];
+
+function toLocalMediaUrl(filePath: string): string {
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `local-media://${encoded}`;
+}
+
+function formatDimensions(w: number, h: number): string {
+  if (!(w && h)) {
+    return "";
+  }
+  const mp = ((w * h) / 1_000_000).toFixed(1);
+  return `${w} × ${h} · ${mp}MP`;
+}
+
+export function PhotoLightbox({
+  photos,
+  index,
+  open,
+  onClose,
+}: PhotoLightboxProps) {
+  const { t } = useTranslation();
+  const [photoIndex, setPhotoIndex] = useState(index);
+  const [playing, setPlaying] = useState(false);
+  const [delay, setDelay] = useState(5000);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const programmaticRef = useRef(false);
+
+  useEffect(() => {
+    setPhotoIndex(index);
+  }, [index]);
+
+  useEffect(() => {
+    if (!open) {
+      setPlaying(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!playing && timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [playing]);
+
+  useEffect(() => {
+    if (!(playing && open)) {
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      programmaticRef.current = true;
+      setPhotoIndex((prev) => (prev + 1) % photos.length);
+    }, delay);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [playing, delay, open, photos.length]);
+
+  const togglePlay = useCallback(() => {
+    setPlaying((p) => !p);
+  }, []);
+
+  const cycleDelay = useCallback(() => {
+    const currentIdx = SLIDESHOW_DELAYS.findIndex((d) => d.value === delay);
+    const nextIdx = (currentIdx + 1) % SLIDESHOW_DELAYS.length;
+    setDelay(SLIDESHOW_DELAYS[nextIdx].value);
+  }, [delay]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === " ") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        togglePlay();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [open, togglePlay]);
+
+  const handleViewChange = useCallback(
+    ({ index: newIndex }: { index: number }) => {
+      if (programmaticRef.current) {
+        programmaticRef.current = false;
+        return;
+      }
+      setPhotoIndex(newIndex);
+      setPlaying(false);
+    },
+    []
+  );
+
+  const slides = photos.map((p) => ({
+    src: toLocalMediaUrl(p.path),
+    alt: p.filename,
+    title: p.filename,
+    description: formatDimensions(p.width, p.height),
+  }));
+
+  const currentDelayLabel =
+    SLIDESHOW_DELAYS.find((d) => d.value === delay)?.label || "5s";
+
+  return (
+    <Lightbox
+      carousel={{
+        finite: false,
+        imageProps: { style: { transition: "opacity 250ms ease" } },
+      }}
+      close={() => onClose(photoIndex)}
+      index={photoIndex}
+      on={{ view: handleViewChange }}
+      open={open}
+      plugins={[Captions, Counter, Fullscreen, Thumbnails, Zoom]}
+      slides={slides}
+      styles={{
+        container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
+        toolbar: { padding: "8px 12px" },
+        slide: { padding: "0 60px" },
+        captionsTitleContainer: { padding: "0 60px" },
+        captionsDescriptionContainer: { padding: "4px 60px 0" },
+        thumbnail: { border: "2px solid transparent", borderRadius: 4 },
+        thumbnailsTrack: { padding: "6px 0" },
+      }}
+      thumbnails={{
+        width: 60,
+        height: 40,
+        gap: 4,
+        borderRadius: 4,
+        border: 0,
+        showToggle: true,
+      }}
+      toolbar={{
+        buttons: [
+          <button
+            aria-label={playing ? t("pause") : t("play")}
+            className="flex h-9 w-9 items-center justify-center rounded-[6px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            key="slideshow-play"
+            onClick={togglePlay}
+            title={playing ? t("pauseSlideshow") : t("playSlideshow")}
+          >
+            {playing ? (
+              <svg
+                fill="currentColor"
+                height="18"
+                viewBox="0 0 24 24"
+                width="18"
+              >
+                <rect height="16" rx="1" width="6" x="5" y="4" />
+                <rect height="16" rx="1" width="6" x="13" y="4" />
+              </svg>
+            ) : (
+              <svg
+                fill="currentColor"
+                height="18"
+                viewBox="0 0 24 24"
+                width="18"
+              >
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            )}
+          </button>,
+          <button
+            aria-label={t("slideshowInterval", { value: currentDelayLabel })}
+            className="flex h-9 min-w-[36px] items-center justify-center rounded-[6px] font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            key="slideshow-delay"
+            onClick={cycleDelay}
+            title={t("switchInterval")}
+          >
+            {currentDelayLabel}
+          </button>,
+          "fullscreen",
+          "close",
+        ],
+      }}
+      zoom={{
+        maxZoomPixelRatio: 5,
+        scrollToZoom: true,
+      }}
+    />
+  );
+}

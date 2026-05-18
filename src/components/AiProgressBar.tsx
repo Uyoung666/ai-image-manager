@@ -1,0 +1,231 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ipc } from "@/ipc/manager";
+
+interface AiProgress {
+  currentFile: string;
+  downloadPercent?: number;
+  error?: string;
+  isActive: boolean;
+  isModelLoaded: boolean;
+  loadingStartedAt?: number | null;
+  phase: "idle" | "loading" | "embedding" | "complete" | "error";
+  processed: number;
+  total: number;
+}
+
+export function AiProgressBar() {
+  const { t } = useTranslation();
+  const [progress, setProgress] = useState<AiProgress | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const pollingRef = useRef(false);
+
+  const fetchProgress = useCallback(async () => {
+    try {
+      const result = await ipc.client.photos.getAiProgress({});
+      return result as AiProgress;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProgress().then((p) => {
+      if (p) {
+        setProgress(p);
+      }
+    });
+  }, [fetchProgress]);
+
+  // Poll while active
+  useEffect(() => {
+    if (!progress?.isActive || pollingRef.current) {
+      return;
+    }
+
+    pollingRef.current = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      const p = await fetchProgress();
+      if (p) {
+        setProgress(p);
+      }
+      if (p?.isActive) {
+        timer = setTimeout(poll, 500);
+      } else {
+        pollingRef.current = false;
+      }
+    };
+
+    timer = setTimeout(poll, 500);
+
+    return () => {
+      clearTimeout(timer);
+      pollingRef.current = false;
+    };
+  }, [progress?.isActive, fetchProgress]);
+
+  useEffect(() => {
+    if (!progress) {
+      return;
+    }
+    if (progress.phase === "error") {
+      setLastError(progress.error || t("aiInitFailed"));
+    }
+  }, [progress]);
+
+  async function handleStart() {
+    setLastError(null);
+    await ipc.client.photos.startAiIndexing({});
+    setPaused(false);
+    // Immediately poll — the backend will have isEmbedding=true now
+    const p = await fetchProgress();
+    if (p) {
+      setProgress(p);
+    }
+  }
+
+  async function handlePause() {
+    await ipc.client.photos.stopAiIndexing({});
+    setPaused(true);
+    const p = await fetchProgress();
+    if (p) {
+      setProgress(p);
+    }
+  }
+
+  async function handleResume() {
+    setLastError(null);
+    await ipc.client.photos.startAiIndexing({});
+    setPaused(false);
+    const p = await fetchProgress();
+    if (p) {
+      setProgress(p);
+    }
+  }
+
+  if (progress?.phase === "error" || lastError) {
+    return (
+      <div className="mt-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
+        <p className="text-[11px] text-danger">{lastError}</p>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("aiMirrorHint")}
+          <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[10px] text-muted-foreground">
+            HF_MIRROR=hf-mirror.com
+          </code>
+        </p>
+        <button
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
+          onClick={handleStart}
+        >
+          {t("aiRetry")}
+        </button>
+      </div>
+    );
+  }
+
+  // Idle state: show start button (no active embedding, nothing processed yet)
+  if (
+    !progress ||
+    (!progress.isActive &&
+      progress.processed === 0 &&
+      progress.phase !== "complete")
+  ) {
+    return (
+      <button
+        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/15"
+        onClick={handleStart}
+      >
+        {t("aiStartIndex")}
+      </button>
+    );
+  }
+
+  // Complete state: show re-index button for newly added photos
+  if (!progress.isActive && progress.phase === "complete") {
+    return (
+      <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-muted-foreground">
+            {t("aiIndexComplete", {
+              processed: progress.processed,
+              total: progress.total,
+            })}
+          </span>
+          <span className="font-[510] text-[11px] text-primary">
+	            {progress.total > 0
+	              ? `${Math.round((progress.processed / progress.total) * 100)}%`
+	              : "100%"}
+	          </span>
+        </div>
+        <button
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
+          onClick={handleStart}
+        >
+          {t("aiIndexNewPhotos")}
+        </button>
+      </div>
+    );
+  }
+
+  const pct =
+    progress.phase === "loading" && progress.downloadPercent != null
+      ? progress.downloadPercent
+      : progress.total > 0
+        ? Math.round((progress.processed / progress.total) * 100)
+        : 0;
+  const phaseLabel =
+    progress.phase === "loading"
+      ? progress.downloadPercent != null
+        ? t("aiLoadingClip", { percent: progress.downloadPercent })
+        : t("aiLoadingClip")
+      : progress.phase === "complete"
+        ? paused
+          ? t("aiPaused")
+          : t("aiComplete")
+        : t("aiIndexingProgress", {
+            processed: progress.processed,
+            total: progress.total,
+          });
+
+  return (
+    <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] text-muted-foreground">{phaseLabel}</span>
+        <span className="font-[510] text-[11px] text-primary">{pct}%</span>
+      </div>
+      <div className="h-1 overflow-hidden rounded-full bg-secondary">
+        <div
+          className="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {progress.currentFile && (
+        <p className="mt-1 truncate text-[10px] text-muted-foreground">
+          {progress.currentFile}
+        </p>
+      )}
+      {progress.phase !== "complete" && (
+        <div className="mt-2 flex gap-1">
+          {paused ? (
+            <button
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/10"
+              onClick={handleResume}
+            >
+              {t("aiResume")}
+            </button>
+          ) : (
+            <button
+              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              onClick={handlePause}
+            >
+              {t("aiPause")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
