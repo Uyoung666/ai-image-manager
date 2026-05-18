@@ -1,0 +1,1000 @@
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
+import { ipc } from "@/ipc/manager";
+
+interface CameraStat {
+  count: number;
+  model: string;
+}
+interface LensStat {
+  count: number;
+  model: string;
+}
+interface FocalStat {
+  count: number;
+  focalLength: string;
+}
+interface ApertureStat {
+  aperture: number;
+  count: number;
+}
+interface BucketStat {
+  count: number;
+  period?: string;
+  range?: string;
+}
+interface DashboardData {
+  aiProcessed: number;
+  apertureStats: ApertureStat[];
+  avgIso: number;
+  cameraStats: CameraStat[];
+  dateRange: { earliest: number; latest: number } | null;
+  focalStats: FocalStat[];
+  geoLocations: GeoLocation[];
+  isoDistribution: BucketStat[];
+  lensStats: LensStat[];
+  monthlyStats: { count: number; month: string }[];
+  shutterSpeedDistribution: BucketStat[];
+  timeHeatmap: BucketStat[];
+  totalPhotos: number;
+  yearlyStats: { count: number; year: string }[];
+}
+
+interface ColorPaletteColor {
+  hex: string;
+  r: number;
+  g: number;
+  b: number;
+  hue: number;
+  saturation: number;
+  lightness: number;
+  weight: number;
+}
+interface HueBucket { label: string; hueRange: [number, number]; count: number; hex: string }
+interface SaturationBucket { level: "vivid" | "moderate" | "muted"; label: string; count: number }
+interface ColorDistributionUI {
+  globalPalette: ColorPaletteColor[];
+  hueDistribution: HueBucket[];
+  saturationDistribution: SaturationBucket[];
+  sampled: number;
+  totalPhotos: number;
+}
+const CHART_1 = "var(--chart-1)";
+const CHART_2 = "var(--chart-2)";
+const CHART_3 = "var(--chart-3)";
+const CHART_4 = "var(--chart-4)";
+const CHART_5 = "var(--chart-5)";
+const TEXT_SECONDARY = "#a1a1aa";
+const TEXT_TERTIARY = "#6b6b75";
+
+const chartTooltipStyle = {
+  contentStyle: {
+    background: "hsl(220 10% 12%)",
+    border: "1px solid hsl(240 4% 18%)",
+    borderRadius: 6,
+    fontSize: 12,
+  },
+  cursor: { fill: "rgba(255,255,255,0.05)" },
+  labelStyle: { color: "hsl(180 8% 97%)" },
+};
+
+// Focal length to range mapping: "85" → { min: 75, max: 95 }
+function focalToRange(focalRaw: string): { min: number; max: number } | null {
+  const n = Number.parseFloat(focalRaw);
+  if (Number.isNaN(n) || n <= 0) {
+    return null;
+  }
+  // Round to nearest 5mm bucket
+  const bucket = Math.round(n / 5) * 5;
+  const half = bucket >= 50 ? 10 : 3;
+  return { min: bucket - half, max: bucket + half };
+}
+
+function DashboardPage() {
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
+  const [colorLoading, setColorLoading] = useState(true);
+  const [colorData, setColorData] = useState<ColorDistributionUI | null>(null);
+  const [colorVisible, setColorVisible] = useState(false);
+  const colorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await ipc.client.photos.getStats({});
+        setData(result as DashboardData);
+      } catch {
+        /* ignore */
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // Fetch color distribution independently (may be slower)
+    setColorLoading(true);
+    ipc.client.photos
+      .getColorDistribution()
+      .then((result) => setColorData(result as ColorDistributionUI))
+      .catch(() => {})
+      .finally(() => setColorLoading(false));
+  }, []);
+
+  useEffect(() => {
+    ipc.client.settings
+      .getAppSetting({ key: "mapSource" })
+      .then((r) => {
+        if (r?.value === "online") {
+          setMapSource("online");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // IntersectionObserver: only play entrance animation when color section is visible
+  useEffect(() => {
+    const el = colorRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setColorVisible(true);
+          obs.disconnect();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [colorLoading]);
+
+  const handleMapSourceChange = useCallback((source: "offline" | "online") => {
+    setMapSource(source);
+    ipc.client.settings
+      .setAppSetting({ key: "mapSource", value: source })
+      .catch(() => {});
+  }, []);
+
+  const drillToHome = useCallback(
+    (params: Record<string, string>) => {
+      navigate({ to: "/", search: params });
+    },
+    [navigate]
+  );
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  const cameraData = (data?.cameraStats || []).map((c) => ({
+    name: c.model || "Unknown",
+    count: c.count,
+    cameraModel: c.model,
+  }));
+
+  const lensData = (data?.lensStats || []).map((l) => ({
+    name: l.model,
+    count: l.count,
+    lensModel: l.model,
+  }));
+
+  const focalData = (data?.focalStats || [])
+    .filter((f) => f.focalLength)
+    .map((f) => {
+      const range = focalToRange(f.focalLength);
+      return {
+        name: `${f.focalLength}mm`,
+        count: f.count,
+        focalMin: range?.min,
+        focalMax: range?.max,
+      };
+    })
+    .slice(0, 12);
+
+  const apertureData = (data?.apertureStats || [])
+    .filter((a) => a.aperture)
+    .map((a) => ({
+      name: `f/${a.aperture}`,
+      count: a.count,
+      apertureMin: (a.aperture - 0.2).toFixed(1),
+      apertureMax: (a.aperture + 0.2).toFixed(1),
+    }))
+    .slice(0, 10);
+
+  const isoData = (data?.isoDistribution || []).map((b) => {
+    // Parse "100-400" → { min: 100, max: 400 }
+    const parts = b.range?.split("-");
+    return {
+      name: b.range || "",
+      count: b.count,
+      isoMin: parts?.[0],
+      isoMax: parts?.[1],
+    };
+  });
+
+  const timeData = (data?.timeHeatmap || []).map((b) => ({
+    name: b.period,
+    count: b.count,
+  }));
+
+  const shutterData = (data?.shutterSpeedDistribution || []).map((b) => {
+    const parts = b.range?.split("-");
+    const getApproxSeconds = (label: string): number | undefined => {
+      if (label.startsWith(">")) {
+        // ">1/1000s" → 1/2000 as representative
+        const m = label.match(/>1\/(\d+)s/);
+        if (m) {
+          return 0.5 / Number.parseFloat(m[1]);
+        }
+      }
+      if (label.startsWith("<")) {
+        // "<1/30s" → 1/15 as representative
+        const m = label.match(/<1\/(\d+)s/);
+        if (m) {
+          return 2 / Number.parseFloat(m[1]);
+        }
+      }
+      const m = label.match(/1\/(\d+)s-1\/(\d+)s/);
+      if (m) {
+        const lo = Number.parseFloat(m[1]);
+        const hi = Number.parseFloat(m[2]);
+        return (1 / lo + 1 / hi) / 2;
+      }
+      return undefined;
+    };
+    const approxSec = getApproxSeconds(b.range || "");
+    return {
+      name: b.range || "",
+      count: b.count,
+      shutterMin: approxSec === undefined ? undefined : approxSec * 0.7,
+      shutterMax: approxSec === undefined ? undefined : approxSec * 1.3,
+    };
+  });
+
+  const yearlyData = (data?.yearlyStats || []).map((y) => {
+    const year = Number.parseInt(y.year, 10);
+    return {
+      name: y.year,
+      count: y.count,
+      dateFrom: `${year}-01-01`,
+      dateTo: `${year}-12-31`,
+    };
+  });
+
+  const monthLabelFormatter = new Intl.DateTimeFormat(i18n.language, {
+    month: "short",
+  });
+  const monthCountMap = new Map<number, number>();
+  for (const m of data?.monthlyStats || []) {
+    const idx = Number.parseInt(m.month, 10);
+    if (idx >= 1 && idx <= 12) {
+      monthCountMap.set(idx, m.count);
+    }
+  }
+  const monthlyData = Array.from({ length: 12 }, (_, i) => ({
+    name: monthLabelFormatter.format(new Date(2000, i, 1)),
+    count: monthCountMap.get(i + 1) || 0,
+  }));
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex items-center gap-4 border-border border-b px-6 py-4">
+        <button
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => navigate({ to: "/" })}
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <h1 className="font-[590] text-[18px] text-foreground">
+          {t("dashboardTitle")}
+        </h1>
+      </div>
+
+      <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        {/* Stat Cards */}
+        <div className="grid grid-cols-4 gap-4">
+          <StatCard
+            label={t("totalPhotos")}
+            value={data?.totalPhotos.toLocaleString() || "0"}
+          />
+          <StatCard
+            label={t("aiProcessed")}
+            value={data?.aiProcessed.toLocaleString() || "0"}
+          />
+          <StatCard
+            label={t("dateRange")}
+            value={
+              data?.dateRange
+                ? `${new Date(data.dateRange.earliest).getFullYear()} - ${new Date(data.dateRange.latest).getFullYear()}`
+                : "—"
+            }
+          />
+          <StatCard
+            label={t("avgIso")}
+            value={data?.avgIso ? Math.round(data.avgIso).toString() : "—"}
+          />
+        </div>
+
+        {/* GPS Map */}
+        <ChartSection title={t("geoMap")}>
+          <PhotoMap
+            locations={data?.geoLocations || []}
+            mapSource={mapSource}
+            onMapSourceChange={handleMapSourceChange}
+          />
+        </ChartSection>
+
+        {/* Color Distribution */}
+        <ChartSection hint={t("colorClickToSearch")} title={t("colorDistribution")}>
+          {colorLoading ? (
+            <div className="space-y-3 py-2">
+              <p className="text-[11px] text-muted-foreground/50">{t("colorAnalyzing")}</p>
+              <div className="flex h-5 w-full gap-[2px] overflow-hidden rounded-[4px]">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    className="h-full flex-1 animate-shimmer rounded-[2px]"
+                    key={i}
+                    style={{ animationDelay: `${i * 80}ms` }}
+                  />
+                ))}
+              </div>
+              <div className="flex h-5 w-full gap-[2px] overflow-hidden rounded-[4px]">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div
+                    className="h-full flex-1 animate-shimmer rounded-[2px]"
+                    key={i}
+                    style={{ animationDelay: `${i * 60}ms` }}
+                  />
+                ))}
+              </div>
+              <div className="space-y-1.5">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div className="flex items-center gap-2" key={i}>
+                    <div className="h-2 w-10 animate-shimmer rounded-[2px]" />
+                    <div className="h-2 flex-1 animate-shimmer rounded-[2px]" />
+                    <div className="h-2 w-8 animate-shimmer rounded-[2px]" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : colorData && colorData.globalPalette.length > 0 ? (
+            <div
+              ref={colorRef}
+              className={colorVisible ? "animate-card-enter" : "opacity-0"}
+            >
+              {/* Insight text */}
+              {(() => {
+                const warmHues = ["红", "橙", "黄"];
+                const coolHues = ["蓝", "紫蓝", "紫", "紫红"];
+                const greenHues = ["黄绿", "绿", "青绿"];
+                let warmT = 0, coolT = 0, greenT = 0;
+                for (const h of colorData.hueDistribution) {
+                  if (warmHues.includes(h.label)) warmT += h.count;
+                  else if (coolHues.includes(h.label)) coolT += h.count;
+                  else if (greenHues.includes(h.label)) greenT += h.count;
+                }
+                const total = warmT + coolT + greenT;
+                const max = Math.max(warmT, coolT, greenT);
+                let insightKey = "colorInsightNeutral";
+                if (total > 0 && max / total >= 0.35) {
+                  if (max === warmT) insightKey = "colorInsightWarm";
+                  else if (max === coolT) insightKey = "colorInsightCool";
+                  else insightKey = "colorInsightGreen";
+                }
+                return (
+                  <p className="mb-3 text-[12px] text-muted-foreground/80">
+                    {t(insightKey)}
+                  </p>
+                );
+              })()}
+
+              {/* Palette Swatch Row — sorted by hue */}
+              <div className="mb-4">
+                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  {t("colorPalette")}
+                </h3>
+                <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
+                  {colorData.globalPalette.map((c, i) => (
+                    <button
+                      className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                      key={i}
+                      style={{
+                        width: `${Math.max(c.weight * 100, 1.5)}%`,
+                        backgroundColor: c.hex,
+                      }}
+                      title={`${c.hex} — ${Math.round(c.weight * 100)}%`}
+                      onClick={() =>
+                        drillToHome({
+                          searchQuery: `#${c.hex.replace("#", "")} 色调`,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Hue Distribution Bar — equal-width segments, opacity = relative count */}
+              <div className="mb-4">
+                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  {t("colorHueDistribution")}
+                </h3>
+                {(() => {
+                  const maxHue = Math.max(...colorData.hueDistribution.map((h) => h.count), 1);
+                  const hueSearchMap: Record<string, string> = {
+                    红: "红色调", 橙: "橙色调", 黄: "黄色调",
+                    黄绿: "黄绿色调", 绿: "绿色调", 青绿: "青绿色调",
+                    青: "青色调", 蓝: "蓝色调", 紫蓝: "紫蓝色调",
+                    紫: "紫色调", 紫红: "紫红色调", 粉: "粉色调",
+                  };
+                  return (
+                    <>
+                      <div className="flex h-6 w-full gap-[1px] overflow-hidden rounded-[4px]">
+                        {colorData.hueDistribution.map((h) => {
+                          const ratio = h.count / maxHue;
+                          const opacity = 0.12 + ratio * 0.88;
+                          return (
+                            <button
+                              className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                              key={h.label}
+                              style={{
+                                backgroundColor: h.hex,
+                                opacity,
+                              }}
+                              title={`${h.label}: ${h.count} — ${t("colorClickToSearch")}`}
+                              onClick={() =>
+                                drillToHome({
+                                  searchQuery: hueSearchMap[h.label] || h.label,
+                                })
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="mt-1.5 flex justify-between px-0">
+                        {colorData.hueDistribution.map((h) => (
+                          <span
+                            className="text-[10px] text-muted-foreground/60 text-center leading-tight"
+                            key={h.label}
+                          >
+                            {h.label}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Saturation Distribution */}
+              <div>
+                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  {t("colorSaturationDistribution")}
+                </h3>
+                {(() => {
+                  const maxSat = Math.max(...colorData.saturationDistribution.map((s) => s.count), 1);
+                  const barColors: Record<string, string> = {
+                    vivid: "hsl(237, 55%, 55%)",
+                    moderate: "hsl(237, 25%, 48%)",
+                    muted: "hsl(237, 8%, 40%)",
+                  };
+                  const satLabels: Record<string, string> = {
+                    vivid: t("colorVivid"),
+                    moderate: t("colorModerate"),
+                    muted: t("colorMuted"),
+                  };
+                  return (
+                    <div className="space-y-1.5">
+                      {colorData.saturationDistribution.map((s) => {
+                        const pct = Math.round((s.count / maxSat) * 100);
+                        return (
+                          <div className="flex items-center gap-2" key={s.level}>
+                            <span className="w-10 shrink-0 text-[11px] text-muted-foreground/70">
+                              {satLabels[s.level]}
+                            </span>
+                            <div className="h-2.5 flex-1 overflow-hidden rounded-[2px] bg-muted">
+                              <div
+                                className="h-full rounded-[2px] transition-all"
+                                style={{
+                                  width: `${Math.max(pct, 4)}%`,
+                                  backgroundColor: barColors[s.level],
+                                }}
+                              />
+                            </div>
+                            <span className="w-8 text-right text-[11px] text-muted-foreground/50 tabular-nums">
+                              {s.count}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <p className="mt-3 text-right text-[10px] text-muted-foreground/50">
+                {t("colorSampled", { count: colorData.sampled, total: colorData.totalPhotos })}
+              </p>
+            </div>
+          ) : (
+            <div className="py-2 text-center">
+              <p className="text-[12px] text-muted-foreground/50">
+                {t("noColorData")}
+              </p>
+              {colorData && colorData.sampled > 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground/30">
+                  {t("colorNotEnoughData", { count: colorData.sampled })}
+                </p>
+              )}
+            </div>
+          )}
+        </ChartSection>
+
+        {/* Camera Usage */}
+        <ChartSection hint={t("clickToView")} title={t("cameraUsage")}>
+          {cameraData.length > 0 ? (
+            <ResponsiveContainer
+              height={cameraData.length * 36 + 20}
+              width="100%"
+            >
+              <BarChart
+                data={cameraData}
+                layout="vertical"
+                margin={{ top: 0, right: 20, left: 140, bottom: 0 }}
+              >
+                <XAxis
+                  axisLine={false}
+                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                  tickLine={false}
+                  type="number"
+                />
+                <YAxis
+                  axisLine={false}
+                  dataKey="name"
+                  tick={{ fill: TEXT_SECONDARY, fontSize: 12 }}
+                  tickLine={false}
+                  type="category"
+                  width={130}
+                />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar
+                  animationDuration={800}
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={(entry) => {
+                    if (entry.cameraModel) {
+                      drillToHome({ cameraModel: entry.cameraModel });
+                    }
+                  }}
+                  radius={[0, 4, 4, 0]}
+                >
+                  {cameraData.map((_, i) => (
+                    <Cell fill={CHART_1} key={i} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyHint text={t("noCameraData")} />
+          )}
+        </ChartSection>
+
+        {/* Lens Usage */}
+        {lensData.length > 0 && (
+          <ChartSection hint={t("clickToView")} title={t("lensUsage")}>
+            <ResponsiveContainer
+              height={lensData.length * 36 + 20}
+              width="100%"
+            >
+              <BarChart
+                data={lensData}
+                layout="vertical"
+                margin={{ top: 0, right: 20, left: 160, bottom: 0 }}
+              >
+                <XAxis
+                  axisLine={false}
+                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                  tickLine={false}
+                  type="number"
+                />
+                <YAxis
+                  axisLine={false}
+                  dataKey="name"
+                  tick={{ fill: TEXT_SECONDARY, fontSize: 11 }}
+                  tickLine={false}
+                  type="category"
+                  width={150}
+                />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar
+                  animationDuration={800}
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={() => {
+                    // Lens drill-down — navigate with the lens model as camera filter
+                    // (lensModel filter not yet in ExifFilters, skip for now)
+                  }}
+                  radius={[0, 4, 4, 0]}
+                >
+                  {lensData.map((_, i) => (
+                    <Cell fill={CHART_5} key={i} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartSection>
+        )}
+
+        {/* Charts Grid 2×2 */}
+        <div className="grid grid-cols-2 gap-4">
+          <ChartSection hint={t("clickToView")} title={t("focalDistribution")}>
+            {focalData.length > 0 ? (
+              <ResponsiveContainer height={180} width="100%">
+                <BarChart
+                  data={focalData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                >
+                  <XAxis
+                    angle={-45}
+                    axisLine={false}
+                    dataKey="name"
+                    height={40}
+                    textAnchor="end"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.focalMin && entry.focalMax) {
+                        drillToHome({
+                          focalMin: String(entry.focalMin),
+                          focalMax: String(entry.focalMax),
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {focalData.map((_, i) => (
+                      <Cell fill={CHART_2} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noFocalData")} />
+            )}
+          </ChartSection>
+
+          <ChartSection hint={t("clickToView")} title={t("aperturePreference")}>
+            {apertureData.length > 0 ? (
+              <ResponsiveContainer height={180} width="100%">
+                <BarChart
+                  data={apertureData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                >
+                  <XAxis
+                    angle={-45}
+                    axisLine={false}
+                    dataKey="name"
+                    height={40}
+                    textAnchor="end"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.apertureMin && entry.apertureMax) {
+                        drillToHome({
+                          apertureMin: entry.apertureMin,
+                          apertureMax: entry.apertureMax,
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {apertureData.map((_, i) => (
+                      <Cell fill={CHART_3} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noApertureData")} />
+            )}
+          </ChartSection>
+
+          <ChartSection hint={t("clickToView")} title={t("isoDistributionTitle")}>
+            {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
+              <ResponsiveContainer height={180} width="100%">
+                <BarChart
+                  data={isoData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                >
+                  <XAxis
+                    axisLine={false}
+                    dataKey="name"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    className="cursor-pointer"
+                    dataKey="count"
+                    onClick={(entry) => {
+                      if (entry.isoMin && entry.isoMax) {
+                        drillToHome({
+                          isoMin: entry.isoMin,
+                          isoMax: entry.isoMax,
+                        });
+                      }
+                    }}
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {isoData.map((_, i) => (
+                      <Cell fill={CHART_4} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noIsoData")} />
+            )}
+          </ChartSection>
+
+          <ChartSection title={t("timeDistribution24h")}>
+            {timeData.length > 0 && timeData.some((d) => d.count > 0) ? (
+              <ResponsiveContainer height={180} width="100%">
+                <BarChart
+                  data={timeData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                >
+                  <XAxis
+                    angle={-90}
+                    axisLine={false}
+                    dataKey="name"
+                    height={40}
+                    interval={2}
+                    textAnchor="end"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 9 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    dataKey="count"
+                    radius={[3, 3, 0, 0]}
+                  >
+                    {timeData.map((_, i) => (
+                      <Cell fill={CHART_1} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noTimeData")} />
+            )}
+          </ChartSection>
+        </div>
+
+        {/* Shutter Speed Distribution */}
+        <ChartSection hint={t("clickToView")} title={t("shutterDistribution")}>
+          {shutterData.length > 0 && shutterData.some((d) => d.count > 0) ? (
+            <ResponsiveContainer height={180} width="100%">
+              <BarChart
+                data={shutterData}
+                margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+              >
+                <XAxis
+                  angle={-45}
+                  axisLine={false}
+                  dataKey="name"
+                  height={40}
+                  textAnchor="end"
+                  tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
+                  tickLine={false}
+                />
+                <YAxis
+                  axisLine={false}
+                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                  tickLine={false}
+                />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar
+                  animationDuration={800}
+                  className="cursor-pointer"
+                  dataKey="count"
+                  onClick={(entry) => {
+                    if (
+                      entry.shutterMin !== undefined &&
+                      entry.shutterMax !== undefined
+                    ) {
+                      drillToHome({
+                        shutterMin: String(entry.shutterMin),
+                        shutterMax: String(entry.shutterMax),
+                      });
+                    }
+                  }}
+                  radius={[4, 4, 0, 0]}
+                >
+                  {shutterData.map((_, i) => (
+                    <Cell fill={CHART_5} key={i} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <EmptyHint text={t("noShutterData")} />
+          )}
+        </ChartSection>
+
+        {/* Yearly & Monthly Distribution */}
+        <div className="grid grid-cols-2 gap-4">
+          <ChartSection hint={t("clickYearToView")} title={t("yearlyDistribution")}>
+            {yearlyData.length > 0 ? (
+              <ResponsiveContainer height={200} width="100%">
+                <BarChart
+                  data={yearlyData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                  onClick={(entry: any) => {
+                    if (entry?.activePayload?.[0]?.payload) {
+                      const p = entry.activePayload[0].payload;
+                      if (p.dateFrom && p.dateTo) {
+                        drillToHome({ dateFrom: p.dateFrom, dateTo: p.dateTo });
+                      }
+                    }
+                  }}
+                >
+                  <XAxis
+                    axisLine={false}
+                    dataKey="name"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    className="cursor-pointer"
+                    dataKey="count"
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {yearlyData.map((_, i) => (
+                      <Cell fill={CHART_2} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noYearData")} />
+            )}
+          </ChartSection>
+
+          <ChartSection title={t("monthlyDistribution")}>
+            {monthlyData.some((d) => d.count > 0) ? (
+              <ResponsiveContainer height={200} width="100%">
+                <BarChart
+                  data={monthlyData}
+                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+                >
+                  <XAxis
+                    axisLine={false}
+                    dataKey="name"
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar
+                    animationDuration={800}
+                    dataKey="count"
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {monthlyData.map((_, i) => (
+                      <Cell fill={CHART_4} key={i} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyHint text={t("noMonthData")} />
+            )}
+          </ChartSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[8px] border border-border bg-secondary p-4">
+      <p className="font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+        {label}
+      </p>
+      <p className="mt-1 font-[590] text-[24px] text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function ChartSection({
+  title,
+  children,
+  hint,
+}: {
+  children: React.ReactNode;
+  hint?: string;
+  title: string;
+}) {
+  return (
+    <div className="rounded-[8px] border border-border bg-secondary p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-[590] text-[16px] text-foreground">{title}</h2>
+        {hint && (
+          <span className="text-[10px] text-muted-foreground/70">{hint}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EmptyHint({ text }: { text: string }) {
+  return <p className="text-[13px] text-muted-foreground/70">{text}</p>;
+}
+
+export const Route = createFileRoute("/dashboard")({
+  component: DashboardPage,
+});

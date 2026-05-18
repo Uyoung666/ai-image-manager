@@ -1,0 +1,1378 @@
+import { useNavigate } from "@tanstack/react-router";
+import { getTagDisplayName } from "@/localization/tag-display";
+import {
+  Album,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Folder,
+  LayoutDashboard,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  ScanSearch,
+  Settings,
+  Star,
+  Tag,
+  Trash2,
+  Users,
+} from "lucide-react";
+import type React from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
+import { AiProgressBar } from "./AiProgressBar";
+
+interface FolderInfo {
+  displayName: string;
+  id: number;
+  path: string;
+  photoCount: number;
+}
+interface TagInfo {
+  color: string | null;
+  id: number;
+  name: string;
+  parentId: number | null;
+  photoCount: number;
+}
+
+interface TagTreeNode {
+  children: TagTreeNode[];
+  tag: TagInfo;
+}
+interface SidebarProps {
+  activeFolderId: number | null;
+  collapsed: boolean;
+  favoriteActive?: boolean;
+  folders: FolderInfo[];
+  onAddFolder: (externalPath?: string) => void;
+  onDeleteFolder: (id: number, displayName: string) => void;
+  onSelectFavorites?: () => void;
+  onSelectFolder: (id: number | null) => void;
+  onSelectTag?: (tagId: number | null) => void;
+  onToggleCollapse: () => void;
+  scanningFolder: string | null;
+  scanProgress: string;
+  totalPhotos: number;
+}
+
+interface FolderTreeNode {
+  children: FolderTreeNode[];
+  folder: FolderInfo;
+}
+
+function dirname(filePath: string): string {
+  const i = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return i < 0 ? "" : filePath.slice(0, i);
+}
+
+function buildFolderTree(folders: FolderInfo[]): FolderTreeNode[] {
+  const nodeMap = new Map<number, FolderTreeNode>();
+  const roots: FolderTreeNode[] = [];
+
+  // Sort by path length so parents come before children
+  const sorted = [...folders].sort((a, b) => a.path.length - b.path.length);
+
+  for (const f of sorted) {
+    nodeMap.set(f.id, { folder: f, children: [] });
+  }
+
+  for (const f of sorted) {
+    const parentPath = dirname(f.path);
+    const parent = sorted.find((p) => p.path === parentPath);
+    if (parent) {
+      const parentNode = nodeMap.get(parent.id);
+      const childNode = nodeMap.get(f.id);
+      if (parentNode && childNode) {
+        parentNode.children.push(childNode);
+      }
+    } else {
+      const node = nodeMap.get(f.id);
+      if (node) {
+        roots.push(node);
+      }
+    }
+  }
+
+  return roots;
+}
+
+function renderFolderTree(
+  nodes: FolderTreeNode[],
+  depth: number,
+  expandedIds: Set<number>,
+  onToggle: (id: number) => void,
+  activeId: number | null,
+  onSelect: (id: number) => void,
+  onContextMenu: (e: React.MouseEvent, id: number, name: string) => void,
+  dragOverId: number | null,
+  onDragOver: (e: React.DragEvent, id: number) => void,
+  onDragLeave: () => void,
+  onDrop: (e: React.DragEvent, id: number) => void,
+): ReactNode[] {
+  return nodes.flatMap((node) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedIds.has(node.folder.id);
+    const isActive = activeId === node.folder.id;
+    const isDragOver = dragOverId === node.folder.id;
+
+    const row = (
+      <div className="flex items-center" key={node.folder.id}>
+        <button
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(node.folder.id);
+          }}
+          style={{ marginLeft: depth * 14 }}
+        >
+          {hasChildren ? (
+            <ChevronRight
+              className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+            />
+          ) : (
+            <span className="w-3" />
+          )}
+        </button>
+        <button
+          className={`min-w-0 flex flex-1 items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            isDragOver
+              ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+              : isActive
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => onSelect(node.folder.id)}
+          onContextMenu={(e) =>
+            onContextMenu(e, node.folder.id, node.folder.displayName)
+          }
+          onDragEnter={() => {
+            /* handled by parent */
+          }}
+          onDragLeave={onDragLeave}
+          onDragOver={(e) => onDragOver(e, node.folder.id)}
+          onDrop={(e) => onDrop(e, node.folder.id)}
+        >
+          <Folder className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{node.folder.displayName}</span>
+          <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+            {node.folder.photoCount}
+          </span>
+        </button>
+      </div>
+    );
+
+    return hasChildren && isExpanded
+      ? [
+          row,
+          ...renderFolderTree(
+            node.children,
+            depth + 1,
+            expandedIds,
+            onToggle,
+            activeId,
+            onSelect,
+            onContextMenu,
+            dragOverId,
+            onDragOver,
+            onDragLeave,
+            onDrop,
+          ),
+        ]
+      : [row];
+  });
+}
+
+function buildTagTree(tags: TagInfo[]): TagTreeNode[] {
+  const nodeMap = new Map<number, TagTreeNode>();
+  const roots: TagTreeNode[] = [];
+
+  for (const t of tags) {
+    nodeMap.set(t.id, { tag: t, children: [] });
+  }
+  for (const t of tags) {
+    if (t.parentId && nodeMap.has(t.parentId)) {
+      nodeMap.get(t.parentId)!.children.push(nodeMap.get(t.id)!);
+    } else {
+      roots.push(nodeMap.get(t.id)!);
+    }
+  }
+  return roots;
+}
+
+function renderTagTree(
+  nodes: TagTreeNode[],
+  depth: number,
+  expandedIds: Set<number>,
+  onToggle: (id: number) => void,
+  activeId: number | null,
+  onSelect: (id: number | null) => void,
+  onContextMenu: (e: React.MouseEvent, id: number, name: string) => void,
+  onDragOver: (e: React.DragEvent) => void,
+  onDragEnter: (id: number) => void,
+  onDragLeave: (e: React.DragEvent) => void,
+  onDrop: (e: React.DragEvent, id: number) => void,
+  dragOverId: number | null,
+  language: string
+): ReactNode[] {
+  return nodes.flatMap((node) => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedIds.has(node.tag.id);
+    const isActive = activeId === node.tag.id;
+    const isDragOver = dragOverId === node.tag.id;
+
+    const row = (
+      <div className="flex items-center" key={node.tag.id}>
+        <button
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(node.tag.id);
+          }}
+          style={{ marginLeft: depth * 14 }}
+        >
+          {hasChildren ? (
+            <ChevronRight
+              className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+            />
+          ) : (
+            <span className="w-3" />
+          )}
+        </button>
+        <button
+          className={`group/tag min-w-0 flex flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+            isDragOver
+              ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
+              : isActive
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => {
+            const nextId = activeId === node.tag.id ? null : node.tag.id;
+            onSelect(nextId);
+          }}
+          onContextMenu={(e) => onContextMenu(e, node.tag.id, node.tag.name)}
+          onDragEnter={() => onDragEnter(node.tag.id)}
+          onDragLeave={onDragLeave}
+          onDragOver={onDragOver}
+          onDrop={(e) => onDrop(e, node.tag.id)}
+        >
+          <span
+            className="h-2 w-2 flex-shrink-0 rounded-full"
+            style={{ background: node.tag.color || "var(--primary)" }}
+          />
+          <span className="min-w-0 flex-1 truncate">{getTagDisplayName(node.tag.name, language)}</span>
+          <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+            {node.tag.photoCount}
+          </span>
+        </button>
+      </div>
+    );
+
+    return hasChildren && isExpanded
+      ? [
+          row,
+          ...renderTagTree(
+            node.children,
+            depth + 1,
+            expandedIds,
+            onToggle,
+            activeId,
+            onSelect,
+            onContextMenu,
+            onDragOver,
+            onDragEnter,
+            onDragLeave,
+            onDrop,
+            dragOverId,
+            language
+          ),
+        ]
+      : [row];
+  });
+}
+
+export function Sidebar({
+  folders,
+  activeFolderId,
+  collapsed,
+  favoriteActive,
+  onSelectFolder,
+  onSelectFavorites,
+  onAddFolder,
+  onDeleteFolder,
+  onSelectTag,
+  onToggleCollapse,
+  scanningFolder,
+  scanProgress,
+  totalPhotos,
+}: SidebarProps) {
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const [folderCtx, setFolderCtx] = useState<{
+    folderId: number;
+    displayName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [tags, setTags] = useState<TagInfo[]>([]);
+  const [activeTagId, setActiveTagId] = useState<number | null>(null);
+  const [tagSearch, setTagSearch] = useState("");
+  const ctxRef = useRef<HTMLDivElement>(null);
+  const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
+  const [dragOverAlbumNav, setDragOverAlbumNav] = useState(false);
+  const [openSection, setOpenSection] = useState<
+    "folders" | "tags" | null
+  >("folders");
+  const foldersCollapsed = openSection !== "folders";
+  const tagsCollapsed = openSection !== "tags";
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<number>>(
+    new Set()
+  );
+  const [expandedTagIds, setExpandedTagIds] = useState<Set<number>>(new Set());
+  const [deleteTagTarget, setDeleteTagTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [tagCtx, setTagCtx] = useState<{
+    tagId: number;
+    tagName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [childTagParent, setChildTagParent] = useState<{
+    parentId: number;
+    parentName: string;
+  } | null>(null);
+  const [newChildTagName, setNewChildTagName] = useState("");
+  const childInputRef = useRef<HTMLInputElement>(null);
+  const childComposingRef = useRef(false);
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+
+  // Drag-and-drop: album/tag/folder drop targets + external folder import
+  function handleSidebarDragOver(e: React.DragEvent) {
+    if (e.dataTransfer.types.includes("application/x-photo-ids")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    } else if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  async function handleSidebarDrop(e: React.DragEvent) {
+    // External folder drop → import
+    if (e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      const items = Array.from(e.dataTransfer.items);
+      const folders: string[] = [];
+      for (const item of items) {
+        if (item.kind !== "file") continue;
+        const entry = item.webkitGetAsEntry?.();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const filePath = (window as any).electronAPI?.getFilePath?.(file);
+        if (!filePath) continue;
+        if (entry?.isDirectory) {
+          folders.push(filePath);
+        } else {
+          const parent = filePath.replace(/[\\/][^\\/]+$/, "");
+          if (parent && !folders.includes(parent)) folders.push(parent);
+        }
+      }
+      for (const folder of folders) {
+        onAddFolder(folder);
+      }
+    }
+  }
+
+  function handleFolderDragOver(e: React.DragEvent, folderId: number) {
+    if (e.dataTransfer.types.includes("application/x-photo-ids")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOverFolderId(folderId);
+    }
+  }
+
+  function handleFolderDragLeave() {
+    setDragOverFolderId(null);
+  }
+
+  async function handleFolderDrop(e: React.DragEvent, folderId: number) {
+    setDragOverFolderId(null);
+    const raw = e.dataTransfer.getData("application/x-photo-ids");
+    if (!raw) {
+      return;
+    }
+    const ids: number[] = JSON.parse(raw);
+    if (ids.length === 0) {
+      return;
+    }
+    try {
+      const result = (await ipc.client.photos.movePhotos({
+        ids,
+        targetFolderId: folderId,
+      })) as { moved: number };
+      if (result.moved > 0) {
+        toast.success(t("photosMoved", { count: result.moved }));
+        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["folders"] });
+      }
+    } catch {
+      toast.error(t("movePhotosFailed"));
+    }
+  }
+
+  async function handleDropOnTag(e: React.DragEvent, tagId: number) {
+    setDragOverTagId(null);
+    const raw = e.dataTransfer.getData("application/x-photo-ids");
+    if (!raw) {
+      return;
+    }
+    const ids: number[] = JSON.parse(raw);
+    const tag = tags.find((t) => t.id === tagId);
+    let failed = 0;
+    for (const photoId of ids) {
+      try {
+        await ipc.client.photos.setPhotoTag({ photoId, tagId });
+      } catch {
+        failed++;
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    // Refresh tag counts
+    try {
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+    } catch {
+      /* ignore */
+    }
+    const displayName = tag?.name
+      ? getTagDisplayName(tag.name, i18n.language)
+      : "";
+    if (failed > 0) {
+      toast.success(
+        t("tagAddedToPhotos", {
+          count: ids.length - failed,
+          name: displayName,
+        })
+      );
+    } else {
+      toast.success(
+        t("tagAddedToPhotos", { count: ids.length, name: displayName })
+      );
+    }
+  }
+
+  async function handleDropOnAlbumNav(e: React.DragEvent) {
+    setDragOverAlbumNav(false);
+    const raw = e.dataTransfer.getData("application/x-photo-ids");
+    if (!raw) {
+      return;
+    }
+    const ids: number[] = JSON.parse(raw);
+    // Open AddToAlbumDialog — for now navigate to albums page as fallback
+    // Dispatch a custom event so the parent can intercept it
+    window.dispatchEvent(
+      new CustomEvent("photo-drop:album", { detail: { photoIds: ids } })
+    );
+  }
+
+  useEffect(() => {
+    let running = true;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    async function loadTags() {
+      try {
+        const result = await ipc.client.photos.getTags({
+          folderId: activeFolderId ?? undefined,
+        });
+        if (!running) {
+          return;
+        }
+        const tagList = (result as TagInfo[]) || [];
+        setTags(tagList);
+        // Clear active tag if it's no longer in the filtered list
+        if (activeTagId && !tagList.some((t) => t.id === activeTagId)) {
+          setActiveTagId(null);
+          onSelectTag?.(null);
+        }
+        // Stop polling once tags appear
+        if (tagList.length > 0 && interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    loadTags();
+    // Poll for tags if photos exist but tags haven't loaded yet
+    if (totalPhotos > 0) {
+      interval = setInterval(loadTags, 5000);
+    }
+
+    return () => {
+      running = false;
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [totalPhotos, activeFolderId]);
+
+  useEffect(() => {
+    function handler(event: MessageEvent) {
+      if (event.data?.channel === "ai-embedding-done") {
+        queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+      }
+    }
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  // Listen for tag changes from other components (e.g. PhotoDetailPanel)
+  useEffect(() => {
+    function handleTagsChanged() {
+      ipc.client.photos
+        .getTags({
+          folderId: activeFolderId ?? undefined,
+        })
+        .then((updated) => {
+          setTags((updated as TagInfo[]) || []);
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }
+    window.addEventListener("tags-changed", handleTagsChanged);
+    return () => window.removeEventListener("tags-changed", handleTagsChanged);
+  }, [activeFolderId]);
+
+  const closeCtx = useCallback(() => setFolderCtx(null), []);
+
+  async function handleCreateChildTag() {
+    const name = newChildTagName.trim();
+    if (!(name && childTagParent)) {
+      return;
+    }
+    const { parentId, parentName } = childTagParent;
+    setChildTagParent(null);
+    setNewChildTagName("");
+    try {
+      await ipc.client.photos.addTag({
+        name,
+        color: undefined,
+        parentId,
+      });
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+      // Auto-expand parent
+      setExpandedTagIds((prev) => new Set(prev).add(parentId));
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(t("childTagCreated", { name, parent: parentName }));
+    } catch {
+      toast.error(t("createChildTagFailed"));
+    }
+  }
+
+  async function handleDeleteTag() {
+    if (!deleteTagTarget) {
+      return;
+    }
+    const { id, name } = deleteTagTarget;
+    setDeleteTagTarget(null);
+    try {
+      await ipc.client.photos.deleteTag({ id });
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+      if (activeTagId === id) {
+        setActiveTagId(null);
+        onSelectTag?.(null);
+      }
+      toast.success(t("tagDeleted", { name }));
+    } catch {
+      toast.error(t("deleteTagFailed"));
+    }
+  }
+
+  useEffect(() => {
+    if (!(folderCtx || tagCtx)) {
+      return;
+    }
+    function handleClick(e: MouseEvent) {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
+        closeCtx();
+        setTagCtx(null);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        closeCtx();
+        setTagCtx(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [folderCtx, tagCtx, closeCtx]);
+
+  const folderTree = buildFolderTree(folders);
+
+  // Auto-expand root-level parent folders on first load
+  const prevFolderCount = useRef(folders.length);
+  useEffect(() => {
+    if (folders.length !== prevFolderCount.current) {
+      prevFolderCount.current = folders.length;
+      const rootsWithChildren = folderTree
+        .filter((n) => n.children.length > 0)
+        .map((n) => n.folder.id);
+      if (rootsWithChildren.length > 0) {
+        setExpandedFolderIds(new Set(rootsWithChildren));
+      }
+    }
+  }, [folders.length]);
+
+  function handleFolderContextMenu(
+    e: React.MouseEvent,
+    folderId: number,
+    displayName: string
+  ) {
+    e.preventDefault();
+    setFolderCtx({ folderId, displayName, x: e.clientX, y: e.clientY });
+  }
+
+  // Collapsed: icon-only bar
+  if (collapsed) {
+    return (
+      <div
+        className="flex h-full w-12 flex-col items-center border-border border-r bg-secondary py-3"
+        onDragOver={handleSidebarDragOver}
+        onDrop={handleSidebarDrop}
+      >
+        <button
+          className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={onToggleCollapse}
+          title={t("expandSidebar")}
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </button>
+
+        <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
+          <button
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              activeFolderId === null && !favoriteActive
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
+            onClick={() => onSelectFolder(null)}
+            title={t("sidebarAllPhotos")}
+          >
+            <Folder className="h-4 w-4" />
+          </button>
+
+          {onSelectFavorites && (
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                favoriteActive
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={onSelectFavorites}
+              title={t("favorite")}
+            >
+              <Star className="h-4 w-4" />
+            </button>
+          )}
+
+          {folders.map((folder) => (
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                dragOverFolderId === folder.id
+                  ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+                  : activeFolderId === folder.id
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              key={folder.id}
+              onClick={() => onSelectFolder(folder.id)}
+              onContextMenu={(e) =>
+                handleFolderContextMenu(e, folder.id, folder.displayName)
+              }
+              onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+              onDragLeave={handleFolderDragLeave}
+              onDrop={(e) => handleFolderDrop(e, folder.id)}
+              title={`${folder.displayName} (${folder.photoCount})\n${t("rightClickDelete")}`}
+            >
+              <Folder className="h-4 w-4" />
+            </button>
+          ))}
+
+          {/* Tags popover — available when collapsed */}
+          {tags.length > 0 && (
+            <Popover onOpenChange={setTagPopoverOpen} open={tagPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    activeTagId
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  title={t("sidebarTags")}
+                >
+                  <Tag className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-48 p-0" sideOffset={8}>
+                <div className="max-h-[320px] overflow-y-auto p-1.5">
+                  <p className="px-2 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    {t("sidebarTags")}
+                  </p>
+                  {renderTagTree(
+                    buildTagTree(tags),
+                    0,
+                    expandedTagIds,
+                    (id) => {
+                      const next = new Set(expandedTagIds);
+                      if (next.has(id)) {
+                        next.delete(id);
+                      } else {
+                        next.add(id);
+                      }
+                      setExpandedTagIds(next);
+                    },
+                    activeTagId,
+                    (nextId) => {
+                      setActiveTagId(nextId);
+                      onSelectTag?.(nextId);
+                      setTagPopoverOpen(false);
+                    },
+                    () => {},
+                    () => {},
+                    () => {},
+                    () => {},
+                    () => {},
+                    null,
+                    i18n.language
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+
+        <div className="flex flex-col items-center gap-1 px-1.5">
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+            disabled={scanningFolder !== null}
+            onClick={() => onAddFolder()}
+            title={t("sidebarAddFolder")}
+          >
+            {scanningFolder ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/dashboard" })}
+            title={t("sidebarDashboard")}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/albums" as const })}
+            title={t("sidebarAlbums")}
+          >
+            <Album className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/duplicates" })}
+            title={t("duplicates")}
+          >
+            <ScanSearch className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/people" })}
+            title={t("people")}
+          >
+            <Users className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/trash" })}
+            title={t("trash")}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/settings" })}
+            title={t("sidebarSettings")}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() =>
+              document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
+            }
+            title={t("keyboardHelpTitle")}
+          >
+            <CircleHelp className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Expanded: full sidebar
+  return (
+    <div
+      className="flex h-full w-[240px] select-none flex-col border-border border-r bg-secondary"
+      onDragOver={handleSidebarDragOver}
+      onDrop={handleSidebarDrop}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between border-border border-b px-4 py-3">
+        <div>
+          <h2 className="font-[590] text-[14px] text-foreground">
+            {t("appName")}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+            {t("photosCount", { count: totalPhotos.toLocaleString() })}
+          </p>
+        </div>
+        <button
+          className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={onToggleCollapse}
+          title={t("collapseSidebar")}
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="space-y-1 px-3 py-2">
+        <button
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            activeFolderId === null && !favoriteActive
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => {
+            setActiveTagId(null);
+            onSelectTag?.(null);
+            onSelectFolder(null);
+          }}
+        >
+          {t("sidebarAllPhotos")}
+        </button>
+        {onSelectFavorites && (
+          <button
+            className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+              favoriteActive
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
+            onClick={onSelectFavorites}
+          >
+            <Star className="h-3.5 w-3.5" />
+            {t("favorite")}
+          </button>
+        )}
+        <button
+          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+          disabled={scanningFolder !== null}
+          onClick={() => onAddFolder()}
+        >
+          {scanningFolder ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
+          {t("sidebarAddFolder")}
+        </button>
+        <AiProgressBar />
+      </div>
+
+      {/* Scan progress */}
+      {scanProgress && (
+        <div className="px-3 py-1.5">
+          <div className="rounded-[6px] bg-card px-3 py-2">
+            <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
+            {scanningFolder && (
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
+                {t("scanningPath", { path: scanningFolder })}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Separator */}
+      <div className="mx-3 my-2 border-border border-t" />
+
+      {/* Scrollable area: fills remaining space, pushes footer to bottom */}
+      <div className="flex min-h-0 flex-1 flex-col px-3">
+        {/* Folders */}
+        <div
+          className={`flex flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
+        >
+          <button
+            className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
+            onClick={() =>
+              setOpenSection(openSection === "folders" ? null : "folders")
+            }
+          >
+            <p className="flex-1 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+              {t("sidebarFolders")}
+            </p>
+            <ChevronDown
+              className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
+            />
+          </button>
+          {!foldersCollapsed && (
+            <div className="flex-1 overflow-y-auto">
+              {folderTree.length === 0 ? (
+                <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
+                  {t("sidebarNoFolders")}
+                </p>
+              ) : (
+                renderFolderTree(
+                  folderTree,
+                  0,
+                  expandedFolderIds,
+                  (id) => {
+                    const next = new Set(expandedFolderIds);
+                    if (next.has(id)) {
+                      next.delete(id);
+                    } else {
+                      next.add(id);
+                    }
+                    setExpandedFolderIds(next);
+                  },
+                  activeFolderId,
+                  onSelectFolder,
+                  handleFolderContextMenu,
+                  dragOverFolderId,
+                  handleFolderDragOver,
+                  handleFolderDragLeave,
+                  handleFolderDrop,
+                )
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Tags */}
+        {(tags.length > 0 || totalPhotos > 0) && (
+          <>
+            <div className="mx-3 my-2 border-border border-t" />
+            <div
+              className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
+            >
+              <button
+                className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
+                onClick={() =>
+                  setOpenSection(openSection === "tags" ? null : "tags")
+                }
+              >
+                <p className="flex-1 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+                  {t("sidebarTags")}
+                </p>
+                <ChevronDown
+                  className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
+                />
+              </button>
+              {!tagsCollapsed && (
+                <>
+                  {tags.length > 0 ? (
+                    <>
+                      <div className="px-1 pb-1">
+                        <input
+                          className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                          onChange={(e) => setTagSearch(e.target.value)}
+                          placeholder={t("tagSearchPlaceholder")}
+                          value={tagSearch}
+                        />
+                      </div>
+                      <div className="flex-1 overflow-y-auto">
+                        {(() => {
+                          const filtered = tags.filter((t) =>
+                            tagSearch
+                              ? t.name
+                                  .toLowerCase()
+                                  .includes(tagSearch.toLowerCase())
+                              : true
+                          );
+                          // Build tree from filtered flat list, including ancestors
+                          const allIds = new Set(filtered.map((t) => t.id));
+                          // Include parents of filtered items so tree structure is preserved
+                          for (const t of filtered) {
+                            let cur = t.parentId;
+                            while (cur) {
+                              if (allIds.has(cur)) {
+                                break;
+                              }
+                              const parent = tags.find((p) => p.id === cur);
+                              if (parent) {
+                                allIds.add(cur);
+                                cur = parent.parentId;
+                              } else {
+                                break;
+                              }
+                            }
+                          }
+                          const visible = tags.filter((t) => allIds.has(t.id));
+                          const tree = buildTagTree(visible);
+                          return renderTagTree(
+                            tree,
+                            0,
+                            expandedTagIds,
+                            (id) => {
+                              const next = new Set(expandedTagIds);
+                              if (next.has(id)) {
+                                next.delete(id);
+                              } else {
+                                next.add(id);
+                              }
+                              setExpandedTagIds(next);
+                            },
+                            activeTagId,
+                            (nextId) => {
+                              setActiveTagId(nextId);
+                              onSelectTag?.(nextId);
+                            },
+                            (e, id, name) => {
+                              e.preventDefault();
+                              setTagCtx({
+                                tagId: id,
+                                tagName: name,
+                                x: e.clientX,
+                                y: e.clientY,
+                              });
+                            },
+                            handleSidebarDragOver,
+                            (id) => setDragOverTagId(id),
+                            (e) => {
+                              if (
+                                !(e.currentTarget as HTMLElement).contains(
+                                  e.relatedTarget as Node
+                                )
+                              ) {
+                                setDragOverTagId(null);
+                              }
+                            },
+                            (e, id) => handleDropOnTag(e, id),
+                            dragOverTagId,
+                            i18n.language
+                          );
+                        })()}
+                      </div>
+                      {!tags.some((t) => t.photoCount > 0) && (
+                        <div className="px-1 py-1">
+                          <button
+                            className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
+                            onClick={async () => {
+                              try {
+                                await ipc.client.photos.batchGenerateTags({});
+                                const updated = await ipc.client.photos.getTags(
+                                  {}
+                                );
+                                setTags((updated as TagInfo[]) || []);
+                                toast.success(t("aiTagsGenerated"));
+                              } catch {
+                                toast.error(t("aiTagsFailed"));
+                              }
+                            }}
+                          >
+                            <ScanSearch className="h-3.5 w-3.5" />
+                            {t("tagBatchGenerate")}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="px-3 py-1">
+                      <button
+                        className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                        onClick={async () => {
+                          try {
+                            await ipc.client.photos.batchGenerateTags({});
+                            const updated = await ipc.client.photos.getTags({});
+                            setTags((updated as TagInfo[]) || []);
+                            toast.success(t("aiTagsGenerated"));
+                          } catch {
+                            toast.error(t("aiTagsFailed"));
+                          }
+                        }}
+                      >
+                        <ScanSearch className="h-3.5 w-3.5" />
+                        {t("tagBatchGenerate")}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+              <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
+                {t("aiTagDisclaimer")}
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="border-border border-t px-3 py-2">
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/dashboard" })}
+        >
+          <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
+          {t("sidebarDashboard")}
+        </button>
+        <button
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            dragOverAlbumNav
+              ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => navigate({ to: "/albums" as const })}
+          onDragEnter={() => setDragOverAlbumNav(true)}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDragOverAlbumNav(false);
+            }
+          }}
+          onDragOver={handleSidebarDragOver}
+          onDrop={handleDropOnAlbumNav}
+        >
+          <Album className="mr-2 inline h-3.5 w-3.5" />
+          {t("sidebarAlbums")}
+          {dragOverAlbumNav && (
+            <span className="ml-auto text-[10px] text-primary">
+              {t("tagDropHint")}
+            </span>
+          )}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/duplicates" })}
+        >
+          <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
+          {t("duplicates")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/people" })}
+        >
+          <Users className="mr-2 inline h-3.5 w-3.5" />
+          {t("people")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/trash" })}
+        >
+          <Trash2 className="mr-2 inline h-3.5 w-3.5" />
+          {t("trash")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/settings" })}
+        >
+          <Settings className="mr-2 inline h-3.5 w-3.5" />
+          {t("sidebarSettings")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() =>
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
+          }
+        >
+          <CircleHelp className="mr-2 inline h-3.5 w-3.5" />
+          {t("keyboardHelpTitle")}
+        </button>
+      </div>
+
+      {/* Delete tag confirmation dialog */}
+      <ConfirmDialog
+        confirmText={t("delete")}
+        description={t("tagDeleteDescription", {
+          name: deleteTagTarget
+            ? getTagDisplayName(deleteTagTarget.name, i18n.language)
+            : "",
+        })}
+        destructive
+        onCancel={() => setDeleteTagTarget(null)}
+        onConfirm={handleDeleteTag}
+        open={deleteTagTarget !== null}
+        title={t("tagDeleteTitle")}
+      />
+
+      {/* Folder context menu */}
+      {folderCtx && (
+        <div
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          ref={ctxRef}
+          style={{ left: folderCtx.x, top: folderCtx.y }}
+        >
+          <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+            {folderCtx.displayName}
+          </div>
+          <div className="mx-2 my-1 border-border border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+            onClick={() => {
+              onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
+              closeCtx();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("removeFromIndex")}
+          </button>
+        </div>
+      )}
+
+      {/* Tag context menu */}
+      {tagCtx && (
+        <div
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          ref={ctxRef}
+          style={{ left: tagCtx.x, top: tagCtx.y }}
+        >
+          <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+            {tagCtx.tagName}
+          </div>
+          <div className="mx-2 my-1 border-border border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+            onClick={() => {
+              setChildTagParent({
+                parentId: tagCtx.tagId,
+                parentName: tagCtx.tagName,
+              });
+              setTagCtx(null);
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("tagCreateChild")}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+            onClick={() => {
+              setDeleteTagTarget({ id: tagCtx.tagId, name: tagCtx.tagName });
+              setTagCtx(null);
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("tagDeleteTitle")}
+          </button>
+        </div>
+      )}
+
+      {/* Create child tag dialog */}
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setChildTagParent(null);
+            setNewChildTagName("");
+          }
+        }}
+        open={childTagParent !== null}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t("tagCreateChild")}</DialogTitle>
+            <DialogDescription>
+              {t("parentTag", { name: childTagParent?.parentName ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            autoFocus
+            className="w-full rounded-[6px] border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary/50"
+            onChange={(e) => setNewChildTagName(e.target.value)}
+            onCompositionEnd={(e) => {
+              childComposingRef.current = false;
+              setNewChildTagName((e.target as HTMLInputElement).value);
+            }}
+            onCompositionStart={() => {
+              childComposingRef.current = true;
+            }}
+            onKeyDown={(e) => {
+              if (childComposingRef.current) {
+                return;
+              }
+              if (e.key === "Enter") {
+                handleCreateChildTag();
+              }
+            }}
+            placeholder={t("childTagPlaceholder")}
+            ref={childInputRef}
+            value={newChildTagName}
+          />
+          <DialogFooter>
+            <button
+              className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
+              onClick={() => {
+                setChildTagParent(null);
+                setNewChildTagName("");
+              }}
+              type="button"
+            >
+              {t("cancel")}
+            </button>
+            <button
+              className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              disabled={!newChildTagName.trim()}
+              onClick={handleCreateChildTag}
+              type="button"
+            >
+              {t("confirm")}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
