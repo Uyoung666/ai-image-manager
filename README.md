@@ -8,6 +8,8 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
+> **English README**: [README.en.md](README.en.md)
+
 ---
 
 ## 应用截图
