@@ -15,9 +15,24 @@ const THUMBNAIL_BASE_SIZES = {
 
 type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
 
+interface ThumbnailCacheConfig {
+  maxMemoryMB: number;
+  maxDiskMB: number;
+  maxDiskFiles: number;
+  cleanupThresholdMB: number;
+}
+
+const CACHE_CONFIG: ThumbnailCacheConfig = {
+  maxMemoryMB: 250,
+  maxDiskMB: 2048, // 2GB
+  maxDiskFiles: 10000,
+  cleanupThresholdMB: 1800, // 1.8GB 触发清理
+};
+
 let thumbnailDir: string;
 let memoryCache: LRUCache<string, Buffer>;
 let dprScale = 2; // default to 2x for HiDPI displays
+const diskAccessLog = new Map<string, number>();
 
 export function initThumbnailer(): void {
   thumbnailDir = path.join(getDataPath(), "thumbnails");
@@ -51,6 +66,78 @@ export function getThumbnailPath(imagePath: string, size: ThumbSize): string {
   return path.join(thumbnailDir, `${hash}.webp`);
 }
 
+export function checkAndCleanDiskCache(): {
+  cleaned: boolean;
+  freedMB: number;
+  filesRemoved: number;
+} {
+  const usage = getThumbnailDiskUsage();
+  const usageMB = usage.bytes / (1024 * 1024);
+
+  if (
+    usageMB < CACHE_CONFIG.cleanupThresholdMB &&
+    usage.fileCount < CACHE_CONFIG.maxDiskFiles
+  ) {
+    return { cleaned: false, freedMB: 0, filesRemoved: 0 };
+  }
+
+  console.log(
+    `[Thumbnailer] Disk cache cleanup triggered: ${usageMB.toFixed(1)}MB, ${usage.fileCount} files`
+  );
+
+  const files: Array<{ path: string; atime: number; size: number }> = [];
+
+  if (thumbnailDir && fs.existsSync(thumbnailDir)) {
+    const entries = fs.readdirSync(thumbnailDir);
+    for (const entry of entries) {
+      const entryPath = path.join(thumbnailDir, entry);
+      try {
+        const stat = fs.statSync(entryPath);
+        if (stat.isFile()) {
+          const atime = diskAccessLog.get(entry) || stat.atimeMs;
+          files.push({ path: entryPath, atime, size: stat.size });
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  // Sort by access time (oldest first)
+  files.sort((a, b) => a.atime - b.atime);
+
+  const targetMB = CACHE_CONFIG.maxDiskMB * 0.7;
+  let currentMB = usageMB;
+  let filesRemoved = 0;
+  let freedBytes = 0;
+
+  for (const file of files) {
+    if (currentMB <= targetMB && filesRemoved >= usage.fileCount - CACHE_CONFIG.maxDiskFiles) {
+      break;
+    }
+
+    try {
+      fs.unlinkSync(file.path);
+      freedBytes += file.size;
+      currentMB -= file.size / (1024 * 1024);
+      filesRemoved++;
+      diskAccessLog.delete(path.basename(file.path));
+    } catch {
+      /* skip */
+    }
+  }
+
+  console.log(
+    `[Thumbnailer] Cleaned ${filesRemoved} files, freed ${(freedBytes / (1024 * 1024)).toFixed(1)}MB`
+  );
+
+  return {
+    cleaned: true,
+    freedMB: freedBytes / (1024 * 1024),
+    filesRemoved,
+  };
+}
+
 export async function generateThumbnail(
   imagePath: string,
   size: ThumbSize = "md"
@@ -60,6 +147,10 @@ export async function generateThumbnail(
   // L1: memory
   const cached = memoryCache?.get(cacheKey);
   const thumbPath = getThumbnailPath(imagePath, size);
+  const thumbFilename = path.basename(thumbPath);
+
+  // Record access time
+  diskAccessLog.set(thumbFilename, Date.now());
 
   // L2: disk
   if (!cached && fs.existsSync(thumbPath)) {
@@ -92,6 +183,11 @@ export async function generateThumbnail(
 
   fs.writeFileSync(thumbPath, thumbBuffer);
   memoryCache?.set(cacheKey, thumbBuffer);
+
+  // Periodically check and clean cache (1% chance per generation)
+  if (Math.random() < 0.01) {
+    setTimeout(() => checkAndCleanDiskCache(), 0);
+  }
 
   return {
     thumbnailPath: thumbPath,

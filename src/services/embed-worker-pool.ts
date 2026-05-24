@@ -3,6 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
+import { createLogger } from "@/utils/logger";
+
+const log = createLogger('embed-worker-pool');
 
 interface EmbedResult {
   error?: string;
@@ -210,6 +213,8 @@ function dispatchToSlot(
   slot.pendingResolve = resolve;
   slot.pendingReject = reject;
 
+  console.log(`[Pool] Dispatching ${photos.length} photos to Worker ${slot.index}`);
+
   const timeout = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
       const rej = slot.pendingReject;
@@ -240,7 +245,9 @@ export async function initWorkerPool(mp: string): Promise<void> {
   requestQueue = [];
 
   const cpuCount = os.cpus().length;
-  poolSize = Math.max(2, Math.min(cpuCount - 1, 4));
+  // 每个 worker ~200MB，2 个 = 400MB，4 核以上可以 3 个
+  // 4 个 worker 在 8GB 机器上容易触发 OOM
+  poolSize = cpuCount >= 8 ? 3 : 2;
   const workerScript = findWorkerScript();
   console.log(
     `[Pool] Starting ${poolSize} persistent workers: ${workerScript}`
@@ -384,34 +391,46 @@ export async function embedWithPool(
     throw new Error("Worker pool not initialized");
   }
 
-  const allResults: EmbedResult[] = [];
   const total = photos.length;
+  const aliveCount = slots.filter((s) => s.status !== "dead").length;
+  const concurrency = Math.min(poolSize, aliveCount);
 
+  // 预切批次
+  const batchList: Array<Array<{ id: number; path: string }>> = [];
   for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-    const batch = photos.slice(i, i + BATCH_SIZE);
-
-    try {
-      const results = await dispatchBatch(batch);
-      allResults.push(...results);
-    } catch (err: any) {
-      console.warn(
-        `[Pool] Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${err.message}`
-      );
-      if (batch.length > 1) {
-        const left = await processResultsFallback(
-          batch.slice(0, Math.floor(batch.length / 2))
-        );
-        const right = await processResultsFallback(
-          batch.slice(Math.floor(batch.length / 2))
-        );
-        allResults.push(...left, ...right);
-      } else {
-        allResults.push({ id: batch[0].id, error: err.message });
-      }
-    }
-
-    onProgress?.(Math.min(i + BATCH_SIZE, total), total);
+    batchList.push(photos.slice(i, i + BATCH_SIZE));
   }
+
+  const allResults: EmbedResult[] = [];
+  let processed = 0;
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (cursor < batchList.length) {
+      const idx = cursor++;
+      if (idx >= batchList.length) break;
+      const batch = batchList[idx];
+      try {
+        const results = await dispatchBatch(batch);
+        allResults.push(...results);
+      } catch (err: any) {
+        console.warn(`[Pool] Batch failed: ${err.message}`);
+        if (batch.length > 1) {
+          const left = await processResultsFallback(batch.slice(0, Math.floor(batch.length / 2)));
+          const right = await processResultsFallback(batch.slice(Math.floor(batch.length / 2)));
+          allResults.push(...left, ...right);
+        } else {
+          allResults.push({ id: batch[0].id, error: err.message });
+        }
+      }
+      processed += batch.length;
+      onProgress?.(Math.min(processed, total), total);
+    }
+  }
+
+  // 启动 poolSize 个并发调度 worker
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
 
   return allResults;
 }

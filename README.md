@@ -41,6 +41,35 @@
 
 ---
 
+## 首次启动说明
+
+### 国内用户
+
+应用已自动配置国内镜像（hf-mirror.com），首次启动会自动下载 AI 模型（约 150MB）。
+
+**如果下载失败：**
+
+1. **方法一：在设置中配置镜像**
+   - 启动应用后进入「设置」→「AI 模型镜像设置」
+   - 选择其他镜像源或输入自定义地址
+   - 保存后重新启动 AI 索引
+
+2. **方法二：手动下载模型**
+   ```powershell
+   cd ai-image-manager
+   .\scripts\download-model.ps1
+   ```
+
+3. **方法三：手动放置模型文件**
+   - 从 [hf-mirror.com](https://hf-mirror.com/Xenova/clip-vit-base-patch32/tree/main) 下载模型文件
+   - 放置到：`%APPDATA%\AI Image Manager\models\Xenova\clip-vit-base-patch32\`
+
+### 国际用户
+
+应用会自动从 HuggingFace 官方下载模型，首次启动需要稳定的网络连接。
+
+---
+
 ## 功能一览
 
 ### 核心浏览

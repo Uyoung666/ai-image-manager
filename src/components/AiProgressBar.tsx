@@ -107,15 +107,49 @@ export function AiProgressBar() {
   }
 
   if (progress?.phase === "error" || lastError) {
+    const isNetworkError =
+      lastError?.includes("ENOTFOUND") ||
+      lastError?.includes("timeout") ||
+      lastError?.includes("ETIMEDOUT") ||
+      lastError?.includes("fetch failed") ||
+      lastError?.includes("network");
+
     return (
       <div className="mt-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
-        <p className="text-[11px] text-danger">{lastError}</p>
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          {t("aiMirrorHint")}
-          <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[10px] text-muted-foreground">
-            HF_MIRROR=hf-mirror.com
-          </code>
-        </p>
+        <p className="text-[11px] font-[510] text-danger">{lastError}</p>
+
+        {isNetworkError ? (
+          <div className="mt-2 space-y-2">
+            <p className="text-[10px] text-muted-foreground">
+              {t("aiNetworkErrorHint")}
+            </p>
+            <div className="rounded-[4px] border border-border bg-card p-2">
+              <p className="mb-1 text-[10px] text-muted-foreground">
+                {t("aiMirrorRecommendation")}
+              </p>
+              <button
+                className="w-full rounded-[4px] bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20"
+                onClick={() => {
+                  window.open("https://hf-mirror.com", "_blank");
+                }}
+                type="button"
+              >
+                {t("aiOpenMirrorSite")}
+              </button>
+              <p className="mt-1.5 text-[9px] text-muted-foreground/70">
+                {t("aiMirrorSettingsHint")}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {t("aiMirrorHint")}
+            <code className="mx-0.5 rounded-[4px] bg-card px-1 text-[10px] text-muted-foreground">
+              HF_MIRROR=hf-mirror.com
+            </code>
+          </p>
+        )}
+
         <button
           className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
           onClick={handleStart}
@@ -155,10 +189,10 @@ export function AiProgressBar() {
             })}
           </span>
           <span className="font-[510] text-[11px] text-primary">
-	            {progress.total > 0
-	              ? `${Math.round((progress.processed / progress.total) * 100)}%`
-	              : "100%"}
-	          </span>
+            {progress.total > 0
+              ? `${Math.round((progress.processed / progress.total) * 100)}%`
+              : "100%"}
+          </span>
         </div>
         <button
           className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
@@ -178,9 +212,9 @@ export function AiProgressBar() {
         : 0;
   const phaseLabel =
     progress.phase === "loading"
-      ? progress.downloadPercent != null
-        ? t("aiLoadingClip", { percent: progress.downloadPercent })
-        : t("aiLoadingClip")
+      ? progress.downloadPercent == null
+        ? t("aiLoadingClip")
+        : t("aiLoadingClip", { percent: progress.downloadPercent })
       : progress.phase === "complete"
         ? paused
           ? t("aiPaused")

@@ -71,6 +71,13 @@
       "when": 1778815323011,
       "tag": "0009_thick_robbie_robertson",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779597075986,
+      "tag": "0010_zippy_azazel",
+      "breakpoints": true
     }
   ]
 }
