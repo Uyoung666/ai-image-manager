@@ -245,7 +245,9 @@ export const setDataPath = os
         } catch {
           exists = false;
         }
-        if (!exists) continue;
+        if (!exists) {
+          continue;
+        }
         try {
           diagLog(`setDataPath: cleanup removing old ${oldSub}`);
           await fsp.rm(oldSub, { recursive: true, force: true });
@@ -300,4 +302,25 @@ export const setDataPath = os
       errors: errors.length > 0 ? errors : undefined,
       cleanupErrors: cleanupErrors.length > 0 ? cleanupErrors : undefined,
     };
+  });
+
+export const getMirrorSettings = os.handler(() => {
+  const mirror = getSetting("ai.mirror") || "auto";
+  const customUrl = getSetting("ai.mirror.customUrl") || "";
+  return { mirror, customUrl };
+});
+
+export const setMirrorSettings = os
+  .input(
+    z.object({
+      mirror: z.string(),
+      customUrl: z.string().optional(),
+    })
+  )
+  .handler(async ({ input }) => {
+    setSetting("ai.mirror", input.mirror);
+    if (input.customUrl) {
+      setSetting("ai.mirror.customUrl", input.customUrl);
+    }
+    return { ok: true };
   });

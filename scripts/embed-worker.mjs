@@ -81,10 +81,18 @@ async function handleInit(msg) {
   env.allowRemoteModels = true;
   env.backends.onnx.wasm.numThreads = 1;
 
-  const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
+  // 自动检测中文环境并设置镜像
+  const mirror =
+    process.env.HF_MIRROR ||
+    process.env.HF_ENDPOINT ||
+    (process.env.LANG?.startsWith("zh") || process.env.LC_ALL?.startsWith("zh")
+      ? "https://hf-mirror.com"
+      : null);
+
   if (mirror) {
     env.remoteHost = mirror;
     env.remotePathTemplate = "{model}/resolve/main/";
+    console.error(`[Worker] Using HF mirror: ${mirror}`);
   }
 
   const MODEL_ID = "Xenova/clip-vit-base-patch32";

@@ -73,13 +73,14 @@ const ExportSchema = z.object({
   maxWidth: z.number().optional().default(1920),
   quality: z.number().min(10).max(100).optional().default(85),
   outputPath: z.string().optional(),
+  locale: z.string().optional().default("zh-CN"),
 });
 
 export const exportPhotos = os
   .input(ExportSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    const { ids, format, maxWidth, quality, outputPath } = input;
+    const { ids, format, maxWidth, quality, outputPath, locale } = input;
 
     // Read watermark settings from appSettings
     let wm: {
@@ -361,7 +362,7 @@ export const exportPhotos = os
                 shutter: exif.shutterSpeed ?? undefined,
                 iso: exif.iso ?? undefined,
                 dateTaken: exif.dateTaken
-                  ? new Date(exif.dateTaken).toLocaleDateString("zh-CN")
+                  ? new Date(exif.dateTaken).toLocaleDateString(locale)
                   : undefined,
               }
             : null,
@@ -369,7 +370,7 @@ export const exportPhotos = os
       }
 
       // Generate HTML gallery
-      const html = buildHtmlGallery(galleryPhotos);
+      const html = buildHtmlGallery(galleryPhotos, locale);
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
       const zipPath =

@@ -4,9 +4,12 @@
 
 双击即用，就地索引文件夹（不复制原始文件），CLIP 语义搜索、智能去重、自动标签、人脸识别、云端分享。
 
-[![Version](https://img.shields.io/badge/version-1.0.0--beta-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
+
+> **English README**: [README.en.md](README.en.md)
+> **使用指南**: [GUIDE.md](GUIDE.md) | **User Guide**: [GUIDE.en.md](GUIDE.en.md)
 
 ---
 
@@ -25,7 +28,7 @@
 
 ### 方式一：安装版（推荐）
 
-下载 `AI Image Manager-1.0.0-beta Setup.exe`，双击运行安装向导。
+下载 `AI Image Manager-1.0.1 Setup.exe`，双击运行安装向导。
 
 - 安装到系统默认位置（`%LocalAppData%\AI Image Manager`）
 - 自动创建桌面快捷方式和开始菜单条目
@@ -33,11 +36,40 @@
 
 ### 方式二：便携版
 
-下载 `AI Image Manager-win32-x64-1.0.0-beta.zip`，解压到任意目录，运行 `AI Image Manager.exe` 即可。
+下载 `AI Image Manager-win32-x64-1.0.1.zip`，解压到任意目录，运行 `AI Image Manager.exe` 即可。
 
 - 不写注册表，不创建快捷方式
 - 可将整个目录放在 U 盘或移动硬盘中随身使用
 - 数据存储在解压目录下的 `data/` 文件夹中
+
+---
+
+## 首次启动说明
+
+### 国内用户
+
+正式版安装包已内置 AI 模型，首次启动会从安装包复制模型到本地数据目录，通常不需要联网下载。
+
+**如果模型文件损坏或被误删，应用会尝试在线补全模型：**
+
+1. **方法一：在设置中配置镜像**
+   - 启动应用后进入「设置」→「AI 模型镜像设置」
+   - 国内用户推荐使用 `hf-mirror.com`
+   - 保存后重新启动 AI 索引
+
+2. **方法二：手动下载模型**
+   ```powershell
+   cd ai-image-manager
+   .\scripts\download-model.ps1
+   ```
+
+3. **方法三：手动放置模型文件**
+   - 从 [hf-mirror.com](https://hf-mirror.com/Xenova/clip-vit-base-patch32/tree/main) 下载模型文件
+   - 放置到：`%APPDATA%\AI Image Manager\models\Xenova\clip-vit-base-patch32\`
+
+### 国际用户
+
+正式版安装包同样内置 AI 模型。网络下载只作为模型缺失时的兜底方案。
 
 ---
 
@@ -105,6 +137,22 @@
 - Light/Dark/System 三档主题，Linear Dark 设计系统
 - 中/英文国际化
 - 键盘友好操作（按 `?` 查看全部快捷键）
+
+---
+
+## 性能基准
+
+> 测试环境：Windows 11, Ryzen 7, 16GB RAM, NVMe SSD, CLIP ViT-B/32 量化模型本地推理
+
+| 照片数量 | Phase 1 扫描索引 | Phase 2 AI 嵌入 | **总计** |
+|------|:-----------:|:------------:|:------:|
+| **1,000 张** | ~1 分钟 | ~1.5 分钟 | **~2.5 分钟** |
+| **10,000 张** | ~7 分钟 | ~15 分钟 | **~22 分钟** |
+| **100,000 张** | ~70 分钟 | ~40 分钟 | **~1.8 小时** |
+
+- Phase 1：pHash 感知哈希 + EXIF 解析 + 缩略图生成（4 并发）
+- Phase 2：CLIP 向量嵌入（2 Worker 进程并发调度）
+- 首次全量导入后，后续增量索引为秒级（文件监听自动触发）
 
 ---
 

@@ -1,5 +1,6 @@
 import { memo, useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoCardProps {
   deleting?: boolean;
@@ -36,18 +37,6 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
       {text.slice(idx + query.length)}
     </>
   );
-}
-
-function toLocalMediaUrl(filePath: string | null | undefined): string {
-  if (!filePath) {
-    return "";
-  }
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
 }
 
 export const PhotoCard = memo(function PhotoCard({
@@ -136,7 +125,8 @@ export const PhotoCard = memo(function PhotoCard({
 
   return (
     <div
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 ${
+      aria-selected={isSelected}
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
         deleting
           ? "scale-95 opacity-0 duration-180"
           : isSelected
@@ -151,7 +141,18 @@ export const PhotoCard = memo(function PhotoCard({
       onContextMenu={undefined}
       onDoubleClick={() => onDoubleClick(id)}
       onDragStart={handleDragStart}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onDoubleClick(id);
+        } else if (e.key === " ") {
+          e.preventDefault();
+          onClick(id, e as unknown as React.MouseEvent);
+        }
+      }}
+      role="option"
       style={{ aspectRatio }}
+      tabIndex={0}
     >
       {!loaded && (
         <div className="absolute inset-0 animate-shimmer bg-muted">

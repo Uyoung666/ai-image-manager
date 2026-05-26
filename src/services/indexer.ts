@@ -1,13 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import exifr from "exifr";
+import PQueue from "p-queue";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
+import { createLogger } from "@/utils/logger";
 import { checkNewPhotoDuplicates } from "./dedup-service";
+import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { generateThumbnail } from "./thumbnailer";
+
+const log = createLogger('indexer');
 
 const SUPPORTED_EXTENSIONS = new Set([
   // Common image formats
@@ -24,24 +29,43 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".bmp",
   ".ico",
   // RAW camera formats
-  ".cr2",  // Canon
-  ".cr3",  // Canon
-  ".nef",  // Nikon
-  ".nrw",  // Nikon
-  ".arw",  // Sony
-  ".srf",  // Sony
-  ".sr2",  // Sony
-  ".dng",  // Adobe Digital Negative
-  ".orf",  // Olympus / OM System
-  ".rw2",  // Panasonic
-  ".raf",  // Fujifilm
-  ".pef",  // Pentax
-  ".rwl",  // Leica
-  ".3fr",  // Hasselblad
-  ".raw",  // Generic RAW
+  ".cr2", // Canon
+  ".cr3", // Canon
+  ".nef", // Nikon
+  ".nrw", // Nikon
+  ".arw", // Sony
+  ".srf", // Sony
+  ".sr2", // Sony
+  ".dng", // Adobe Digital Negative
+  ".orf", // Olympus / OM System
+  ".rw2", // Panasonic
+  ".raf", // Fujifilm
+  ".pef", // Pentax
+  ".rwl", // Leica
+  ".3fr", // Hasselblad
+  ".raw", // Generic RAW
 ]);
 
 const SKIP_PATTERNS = [/node_modules/, /\.git/, /\.thumbnails/, /\.cache/];
+
+const WATCHER_CONCURRENCY = 2;
+const watcherQueue = new PQueue({ concurrency: WATCHER_CONCURRENCY });
+
+let watcherStats = {
+  addEvents: 0,
+  unlinkEvents: 0,
+  processed: 0,
+  skipped: 0,
+  errors: 0,
+};
+
+export function getWatcherStats() {
+  return {
+    ...watcherStats,
+    queueSize: watcherQueue.size,
+    queuePending: watcherQueue.pending,
+  };
+}
 
 interface IndexProgress {
   currentFile: string;
@@ -229,6 +253,134 @@ async function readExif(
   }
 }
 
+interface PhotoRecord {
+  path: string;
+  folderId: number | null;
+  filename: string;
+  fileSize: number;
+  fileDate: number;
+  width: number;
+  height: number;
+  format: string;
+  colorSpace: string;
+  hasAlpha: boolean;
+  thumbnailPath: string | null;
+  thumbnailSize: string;
+  isIndexed: boolean;
+  phash: string | null;
+}
+
+interface ExifRecord {
+  photoId: number;
+  cameraMake?: string;
+  cameraModel?: string;
+  lensMake?: string;
+  lensModel?: string;
+  focalLength?: string;
+  focalLength35mm?: string;
+  aperture?: number;
+  shutterSpeed?: string;
+  iso?: number;
+  exposureCompensation?: number;
+  dateTaken?: number | null;
+  dateDigitized?: number | null;
+  flash?: boolean;
+  orientation?: number;
+  gpsLatitude?: number;
+  gpsLongitude?: number;
+  gpsAltitude?: number;
+  software?: string;
+  imageDescription?: string;
+  artist?: string;
+  copyright?: string;
+  rawJson: string;
+}
+
+async function preparePhotoRecord(
+  filePath: string,
+  folderId: number | null
+): Promise<{ photoRecord: PhotoRecord; exifRecord: ExifRecord | null; stat: fs.Stats; phash: string | null } | null> {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    log.warn({ filePath }, "File disappeared before indexing");
+    return null;
+  }
+
+  const meta = await readBasicMeta(filePath);
+  if (!meta) {
+    log.warn({ filePath }, "Skipped unreadable file (sharp metadata failed)");
+    return null;
+  }
+
+  // Generate thumbnail (md=320px for crisp display in grid)
+  let thumb;
+  try {
+    thumb = await generateThumbnail(filePath, "md");
+  } catch {
+    log.warn({ filePath }, "Thumbnail generation failed");
+    thumb = { thumbnailPath: null, width: 0, height: 0 };
+  }
+
+  const phash = await computePHash(filePath);
+
+  const photoRecord: PhotoRecord = {
+    path: filePath,
+    folderId,
+    filename: path.basename(filePath),
+    fileSize: stat.size,
+    fileDate: Math.floor(Math.min(stat.birthtimeMs, stat.mtimeMs)),
+    width: meta.width,
+    height: meta.height,
+    format: meta.format,
+    colorSpace: meta.colorSpace,
+    hasAlpha: meta.hasAlpha,
+    thumbnailPath: thumb.thumbnailPath,
+    thumbnailSize: `${thumb.width}x${thumb.height}`,
+    isIndexed: true,
+    phash,
+  };
+
+  // Extract EXIF
+  const exif = await readExif(filePath);
+  let exifRecord: ExifRecord | null = null;
+
+  if (exif && Object.keys(exif).length > 0) {
+    exifRecord = {
+      photoId: 0, // Will be set after insert
+      cameraMake: exif.Make as string,
+      cameraModel: exif.Model as string,
+      lensMake: exif.LensMake as string,
+      lensModel: exif.LensModel as string,
+      focalLength: exif.FocalLength?.toString(),
+      focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
+      aperture: exif.FNumber as number,
+      shutterSpeed: exif.ExposureTime?.toString(),
+      iso: exif.ISO as number,
+      exposureCompensation: exif.ExposureCompensation as number,
+      dateTaken: exif.DateTimeOriginal
+        ? new Date(exif.DateTimeOriginal as string).getTime()
+        : null,
+      dateDigitized: exif.DateTimeDigitized
+        ? new Date(exif.DateTimeDigitized as string).getTime()
+        : null,
+      flash: exif.Flash as boolean,
+      orientation: exif.Orientation as number,
+      gpsLatitude: (exif.latitude ?? exif.GPSLatitude) as number,
+      gpsLongitude: (exif.longitude ?? exif.GPSLongitude) as number,
+      gpsAltitude: exif.GPSAltitude as number,
+      software: exif.Software as string,
+      imageDescription: exif.ImageDescription as string,
+      artist: exif.Artist as string,
+      copyright: exif.Copyright as string,
+      rawJson: JSON.stringify(exif),
+    };
+  }
+
+  return { photoRecord, exifRecord, stat, phash };
+}
+
 async function indexSingleFile(
   filePath: string,
   folderId: number | null
@@ -269,51 +421,17 @@ async function indexSingleFile(
     return existing.id;
   }
 
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(filePath);
-  } catch {
-    console.warn(`[Indexer] File disappeared before indexing: ${filePath}`);
-    return null;
-  }
-  const meta = await readBasicMeta(filePath);
-  if (!meta) {
-    console.warn(
-      `[Indexer] Skipped unreadable file (sharp metadata failed): ${filePath}`
-    );
+  const prepared = await preparePhotoRecord(filePath, folderId);
+  if (!prepared) {
     return null;
   }
 
-  // Generate thumbnail (md=320px for crisp display in grid)
-  let thumb;
-  try {
-    thumb = await generateThumbnail(filePath, "md");
-  } catch {
-    console.warn(`[Indexer] Thumbnail generation failed for: ${filePath}`);
-    thumb = { thumbnailPath: null, width: 0, height: 0 };
-  }
-
-  const phash = await computePHash(filePath);
+  const { photoRecord, exifRecord, stat, phash } = prepared;
 
   // Insert photo record
   const result = db
     .insert(photos)
-    .values({
-      path: filePath,
-      folderId,
-      filename: path.basename(filePath),
-      fileSize: stat.size,
-      fileDate: Math.floor(Math.min(stat.birthtimeMs, stat.mtimeMs)),
-      width: meta.width,
-      height: meta.height,
-      format: meta.format,
-      colorSpace: meta.colorSpace,
-      hasAlpha: meta.hasAlpha,
-      thumbnailPath: thumb.thumbnailPath,
-      thumbnailSize: `${thumb.width}x${thumb.height}`,
-      isIndexed: true,
-      phash,
-    })
+    .values(photoRecord)
     .returning({ insertedId: photos.id })
     .get();
 
@@ -325,45 +443,13 @@ async function indexSingleFile(
   // Incremental duplicate detection
   checkNewPhotoDuplicates(photoId, phash, filePath, stat.size);
 
-  // Extract EXIF
-  const exif = await readExif(filePath);
-  if (exif && Object.keys(exif).length > 0) {
+  // Insert EXIF if available
+  if (exifRecord) {
     try {
-      db.insert(exifData)
-        .values({
-          photoId,
-          cameraMake: exif.Make as string,
-          cameraModel: exif.Model as string,
-          lensMake: exif.LensMake as string,
-          lensModel: exif.LensModel as string,
-          focalLength: exif.FocalLength?.toString(),
-          focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
-          aperture: exif.FNumber as number,
-          shutterSpeed: exif.ExposureTime?.toString(),
-          iso: exif.ISO as number,
-          exposureCompensation: exif.ExposureCompensation as number,
-          dateTaken: exif.DateTimeOriginal
-            ? new Date(exif.DateTimeOriginal as string).getTime()
-            : null,
-          dateDigitized: exif.DateTimeDigitized
-            ? new Date(exif.DateTimeDigitized as string).getTime()
-            : null,
-          flash: exif.Flash as boolean,
-          orientation: exif.Orientation as number,
-          gpsLatitude: (exif.latitude ?? exif.GPSLatitude) as number,
-          gpsLongitude: (exif.longitude ?? exif.GPSLongitude) as number,
-          gpsAltitude: exif.GPSAltitude as number,
-          software: exif.Software as string,
-          imageDescription: exif.ImageDescription as string,
-          artist: exif.Artist as string,
-          copyright: exif.Copyright as string,
-          rawJson: JSON.stringify(exif),
-        })
-        .run();
+      exifRecord.photoId = photoId;
+      db.insert(exifData).values(exifRecord).run();
     } catch (err: any) {
-      console.warn(
-        `[Indexer] EXIF insert failed for ${filePath}: ${err?.message}`
-      );
+      log.warn({ filePath, err }, "EXIF insert failed");
     }
   }
 
@@ -396,15 +482,23 @@ export async function scanFolder(
       })
       .returning({ insertedId: folders.id })
       .get();
+    if (!result) {
+      throw new Error("Failed to create folder record");
+    }
     folder = {
-      id: result?.insertedId,
+      id: result.insertedId,
       path: resolvedPath,
       displayName: path.basename(resolvedPath),
       photoCount: 0,
       lastScannedAt: null,
       createdAt: Date.now(),
+      isWatching: false,
+      watcherStartedAt: null,
+      lastWatcherEventAt: null,
     };
   }
+
+  const folderId = folder.id;
 
   // Async walk — avoids blocking the main process on large folders.
   // Each directory level yields the event loop via setImmediate to keep the UI responsive.
@@ -432,7 +526,7 @@ export async function scanFolder(
 
   // Auto-discover subdirectories that contain images and create folder records
   const dirToFolderId = new Map<string, number>();
-  dirToFolderId.set(resolvedPath, folder.id);
+  dirToFolderId.set(resolvedPath, folderId);
 
   for (const f of files) {
     const dir = path.dirname(f);
@@ -463,6 +557,7 @@ export async function scanFolder(
   // thumbnail generation + metadata reads yields ~3x throughput on typical
   // consumer hardware without saturating I/O.
   const CONCURRENCY = 4;
+  const BATCH_SIZE = 50;
   const photoIds: number[] = [];
   let scanned = 0;
   let skipped = 0;
@@ -490,7 +585,8 @@ export async function scanFolder(
     return results;
   }
 
-  const fileResults = await runWithConcurrency(
+  // Batch preparation: prepare all photo records with concurrency
+  const preparedRecords = await runWithConcurrency(
     files,
     async (file) => {
       if (!isScanning) {
@@ -506,12 +602,53 @@ export async function scanFolder(
 
       try {
         const fileDir = path.dirname(file);
-        const fileFolderId = dirToFolderId.get(fileDir) || folder.id;
-        const photoId = await indexSingleFile(file, fileFolderId);
+        const fileFolderId = dirToFolderId.get(fileDir) || folderId;
+
+        // Check if already indexed
+        const existing = db
+          .select({ id: photos.id, folderId: photos.folderId })
+          .from(photos)
+          .where(eq(photos.path, file))
+          .get();
+
+        if (existing) {
+          if (fileFolderId !== null && existing.folderId !== fileFolderId) {
+            const existingFolder = existing.folderId
+              ? db
+                  .select({ path: folders.path })
+                  .from(folders)
+                  .where(eq(folders.id, existing.folderId))
+                  .get()
+              : null;
+            const newFolder = db
+              .select({ path: folders.path })
+              .from(folders)
+              .where(eq(folders.id, fileFolderId))
+              .get();
+            if (
+              newFolder &&
+              (!existingFolder || newFolder.path.length > existingFolder.path.length)
+            ) {
+              db.update(photos)
+                .set({ folderId: fileFolderId })
+                .where(eq(photos.id, existing.id))
+                .run();
+            }
+          }
+          scanned++;
+          return { type: "existing" as const, photoId: existing.id };
+        }
+
+        const prepared = await preparePhotoRecord(file, fileFolderId);
+        if (!prepared) {
+          scanned++;
+          return null;
+        }
+
         scanned++;
-        return photoId;
+        return { type: "new" as const, ...prepared };
       } catch (error) {
-        console.error(`[Indexer] Error indexing ${file}:`, error);
+        log.error({ file, err: error }, "Error preparing file");
         scanned++;
         return null;
       }
@@ -519,20 +656,116 @@ export async function scanFolder(
     CONCURRENCY
   );
 
-  for (const photoId of fileResults) {
-    if (photoId) {
-      photoIds.push(photoId);
-    } else {
-      skipped++;
+  // Batch insert: insert photos in batches
+  const newRecords = preparedRecords.filter(
+    (r) => r && r.type === "new"
+  ) as Array<{
+    type: "new";
+    photoRecord: PhotoRecord;
+    exifRecord: ExifRecord | null;
+    stat: fs.Stats;
+    phash: string | null;
+  }>;
+
+  const existingRecords = preparedRecords.filter(
+    (r) => r && r.type === "existing"
+  ) as Array<{ type: "existing"; photoId: number }>;
+
+  // Add existing photo IDs
+  for (const record of existingRecords) {
+    photoIds.push(record.photoId);
+  }
+
+  // Batch insert new photos
+  for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
+    if (!isScanning) {
+      break;
+    }
+
+    const batch = newRecords.slice(i, i + BATCH_SIZE);
+    const photoRecords = batch.map((r) => r.photoRecord);
+
+    try {
+      // Batch insert photos
+      const insertedIds = db
+        .insert(photos)
+        .values(photoRecords)
+        .returning({ insertedId: photos.id })
+        .all();
+
+      // Process each inserted photo
+      for (let j = 0; j < insertedIds.length; j++) {
+        const photoId = insertedIds[j].insertedId;
+        const record = batch[j];
+
+        photoIds.push(photoId);
+
+        // Incremental duplicate detection
+        checkNewPhotoDuplicates(
+          photoId,
+          record.phash,
+          record.photoRecord.path,
+          record.stat.size
+        );
+
+        // Insert EXIF if available
+        if (record.exifRecord) {
+          try {
+            record.exifRecord.photoId = photoId;
+            db.insert(exifData).values(record.exifRecord).run();
+          } catch (err: any) {
+            log.warn(
+              { filePath: record.photoRecord.path, err },
+              "EXIF insert failed"
+            );
+          }
+        }
+      }
+    } catch (err: any) {
+      // Fallback to individual inserts if batch fails
+      log.warn({ err }, "Batch insert failed, falling back to individual inserts");
+      for (const record of batch) {
+        try {
+          const result = db
+            .insert(photos)
+            .values(record.photoRecord)
+            .returning({ insertedId: photos.id })
+            .get();
+
+          if (result) {
+            const photoId = result.insertedId;
+            photoIds.push(photoId);
+
+            checkNewPhotoDuplicates(
+              photoId,
+              record.phash,
+              record.photoRecord.path,
+              record.stat.size
+            );
+
+            if (record.exifRecord) {
+              try {
+                record.exifRecord.photoId = photoId;
+                db.insert(exifData).values(record.exifRecord).run();
+              } catch {
+                /* skip */
+              }
+            }
+          }
+        } catch {
+          skipped++;
+        }
+      }
     }
   }
-  // Correct double-count: fileResults already accounts for skipped via the
-  // worker catch handler, so reset skipped to the count of null results.
-  skipped = fileResults.filter((r) => r === null).length;
+
+  // Count skipped files
+  skipped = preparedRecords.filter((r) => r === null).length;
 
   if (skipped > 0) {
-    console.warn(
-      `[Indexer] Folder scan summary: ${photoIds.length} indexed, ${skipped} skipped (${files.length} total files found)`
+    log.info(
+      { indexed: photoIds.length, skipped, total: files.length },
+      "Folder scan summary"
     );
   }
 
@@ -551,20 +784,30 @@ export async function scanFolder(
         if (idx >= 0) {
           photoIds.splice(idx, 1);
         }
-        console.log(`[Indexer] Removed stale record: ${p.path}`);
+        log.info({ path: p.path }, "Removed stale record");
       }
     }
   }
 
   for (const [dirPath, fid] of dirToFolderId) {
-    const count = fileResults.filter(
-      (pid, i) => pid && dirToFolderId.get(path.dirname(files[i])) === fid
+    const count = photoIds.filter(
+      (pid) => {
+        const photo = db
+          .select({ folderId: photos.folderId })
+          .from(photos)
+          .where(eq(photos.id, pid))
+          .get();
+        return photo && photo.folderId === fid;
+      }
     ).length;
     db.update(folders)
       .set({ photoCount: count, lastScannedAt: Date.now() })
       .where(eq(folders.id, fid))
       .run();
   }
+
+  // 重新加载文件夹匹配器缓存
+  reloadFolderMatcher();
 
   onProgress?.({
     scanned: files.length,
@@ -579,82 +822,114 @@ export async function scanFolder(
   // vectors are available in LanceDB. This avoids expensive per-photo worker
   // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
 
-  return { folderId: folder.id, photoIds, skipped };
+  return { folderId, photoIds, skipped };
 }
 
 export function startWatching(
   onChange: (photoId: number | null, event: "add" | "remove") => void
 ): void {
   const db = getDatabase();
-  const indexedFolders = db.select({ path: folders.path }).from(folders).all();
+  const indexedFolders = db
+    .select({ id: folders.id, path: folders.path })
+    .from(folders)
+    .all();
 
   for (const folder of indexedFolders) {
     const watcher = chokidar.watch(folder.path, {
       ignored: [/\.thumbnails/, /\.cache/],
       ignorePermissionErrors: true,
+      ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
       depth: 10,
     });
 
-    watcher.on("add", async (filePath) => {
+    watcher.on("add", (filePath) => {
       if (!shouldIndex(filePath)) {
         return;
       }
-      try {
-        // Match the closest parent folder from our indexed folders
-        let matchedFolderId: number | null = null;
-        const indexedFolders = db
-          .select({ id: folders.id, path: folders.path })
-          .from(folders)
-          .all();
-        for (const f of indexedFolders) {
-          const normalizedFolder = f.path.replace(/\\/g, "/") + "/";
-          const normalizedFile = filePath.replace(/\\/g, "/");
-          if (normalizedFile.startsWith(normalizedFolder)) {
-            // Keep the longest (most specific) match
-            if (
-              matchedFolderId === null ||
-              f.path.length > (matchedFolderId ? 1 : 0)
-            ) {
-              matchedFolderId = f.id;
-            }
-          }
-        }
-        // chokidar emits "add" for all existing files on startup — we must
-        // avoid double-counting.
-        const alreadyIndexed = db
-          .select({ id: photos.id })
-          .from(photos)
-          .where(eq(photos.path, filePath))
-          .get();
+      watcherStats.addEvents++;
 
-        const photoId = await indexSingleFile(filePath, matchedFolderId);
-        if (matchedFolderId && photoId && !alreadyIndexed) {
-          db.update(folders)
-            .set({ photoCount: sql`photo_count + 1` })
-            .where(eq(folders.id, matchedFolderId))
-            .run();
+      watcherQueue.add(async () => {
+        try {
+          const matchedFolderId = getFolderMatcher().match(filePath);
+
+          const alreadyIndexed = db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(eq(photos.path, filePath))
+            .get();
+
+          if (alreadyIndexed) {
+            watcherStats.skipped++;
+            return;
+          }
+
+          const photoId = await indexSingleFile(filePath, matchedFolderId);
+          if (matchedFolderId && photoId) {
+            db.update(folders)
+              .set({
+                photoCount: sql`photo_count + 1`,
+                lastWatcherEventAt: Date.now(),
+              })
+              .where(eq(folders.id, matchedFolderId))
+              .run();
+          }
+          watcherStats.processed++;
+          onChange(photoId, "add");
+        } catch (err) {
+          watcherStats.errors++;
+          log.error({ filePath, err }, "Watcher: Error processing add event");
         }
-        onChange(photoId, "add");
-      } catch {
-        /* ignore */
-      }
+      });
     });
 
     watcher.on("unlink", (filePath) => {
-      const photo = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(eq(photos.path, filePath))
-        .get();
-      if (photo) {
-        db.delete(photos).where(eq(photos.id, photo.id)).run();
-        onChange(photo.id, "remove");
-      }
+      watcherStats.unlinkEvents++;
+
+      watcherQueue.add(async () => {
+        try {
+          const photo = db
+            .select({ id: photos.id, folderId: photos.folderId })
+            .from(photos)
+            .where(eq(photos.path, filePath))
+            .get();
+          if (photo) {
+            db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
+            db.delete(photos).where(eq(photos.id, photo.id)).run();
+
+            if (photo.folderId) {
+              db.update(folders)
+                .set({
+                  photoCount: sql`photo_count - 1`,
+                  lastWatcherEventAt: Date.now(),
+                })
+                .where(eq(folders.id, photo.folderId))
+                .run();
+            }
+
+            watcherStats.processed++;
+            onChange(photo.id, "remove");
+          }
+        } catch (err) {
+          watcherStats.errors++;
+          log.error({ filePath, err }, "Watcher: Error processing unlink event");
+        }
+      });
     });
+
+    // 更新文件夹 watcher 状态
+    db.update(folders)
+      .set({
+        isWatching: true,
+        watcherStartedAt: Date.now(),
+      })
+      .where(eq(folders.id, folder.id))
+      .run();
 
     watchers.push(watcher);
   }
+
+  log.info({ count: indexedFolders.length }, "Watcher: Started watching folders");
 }
 
 export function watchFolder(
@@ -665,70 +940,150 @@ export function watchFolder(
   const watcher = chokidar.watch(folderPath, {
     ignored: [/\.thumbnails/, /\.cache/],
     ignorePermissionErrors: true,
+    ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
     depth: 10,
   });
 
-  watcher.on("add", async (filePath) => {
+  watcher.on("add", (filePath) => {
     if (!shouldIndex(filePath)) {
       return;
     }
-    try {
-      let matchedFolderId: number | null = null;
-      const indexedFolders = db
-        .select({ id: folders.id, path: folders.path })
-        .from(folders)
-        .all();
-      for (const f of indexedFolders) {
-        const normalizedFolder = f.path.replace(/\\/g, "/") + "/";
-        const normalizedFile = filePath.replace(/\\/g, "/");
-        if (
-          normalizedFile.startsWith(normalizedFolder) &&
-          (matchedFolderId === null ||
-            f.path.length > (matchedFolderId ? 1 : 0))
-        ) {
-          matchedFolderId = f.id;
-        }
-      }
-      const alreadyIndexed = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(eq(photos.path, filePath))
-        .get();
+    watcherStats.addEvents++;
 
-      const photoId = await indexSingleFile(filePath, matchedFolderId);
-      if (matchedFolderId && photoId && !alreadyIndexed) {
-        db.update(folders)
-          .set({ photoCount: sql`photo_count + 1` })
-          .where(eq(folders.id, matchedFolderId))
-          .run();
+    watcherQueue.add(async () => {
+      try {
+        const matchedFolderId = getFolderMatcher().match(filePath);
+
+        const alreadyIndexed = db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(eq(photos.path, filePath))
+          .get();
+
+        if (alreadyIndexed) {
+          watcherStats.skipped++;
+          return;
+        }
+
+        const photoId = await indexSingleFile(filePath, matchedFolderId);
+        if (matchedFolderId && photoId) {
+          db.update(folders)
+            .set({
+              photoCount: sql`photo_count + 1`,
+              lastWatcherEventAt: Date.now(),
+            })
+            .where(eq(folders.id, matchedFolderId))
+            .run();
+        }
+        watcherStats.processed++;
+        onChange(photoId, "add");
+      } catch (err) {
+        watcherStats.errors++;
+        log.error({ filePath, err }, "Watcher: Error processing add event");
       }
-      onChange(photoId, "add");
-    } catch {
-      /* ignore */
-    }
+    });
   });
 
   watcher.on("unlink", (filePath) => {
-    const photo = db
-      .select({ id: photos.id })
-      .from(photos)
-      .where(eq(photos.path, filePath))
-      .get();
-    if (photo) {
-      db.delete(photos).where(eq(photos.id, photo.id)).run();
-      onChange(photo.id, "remove");
-    }
+    watcherStats.unlinkEvents++;
+
+    watcherQueue.add(async () => {
+      try {
+        const photo = db
+          .select({ id: photos.id, folderId: photos.folderId })
+          .from(photos)
+          .where(eq(photos.path, filePath))
+          .get();
+        if (photo) {
+          db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
+          db.delete(photos).where(eq(photos.id, photo.id)).run();
+
+          if (photo.folderId) {
+            db.update(folders)
+              .set({
+                photoCount: sql`photo_count - 1`,
+                lastWatcherEventAt: Date.now(),
+              })
+              .where(eq(folders.id, photo.folderId))
+              .run();
+          }
+
+          watcherStats.processed++;
+          onChange(photo.id, "remove");
+        }
+      } catch (err) {
+        watcherStats.errors++;
+        log.error({ filePath, err }, "Watcher: Error processing unlink event");
+      }
+    });
   });
 
   watchers.push(watcher);
 }
 
-export function stopWatching(): void {
+export async function stopWatching(): Promise<void> {
+  const db = getDatabase();
+
+  // 等待队列清空
+  await watcherQueue.onIdle();
+
   for (const watcher of watchers) {
-    watcher.close();
+    await watcher.close();
   }
   watchers = [];
+
+  // 更新所有文件夹状态
+  db.update(folders).set({ isWatching: false }).run();
+
+  log.info({ stats: watcherStats }, "Watcher: Stopped");
+
+  watcherStats = {
+    addEvents: 0,
+    unlinkEvents: 0,
+    processed: 0,
+    skipped: 0,
+    errors: 0,
+  };
+}
+
+export async function cleanupOrphanedRecords(): Promise<{
+  checked: number;
+  removed: number;
+}> {
+  const db = getDatabase();
+  const allPhotos = db
+    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
+    .from(photos)
+    .all();
+
+  let removed = 0;
+  const folderUpdates = new Map<number, number>();
+
+  for (const photo of allPhotos) {
+    if (!fs.existsSync(photo.path)) {
+      db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
+      db.delete(photos).where(eq(photos.id, photo.id)).run();
+
+      if (photo.folderId) {
+        folderUpdates.set(
+          photo.folderId,
+          (folderUpdates.get(photo.folderId) || 0) + 1
+        );
+      }
+
+      removed++;
+    }
+  }
+
+  for (const [folderId, count] of folderUpdates) {
+    db.update(folders)
+      .set({ photoCount: sql`photo_count - ${count}` })
+      .where(eq(folders.id, folderId))
+      .run();
+  }
+
+  return { checked: allPhotos.length, removed };
 }
 
 export function stopScanning(): void {

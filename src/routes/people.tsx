@@ -5,8 +5,7 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import {
-  ArrowLeft,
+import { ArrowLeft,
   Check,
   Merge,
   Play,
@@ -15,10 +14,12 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ipc } from "@/ipc/manager";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface FaceIdentity {
   coverBbox: { x: number; y: number; width: number; height: number } | null;
@@ -44,14 +45,17 @@ function PeoplePage() {
     id: number;
     name: string | null;
   } | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const composingRef = useRef(false);
   const navigate = useNavigate();
 
   const loadIdentities = useCallback(async () => {
     try {
       const result = await ipc.client.faces.listFaceIdentities({});
       setIdentities(result as FaceIdentity[]);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadIdentities] failed:", err);
     } finally {
       setLoading(false);
     }
@@ -90,7 +94,8 @@ function PeoplePage() {
               setDetecting(false);
               setProgress("");
             }
-          } catch {
+          } catch (err) {
+            console.error("[detectionPoll] failed:", err);
             clearInterval(poll);
             setDetecting(false);
           }
@@ -141,7 +146,7 @@ function PeoplePage() {
       await ipc.client.faces.deleteFaceIdentity({ id });
       loadIdentities();
     } catch {
-      /* ignore */
+      toast.error(t("deletePersonFailed"));
     }
   }
 
@@ -164,7 +169,7 @@ function PeoplePage() {
       setSelected(new Set());
       loadIdentities();
     } catch {
-      /* ignore */
+      toast.error(t("mergePeopleFailed"));
     }
   }
 
@@ -185,14 +190,29 @@ function PeoplePage() {
     setSelected(new Set());
   }
 
-  function toLocalMediaUrl(filePath: string): string {
-    const encoded = filePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .map((s) => encodeURIComponent(s))
-      .join("/");
-    return `local-media://${encoded}`;
+  function startEditing(id: number, currentName: string | null) {
+    setEditingId(id);
+    setNameInput(currentName || "");
   }
+
+  function cancelEditing() {
+    setEditingId(null);
+  }
+
+  async function handleRename(id: number) {
+    const newName = nameInput.trim();
+    try {
+      await ipc.client.faces.updateFaceIdentity({ id, name: newName });
+      setIdentities((prev) =>
+        prev.map((i) => (i.id === id ? { ...i, name: newName || null } : i))
+      );
+    } catch {
+      toast.error(t("personRenameFailed"));
+    } finally {
+      setEditingId((current) => (current === id ? null : current));
+    }
+  }
+
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -455,9 +475,45 @@ function PeoplePage() {
                         )}
                       </div>
                       <div className="p-3">
-                        <h3 className="truncate font-[510] text-[13px] text-foreground">
-                          {identity.name || t("unnamedPerson")}
-                        </h3>
+                        {editingId === identity.id ? (
+                          <input
+                            autoFocus
+                            className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
+                            onBlur={() => handleRename(identity.id)}
+                            onChange={(e) => setNameInput(e.target.value)}
+                            onCompositionEnd={(e) => {
+                              composingRef.current = false;
+                              setNameInput((e.target as HTMLInputElement).value);
+                            }}
+                            onCompositionStart={() => {
+                              composingRef.current = true;
+                            }}
+                            onFocus={(e) => e.target.select()}
+                            onKeyDown={(e) => {
+                              if (composingRef.current) return;
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleRename(identity.id);
+                              }
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                cancelEditing();
+                              }
+                            }}
+                            value={nameInput}
+                          />
+                        ) : (
+                          <h3
+                            className="truncate font-[510] text-[13px] text-foreground cursor-pointer hover:text-primary transition-colors"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              startEditing(identity.id, identity.name);
+                            }}
+                          >
+                            {identity.name || t("unnamedPerson")}
+                          </h3>
+                        )}
                         <p className="mt-0.5 text-[11px] text-muted-foreground/70">
                           {identity.faceCount} {t("photos")}
                         </p>

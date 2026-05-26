@@ -1,13 +1,16 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { CloudConfigPanel } from "@/components/CloudConfigPanel";
-import { WatermarkPreview, type WatermarkPreviewSettings } from "@/components/WatermarkPreview";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
+import {
+  WatermarkPreview,
+  type WatermarkPreviewSettings,
+} from "@/components/WatermarkPreview";
 import { ipc } from "@/ipc/manager";
 
 function formatBytes(bytes: number): string {
@@ -42,6 +45,111 @@ const DEFAULT_WM: WatermarkSettings = {
   imageScale: 15,
 };
 
+function MirrorSettingsSection() {
+  const { t } = useTranslation();
+  const [mirror, setMirror] = useState<string>("auto");
+  const [customMirror, setCustomMirror] = useState<string>("");
+  const [saveStatus, setSaveStatus] = useState<string>("");
+
+  useEffect(() => {
+    ipc.client.settings.getMirrorSettings({}).then((r: any) => {
+      setMirror(r.mirror || "auto");
+      setCustomMirror(r.customUrl || "");
+    });
+  }, []);
+
+  const mirrorOptions = [
+    { value: "auto", label: t("aiMirrorAuto"), url: null },
+    {
+      value: "hf-mirror",
+      label: t("aiMirrorHfMirror"),
+      url: "https://hf-mirror.com",
+    },
+    {
+      value: "modelscope",
+      label: t("aiMirrorModelScope"),
+      url: "https://modelscope.cn",
+    },
+    {
+      value: "official",
+      label: t("aiMirrorOfficial"),
+      url: "https://huggingface.co",
+    },
+    { value: "custom", label: t("aiMirrorCustom"), url: customMirror },
+  ];
+
+  async function handleSave() {
+    setSaveStatus(t("saving"));
+    try {
+      await ipc.client.settings.setMirrorSettings({
+        mirror,
+        customUrl: customMirror,
+      });
+      setSaveStatus(t("aiMirrorSaved"));
+      setTimeout(() => setSaveStatus(""), 3000);
+    } catch {
+      setSaveStatus(t("saveFailed"));
+      setTimeout(() => setSaveStatus(""), 3000);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-[590] text-[14px] text-foreground">
+        {t("aiMirrorSettings")}
+      </h2>
+      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+        <div>
+          <label className="mb-1 block text-[13px] text-muted-foreground">
+            {t("aiMirrorSource")}
+          </label>
+          <select
+            className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
+            value={mirror}
+            onChange={(e) => setMirror(e.target.value)}
+          >
+            {mirrorOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-muted-foreground/70">
+            {t("aiMirrorSourceHint")}
+          </p>
+        </div>
+
+        {mirror === "custom" && (
+          <div className="border-border border-t pt-3">
+            <label className="mb-1 block text-[11px] text-muted-foreground/70">
+              {t("aiMirrorCustomUrl")}
+            </label>
+            <input
+              type="text"
+              className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
+              placeholder="https://your-mirror.com"
+              value={customMirror}
+              onChange={(e) => setCustomMirror(e.target.value)}
+            />
+          </div>
+        )}
+
+        <div className="border-border border-t pt-3">
+          <button
+            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+            onClick={handleSave}
+          >
+            {saveStatus || t("save")}
+          </button>
+          <p className="mt-2 text-[11px] text-muted-foreground/70">
+            {t("aiMirrorRestartHint")}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function DataDirSection() {
   const { t } = useTranslation();
   const [dataPath, setDataPathState] = useState("");
@@ -70,7 +178,11 @@ function DataDirSection() {
       }
       switch (data.phase) {
         case "start":
-          setProgress({ current: 0, total: data.total, label: t("preparingMigration") });
+          setProgress({
+            current: 0,
+            total: data.total,
+            label: t("preparingMigration"),
+          });
           break;
         case "stopping-services":
           setProgress((p) => ({
@@ -83,14 +195,22 @@ function DataDirSection() {
           setProgress({
             current: data.index - 1,
             total: data.total,
-            label: t("copyingDataDir", { dir: data.dir, index: data.index, total: data.total }),
+            label: t("copyingDataDir", {
+              dir: data.dir,
+              index: data.index,
+              total: data.total,
+            }),
           });
           break;
         case "copied":
           setProgress({
             current: data.index,
             total: data.total,
-            label: t("copiedDataDir", { dir: data.dir, index: data.index, total: data.total }),
+            label: t("copiedDataDir", {
+              dir: data.dir,
+              index: data.index,
+              total: data.total,
+            }),
           });
           break;
         case "skipped":
@@ -140,10 +260,16 @@ function DataDirSection() {
         parts.push(t("cleanedOldDirs", { count: data.cleaned }));
       }
       if (data.errors?.length > 0) {
-        parts.push(t("dataMigrationPartialFailed", { errors: data.errors.join("; ") }));
+        parts.push(
+          t("dataMigrationPartialFailed", { errors: data.errors.join("; ") })
+        );
       }
       if (data.cleanupErrors?.length > 0) {
-        parts.push(t("cleanupOldDataPartialFailed", { errors: data.cleanupErrors.join("; ") }));
+        parts.push(
+          t("cleanupOldDataPartialFailed", {
+            errors: data.cleanupErrors.join("; "),
+          })
+        );
       }
       setMsg(`${parts.join("")}${t("refreshingAfterMigration")}`);
       setDataPathState(newPath);
@@ -168,10 +294,14 @@ function DataDirSection() {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">{t("dataDirectory")}</h2>
+      <h2 className="font-[590] text-[14px] text-foreground">
+        {t("dataDirectory")}
+      </h2>
       <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
         <div>
-          <span className="text-[13px] text-muted-foreground">{t("currentPath")}</span>
+          <span className="text-[13px] text-muted-foreground">
+            {t("currentPath")}
+          </span>
           <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground/70">
             {dataPath || "..."}
           </p>
@@ -185,7 +315,11 @@ function DataDirSection() {
             disabled={restarting || migrating}
             onClick={handleChangeDir}
           >
-            {restarting ? t("refreshing") : migrating ? t("migrating") : t("chooseDirectory")}
+            {restarting
+              ? t("refreshing")
+              : migrating
+                ? t("migrating")
+                : t("chooseDirectory")}
           </button>
           {progress && (
             <div className="mt-3 space-y-1.5">
@@ -247,13 +381,18 @@ function SettingsPage() {
             w.margin = 5;
           }
           if (!w.anchor && w.position) {
-            w.anchor = (w.position === "topLeft" || w.position === "topRight" ||
-              w.position === "bottomLeft" || w.position === "bottomRight" ||
-              w.position === "center" || w.position === "topCenter" ||
-              w.position === "centerLeft" || w.position === "centerRight" ||
-              w.position === "bottomCenter")
-              ? w.position as WatermarkSettings["anchor"]
-              : "bottomRight";
+            w.anchor =
+              w.position === "topLeft" ||
+              w.position === "topRight" ||
+              w.position === "bottomLeft" ||
+              w.position === "bottomRight" ||
+              w.position === "center" ||
+              w.position === "topCenter" ||
+              w.position === "centerLeft" ||
+              w.position === "centerRight" ||
+              w.position === "bottomCenter"
+                ? (w.position as WatermarkSettings["anchor"])
+                : "bottomRight";
             w.margin = 5;
           }
           setWm(w);
@@ -425,7 +564,8 @@ function SettingsPage() {
                   </span>
                   <p className="mt-0.5 text-[11px] text-muted-foreground/70">
                     {t("settingsInvalidIndexHint")}
-                    {cleanupCount > 0 && t("lastCleanupCount", { count: cleanupCount })}
+                    {cleanupCount > 0 &&
+                      t("lastCleanupCount", { count: cleanupCount })}
                   </p>
                   {indexStats && (
                     <div className="mt-2 space-y-1">
@@ -480,8 +620,12 @@ function SettingsPage() {
 
           <DataDirSection />
 
+          <MirrorSettingsSection />
+
           <section className="space-y-3">
-            <h2 className="font-[590] text-[14px] text-foreground">{t("cloudSync")}</h2>
+            <h2 className="font-[590] text-[14px] text-foreground">
+              {t("cloudSync")}
+            </h2>
             <CloudConfigPanel />
           </section>
 
@@ -566,7 +710,10 @@ function SettingsPage() {
                     max={15}
                     min={2}
                     onChange={(e) =>
-                      setWm((prev) => ({ ...prev, margin: Number(e.target.value) }))
+                      setWm((prev) => ({
+                        ...prev,
+                        margin: Number(e.target.value),
+                      }))
                     }
                     step={1}
                     type="range"
@@ -599,13 +746,31 @@ function SettingsPage() {
                       className="rounded-[6px] border border-input px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                       onClick={async () => {
                         try {
-                          const result = (await ipc.client.shell.openFileDialog({
-                            filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "svg"] }],
-                          })) as { path?: string };
+                          const result = (await ipc.client.shell.openFileDialog(
+                            {
+                              filters: [
+                                {
+                                  name: "Images",
+                                  extensions: [
+                                    "png",
+                                    "jpg",
+                                    "jpeg",
+                                    "webp",
+                                    "svg",
+                                  ],
+                                },
+                              ],
+                            }
+                          )) as { path?: string };
                           if (result?.path) {
-                            setWm((prev) => ({ ...prev, imagePath: result.path! }));
+                            setWm((prev) => ({
+                              ...prev,
+                              imagePath: result.path!,
+                            }));
                           }
-                        } catch { /* ignore */ }
+                        } catch {
+                          /* ignore */
+                        }
                       }}
                       type="button"
                     >
@@ -619,7 +784,9 @@ function SettingsPage() {
                     {wm.imagePath && (
                       <button
                         className="text-[10px] text-destructive hover:underline"
-                        onClick={() => setWm((prev) => ({ ...prev, imagePath: "" }))}
+                        onClick={() =>
+                          setWm((prev) => ({ ...prev, imagePath: "" }))
+                        }
                         type="button"
                       >
                         {t("clear")}
@@ -631,7 +798,11 @@ function SettingsPage() {
                 {/* Size slider */}
                 <div className="border-border border-t pt-3">
                   <label className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground/70">
-                    <span>{wm.imagePath ? t("watermarkImageScale", { value: wm.imageScale }) : t("watermarkFontSize", { value: wm.fontSize })}</span>
+                    <span>
+                      {wm.imagePath
+                        ? t("watermarkImageScale", { value: wm.imageScale })
+                        : t("watermarkFontSize", { value: wm.fontSize })}
+                    </span>
                     <span className="text-[10px] text-muted-foreground/50">
                       {wm.imagePath ? "5% — 50%" : "12 — 72"}
                     </span>

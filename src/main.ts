@@ -1,16 +1,13 @@
-import started from "electron-squirrel-startup";
-import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { inArray, sql } from "drizzle-orm";
-import sharp from "sharp";
 import {
   app,
   BrowserWindow,
   dialog,
   globalShortcut,
   Menu,
-  type NativeImage,
   nativeImage,
   nativeTheme,
   protocol,
@@ -18,7 +15,9 @@ import {
   Tray,
 } from "electron";
 import { ipcMain } from "electron/main";
+import started from "electron-squirrel-startup";
 import Store from "electron-store";
+import sharp from "sharp";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
@@ -31,10 +30,16 @@ import {
 } from "@/services/sendto-integration";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
+import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
+import { isSafePath } from "./utils/path-security.js";
+
+const log = createLogger("main");
 
 // ── Squirrel startup event handling ──────────────────────────────────
-if (started) app.quit();
+if (started) {
+  app.quit();
+}
 
 // ── Single instance lock ─────────────────────────────────────────────
 const gotTheLock = app.requestSingleInstanceLock();
@@ -65,7 +70,7 @@ process.on("uncaughtException", (err) => {
   const message = String(err);
   const detail = err?.stack ?? message;
   crashLog(`UNCAUGHT ${message}\n${detail}`);
-  console.error("[App] FATAL - uncaught exception:", err);
+  log.fatal({ err }, "FATAL - uncaught exception");
   dialog.showErrorBox("Fatal Error", message);
   app.quit();
 });
@@ -73,7 +78,7 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   const message = String(reason);
   crashLog(`REJECTION ${message}`);
-  console.error("[App] FATAL - unhandled rejection:", reason);
+  log.fatal({ reason }, "FATAL - unhandled rejection");
   dialog.showErrorBox("Fatal Error", message);
   app.quit();
 });
@@ -101,10 +106,7 @@ function appendStartupLog(filename: string, message: string) {
 }
 
 function logMain(message: string) {
-  appendStartupLog(
-    "main.log",
-    `${new Date().toISOString()} ${message}`
-  );
+  appendStartupLog("main.log", `${new Date().toISOString()} ${message}`);
 }
 
 function summarizePathState(label: string, targetPath: string): string {
@@ -129,9 +131,15 @@ function logPackagedPathDiagnostics() {
     `[Diag] app.getPath(userData)=${app.getPath("userData")}`,
     `[Diag] app.getAppPath()=${appPath}`,
     `[Diag] process.resourcesPath=${process.resourcesPath}`,
-    summarizePathState("app-exe", path.join(path.dirname(appPath), "ai-image-manager.exe")),
+    summarizePathState(
+      "app-exe",
+      path.join(path.dirname(appPath), "ai-image-manager.exe")
+    ),
     summarizePathState("resources-dir", process.resourcesPath),
-    summarizePathState("app.asar", path.join(process.resourcesPath, "app.asar")),
+    summarizePathState(
+      "app.asar",
+      path.join(process.resourcesPath, "app.asar")
+    ),
     summarizePathState(
       "asar-unpacked-transformers",
       path.join(
@@ -186,7 +194,7 @@ function logPackagedPathDiagnostics() {
   ];
 
   for (const line of diagnostics) {
-    console.log(line);
+    log.info(line);
     appendStartupLog("startup.log", line);
     appendStartupLog("whenReady.log", line);
   }
@@ -286,14 +294,16 @@ function createTray() {
 function registerGlobalShortcuts() {
   const searchRegistered = globalShortcut.register("Ctrl+Shift+F", () => {
     if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
       mainWindow.show();
       mainWindow.focus();
       mainWindow.webContents.send("global-shortcut:search");
     }
   });
   if (!searchRegistered) {
-    console.warn("[App] Failed to register global shortcut Ctrl+Shift+F");
+    log.warn("Failed to register global shortcut Ctrl+Shift+F");
   }
 
   const hideRegistered = globalShortcut.register("Ctrl+Shift+H", () => {
@@ -302,11 +312,11 @@ function registerGlobalShortcuts() {
     }
   });
   if (!hideRegistered) {
-    console.warn("[App] Failed to register global shortcut Ctrl+Shift+H");
+    log.warn("Failed to register global shortcut Ctrl+Shift+H");
   }
 
-  console.log(
-    "[App] Global shortcuts registered: Ctrl+Shift+F (search), Ctrl+Shift+H (hide)"
+  log.info(
+    "Global shortcuts registered: Ctrl+Shift+F (search), Ctrl+Shift+H (hide)"
   );
 }
 
@@ -358,7 +368,7 @@ async function ensureModelAvailable(): Promise<void> {
   );
 
   if (fs.existsSync(modelMarker)) {
-    console.log("[App] AI model already cached");
+    log.info("AI model already cached");
     return;
   }
 
@@ -381,11 +391,18 @@ async function ensureModelAvailable(): Promise<void> {
       continue;
     }
 
-    console.log(`[App] Copying model from: ${path.join(resourceRoot, "models")}`);
-    await fs.promises.cp(path.join(resourceRoot, "models"), path.join(dataPath, "models"), {
-      recursive: true,
-    });
-    console.log("[App] Model copied");
+    log.info(
+      { source: path.join(resourceRoot, "models") },
+      "Copying model from resources"
+    );
+    await fs.promises.cp(
+      path.join(resourceRoot, "models"),
+      path.join(dataPath, "models"),
+      {
+        recursive: true,
+      }
+    );
+    log.info("Model copied");
     return;
   }
 
@@ -405,17 +422,17 @@ async function ensureModelAvailable(): Promise<void> {
         "onnx",
         "model_quantized.onnx"
       );
-      console.log(`[App] Checking: ${marker}`);
+      log.debug({ marker }, "Checking for model");
       if (fs.existsSync(marker)) {
-        console.log(`[App] Copying model from: ${candidate}`);
+        log.info({ source: candidate }, "Copying model from dev path");
         await fs.promises.cp(candidate, path.join(dataPath, "models"), {
           recursive: true,
         });
-        console.log("[App] Model copied");
+        log.info("Model copied");
         return;
       }
     }
-    console.warn("[App] Model not found in dev paths, will rely on download");
+    log.warn("Model not found in dev paths, will rely on download");
   }
 }
 
@@ -496,17 +513,20 @@ function createWindow() {
   ipcContext.setMainWindow(mainWindow);
 
   // typeof guard: prevents ReferenceError in production strict mode
-  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined") {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
+  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined") {
     mainWindow.loadFile(
       path.join(basePath, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
     );
+  } else {
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   }
 
   const display = screen.getDisplayMatching(mainWindow.getBounds());
   const bounds = display.workArea;
-  if (mainWindow.getBounds().width < 720 || mainWindow.getBounds().height < 480) {
+  if (
+    mainWindow.getBounds().width < 720 ||
+    mainWindow.getBounds().height < 480
+  ) {
     mainWindow.setSize(
       Math.max(1280, bounds.width - 80),
       Math.max(800, bounds.height - 120)
@@ -562,8 +582,9 @@ async function runStartupCleanup() {
       db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
       db.delete(photoTags).where(inArray(photoTags.photoId, orphanIds)).run();
       db.delete(photos).where(inArray(photos.id, orphanIds)).run();
-      console.log(
-        `[App] Startup cleanup: removed ${orphanIds.length} orphan photo records`
+      log.info(
+        { count: orphanIds.length },
+        "Startup cleanup: removed orphan photo records"
       );
 
       initVectorDB()
@@ -573,7 +594,7 @@ async function runStartupCleanup() {
         });
     }
   } catch (err) {
-    console.warn("[App] Orphan cleanup skipped:", (err as Error)?.message);
+    log.warn({ err }, "Orphan cleanup skipped");
   }
 
   try {
@@ -592,10 +613,7 @@ async function runStartupCleanup() {
         .run();
     }
   } catch (err) {
-    console.warn(
-      "[App] photoCount recalculation skipped:",
-      (err as Error)?.message
-    );
+    log.warn({ err }, "photoCount recalculation skipped");
   }
 }
 
@@ -604,7 +622,7 @@ async function startBackgroundServices() {
   try {
     logMain("[bg] startLevel(Critical) begin");
     await registry.startLevel(ServiceLevel.Critical);
-    console.log("[App] Critical services started");
+    log.info("Critical services started");
     logMain("[bg] startLevel(Critical) done");
 
     await runStartupCleanup();
@@ -614,7 +632,7 @@ async function startBackgroundServices() {
     logMain("[bg] ensureModelAvailable done");
 
     await registry.startRemaining();
-    console.log("[App] All services started");
+    log.info("All services started");
     logMain("[bg] startRemaining done");
   } catch (err) {
     const stack = (err as Error)?.stack || String(err);
@@ -655,7 +673,7 @@ app.whenReady().then(async () => {
   try {
     // ── Step 1: Fast synchronous setup (no blocking I/O) ─────────────
     initDataPath();
-    console.log("[App] Data path:", getDataPath());
+    log.info({ dataPath: getDataPath() }, "Data path initialized");
 
     // Register custom protocol handler for local file access.
     // Must be set up before createWindow() since the window loads
@@ -676,14 +694,9 @@ app.whenReady().then(async () => {
           ...indexedFolders.map((f) => f.path),
         ];
 
-        const isAllowed = allowedPaths.some((allowed) => {
-          const normalized = `${allowed.replace(/\\/g, "/")}/`;
-          const normalizedFile = resolved.replace(/\\/g, "/");
-          return normalizedFile.startsWith(normalized);
-        });
-
-        if (!isAllowed) {
-          console.warn(`[Security] local-media blocked: ${filePath}`);
+        // 使用路径安全验证函数
+        if (!isSafePath(resolved, allowedPaths)) {
+          log.warn({ filePath }, "Security: local-media blocked");
           return new Response(null, { status: 403 });
         }
 
@@ -697,7 +710,15 @@ app.whenReady().then(async () => {
         // Chromium natively supports these image formats. For everything else
         // (TIFF, HEIC, RAW camera formats), convert to PNG on-the-fly via sharp.
         const browserCompatible = new Set([
-          ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".avif", ".svg",
+          ".jpg",
+          ".jpeg",
+          ".png",
+          ".gif",
+          ".webp",
+          ".bmp",
+          ".ico",
+          ".avif",
+          ".svg",
         ]);
 
         if (browserCompatible.has(ext)) {
@@ -718,9 +739,9 @@ app.whenReady().then(async () => {
             },
           });
         } catch (e) {
-          console.warn(
-            `[local-media] Conversion failed for ${resolved}:`,
-            (e as Error).message,
+          log.warn(
+            { filePath: resolved, err: e },
+            "local-media: Conversion failed"
           );
           return new Response(buffer, {
             headers: {
@@ -742,14 +763,11 @@ app.whenReady().then(async () => {
     checkForUpdates();
     setupSendToShortcut();
 
-    console.log("[App] Window ready — starting background services...");
+    log.info("Window ready — starting background services...");
 
     // ── Step 3: Non-blocking background initialization ───────────────
     startBackgroundServices().catch((err) =>
-      console.warn(
-        "[App] Non-critical services degraded:",
-        (err as Error)?.message
-      )
+      log.warn({ err }, "Non-critical services degraded")
     );
 
     // Forward system theme changes to renderer
@@ -763,8 +781,9 @@ app.whenReady().then(async () => {
     // Handle files sent via SendTo or command-line
     const sentFilePaths = getSendToFilePaths();
     if (sentFilePaths.length > 0) {
-      console.log(
-        `[App] Received ${sentFilePaths.length} file(s) via SendTo/CLI`
+      log.info(
+        { count: sentFilePaths.length },
+        "Received files via SendTo/CLI"
       );
       mainWindow?.webContents.once("did-finish-load", () => {
         mainWindow?.webContents.send("sendto:files", sentFilePaths);
@@ -772,11 +791,8 @@ app.whenReady().then(async () => {
     }
   } catch (error) {
     const message = String(error);
-    fs.writeFileSync(
-      path.join(logDir, "whenReady.log"),
-      `CATCH ${message}\n`
-    );
-    console.error("Error during app initialization:", error);
+    fs.writeFileSync(path.join(logDir, "whenReady.log"), `CATCH ${message}\n`);
+    log.error({ err: error }, "Error during app initialization");
     dialog.showErrorBox("Startup Failed", message);
     app.quit();
   }
@@ -785,7 +801,9 @@ app.whenReady().then(async () => {
 // ── Second instance: focus existing window ───────────────────────────
 app.on("second-instance", (_event, _commandLine, _workingDirectory) => {
   if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
     mainWindow.show();
     mainWindow.focus();
   }
@@ -821,7 +839,9 @@ app.on("will-quit", async () => {
       `${new Date().toISOString()} will-quit: START\n`,
       { flag: "a" }
     );
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
   globalShortcut.unregisterAll();
   if (tray) {
     tray.destroy();
@@ -834,5 +854,7 @@ app.on("will-quit", async () => {
       `${new Date().toISOString()} will-quit: DONE\n`,
       { flag: "a" }
     );
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 });

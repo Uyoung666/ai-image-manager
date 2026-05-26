@@ -16,6 +16,11 @@ export const folders = sqliteTable("folders", {
   createdAt: integer("created_at")
     .notNull()
     .$defaultFn(() => Date.now()),
+  isWatching: integer("is_watching", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  watcherStartedAt: integer("watcher_started_at"),
+  lastWatcherEventAt: integer("last_watcher_event_at"),
 });
 
 export const photos = sqliteTable(

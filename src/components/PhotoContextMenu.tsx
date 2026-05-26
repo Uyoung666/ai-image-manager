@@ -84,7 +84,7 @@ export function PhotoContextMenu({
 
   return (
     <div
-      className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+      className="fixed z-50 min-w-[210px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
       ref={ref}
       style={{ left: x, top: y }}
     >
@@ -128,7 +128,12 @@ export function PhotoContextMenu({
           }}
         >
           <Star className="h-3.5 w-3.5 flex-shrink-0" />
-          {t("shortcutToggleFavorite")}
+          <span className="flex-1 text-left">
+            {t("shortcutToggleFavorite")}
+          </span>
+          <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+            F
+          </span>
         </button>
       )}
       <div className="my-1 h-px bg-border" />
@@ -156,7 +161,10 @@ export function PhotoContextMenu({
         }}
       >
         <Download className="h-3.5 w-3.5 flex-shrink-0" />
-        {t("exportPhoto")}
+        <span className="flex-1 text-left">{t("exportPhoto")}</span>
+        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+          Ctrl+Shift+E
+        </span>
       </button>
       {onUploadToCloud && (
         <button
@@ -200,7 +208,10 @@ export function PhotoContextMenu({
         }}
       >
         <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
-        {t("deletePhoto")}
+        <span className="flex-1 text-left">{t("deletePhoto")}</span>
+        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+          Delete
+        </span>
       </button>
     </div>
   );
