@@ -14,6 +14,7 @@
 - [Face Recognition](#face-recognition)
 - [Albums & Smart Albums](#albums--smart-albums)
 - [Dashboard](#dashboard)
+- [Photo Culling](#photo-culling)
 - [Duplicate Detection](#duplicate-detection)
 - [Batch Operations](#batch-operations)
 - [Export & Share](#export--share)
@@ -231,6 +232,43 @@ Open **Dashboard** for statistical analysis of your library:
 | **Map** | GPS-tagged photos on a map (online/offline modes) |
 
 **Linked Search**: Click any chart bar or color swatch to jump back to the home page with the corresponding filter applied.
+
+---
+
+## Photo Culling
+
+Quickly narrow down large batches to find the best shots. Ideal for post-shoot selection, travel photo curation, and similar workflows.
+
+### Creating a Culling Session
+
+Navigate to the **Culling** page via the sidebar and click "New Culling Session":
+
+- **Name**: Give the session a label, e.g. "2025 Cherry Blossom Picks"
+- **Mode**: PK (pairwise comparison) or Curate (single-photo review)
+- **PK Sub-mode**: Quick (min 5 comparisons) / Standard (8) / Fine (12)
+
+### PK Mode
+
+Two photos side by side — pick the better one. Features:
+- Synchronized zoom and pan (zooming one auto-syncs the other)
+- Keyboard shortcuts: `1` pick left, `2` pick right, `3` skip
+- EXIF overlay display
+- Fatigue reminder (after every 50 comparisons)
+- Undo last choice
+
+The system uses an Elo rating algorithm — after multiple rounds of pairing, a final ranking is produced.
+
+### Curate Mode
+
+Review photos one at a time — keep or reject. Keyboard shortcuts: `Y` keep, `N` reject.
+
+### Results
+
+After culling is complete, the results view provides:
+- **Leaderboard** — ranked by Elo score / win rate
+- **Multi-select** — batch add to album, export, delete
+- **Top-N export** — export the top N best photos in one click
+- **Comparison details** — view per-photo win/loss records and rating history
 
 ---
 
