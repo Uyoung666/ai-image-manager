@@ -35,10 +35,14 @@ test.beforeAll(async () => {
   });
 });
 
+test.afterAll(async () => {
+  await electronApp.close();
+});
+
 test("renders the first page", async () => {
   const page: Page = await electronApp.firstWindow();
 
   const title = await page.waitForSelector("h1");
   const text = await title.textContent();
-  expect(text).toBe("electron-shadcn");
+  expect(text).toBe("欢迎使用 AI 图片管理器");
 });

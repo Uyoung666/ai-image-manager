@@ -4,11 +4,12 @@
 
 双击即用，就地索引文件夹（不复制原始文件），CLIP 语义搜索、智能去重、自动标签、人脸识别、云端分享。
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
 > **English README**: [README.en.md](README.en.md)
+> **使用指南**: [GUIDE.md](GUIDE.md) | **User Guide**: [GUIDE.en.md](GUIDE.en.md)
 
 ---
 
@@ -27,7 +28,7 @@
 
 ### 方式一：安装版（推荐）
 
-下载 `AI Image Manager-1.0.0 Setup.exe`，双击运行安装向导。
+下载 `AI Image Manager-1.0.1 Setup.exe`，双击运行安装向导。
 
 - 安装到系统默认位置（`%LocalAppData%\AI Image Manager`）
 - 自动创建桌面快捷方式和开始菜单条目
@@ -35,7 +36,7 @@
 
 ### 方式二：便携版
 
-下载 `AI Image Manager-win32-x64-1.0.0.zip`，解压到任意目录，运行 `AI Image Manager.exe` 即可。
+下载 `AI Image Manager-win32-x64-1.0.1.zip`，解压到任意目录，运行 `AI Image Manager.exe` 即可。
 
 - 不写注册表，不创建快捷方式
 - 可将整个目录放在 U 盘或移动硬盘中随身使用
