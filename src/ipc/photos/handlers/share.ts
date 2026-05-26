@@ -13,14 +13,15 @@ export const generateAndUploadShare = os
     z.object({
       photoIds: z.array(z.number()),
       cloudConfigId: z.number(),
+      locale: z.string().optional().default("zh-CN"),
     })
   )
   .handler(async ({ input }) => {
-    const { photoIds, cloudConfigId } = input;
+    const { photoIds, cloudConfigId, locale } = input;
     const db = getDatabase();
 
     // Generate share page HTML
-    const html = await generateSharePage(photoIds);
+    const html = await generateSharePage(photoIds, locale);
 
     const buf = Buffer.from(html, "utf-8");
     const filename = `share-${Date.now()}`;

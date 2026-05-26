@@ -70,8 +70,8 @@ function PersonDetailPage() {
       const data = result as unknown as IdentityDetail;
       setIdentity(data);
       setNameInput(data.name || "");
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadIdentity] failed:", err);
     } finally {
       setLoading(false);
     }
@@ -122,7 +122,7 @@ function PersonDetailPage() {
       );
       setEditingName(false);
     } catch {
-      /* ignore */
+      toast.error(t("personRenameFailed"));
     }
   }
 
@@ -157,7 +157,7 @@ function PersonDetailPage() {
         loadIdentity();
       }
     } catch {
-      /* ignore */
+      toast.error(t("removeFaceFailed"));
     }
   }
 
@@ -179,8 +179,8 @@ function PersonDetailPage() {
     const nextFav = !allFavorite;
     try {
       await ipc.client.photos.toggleFavorite({ ids, favorite: nextFav });
-    } catch {
-      /* skip */
+    } catch (err) {
+      console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
     queryClient.invalidateQueries({ queryKey: ["photos"] });

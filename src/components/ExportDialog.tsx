@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getDateLocale } from "@/utils/date-locale";
 import { ipc } from "@/ipc/manager";
 
 interface ExportDialogProps {
@@ -16,7 +17,7 @@ interface ExportDialogProps {
 }
 
 export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [format, setFormat] = useState<"original" | "compressed">("original");
   const [quality, setQuality] = useState(85);
   const [maxWidth, setMaxWidth] = useState(1920);
@@ -55,6 +56,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         maxWidth: format === "compressed" ? maxWidth : undefined,
         quality: format === "compressed" ? quality : undefined,
         outputPath: savePath,
+        locale: getDateLocale(i18n.language),
       });
       const data = res as {
         success: boolean;

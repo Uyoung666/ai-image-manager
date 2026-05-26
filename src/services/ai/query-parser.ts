@@ -3,6 +3,7 @@ import {
   type DictCategory,
   ZH_TO_EN_SEARCH,
 } from "./zh-en-dict";
+import { getDictionaryManager } from "../dictionary-manager";
 
 export interface ParsedQuery {
   activity: string[];
@@ -39,12 +40,25 @@ const CATEGORY_TO_SLOT: Record<DictCategory, keyof ParsedQuery> = {
   object: "subject",
 };
 
+// 获取合并后的词典（包含用户自定义）
+function getMergedDict() {
+  try {
+    return getDictionaryManager().getMergedDictionary();
+  } catch {
+    // 降级到内置词典
+    return ZH_TO_EN_SEARCH;
+  }
+}
+
 // Sort dictionary keys by length descending for greedy matching
-const SORTED_DICT_KEYS = Object.keys(ZH_TO_EN_SEARCH).sort(
-  (a, b) => b.length - a.length
-);
+function getSortedDictKeys() {
+  return Object.keys(getMergedDict()).sort((a, b) => b.length - a.length);
+}
 
 export function parseChineseQuery(query: string): ParsedQuery {
+  const dict = getMergedDict();
+  const sortedKeys = getSortedDictKeys();
+
   const parsed: ParsedQuery = {
     subject: [],
     scene: [],
@@ -59,9 +73,9 @@ export function parseChineseQuery(query: string): ParsedQuery {
   let remaining = query.trim();
 
   // Greedy match: longest dictionary entries first
-  for (const key of SORTED_DICT_KEYS) {
+  for (const key of sortedKeys) {
     if (remaining.includes(key)) {
-      const entry = ZH_TO_EN_SEARCH[key];
+      const entry = dict[key];
       const slot = CATEGORY_TO_SLOT[entry.category];
       parsed[slot].push(key);
       remaining = remaining.replaceAll(key, " ");
@@ -87,7 +101,8 @@ export function parseChineseQuery(query: string): ParsedQuery {
 }
 
 function translateTerm(term: string): string {
-  const dictEntry = ZH_TO_EN_SEARCH[term];
+  const dict = getMergedDict();
+  const dictEntry = dict[term];
   if (dictEntry) {
     return dictEntry.en;
   }

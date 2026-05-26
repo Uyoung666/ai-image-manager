@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getDateLocale } from "@/utils/date-locale";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface QuickPreviewPhoto {
   fileDate?: number | null;
@@ -16,21 +18,12 @@ interface QuickPreviewProps {
   photo: QuickPreviewPhoto;
 }
 
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
-
 export function QuickPreview({
   photo,
   onClose,
   onNavigate,
 }: QuickPreviewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [loaded, setLoaded] = useState(false);
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
@@ -118,7 +111,7 @@ export function QuickPreview({
   }, []);
 
   const dateStr = photo.fileDate
-    ? new Date(photo.fileDate).toLocaleDateString("zh-CN", {
+    ? new Date(photo.fileDate).toLocaleDateString(getDateLocale(i18n.language), {
         year: "numeric",
         month: "long",
         day: "numeric",

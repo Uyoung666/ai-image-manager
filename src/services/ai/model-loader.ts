@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
+import { isSafePath } from "@/utils/path-security";
 import { disposeTensors } from "./constants";
 import type { EmbedProgress } from "./state";
 import {
@@ -17,6 +18,66 @@ import {
   setLocalModelPath,
 } from "./state";
 
+function detectDefaultMirror(): string | null {
+  const locale = app.getLocale();
+
+  if (locale.startsWith("zh")) {
+    return "https://hf-mirror.com";
+  }
+
+  return null;
+}
+
+function resolveMirrorUrl(): string | null {
+  // 1. 环境变量最高优先级
+  const envMirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
+  if (envMirror) {
+    console.log(`[AI] Using mirror from env: ${envMirror}`);
+    return envMirror;
+  }
+
+  // 2. 读取用户保存的设置
+  try {
+    const { getSetting } = require("@/services/settings-manager");
+    const savedMirror = getSetting("ai.mirror") || "auto";
+
+    if (savedMirror === "official") {
+      console.log("[AI] Using official HuggingFace");
+      return null;
+    }
+    if (savedMirror === "hf-mirror") {
+      console.log("[AI] Using hf-mirror.com from settings");
+      return "https://hf-mirror.com";
+    }
+    if (savedMirror === "modelscope") {
+      console.log("[AI] Using modelscope.cn from settings");
+      return "https://modelscope.cn";
+    }
+    if (savedMirror === "custom") {
+      const customUrl = getSetting("ai.mirror.customUrl") || "";
+      if (customUrl) {
+        console.log(`[AI] Using custom mirror: ${customUrl}`);
+        return customUrl;
+      }
+    }
+    // "auto" → 走自动检测
+  } catch {
+    // settings-manager 不可用时跳过
+  }
+
+  // 3. 自动检测
+  return detectDefaultMirror();
+}
+
+// 解析一次，缓存结果，同时设置环境变量供 worker 进程继承
+function getResolvedMirror(): string | null {
+  const mirror = resolveMirrorUrl();
+  if (mirror) {
+    process.env.HF_MIRROR = mirror;
+  }
+  return mirror;
+}
+
 function configureTransformersEnv(env: any, localModelPath: string): void {
   env.localModelPath = localModelPath;
   env.allowLocalModels = true;
@@ -24,7 +85,8 @@ function configureTransformersEnv(env: any, localModelPath: string): void {
   env.useFSCache = true;
   env.cacheDir = path.join(getDataPath(), "hf-cache");
 
-  const mirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
+  const mirror = getResolvedMirror();
+
   if (mirror) {
     env.remoteHost = mirror;
     env.remotePathTemplate = "{model}/resolve/main/";
@@ -36,6 +98,24 @@ function configureTransformersEnv(env: any, localModelPath: string): void {
 
 function copyDir(src: string, dest: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    // 验证源路径和目标路径的安全性
+    const allowedSources = [
+      process.resourcesPath,
+      app.getAppPath(),
+      process.cwd(),
+    ];
+    const allowedDestinations = [getDataPath()];
+
+    if (!isSafePath(src, allowedSources)) {
+      reject(new Error(`[Security] 不安全的源路径: ${src}`));
+      return;
+    }
+
+    if (!isSafePath(dest, allowedDestinations)) {
+      reject(new Error(`[Security] 不安全的目标路径: ${dest}`));
+      return;
+    }
+
     fs.cp(src, dest, { recursive: true }, (err) => {
       if (err) {
         reject(err);
@@ -168,7 +248,9 @@ export async function loadModel(): Promise<void> {
     try {
       Object.defineProperty(process.release, "name", { value: "browser" });
     } catch {
-      console.error("[AI] Cannot override process.release.name, ONNX backend may fail");
+      console.error(
+        "[AI] Cannot override process.release.name, ONNX backend may fail"
+      );
     }
   }
 

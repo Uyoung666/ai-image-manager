@@ -2,8 +2,10 @@ import {
   getAllAppSettings,
   getAppSetting,
   getDataPathInfo,
+  getMirrorSettings,
   setAppSetting,
   setDataPath,
+  setMirrorSettings,
 } from "./handlers";
 
 export const settings = {
@@ -12,4 +14,6 @@ export const settings = {
   setAppSetting,
   getDataPathInfo,
   setDataPath,
+  getMirrorSettings,
+  setMirrorSettings,
 };

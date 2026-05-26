@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
+import { isSafePath } from "@/utils/path-security";
 import * as schema from "./schema";
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
@@ -21,6 +22,9 @@ export function getDbPath(): string {
 }
 
 function getMigrationsFolder(): string {
+  // 定义允许的迁移文件路径白名单
+  const allowedRoots = [app.getAppPath(), process.cwd(), process.resourcesPath];
+
   // In development, migrations are in the project root
   const candidates = [
     path.join(app.getAppPath(), "drizzle"),
@@ -28,13 +32,13 @@ function getMigrationsFolder(): string {
     path.join(app.getAppPath(), "..", "..", "drizzle"),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
+    if (fs.existsSync(candidate) && isSafePath(candidate, allowedRoots)) {
       return candidate;
     }
   }
   // Fallback for packaged app
   const prodPath = path.join(process.resourcesPath, "drizzle");
-  if (fs.existsSync(prodPath)) {
+  if (fs.existsSync(prodPath) && isSafePath(prodPath, allowedRoots)) {
     return prodPath;
   }
   throw new Error("Migrations folder not found");
@@ -87,18 +91,22 @@ export function initDatabase(): ReturnType<typeof drizzle> {
     const update = sqlite.prepare(
       "UPDATE photos SET thumbnail_path = ? WHERE id = ?"
     );
-    const healMany = sqlite.transaction((items: { id: number; p: string }[]) => {
-      let healed = 0;
-      for (const row of items) {
-        const rowNorm = row.p.replace(/\\/g, "/").toLowerCase();
-        if (rowNorm.startsWith(`${norm}/`)) continue;
-        const filename = path.basename(row.p);
-        const fixed = path.join(currentThumbDir, filename);
-        update.run(fixed, row.id);
-        healed++;
+    const healMany = sqlite.transaction(
+      (items: { id: number; p: string }[]) => {
+        let healed = 0;
+        for (const row of items) {
+          const rowNorm = row.p.replace(/\\/g, "/").toLowerCase();
+          if (rowNorm.startsWith(`${norm}/`)) {
+            continue;
+          }
+          const filename = path.basename(row.p);
+          const fixed = path.join(currentThumbDir, filename);
+          update.run(fixed, row.id);
+          healed++;
+        }
+        return healed;
       }
-      return healed;
-    });
+    );
     const healedCount = healMany(rows);
     if (healedCount > 0) {
       console.log(

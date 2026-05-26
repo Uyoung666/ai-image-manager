@@ -100,6 +100,18 @@ i18n.use(initReactI18next).init({
         colorInsightNeutral: "色彩分布均衡，无明显主导色系",
         colorClickToSearch: "点击色相可搜索",
         colorNotEnoughData: "有效色彩数据不足 ({{count}}/10)，请导入更多照片",
+        hueRed: "红",
+        hueOrange: "橙",
+        hueYellow: "黄",
+        hueYellowGreen: "黄绿",
+        hueGreen: "绿",
+        hueSpringGreen: "青绿",
+        hueCyan: "青",
+        hueBlue: "蓝",
+        hueBlueViolet: "紫蓝",
+        huePurple: "紫",
+        hueMagenta: "紫红",
+        huePink: "粉",
         noGeoData: "暂无 GPS 地理数据，请先索引带有定位信息的照片",
         mapModeOnline: "在线",
         mapModeOffline: "离线",
@@ -222,7 +234,8 @@ i18n.use(initReactI18next).init({
         toastFavoriteRemoved: "已取消收藏",
         toastFavoriteAddedCount: "已收藏 {{count}} 张",
         toastPhotosIndexed: "已索引 {{count}} 张照片",
-        toastPhotosIndexedSkipped: "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
+        toastPhotosIndexedSkipped:
+          "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
         toastScanFolderFailed: "扫描文件夹失败",
         toastDropFolderOnly: "请拖入文件夹（不支持单个文件）",
         toastFolderRemoved: "已移除文件夹",
@@ -240,12 +253,16 @@ i18n.use(initReactI18next).init({
         toastImageSearchFailed: "以图搜图失败",
         toastAddToAlbumSuccess: "已添加 {{count}} 张照片到「{{album}}」",
         toastAddFailed: "添加失败",
+        albumCreateFailed: "创建相册失败",
+        albumRenameFailed: "重命名相册失败",
+        duplicateDeleteFailed: "删除重复照片失败",
 
         // Empty states
         emptySearchTitle: "未找到匹配的照片",
         emptySearchDescription: "试试换个关键词，或使用 EXIF 筛选器缩小范围",
         emptyFavoritesTitle: "还没有收藏的照片",
-        emptyFavoritesDescription: "浏览照片时点击星标即可收藏，收藏的照片会出现在这里",
+        emptyFavoritesDescription:
+          "浏览照片时点击星标即可收藏，收藏的照片会出现在这里",
 
         // Albums
         albumAddTitle: "添加到相册",
@@ -257,7 +274,8 @@ i18n.use(initReactI18next).init({
         // Confirm delete
         confirmDeleteTitle: "确认删除",
         confirmDeleteAction: "删除",
-        confirmDeleteDescription: "将{{target}}移到系统回收站，可从回收站恢复。",
+        confirmDeleteDescription:
+          "将{{target}}移到系统回收站，可从回收站恢复。",
         confirmDeleteTargetPhoto: "该照片",
         confirmDeleteTargetPhotos: " {{count}} 张照片",
 
@@ -319,6 +337,10 @@ i18n.use(initReactI18next).init({
         // AI progress
         aiInitFailed: "AI 初始化失败",
         aiMirrorHint: "国内用户可设置 HuggingFace 镜像：启动时设置环境变量",
+        aiNetworkErrorHint: "网络连接失败，可能是 HuggingFace 访问受限",
+        aiMirrorRecommendation: "推荐使用国内镜像：",
+        aiOpenMirrorSite: "打开镜像站点",
+        aiMirrorSettingsHint: "或在下方「AI 镜像设置」中配置",
         aiRetry: "重试",
         aiStartIndex: "开始 AI 索引",
         aiIndexComplete: "AI 索引完成 ({{processed}}/{{total}})",
@@ -333,6 +355,19 @@ i18n.use(initReactI18next).init({
         aiIndexingPercent: "AI 索引中 {{pct}}%",
         aiReadyVectors: "AI 就绪 ({{count}} 向量)",
         aiNotIndexed: "AI 未索引",
+        aiMirrorSettings: "AI 模型镜像设置",
+        aiMirrorSource: "镜像源",
+        aiMirrorSourceHint: "自动检测会根据系统语言选择合适的镜像",
+        aiMirrorAuto: "自动检测",
+        aiMirrorCustom: "自定义",
+        aiMirrorCustomUrl: "自定义镜像地址",
+        aiMirrorHfMirror: "hf-mirror.com (推荐)",
+        aiMirrorModelScope: "modelscope.cn",
+        aiMirrorOfficial: "HuggingFace 官方",
+        aiMirrorSaved: "已保存",
+        aiMirrorRestartHint: "镜像设置将在下次启动 AI 索引时生效",
+        saving: "保存中...",
+        saveFailed: "保存失败",
 
         // Error boundary
         errorBoundaryTitle: "出现了一些问题",
@@ -355,7 +390,8 @@ i18n.use(initReactI18next).init({
         // Search
         imageSearchToken: "[以图搜图]",
         imageSearchMode: "[以图搜图模式]",
-        aiEmbeddingSearchReady: "AI 索引中... ({{processed}}/{{total}}) — 完成后即可搜索",
+        aiEmbeddingSearchReady:
+          "AI 索引中... ({{processed}}/{{total}}) — 完成后即可搜索",
         aiModelLoading: "AI 模型加载中...",
         aiModelError: "AI 模型加载失败，搜索不可用",
         vectorDbNotReady: "向量数据库未就绪...",
@@ -441,6 +477,12 @@ i18n.use(initReactI18next).init({
         tagAddedToPhotos: "已为 {{count}} 张照片添加标签「{{name}}」",
         childTagCreated: "已创建子标签「{{name}}」（父标签: {{parent}}）",
         tagDeleted: "已删除标签「{{name}}」",
+        addTagFailed: "添加标签失败",
+        removeTagFailed: "移除标签失败",
+        confirmTagFailed: "确认标签失败",
+        createTagFailed: "创建标签失败",
+        aiSuggestFailed: "AI 标签分析失败",
+        applySuggestionFailed: "应用建议标签失败",
         smartAlbumCreateTitle: "创建智能相册",
         smartAlbumNamePlaceholder: "相册名称",
         smartAlbumDescriptionPlaceholder: "描述 (可选)",
@@ -534,7 +576,8 @@ i18n.use(initReactI18next).init({
         smartAlbum: "智能相册",
         albumDescriptionPlaceholder: "描述 (可选)",
         noAlbumsTitle: "还没有相册",
-        noAlbumsDescription: "创建相册来整理你的照片，也可以拖拽照片到侧边栏快速添加",
+        noAlbumsDescription:
+          "创建相册来整理你的照片，也可以拖拽照片到侧边栏快速添加",
         createFirstAlbum: "创建第一个相册",
         smartAlbumShort: "智能",
         smartMatchedPhotos: "智能匹配 {{count}} 张照片",
@@ -574,14 +617,15 @@ i18n.use(initReactI18next).init({
         startFaceDetection: "开始人脸检测",
         startFaceDetectionShort: "开始检测",
         noPeopleTitle: "还没有检测到人物",
-        noPeopleDescription: "点击\"开始人脸检测\"来分析照片中的人物",
+        noPeopleDescription: '点击"开始人脸检测"来分析照片中的人物',
         unnamedPerson: "未命名",
         deletePerson: "删除此人物",
         deletePersonTitle: "确认删除人物",
-        deletePersonDescription: "将删除人物\"{{name}}\"，此操作不可撤销。",
+        deletePersonDescription: '将删除人物"{{name}}"，此操作不可撤销。',
         detectedPersonPhotos: "{{count}} 张检测到该人物的照片",
         removeFromPerson: "从此人物分组中移除",
-        removeFromPersonDescription: "将此照片从该人物分组中移除，此操作不可撤销。",
+        removeFromPersonDescription:
+          "将此照片从该人物分组中移除，此操作不可撤销。",
         confirmRemove: "确认移除",
         startingFaceDetection: "正在启动人脸检测...",
         restartingFaceDetection: "正在重新扫描所有照片...",
@@ -594,6 +638,10 @@ i18n.use(initReactI18next).init({
         reclusterCompleteCount: "聚类完成！共 {{count}} 个人物分组",
         reclusterFailed: "聚类失败",
         reclusterException: "重新聚类失败",
+        deletePersonFailed: "删除人物失败",
+        mergePeopleFailed: "合并人物失败",
+        personRenameFailed: "重命名人物失败",
+        removeFaceFailed: "移除人脸失败",
         routeErrorTitle: "页面加载出错",
         routeErrorDescription: "请尝试刷新页面",
         refresh: "刷新",
@@ -622,7 +670,8 @@ i18n.use(initReactI18next).init({
         trashRetentionHint: "删除的照片会在这里保留 30 天",
         deleteAfterDays: "{{count}} 天后删除",
         confirmPermanentDeleteTitle: "确认永久删除",
-        confirmPermanentDeleteDescription: "将永久删除 {{count}} 张照片，此操作不可撤销。",
+        confirmPermanentDeleteDescription:
+          "将永久删除 {{count}} 张照片，此操作不可撤销。",
         confirmEmptyTrashTitle: "确认清空回收站",
         gridMedium: "中",
         gridLarge: "大",
@@ -763,7 +812,8 @@ i18n.use(initReactI18next).init({
         colorVivid: "Vivid",
         colorModerate: "Moderate",
         colorMuted: "Muted",
-        noColorData: "Not enough color data. Import more photos and generate thumbnails.",
+        noColorData:
+          "Not enough color data. Import more photos and generate thumbnails.",
         colorSampled: "Sampled from {{count}} / {{total}} photos",
         colorAnalyzing: "Analyzing colors...",
         colorInsightWarm: "Warm-toned — reds, oranges & yellows dominate",
@@ -771,7 +821,20 @@ i18n.use(initReactI18next).init({
         colorInsightGreen: "Natural-toned — greens dominate",
         colorInsightNeutral: "Balanced — no single hue dominates",
         colorClickToSearch: "Click hue to search",
-        colorNotEnoughData: "Insufficient color data ({{count}}/10). Import more photos.",
+        colorNotEnoughData:
+          "Insufficient color data ({{count}}/10). Import more photos.",
+        hueRed: "Red",
+        hueOrange: "Orange",
+        hueYellow: "Yellow",
+        hueYellowGreen: "Yellow Green",
+        hueGreen: "Green",
+        hueSpringGreen: "Spring Green",
+        hueCyan: "Cyan",
+        hueBlue: "Blue",
+        hueBlueViolet: "Blue Violet",
+        huePurple: "Purple",
+        hueMagenta: "Magenta",
+        huePink: "Pink",
         noGeoData:
           "No GPS data available. Index photos with location information.",
         mapModeOnline: "Online",
@@ -827,13 +890,15 @@ i18n.use(initReactI18next).init({
         dataMigratedDirs: " ({{count}} directories)",
         cleanedOldDirs: ", cleaned {{count}} old directories",
         dataMigrationPartialFailed: ", some migrations failed: {{errors}}",
-        cleanupOldDataPartialFailed: ", some old data cleanup failed: {{errors}}",
+        cleanupOldDataPartialFailed:
+          ", some old data cleanup failed: {{errors}}",
         refreshingAfterMigration: ", refreshing UI...",
         dataPathSetFailed: "Failed to update setting",
         themeDark: "Dark",
         themeLight: "Light",
         themeSystem: "Follow system",
-        cacheCleanedDetail: "Cleared {{count}} cached files and freed {{size}} MB",
+        cacheCleanedDetail:
+          "Cleared {{count}} cached files and freed {{size}} MB",
         clearCacheFailed: "Clear failed",
         cleanupInvalidIndex: "Clean Invalid Index Records",
         lastCleanupCount: "(Last cleanup: {{count}} records)",
@@ -890,16 +955,17 @@ i18n.use(initReactI18next).init({
           'Are you sure you want to delete tag "{{name}}"? This action cannot be undone.',
         tagCreateChild: "Create Child Tag",
 
-
         // Toasts / status
         toastUndo: "Undo",
         toastFavoriteAdded: "Added to favorites",
         toastFavoriteRemoved: "Removed from favorites",
         toastFavoriteAddedCount: "Added {{count}} to favorites",
         toastPhotosIndexed: "Indexed {{count}} photos",
-        toastPhotosIndexedSkipped: "Indexed {{count}} photos, skipped {{skipped}}",
+        toastPhotosIndexedSkipped:
+          "Indexed {{count}} photos, skipped {{skipped}}",
         toastScanFolderFailed: "Failed to scan folder",
-        toastDropFolderOnly: "Please drop a folder (single files are not supported)",
+        toastDropFolderOnly:
+          "Please drop a folder (single files are not supported)",
         toastFolderRemoved: "Folder removed",
         toastDeleteFolderFailed: "Failed to delete folder",
         toastSearchFailed: "Search failed",
@@ -913,14 +979,19 @@ i18n.use(initReactI18next).init({
         toastConvertedCount: "Converted {{count}} photos",
         toastConvertFailed: "Format conversion failed",
         toastImageSearchFailed: "Image search failed",
-        toastAddToAlbumSuccess: "Added {{count}} photos to \"{{album}}\"",
+        toastAddToAlbumSuccess: 'Added {{count}} photos to "{{album}}"',
         toastAddFailed: "Add failed",
+        albumCreateFailed: "Failed to create album",
+        albumRenameFailed: "Failed to rename album",
+        duplicateDeleteFailed: "Failed to delete duplicate photo",
 
         // Empty states
         emptySearchTitle: "No matching photos",
-        emptySearchDescription: "Try another keyword, or narrow the range with EXIF filters",
+        emptySearchDescription:
+          "Try another keyword, or narrow the range with EXIF filters",
         emptyFavoritesTitle: "No favorite photos yet",
-        emptyFavoritesDescription: "Click the star while browsing to add favorites. They will appear here.",
+        emptyFavoritesDescription:
+          "Click the star while browsing to add favorites. They will appear here.",
 
         // Albums
         albumAddTitle: "Add to Album",
@@ -932,7 +1003,8 @@ i18n.use(initReactI18next).init({
         // Confirm delete
         confirmDeleteTitle: "Confirm Delete",
         confirmDeleteAction: "Delete",
-        confirmDeleteDescription: "Move {{target}} to the system recycle bin. You can restore it there.",
+        confirmDeleteDescription:
+          "Move {{target}} to the system recycle bin. You can restore it there.",
         confirmDeleteTargetPhoto: "this photo",
         confirmDeleteTargetPhotos: " {{count}} photos",
 
@@ -995,6 +1067,11 @@ i18n.use(initReactI18next).init({
         aiInitFailed: "AI initialization failed",
         aiMirrorHint:
           "Users in China can set a HuggingFace mirror with this environment variable on startup",
+        aiNetworkErrorHint:
+          "Network connection failed. HuggingFace may be restricted.",
+        aiMirrorRecommendation: "Recommended: use a mirror site",
+        aiOpenMirrorSite: "Open mirror site",
+        aiMirrorSettingsHint: 'Or configure in "AI Mirror Settings" below',
         aiRetry: "Retry",
         aiStartIndex: "Start AI Indexing",
         aiIndexComplete: "AI index complete ({{processed}}/{{total}})",
@@ -1009,6 +1086,21 @@ i18n.use(initReactI18next).init({
         aiIndexingPercent: "AI indexing {{pct}}%",
         aiReadyVectors: "AI ready ({{count}} vectors)",
         aiNotIndexed: "AI not indexed",
+        aiMirrorSettings: "AI Model Mirror Settings",
+        aiMirrorSource: "Mirror Source",
+        aiMirrorSourceHint:
+          "Auto-detect will choose a suitable mirror based on system language",
+        aiMirrorAuto: "Auto-detect",
+        aiMirrorCustom: "Custom",
+        aiMirrorCustomUrl: "Custom Mirror URL",
+        aiMirrorHfMirror: "hf-mirror.com (Recommended)",
+        aiMirrorModelScope: "modelscope.cn",
+        aiMirrorOfficial: "HuggingFace Official",
+        aiMirrorSaved: "Saved",
+        aiMirrorRestartHint:
+          "Mirror settings will take effect on next AI indexing start",
+        saving: "Saving...",
+        saveFailed: "Save failed",
 
         // Error boundary
         errorBoundaryTitle: "Something went wrong",
@@ -1024,7 +1116,8 @@ i18n.use(initReactI18next).init({
         exportCompressed: "Compressed",
         exportQuality: "Image quality: {{quality}}%",
         exportMaxWidth: "Max width: {{width}}px",
-        exportComplete: "Export complete: {{filename}} ({{count}} photos, {{size}}MB)",
+        exportComplete:
+          "Export complete: {{filename}} ({{count}} photos, {{size}}MB)",
         exportProgress: "Exporting {{count}} photos...",
         exportAction: "Export",
 
@@ -1038,7 +1131,8 @@ i18n.use(initReactI18next).init({
         vectorDbNotReady: "Vector database is not ready...",
         aiNoIndexHint: "No AI index yet. Import and index photos first.",
         dropImageToSearch: "Drop an image to search for similar photos",
-        imageSearchTitle: "Image search — choose a reference image to find similar photos",
+        imageSearchTitle:
+          "Image search — choose a reference image to find similar photos",
         exifFilterTitle: "EXIF Filters",
         searchModeSemantic: "Semantic Search",
         searchModeImage: "Image Search",
@@ -1115,9 +1209,15 @@ i18n.use(initReactI18next).init({
         rightClickDelete: "Right-click to delete",
         removeFromIndex: "Remove from Index",
         parentTag: "Parent tag: {{name}}",
-        tagAddedToPhotos: "Added tag \"{{name}}\" to {{count}} photos",
-        childTagCreated: "Created child tag \"{{name}}\" (parent: {{parent}})",
-        tagDeleted: "Deleted tag \"{{name}}\"",
+        tagAddedToPhotos: 'Added tag "{{name}}" to {{count}} photos',
+        childTagCreated: 'Created child tag "{{name}}" (parent: {{parent}})',
+        tagDeleted: 'Deleted tag "{{name}}"',
+        addTagFailed: "Failed to add tag",
+        removeTagFailed: "Failed to remove tag",
+        confirmTagFailed: "Failed to confirm tag",
+        createTagFailed: "Failed to create tag",
+        aiSuggestFailed: "AI tag analysis failed",
+        applySuggestionFailed: "Failed to apply suggested tag",
         smartAlbumCreateTitle: "Create Smart Album",
         smartAlbumNamePlaceholder: "Album name",
         smartAlbumDescriptionPlaceholder: "Description (optional)",
@@ -1187,7 +1287,8 @@ i18n.use(initReactI18next).init({
         remove: "Remove",
         newTagPlaceholder: "Enter a new tag name...",
         addTag: "Add",
-        aiSuggestionConfirm: "AI suggestion ({{confidence}}) — click to confirm",
+        aiSuggestionConfirm:
+          "AI suggestion ({{confidence}}) — click to confirm",
         play: "Play",
         pause: "Pause",
         pauseSlideshow: "Pause slideshow",
@@ -1200,18 +1301,21 @@ i18n.use(initReactI18next).init({
         exportPhoto: "Export Photo",
         generateSharePage: "Generate Share Page",
         aiSuggestionTitle: "AI Suggested Tags",
-        aiTagDisclaimer: "AI tags are auto-generated by local models, for reference only",
+        aiTagDisclaimer:
+          "AI tags are auto-generated by local models, for reference only",
         analyzeSuggestedTags: "Analyze Suggested Tags",
         aiAnalyzing: "AI analyzing...",
         noSuggestedTags: "No suitable tags detected",
         retry: "Retry",
         confidence: "Confidence: {{value}}%",
-        quickPreviewHelp: "Space / Esc to close · ← → to switch · Wheel to zoom · Double-click to reset",
+        quickPreviewHelp:
+          "Space / Esc to close · ← → to switch · Wheel to zoom · Double-click to reset",
         albumsCount: "{{count}} albums",
         smartAlbum: "Smart Album",
         albumDescriptionPlaceholder: "Description (optional)",
         noAlbumsTitle: "No albums yet",
-        noAlbumsDescription: "Create albums to organize your photos, or drag photos to the sidebar for quick adding.",
+        noAlbumsDescription:
+          "Create albums to organize your photos, or drag photos to the sidebar for quick adding.",
         createFirstAlbum: "Create First Album",
         smartAlbumShort: "Smart",
         smartMatchedPhotos: "Smart matched {{count}} photos",
@@ -1230,7 +1334,8 @@ i18n.use(initReactI18next).init({
         visualDuplicate: "Visually identical",
         highlySimilar: "Highly similar",
         noDuplicatesTitle: "No duplicate photos found",
-        noDuplicatesDescription: "Visual duplicates will appear here after indexing.",
+        noDuplicatesDescription:
+          "Visual duplicates will appear here after indexing.",
         hammingDistance: "Hamming distance: {{distance}}",
         ignore: "Ignore",
         pendingDelete: "Pending delete",
@@ -1251,19 +1356,23 @@ i18n.use(initReactI18next).init({
         startFaceDetection: "Start Face Detection",
         startFaceDetectionShort: "Start Detection",
         noPeopleTitle: "No people detected yet",
-        noPeopleDescription: "Click \"Start Face Detection\" to analyze people in your photos",
+        noPeopleDescription:
+          'Click "Start Face Detection" to analyze people in your photos',
         unnamedPerson: "Unnamed",
         deletePerson: "Delete this person",
         deletePersonTitle: "Confirm Person Deletion",
-        deletePersonDescription: "Delete person \"{{name}}\". This action cannot be undone.",
+        deletePersonDescription:
+          'Delete person "{{name}}". This action cannot be undone.',
         detectedPersonPhotos: "{{count}} photos detected for this person",
         removeFromPerson: "Remove from this person group",
-        removeFromPersonDescription: "Remove this photo from the person group. This action cannot be undone.",
+        removeFromPersonDescription:
+          "Remove this photo from the person group. This action cannot be undone.",
         confirmRemove: "Confirm Removal",
         startingFaceDetection: "Starting face detection...",
         restartingFaceDetection: "Rescanning all photos...",
         detectingFacesCount: "Detecting faces in {{count}} photos...",
-        detectionCompleteCount: "Detection complete. Processed {{count}} photos",
+        detectionCompleteCount:
+          "Detection complete. Processed {{count}} photos",
         detectingFacesProgress: "Detecting... {{processed}}/{{total}}",
         startFailed: "Failed to start",
         startFaceDetectionFailed: "Failed to start face detection",
@@ -1271,6 +1380,10 @@ i18n.use(initReactI18next).init({
         reclusterCompleteCount: "Recluster complete. {{count}} people groups",
         reclusterFailed: "Recluster failed",
         reclusterException: "Failed to recluster",
+        deletePersonFailed: "Failed to delete person",
+        mergePeopleFailed: "Failed to merge people",
+        personRenameFailed: "Failed to rename person",
+        removeFaceFailed: "Failed to remove face",
         routeErrorTitle: "Page failed to load",
         routeErrorDescription: "Try refreshing the page",
         refresh: "Refresh",
@@ -1299,7 +1412,8 @@ i18n.use(initReactI18next).init({
         trashRetentionHint: "Deleted photos are kept here for 30 days",
         deleteAfterDays: "Deleted after {{count}} days",
         confirmPermanentDeleteTitle: "Confirm Permanent Deletion",
-        confirmPermanentDeleteDescription: "Permanently delete {{count}} photos. This action cannot be undone.",
+        confirmPermanentDeleteDescription:
+          "Permanently delete {{count}} photos. This action cannot be undone.",
         confirmEmptyTrashTitle: "Confirm Empty Trash",
         gridMedium: "Medium",
         gridLarge: "Large",
@@ -1309,8 +1423,10 @@ i18n.use(initReactI18next).init({
         sharePublishedCloud: "Share page published to cloud",
         shareLink: "Share link",
         noCloudConfig: "No cloud sync configurations",
-        shareNeedsCloud: "Share pages must be uploaded to cloud storage before a link can be generated.",
-        shareAddCloudHint: "Add a WebDAV or S3 configuration in Settings first.",
+        shareNeedsCloud:
+          "Share pages must be uploaded to cloud storage before a link can be generated.",
+        shareAddCloudHint:
+          "Add a WebDAV or S3 configuration in Settings first.",
         uploadTo: "Upload to",
         shareDescription:
           "Generate a single-file share page with thumbnails, EXIF data, and tags for {{count}} photos. After upload, it can be viewed in a browser via the link.",
@@ -1321,7 +1437,8 @@ i18n.use(initReactI18next).init({
         sharePageTitle: "Generate Share Page",
         copyLink: "Copy link",
         openInBrowser: "Open in browser",
-        webdavPrivateNote: "WebDAV links are private and require Nutstore login to access",
+        webdavPrivateNote:
+          "WebDAV links are private and require Nutstore login to access",
         createChildTagFailed: "Failed to create child tag",
         deleteTagFailed: "Failed to delete tag",
         expandSidebar: "Expand sidebar",
@@ -1361,7 +1478,4 @@ i18n.use(initReactI18next).init({
     },
   },
 });
-
-
-
-
+export default i18n;

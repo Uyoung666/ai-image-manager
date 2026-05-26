@@ -41,8 +41,8 @@ export function AddToAlbumDialog({
     try {
       const result = await ipc.client.albums.listAlbums({});
       setAlbums((result as AlbumInfo[]).filter((a) => !a.isSmart));
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[AddToAlbumDialog loadAlbums] failed:", err);
     }
   }, []);
 
@@ -97,7 +97,7 @@ export function AddToAlbumDialog({
       });
       onClose();
     } catch {
-      /* ignore */
+      toast.error(t("albumCreateFailed"));
     }
   }
 

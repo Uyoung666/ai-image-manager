@@ -47,6 +47,23 @@ const COL_WIDTH_MAX = 320;
 const COL_WIDTH_DEFAULT = 220;
 const GAP = 8;
 
+const GRID_COL_WIDTH_KEY = "grid_column_width";
+
+function loadColWidth(): number {
+  try {
+    const raw = localStorage.getItem(GRID_COL_WIDTH_KEY);
+    if (raw !== null) {
+      const val = Number(raw);
+      if (!Number.isNaN(val) && val >= COL_WIDTH_MIN && val <= COL_WIDTH_MAX) {
+        return val;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return COL_WIDTH_DEFAULT;
+}
+
 export function PhotoGrid({
   photos,
   loading,
@@ -66,7 +83,7 @@ export function PhotoGrid({
   onMarqueeSelect,
 }: PhotoGridProps) {
   const { t, i18n } = useTranslation();
-  const [targetColWidth, setTargetColWidth] = useState(COL_WIDTH_DEFAULT);
+  const [targetColWidth, setTargetColWidth] = useState(loadColWidth);
   const [columnCount, setColumnCount] = useState(4);
   const [compact, setCompact] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -316,7 +333,15 @@ export function PhotoGrid({
                 className="h-4 w-20 cursor-pointer accent-primary"
                 max={COL_WIDTH_MAX}
                 min={COL_WIDTH_MIN}
-                onChange={(e) => setTargetColWidth(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setTargetColWidth(val);
+                  try {
+                    localStorage.setItem(GRID_COL_WIDTH_KEY, String(val));
+                  } catch {
+                    /* ignore */
+                  }
+                }}
                 step={10}
                 type="range"
                 value={targetColWidth}

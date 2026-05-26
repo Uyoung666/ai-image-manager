@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { openExternalLink } from "@/actions/shell";
+import { getDateLocale } from "@/utils/date-locale";
 import { ipc } from "@/ipc/manager";
 
 interface CloudConfig {
@@ -30,7 +31,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [configs, setConfigs] = useState<CloudConfig[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,6 +72,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       const res = (await ipc.client.photos.generateAndUploadShare({
         photoIds,
         cloudConfigId: selectedId,
+        locale: getDateLocale(i18n.language),
       })) as {
         success: boolean;
         url?: string;

@@ -16,18 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
-
-function toLocalMediaUrl(filePath: string | null | undefined): string {
-  if (!filePath) {
-    return "";
-  }
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface SearchResult {
   action: () => void;

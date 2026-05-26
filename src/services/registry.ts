@@ -8,8 +8,13 @@ import {
   stopEmbedding,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
-import { startWatching, stopScanning, stopWatching } from "@/services/indexer";
-import { initThumbnailer } from "@/services/thumbnailer";
+import {
+  cleanupOrphanedRecords,
+  startWatching,
+  stopScanning,
+  stopWatching,
+} from "@/services/indexer";
+import { checkAndCleanDiskCache, initThumbnailer } from "@/services/thumbnailer";
 
 // ── Service lifecycle types ───────────────────────────────────────────
 
@@ -262,6 +267,15 @@ registry.register({
   dependencies: ["database", "thumbnailer"],
   start: async () => {
     const { BrowserWindow } = await import("electron");
+
+    // 启动时清理孤立记录
+    const { removed } = await cleanupOrphanedRecords();
+    if (removed > 0) {
+      console.log(
+        `[Registry] Cleaned up ${removed} orphaned records on startup`
+      );
+    }
+
     startWatching((photoId, event) => {
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send("file-change", { type: event, photoId });
@@ -270,7 +284,7 @@ registry.register({
   },
   stop: async () => {
     stopScanning();
-    stopWatching();
+    await stopWatching();
   },
   health: async () => {
     return { status: "ok" as const };
@@ -319,5 +333,42 @@ registry.register({
       status: "degraded" as const,
       detail: "CLIP model not loaded",
     };
+  },
+});
+
+registry.register({
+  name: "thumbnailCleaner",
+  level: ServiceLevel.Optional,
+  start: async () => {
+    // 启动时清理一次
+    const result = checkAndCleanDiskCache();
+    if (result.cleaned) {
+      console.log(
+        `[Registry] Thumbnail cache cleaned on startup: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
+      );
+    }
+
+    // 每天清理一次
+    const cleanupInterval = setInterval(() => {
+      const result = checkAndCleanDiskCache();
+      if (result.cleaned) {
+        console.log(
+          `[Registry] Thumbnail cache cleaned: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
+        );
+      }
+    }, 24 * 60 * 60 * 1000);
+
+    // Store interval for cleanup
+    (global as any).__thumbnailCleanupInterval = cleanupInterval;
+  },
+  stop: async () => {
+    const interval = (global as any).__thumbnailCleanupInterval;
+    if (interval) {
+      clearInterval(interval);
+      delete (global as any).__thumbnailCleanupInterval;
+    }
+  },
+  health: async () => {
+    return { status: "ok" as const };
   },
 });
