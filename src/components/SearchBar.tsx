@@ -80,12 +80,25 @@ export function SearchBar({
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [tags, setTags] = useState<TagInfo[]>([]);
+  const [cameraModels, setCameraModels] = useState<string[]>([]);
+  const [showCameraSuggestions, setShowCameraSuggestions] = useState(false);
 
   useEffect(() => {
     ipc.client.photos
       .getTags({})
       .then((result) => {
         setTags((result as TagInfo[]) || []);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, []);
+
+  useEffect(() => {
+    ipc.client.photos
+      .getExifCandidates({})
+      .then((r: any) => {
+        setCameraModels(r.cameraModels || []);
       })
       .catch(() => {
         /* ignore */
@@ -127,6 +140,7 @@ export function SearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const cameraDropdownRef = useRef<HTMLDivElement>(null);
   const [locallyDragging, setLocallyDragging] = useState(false);
 
   function clearHistory() {
@@ -146,6 +160,12 @@ export function SearchBar({
     (v) => v && v.length > 0
   );
 
+  const cameraSuggestions = useMemo(() => {
+    if (!filters.cameraModel) return cameraModels.slice(0, 20);
+    const q = filters.cameraModel.toLowerCase();
+    return cameraModels.filter((m) => m.toLowerCase().includes(q)).slice(0, 20);
+  }, [filters.cameraModel, cameraModels]);
+
   useEffect(() => {
     function handleGlobalShortcut(e: MessageEvent) {
       if (e.data === "global-shortcut:search") {
@@ -161,6 +181,15 @@ export function SearchBar({
   // Close suggestions on blur (delay to allow click on suggestion items)
   function handleInputBlur() {
     setTimeout(() => setShowSuggestions(false), 150);
+  }
+
+  function handleCameraBlur() {
+    setTimeout(() => setShowCameraSuggestions(false), 150);
+  }
+
+  function handleCameraSuggestionClick(model: string) {
+    setFilters((prev) => ({ ...prev, cameraModel: model }));
+    setShowCameraSuggestions(false);
   }
 
   const addToHistory = useCallback((q: string) => {
@@ -517,12 +546,38 @@ export function SearchBar({
                 <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                   {t("cameraModelLabel")}
                 </label>
-                <input
-                  className={filterInputClass}
-                  onChange={(e) => updateFilter("cameraModel", e.target.value)}
-                  placeholder={t("cameraPlaceholder")}
-                  value={filters.cameraModel || ""}
-                />
+                <div className="relative" ref={cameraDropdownRef}>
+                  <input
+                    className={filterInputClass}
+                    onBlur={handleCameraBlur}
+                    onChange={(e) => {
+                      updateFilter("cameraModel", e.target.value);
+                      setShowCameraSuggestions(true);
+                    }}
+                    onFocus={() => {
+                      if (cameraSuggestions.length > 0) {
+                        setShowCameraSuggestions(true);
+                      }
+                    }}
+                    placeholder={t("cameraPlaceholder")}
+                    value={filters.cameraModel || ""}
+                  />
+                  {showCameraSuggestions && cameraSuggestions.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
+                      {cameraSuggestions.map((model) => (
+                        <button
+                          className="flex w-full items-center px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5 truncate"
+                          key={model}
+                          onClick={() => handleCameraSuggestionClick(model)}
+                          onMouseDown={(e) => e.preventDefault()}
+                          type="button"
+                        >
+                          {model}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* ISO range */}

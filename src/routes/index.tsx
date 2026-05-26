@@ -526,7 +526,7 @@ function HomePage() {
         shutterMin?: number;
         shutterMax?: number;
         limit: number;
-      } = { limit: 100 };
+      } = { limit: 500 };
       if (query.trim()) {
         searchParams.query = query.trim();
       }
@@ -776,7 +776,7 @@ function HomePage() {
     try {
       const result = await ipc.client.photos.searchByImage({
         imagePath,
-        limit: 100,
+        limit: 500,
       });
       if (result.error) {
         console.warn("[ImageSearch]", result.error);

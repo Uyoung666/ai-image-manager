@@ -130,7 +130,7 @@ export function PhotoDetailPanel({
     } else {
       setVisible(false);
     }
-  }, [photo]);
+  }, [!!photo]);
 
   useEffect(() => {
     const cached = photo ? suggestionCache.current.get(photo.id) : undefined;
