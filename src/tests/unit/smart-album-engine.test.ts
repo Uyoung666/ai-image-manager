@@ -58,7 +58,7 @@ vi.mock("electron-store", () => ({
   },
 }));
 
-import { initDatabase } from "@/db";
+import { closeDatabase, initDatabase } from "@/db";
 import {
   evaluateSmartAlbum,
   validateSmartRules,
@@ -91,6 +91,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  closeDatabase();
   cleanupTestDirs();
 });
 
