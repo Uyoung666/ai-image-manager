@@ -15,6 +15,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
+      - name: Rebuild better-sqlite3 from source
+        run: npm rebuild better-sqlite3 --build-from-source
       - name: Run unit tests
         run: npm run test:unit
 
