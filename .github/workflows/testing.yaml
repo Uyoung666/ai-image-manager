@@ -16,7 +16,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Rebuild native modules
-        run: npx electron-rebuild
+        run: |
+          node -e "const fs=require('fs');['better-sqlite3','@lancedb/lancedb'].forEach(m=>{const p='node_modules/'+m+'/build/Release';if(fs.existsSync(p))fs.rmSync(p,{recursive:true,force:true})})"
+          npx electron-rebuild -f
       - name: Run unit tests
         run: npm run test:unit
 
@@ -31,7 +33,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Rebuild native modules
-        run: npx electron-rebuild
+        run: |
+          node -e "const fs=require('fs');['better-sqlite3','@lancedb/lancedb'].forEach(m=>{const p='node_modules/'+m+'/build/Release';if(fs.existsSync(p))fs.rmSync(p,{recursive:true,force:true})})"
+          npx electron-rebuild -f
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
       - name: Create models placeholder
