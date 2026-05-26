@@ -1,6 +1,7 @@
 import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/localization/i18n";
 import {
   Dialog,
   DialogContent,
@@ -79,31 +80,31 @@ const FORMATS = [
 function toSmartPresetValue(preset: DatePreset): string {
   switch (preset) {
     case "smartPresetLastYearToday":
-      return "去年今日";
+      return i18n.t("smartPresetLastYearToday");
     case "smartPresetLast7Days":
-      return "最近7天";
+      return i18n.t("smartPresetLast7Days");
     case "smartPresetLast30Days":
-      return "最近30天";
+      return i18n.t("smartPresetLast30Days");
     case "smartPresetThisYear":
-      return "今年";
+      return i18n.t("smartPresetThisYear");
     case "smartPresetCustom":
-      return "自定义";
+      return i18n.t("smartPresetCustom");
   }
 }
 
 function toStringOperatorValue(operator: StringOp): string {
-  return operator === "operatorEquals" ? "等于" : "包含";
+  return operator === "operatorEquals" ? i18n.t("operatorEquals") : i18n.t("operatorContains");
 }
 
 function toNumberOperatorValue(operator: NumberOp): string {
   if (operator === "operatorLte") {
     return "<=";
   }
-  return operator === "operatorRange" ? "范围" : ">=";
+  return operator === "operatorRange" ? i18n.t("operatorRange") : ">=";
 }
 
 function toTagsOperatorValue(operator: TagsOp): string {
-  return operator === "operatorContainsAll" ? "包含全部" : "包含任一";
+  return operator === "operatorContainsAll" ? i18n.t("operatorContainsAll") : i18n.t("operatorContainsAny");
 }
 
 function AutocompleteInput({

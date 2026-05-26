@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getDateLocale } from "@/utils/date-locale";
 
 interface QuickPreviewPhoto {
   fileDate?: number | null;
@@ -30,7 +31,7 @@ export function QuickPreview({
   onClose,
   onNavigate,
 }: QuickPreviewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [loaded, setLoaded] = useState(false);
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
@@ -118,7 +119,7 @@ export function QuickPreview({
   }, []);
 
   const dateStr = photo.fileDate
-    ? new Date(photo.fileDate).toLocaleDateString("zh-CN", {
+    ? new Date(photo.fileDate).toLocaleDateString(getDateLocale(i18n.language), {
         year: "numeric",
         month: "long",
         day: "numeric",

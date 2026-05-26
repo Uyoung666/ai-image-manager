@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 
 interface DupPhoto {
@@ -115,8 +116,8 @@ function DuplicatesPage() {
       };
       setPairs(data.duplicates || []);
       setSelected(new Set());
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadDuplicates] failed:", err);
     } finally {
       setLoading(false);
       setScanning(false);
@@ -174,8 +175,8 @@ function DuplicatesPage() {
     if (pair.pairId) {
       try {
         await ipc.client.photos.dismissDuplicate({ pairId: pair.pairId });
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.error("[handleDismiss] failed:", err);
       }
     }
     setPairs((prev) => prev.filter((p) => p !== pair));
@@ -195,7 +196,7 @@ function DuplicatesPage() {
       );
       setSelected(new Set());
     } catch {
-      /* ignore */
+      toast.error(t("duplicateDeleteFailed"));
     } finally {
       setDeleting(false);
     }
@@ -214,7 +215,7 @@ function DuplicatesPage() {
         return n;
       });
     } catch {
-      /* ignore */
+      toast.error(t("duplicateDeleteFailed"));
     } finally {
       setDeleting(false);
     }

@@ -8,6 +8,8 @@ import {
 import { ArrowLeft, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { getDateLocale } from "@/utils/date-locale";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
 import { ipc } from "@/ipc/manager";
 
@@ -63,8 +65,8 @@ function AlbumsPage() {
         });
         setCovers(coverMap);
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadAlbums] failed:", err);
     } finally {
       setLoading(false);
     }
@@ -90,7 +92,7 @@ function AlbumsPage() {
       setShowCreate(false);
       loadAlbums();
     } catch {
-      /* ignore */
+      toast.error(t("albumCreateFailed"));
     }
     setCreating(false);
   }
@@ -297,7 +299,7 @@ function AlbumsPage() {
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
                     {album.isSmart
                       ? t("smartAlbum")
-                      : new Date(album.createdAt).toLocaleDateString(i18n.language)}
+                      : new Date(album.createdAt).toLocaleDateString(getDateLocale(i18n.language))}
                   </p>
                 </div>
               </Link>

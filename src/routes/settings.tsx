@@ -62,17 +62,17 @@ function MirrorSettingsSection() {
     { value: "auto", label: t("aiMirrorAuto"), url: null },
     {
       value: "hf-mirror",
-      label: "hf-mirror.com (推荐)",
+      label: t("aiMirrorHfMirror"),
       url: "https://hf-mirror.com",
     },
     {
       value: "modelscope",
-      label: "modelscope.cn",
+      label: t("aiMirrorModelScope"),
       url: "https://modelscope.cn",
     },
     {
       value: "official",
-      label: "HuggingFace 官方",
+      label: t("aiMirrorOfficial"),
       url: "https://huggingface.co",
     },
     { value: "custom", label: t("aiMirrorCustom"), url: customMirror },

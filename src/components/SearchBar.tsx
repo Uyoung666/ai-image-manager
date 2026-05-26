@@ -129,6 +129,16 @@ export function SearchBar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [locallyDragging, setLocallyDragging] = useState(false);
 
+  function clearHistory() {
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      /* ignore */
+    }
+    setHistory([]);
+    setShowSuggestions(false);
+  }
+
   // Filter state
   const [filters, setFilters] = useState<ExifFilters>({});
 
@@ -486,15 +496,17 @@ export function SearchBar({
                   <input
                     className={filterInputClass}
                     onChange={(e) => updateFilter("dateFrom", e.target.value)}
+                    pattern="\d{4}-\d{2}-\d{2}"
                     placeholder={t("dateFromPlaceholder")}
-                    type="date"
+                    type="text"
                     value={filters.dateFrom || ""}
                   />
                   <input
                     className={filterInputClass}
                     onChange={(e) => updateFilter("dateTo", e.target.value)}
+                    pattern="\d{4}-\d{2}-\d{2}"
                     placeholder={t("dateToPlaceholder")}
-                    type="date"
+                    type="text"
                     value={filters.dateTo || ""}
                   />
                 </div>
@@ -626,8 +638,19 @@ export function SearchBar({
           className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-foreground/5"
           ref={dropdownRef}
         >
-          <div className="px-3 py-1.5 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-            {query.trim() ? t("searchSuggestions") : t("recentSearches")}
+          <div className="flex items-center justify-between px-3 py-1.5">
+            <span className="font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+              {query.trim() ? t("searchSuggestions") : t("recentSearches")}
+            </span>
+            {!query.trim() && (
+              <button
+                className="text-[10px] text-muted-foreground/70 hover:text-foreground"
+                onClick={clearHistory}
+                type="button"
+              >
+                {t("clearAll")}
+              </button>
+            )}
           </div>
           {suggestions.map((s, i) => (
             <button

@@ -105,6 +105,25 @@ function focalToRange(focalRaw: string): { min: number; max: number } | null {
 function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+
+  const HUE_LABEL_KEYS: Record<number, string> = {
+    0: "hueRed",
+    30: "hueOrange",
+    60: "hueYellow",
+    90: "hueYellowGreen",
+    120: "hueGreen",
+    150: "hueSpringGreen",
+    180: "hueCyan",
+    210: "hueBlue",
+    240: "hueBlueViolet",
+    270: "huePurple",
+    300: "hueMagenta",
+    330: "huePink",
+  };
+  function getHueLabel(hueStart: number): string {
+    return t(HUE_LABEL_KEYS[hueStart] || "hueRed");
+  }
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
@@ -381,14 +400,12 @@ function DashboardPage() {
             >
               {/* Insight text */}
               {(() => {
-                const warmHues = ["红", "橙", "黄"];
-                const coolHues = ["蓝", "紫蓝", "紫", "紫红"];
-                const greenHues = ["黄绿", "绿", "青绿"];
                 let warmT = 0, coolT = 0, greenT = 0;
                 for (const h of colorData.hueDistribution) {
-                  if (warmHues.includes(h.label)) warmT += h.count;
-                  else if (coolHues.includes(h.label)) coolT += h.count;
-                  else if (greenHues.includes(h.label)) greenT += h.count;
+                  const hue = h.hueRange[0];
+                  if (hue >= 0 && hue < 90) warmT += h.count;
+                  else if (hue >= 210 && hue < 330) coolT += h.count;
+                  else if (hue >= 90 && hue < 180) greenT += h.count;
                 }
                 const total = warmT + coolT + greenT;
                 const max = Math.max(warmT, coolT, greenT);
@@ -437,12 +454,6 @@ function DashboardPage() {
                 </h3>
                 {(() => {
                   const maxHue = Math.max(...colorData.hueDistribution.map((h) => h.count), 1);
-                  const hueSearchMap: Record<string, string> = {
-                    红: "红色调", 橙: "橙色调", 黄: "黄色调",
-                    黄绿: "黄绿色调", 绿: "绿色调", 青绿: "青绿色调",
-                    青: "青色调", 蓝: "蓝色调", 紫蓝: "紫蓝色调",
-                    紫: "紫色调", 紫红: "紫红色调", 粉: "粉色调",
-                  };
                   return (
                     <>
                       <div className="flex h-6 w-full gap-[1px] overflow-hidden rounded-[4px]">
@@ -452,15 +463,15 @@ function DashboardPage() {
                           return (
                             <button
                               className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
-                              key={h.label}
+                              key={h.hueRange[0]}
                               style={{
                                 backgroundColor: h.hex,
                                 opacity,
                               }}
-                              title={`${h.label}: ${h.count} — ${t("colorClickToSearch")}`}
+                              title={`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}
                               onClick={() =>
                                 drillToHome({
-                                  searchQuery: hueSearchMap[h.label] || h.label,
+                                  searchQuery: `#${h.hex.replace("#", "")} 色调`,
                                 })
                               }
                             />
@@ -471,9 +482,9 @@ function DashboardPage() {
                         {colorData.hueDistribution.map((h) => (
                           <span
                             className="text-[10px] text-muted-foreground/60 text-center leading-tight"
-                            key={h.label}
+                            key={h.hueRange[0]}
                           >
-                            {h.label}
+                            {getHueLabel(h.hueRange[0])}
                           </span>
                         ))}
                       </div>

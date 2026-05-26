@@ -39,6 +39,33 @@ function loadSidebarState(): boolean {
   }
 }
 
+const GRID_SORT_FIELD_KEY = "grid_sort_field";
+const GRID_SORT_ORDER_KEY = "grid_sort_order";
+
+function loadSortField(): SortField {
+  try {
+    const raw = localStorage.getItem(GRID_SORT_FIELD_KEY);
+    if (raw === "date" || raw === "name" || raw === "size") {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "date";
+}
+
+function loadSortOrder(): SortOrder {
+  try {
+    const raw = localStorage.getItem(GRID_SORT_ORDER_KEY);
+    if (raw === "asc" || raw === "desc") {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "desc";
+}
+
 function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -80,8 +107,8 @@ function HomePage() {
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [searchLoading, setSearchLoading] = useState(false);
-  const [sortField, setSortField] = useState<SortField>("date");
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [sortField, setSortField] = useState<SortField>(loadSortField);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
 
@@ -975,6 +1002,12 @@ function HomePage() {
                 onSortChange={(s, o) => {
                   setSortField(s);
                   setSortOrder(o);
+                  try {
+                    localStorage.setItem(GRID_SORT_FIELD_KEY, s);
+                    localStorage.setItem(GRID_SORT_ORDER_KEY, o);
+                  } catch {
+                    /* ignore */
+                  }
                 }}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}

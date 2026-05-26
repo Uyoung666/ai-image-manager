@@ -7,7 +7,9 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getDateLocale } from "@/utils/date-locale";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 
@@ -229,8 +231,8 @@ export function PhotoDetailPanel({
       ]);
       setPhotoTags((pTags as TagInfo[]) || []);
       setAllTags((aTags as unknown as TagInfo[]) || []);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadTags] failed:", err);
     }
   }, [photo]);
 
@@ -264,7 +266,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("addTagFailed"));
     }
   }
 
@@ -277,7 +279,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("removeTagFailed"));
     }
   }
 
@@ -289,7 +291,7 @@ export function PhotoDetailPanel({
       await ipc.client.photos.confirmPhotoTag({ photoId: photo.id, tagId });
       loadTags();
     } catch {
-      /* ignore */
+      toast.error(t("confirmTagFailed"));
     }
   }
 
@@ -313,7 +315,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("createTagFailed"));
     }
   }
 
@@ -330,6 +332,7 @@ export function PhotoDetailPanel({
           ?.suggestions || []
       );
     } catch {
+      toast.error(t("aiSuggestFailed"));
       setAiSuggestions([]);
     } finally {
       setAiLoading(false);
@@ -366,7 +369,7 @@ export function PhotoDetailPanel({
         prev ? prev.filter((s) => s.tag !== tagName) : null
       );
     } catch {
-      /* ignore */
+      toast.error(t("applySuggestionFailed"));
     }
   }
 
@@ -390,7 +393,7 @@ export function PhotoDetailPanel({
   }
 
   const dateStr = exif?.dateTaken
-    ? new Date(exif.dateTaken).toLocaleDateString(i18n.language, {
+    ? new Date(exif.dateTaken).toLocaleDateString(getDateLocale(i18n.language), {
         year: "numeric",
         month: "long",
         day: "numeric",
