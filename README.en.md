@@ -4,11 +4,12 @@
 
 Double-click to launch. Index folders in-place (no copying of original files). CLIP semantic search, smart deduplication, auto-tagging, face recognition, and cloud sharing.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
 > **中文 README**: [README.md](README.md)
+> **User Guide**: [GUIDE.en.md](GUIDE.en.md) | **使用指南**: [GUIDE.md](GUIDE.md)
 
 ---
 
@@ -27,7 +28,7 @@ Download the latest version from the [Releases](https://github.com/Uyoung666/ai-
 
 ### Option 1: Installer (Recommended)
 
-Download `AI Image Manager-1.0.0 Setup.exe` and run the setup wizard.
+Download `AI Image Manager-1.0.1 Setup.exe` and run the setup wizard.
 
 - Installs to the default system location (`%LocalAppData%\AI Image Manager`)
 - Creates desktop shortcut and Start Menu entry automatically
@@ -35,7 +36,7 @@ Download `AI Image Manager-1.0.0 Setup.exe` and run the setup wizard.
 
 ### Option 2: Portable
 
-Download `AI Image Manager-win32-x64-1.0.0.zip`, extract to any directory, and run `AI Image Manager.exe`.
+Download `AI Image Manager-win32-x64-1.0.1.zip`, extract to any directory, and run `AI Image Manager.exe`.
 
 - No registry writes, no shortcuts created
 - Run from a USB drive or external disk
