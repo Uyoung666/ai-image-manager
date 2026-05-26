@@ -57,7 +57,7 @@
     "i18next": "^26.0.3",
     "leaflet": "^1.9.4",
     "lru-cache": "^11.1.0",
-    "lucide-react": "^1.14.0",
+    "lucide-react": "^1.16.0",
     "p-queue": "^8.1.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
