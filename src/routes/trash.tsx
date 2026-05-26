@@ -6,18 +6,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-
-function toLocalMediaUrl(filePath: string | null | undefined): string {
-  if (!filePath) {
-    return "";
-  }
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface DeletedPhoto {
   deletedAt: number | null;

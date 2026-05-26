@@ -13,7 +13,8 @@ export function buildHtmlGallery(
       iso?: number;
       dateTaken?: string;
     } | null;
-  }>
+  }>,
+  locale = "zh-CN"
 ): string {
   const itemsJson = JSON.stringify(
     photos.map((p) => ({
@@ -151,7 +152,7 @@ footer a{color:var(--accent);text-decoration:none}
 })();`;
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">

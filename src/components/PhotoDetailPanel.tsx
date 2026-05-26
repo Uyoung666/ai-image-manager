@@ -7,9 +7,12 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getDateLocale } from "@/utils/date-locale";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoDetail {
   filename: string;
@@ -86,15 +89,6 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
-
 export function PhotoDetailPanel({
   photo,
   onClose,
@@ -122,6 +116,7 @@ export function PhotoDetailPanel({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
+  const suggestionCache = useRef<Map<number, Array<{tag: string; confidence: number}>>>(new Map());
 
   if (photo) {
     lastPhotoRef.current = photo;
@@ -135,10 +130,15 @@ export function PhotoDetailPanel({
     } else {
       setVisible(false);
     }
-  }, [photo]);
+  }, [!!photo]);
 
   useEffect(() => {
-    setAiSuggestions(null);
+    const cached = photo ? suggestionCache.current.get(photo.id) : undefined;
+    if (cached) {
+      setAiSuggestions(cached);
+    } else {
+      setAiSuggestions(null);
+    }
     setAiLoading(false);
     setNewTagName("");
     setShowTagInput(false);
@@ -229,8 +229,8 @@ export function PhotoDetailPanel({
       ]);
       setPhotoTags((pTags as TagInfo[]) || []);
       setAllTags((aTags as unknown as TagInfo[]) || []);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadTags] failed:", err);
     }
   }, [photo]);
 
@@ -264,7 +264,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("addTagFailed"));
     }
   }
 
@@ -277,7 +277,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("removeTagFailed"));
     }
   }
 
@@ -289,7 +289,7 @@ export function PhotoDetailPanel({
       await ipc.client.photos.confirmPhotoTag({ photoId: photo.id, tagId });
       loadTags();
     } catch {
-      /* ignore */
+      toast.error(t("confirmTagFailed"));
     }
   }
 
@@ -313,7 +313,7 @@ export function PhotoDetailPanel({
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
-      /* ignore */
+      toast.error(t("createTagFailed"));
     }
   }
 
@@ -325,11 +325,21 @@ export function PhotoDetailPanel({
     setAiSuggestions(null);
     try {
       const result = await ipc.client.photos.suggestTags({ id: photo.id });
-      setAiSuggestions(
+      const suggestions =
         (result as { suggestions?: Array<{ tag: string; confidence: number }> })
-          ?.suggestions || []
-      );
+          ?.suggestions || [];
+      setAiSuggestions(suggestions);
+      // Cache the result
+      if (suggestions.length > 0) {
+        suggestionCache.current.set(photo.id, suggestions);
+        // Limit cache size to 20
+        if (suggestionCache.current.size > 20) {
+          const firstKey = suggestionCache.current.keys().next().value;
+          if (firstKey !== undefined) suggestionCache.current.delete(firstKey);
+        }
+      }
     } catch {
+      toast.error(t("aiSuggestFailed"));
       setAiSuggestions([]);
     } finally {
       setAiLoading(false);
@@ -366,7 +376,7 @@ export function PhotoDetailPanel({
         prev ? prev.filter((s) => s.tag !== tagName) : null
       );
     } catch {
-      /* ignore */
+      toast.error(t("applySuggestionFailed"));
     }
   }
 
@@ -390,7 +400,7 @@ export function PhotoDetailPanel({
   }
 
   const dateStr = exif?.dateTaken
-    ? new Date(exif.dateTaken).toLocaleDateString(i18n.language, {
+    ? new Date(exif.dateTaken).toLocaleDateString(getDateLocale(i18n.language), {
         year: "numeric",
         month: "long",
         day: "numeric",

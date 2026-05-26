@@ -50,8 +50,8 @@ function AlbumDetailPage() {
         id: Number(albumId),
       });
       setAlbum(result as unknown as AlbumDetail);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[loadAlbum] failed:", err);
     } finally {
       setLoading(false);
     }
@@ -81,8 +81,8 @@ function AlbumDetailPage() {
     const nextFav = !allFavorite;
     try {
       await ipc.client.photos.toggleFavorite({ ids, favorite: nextFav });
-    } catch {
-      /* skip */
+    } catch (err) {
+      console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
     queryClient.invalidateQueries({ queryKey: ["photos"] });
@@ -151,7 +151,7 @@ function AlbumDetailPage() {
       setAlbum((prev) => (prev ? { ...prev, name: nameInput.trim() } : prev));
       setEditingName(false);
     } catch {
-      /* ignore */
+      toast.error(t("albumRenameFailed"));
     }
   }
 

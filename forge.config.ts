@@ -166,9 +166,7 @@ const config: ForgeConfig = {
             "sharp"
           );
           if (fs.existsSync(nestedSharpDir2)) {
-            console.log(
-              "[afterPrune] nested sharp still present (expected)"
-            );
+            console.log("[afterPrune] nested sharp still present (expected)");
           }
           done();
         } catch (err) {

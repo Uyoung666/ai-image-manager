@@ -455,7 +455,8 @@ export function Sidebar({
     for (const photoId of ids) {
       try {
         await ipc.client.photos.setPhotoTag({ photoId, tagId });
-      } catch {
+      } catch (err) {
+        console.error("[handleDropOnTag] failed to add tag to photo:", err);
         failed++;
       }
     }
@@ -466,8 +467,8 @@ export function Sidebar({
         folderId: activeFolderId ?? undefined,
       });
       setTags((updated as TagInfo[]) || []);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.error("[handleDropOnTag] failed to refresh tags:", err);
     }
     const displayName = tag?.name
       ? getTagDisplayName(tag.name, i18n.language)
@@ -524,8 +525,8 @@ export function Sidebar({
           clearInterval(interval);
           interval = null;
         }
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.error("[Sidebar loadTags] failed:", err);
       }
     }
 

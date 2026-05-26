@@ -26,7 +26,7 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildSharePageHtml(items: SharePhoto[]): string {
+function buildSharePageHtml(items: SharePhoto[], locale = "zh-CN"): string {
   const itemsJson = JSON.stringify(
     items.map((p) => ({
       fn: p.filename,
@@ -161,9 +161,9 @@ search.addEventListener("input",function(){
 render(filteredData);
 })();`;
 
-  const title = `AI Image Manager — ${new Date().toLocaleDateString("zh-CN")}`;
+  const title = `AI Image Manager — ${new Date().toLocaleDateString(locale)}`;
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -192,7 +192,7 @@ render(filteredData);
 </html>`;
 }
 
-export async function generateSharePage(photoIds: number[]): Promise<string> {
+export async function generateSharePage(photoIds: number[], locale = "zh-CN"): Promise<string> {
   const db = getDatabase();
 
   const photoList = db
@@ -255,8 +255,8 @@ export async function generateSharePage(photoIds: number[]): Promise<string> {
     sharePhotos.push({
       filename: photo.filename,
       dateTaken: exif?.dateTaken
-        ? new Date(exif.dateTaken).toLocaleDateString("zh-CN")
-        : new Date(photo.fileDate || Date.now()).toLocaleDateString("zh-CN"),
+        ? new Date(exif.dateTaken).toLocaleDateString(locale)
+        : new Date(photo.fileDate || Date.now()).toLocaleDateString(locale),
       camera: exif?.cameraModel ?? "",
       lens: exif?.lensModel ?? "",
       focalLength: exif?.focalLength?.toString() ?? "",
@@ -270,5 +270,5 @@ export async function generateSharePage(photoIds: number[]): Promise<string> {
     });
   }
 
-  return buildSharePageHtml(sharePhotos);
+  return buildSharePageHtml(sharePhotos, locale);
 }

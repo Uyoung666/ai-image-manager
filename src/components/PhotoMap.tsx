@@ -4,6 +4,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { Globe, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 export interface GeoLocation {
   filename: string | null;
@@ -13,15 +14,6 @@ export interface GeoLocation {
   path: string;
   photoId: number;
   width: number | null;
-}
-
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
 }
 
 const markerIcon = L.divIcon({
