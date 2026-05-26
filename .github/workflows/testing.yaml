@@ -7,7 +7,7 @@ on:
 
 jobs:
   tests-unit:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -15,6 +15,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm ci
+      - name: Rebuild native modules
+        run: npx electron-rebuild
       - name: Run unit tests
         run: npm run test:unit
 
@@ -28,8 +30,12 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm ci
+      - name: Rebuild native modules
+        run: npx electron-rebuild
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
+      - name: Create models placeholder
+        run: node -e "fs.mkdirSync('models',{recursive:true})"
       - name: Create Executable
         run: npm run make
       - name: Run Playwright tests
