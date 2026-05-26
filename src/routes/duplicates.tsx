@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface DupPhoto {
   createdAt: number;
@@ -26,15 +27,6 @@ interface DuplicatePair {
 }
 
 type RetentionStrategy = "larger" | "older" | "manual";
-
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) {

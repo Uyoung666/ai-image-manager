@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoDetail {
   filename: string;
@@ -88,15 +89,6 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
-
 export function PhotoDetailPanel({
   photo,
   onClose,
@@ -124,6 +116,7 @@ export function PhotoDetailPanel({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
+  const suggestionCache = useRef<Map<number, Array<{tag: string; confidence: number}>>>(new Map());
 
   if (photo) {
     lastPhotoRef.current = photo;
@@ -140,7 +133,12 @@ export function PhotoDetailPanel({
   }, [photo]);
 
   useEffect(() => {
-    setAiSuggestions(null);
+    const cached = photo ? suggestionCache.current.get(photo.id) : undefined;
+    if (cached) {
+      setAiSuggestions(cached);
+    } else {
+      setAiSuggestions(null);
+    }
     setAiLoading(false);
     setNewTagName("");
     setShowTagInput(false);
@@ -327,10 +325,19 @@ export function PhotoDetailPanel({
     setAiSuggestions(null);
     try {
       const result = await ipc.client.photos.suggestTags({ id: photo.id });
-      setAiSuggestions(
+      const suggestions =
         (result as { suggestions?: Array<{ tag: string; confidence: number }> })
-          ?.suggestions || []
-      );
+          ?.suggestions || [];
+      setAiSuggestions(suggestions);
+      // Cache the result
+      if (suggestions.length > 0) {
+        suggestionCache.current.set(photo.id, suggestions);
+        // Limit cache size to 20
+        if (suggestionCache.current.size > 20) {
+          const firstKey = suggestionCache.current.keys().next().value;
+          if (firstKey !== undefined) suggestionCache.current.delete(firstKey);
+        }
+      }
     } catch {
       toast.error(t("aiSuggestFailed"));
       setAiSuggestions([]);

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { getDateLocale } from "@/utils/date-locale";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
 import { ipc } from "@/ipc/manager";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface AlbumInfo {
   coverPhotoId: number | null;
@@ -97,14 +98,6 @@ function AlbumsPage() {
     setCreating(false);
   }
 
-  function toLocalMediaUrl(filePath: string): string {
-    const encoded = filePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .map((s) => encodeURIComponent(s))
-      .join("/");
-    return `local-media://${encoded}`;
-  }
 
   return (
     <div className="flex h-full flex-col bg-background">

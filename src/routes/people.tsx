@@ -5,8 +5,7 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import {
-  ArrowLeft,
+import { ArrowLeft,
   Check,
   Merge,
   Play,
@@ -20,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ipc } from "@/ipc/manager";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface FaceIdentity {
   coverBbox: { x: number; y: number; width: number; height: number } | null;
@@ -213,14 +213,6 @@ function PeoplePage() {
     }
   }
 
-  function toLocalMediaUrl(filePath: string): string {
-    const encoded = filePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .map((s) => encodeURIComponent(s))
-      .join("/");
-    return `local-media://${encoded}`;
-  }
 
   return (
     <div className="flex h-full flex-col bg-background">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getDateLocale } from "@/utils/date-locale";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface QuickPreviewPhoto {
   fileDate?: number | null;
@@ -15,15 +16,6 @@ interface QuickPreviewProps {
   onClose: () => void;
   onNavigate: (direction: -1 | 1) => void;
   photo: QuickPreviewPhoto;
-}
-
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
 }
 
 export function QuickPreview({

@@ -12,6 +12,7 @@ import "yet-another-react-lightbox/styles.css";
 import "yet-another-react-lightbox/plugins/captions.css";
 import "yet-another-react-lightbox/plugins/counter.css";
 import "yet-another-react-lightbox/plugins/thumbnails.css";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface Photo {
   filename: string;
@@ -33,15 +34,6 @@ const SLIDESHOW_DELAYS = [
   { label: "5s", value: 5000 },
   { label: "10s", value: 10_000 },
 ];
-
-function toLocalMediaUrl(filePath: string): string {
-  const encoded = filePath
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `local-media://${encoded}`;
-}
 
 function formatDimensions(w: number, h: number): string {
   if (!(w && h)) {
