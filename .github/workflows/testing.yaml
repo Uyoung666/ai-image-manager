@@ -14,9 +14,9 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: |
-          npm cache clean --force
-          npm install
+        run: npm install --ignore-scripts
+      - name: Build better-sqlite3 for Node 22
+        run: npm rebuild better-sqlite3
       - name: Run unit tests
         run: npm run test:unit
 
