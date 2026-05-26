@@ -171,12 +171,15 @@ export function MasonryGrid({
   // item at the same visual position in the viewport.
   const prevPositionsRef = useRef(positions);
   const prevScrollToIdRef = useRef(scrollToId);
+  const prevItemCountRef = useRef(items.length);
 
   useLayoutEffect(() => {
     const prevPositions = prevPositionsRef.current;
     const prevScrollToId = prevScrollToIdRef.current;
+    const prevItemCount = prevItemCountRef.current;
     prevPositionsRef.current = positions;
     prevScrollToIdRef.current = scrollToId;
+    prevItemCountRef.current = items.length;
 
     if (positions.length === 0) {
       return;
@@ -190,7 +193,16 @@ export function MasonryGrid({
     const scrollToIdChanged = scrollToId !== prevScrollToId;
 
     if (scrollToId != null) {
-      if (scrollToIdChanged || positionsChanged) {
+      // Scroll to selected photo when:
+      //   1) user just selected it (scrollToIdChanged), or
+      //   2) layout recalculated from container resize (positionsChanged
+      //      without new items — detail panel, window resize).
+      // Skip when items grew (infinite scroll) so we don't yank the user
+      // back to the selected photo while they're browsing.
+      const shouldScroll =
+        scrollToIdChanged ||
+        (positionsChanged && items.length <= prevItemCount);
+      if (shouldScroll) {
         const idx = items.findIndex((item) => item.id === scrollToId);
         if (idx >= 0 && positions[idx]) {
           const pos = positions[idx];
