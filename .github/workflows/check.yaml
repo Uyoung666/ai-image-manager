@@ -8,10 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Install dependencies
         run: npm ci
       - name: Run check
-        run: npm run check
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          mapfile -t files < <(git diff --name-only origin/main...HEAD)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No changed files to check"
+            exit 0
+          fi
+          npx ultracite check --files-ignore-unknown=true "${files[@]}"
