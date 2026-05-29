@@ -60,6 +60,10 @@ const PANEL_WIDTH_KEY = "detail_panel_width";
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 480;
 const DEFAULT_PANEL_WIDTH = 300;
+const SUGGESTION_CACHE_MAX = 20;
+
+// Module-level cache so AI suggestions survive panel close/reopen and lightbox navigation
+const suggestionCache = new Map<number, Array<{ tag: string; confidence: number }>>();
 
 function loadPanelWidth(): number {
   try {
@@ -116,7 +120,6 @@ export function PhotoDetailPanel({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
-  const suggestionCache = useRef<Map<number, Array<{tag: string; confidence: number}>>>(new Map());
 
   if (photo) {
     lastPhotoRef.current = photo;
@@ -133,7 +136,7 @@ export function PhotoDetailPanel({
   }, [!!photo]);
 
   useEffect(() => {
-    const cached = photo ? suggestionCache.current.get(photo.id) : undefined;
+    const cached = photo ? suggestionCache.get(photo.id) : undefined;
     if (cached) {
       setAiSuggestions(cached);
     } else {
@@ -331,11 +334,11 @@ export function PhotoDetailPanel({
       setAiSuggestions(suggestions);
       // Cache the result
       if (suggestions.length > 0) {
-        suggestionCache.current.set(photo.id, suggestions);
+        suggestionCache.set(photo.id, suggestions);
         // Limit cache size to 20
-        if (suggestionCache.current.size > 20) {
-          const firstKey = suggestionCache.current.keys().next().value;
-          if (firstKey !== undefined) suggestionCache.current.delete(firstKey);
+        if (suggestionCache.size > 20) {
+          const firstKey = suggestionCache.keys().next().value;
+          if (firstKey !== undefined) suggestionCache.delete(firstKey);
         }
       }
     } catch {

@@ -240,7 +240,6 @@ export function PhotoLightbox({
         programmaticRef.current = false;
         return;
       }
-      setInfoPanelVisible(false);
       setPhotoIndex(newIndex);
       setPlaying(false);
     },

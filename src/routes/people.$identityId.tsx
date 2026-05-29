@@ -1,12 +1,24 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, UserMinus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
+import { BatchRenameDialog } from "@/components/BatchRenameDialog";
+import { CloudUploadDialog } from "@/components/CloudUploadDialog";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ExportDialog } from "@/components/ExportDialog";
+import { FormatConvertDialog } from "@/components/FormatConvertDialog";
+import type { MenuState } from "@/components/PhotoContextMenu";
+import { PhotoContextMenu } from "@/components/PhotoContextMenu";
+import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
+import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { QuickPreview } from "@/components/QuickPreview";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
+import { ShareDialog } from "@/components/ShareDialog";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
@@ -28,12 +40,23 @@ interface IdentityDetail {
   photos: Photo[];
 }
 
-interface CtxMenu {
-  open: boolean;
-  photoId: number | null;
-  photoPath: string | null;
-  x: number;
-  y: number;
+const GRID_SORT_FIELD_KEY = "person_grid_sort_field";
+const GRID_SORT_ORDER_KEY = "person_grid_sort_order";
+
+function loadSortField(): SortField {
+  try {
+    const raw = localStorage.getItem(GRID_SORT_FIELD_KEY);
+    if (raw === "date" || raw === "name" || raw === "size") return raw;
+  } catch { /* ignore */ }
+  return "date";
+}
+
+function loadSortOrder(): SortOrder {
+  try {
+    const raw = localStorage.getItem(GRID_SORT_ORDER_KEY);
+    if (raw === "asc" || raw === "desc") return raw;
+  } catch { /* ignore */ }
+  return "desc";
 }
 
 function PersonDetailPage() {
@@ -45,28 +68,37 @@ function PersonDetailPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [ctxMenu, setCtxMenu] = useState<CtxMenu>({
-    open: false,
-    photoId: null,
-    photoPath: null,
-    x: 0,
-    y: 0,
-  });
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
   const composingRef = useRef(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [confirmRemovePhotoId, setConfirmRemovePhotoId] = useState<number | null>(
-    null
-  );
+  const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
+  const [detailDismissed, setDetailDismissed] = useState(false);
+  const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
+  const [ctxMenu, setCtxMenu] = useState<MenuState>({
+    open: false, x: 0, y: 0, photoId: null, photoPath: null,
+  });
+  const [sortField, setSortField] = useState<SortField>(loadSortField);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
+  const [confirmRemovePhotoId, setConfirmRemovePhotoId] = useState<number | null>(null);
+  const [confirmRemoveIds, setConfirmRemoveIds] = useState<number[]>([]);
   const [allFavorite, setAllFavorite] = useState(false);
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<number[]>([]);
-
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [convertDialogOpen, setConvertDialogOpen] = useState(false);
+  const [addToAlbumOpen, setAddToAlbumOpen] = useState(false);
+  const [addToAlbumIds, setAddToAlbumIds] = useState<number[]>([]);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportIds, setExportIds] = useState<number[]>([]);
+  const [cloudUploadOpen, setCloudUploadOpen] = useState(false);
+  const [cloudUploadIds, setCloudUploadIds] = useState<number[]>([]);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareIds, setShareIds] = useState<number[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
 
   const loadIdentity = useCallback(async () => {
     try {
-      const result = await ipc.client.faces.getFaceIdentity({
-        id: Number(identityId),
-      });
+      const result = await ipc.client.faces.getFaceIdentity({ id: Number(identityId) });
       const data = result as unknown as IdentityDetail;
       setIdentity(data);
       setNameInput(data.name || "");
@@ -77,79 +109,209 @@ function PersonDetailPage() {
     }
   }, [identityId]);
 
-  useEffect(() => {
-    loadIdentity();
-  }, [loadIdentity]);
+  useEffect(() => { loadIdentity(); }, [loadIdentity]);
 
-  useEffect(() => {
-    if (!ctxMenu.open) {
-      return;
-    }
-    const dismiss = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setCtxMenu((m) => ({ ...m, open: false }));
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setCtxMenu((m) => ({ ...m, open: false }));
-      }
-    };
-    const timer = setTimeout(() => {
-      document.addEventListener("mousedown", dismiss, true);
-      document.addEventListener("contextmenu", dismiss, true);
-    }, 0);
-    document.addEventListener("keydown", keyHandler);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("mousedown", dismiss, true);
-      document.removeEventListener("contextmenu", dismiss, true);
-      document.removeEventListener("keydown", keyHandler);
-    };
-  }, [ctxMenu.open]);
+  const photos = useMemo(() => {
+    const raw = identity?.photos || [];
+    const sorted = [...raw];
+    sorted.sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = a.filename.localeCompare(b.filename);
+      else if (sortField === "size") cmp = a.fileSize - b.fileSize;
+      if (cmp === 0) cmp = (a.id || 0) - (b.id || 0);
+      return sortOrder === "asc" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [identity?.photos, sortField, sortOrder]);
 
-  async function handleSaveName() {
-    if (!(identity && nameInput.trim())) {
-      return;
+  // Sync detailPhoto when single photo selected
+  useEffect(() => {
+    if (detailDismissed) return;
+    if (selectedIds.size === 1) {
+      const id = selectedIds.values().next().value as number;
+      const p = photos.find((ph) => ph.id === id);
+      if (p) setDetailPhoto(p);
+    } else if (selectedIds.size === 0 && detailPhoto) {
+      setDetailPhoto(null);
     }
-    try {
-      await ipc.client.faces.updateFaceIdentity({
-        id: identity.id,
-        name: nameInput.trim(),
-      });
-      setIdentity((prev) =>
-        prev ? { ...prev, name: nameInput.trim() } : prev
-      );
-      setEditingName(false);
-    } catch {
-      toast.error(t("personRenameFailed"));
-    }
+  }, [selectedIds, photos, detailDismissed, detailPhoto]);
+
+  // --- handlers ---
+
+  function handleSelect(id: number, event: React.MouseEvent) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const idx = photos.findIndex((p) => p.id === id);
+      if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
+        const [from, to] = lastClickedIdx < idx ? [lastClickedIdx, idx] : [idx, lastClickedIdx];
+        for (let i = from; i <= to; i++) next.add(photos[i].id);
+      } else if (event.ctrlKey || event.metaKey) {
+        next.has(id) ? next.delete(id) : next.add(id);
+        if (idx >= 0) setLastClickedIdx(idx);
+      } else {
+        next.clear();
+        next.add(id);
+        if (idx >= 0) setLastClickedIdx(idx);
+      }
+      return next;
+    });
   }
 
+  function handleDoubleClick(id: number) {
+    const idx = photos.findIndex((p) => p.id === id);
+    if (idx >= 0) setLightboxIndex(idx);
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    const card = (e.target as HTMLElement).closest("[data-photo-id]") as HTMLElement | null;
+    if (!card) return;
+    const id = Number.parseInt(card.dataset.photoId || "", 10);
+    const path = card.dataset.photoPath || null;
+    if (!id) return;
+    e.preventDefault();
+    setCtxMenu({ open: true, x: e.clientX, y: e.clientY, photoId: id, photoPath: path });
+  }
+
+  async function handleOpenExplorer(filePath: string) {
+    await ipc.client.shell.openInExplorer({ path: filePath });
+  }
+
+  function handleDetailNavigate(direction: "prev" | "next") {
+    if (!detailPhoto) return;
+    const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
+    if (currentIdx < 0) return;
+    const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
+    if (nextIdx < 0 || nextIdx >= photos.length) return;
+    const nextPhoto = photos[nextIdx];
+    setSelectedIds(new Set([nextPhoto.id]));
+    setLastClickedIdx(nextIdx);
+    setDetailDismissed(false);
+    setDetailPhoto(nextPhoto);
+  }
+
+  // Single-photo actions (triggered from context menu)
+  function handleToggleFavorite(id: number) {
+    const photo = photos.find((p) => p.id === id);
+    if (!photo) return;
+    const prevVal = !!photo.isFavorite;
+    const newVal = !prevVal;
+    ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal }).then(() => {
+      setIdentity((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          photos: prev.photos.map((p) =>
+            p.id === id ? { ...p, isFavorite: newVal } : p
+          ),
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"), {
+        action: {
+          label: t("toastUndo"),
+          onClick: async () => {
+            await ipc.client.photos.toggleFavorite({ ids: [id], favorite: prevVal });
+            setIdentity((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                photos: prev.photos.map((p) =>
+                  p.id === id ? { ...p, isFavorite: prevVal } : p
+                ),
+              };
+            });
+            queryClient.invalidateQueries({ queryKey: ["photos"] });
+          },
+        },
+      });
+    });
+  }
+
+  function handleDeletePhoto(id: number) {
+    setPendingDeleteIds([id]);
+    setDeleteConfirmOpen(true);
+  }
+
+  function handleAddToAlbum(id: number) {
+    setAddToAlbumIds([id]);
+    setAddToAlbumOpen(true);
+  }
+
+  function handleExportPhoto(id: number) {
+    setExportIds([id]);
+    setExportDialogOpen(true);
+  }
+
+  function handleUploadToCloud(id: number) {
+    setCloudUploadIds([id]);
+    setCloudUploadOpen(true);
+  }
+
+  function handleShare(id: number) {
+    setShareIds([id]);
+    setShareDialogOpen(true);
+  }
+
+  // Batch actions
+  function handleExportSelected() {
+    setExportIds(Array.from(selectedIds));
+    setExportDialogOpen(true);
+  }
+
+  function handleUploadSelectedToCloud() {
+    setCloudUploadIds(Array.from(selectedIds));
+    setCloudUploadOpen(true);
+  }
+
+  function handleShareSelected() {
+    setShareIds(Array.from(selectedIds));
+    setShareDialogOpen(true);
+  }
+
+  // Remove photo(s) from person identity
   function handleRemoveFace(photoId: number) {
-    if (!identity) {
-      return;
-    }
+    if (!identity) return;
     const face = identity.faces.find((f) => f.photoId === photoId);
-    if (!face) {
-      return;
-    }
+    if (!face) return;
     setConfirmRemovePhotoId(photoId);
   }
 
-  async function performRemoveFace() {
-    if (!(identity && confirmRemovePhotoId !== null)) {
-      return;
+  function handleRemoveSelected() {
+    setConfirmRemoveIds(Array.from(selectedIds));
+  }
+
+  async function performRemoveSelected() {
+    if (!(identity && confirmRemoveIds.length > 0)) return;
+    const ids = confirmRemoveIds;
+    setConfirmRemoveIds([]);
+    try {
+      for (const photoId of ids) {
+        const face = identity.faces.find((f) => f.photoId === photoId);
+        if (face) {
+          const result = await ipc.client.faces.removeFaceFromIdentity({
+            identityId: identity.id, faceVectorId: face.id,
+          }) as { ok: boolean; remainingCount: number };
+          if (result.remainingCount === 0) {
+            navigate({ to: "/people" as const });
+            return;
+          }
+        }
+      }
+      setSelectedIds(new Set());
+      loadIdentity();
+    } catch {
+      toast.error(t("removeFaceFailed"));
     }
+  }
+
+  async function performRemoveFace() {
+    if (!(identity && confirmRemovePhotoId !== null)) return;
     const face = identity.faces.find((f) => f.photoId === confirmRemovePhotoId);
     setConfirmRemovePhotoId(null);
-    if (!face) {
-      return;
-    }
+    if (!face) return;
     try {
       const result = (await ipc.client.faces.removeFaceFromIdentity({
-        identityId: identity.id,
-        faceVectorId: face.id,
+        identityId: identity.id, faceVectorId: face.id,
       })) as { ok: boolean; remainingCount: number };
       if (result.remainingCount === 0) {
         navigate({ to: "/people" as const });
@@ -159,19 +321,6 @@ function PersonDetailPage() {
     } catch {
       toast.error(t("removeFaceFailed"));
     }
-  }
-
-  function handleContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-    const target = (e.target as HTMLElement).closest(
-      "[data-photo-id]"
-    ) as HTMLElement | null;
-    if (!target) {
-      return;
-    }
-    const photoId = Number(target.dataset.photoId);
-    const photoPath = target.dataset.photoPath || null;
-    setCtxMenu({ open: true, photoId, photoPath, x: e.clientX, y: e.clientY });
   }
 
   async function handleFavoriteSelected() {
@@ -186,7 +335,7 @@ function PersonDetailPage() {
     queryClient.invalidateQueries({ queryKey: ["photos"] });
   }
 
-  async function handleDeleteSelected() {
+  function handleDeleteSelected() {
     setConfirmDeleteIds(Array.from(selectedIds));
   }
 
@@ -195,12 +344,7 @@ function PersonDetailPage() {
       await ipc.client.photos.deletePhotos({ ids: confirmDeleteIds });
       toast.success(t("deletedPhotosCount", { count: confirmDeleteIds.length }));
       setIdentity((prev) =>
-        prev
-          ? {
-              ...prev,
-              photos: prev.photos.filter((p) => !confirmDeleteIds.includes(p.id)),
-            }
-          : prev
+        prev ? { ...prev, photos: prev.photos.filter((p) => !confirmDeleteIds.includes(p.id)) } : prev
       );
       setSelectedIds(new Set());
       queryClient.invalidateQueries({ queryKey: ["photos"] });
@@ -212,38 +356,163 @@ function PersonDetailPage() {
     }
   }
 
-  function handleSelect(id: number, event: React.MouseEvent) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (event.ctrlKey || event.metaKey) {
-        if (next.has(id)) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-      } else {
-        next.clear();
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  function handleDoubleClick(id: number) {
-    const idx = photos.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      setLightboxIndex(idx);
+  async function executeDelete() {
+    const ids = pendingDeleteIds;
+    setDeleteConfirmOpen(false);
+    setPendingDeleteIds([]);
+    try {
+      await ipc.client.photos.deletePhotos({ ids });
+      setIdentity((prev) =>
+        prev ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) } : prev
+      );
+      setSelectedIds((prev) => {
+        const n = new Set(prev);
+        for (const id of ids) n.delete(id);
+        return n;
+      });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(t("toastDeletedCount", { count: ids.length }));
+    } catch {
+      toast.error(t("toastDeleteFailed"));
     }
   }
 
-  function handleOpenExplorer(path: string) {
-    ipc.client.shell.openInExplorer({ path }).catch(() => {});
+  async function handleRenameSelected(pattern: string) {
+    const ids = Array.from(selectedIds);
+    try {
+      const result = await ipc.client.photos.renamePhotos({ ids, pattern });
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      const r = result as { renamed: number; errors: number; results: Array<{ id: number; oldName: string; newName: string; error?: string }> };
+      toast.success(r.errors > 0 ? t("toastRenamePartial", { count: r.renamed, errors: r.errors }) : t("toastRenameCount", { count: r.renamed }));
+      loadIdentity();
+      return r;
+    } catch {
+      toast.error(t("toastRenameFailed"));
+      return { renamed: 0, errors: ids.length, results: [] };
+    }
   }
 
-  const photos = identity?.photos || [];
+  async function handleConvertSelected(options: { format: "jpg" | "png" | "webp" | "avif"; quality: number; maxWidth: number; outputDir: string }) {
+    const ids = Array.from(selectedIds);
+    try {
+      const result = await ipc.client.photos.convertPhotos({ ids, format: options.format, quality: options.quality, maxWidth: options.maxWidth || undefined, outputDir: options.outputDir });
+      const r = result as { converted: number; outputDir: string };
+      toast.success(t("toastConvertedCount", { count: r.converted }));
+      return r;
+    } catch {
+      toast.error(t("toastConvertFailed"));
+      return { converted: 0, outputDir: options.outputDir };
+    }
+  }
+
+  async function handleSaveName() {
+    if (!(identity && nameInput.trim())) return;
+    try {
+      await ipc.client.faces.updateFaceIdentity({ id: identity.id, name: nameInput.trim() });
+      setIdentity((prev) => (prev ? { ...prev, name: nameInput.trim() } : prev));
+      setEditingName(false);
+    } catch {
+      toast.error(t("personRenameFailed"));
+    }
+  }
+
+  // Keyboard shortcuts
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault();
+        setSelectedIds(new Set(photos.map((p) => p.id)));
+        return;
+      }
+
+      if (e.key === "Delete" && selectedIds.size > 0) {
+        e.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      if (e.key === "F2" && selectedIds.size > 0) {
+        e.preventDefault();
+        setRenameDialogOpen(true);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "E") {
+        e.preventDefault();
+        if (selectedIds.size > 0) handleExportSelected();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
+        e.preventDefault();
+        if (selectedIds.size > 0) setConvertDialogOpen(true);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (quickPreviewIndex >= 0) { setQuickPreviewIndex(-1); return; }
+        if (renameDialogOpen) { setRenameDialogOpen(false); return; }
+        if (convertDialogOpen) { setConvertDialogOpen(false); return; }
+        if (selectedIds.size > 0) { setSelectedIds(new Set()); return; }
+      }
+
+      if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
+        e.preventDefault();
+        const firstId = selectedIds.values().next().value as number;
+        const idx = photos.findIndex((p) => p.id === firstId);
+        if (idx >= 0) setQuickPreviewIndex(idx);
+        return;
+      }
+
+      if (e.key === "f" && selectedIds.size > 0 && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const ids = [...selectedIds];
+        const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
+        const newVal = !allFav;
+        ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
+          setIdentity((prev) => {
+            if (!prev) return prev;
+            const idSet = new Set(ids);
+            return {
+              ...prev,
+              photos: prev.photos.map((p) =>
+                idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+              ),
+            };
+          });
+          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          toast.success(newVal ? t("toastFavoriteAddedCount", { count: ids.length }) : t("toastFavoriteRemoved"), {
+            action: { label: t("toastUndo"), onClick: async () => { await ipc.client.photos.toggleFavorite({ ids, favorite: allFav }); queryClient.invalidateQueries({ queryKey: ["photos"] }); } },
+          });
+        });
+        return;
+      }
+
+      if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (detailPhoto) {
+          setDetailDismissed(true);
+          setDetailPhoto(null);
+          setSelectedIds(new Set());
+        } else if (selectedIds.size === 1) {
+          setDetailDismissed(false);
+          const id = selectedIds.values().next().value as number;
+          const p = photos.find((ph) => ph.id === id);
+          if (p) setDetailPhoto(p);
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [photos, selectedIds, renameDialogOpen, convertDialogOpen, quickPreviewIndex, detailPhoto]);
 
   return (
     <div className="flex h-full flex-col bg-background">
+      {/* Header */}
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
           <button
@@ -265,31 +534,16 @@ function PersonDetailPage() {
                   autoFocus
                   className="h-8 rounded-[6px] border border-input bg-card px-3 font-[590] text-[16px] text-foreground outline-none focus:border-primary"
                   onChange={(e) => setNameInput(e.target.value)}
-                  onCompositionEnd={(e) => {
-                    composingRef.current = false;
-                    setNameInput((e.target as HTMLInputElement).value);
-                  }}
-                  onCompositionStart={() => {
-                    composingRef.current = true;
-                  }}
+                  onCompositionEnd={(e) => { composingRef.current = false; setNameInput((e.target as HTMLInputElement).value); }}
+                  onCompositionStart={() => { composingRef.current = true; }}
                   onKeyDown={(e) => {
-                    if (composingRef.current) {
-                      return;
-                    }
-                    if (e.key === "Enter") {
-                      handleSaveName();
-                    }
-                    if (e.key === "Escape") {
-                      setEditingName(false);
-                    }
+                    if (composingRef.current) return;
+                    if (e.key === "Enter") handleSaveName();
+                    if (e.key === "Escape") setEditingName(false);
                   }}
                   value={nameInput}
                 />
-                <button
-                  className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"
-                  onClick={handleSaveName}
-                  type="button"
-                >
+                <button className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10" onClick={handleSaveName} type="button">
                   {t("save")}
                 </button>
               </div>
@@ -306,16 +560,106 @@ function PersonDetailPage() {
             </p>
           </div>
         </div>
+        {/* Batch remove from person button */}
+        {selectedIds.size > 0 && (
+          <button
+            className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
+            onClick={handleRemoveSelected}
+          >
+            <UserMinus className="h-3.5 w-3.5" />
+            {t("removeFromPerson")} ({selectedIds.size})
+          </button>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <PhotoGrid
-          loading={loading}
-          onContextMenu={handleContextMenu}
-          onDoubleClick={handleDoubleClick}
-          onSelect={handleSelect}
-          photos={photos as any}
-          selectedIds={selectedIds}
+      {/* Content area */}
+      <div className="flex min-h-0 flex-1">
+        <div
+          className="relative flex min-w-0 flex-1"
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-masonry-scroll]") && !target.closest("[data-photo-id]")) {
+              setSelectedIds(new Set());
+            }
+          }}
+        >
+          <PhotoGrid
+            loading={loading}
+            onContextMenu={handleContextMenu}
+            onDoubleClick={handleDoubleClick}
+            onKeyboardSelect={(id) => {
+              setSelectedIds(new Set([id]));
+              const idx = photos.findIndex((p) => p.id === id);
+              if (idx >= 0) setLastClickedIdx(idx);
+            }}
+            onMarqueeSelect={(ids) => {
+              if (ids.size > 0) setSelectedIds(ids);
+            }}
+            onSelect={handleSelect}
+            onSortChange={(s, o) => {
+              setSortField(s);
+              setSortOrder(o);
+              try { localStorage.setItem(GRID_SORT_FIELD_KEY, s); localStorage.setItem(GRID_SORT_ORDER_KEY, o); } catch { /* ignore */ }
+            }}
+            onToggleFavorite={handleToggleFavorite}
+            photos={photos as any}
+            selectedIds={selectedIds}
+            sort={sortField}
+            sortOrder={sortOrder}
+          />
+          <SelectionActionBar
+            allFavorite={
+              selectedIds.size > 0 && [...selectedIds].every((id) => photos.find((p) => p.id === id)?.isFavorite)
+            }
+            onAddToAlbum={() => { setAddToAlbumIds(Array.from(selectedIds)); setAddToAlbumOpen(true); }}
+            onClearSelection={() => setSelectedIds(new Set())}
+            onConvert={() => setConvertDialogOpen(true)}
+            onDelete={handleDeleteSelected}
+            onExport={handleExportSelected}
+            onRename={() => setRenameDialogOpen(true)}
+            onShare={handleShareSelected}
+            onToggleFavorite={() => {
+              const ids = [...selectedIds];
+              const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
+              const newVal = !allFav;
+              ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
+                setIdentity((prev) => {
+                  if (!prev) return prev;
+                  const idSet = new Set(ids);
+                  return {
+                    ...prev,
+                    photos: prev.photos.map((p) =>
+                      idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                    ),
+                  };
+                });
+                queryClient.invalidateQueries({ queryKey: ["photos"] });
+                toast.success(newVal ? t("toastFavoriteAddedCount", { count: ids.length }) : t("toastFavoriteRemoved"), {
+                  action: { label: t("toastUndo"), onClick: async () => { await ipc.client.photos.toggleFavorite({ ids, favorite: allFav }); queryClient.invalidateQueries({ queryKey: ["photos"] }); } },
+                });
+              });
+            }}
+            onUploadToCloud={handleUploadSelectedToCloud}
+            onStartCull={async () => {
+              const ids = Array.from(selectedIds);
+              if (ids.length < 2) return;
+              try {
+                const session = (await ipc.client.cull.createSession({
+                  name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
+                  mode: "duel", photoIds: ids,
+                })) as { id: number };
+                setSelectedIds(new Set());
+                navigate({ to: "/cull/$sessionId", params: { sessionId: String(session.id) } });
+              } catch { toast.error("Failed to create cull session"); }
+            }}
+            selectedCount={selectedIds.size}
+          />
+        </div>
+        <PhotoDetailPanel
+          onClose={() => { setDetailDismissed(true); setDetailPhoto(null); setSelectedIds(new Set()); }}
+          onNavigate={handleDetailNavigate}
+          onOpenExplorer={handleOpenExplorer}
+          photo={detailPhoto}
         />
       </div>
 
@@ -328,62 +672,73 @@ function PersonDetailPage() {
         />
       )}
 
-      {ctxMenu.open && (
-        <div
-          className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
-          ref={menuRef}
-          style={{
-            left: Math.min(ctxMenu.x, window.innerWidth - 190),
-            top: Math.min(ctxMenu.y, window.innerHeight - 180),
+      {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
+        <QuickPreview
+          onClose={() => setQuickPreviewIndex(-1)}
+          onNavigate={(dir) => {
+            setQuickPreviewIndex((prev) => {
+              const next = prev + dir;
+              if (next < 0 || next >= photos.length) return prev;
+              setSelectedIds(new Set([photos[next].id]));
+              return next;
+            });
           }}
-        >
-          <button
-            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-            onClick={() => {
-              if (ctxMenu.photoPath) {
-                handleOpenExplorer(ctxMenu.photoPath);
-              }
-              setCtxMenu((m) => ({ ...m, open: false }));
-            }}
-          >
-            {t("openInExplorer")}
-          </button>
-          <button
-            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-            onClick={() => {
-              if (ctxMenu.photoPath) {
-                navigator.clipboard
-                  .writeText(ctxMenu.photoPath)
-                  .catch(() => {});
-              }
-              setCtxMenu((m) => ({ ...m, open: false }));
-            }}
-          >
-            {t("copyPath")}
-          </button>
-          <div className="my-1 h-px bg-border" />
-          <button
-            className="flex w-full cursor-default items-center gap-2 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10"
-            onClick={() => {
-              if (ctxMenu.photoId !== null) {
-                handleRemoveFace(ctxMenu.photoId);
-              }
-              setCtxMenu((m) => ({ ...m, open: false }));
-            }}
-          >
-            {t("removeFromPerson")}
-          </button>
-        </div>
+          photo={photos[quickPreviewIndex] as any}
+        />
       )}
 
-      <SelectionActionBar
-        allFavorite={allFavorite}
-        onClearSelection={() => setSelectedIds(new Set())}
-        onDelete={handleDeleteSelected}
-        onToggleFavorite={handleFavoriteSelected}
-        selectedCount={selectedIds.size}
+      <PhotoContextMenu
+        menu={ctxMenu}
+        onAddToAlbum={handleAddToAlbum}
+        onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
+        onDelete={handleDeletePhoto}
+        onExport={handleExportPhoto}
+        onOpenExplorer={handleOpenExplorer}
+        onShare={handleShare}
+        onToggleFavorite={handleToggleFavorite}
+        onUploadToCloud={handleUploadToCloud}
       />
 
+      <AddToAlbumDialog
+        open={addToAlbumOpen}
+        onClose={() => { setAddToAlbumOpen(false); setAddToAlbumIds([]); }}
+        photoIds={addToAlbumIds}
+      />
+
+      <ExportDialog
+        open={exportDialogOpen}
+        onClose={() => { setExportDialogOpen(false); setExportIds([]); }}
+        photoIds={exportIds}
+      />
+
+      <BatchRenameDialog
+        open={renameDialogOpen}
+        onClose={() => { setRenameDialogOpen(false); setSelectedIds(new Set()); }}
+        onRename={handleRenameSelected}
+        photoCount={selectedIds.size}
+        sampleFilename={photos[0]?.filename || ""}
+      />
+
+      <FormatConvertDialog
+        open={convertDialogOpen}
+        onClose={() => setConvertDialogOpen(false)}
+        onConvert={handleConvertSelected}
+        photoCount={selectedIds.size}
+      />
+
+      <CloudUploadDialog
+        open={cloudUploadOpen}
+        onClose={() => { setCloudUploadOpen(false); setCloudUploadIds([]); }}
+        photoIds={cloudUploadIds}
+      />
+
+      <ShareDialog
+        open={shareDialogOpen}
+        onClose={() => { setShareDialogOpen(false); setShareIds([]); }}
+        photoIds={shareIds}
+      />
+
+      {/* Confirm dialogs */}
       <ConfirmDialog
         confirmText={t("remove")}
         description={t("removeFromPersonDescription")}
@@ -393,6 +748,17 @@ function PersonDetailPage() {
         open={confirmRemovePhotoId !== null}
         title={t("confirmRemove")}
       />
+
+      <ConfirmDialog
+        confirmText={t("remove")}
+        description={t("removeFromPersonDescription")}
+        destructive
+        onCancel={() => setConfirmRemoveIds([])}
+        onConfirm={performRemoveSelected}
+        open={confirmRemoveIds.length > 0}
+        title={t("confirmRemove")}
+      />
+
       <ConfirmDialog
         confirmText={t("delete")}
         description={t("confirmDeleteDescription", { count: confirmDeleteIds.length })}
@@ -401,6 +767,13 @@ function PersonDetailPage() {
         onConfirm={performDelete}
         open={confirmDeleteIds.length > 0}
         title={t("confirmDeleteTitle")}
+      />
+
+      <ConfirmDeleteDialog
+        open={deleteConfirmOpen}
+        onCancel={() => { setDeleteConfirmOpen(false); setPendingDeleteIds([]); }}
+        onConfirm={executeDelete}
+        count={pendingDeleteIds.length}
       />
     </div>
   );
