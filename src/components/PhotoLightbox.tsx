@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import Lightbox from "yet-another-react-lightbox";
 import {
@@ -13,9 +14,13 @@ import "yet-another-react-lightbox/plugins/captions.css";
 import "yet-another-react-lightbox/plugins/counter.css";
 import "yet-another-react-lightbox/plugins/thumbnails.css";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
+import { ipc } from "@/ipc/manager";
 
 interface Photo {
   filename: string;
+  fileSize: number;
+  format?: string;
   height: number;
   id: number;
   path: string;
@@ -55,6 +60,10 @@ export function PhotoLightbox({
   const [delay, setDelay] = useState(5000);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const programmaticRef = useRef(false);
+  const [overlayVisible, setOverlayVisible] = useState(true);
+  const [infoPanelVisible, setInfoPanelVisible] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [panelAnchor, setPanelAnchor] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setPhotoIndex(index);
@@ -95,6 +104,27 @@ export function PhotoLightbox({
     };
   }, [playing, delay, open, photos.length]);
 
+  function resetIdleTimer() {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = setTimeout(() => {
+      setOverlayVisible(false);
+    }, 3000);
+  }
+
+  function clearIdleTimer() {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }
+
+  function handleMouseMove(_e: MouseEvent) {
+    setOverlayVisible(true);
+    resetIdleTimer();
+  }
+
   const togglePlay = useCallback(() => {
     setPlaying((p) => !p);
   }, []);
@@ -113,10 +143,96 @@ export function PhotoLightbox({
         e.stopImmediatePropagation();
         togglePlay();
       }
+      if (e.key === "i" || e.key === "I") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setInfoPanelVisible((v) => !v);
+      }
     }
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [open, togglePlay]);
+
+  useEffect(() => {
+    if (!open) {
+      setOverlayVisible(true);
+      clearIdleTimer();
+      return;
+    }
+
+    resetIdleTimer();
+
+    document.addEventListener("mousemove", handleMouseMove);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      clearIdleTimer();
+    };
+  }, [open]);
+
+  // Find yarl portal and create anchor div for rendering info panel inside portal.
+  // Uses MutationObserver to survive fullscreen transitions that recreate portal DOM.
+  useEffect(() => {
+    if (!open) {
+      setPanelAnchor(null);
+      return;
+    }
+
+    let cancelled = false;
+    let observer: MutationObserver | null = null;
+
+    function ensureAnchor(): HTMLDivElement | null {
+      const portal = document.querySelector<HTMLDivElement>(".yarl__fullscreen");
+      if (!portal) return null;
+      let anchor = portal.querySelector<HTMLDivElement>(".photo-detail-panel-anchor");
+      if (!anchor) {
+        anchor = document.createElement("div");
+        anchor.className = "photo-detail-panel-anchor";
+        portal.appendChild(anchor);
+        // Re-watch after re-insertion
+        observer?.disconnect();
+        observer = watchPortal(portal);
+      }
+      return anchor;
+    }
+
+    function watchPortal(portal: HTMLElement): MutationObserver {
+      const obs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.removedNodes) {
+            if (node instanceof HTMLElement && node.classList.contains("photo-detail-panel-anchor")) {
+              const newAnchor = ensureAnchor();
+              if (newAnchor && !cancelled) setPanelAnchor(newAnchor);
+              return;
+            }
+          }
+        }
+      });
+      obs.observe(portal, { childList: true });
+      return obs;
+    }
+
+    function attach() {
+      if (cancelled) return;
+      const portal = document.querySelector<HTMLDivElement>(".yarl__fullscreen");
+      if (portal) {
+        const anchor = ensureAnchor();
+        if (anchor) {
+          if (!cancelled) setPanelAnchor(anchor);
+          observer = watchPortal(portal);
+        }
+      } else {
+        requestAnimationFrame(attach);
+      }
+    }
+    attach();
+
+    return () => {
+      cancelled = true;
+      observer?.disconnect();
+      document.querySelector(".photo-detail-panel-anchor")?.remove();
+    };
+  }, [open]);
 
   const handleViewChange = useCallback(
     ({ index: newIndex }: { index: number }) => {
@@ -124,6 +240,7 @@ export function PhotoLightbox({
         programmaticRef.current = false;
         return;
       }
+      setInfoPanelVisible(false);
       setPhotoIndex(newIndex);
       setPlaying(false);
     },
@@ -140,27 +257,45 @@ export function PhotoLightbox({
   const currentDelayLabel =
     SLIDESHOW_DELAYS.find((d) => d.value === delay)?.label || "5s";
 
+  const lightboxStyles = useMemo(() => {
+    const fadeIn = { opacity: 1, pointerEvents: "auto" as const, transition: "opacity 150ms ease-in" };
+    const fadeOut = { opacity: 0, pointerEvents: "none" as const, transition: "opacity 300ms ease-out" };
+    const overlayStyle = overlayVisible ? fadeIn : fadeOut;
+
+    return {
+      container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
+      toolbar: { padding: "8px 12px", ...overlayStyle },
+      slide: { padding: "0 60px" },
+      captionsTitleContainer: {
+        background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
+        padding: "10px 16px",
+        ...overlayStyle,
+      },
+      captionsDescriptionContainer: {
+        background: "linear-gradient(to top, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
+        padding: "10px 16px",
+        ...overlayStyle,
+      },
+      thumbnail: { border: "2px solid transparent", borderRadius: 4 },
+      thumbnailsTrack: { padding: "6px 0" }
+    };
+  }, [overlayVisible]);
+
   return (
-    <Lightbox
-      carousel={{
-        finite: false,
-        imageProps: { style: { transition: "opacity 250ms ease" } },
-      }}
-      close={() => onClose(photoIndex)}
-      index={photoIndex}
-      on={{ view: handleViewChange }}
-      open={open}
+    <>
+      <Lightbox
+        carousel={{
+          finite: false,
+          imageProps: { style: { transition: "opacity 250ms ease" } },
+        }}
+        close={() => onClose(photoIndex)}
+        index={photoIndex}
+        on={{ view: handleViewChange }}
+        open={open}
+        captions={{ showToggle: true }}
       plugins={[Captions, Counter, Fullscreen, Thumbnails, Zoom]}
       slides={slides}
-      styles={{
-        container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
-        toolbar: { padding: "8px 12px" },
-        slide: { padding: "0 60px" },
-        captionsTitleContainer: { padding: "0 60px" },
-        captionsDescriptionContainer: { padding: "4px 60px 0" },
-        thumbnail: { border: "2px solid transparent", borderRadius: 4 },
-        thumbnailsTrack: { padding: "6px 0" },
-      }}
+      styles={lightboxStyles}
       thumbnails={{
         width: 60,
         height: 40,
@@ -172,18 +307,40 @@ export function PhotoLightbox({
       toolbar={{
         buttons: [
           <button
+            aria-label={t("photoDetail")}
+            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            key="info-panel"
+            onClick={() => setInfoPanelVisible((v) => !v)}
+            title={t("photoDetail")}
+            type="button"
+          >
+            <svg
+              fill="none"
+              height="20"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              width="20"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" strokeLinecap="round" />
+              <circle cx="12" cy="8" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>,
+          <button
             aria-label={playing ? t("pause") : t("play")}
-            className="flex h-9 w-9 items-center justify-center rounded-[6px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
             key="slideshow-play"
             onClick={togglePlay}
             title={playing ? t("pauseSlideshow") : t("playSlideshow")}
+            type="button"
           >
             {playing ? (
               <svg
                 fill="currentColor"
-                height="18"
+                height="20"
                 viewBox="0 0 24 24"
-                width="18"
+                width="20"
               >
                 <rect height="16" rx="1" width="6" x="5" y="4" />
                 <rect height="16" rx="1" width="6" x="13" y="4" />
@@ -191,9 +348,9 @@ export function PhotoLightbox({
             ) : (
               <svg
                 fill="currentColor"
-                height="18"
+                height="20"
                 viewBox="0 0 24 24"
-                width="18"
+                width="20"
               >
                 <polygon points="5,3 19,12 5,21" />
               </svg>
@@ -201,10 +358,11 @@ export function PhotoLightbox({
           </button>,
           <button
             aria-label={t("slideshowInterval", { value: currentDelayLabel })}
-            className="flex h-9 min-w-[36px] items-center justify-center rounded-[6px] font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            className="flex items-center justify-center rounded-[6px] px-2 py-2 font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
             key="slideshow-delay"
             onClick={cycleDelay}
             title={t("switchInterval")}
+            type="button"
           >
             {currentDelayLabel}
           </button>,
@@ -217,5 +375,18 @@ export function PhotoLightbox({
         scrollToZoom: true,
       }}
     />
+      {infoPanelVisible && panelAnchor && createPortal(
+        <div className="fixed top-0 right-0 z-[10000] h-full">
+          <PhotoDetailPanel
+            photo={photos[photoIndex]}
+            onClose={() => setInfoPanelVisible(false)}
+            onOpenExplorer={async (path) => {
+              await ipc.client.shell.openInExplorer({ path });
+            }}
+          />
+        </div>,
+        panelAnchor
+      )}
+    </>
   );
 }
