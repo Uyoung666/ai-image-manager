@@ -14,9 +14,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PeopleRouteImport } from './routes/people'
 import { Route as DuplicatesRouteImport } from './routes/duplicates'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as CullRouteImport } from './routes/cull'
 import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityId'
+import { Route as CullSessionIdRouteImport } from './routes/cull.$sessionId'
 import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
 
 const TrashRoute = TrashRouteImport.update({
@@ -44,6 +46,11 @@ const DashboardRoute = DashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CullRoute = CullRouteImport.update({
+  id: '/cull',
+  path: '/cull',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AlbumsRoute = AlbumsRouteImport.update({
   id: '/albums',
   path: '/albums',
@@ -59,6 +66,11 @@ const PeopleIdentityIdRoute = PeopleIdentityIdRouteImport.update({
   path: '/$identityId',
   getParentRoute: () => PeopleRoute,
 } as any)
+const CullSessionIdRoute = CullSessionIdRouteImport.update({
+  id: '/$sessionId',
+  path: '/$sessionId',
+  getParentRoute: () => CullRoute,
+} as any)
 const AlbumsAlbumIdRoute = AlbumsAlbumIdRouteImport.update({
   id: '/$albumId',
   path: '/$albumId',
@@ -68,35 +80,41 @@ const AlbumsAlbumIdRoute = AlbumsAlbumIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/albums': typeof AlbumsRouteWithChildren
+  '/cull': typeof CullRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/albums': typeof AlbumsRouteWithChildren
+  '/cull': typeof CullRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/albums': typeof AlbumsRouteWithChildren
+  '/cull': typeof CullRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRoute
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
+  '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
 }
 export interface FileRouteTypes {
@@ -104,40 +122,47 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/albums'
+    | '/cull'
     | '/dashboard'
     | '/duplicates'
     | '/people'
     | '/settings'
     | '/trash'
     | '/albums/$albumId'
+    | '/cull/$sessionId'
     | '/people/$identityId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/albums'
+    | '/cull'
     | '/dashboard'
     | '/duplicates'
     | '/people'
     | '/settings'
     | '/trash'
     | '/albums/$albumId'
+    | '/cull/$sessionId'
     | '/people/$identityId'
   id:
     | '__root__'
     | '/'
     | '/albums'
+    | '/cull'
     | '/dashboard'
     | '/duplicates'
     | '/people'
     | '/settings'
     | '/trash'
     | '/albums/$albumId'
+    | '/cull/$sessionId'
     | '/people/$identityId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AlbumsRoute: typeof AlbumsRouteWithChildren
+  CullRoute: typeof CullRouteWithChildren
   DashboardRoute: typeof DashboardRoute
   DuplicatesRoute: typeof DuplicatesRoute
   PeopleRoute: typeof PeopleRouteWithChildren
@@ -182,6 +207,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cull': {
+      id: '/cull'
+      path: '/cull'
+      fullPath: '/cull'
+      preLoaderRoute: typeof CullRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/albums': {
       id: '/albums'
       path: '/albums'
@@ -202,6 +234,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/people/$identityId'
       preLoaderRoute: typeof PeopleIdentityIdRouteImport
       parentRoute: typeof PeopleRoute
+    }
+    '/cull/$sessionId': {
+      id: '/cull/$sessionId'
+      path: '/$sessionId'
+      fullPath: '/cull/$sessionId'
+      preLoaderRoute: typeof CullSessionIdRouteImport
+      parentRoute: typeof CullRoute
     }
     '/albums/$albumId': {
       id: '/albums/$albumId'
@@ -224,6 +263,16 @@ const AlbumsRouteChildren: AlbumsRouteChildren = {
 const AlbumsRouteWithChildren =
   AlbumsRoute._addFileChildren(AlbumsRouteChildren)
 
+interface CullRouteChildren {
+  CullSessionIdRoute: typeof CullSessionIdRoute
+}
+
+const CullRouteChildren: CullRouteChildren = {
+  CullSessionIdRoute: CullSessionIdRoute,
+}
+
+const CullRouteWithChildren = CullRoute._addFileChildren(CullRouteChildren)
+
 interface PeopleRouteChildren {
   PeopleIdentityIdRoute: typeof PeopleIdentityIdRoute
 }
@@ -238,6 +287,7 @@ const PeopleRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AlbumsRoute: AlbumsRouteWithChildren,
+  CullRoute: CullRouteWithChildren,
   DashboardRoute: DashboardRoute,
   DuplicatesRoute: DuplicatesRoute,
   PeopleRoute: PeopleRouteWithChildren,

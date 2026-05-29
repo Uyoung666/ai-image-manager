@@ -1065,6 +1065,26 @@ function HomePage() {
                     });
                 }}
                 onUploadToCloud={handleUploadSelectedToCloud}
+                onStartCull={async () => {
+                  const ids = Array.from(selectedIds);
+                  if (ids.length < 2) {
+                    return;
+                  }
+                  try {
+                    const session = (await ipc.client.cull.createSession({
+                      name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
+                      mode: "duel",
+                      photoIds: ids,
+                    })) as { id: number };
+                    setSelectedIds(new Set());
+                    navigate({
+                      to: "/cull/$sessionId",
+                      params: { sessionId: String(session.id) },
+                    });
+                  } catch {
+                    toast.error("Failed to create cull session");
+                  }
+                }}
                 selectedCount={selectedIds.size}
               />
             </div>

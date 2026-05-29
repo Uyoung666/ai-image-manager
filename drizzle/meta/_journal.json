@@ -78,6 +78,34 @@
       "when": 1779597075986,
       "tag": "0010_zippy_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1779861876715,
+      "tag": "0011_robust_eternity",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1779993600000,
+      "tag": "0012_add_cull_pk_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "1",
+      "when": 1780100000000,
+      "tag": "0013_add_sort_strategy",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1785000000000,
+      "tag": "0014_add_cull_composite_indexes",
+      "breakpoints": true
     }
   ]
 }

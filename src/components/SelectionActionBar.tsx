@@ -6,6 +6,7 @@ import {
   ImageIcon,
   Pencil,
   Share2,
+  Swords,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,6 +22,7 @@ interface SelectionActionBarProps {
   onExport?: () => void;
   onRename?: () => void;
   onShare?: () => void;
+  onStartCull?: () => void;
   onToggleFavorite?: () => void;
   onUploadToCloud?: () => void;
   selectedCount: number;
@@ -38,6 +40,7 @@ export function SelectionActionBar({
   onClearSelection,
   onUploadToCloud,
   onShare,
+  onStartCull,
 }: SelectionActionBarProps) {
   const { t } = useTranslation();
   const [animating, setAnimating] = useState(false);
@@ -95,6 +98,16 @@ export function SelectionActionBar({
             label={t("addToAlbum")}
             onClick={onAddToAlbum}
           />
+        )}
+        {onStartCull && (
+          <>
+            <div className="mx-1 h-4 w-px bg-border" />
+            <ActionButton
+              icon={<Swords size={15} />}
+              label={t("cullStart")}
+              onClick={onStartCull}
+            />
+          </>
         )}
         {onExport && (
           <ActionButton

@@ -14,6 +14,7 @@ import {
   ScanSearch,
   Settings,
   Star,
+  Swords,
   Tag,
   Trash2,
   Users,
@@ -831,6 +832,14 @@ export function Sidebar({
 
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => navigate({ to: "/cull" })}
+            title={t("cull")}
+          >
+            <Swords className="h-4 w-4" />
+          </button>
+
+          <button
+            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/people" })}
             title={t("people")}
           >
@@ -1203,6 +1212,13 @@ export function Sidebar({
         >
           <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
           {t("duplicates")}
+        </button>
+        <button
+          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          onClick={() => navigate({ to: "/cull" })}
+        >
+          <Swords className="mr-2 inline h-3.5 w-3.5" />
+          {t("cull")}
         </button>
         <button
           className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"

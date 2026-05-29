@@ -287,6 +287,73 @@ export const cloudConfigs = sqliteTable("cloud_configs", {
     .$defaultFn(() => Date.now()),
 });
 
+export const cullSessions = sqliteTable("cull_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  mode: text("mode").notNull().default("duel"),
+  status: text("status").notNull().default("active"),
+  totalPhotos: integer("total_photos").notNull().default(0),
+  completedComparisons: integer("completed_comparisons").notNull().default(0),
+  pkMode: text("pk_mode").notNull().default("standard"),
+  sortStrategy: text("sort_strategy").notNull().default("time"),
+  createdAt: integer("created_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+  completedAt: integer("completed_at"),
+});
+
+export const cullSessionPhotos = sqliteTable(
+  "cull_session_photos",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id")
+      .references(() => cullSessions.id, { onDelete: "cascade" })
+      .notNull(),
+    photoId: integer("photo_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    rating: integer("rating").notNull().default(1500),
+    comparisons: integer("comparisons").notNull().default(0),
+    wins: integer("wins").notNull().default(0),
+    losses: integer("losses").notNull().default(0),
+    status: text("status").notNull().default("pending"),
+  },
+  (table) => ({
+    sessionIdIdx: index("idx_csp_session_id").on(table.sessionId),
+    photoIdIdx: index("idx_csp_photo_id").on(table.photoId),
+    ratingIdx: index("idx_csp_rating").on(table.rating),
+    uniqueSessionPhoto: uniqueIndex("idx_csp_session_photo").on(
+      table.sessionId,
+      table.photoId
+    ),
+    sessionStatusIdx: index("idx_csp_session_status").on(
+      table.sessionId,
+      table.status
+    ),
+  })
+);
+
+export const cullActionLogs = sqliteTable(
+  "cull_action_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id")
+      .references(() => cullSessions.id, { onDelete: "cascade" })
+      .notNull(),
+    action: text("action").notNull(),
+    payload: text("payload").notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("idx_cal_session_created").on(
+      table.sessionId,
+      table.createdAt
+    ),
+  })
+);
+
 export const cloudSyncLog = sqliteTable("cloud_sync_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   photoId: integer("photo_id").references(() => photos.id, {

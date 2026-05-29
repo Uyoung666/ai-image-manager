@@ -9,3 +9,9 @@ export function toLocalMediaUrl(filePath: string | null | undefined): string {
     .join("/");
   return `local-media://${encoded}`;
 }
+
+export function preloadImage(filePath: string | null | undefined): void {
+  if (!filePath) return;
+  const img = new Image();
+  img.src = toLocalMediaUrl(filePath);
+}
