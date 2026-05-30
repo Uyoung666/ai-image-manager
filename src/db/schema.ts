@@ -50,6 +50,9 @@ export const photos = sqliteTable(
     isAiProcessed: integer("is_ai_processed", { mode: "boolean" })
       .notNull()
       .default(false),
+    isFaceProcessed: integer("is_face_processed", { mode: "boolean" })
+      .notNull()
+      .default(false),
     isFavorite: integer("is_favorite", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -62,6 +65,9 @@ export const photos = sqliteTable(
     folderIdIdx: index("idx_photos_folder_id").on(table.folderId),
     isAiProcessedIdx: index("idx_photos_is_ai_processed").on(
       table.isAiProcessed
+    ),
+    isFaceProcessedIdx: index("idx_photos_is_face_processed").on(
+      table.isFaceProcessed
     ),
     fileDateIdx: index("idx_photos_file_date").on(table.fileDate),
     phashIdx: index("idx_photos_phash").on(table.phash),
@@ -195,6 +201,9 @@ export const faceVectors = sqliteTable("face_vectors", {
   confidence: real("confidence"),
   embedding: text("embedding"),
   vectorId: text("vector_id"),
+  isRejected: integer("is_rejected", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at")
     .notNull()
     .$defaultFn(() => Date.now()),

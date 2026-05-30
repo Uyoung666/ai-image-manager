@@ -5,7 +5,8 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import { ArrowLeft,
+import {
+  ArrowLeft,
   Check,
   Merge,
   Play,
@@ -24,6 +25,7 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 interface FaceIdentity {
   coverBbox: { x: number; y: number; width: number; height: number } | null;
   coverPhotoHeight: number | null;
+  coverPhotoPath: string | null;
   coverPhotoWidth: number | null;
   coverThumbnailPath: string | null;
   createdAt: number;
@@ -67,7 +69,9 @@ function PeoplePage() {
 
   async function handleStartDetection(rescan = false) {
     setDetecting(true);
-    setProgress(rescan ? t("restartingFaceDetection") : t("startingFaceDetection"));
+    setProgress(
+      rescan ? t("restartingFaceDetection") : t("startingFaceDetection")
+    );
     try {
       const result = (await ipc.client.faces.startFaceDetection({
         rescan,
@@ -88,7 +92,12 @@ function PeoplePage() {
               setDetecting(false);
               loadIdentities();
             } else if (p.phase === "running") {
-              setProgress(t("detectingFacesProgress", { processed: p.processed, total: p.total }));
+              setProgress(
+                t("detectingFacesProgress", {
+                  processed: p.processed,
+                  total: p.total,
+                })
+              );
             } else {
               clearInterval(poll);
               setDetecting(false);
@@ -120,7 +129,9 @@ function PeoplePage() {
         message?: string;
       };
       if (result.ok) {
-        setProgress(t("reclusterCompleteCount", { count: result.identityCount }));
+        setProgress(
+          t("reclusterCompleteCount", { count: result.identityCount })
+        );
         loadIdentities();
       } else {
         setProgress(result.message || t("reclusterFailed"));
@@ -212,7 +223,6 @@ function PeoplePage() {
       setEditingId((current) => (current === id ? null : current));
     }
   }
-
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -359,8 +369,11 @@ function PeoplePage() {
                 {selectMode ? (
                   <div className="block">
                     <div className="aspect-square overflow-hidden bg-muted">
-                      {identity.coverThumbnailPath ? (
+                      {identity.coverThumbnailPath ||
+                      identity.coverPhotoPath ? (
                         (() => {
+                          const src = (identity.coverThumbnailPath ||
+                            identity.coverPhotoPath) as string;
                           const bbox = identity.coverBbox;
                           const pw = identity.coverPhotoWidth;
                           const ph = identity.coverPhotoHeight;
@@ -379,9 +392,7 @@ function PeoplePage() {
                               <img
                                 alt={identity.name || t("unnamedPerson")}
                                 className="h-full w-full object-cover"
-                                src={toLocalMediaUrl(
-                                  identity.coverThumbnailPath
-                                )}
+                                src={toLocalMediaUrl(src)}
                                 style={{
                                   objectPosition: `${cx}% ${cy}%`,
                                   transform: `scale(${zoom})`,
@@ -394,7 +405,7 @@ function PeoplePage() {
                             <img
                               alt={identity.name || t("unnamedPerson")}
                               className="h-full w-full object-cover"
-                              src={toLocalMediaUrl(identity.coverThumbnailPath)}
+                              src={toLocalMediaUrl(src)}
                             />
                           );
                         })()
@@ -426,8 +437,11 @@ function PeoplePage() {
                       to="/people/$identityId"
                     >
                       <div className="aspect-square overflow-hidden bg-muted">
-                        {identity.coverThumbnailPath ? (
+                        {identity.coverThumbnailPath ||
+                        identity.coverPhotoPath ? (
                           (() => {
+                            const src = (identity.coverThumbnailPath ||
+                              identity.coverPhotoPath) as string;
                             const bbox = identity.coverBbox;
                             const pw = identity.coverPhotoWidth;
                             const ph = identity.coverPhotoHeight;
@@ -447,9 +461,7 @@ function PeoplePage() {
                                 <img
                                   alt={identity.name || t("unnamedPerson")}
                                   className="h-full w-full object-cover"
-                                  src={toLocalMediaUrl(
-                                    identity.coverThumbnailPath
-                                  )}
+                                  src={toLocalMediaUrl(src)}
                                   style={{
                                     objectPosition: `${cx}% ${cy}%`,
                                     transform: `scale(${zoom})`,
@@ -462,9 +474,7 @@ function PeoplePage() {
                               <img
                                 alt={identity.name || t("unnamedPerson")}
                                 className="h-full w-full object-cover"
-                                src={toLocalMediaUrl(
-                                  identity.coverThumbnailPath
-                                )}
+                                src={toLocalMediaUrl(src)}
                               />
                             );
                           })()
@@ -483,14 +493,18 @@ function PeoplePage() {
                             onChange={(e) => setNameInput(e.target.value)}
                             onCompositionEnd={(e) => {
                               composingRef.current = false;
-                              setNameInput((e.target as HTMLInputElement).value);
+                              setNameInput(
+                                (e.target as HTMLInputElement).value
+                              );
                             }}
                             onCompositionStart={() => {
                               composingRef.current = true;
                             }}
                             onFocus={(e) => e.target.select()}
                             onKeyDown={(e) => {
-                              if (composingRef.current) return;
+                              if (composingRef.current) {
+                                return;
+                              }
                               if (e.key === "Enter") {
                                 e.preventDefault();
                                 handleRename(identity.id);
@@ -504,7 +518,7 @@ function PeoplePage() {
                           />
                         ) : (
                           <h3
-                            className="truncate font-[510] text-[13px] text-foreground cursor-pointer hover:text-primary transition-colors"
+                            className="cursor-pointer truncate font-[510] text-[13px] text-foreground transition-colors hover:text-primary"
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();

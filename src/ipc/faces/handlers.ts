@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -70,24 +70,43 @@ export const startFaceDetection = os
             db.delete(faceVectors).where(eq(faceVectors.id, fv.id)).run();
           }
         }
+        // Reset isFaceProcessed for photos whose face vectors were removed
+        const remainingFaceVectorPhotoIds = db
+          .select({ photoId: faceVectors.photoId })
+          .from(faceVectors)
+          .all()
+          .map((r) => r.photoId);
+        const allPhotoIds = db
+          .select({ id: photos.id })
+          .from(photos)
+          .all()
+          .map((r) => r.id);
+        for (const pid of allPhotoIds) {
+          if (!remainingFaceVectorPhotoIds.includes(pid)) {
+            db.update(photos)
+              .set({ isFaceProcessed: false })
+              .where(eq(photos.id, pid))
+              .run();
+          }
+        }
       } else {
         // No confirmed identities — clear everything
         db.delete(faceIdentityMembers).run();
         db.delete(faceIdentities).run();
         db.delete(faceVectors).run();
+        db.update(photos).set({ isFaceProcessed: false }).run();
       }
 
       const all = db.select({ id: photos.id }).from(photos).all();
       ids = all.map((p) => p.id);
     } else if (!(ids && ids.length)) {
       // Default: detect faces in all unprocessed photos
-      const processed = db
-        .select({ photoId: faceVectors.photoId })
-        .from(faceVectors)
+      const unprocessed = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(and(eq(photos.isFaceProcessed, false), isNull(photos.deletedAt)))
         .all();
-      const processedSet = new Set(processed.map((r) => r.photoId));
-      const all = db.select({ id: photos.id }).from(photos).all();
-      ids = all.filter((p) => !processedSet.has(p.id)).map((p) => p.id);
+      ids = unprocessed.map((p) => p.id);
     }
 
     if (!ids.length) {
@@ -117,6 +136,7 @@ export const listFaceIdentities = os.handler(() => {
   const result = [];
   for (const identity of identities) {
     let coverPath: string | null = null;
+    let coverPhotoPath: string | null = null;
     let coverBbox: {
       x: number;
       y: number;
@@ -130,13 +150,15 @@ export const listFaceIdentities = os.handler(() => {
       const photo = db
         .select({
           thumbnailPath: photos.thumbnailPath,
+          path: photos.path,
           width: photos.width,
           height: photos.height,
         })
         .from(photos)
         .where(eq(photos.id, identity.representativePhotoId))
         .get();
-      coverPath = photo?.thumbnailPath ?? null;
+      coverPath = photo?.thumbnailPath || photo?.path || null;
+      coverPhotoPath = photo?.path ?? null;
       coverPhotoWidth = photo?.width ?? null;
       coverPhotoHeight = photo?.height ?? null;
 
@@ -168,6 +190,7 @@ export const listFaceIdentities = os.handler(() => {
     result.push({
       ...identity,
       coverThumbnailPath: coverPath,
+      coverPhotoPath,
       coverBbox,
       coverPhotoWidth,
       coverPhotoHeight,
@@ -318,6 +341,19 @@ export const mergeIdentities = os
 
 export const deleteFaceIdentity = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
+  // Mark associated face vectors as rejected first
+  db.update(faceVectors)
+    .set({ isRejected: true })
+    .where(
+      inArray(
+        faceVectors.id,
+        db
+          .select({ faceVectorId: faceIdentityMembers.faceVectorId })
+          .from(faceIdentityMembers)
+          .where(eq(faceIdentityMembers.identityId, input.id))
+      )
+    )
+    .run();
   // Remove face identity members first (FK constraint)
   db.delete(faceIdentityMembers)
     .where(eq(faceIdentityMembers.identityId, input.id))
@@ -330,6 +366,12 @@ export const removeFaceFromIdentity = os
   .input(z.object({ identityId: z.number(), faceVectorId: z.number() }))
   .handler(({ input }) => {
     const db = getDatabase();
+
+    // Mark face vector as rejected before removing from identity
+    db.update(faceVectors)
+      .set({ isRejected: true })
+      .where(eq(faceVectors.id, input.faceVectorId))
+      .run();
 
     db.delete(faceIdentityMembers)
       .where(

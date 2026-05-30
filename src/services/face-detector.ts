@@ -3,7 +3,7 @@ import { fork } from "node:child_process";
 import fs from "node:fs";
 import https from "node:https";
 import path from "node:path";
-import { eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
@@ -309,21 +309,18 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
   let totalFaces = 0;
 
   try {
-    // Skip photos that already have face vectors (from confirmed identities)
-    const existingPhotoIds = new Set(
-      db
-        .select({ photoId: faceVectors.photoId })
-        .from(faceVectors)
-        .all()
-        .map((r) => r.photoId)
-    );
-
+    // Skip photos that are already face-processed
     const photoRows = db
       .select({ id: photos.id, path: photos.path })
       .from(photos)
-      .where(inArray(photos.id, photoIds))
-      .all()
-      .filter((p) => !existingPhotoIds.has(p.id));
+      .where(
+        and(
+          inArray(photos.id, photoIds),
+          eq(photos.isFaceProcessed, false),
+          isNull(photos.deletedAt)
+        )
+      )
+      .all();
 
     if (!photoRows.length) {
       // Still need to cluster any unassigned faces
@@ -372,6 +369,13 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
             }
           }
         }
+
+        // Mark batch photos as face-processed
+        const batchIds = batch.map((p) => p.id);
+        db.update(photos)
+          .set({ isFaceProcessed: true })
+          .where(inArray(photos.id, batchIds))
+          .run();
 
         currentProgress.processed = Math.min(i + BATCH_SIZE, photoRows.length);
       } catch (err: any) {
@@ -430,28 +434,23 @@ async function clusterUnassignedFaces(): Promise<void> {
       faceIdentityMembers,
       eq(faceVectors.id, faceIdentityMembers.faceVectorId)
     )
-    .where(isNull(faceIdentityMembers.id))
+    .where(
+      and(
+        isNull(faceIdentityMembers.id),
+        eq(faceVectors.isRejected, false),
+        // Filter out low-confidence detections, but keep null (legacy data)
+        sql`(${faceVectors.confidence} IS NULL OR ${faceVectors.confidence} >= 0.88)`
+      )
+    )
     .all();
 
   for (const face of unassignedFaces) {
     if (!face.embedding) {
-      // No embedding — create standalone identity (legacy behavior)
-      const result = db
-        .insert(faceIdentities)
-        .values({
-          name: null,
-          faceCount: 1,
-          representativePhotoId: face.photoId,
-        })
-        .returning({ insertedId: faceIdentities.id })
-        .get();
-
-      if (result) {
-        db.insert(faceIdentityMembers)
-          .values({ identityId: result.insertedId, faceVectorId: face.id })
-          .onConflictDoNothing()
-          .run();
-      }
+      // No valid embedding — mark as rejected, don't create identity
+      db.update(faceVectors)
+        .set({ isRejected: true })
+        .where(eq(faceVectors.id, face.id))
+        .run();
       continue;
     }
 

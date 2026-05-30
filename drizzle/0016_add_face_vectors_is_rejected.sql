@@ -1,0 +1,1 @@
+ALTER TABLE face_vectors ADD COLUMN is_rejected INTEGER NOT NULL DEFAULT 0;
