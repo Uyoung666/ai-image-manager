@@ -5,6 +5,7 @@ import { screen } from "electron";
 import { LRUCache } from "lru-cache";
 import sharp from "sharp";
 import { getDataPath } from "@/utils/data-path";
+import { extractRawPreview, isRawFile } from "./raw-preview";
 
 // Base sizes at 1x DPI — actual generation size is multiplied by devicePixelRatio
 const THUMBNAIL_BASE_SIZES = {
@@ -174,7 +175,17 @@ export async function generateThumbnail(
 
   // L3: generate
   const targetSize = getThumbnailSize(size);
-  const pipeline = sharp(imagePath, { failOn: "none" })
+
+  // For RAW files, extract the embedded JPEG preview first
+  let input: string | Buffer = imagePath;
+  if (isRawFile(imagePath)) {
+    const preview = await extractRawPreview(imagePath);
+    if (preview) {
+      input = preview;
+    }
+  }
+
+  const pipeline = sharp(input, { failOn: "none" })
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80, effort: 1 });
   const { data: thumbBuffer, info } = await pipeline.toBuffer({

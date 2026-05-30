@@ -18,6 +18,7 @@ import { ipcMain } from "electron/main";
 import started from "electron-squirrel-startup";
 import Store from "electron-store";
 import sharp from "sharp";
+import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
@@ -728,6 +729,19 @@ app.whenReady().then(async () => {
               "cache-control": "public, max-age=31536000, immutable",
             },
           });
+        }
+
+        // RAW camera formats: extract embedded JPEG preview
+        if (isRawFile(resolved)) {
+          const preview = await extractRawPreview(resolved);
+          if (preview) {
+            return new Response(new Uint8Array(preview), {
+              headers: {
+                "content-type": "image/jpeg",
+                "cache-control": "public, max-age=31536000, immutable",
+              },
+            });
+          }
         }
 
         try {

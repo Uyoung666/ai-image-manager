@@ -18,7 +18,7 @@ const config: ForgeConfig = {
       : {}),
     asar: {
       unpack:
-        "**/{better-sqlite3,sharp,@lancedb,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish}/**",
+        "**/{better-sqlite3,sharp,@lancedb,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exiftool-vendored,exiftool-vendored.exe}/**",
     },
     extraResource: ["models", "drizzle", "assets/icon.png"],
     name: "AI Image Manager",
@@ -80,6 +80,11 @@ const config: ForgeConfig = {
             "color-string",
             "simple-swizzle",
             "is-arrayish",
+            // exiftool-vendored: RAW embedded preview extraction, must be
+            // unpacked because the win32 binary (Perl compiled to .exe)
+            // runs as a child process and cannot be read from within asar.
+            "exiftool-vendored",
+            "exiftool-vendored.exe",
             // face-worker.mjs 通过 createRequire 加载 onnxruntime-node（原生
             // ONNX 推理）跑 UltraFace + ArcFace，必须显式复制到 packaged
             // node_modules，否则 face-worker 启动时 require 失败 → 进 catch

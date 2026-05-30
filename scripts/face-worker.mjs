@@ -12,11 +12,42 @@
  *   Then worker exits with code 0.
  */
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 // --- ONNX Runtime (native Node.js binding for speed) ---
 import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
+
+const faceRequire = createRequire(import.meta.url);
+const exiftoolPath = faceRequire("exiftool-vendored.exe");
+
+const RAW_EXTENSIONS = new Set([
+  ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
+  ".dng", ".orf", ".rw2", ".raf", ".pef", ".rwl", ".3fr", ".raw",
+]);
+
+function isRawFile(filePath) {
+  return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function extractRawPreview(filePath) {
+  try {
+    const buf = execFileSync(exiftoolPath, ["-b", "-JpgFromRaw", filePath], {
+      timeout: 15000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (buf && buf.length > 0) return buf;
+  } catch {}
+  try {
+    const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
+      timeout: 15000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (buf && buf.length > 0) return buf;
+  } catch {}
+  return null;
+}
 
 let ort = null;
 
@@ -93,8 +124,8 @@ async function initModels(modelsDir) {
  * Preprocess image for UltraFace detection.
  * Input: 320x240 RGB, normalized to [0,1], NCHW layout.
  */
-async function preprocessForDetection(filePath) {
-  const { data, info } = await sharp(filePath, { failOn: "none" })
+async function preprocessForDetection(input) {
+  const { data, info } = await sharp(input, { failOn: "none" })
     .resize(DET_INPUT_W, DET_INPUT_H, { fit: "fill" })
     .removeAlpha()
     .raw()
@@ -161,17 +192,17 @@ function computeIoU(a, b) {
  * Run UltraFace detection on a single image.
  * Returns array of { bbox: {x, y, width, height}, confidence }.
  */
-async function detectFacesInImage(filePath) {
+async function detectFacesInImage(input) {
   const { Tensor } = await loadOrt();
 
-  const meta = await sharp(filePath, { failOn: "none" }).metadata();
+  const meta = await sharp(input, { failOn: "none" }).metadata();
   const imgW = meta.width || 0;
   const imgH = meta.height || 0;
   if (imgW < 32 || imgH < 32) {
     return [];
   }
 
-  const inputData = await preprocessForDetection(filePath);
+  const inputData = await preprocessForDetection(input);
   const inputTensor = new Tensor("float32", inputData, [
     1,
     3,
@@ -240,7 +271,7 @@ async function detectFacesInImage(filePath) {
  * Generate face embedding using ArcFace model.
  * Crops the face region, resizes to 112x112, normalizes, and runs inference.
  */
-async function generateEmbedding(filePath, bbox) {
+async function generateEmbedding(input, bbox) {
   if (!embeddingSession) {
     return null;
   }
@@ -249,7 +280,7 @@ async function generateEmbedding(filePath, bbox) {
 
   // Expand bbox by 20% for better face coverage
   const expand = 0.2;
-  const meta = await sharp(filePath, { failOn: "none" }).metadata();
+  const meta = await sharp(input, { failOn: "none" }).metadata();
   const imgW = meta.width || 0;
   const imgH = meta.height || 0;
 
@@ -264,7 +295,7 @@ async function generateEmbedding(filePath, bbox) {
     return null;
   }
 
-  const { data } = await sharp(filePath, { failOn: "none" })
+  const { data } = await sharp(input, { failOn: "none" })
     .extract({ left, top, width, height })
     .resize(EMBED_SIZE, EMBED_SIZE, { fit: "fill" })
     .removeAlpha()
@@ -304,7 +335,16 @@ async function generateEmbedding(filePath, bbox) {
  * Process a single photo: detect faces + generate embeddings.
  */
 async function processPhoto(photo) {
-  const faces = await detectFacesInImage(photo.path);
+  // Resolve input: for RAW files, extract embedded JPEG preview
+  let imageInput = photo.path;
+  if (isRawFile(photo.path)) {
+    const preview = extractRawPreview(photo.path);
+    if (preview) {
+      imageInput = preview;
+    }
+  }
+
+  const faces = await detectFacesInImage(imageInput);
   if (faces.length === 0) {
     return { id: photo.id, faces: [] };
   }
@@ -314,7 +354,7 @@ async function processPhoto(photo) {
     const face = faces[i];
     let embedding = null;
     try {
-      embedding = await generateEmbedding(photo.path, face.bbox);
+      embedding = await generateEmbedding(imageInput, face.bbox);
     } catch (err) {
       console.error(
         `[FaceWorker] Embedding failed for face ${i}: ${err.message}`

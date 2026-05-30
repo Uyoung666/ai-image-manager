@@ -11,6 +11,7 @@ import { createLogger } from "@/utils/logger";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { generateThumbnail } from "./thumbnailer";
+import { extractRawPreview, isRawFile } from "./raw-preview";
 
 const log = createLogger('indexer');
 
@@ -204,7 +205,15 @@ async function readBasicMeta(filePath: string): Promise<{
   hasAlpha: boolean;
 } | null> {
   try {
-    const meta = await sharp(filePath).metadata();
+    // For RAW files, read metadata from the embedded JPEG preview
+    let input: string | Buffer = filePath;
+    if (isRawFile(filePath)) {
+      const preview = await extractRawPreview(filePath);
+      if (preview) {
+        input = preview;
+      }
+    }
+    const meta = await sharp(input).metadata();
     return {
       width: meta.width || 0,
       height: meta.height || 0,

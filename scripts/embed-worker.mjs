@@ -19,8 +19,40 @@
  *   main process; the native ORT backend has no GLib dependency.
  */
 
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
+
+const require = createRequire(import.meta.url);
+const exiftoolPath = require("exiftool-vendored.exe");
+
+const RAW_EXTENSIONS = new Set([
+  ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
+  ".dng", ".orf", ".rw2", ".raf", ".pef", ".rwl", ".3fr", ".raw",
+]);
+
+function isRawFile(filePath) {
+  return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+function extractRawPreview(filePath) {
+  try {
+    const buf = execFileSync(exiftoolPath, ["-b", "-JpgFromRaw", filePath], {
+      timeout: 15000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (buf && buf.length > 0) return buf;
+  } catch {}
+  try {
+    const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
+      timeout: 15000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (buf && buf.length > 0) return buf;
+  } catch {}
+  return null;
+}
 
 process.env.ORT_WASM_NUM_THREADS = "1";
 
@@ -137,9 +169,18 @@ async function handleEmbed(msg) {
     try {
       let output;
 
+      // Resolve input: for RAW files, extract embedded JPEG preview
+      let imageInput = photo.path;
+      if (isRawFile(photo.path)) {
+        const preview = extractRawPreview(photo.path);
+        if (preview) {
+          imageInput = preview;
+        }
+      }
+
       // Primary: manual tensor construction (avoids GLib conflict)
       try {
-        const floatData = await preprocessCLIP(photo.path);
+        const floatData = await preprocessCLIP(imageInput);
         const pixelValues = new Tensor("float32", floatData, [
           1,
           3,
@@ -160,7 +201,7 @@ async function handleEmbed(msg) {
         const { RawImage } = await import("@xenova/transformers");
         let image;
         try {
-          const { data: imgData, info: imgInfo } = await sharp(photo.path, {
+          const { data: imgData, info: imgInfo } = await sharp(imageInput, {
             failOn: "none",
           })
             .ensureAlpha()
@@ -177,7 +218,7 @@ async function handleEmbed(msg) {
             imgInfo.channels
           );
         } catch {
-          const pngBuffer = await sharp(photo.path, { failOn: "none" })
+          const pngBuffer = await sharp(imageInput, { failOn: "none" })
             .png()
             .toBuffer();
           const { data: pngData, info: pngInfo } = await sharp(pngBuffer)
