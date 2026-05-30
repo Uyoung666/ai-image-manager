@@ -13,7 +13,7 @@ import "yet-another-react-lightbox/styles.css";
 import "yet-another-react-lightbox/plugins/captions.css";
 import "yet-another-react-lightbox/plugins/counter.css";
 import "yet-another-react-lightbox/plugins/thumbnails.css";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import { ipc } from "@/ipc/manager";
 
@@ -24,6 +24,7 @@ interface Photo {
   height: number;
   id: number;
   path: string;
+  thumbnailPath?: string | null;
   width: number;
 }
 
@@ -58,7 +59,7 @@ export function PhotoLightbox({
   const [photoIndex, setPhotoIndex] = useState(index);
   const [playing, setPlaying] = useState(false);
   const [delay, setDelay] = useState(5000);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const programmaticRef = useRef(false);
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [infoPanelVisible, setInfoPanelVisible] = useState(false);
@@ -69,11 +70,24 @@ export function PhotoLightbox({
     setPhotoIndex(index);
   }, [index]);
 
+  // Preload adjacent photos for instant switching
+  useEffect(() => {
+    const RANGE = 2;
+    const start = Math.max(0, photoIndex - RANGE);
+    const end = Math.min(photos.length - 1, photoIndex + RANGE);
+    for (let i = start; i <= end; i++) {
+      if (i !== photoIndex) {
+        const p = photos[i];
+        preloadImage(p.thumbnailPath ?? p.path);
+      }
+    }
+  }, [photoIndex, photos]);
+
   useEffect(() => {
     if (!open) {
       setPlaying(false);
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearTimeout(timerRef.current);
         timerRef.current = null;
       }
     }
@@ -81,7 +95,7 @@ export function PhotoLightbox({
 
   useEffect(() => {
     if (!playing && timerRef.current) {
-      clearInterval(timerRef.current);
+      clearTimeout(timerRef.current);
       timerRef.current = null;
     }
   }, [playing]);
@@ -91,18 +105,18 @@ export function PhotoLightbox({
       return;
     }
 
-    timerRef.current = setInterval(() => {
+    timerRef.current = setTimeout(() => {
       programmaticRef.current = true;
       setPhotoIndex((prev) => (prev + 1) % photos.length);
     }, delay);
 
     return () => {
       if (timerRef.current) {
-        clearInterval(timerRef.current);
+        clearTimeout(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [playing, delay, open, photos.length]);
+  }, [playing, delay, open, photos.length, photoIndex]);
 
   function resetIdleTimer() {
     if (idleTimerRef.current) {
@@ -283,9 +297,10 @@ export function PhotoLightbox({
   return (
     <>
       <Lightbox
+        animation={{ navigation: 0 }}
         carousel={{
           finite: false,
-          imageProps: { style: { transition: "opacity 250ms ease" } },
+          imageProps: { style: { transition: "none" } },
         }}
         close={() => onClose(photoIndex)}
         index={photoIndex}
