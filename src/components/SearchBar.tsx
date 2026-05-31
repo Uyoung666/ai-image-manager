@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
+import { hexToColorName } from "@/utils/color-name";
 import { cn } from "@/utils/tailwind";
 import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterPresets } from "./FilterPresets";
@@ -68,12 +69,13 @@ interface SearchBarProps {
     isEmbedding: boolean;
     embeddingProgress: { processed: number; total: number; phase: string };
   } | null;
+  colorHex?: string | null;
   imageSearchActive?: boolean;
   onClear: () => void;
   onImageSearch?: (imagePath: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
   resultCount?: number;
-  searchMode?: "text" | "image" | "exif" | null;
+  searchMode?: "text" | "image" | "exif" | "color" | null;
   searchTime?: number;
 }
 
@@ -123,6 +125,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
   (
     {
       aiStatus,
+      colorHex,
       imageSearchActive,
       onSearch,
       onClear,
@@ -596,12 +599,22 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             resultCount !== undefined) && (
             <div className="mt-2 flex items-center gap-2 text-[11px]">
               {searchMode && (
-                <span className="rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary">
+                <span className="rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary inline-flex items-center gap-1">
                   {searchMode === "text"
                     ? t("searchModeSemantic")
                     : searchMode === "image"
                       ? t("searchModeImage")
-                      : t("searchModeExif")}
+                      : searchMode === "color" && colorHex
+                        ? (
+                          <>
+                            <span
+                              className="inline-block h-2.5 w-2.5 rounded-full"
+                              style={{ backgroundColor: `#${colorHex}` }}
+                            />
+                            {hexToColorName(`#${colorHex}`, "zh")}
+                          </>
+                        )
+                        : t("searchModeExif")}
                 </span>
               )}
               {searchTime !== undefined && (
@@ -620,6 +633,25 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                       : ""}
                 </span>
               )}
+            </div>
+          )}
+
+          {/* Color hex chip — shown separately from Exif filter chips */}
+          {colorHex && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-[4px] bg-primary/10 px-2 py-0.5 font-[510] text-[10px] text-primary">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: `#${colorHex}` }}
+                />
+                <span className="font-mono">#{colorHex.toUpperCase()}</span>
+                <button
+                  className="ml-0.5 hover:text-foreground"
+                  onClick={() => onClear()}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
             </div>
           )}
 

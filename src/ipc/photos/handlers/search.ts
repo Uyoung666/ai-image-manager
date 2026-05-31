@@ -1,7 +1,17 @@
 import fs from "node:fs";
 import { os } from "@orpc/server";
 import type { SQL } from "drizzle-orm";
-import { and, desc, gte, inArray, like, lte, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos } from "@/db/schema";
 import {
@@ -18,6 +28,12 @@ import {
   ImageSearchSchema,
   SearchSchema,
 } from "./shared";
+
+// Pre-compiled regex patterns for color search and temporal detection
+const HASH_PREFIX_RE = /^#/;
+const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+const HEX_COLOR_QUERY_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+const CHINESE_CHAR_RE = /[一-鿿]/;
 
 // EXIF filter cache: cache key -> { result, timestamp }
 const filterCache = new Map<string, { result: any; timestamp: number }>();
@@ -87,7 +103,7 @@ export const searchByText = os
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
     // Extract temporal boost from query if it contains time keywords
-    const hasChinese = /[一-鿿]/.test(input.query);
+    const hasChinese = CHINESE_CHAR_RE.test(input.query);
     let temporalBoost: ReturnType<typeof extractTemporalContext> | undefined;
     if (hasChinese) {
       const parsed = parseChineseQuery(input.query);
@@ -154,6 +170,7 @@ export const searchCompound = os
     const db = getDatabase();
     const {
       query,
+      colorHex,
       dateFrom,
       dateTo,
       cameraModel,
@@ -182,6 +199,101 @@ export const searchCompound = os
       isoMax ||
       shutterMin ||
       shutterMax;
+
+    // Color search: if colorHex provided, or query is a hex code
+    function parseHexColor(
+      hex: string
+    ): { r: number; g: number; b: number } | null {
+      const cleaned = hex.replace(HASH_PREFIX_RE, "");
+      const match = HEX_COLOR_RE.exec(cleaned);
+      if (!match) {
+        return null;
+      }
+      let h = match[1];
+      if (h.length === 3) {
+        h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      }
+      return {
+        r: Number.parseInt(h.slice(0, 2), 16),
+        g: Number.parseInt(h.slice(2, 4), 16),
+        b: Number.parseInt(h.slice(4, 6), 16),
+      };
+    }
+
+    let effectiveColorHex = colorHex;
+    if (!effectiveColorHex && query?.trim()) {
+      const hexMatch = HEX_COLOR_QUERY_RE.exec(query.trim());
+      if (hexMatch) {
+        effectiveColorHex = hexMatch[1];
+      }
+    }
+
+    if (effectiveColorHex) {
+      const rgb = parseHexColor(effectiveColorHex);
+      if (rgb) {
+        // 动态构建 SQL：颜色搜索 + 可选 EXIF 叠加
+        const exifActive =
+          dateFrom || dateTo || cameraModel || lensModel ||
+          focalMin !== undefined || focalMax !== undefined ||
+          apertureMin !== undefined || apertureMax !== undefined ||
+          isoMin !== undefined || isoMax !== undefined ||
+          shutterMin !== undefined || shutterMax !== undefined;
+
+        let colorSQL = sql``;
+        if (exifActive) {
+          // 有 EXIF 筛选：JOIN exif_data 并附加条件
+          const conditions: SQL[] = [];
+          conditions.push(sql`p.deleted_at IS NULL`);
+          conditions.push(sql`p.dominant_colors IS NOT NULL`);
+          if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
+          if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
+          if (cameraModel) conditions.push(sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`);
+          if (lensModel) conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
+          if (focalMin !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
+          if (focalMax !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
+          if (apertureMin !== undefined) conditions.push(sql`e.aperture >= ${apertureMin}`);
+          if (apertureMax !== undefined) conditions.push(sql`e.aperture <= ${apertureMax}`);
+          if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
+          if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
+          if (shutterMin !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`);
+          if (shutterMax !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`);
+
+          colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+              FROM photos p
+              JOIN exif_data e ON e.photo_id = p.id
+              WHERE ${and(...conditions)}
+                AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
+              ORDER BY dist ASC
+              LIMIT ${limit}`;
+        } else {
+          colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+              FROM photos p
+              WHERE p.deleted_at IS NULL AND p.dominant_colors IS NOT NULL
+                AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
+              ORDER BY dist ASC
+              LIMIT ${limit}`;
+        }
+
+        const results = db.all(colorSQL) as Array<Record<string, unknown> & { dist: number }>;
+
+        const photoList = results.map((r) => ({
+          ...r,
+          id: r.id as number,
+          similarity:
+            Math.round(
+              (1 /
+                (1 + Math.sqrt(r.dist || 0))) *
+                10_000
+            ) / 10_000,
+        }));
+
+        return {
+          results: photoList as any,
+          total: photoList.length,
+          searchMode: "color" as const,
+        };
+      }
+    }
 
     // If text query: AI search first, then apply EXIF filters on the results
     if (query?.trim()) {
@@ -337,7 +449,9 @@ export const searchCompound = os
     // Check EXIF-only filter cache (only for non-AI path)
     const cacheKey = getCacheKey(input);
     const cached = getCachedResult(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
 
     const exifConditions: SQL[] = [];
 

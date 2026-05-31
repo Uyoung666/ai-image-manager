@@ -44,6 +44,7 @@ import {
   getExifCandidates,
   getIndexStats,
   getStats,
+  migrateColors,
 } from "./handlers/stats";
 import {
   addTag,
@@ -87,6 +88,7 @@ export const photos = {
   getWatermarkSettings,
   listDeletedPhotos,
   listPhotos,
+  migrateColors,
   movePhotos,
   permanentlyDeletePhotos,
   previewRename,

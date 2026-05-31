@@ -58,6 +58,32 @@ export function initDatabase(): ReturnType<typeof drizzle> {
   sqlite.pragma("busy_timeout = 5000");
   sqliteConnection = sqlite;
 
+  // Register custom SQLite functions
+  sqlite.function(
+    "closest_color_dist",
+    (r: number, g: number, b: number, colorsJson: string | null) => {
+      if (!colorsJson) {
+        return Number.MAX_VALUE;
+      }
+      try {
+        const colors = JSON.parse(colorsJson);
+        let minDist = Number.POSITIVE_INFINITY;
+        for (const c of colors) {
+          const dr = c.r - r;
+          const dg = c.g - g;
+          const db = c.b - b;
+          const dist = dr * dr + dg * dg + db * db;
+          if (dist < minDist) {
+            minDist = dist;
+          }
+        }
+        return minDist;
+      } catch {
+        return Number.MAX_VALUE;
+      }
+    }
+  );
+
   dbInstance = drizzle(sqlite, { schema });
 
   // Auto-run migrations on startup

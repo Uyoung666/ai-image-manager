@@ -41,6 +41,7 @@ export const photos = sqliteTable(
     hasAlpha: integer("has_alpha", { mode: "boolean" }),
     thumbnailPath: text("thumbnail_path"),
     thumbnailSize: text("thumbnail_size"),
+    dominantColors: text("dominant_colors"),
     phash: text("phash"),
     contentHash: text("content_hash"),
     vectorId: text("vector_id"),

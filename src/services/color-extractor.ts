@@ -34,6 +34,13 @@ function rgbToHsl(r: number, g: number, b: number) {
 }
 
 export function hexFromHue(hueDeg: number): string {
+  const { r, g, b } = rgbFromHue(hueDeg);
+  const toHex = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/** Same HSL→RGB as hexFromHue but returns integer channel values (0–255). */
+export function rgbFromHue(hueDeg: number): { r: number; g: number; b: number } {
   const sn = 0.7;
   const ln = 0.5;
   const c = (1 - Math.abs(2 * ln - 1)) * sn;
@@ -46,8 +53,11 @@ export function hexFromHue(hueDeg: number): string {
   else if (hueDeg < 240) { gn = x; bn = c; }
   else if (hueDeg < 300) { rn = x; bn = c; }
   else { rn = c; bn = x; }
-  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
-  return `#${toHex(rn)}${toHex(gn)}${toHex(bn)}`;
+  return {
+    r: Math.round((rn + m) * 255),
+    g: Math.round((gn + m) * 255),
+    b: Math.round((bn + m) * 255),
+  };
 }
 
 // ── Pixel filtering ───────────────────────────────────────────────────
@@ -91,7 +101,7 @@ export interface PaletteColor {
   weight: number;
 }
 
-interface PerPhotoPalette {
+export interface PerPhotoPalette {
   colors: PaletteColor[];
   histogram: Uint32Array;
   validPixels: number;
@@ -129,7 +139,7 @@ export interface ColorDistributionResult {
 
 // ── Per-photo palette extraction ──────────────────────────────────────
 
-async function extractPerPhotoPalette(imagePath: string): Promise<PerPhotoPalette | null> {
+export async function extractPerPhotoPalette(imagePath: string): Promise<PerPhotoPalette | null> {
   const { data, info } = await sharp(imagePath)
     .resize(SAMPLE_SIZE, SAMPLE_SIZE, { fit: "fill" })
     .ensureAlpha()
@@ -190,6 +200,12 @@ async function extractPerPhotoPalette(imagePath: string): Promise<PerPhotoPalett
   return { colors, histogram, validPixels };
 }
 
+export async function extractDominantColors(imagePath: string): Promise<string | null> {
+  const palette = await extractPerPhotoPalette(imagePath);
+  if (!palette || !palette.colors || palette.colors.length === 0) return null;
+  return JSON.stringify(palette.colors);
+}
+
 function rgbToHex(r: number, g: number, b: number) {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
@@ -243,30 +259,39 @@ function aggregateDistribution(
     };
   }).sort((a, b) => a.hue - b.hue);
 
-  // Hue & saturation distribution — computed from FULL global histogram.
-  // Bin centers on the gray diagonal (R≈G≈B) have hue=0 (red), so we skip
-  // low-saturation bin centers for hue to avoid inflating the red bucket.
+  // Hue & saturation distribution.
+  // Hue buckets use the same RGB distance matching as search
+  // (closest_color_dist < 10000), ensuring dashboard counts
+  // match drill-down search results exactly.
   const hueBuckets = new Array(12).fill(0);
+  const MAX_DIST = 10000;
   let vividCount = 0;
   let moderateCount = 0;
   let mutedCount = 0;
 
-  for (let i = 0; i < globalHist.length; i++) {
-    const count = globalHist[i];
-    if (count === 0) continue;
-    const [br, bg, bb] = binToRgb(i);
-    const delta = Math.max(br, bg, bb) - Math.min(br, bg, bb);
-    const { h, s } = rgbToHsl(br, bg, bb);
-
-    // Only contribute to hue when bin center has meaningful chroma
-    if (delta >= 20) {
-      const bucket = Math.floor(h / 30) % 12;
-      hueBuckets[bucket] += count;
+  for (const p of palettes) {
+    for (let b = 0; b < 12; b++) {
+      const target = rgbFromHue(b * 30 + 15);
+      let minDist = Number.POSITIVE_INFINITY;
+      for (const c of p.colors) {
+        const dr = c.r - target.r;
+        const dg = c.g - target.g;
+        const db = c.b - target.b;
+        const dist = dr * dr + dg * dg + db * db;
+        if (dist < minDist) minDist = dist;
+      }
+      if (minDist < MAX_DIST) hueBuckets[b]++;
     }
 
-    if (s >= 0.6) vividCount += count;
-    else if (s >= 0.25) moderateCount += count;
-    else mutedCount += count;
+    let hasVivid = false, hasModerate = false, hasMuted = false;
+    for (const c of p.colors) {
+      if (c.saturation >= 0.6) hasVivid = true;
+      else if (c.saturation >= 0.25) hasModerate = true;
+      else hasMuted = true;
+    }
+    if (hasVivid) vividCount++;
+    if (hasModerate) moderateCount++;
+    if (hasMuted) mutedCount++;
   }
 
   const hueDistribution: HueBucket[] = hueBuckets.map((count, i) => ({
@@ -287,6 +312,124 @@ function aggregateDistribution(
     saturationDistribution,
     sampled: palettes.length,
     totalPhotos,
+  };
+}
+
+// ── Aggregation from stored dominant_colors ────────────────────────────
+
+/**
+ * 从已存储的 dominant_colors JSON 数据中聚合全局色彩分布。
+ * 与 aggregateDistribution 不同，此函数不依赖 histogram。
+ */
+export function aggregateFromStoredColors(
+  allColors: Array<Array<PaletteColor>>
+): {
+  palette: Array<PaletteColor>;
+  hueDistribution: Array<{ hueRange: [number, number]; count: number; hex: string }>;
+  saturationCounts: { vivid: number; moderate: number; muted: number };
+  totalPhotos: number;
+} {
+  // 收集所有颜色，带 weight
+  const weightedColors: PaletteColor[] = [];
+  for (const photoColors of allColors) {
+    for (const c of photoColors) {
+      weightedColors.push(c);
+    }
+  }
+
+  // 统计每种颜色出现在多少张不同照片中（按 hex 去重），
+  // 按全局照片级频率排序而非单张照片内的像素占比，避免
+  // 人像等常见题材共享的米色/奶油色变体占据全部调色板位置。
+  const freqMap = new Map<string, number>();
+  for (const c of weightedColors) {
+    freqMap.set(c.hex, (freqMap.get(c.hex) || 0) + 1);
+  }
+  const uniqueColors = new Map<
+    string,
+    PaletteColor & { globalFreq: number }
+  >();
+  for (const c of weightedColors) {
+    if (!uniqueColors.has(c.hex)) {
+      uniqueColors.set(c.hex, {
+        ...c,
+        globalFreq: freqMap.get(c.hex) || 0,
+      });
+    }
+  }
+  const sorted = Array.from(uniqueColors.values()).sort(
+    (a, b) => b.globalFreq - a.globalFreq
+  );
+
+  // 全局调色板：按全局频率排序，取 top-25，合并近色（欧几里得距离 < 25）
+  const palette: PaletteColor[] = [];
+  const totalPhotos = allColors.length;
+  for (const c of sorted) {
+    const isNear = palette.some((p) => {
+      const dr = p.r - c.r, dg = p.g - c.g, db = p.b - c.b;
+      return dr * dr + dg * dg + db * db < 625; // 25^2
+    });
+    if (!isNear) {
+      palette.push({
+        ...c,
+        weight: totalPhotos > 0 ? c.globalFreq / totalPhotos : 0,
+      });
+    }
+    if (palette.length >= 25) break;
+  }
+
+  // 归一化权重使总和为 100%，让调色板显示正确的比例分布
+  const totalWeight = palette.reduce((sum, c) => sum + c.weight, 0);
+  if (totalWeight > 0) {
+    for (const c of palette) {
+      c.weight = c.weight / totalWeight;
+    }
+  }
+
+  // 色相分布：使用与搜索完全相同的 RGB 距离匹配逻辑。
+  // 对每个桶的中心色相生成代表色，计算每张照片 dominant_colors
+  // 到该色的最小平方欧氏距离，阈值 10000（= SQL closest_color_dist 阈值）。
+  const HUE_BUCKETS = 12;
+  const MAX_DIST = 10000;
+  const hueCounts = new Array(HUE_BUCKETS).fill(0);
+
+  for (const palette of allColors) {
+    for (let b = 0; b < HUE_BUCKETS; b++) {
+      const target = rgbFromHue(b * 30 + 15);
+      let minDist = Number.POSITIVE_INFINITY;
+      for (const c of palette) {
+        const dr = c.r - target.r;
+        const dg = c.g - target.g;
+        const db = c.b - target.b;
+        const dist = dr * dr + dg * dg + db * db;
+        if (dist < minDist) minDist = dist;
+      }
+      if (minDist < MAX_DIST) hueCounts[b]++;
+    }
+  }
+
+  // 饱和度分布：按唯一照片计数
+  let vivid = 0, moderate = 0, muted = 0;
+  for (const palette of allColors) {
+    let hasVivid = false, hasModerate = false, hasMuted = false;
+    for (const c of palette) {
+      if (c.saturation >= 0.6) hasVivid = true;
+      else if (c.saturation >= 0.25) hasModerate = true;
+      else hasMuted = true;
+    }
+    if (hasVivid) vivid++;
+    if (hasModerate) moderate++;
+    if (hasMuted) muted++;
+  }
+
+  return {
+    palette: palette.slice(0, 25),
+    hueDistribution: hueCounts.map((count, i) => ({
+      hueRange: [i * 30, (i + 1) * 30] as [number, number],
+      count,
+      hex: hexFromHue(i * 30 + 15),
+    })),
+    saturationCounts: { vivid, moderate, muted },
+    totalPhotos: allColors.length,
   };
 }
 

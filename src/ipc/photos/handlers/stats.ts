@@ -1,15 +1,27 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { os } from "@orpc/server";
-import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase, getDbPath } from "@/db";
 import { detectionRuns, duplicatePairs, exifData, photos } from "@/db/schema";
 import { getPhotoVectors } from "@/services/ai-embedder";
 import { BKTree } from "@/services/bk-tree";
 import {
+  aggregateFromStoredColors,
   computeColorDistribution,
+  extractDominantColors,
   invalidateColorCache,
+  type PaletteColor,
 } from "@/services/color-extractor";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
 
@@ -87,9 +99,53 @@ export const getExifCandidates = os.handler(() => {
   return { cameraModels, lensModels, focalLengths, apertures, isos, formats };
 });
 
-// Color distribution: sample photos, extract multi-color palette via 3D histogram binning
+// Color distribution: aggregate from stored dominant_colors when available,
+// falling back to real-time histogram sampling for photos missing color data.
 export const getColorDistribution = os.handler(async () => {
   const db = getDatabase();
+
+  // ── Primary path: aggregate from pre-extracted dominant_colors ─────
+  const rows = db
+    .select({ dominantColors: photos.dominantColors })
+    .from(photos)
+    .where(
+      and(
+        isNull(photos.deletedAt),
+        isNotNull(photos.dominantColors)
+      )
+    )
+    .all();
+
+  const allColors = rows
+    .map((r) => {
+      try {
+        return r.dominantColors ? JSON.parse(r.dominantColors) : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((c): c is PaletteColor[] => Array.isArray(c) && c.length > 0);
+
+  if (allColors.length >= 10) {
+    const result = aggregateFromStoredColors(allColors);
+    return {
+      globalPalette: result.palette,
+      hueDistribution: result.hueDistribution,
+      saturationDistribution: [
+        { level: "vivid" as const, count: result.saturationCounts.vivid },
+        { level: "moderate" as const, count: result.saturationCounts.moderate },
+        { level: "muted" as const, count: result.saturationCounts.muted },
+      ],
+      sampled: result.totalPhotos,
+      totalPhotos: result.totalPhotos,
+      source: "db" as const,
+    };
+  }
+
+  // ── Fallback: real-time histogram sampling ─────────────────────────
+  console.log(
+    `[Stats] Not enough dominant_colors data (${allColors.length}), falling back to sampling`
+  );
 
   const totalCount =
     db
@@ -811,3 +867,81 @@ export const getIndexStats = os.input(z.object({}).optional()).handler(() => {
     invalidPhotoCount,
   };
 });
+
+// ── Color migration: backfill dominant_colors for existing photos ─────
+// Exported as a plain function so main.ts can call it directly on startup,
+// and also exposed as an oRPC handler for manual trigger from the frontend.
+
+export async function runColorMigration(
+  force = false
+): Promise<{ processed: number; total: number; complete: boolean }> {
+  const db = getDatabase();
+
+  if (force) {
+    // Clear existing color data for re-extraction
+    db.run(
+      sql`UPDATE photos SET dominant_colors = NULL WHERE deleted_at IS NULL`
+    );
+  }
+
+  const photoRows = db
+    .select({ id: photos.id, thumbnailPath: photos.thumbnailPath })
+    .from(photos)
+    .where(
+      and(
+        isNull(photos.deletedAt),
+        isNotNull(photos.thumbnailPath),
+        isNull(photos.dominantColors)
+      )
+    )
+    .all();
+
+  const total = photoRows.length;
+  let processed = 0;
+
+  for (const photo of photoRows) {
+    try {
+      const colors = await extractDominantColors(photo.thumbnailPath!);
+      if (colors) {
+        db.run(
+          sql`UPDATE photos SET dominant_colors = ${colors} WHERE id = ${photo.id}`
+        );
+      }
+    } catch (err) {
+      console.warn(`[ColorMigration] Failed for photo ${photo.id}:`, err);
+    }
+    processed++;
+
+    if (processed % 10 === 0 || processed === total) {
+      console.log(`[ColorMigration] Progress: ${processed}/${total}`);
+    }
+  }
+
+  // Mark migration complete so startup skip works on subsequent launches
+  console.log("[ColorMigration] Writing completion marker...");
+  try {
+    db.run(
+      sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('colors_migrated', 'true', ${Date.now()})`
+    );
+    console.log("[ColorMigration] Completion marker written.");
+  } catch (err) {
+    console.error("[ColorMigration] Failed to write completion marker:", err);
+  }
+
+  // Invalidate cached color distribution so the dashboard picks up fresh data
+  try {
+    invalidateColorCache();
+    console.log("[ColorMigration] Color cache invalidated.");
+  } catch (err) {
+    console.warn("[ColorMigration] Failed to invalidate cache:", err);
+  }
+
+  console.log("[ColorMigration] Background backfill complete.");
+  return { processed, total, complete: true };
+}
+
+export const migrateColors = os
+  .input(z.object({ force: z.boolean().optional().default(false) }))
+  .handler(({ input }) => {
+    return runColorMigration(input.force);
+  });

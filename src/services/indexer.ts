@@ -11,6 +11,7 @@ import { createLogger } from "@/utils/logger";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { generateThumbnail } from "./thumbnailer";
+import { extractDominantColors } from "./color-extractor";
 import { extractRawPreview, isRawFile } from "./raw-preview";
 
 const log = createLogger('indexer');
@@ -277,6 +278,7 @@ interface PhotoRecord {
   thumbnailSize: string;
   isIndexed: boolean;
   phash: string | null;
+  dominantColors: string | null;
 }
 
 interface ExifRecord {
@@ -334,6 +336,17 @@ async function preparePhotoRecord(
 
   const phash = await computePHash(filePath);
 
+  // 提取主色调（使用缩略图，3-8ms/张）
+  let dominantColors: string | null = null;
+  if (thumb.thumbnailPath) {
+    try {
+      dominantColors = await extractDominantColors(thumb.thumbnailPath);
+    } catch (err) {
+      // 颜色提取失败不阻塞索引
+      console.warn(`[Indexer] Color extraction failed for ${filePath}:`, err);
+    }
+  }
+
   const photoRecord: PhotoRecord = {
     path: filePath,
     folderId,
@@ -349,6 +362,7 @@ async function preparePhotoRecord(
     thumbnailSize: `${thumb.width}x${thumb.height}`,
     isIndexed: true,
     phash,
+    dominantColors,
   };
 
   // Extract EXIF

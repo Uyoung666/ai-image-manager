@@ -49,6 +49,7 @@ export function applyTimeDecay<
 
 export const CompoundSearchSchema = z.object({
   query: z.string().optional(),
+  colorHex: z.string().optional(),
   dateFrom: z.number().optional(),
   dateTo: z.number().optional(),
   cameraModel: z.string().optional(),

@@ -76,7 +76,7 @@ function HomePage() {
   const aiIndexingRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<
-    "text" | "image" | "exif" | null
+    "text" | "image" | "exif" | "color" | null
   >(null);
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
@@ -105,6 +105,7 @@ function HomePage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+  const [colorHex, setColorHex] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
@@ -174,8 +175,9 @@ function HomePage() {
       filters.dateTo = drillParams.dateTo;
     }
 
-    // Extract optional text search query for color drill-down
+    // Extract optional text search query and color hex for color drill-down
     const textQuery = (drillParams.searchQuery as string) || "";
+    const colorHexParam = (drillParams.colorHex as string) || undefined;
 
     // Sync filters to SearchBar BEFORE clearing URL params
     if (searchBarRef.current) {
@@ -184,7 +186,7 @@ function HomePage() {
 
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
-    handleSearch(textQuery, filters);
+    handleSearch(textQuery, filters, colorHexParam);
   }, [drillParams, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for photo-drop:album event from sidebar
@@ -510,11 +512,19 @@ function HomePage() {
     },
     [photos]
   );
-  async function handleSearch(query: string, filters?: ExifFilters) {
-    setSearchQuery(query);
-    const hasFilters = filters && Object.values(filters).some((v) => v);
+  async function handleSearch(
+    query: string,
+    filters?: ExifFilters,
+    paramColorHex?: string,
+  ) {
+	    // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
+	    const effectiveColorHex = paramColorHex !== undefined ? paramColorHex : colorHex;
+	    setSearchQuery(query);
+	    if (paramColorHex !== undefined) setColorHex(paramColorHex);
+	    const hasFilters = filters && Object.values(filters).some((v) => v);
+	    const hasColorHex = !!effectiveColorHex;
 
-    if (!(query.trim() || hasFilters)) {
+    if (!(query.trim() || hasFilters || hasColorHex)) {
       setSearchMode(null);
       setSearchTime(undefined);
       setSearchResults(null);
@@ -522,12 +532,13 @@ function HomePage() {
     }
 
     const startTime = performance.now();
-    setSearchMode(query.trim() ? "text" : "exif");
+    setSearchMode(hasColorHex ? "color" : query.trim() ? "text" : "exif");
     setSearchLoading(true);
 
     try {
       const searchParams: {
         query?: string;
+        colorHex?: string;
         dateFrom?: number;
         dateTo?: number;
         cameraModel?: string;
@@ -544,6 +555,9 @@ function HomePage() {
       } = { limit: 500 };
       if (query.trim()) {
         searchParams.query = query.trim();
+      }
+      if (effectiveColorHex) {
+        searchParams.colorHex = effectiveColorHex;
       }
       if (filters?.dateFrom) {
         const [y, m, d] = filters.dateFrom.split("-").map(Number);
@@ -588,19 +602,25 @@ function HomePage() {
       setSearchResults((result as any).results || []);
       setSearchTime(Math.round(performance.now() - startTime));
     } catch {
-      try {
-        const fallback = await ipc.client.photos.listPhotos({
-          search: query.trim() || undefined,
-          sort: "date",
-          order: "desc",
-          offset: 0,
-          limit: 500,
-        });
-        setSearchResults((fallback as any).items || []);
-        setSearchTime(Math.round(performance.now() - startTime));
-      } catch {
-        toast.error(t("toastSearchFailed"));
+      // 颜色搜索失败不降级到全量查询
+      if (effectiveColorHex) {
         setSearchResults([]);
+        setSearchTime(Math.round(performance.now() - startTime));
+      } else {
+        try {
+          const fallback = await ipc.client.photos.listPhotos({
+            search: query.trim() || undefined,
+            sort: "date",
+            order: "desc",
+            offset: 0,
+            limit: 500,
+          });
+          setSearchResults((fallback as any).items || []);
+          setSearchTime(Math.round(performance.now() - startTime));
+        } catch {
+          toast.error(t("toastSearchFailed"));
+          setSearchResults([]);
+        }
       }
     } finally {
       setSearchLoading(false);
@@ -985,6 +1005,7 @@ function HomePage() {
           imageSearchActive={searchMode === "image"}
           onClear={() => {
             setSearchQuery("");
+            setColorHex(null);
             setSearchMode(null);
             setSearchTime(undefined);
             setSearchResults(null);
@@ -994,6 +1015,7 @@ function HomePage() {
           resultCount={searchQuery ? photos.length : undefined}
           searchMode={searchMode}
           searchTime={searchTime}
+          colorHex={colorHex ?? undefined}
         />
         {/* Drill-down banner */}
         {showDrillBanner && (
@@ -1272,10 +1294,12 @@ export const Route = createFileRoute("/")({
     focalMin?: string;
     isoMax?: string;
     isoMin?: string;
+    colorHex?: string;
     searchQuery?: string;
     shutterMax?: string;
     shutterMin?: string;
   } => ({
+    colorHex: search.colorHex as string | undefined,
     searchQuery: search.searchQuery as string | undefined,
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,

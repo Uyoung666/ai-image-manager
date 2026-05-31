@@ -141,6 +141,13 @@
       "when": 1785500000000,
       "tag": "0019_add_exif_composite_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1785600000000,
+      "tag": "0020_add_dominant_colors",
+      "breakpoints": true
     }
   ]
 }

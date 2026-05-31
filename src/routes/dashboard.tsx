@@ -84,13 +84,14 @@ const TEXT_TERTIARY = "#6b6b75";
 
 const chartTooltipStyle = {
   contentStyle: {
-    background: "hsl(220 10% 12%)",
-    border: "1px solid hsl(240 4% 18%)",
+    background: "var(--popover)",
+    border: "1px solid var(--border)",
     borderRadius: 6,
-    fontSize: 12,
+    fontSize: 13,
   },
-  cursor: { fill: "rgba(255,255,255,0.05)" },
-  labelStyle: { color: "hsl(180 8% 97%)" },
+  cursor: { fill: "var(--border)" },
+  itemStyle: { color: "var(--popover-foreground)" },
+  labelStyle: { color: "var(--popover-foreground)", fontWeight: 600 },
 };
 
 // Focal length to range mapping: "85" → { min: 75, max: 95 }
@@ -496,7 +497,7 @@ function DashboardPage() {
                       title={`${c.hex} — ${Math.round(c.weight * 100)}%`}
                       onClick={() =>
                         drillToHome({
-                          searchQuery: `#${c.hex.replace("#", "")} 色调`,
+                          colorHex: c.hex.replace("#", ""),
                         })
                       }
                     />
@@ -528,7 +529,7 @@ function DashboardPage() {
                               title={`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}
                               onClick={() =>
                                 drillToHome({
-                                  searchQuery: `#${h.hex.replace("#", "")} 色调`,
+                                  colorHex: h.hex.replace("#", ""),
                                 })
                               }
                             />

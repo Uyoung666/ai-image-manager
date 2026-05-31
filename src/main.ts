@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import {
   app,
   BrowserWindow,
@@ -18,12 +18,12 @@ import { ipcMain } from "electron/main";
 import started from "electron-squirrel-startup";
 import Store from "electron-store";
 import sharp from "sharp";
-import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos, photoTags } from "@/db/schema";
+import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
+import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
   getSendToFilePaths,
@@ -783,6 +783,29 @@ app.whenReady().then(async () => {
     startBackgroundServices().catch((err) =>
       log.warn({ err }, "Non-critical services degraded")
     );
+
+    // ── Background color data backfill (non-blocking, deferred 5s) ─────
+    setTimeout(async () => {
+      try {
+        const db = getDatabase();
+        const row = db
+          .select({ value: appSettings.value })
+          .from(appSettings)
+          .where(eq(appSettings.key, "colors_migrated"))
+          .get();
+
+        if (!row || row.value !== "true") {
+          log.info("[ColorMigration] Starting background color backfill...");
+          const { runColorMigration } = await import(
+            "@/ipc/photos/handlers/stats"
+          );
+          const result = await runColorMigration(false);
+          log.info({ result }, "[ColorMigration] Background backfill complete");
+        }
+      } catch (err) {
+        log.warn({ err }, "[ColorMigration] Startup backfill failed");
+      }
+    }, 5000);
 
     // Forward system theme changes to renderer
     nativeTheme.on("updated", () => {
