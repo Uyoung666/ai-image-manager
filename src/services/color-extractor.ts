@@ -10,11 +10,6 @@ const BINS = 16; // 4 bits per channel → 16×16×16 = 4096 histogram bins
 const TOP_PER_PHOTO = 5;
 const TOP_GLOBAL = 25;
 
-const HUE_LABELS = [
-  "红", "橙", "黄", "黄绿", "绿", "青绿",
-  "青", "蓝", "紫蓝", "紫", "紫红", "粉",
-] as const;
-
 // ── RGB ↔ HSL ────────────────────────────────────────────────────────
 
 function rgbToHsl(r: number, g: number, b: number) {
@@ -114,7 +109,6 @@ interface GlobalPaletteColor {
 }
 
 interface HueBucket {
-  label: string;
   hueRange: [number, number];
   count: number;
   hex: string;
@@ -122,7 +116,6 @@ interface HueBucket {
 
 interface SaturationBucket {
   level: "vivid" | "moderate" | "muted";
-  label: string;
   count: number;
 }
 
@@ -277,16 +270,15 @@ function aggregateDistribution(
   }
 
   const hueDistribution: HueBucket[] = hueBuckets.map((count, i) => ({
-    label: HUE_LABELS[i],
     hueRange: [i * 30, (i + 1) * 30] as [number, number],
     count,
     hex: hexFromHue(i * 30 + 15),
   }));
 
   const saturationDistribution: SaturationBucket[] = [
-    { level: "vivid", label: "高饱和", count: vividCount },
-    { level: "moderate", label: "中等", count: moderateCount },
-    { level: "muted", label: "低饱和", count: mutedCount },
+    { level: "vivid", count: vividCount },
+    { level: "moderate", count: moderateCount },
+    { level: "muted", count: mutedCount },
   ];
 
   return {
@@ -314,14 +306,17 @@ export function invalidateColorCache(): void {
 
 // ── Public API ────────────────────────────────────────────────────────
 
+const COLOR_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
 export async function computeColorDistribution(
   samplePhotos: { path: string; thumbnailPath: string | null }[],
   totalPhotos: number,
 ): Promise<ColorDistributionResult> {
   // Return cached result if photo count hasn't changed significantly
   if (colorCache) {
+    const age = Date.now() - colorCache.timestamp;
     const delta = Math.abs(colorCache.totalPhotos - totalPhotos);
-    if (delta / Math.max(totalPhotos, 1) < 0.05) {
+    if (age < COLOR_CACHE_TTL && delta / Math.max(totalPhotos, 1) < 0.05) {
       return colorCache.result;
     }
   }

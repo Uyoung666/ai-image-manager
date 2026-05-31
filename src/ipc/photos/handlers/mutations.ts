@@ -14,6 +14,7 @@ import {
   getThumbnailPath,
 } from "@/services/thumbnailer";
 import { IdSchema } from "./shared";
+import { invalidateStatsCache } from "./stats";
 
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
@@ -34,6 +35,7 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
         .run();
     }
   }
+  invalidateStatsCache();
   return { success: true };
 });
 
@@ -391,6 +393,7 @@ export const toggleFavorite = os
       .set({ isFavorite: input.favorite })
       .where(inArray(photos.id, input.ids))
       .run();
+    invalidateStatsCache();
     return { success: true };
   });
 
@@ -459,6 +462,7 @@ export const permanentlyDeletePhotos = os
     deletePhotoVectors(input.ids).catch((err) =>
       console.error("[AI] permanentlyDeletePhotos vector cleanup failed:", err)
     );
+    invalidateStatsCache();
     return { deleted: input.ids.length };
   });
 
@@ -471,6 +475,7 @@ export const emptyTrash = os.handler(async () => {
     .all();
   const ids = deletedPhotos.map((p) => p.id);
   if (ids.length === 0) {
+    invalidateStatsCache();
     return { deleted: 0 };
   }
   for (const p of deletedPhotos) {
@@ -484,5 +489,6 @@ export const emptyTrash = os.handler(async () => {
   deletePhotoVectors(ids).catch((err) =>
     console.error("[AI] emptyTrash vector cleanup failed:", err)
   );
+  invalidateStatsCache();
   return { deleted: ids.length };
 });

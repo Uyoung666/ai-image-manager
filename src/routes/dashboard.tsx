@@ -3,6 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   Cell,
@@ -11,6 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+interface ChartClickState { activePayload?: { payload: Record<string, unknown> }[] }
 import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
 import { ipc } from "@/ipc/manager";
 
@@ -124,6 +127,8 @@ function DashboardPage() {
     return t(HUE_LABEL_KEYS[hueStart] || "hueRed");
   }
 
+  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
@@ -133,23 +138,27 @@ function DashboardPage() {
   const colorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
         const result = await ipc.client.photos.getStats({});
-        setData(result as DashboardData);
+        if (!cancelled) setData(result as DashboardData);
       } catch {
         /* ignore */
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-    // Fetch color distribution independently (may be slower)
+
     setColorLoading(true);
     ipc.client.photos
       .getColorDistribution()
-      .then((result) => setColorData(result as ColorDistributionUI))
+      .then((result) => { if (!cancelled) setColorData(result as ColorDistributionUI); })
       .catch(() => {})
-      .finally(() => setColorLoading(false));
+      .finally(() => { if (!cancelled) setColorLoading(false); });
+
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -167,6 +176,14 @@ function DashboardPage() {
   useEffect(() => {
     const el = colorRef.current;
     if (!el) return;
+
+    // Check if already visible (user scrolled during loading)
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight && rect.bottom > 0) {
+      setColorVisible(true);
+      return;
+    }
+
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -194,6 +211,156 @@ function DashboardPage() {
     [navigate]
   );
 
+  const cameraData = useMemo(
+    () =>
+      (data?.cameraStats || []).map((c) => ({
+        name: c.model || "Unknown",
+        count: c.count,
+        cameraModel: c.model,
+      })),
+    [data?.cameraStats]
+  );
+
+  const lensData = useMemo(
+    () =>
+      (data?.lensStats || []).map((l) => ({
+        name: l.model,
+        count: l.count,
+        lensModel: l.model,
+      })),
+    [data?.lensStats]
+  );
+
+  const focalData = useMemo(
+    () =>
+      (data?.focalStats || [])
+        .filter((f) => f.focalLength)
+        .map((f) => {
+          const range = focalToRange(f.focalLength);
+          return {
+            name: `${f.focalLength}mm`,
+            count: f.count,
+            focalMin: range?.min,
+            focalMax: range?.max,
+          };
+        })
+        .sort((a, b) => {
+          const na = Number.parseFloat(a.name);
+          const nb = Number.parseFloat(b.name);
+          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          return 0;
+        })
+        .slice(0, 12),
+    [data?.focalStats]
+  );
+
+  const apertureData = useMemo(
+    () =>
+      (data?.apertureStats || [])
+        .filter((a) => a.aperture)
+        .map((a) => ({
+          name: `f/${a.aperture}`,
+          count: a.count,
+          apertureMin: (a.aperture - 0.2).toFixed(1),
+          apertureMax: (a.aperture + 0.2).toFixed(1),
+        }))
+        .slice(0, 10),
+    [data?.apertureStats]
+  );
+
+  const isoData = useMemo(
+    () =>
+      (data?.isoDistribution || []).map((b) => {
+        // Parse "100-400" → { min: 100, max: 400 }
+        const parts = b.range?.split("-");
+        return {
+          name: b.range || "",
+          count: b.count,
+          isoMin: parts?.[0],
+          isoMax: parts?.[1],
+        };
+      }),
+    [data?.isoDistribution]
+  );
+
+  const timeData = useMemo(
+    () =>
+      (data?.timeHeatmap || []).map((b) => ({
+        name: b.period,
+        count: b.count,
+      })),
+    [data?.timeHeatmap]
+  );
+
+  const shutterData = useMemo(
+    () =>
+      (data?.shutterSpeedDistribution || []).map((b) => {
+        const parts = b.range?.split("-");
+        const getApproxSeconds = (label: string): number | undefined => {
+          if (label.startsWith(">")) {
+            // ">1/1000s" → 1/2000 as representative
+            const m = label.match(/>1\/(\d+)s/);
+            if (m) {
+              return 0.5 / Number.parseFloat(m[1]);
+            }
+          }
+          if (label.startsWith("<")) {
+            // "<1/30s" → 1/15 as representative
+            const m = label.match(/<1\/(\d+)s/);
+            if (m) {
+              return 2 / Number.parseFloat(m[1]);
+            }
+          }
+          const m = label.match(/1\/(\d+)s-1\/(\d+)s/);
+          if (m) {
+            const lo = Number.parseFloat(m[1]);
+            const hi = Number.parseFloat(m[2]);
+            return (1 / lo + 1 / hi) / 2;
+          }
+          return undefined;
+        };
+        const approxSec = getApproxSeconds(b.range || "");
+        return {
+          name: b.range || "",
+          count: b.count,
+          shutterMin: approxSec === undefined ? undefined : approxSec * 0.7,
+          shutterMax: approxSec === undefined ? undefined : approxSec * 1.3,
+        };
+      }),
+    [data?.shutterSpeedDistribution]
+  );
+
+  const yearlyData = useMemo(
+    () =>
+      (data?.yearlyStats || []).map((y) => {
+        const year = Number.parseInt(y.year, 10);
+        return {
+          name: y.year,
+          count: y.count,
+          dateFrom: `${year}-01-01`,
+          dateTo: `${year}-12-31`,
+        };
+      }),
+    [data?.yearlyStats]
+  );
+
+  const monthlyData = useMemo(() => {
+    const monthLabelFormatter = new Intl.DateTimeFormat(i18n.language, {
+      month: "short",
+    });
+    const monthCountMap = new Map<number, number>();
+    for (const m of data?.monthlyStats || []) {
+      const idx = Number.parseInt(m.month, 10);
+      if (idx >= 1 && idx <= 12) {
+        monthCountMap.set(idx, m.count);
+      }
+    }
+    return Array.from({ length: 12 }, (_, i) => ({
+      name: monthLabelFormatter.format(new Date(2000, i, 1)),
+      count: monthCountMap.get(i + 1) || 0,
+    }));
+  }, [data?.monthlyStats, i18n.language]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -201,116 +368,6 @@ function DashboardPage() {
       </div>
     );
   }
-
-  const cameraData = (data?.cameraStats || []).map((c) => ({
-    name: c.model || "Unknown",
-    count: c.count,
-    cameraModel: c.model,
-  }));
-
-  const lensData = (data?.lensStats || []).map((l) => ({
-    name: l.model,
-    count: l.count,
-    lensModel: l.model,
-  }));
-
-  const focalData = (data?.focalStats || [])
-    .filter((f) => f.focalLength)
-    .map((f) => {
-      const range = focalToRange(f.focalLength);
-      return {
-        name: `${f.focalLength}mm`,
-        count: f.count,
-        focalMin: range?.min,
-        focalMax: range?.max,
-      };
-    })
-    .slice(0, 12);
-
-  const apertureData = (data?.apertureStats || [])
-    .filter((a) => a.aperture)
-    .map((a) => ({
-      name: `f/${a.aperture}`,
-      count: a.count,
-      apertureMin: (a.aperture - 0.2).toFixed(1),
-      apertureMax: (a.aperture + 0.2).toFixed(1),
-    }))
-    .slice(0, 10);
-
-  const isoData = (data?.isoDistribution || []).map((b) => {
-    // Parse "100-400" → { min: 100, max: 400 }
-    const parts = b.range?.split("-");
-    return {
-      name: b.range || "",
-      count: b.count,
-      isoMin: parts?.[0],
-      isoMax: parts?.[1],
-    };
-  });
-
-  const timeData = (data?.timeHeatmap || []).map((b) => ({
-    name: b.period,
-    count: b.count,
-  }));
-
-  const shutterData = (data?.shutterSpeedDistribution || []).map((b) => {
-    const parts = b.range?.split("-");
-    const getApproxSeconds = (label: string): number | undefined => {
-      if (label.startsWith(">")) {
-        // ">1/1000s" → 1/2000 as representative
-        const m = label.match(/>1\/(\d+)s/);
-        if (m) {
-          return 0.5 / Number.parseFloat(m[1]);
-        }
-      }
-      if (label.startsWith("<")) {
-        // "<1/30s" → 1/15 as representative
-        const m = label.match(/<1\/(\d+)s/);
-        if (m) {
-          return 2 / Number.parseFloat(m[1]);
-        }
-      }
-      const m = label.match(/1\/(\d+)s-1\/(\d+)s/);
-      if (m) {
-        const lo = Number.parseFloat(m[1]);
-        const hi = Number.parseFloat(m[2]);
-        return (1 / lo + 1 / hi) / 2;
-      }
-      return undefined;
-    };
-    const approxSec = getApproxSeconds(b.range || "");
-    return {
-      name: b.range || "",
-      count: b.count,
-      shutterMin: approxSec === undefined ? undefined : approxSec * 0.7,
-      shutterMax: approxSec === undefined ? undefined : approxSec * 1.3,
-    };
-  });
-
-  const yearlyData = (data?.yearlyStats || []).map((y) => {
-    const year = Number.parseInt(y.year, 10);
-    return {
-      name: y.year,
-      count: y.count,
-      dateFrom: `${year}-01-01`,
-      dateTo: `${year}-12-31`,
-    };
-  });
-
-  const monthLabelFormatter = new Intl.DateTimeFormat(i18n.language, {
-    month: "short",
-  });
-  const monthCountMap = new Map<number, number>();
-  for (const m of data?.monthlyStats || []) {
-    const idx = Number.parseInt(m.month, 10);
-    if (idx >= 1 && idx <= 12) {
-      monthCountMap.set(idx, m.count);
-    }
-  }
-  const monthlyData = Array.from({ length: 12 }, (_, i) => ({
-    name: monthLabelFormatter.format(new Date(2000, i, 1)),
-    count: monthCountMap.get(i + 1) || 0,
-  }));
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -560,47 +617,18 @@ function DashboardPage() {
         {/* Camera Usage */}
         <ChartSection hint={t("clickToView")} title={t("cameraUsage")}>
           {cameraData.length > 0 ? (
-            <ResponsiveContainer
-              height={cameraData.length * 36 + 20}
-              width="100%"
-            >
-              <BarChart
-                data={cameraData}
-                layout="vertical"
-                margin={{ top: 0, right: 20, left: 140, bottom: 0 }}
-              >
-                <XAxis
-                  axisLine={false}
-                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                  tickLine={false}
-                  type="number"
-                />
-                <YAxis
-                  axisLine={false}
-                  dataKey="name"
-                  tick={{ fill: TEXT_SECONDARY, fontSize: 12 }}
-                  tickLine={false}
-                  type="category"
-                  width={130}
-                />
-                <Tooltip {...chartTooltipStyle} />
-                <Bar
-                  animationDuration={800}
-                  className="cursor-pointer"
-                  dataKey="count"
-                  onClick={(entry) => {
-                    if (entry.cameraModel) {
-                      drillToHome({ cameraModel: entry.cameraModel });
-                    }
-                  }}
-                  radius={[0, 4, 4, 0]}
-                >
-                  {cameraData.map((_, i) => (
-                    <Cell fill={CHART_1} key={i} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <DashboardBarChart
+              data={cameraData}
+              horizontal
+              leftMargin={140}
+              fillColor={CHART_1}
+              barRadius={[0, 4, 4, 0]}
+              onBarClick={(entry) => {
+                if (entry.cameraModel) {
+                  drillToHome({ cameraModel: entry.cameraModel });
+                }
+              }}
+            />
           ) : (
             <EmptyHint text={t("noCameraData")} />
           )}
@@ -609,46 +637,19 @@ function DashboardPage() {
         {/* Lens Usage */}
         {lensData.length > 0 && (
           <ChartSection hint={t("clickToView")} title={t("lensUsage")}>
-            <ResponsiveContainer
-              height={lensData.length * 36 + 20}
-              width="100%"
-            >
-              <BarChart
-                data={lensData}
-                layout="vertical"
-                margin={{ top: 0, right: 20, left: 160, bottom: 0 }}
-              >
-                <XAxis
-                  axisLine={false}
-                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                  tickLine={false}
-                  type="number"
-                />
-                <YAxis
-                  axisLine={false}
-                  dataKey="name"
-                  tick={{ fill: TEXT_SECONDARY, fontSize: 11 }}
-                  tickLine={false}
-                  type="category"
-                  width={150}
-                />
-                <Tooltip {...chartTooltipStyle} />
-                <Bar
-                  animationDuration={800}
-                  className="cursor-pointer"
-                  dataKey="count"
-                  onClick={() => {
-                    // Lens drill-down — navigate with the lens model as camera filter
-                    // (lensModel filter not yet in ExifFilters, skip for now)
-                  }}
-                  radius={[0, 4, 4, 0]}
-                >
-                  {lensData.map((_, i) => (
-                    <Cell fill={CHART_5} key={i} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <DashboardBarChart
+              data={lensData}
+              horizontal
+              leftMargin={160}
+              fillColor={CHART_5}
+              barRadius={[0, 4, 4, 0]}
+              cursor={true}
+              onBarClick={(entry) => {
+                if (entry.lensModel) {
+                  drillToHome({ lensModel: entry.lensModel });
+                }
+              }}
+            />
           </ChartSection>
         )}
 
@@ -656,46 +657,20 @@ function DashboardPage() {
         <div className="grid grid-cols-2 gap-4">
           <ChartSection hint={t("clickToView")} title={t("focalDistribution")}>
             {focalData.length > 0 ? (
-              <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={focalData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    angle={-45}
-                    axisLine={false}
-                    dataKey="name"
-                    height={40}
-                    textAnchor="end"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
-                    className="cursor-pointer"
-                    dataKey="count"
-                    onClick={(entry) => {
-                      if (entry.focalMin && entry.focalMax) {
-                        drillToHome({
-                          focalMin: String(entry.focalMin),
-                          focalMax: String(entry.focalMax),
-                        });
-                      }
-                    }}
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {focalData.map((_, i) => (
-                      <Cell fill={CHART_2} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <DashboardBarChart
+                data={focalData}
+                fillColor={CHART_2}
+                xAxisAngle={-45}
+                xAxisFontSize={10}
+                onBarClick={(entry) => {
+                  if (entry.focalMin && entry.focalMax) {
+                    drillToHome({
+                      focalMin: String(entry.focalMin),
+                      focalMax: String(entry.focalMax),
+                    });
+                  }
+                }}
+              />
             ) : (
               <EmptyHint text={t("noFocalData")} />
             )}
@@ -703,46 +678,20 @@ function DashboardPage() {
 
           <ChartSection hint={t("clickToView")} title={t("aperturePreference")}>
             {apertureData.length > 0 ? (
-              <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={apertureData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    angle={-45}
-                    axisLine={false}
-                    dataKey="name"
-                    height={40}
-                    textAnchor="end"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
-                    className="cursor-pointer"
-                    dataKey="count"
-                    onClick={(entry) => {
-                      if (entry.apertureMin && entry.apertureMax) {
-                        drillToHome({
-                          apertureMin: entry.apertureMin,
-                          apertureMax: entry.apertureMax,
-                        });
-                      }
-                    }}
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {apertureData.map((_, i) => (
-                      <Cell fill={CHART_3} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <DashboardBarChart
+                data={apertureData}
+                fillColor={CHART_3}
+                xAxisAngle={-45}
+                xAxisFontSize={10}
+                onBarClick={(entry) => {
+                  if (entry.apertureMin && entry.apertureMax) {
+                    drillToHome({
+                      apertureMin: entry.apertureMin,
+                      apertureMax: entry.apertureMax,
+                    });
+                  }
+                }}
+              />
             ) : (
               <EmptyHint text={t("noApertureData")} />
             )}
@@ -750,43 +699,18 @@ function DashboardPage() {
 
           <ChartSection hint={t("clickToView")} title={t("isoDistributionTitle")}>
             {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
-              <ResponsiveContainer height={180} width="100%">
-                <BarChart
-                  data={isoData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
-                    className="cursor-pointer"
-                    dataKey="count"
-                    onClick={(entry) => {
-                      if (entry.isoMin && entry.isoMax) {
-                        drillToHome({
-                          isoMin: entry.isoMin,
-                          isoMax: entry.isoMax,
-                        });
-                      }
-                    }}
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {isoData.map((_, i) => (
-                      <Cell fill={CHART_4} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <DashboardBarChart
+                data={isoData}
+                fillColor={CHART_4}
+                onBarClick={(entry) => {
+                  if (entry.isoMin && entry.isoMax) {
+                    drillToHome({
+                      isoMin: entry.isoMin,
+                      isoMax: entry.isoMax,
+                    });
+                  }
+                }}
+              />
             ) : (
               <EmptyHint text={t("noIsoData")} />
             )}
@@ -795,18 +719,21 @@ function DashboardPage() {
           <ChartSection title={t("timeDistribution24h")}>
             {timeData.length > 0 && timeData.some((d) => d.count > 0) ? (
               <ResponsiveContainer height={180} width="100%">
-                <BarChart
+                <AreaChart
                   data={timeData}
                   margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
                 >
+                  <defs>
+                    <linearGradient id="timeGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.5} />
+                      <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
                   <XAxis
-                    angle={-90}
                     axisLine={false}
                     dataKey="name"
-                    height={40}
-                    interval={2}
-                    textAnchor="end"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 9 }}
+                    interval={3}
+                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
                     tickLine={false}
                   />
                   <YAxis
@@ -815,16 +742,15 @@ function DashboardPage() {
                     tickLine={false}
                   />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
+                  <Area
+                    animationDuration={prefersReducedMotion ? 0 : 800}
                     dataKey="count"
-                    radius={[3, 3, 0, 0]}
-                  >
-                    {timeData.map((_, i) => (
-                      <Cell fill={CHART_1} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
+                    fill="url(#timeGradient)"
+                    stroke={CHART_1}
+                    strokeWidth={2}
+                    type="monotone"
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             ) : (
               <EmptyHint text={t("noTimeData")} />
@@ -835,49 +761,23 @@ function DashboardPage() {
         {/* Shutter Speed Distribution */}
         <ChartSection hint={t("clickToView")} title={t("shutterDistribution")}>
           {shutterData.length > 0 && shutterData.some((d) => d.count > 0) ? (
-            <ResponsiveContainer height={180} width="100%">
-              <BarChart
-                data={shutterData}
-                margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-              >
-                <XAxis
-                  angle={-45}
-                  axisLine={false}
-                  dataKey="name"
-                  height={40}
-                  textAnchor="end"
-                  tick={{ fill: TEXT_TERTIARY, fontSize: 10 }}
-                  tickLine={false}
-                />
-                <YAxis
-                  axisLine={false}
-                  tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                  tickLine={false}
-                />
-                <Tooltip {...chartTooltipStyle} />
-                <Bar
-                  animationDuration={800}
-                  className="cursor-pointer"
-                  dataKey="count"
-                  onClick={(entry) => {
-                    if (
-                      entry.shutterMin !== undefined &&
-                      entry.shutterMax !== undefined
-                    ) {
-                      drillToHome({
-                        shutterMin: String(entry.shutterMin),
-                        shutterMax: String(entry.shutterMax),
-                      });
-                    }
-                  }}
-                  radius={[4, 4, 0, 0]}
-                >
-                  {shutterData.map((_, i) => (
-                    <Cell fill={CHART_5} key={i} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <DashboardBarChart
+              data={shutterData}
+              fillColor={CHART_5}
+              xAxisAngle={-45}
+              xAxisFontSize={10}
+              onBarClick={(entry) => {
+                if (
+                  entry.shutterMin !== undefined &&
+                  entry.shutterMax !== undefined
+                ) {
+                  drillToHome({
+                    shutterMin: String(entry.shutterMin),
+                    shutterMax: String(entry.shutterMax),
+                  });
+                }
+              }}
+            />
           ) : (
             <EmptyHint text={t("noShutterData")} />
           )}
@@ -888,18 +788,24 @@ function DashboardPage() {
           <ChartSection hint={t("clickYearToView")} title={t("yearlyDistribution")}>
             {yearlyData.length > 0 ? (
               <ResponsiveContainer height={200} width="100%">
-                <BarChart
+                <AreaChart
                   data={yearlyData}
                   margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                  onClick={(entry: any) => {
-                    if (entry?.activePayload?.[0]?.payload) {
-                      const p = entry.activePayload[0].payload;
+                  onClick={(state: ChartClickState) => {
+                    if (state?.activePayload?.[0]?.payload) {
+                      const p = state.activePayload[0].payload as { dateFrom?: string; dateTo?: string };
                       if (p.dateFrom && p.dateTo) {
                         drillToHome({ dateFrom: p.dateFrom, dateTo: p.dateTo });
                       }
                     }
                   }}
                 >
+                  <defs>
+                    <linearGradient id="yearGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.5} />
+                      <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
                   <XAxis
                     axisLine={false}
                     dataKey="name"
@@ -912,17 +818,16 @@ function DashboardPage() {
                     tickLine={false}
                   />
                   <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
+                  <Area
+                    animationDuration={prefersReducedMotion ? 0 : 800}
                     className="cursor-pointer"
                     dataKey="count"
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {yearlyData.map((_, i) => (
-                      <Cell fill={CHART_2} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
+                    fill="url(#yearGradient)"
+                    stroke={CHART_2}
+                    strokeWidth={2}
+                    type="monotone"
+                  />
+                </AreaChart>
               </ResponsiveContainer>
             ) : (
               <EmptyHint text={t("noYearData")} />
@@ -931,34 +836,12 @@ function DashboardPage() {
 
           <ChartSection title={t("monthlyDistribution")}>
             {monthlyData.some((d) => d.count > 0) ? (
-              <ResponsiveContainer height={200} width="100%">
-                <BarChart
-                  data={monthlyData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Bar
-                    animationDuration={800}
-                    dataKey="count"
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {monthlyData.map((_, i) => (
-                      <Cell fill={CHART_4} key={i} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <DashboardBarChart
+                data={monthlyData}
+                fillColor={CHART_4}
+                height={200}
+                cursor={false}
+              />
             ) : (
               <EmptyHint text={t("noMonthData")} />
             )}
@@ -966,6 +849,116 @@ function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+interface DashboardBarChartProps {
+  data: any[];
+  dataKey?: string;
+  fillColor: string;
+  height?: number;
+  horizontal?: boolean;
+  leftMargin?: number;
+  xAxisAngle?: number;
+  xAxisHeight?: number;
+  xAxisFontSize?: number;
+  xAxisInterval?: number;
+  barRadius?: [number, number, number, number];
+  cursor?: boolean;
+  onBarClick?: (entry: any) => void;
+}
+
+function DashboardBarChart({
+  data,
+  dataKey = "count",
+  fillColor,
+  height = 180,
+  horizontal = false,
+  leftMargin = 0,
+  xAxisAngle = 0,
+  xAxisHeight = 40,
+  xAxisFontSize = 11,
+  xAxisInterval = 0,
+  barRadius = [4, 4, 0, 0],
+  cursor = true,
+  onBarClick,
+}: DashboardBarChartProps) {
+  const noAnim = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (horizontal) {
+    const containerHeight = data.length * 36 + 20;
+    return (
+      <ResponsiveContainer height={containerHeight} width="100%">
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 0, right: 20, left: leftMargin, bottom: 0 }}
+        >
+          <XAxis
+            axisLine={false}
+            tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+            tickLine={false}
+            type="number"
+          />
+          <YAxis
+            axisLine={false}
+            dataKey="name"
+            tick={{ fill: TEXT_SECONDARY, fontSize: 12 }}
+            tickLine={false}
+            type="category"
+            width={leftMargin - 10}
+          />
+          <Tooltip {...chartTooltipStyle} />
+          <Bar
+            animationDuration={noAnim ? 0 : 800}
+            className={onBarClick && cursor ? "cursor-pointer" : undefined}
+            dataKey={dataKey}
+            onClick={onBarClick}
+            radius={barRadius as [number, number, number, number]}
+          >
+            {data.map((_, i) => (
+              <Cell fill={fillColor} key={i} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  return (
+    <ResponsiveContainer height={height} width="100%">
+      <BarChart
+        data={data}
+        margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
+      >
+        <XAxis
+          angle={xAxisAngle}
+          axisLine={false}
+          dataKey="name"
+          height={xAxisHeight}
+          textAnchor={xAxisAngle !== 0 ? "end" : undefined}
+          tick={{ fill: TEXT_TERTIARY, fontSize: xAxisFontSize }}
+          tickLine={false}
+          interval={xAxisInterval}
+        />
+        <YAxis
+          axisLine={false}
+          tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
+          tickLine={false}
+        />
+        <Tooltip {...chartTooltipStyle} />
+        <Bar
+          animationDuration={noAnim ? 0 : 800}
+          className={onBarClick && cursor ? "cursor-pointer" : undefined}
+          dataKey={dataKey}
+          onClick={onBarClick}
+          radius={barRadius as [number, number, number, number]}
+        >
+          {data.map((_, i) => (
+            <Cell fill={fillColor} key={i} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 

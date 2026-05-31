@@ -88,8 +88,10 @@ export const exifData = sqliteTable(
     lensModel: text("lens_model"),
     focalLength: text("focal_length"),
     focalLength35mm: text("focal_length_35mm"),
+    focalLengthNum: real("focal_length_num"),
     aperture: real("aperture"),
     shutterSpeed: text("shutter_speed"),
+    shutterSpeedNum: real("shutter_speed_num"),
     iso: integer("iso"),
     exposureCompensation: real("exposure_compensation"),
     dateTaken: integer("date_taken"),
@@ -107,6 +109,34 @@ export const exifData = sqliteTable(
   },
   (table) => ({
     dateTakenIdx: index("idx_exif_date_taken").on(table.dateTaken),
+    cameraModelIdx: index("idx_exif_camera_model").on(table.cameraModel),
+    lensModelIdx: index("idx_exif_lens_model").on(table.lensModel),
+    focalLengthIdx: index("idx_exif_focal_length").on(table.focalLength),
+    apertureIdx: index("idx_exif_aperture").on(table.aperture),
+    isoIdx: index("idx_exif_iso").on(table.iso),
+    shutterSpeedIdx: index("idx_exif_shutter_speed").on(table.shutterSpeed),
+    focalLengthNumIdx: index("idx_exif_focal_length_num").on(
+      table.focalLengthNum
+    ),
+    shutterSpeedNumIdx: index("idx_exif_shutter_speed_num").on(
+      table.shutterSpeedNum
+    ),
+    cameraDateIdx: index("idx_exif_camera_date").on(
+      table.cameraModel,
+      table.dateTaken
+    ),
+    isoApertureIdx: index("idx_exif_iso_aperture").on(
+      table.iso,
+      table.aperture
+    ),
+    focalApertureIdx: index("idx_exif_focal_aperture").on(
+      table.focalLengthNum,
+      table.aperture
+    ),
+    shutterIsoIdx: index("idx_exif_shutter_iso").on(
+      table.shutterSpeedNum,
+      table.iso
+    ),
   })
 );
 

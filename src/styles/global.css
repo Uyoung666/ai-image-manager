@@ -43,6 +43,7 @@
   --secondary-foreground: var(--foreground);
   --muted: #15171a;
   --muted-foreground: var(--foreground-secondary);
+  --skeleton: #1e2029;
   --accent: var(--primary);
   --accent-foreground: var(--primary-foreground);
   --destructive: var(--danger);
@@ -51,11 +52,11 @@
   --ring: var(--primary);
 
   /* 图表色 */
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
+  --chart-1: oklch(0.65 0.19 250);
+  --chart-2: oklch(0.6 0.14 175);
+  --chart-3: oklch(0.65 0.17 55);
+  --chart-4: oklch(0.6 0.17 320);
+  --chart-5: oklch(0.55 0.2 15);
 
   /* 圆角令牌 (对齐 PDR: 4/6/8/12/full) */
   --radius: 0.5rem;
@@ -118,6 +119,7 @@
   --secondary-foreground: var(--foreground);
   --muted: #f5f5f5;
   --muted-foreground: var(--foreground-secondary);
+  --skeleton: #ebebeb;
   --accent: var(--primary);
   --accent-foreground: var(--primary-foreground);
   --destructive: var(--danger);
@@ -254,11 +256,12 @@
 }
 
 .animate-shimmer {
-  background: linear-gradient(
+  background-color: var(--skeleton);
+  background-image: linear-gradient(
     90deg,
-    var(--muted) 0%,
-    color-mix(in srgb, var(--muted) 85%, white) 50%,
-    var(--muted) 100%
+    transparent 0%,
+    color-mix(in srgb, var(--skeleton) 85%, white) 50%,
+    transparent 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.8s ease-in-out infinite;

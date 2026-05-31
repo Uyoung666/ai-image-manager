@@ -15,8 +15,7 @@ import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
-import type { ExifFilters } from "@/components/SearchBar";
-import { SearchBar } from "@/components/SearchBar";
+import { SearchBar, type ExifFilters, type SearchBarHandle } from "@/components/SearchBar";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { ShareDialog } from "@/components/ShareDialog";
 import { Sidebar } from "@/components/Sidebar";
@@ -111,6 +110,7 @@ function HomePage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [showDrillBanner, setShowDrillBanner] = useState(false);
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
@@ -118,21 +118,30 @@ function HomePage() {
   // Drill-down from dashboard: detect search params and auto-trigger EXIF search
   const drillParams = Route.useSearch();
   const drillConsumed = useRef(false);
+  const searchBarRef = useRef<SearchBarHandle>(null);
 
   useEffect(() => {
+    const hasParams = Object.values(drillParams).some((v) => v !== undefined);
+
+    if (!hasParams) {
+      drillConsumed.current = false;
+      setShowDrillBanner(false);
+      return;
+    }
+
     if (drillConsumed.current) {
       return;
     }
-    const hasParams = Object.values(drillParams).some((v) => v !== undefined);
-    if (!hasParams) {
-      return;
-    }
     drillConsumed.current = true;
+    setShowDrillBanner(true);
 
-    // Build filters and trigger search
+    // Build filters
     const filters: ExifFilters = {};
     if (drillParams.cameraModel) {
       filters.cameraModel = drillParams.cameraModel;
+    }
+    if (drillParams.lensModel) {
+      filters.lensModel = drillParams.lensModel;
     }
     if (drillParams.focalMin) {
       filters.focalMin = drillParams.focalMin;
@@ -168,10 +177,15 @@ function HomePage() {
     // Extract optional text search query for color drill-down
     const textQuery = (drillParams.searchQuery as string) || "";
 
+    // Sync filters to SearchBar BEFORE clearing URL params
+    if (searchBarRef.current) {
+      searchBarRef.current.setFilters(filters, true);
+    }
+
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
     handleSearch(textQuery, filters);
-  }, [drillParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drillParams, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for photo-drop:album event from sidebar
   useEffect(() => {
@@ -517,6 +531,7 @@ function HomePage() {
         dateFrom?: number;
         dateTo?: number;
         cameraModel?: string;
+        lensModel?: string;
         focalMin?: number;
         focalMax?: number;
         apertureMin?: number;
@@ -540,6 +555,9 @@ function HomePage() {
       }
       if (filters?.cameraModel) {
         searchParams.cameraModel = filters.cameraModel;
+      }
+      if (filters?.lensModel) {
+        searchParams.lensModel = filters.lensModel;
       }
       if (filters?.focalMin) {
         searchParams.focalMin = Number(filters.focalMin);
@@ -962,6 +980,7 @@ function HomePage() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
+          ref={searchBarRef}
           aiStatus={aiStatus ?? null}
           imageSearchActive={searchMode === "image"}
           onClear={() => {
@@ -976,6 +995,35 @@ function HomePage() {
           searchMode={searchMode}
           searchTime={searchTime}
         />
+        {/* Drill-down banner */}
+        {showDrillBanner && (
+          <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
+            <div className="flex items-center gap-2">
+              <span className="text-blue-900 text-sm dark:text-blue-100">
+                {t("drillDownActiveHint")}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="rounded-[4px] px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-800"
+                onClick={() => {
+                  searchBarRef.current?.clearFilters();
+                  setShowDrillBanner(false);
+                }}
+                type="button"
+              >
+                {t("clearAll")}
+              </button>
+              <button
+                className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
+                onClick={() => navigate({ to: "/dashboard" })}
+                type="button"
+              >
+                {t("backToDashboard")}
+              </button>
+            </div>
+          </div>
+        )}
         {hasPhotos ? (
           <div className="flex min-h-0 flex-1">
             <div className="relative flex min-w-0 flex-1">
@@ -1217,6 +1265,7 @@ export const Route = createFileRoute("/")({
     apertureMax?: string;
     apertureMin?: string;
     cameraModel?: string;
+    lensModel?: string;
     dateFrom?: string;
     dateTo?: string;
     focalMax?: string;
@@ -1231,6 +1280,7 @@ export const Route = createFileRoute("/")({
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,
     cameraModel: search.cameraModel as string | undefined,
+    lensModel: search.lensModel as string | undefined,
     dateFrom: search.dateFrom as string | undefined,
     dateTo: search.dateTo as string | undefined,
     focalMax: search.focalMax as string | undefined,

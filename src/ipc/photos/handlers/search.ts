@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { os } from "@orpc/server";
-import { desc, gte, inArray, like, lte, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { and, desc, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos } from "@/db/schema";
 import {
@@ -17,6 +18,44 @@ import {
   ImageSearchSchema,
   SearchSchema,
 } from "./shared";
+
+// EXIF filter cache: cache key -> { result, timestamp }
+const filterCache = new Map<string, { result: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 50;
+
+function getCacheKey(params: Record<string, unknown>): string {
+  // Create a deterministic key excluding non-filter params
+  const filterParams: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && key !== "limit" && key !== "query") {
+      filterParams[key] = value;
+    }
+  }
+  return JSON.stringify(filterParams, Object.keys(filterParams).sort());
+}
+
+function getCachedResult(cacheKey: string) {
+  const entry = filterCache.get(cacheKey);
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
+    return entry.result;
+  }
+  if (entry) {
+    filterCache.delete(cacheKey); // expired
+  }
+  return null;
+}
+
+function setCachedResult(cacheKey: string, result: any) {
+  // Evict oldest if at capacity
+  if (filterCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = filterCache.keys().next().value;
+    if (firstKey !== undefined) {
+      filterCache.delete(firstKey);
+    }
+  }
+  filterCache.set(cacheKey, { result, timestamp: Date.now() });
+}
 
 // AI Search
 export const searchByText = os
@@ -118,6 +157,7 @@ export const searchCompound = os
       dateFrom,
       dateTo,
       cameraModel,
+      lensModel,
       focalMin,
       focalMax,
       apertureMin,
@@ -128,10 +168,12 @@ export const searchCompound = os
       shutterMax,
       limit,
     } = input;
+
     const hasExifFilters =
       dateFrom ||
       dateTo ||
       cameraModel ||
+      lensModel ||
       focalMin ||
       focalMax ||
       apertureMin ||
@@ -195,61 +237,56 @@ export const searchCompound = os
         };
       }
       // Apply EXIF filters on AI results
-      let exifQuery = db
+      const aiExifConditions: SQL[] = [];
+
+      if (dateFrom) {
+        aiExifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
+      }
+      if (dateTo) {
+        aiExifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
+      }
+      if (cameraModel) {
+        aiExifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
+      }
+      if (lensModel) {
+        aiExifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
+      }
+      if (focalMin !== undefined) {
+        aiExifConditions.push(gte(exifData.focalLengthNum, focalMin));
+      }
+      if (focalMax !== undefined) {
+        aiExifConditions.push(lte(exifData.focalLengthNum, focalMax));
+      }
+      if (apertureMin !== undefined) {
+        aiExifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
+      }
+      if (apertureMax !== undefined) {
+        aiExifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
+      }
+      if (isoMin !== undefined) {
+        aiExifConditions.push(gte(exifData.iso, isoMin));
+      }
+      if (isoMax !== undefined) {
+        aiExifConditions.push(lte(exifData.iso, isoMax));
+      }
+      if (shutterMin !== undefined) {
+        aiExifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
+      }
+      if (shutterMax !== undefined) {
+        aiExifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
+      }
+
+      const aiExifBaseQuery = db
         .select({ photoId: exifData.photoId })
         .from(exifData)
         .where(inArray(exifData.photoId, photoIds))
         .$dynamic();
 
-      if (dateFrom) {
-        exifQuery = exifQuery.where(sql`${exifData.dateTaken} >= ${dateFrom}`);
-      }
-      if (dateTo) {
-        exifQuery = exifQuery.where(sql`${exifData.dateTaken} <= ${dateTo}`);
-      }
-      if (cameraModel) {
-        exifQuery = exifQuery.where(
-          like(exifData.cameraModel, `%${cameraModel}%`)
-        );
-      }
-      if (focalMin !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`CAST(${exifData.focalLength} AS REAL) >= ${focalMin}`
-        );
-      }
-      if (focalMax !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`CAST(${exifData.focalLength} AS REAL) <= ${focalMax}`
-        );
-      }
-      if (apertureMin !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`${exifData.aperture} >= ${apertureMin}`
-        );
-      }
-      if (apertureMax !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`${exifData.aperture} <= ${apertureMax}`
-        );
-      }
-      if (isoMin !== undefined) {
-        exifQuery = exifQuery.where(gte(exifData.iso, isoMin));
-      }
-      if (isoMax !== undefined) {
-        exifQuery = exifQuery.where(lte(exifData.iso, isoMax));
-      }
-      if (shutterMin !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`CAST(${exifData.shutterSpeed} AS REAL) >= ${shutterMin}`
-        );
-      }
-      if (shutterMax !== undefined) {
-        exifQuery = exifQuery.where(
-          sql`CAST(${exifData.shutterSpeed} AS REAL) <= ${shutterMax}`
-        );
-      }
-
-      const filteredExif = exifQuery.all();
+      const filteredExif = (
+        aiExifConditions.length > 0
+          ? aiExifBaseQuery.where(and(...aiExifConditions))
+          : aiExifBaseQuery
+      ).all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
 
       const filtered = aiResults.filter((r) => validIds.has(r.photoId));
@@ -297,60 +334,68 @@ export const searchCompound = os
       return { results: items, total: items.length };
     }
 
-    let exifQuery = db
+    // Check EXIF-only filter cache (only for non-AI path)
+    const cacheKey = getCacheKey(input);
+    const cached = getCachedResult(cacheKey);
+    if (cached) return cached;
+
+    const exifConditions: SQL[] = [];
+
+    if (dateFrom) {
+      exifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
+    }
+    if (dateTo) {
+      exifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
+    }
+    if (cameraModel) {
+      exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
+    }
+    if (lensModel) {
+      exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
+    }
+    if (focalMin !== undefined) {
+      exifConditions.push(gte(exifData.focalLengthNum, focalMin));
+    }
+    if (focalMax !== undefined) {
+      exifConditions.push(lte(exifData.focalLengthNum, focalMax));
+    }
+    if (apertureMin !== undefined) {
+      exifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
+    }
+    if (apertureMax !== undefined) {
+      exifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
+    }
+    if (isoMin !== undefined) {
+      exifConditions.push(gte(exifData.iso, isoMin));
+    }
+    if (isoMax !== undefined) {
+      exifConditions.push(lte(exifData.iso, isoMax));
+    }
+    if (shutterMin !== undefined) {
+      exifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
+    }
+    if (shutterMax !== undefined) {
+      exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
+    }
+
+    const exifBaseQuery = db
       .select({ photoId: exifData.photoId })
       .from(exifData)
       .$dynamic();
 
-    if (dateFrom) {
-      exifQuery = exifQuery.where(sql`${exifData.dateTaken} >= ${dateFrom}`);
-    }
-    if (dateTo) {
-      exifQuery = exifQuery.where(sql`${exifData.dateTaken} <= ${dateTo}`);
-    }
-    if (cameraModel) {
-      exifQuery = exifQuery.where(
-        like(exifData.cameraModel, `%${cameraModel}%`)
-      );
-    }
-    if (focalMin !== undefined) {
-      exifQuery = exifQuery.where(
-        sql`CAST(${exifData.focalLength} AS REAL) >= ${focalMin}`
-      );
-    }
-    if (focalMax !== undefined) {
-      exifQuery = exifQuery.where(
-        sql`CAST(${exifData.focalLength} AS REAL) <= ${focalMax}`
-      );
-    }
-    if (apertureMin !== undefined) {
-      exifQuery = exifQuery.where(sql`${exifData.aperture} >= ${apertureMin}`);
-    }
-    if (apertureMax !== undefined) {
-      exifQuery = exifQuery.where(sql`${exifData.aperture} <= ${apertureMax}`);
-    }
-    if (isoMin !== undefined) {
-      exifQuery = exifQuery.where(gte(exifData.iso, isoMin));
-    }
-    if (isoMax !== undefined) {
-      exifQuery = exifQuery.where(lte(exifData.iso, isoMax));
-    }
-    if (shutterMin !== undefined) {
-      exifQuery = exifQuery.where(
-        sql`CAST(${exifData.shutterSpeed} AS REAL) >= ${shutterMin}`
-      );
-    }
-    if (shutterMax !== undefined) {
-      exifQuery = exifQuery.where(
-        sql`CAST(${exifData.shutterSpeed} AS REAL) <= ${shutterMax}`
-      );
-    }
-
-    const filteredExif = exifQuery.limit(limit).all();
+    const filteredExif = (
+      exifConditions.length > 0
+        ? exifBaseQuery.where(and(...exifConditions))
+        : exifBaseQuery
+    )
+      .limit(limit)
+      .all();
     const exifPhotoIds = filteredExif.map((e) => e.photoId!).filter(Boolean);
 
     if (exifPhotoIds.length === 0) {
-      return { results: [], total: 0 };
+      const emptyResult = { results: [], total: 0 };
+      setCachedResult(cacheKey, emptyResult);
+      return emptyResult;
     }
 
     const photoList = db
@@ -360,5 +405,7 @@ export const searchCompound = os
       .limit(limit)
       .all();
 
-    return { results: photoList, total: photoList.length };
+    const result = { results: photoList, total: photoList.length };
+    setCachedResult(cacheKey, result);
+    return result;
   });

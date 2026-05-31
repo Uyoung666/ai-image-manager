@@ -11,6 +11,7 @@ import {
   watchFolder,
 } from "@/services/indexer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
+import { invalidateStatsCache } from "./stats";
 
 function logIpcError(handlerName: string, err: unknown): void {
   try {
@@ -61,6 +62,7 @@ export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
         });
     }
 
+    invalidateStatsCache();
     return result;
   } catch (err) {
     logIpcError("scanFolder", err);

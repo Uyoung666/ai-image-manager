@@ -120,6 +120,27 @@
       "when": 1785200000000,
       "tag": "0016_add_face_vectors_is_rejected",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1785300000000,
+      "tag": "0017_add_exif_perf_indexes",
+      "breakpoints": false
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1785400000000,
+      "tag": "0018_normalize_exif_numeric",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1785500000000,
+      "tag": "0019_add_exif_composite_indexes",
+      "breakpoints": true
     }
   ]
 }

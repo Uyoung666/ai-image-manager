@@ -205,13 +205,13 @@ function evaluateRule(rule: SmartRule): number[] {
     case "focalLength": {
       let cond;
       if (rule.operator === ">=") {
-        cond = sql`CAST(${exifData.focalLength} AS REAL) >= ${rule.value}`;
+        cond = gte(exifData.focalLengthNum, rule.value);
       } else if (rule.operator === "<=") {
-        cond = sql`CAST(${exifData.focalLength} AS REAL) <= ${rule.value}`;
+        cond = lte(exifData.focalLengthNum, rule.value);
       } else {
         cond = and(
-          sql`CAST(${exifData.focalLength} AS REAL) >= ${rule.value}`,
-          sql`CAST(${exifData.focalLength} AS REAL) <= ${rule.max ?? rule.value}`
+          gte(exifData.focalLengthNum, rule.value),
+          lte(exifData.focalLengthNum, rule.max ?? rule.value)
         );
       }
       const rows = db
