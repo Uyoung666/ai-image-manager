@@ -121,7 +121,7 @@ export function MasonryGrid({
         if (scrollTimerRef.current) {
           clearTimeout(scrollTimerRef.current);
         }
-        scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 1200);
+        scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 600);
       }
     });
   }, []);
@@ -437,7 +437,13 @@ export function MasonryGrid({
   }, [marquee, positions, items, onMarqueeSelect]);
 
   const scrollToTop = () => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollTop;
+    el.scrollTo({
+      top: 0,
+      behavior: distance > el.clientHeight * 4 ? "auto" : "smooth",
+    });
   };
 
   const layoutReady = containerWidth > 0 && columnCount > 0;
@@ -457,7 +463,7 @@ export function MasonryGrid({
           >
             {visibleHeaders.map((h) => (
               <div
-                className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground"
+                className="flex items-end px-1 pb-1 font-[510] text-[12px] text-muted-foreground cursor-pointer"
                 key={h.label}
                 style={{
                   position: "absolute",
@@ -466,6 +472,10 @@ export function MasonryGrid({
                   width: "100%",
                   height: HEADER_HEIGHT,
                 }}
+                onClick={() => {
+                  scrollRef.current?.scrollTo({ top: Math.max(0, h.top - 16), behavior: "smooth" });
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
               >
                 {h.label}
               </div>
@@ -514,28 +524,30 @@ export function MasonryGrid({
           </div>
         )}
       </div>
-      {showScrollTop && (
-        <button
-          aria-label={t("backToTop")}
-          className={`absolute right-4 z-40 flex h-9 w-9 items-center justify-center rounded-full bg-popover/90 text-muted-foreground shadow-lg ring-1 ring-border backdrop-blur-sm transition-all hover:bg-popover hover:text-foreground ${
-            selectionActive ? "bottom-16" : "bottom-4"
-          }`}
-          onClick={scrollToTop}
+      <button
+        aria-hidden={!showScrollTop}
+        aria-label={t("backToTop")}
+        className={`absolute right-4 z-40 flex h-9 w-9 items-center justify-center rounded-full bg-popover/90 text-muted-foreground shadow-lg ring-1 ring-border backdrop-blur-sm transition-all duration-200 hover:bg-popover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 ${
+          selectionActive ? "bottom-16" : "bottom-4"
+        } ${
+          showScrollTop ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"
+        }`}
+        onClick={scrollToTop}
+        tabIndex={showScrollTop ? 0 : -1}
+      >
+        <svg
+          fill="none"
+          height="16"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          viewBox="0 0 16 16"
+          width="16"
         >
-          <svg
-            fill="none"
-            height="16"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            viewBox="0 0 16 16"
-            width="16"
-          >
-            <path d="M8 12V4M4 7l4-4 4 4" />
-          </svg>
-        </button>
-      )}
+          <path d="M8 12V4M4 7l4-4 4 4" />
+        </svg>
+      </button>
       {isScrolling && currentTimeLabel && headerPositions.length > 1 && (
         <div className="pointer-events-none absolute top-3 right-4 z-40 rounded-[6px] bg-popover/90 px-3 py-1.5 font-[510] text-[12px] text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
           {currentTimeLabel}
