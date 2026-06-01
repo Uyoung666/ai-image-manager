@@ -11,6 +11,7 @@ export const folders = sqliteTable("folders", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   path: text("path").notNull().unique(),
   displayName: text("display_name").notNull(),
+  parentId: integer("parent_id"),
   photoCount: integer("photo_count").notNull().default(0),
   lastScannedAt: integer("last_scanned_at"),
   createdAt: integer("created_at")

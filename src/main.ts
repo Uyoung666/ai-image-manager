@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   app,
   BrowserWindow,
@@ -606,7 +606,7 @@ async function runStartupCleanup() {
         db
           .select({ c: sql<number>`count(*)` })
           .from(photos)
-          .where(sql`${photos.folderId} = ${f.id}`)
+          .where(and(sql`${photos.folderId} = ${f.id}`, isNull(photos.deletedAt)))
           .get()?.c ?? 0;
       db.update(folders)
         .set({ photoCount: count })

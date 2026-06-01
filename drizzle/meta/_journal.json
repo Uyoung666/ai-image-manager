@@ -148,6 +148,13 @@
       "when": 1785600000000,
       "tag": "0020_add_dominant_colors",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1785700000000,
+      "tag": "0021_add_folder_parent_id",
+      "breakpoints": true
     }
   ]
 }

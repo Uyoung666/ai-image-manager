@@ -108,6 +108,7 @@ function TrashPage() {
       });
       toast.success(t("permanentlyDeletedCount", { count: selectedIds.size }));
       setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
     } catch {
       toast.error(t("deleteFailed"));
@@ -123,6 +124,7 @@ function TrashPage() {
       await ipc.client.photos.emptyTrash();
       toast.success(t("trashEmptied"));
       setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       setPhotos([]);
     } catch {
       toast.error(t("emptyTrashFailed"));

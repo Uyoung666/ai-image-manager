@@ -45,8 +45,10 @@ import { AiProgressBar } from "./AiProgressBar";
 interface FolderInfo {
   displayName: string;
   id: number;
+  parentId: number | null;
   path: string;
   photoCount: number;
+  totalPhotoCount?: number;
 }
 interface TagInfo {
   color: string | null;
@@ -81,39 +83,21 @@ interface FolderTreeNode {
   folder: FolderInfo;
 }
 
-function dirname(filePath: string): string {
-  const i = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-  return i < 0 ? "" : filePath.slice(0, i);
-}
-
 function buildFolderTree(folders: FolderInfo[]): FolderTreeNode[] {
   const nodeMap = new Map<number, FolderTreeNode>();
   const roots: FolderTreeNode[] = [];
 
-  // Sort by path length so parents come before children
-  const sorted = [...folders].sort((a, b) => a.path.length - b.path.length);
-
-  for (const f of sorted) {
+  for (const f of folders) {
     nodeMap.set(f.id, { folder: f, children: [] });
   }
-
-  for (const f of sorted) {
-    const parentPath = dirname(f.path);
-    const parent = sorted.find((p) => p.path === parentPath);
-    if (parent) {
-      const parentNode = nodeMap.get(parent.id);
-      const childNode = nodeMap.get(f.id);
-      if (parentNode && childNode) {
-        parentNode.children.push(childNode);
-      }
+  for (const f of folders) {
+    const node = nodeMap.get(f.id)!;
+    if (f.parentId != null && nodeMap.has(f.parentId)) {
+      nodeMap.get(f.parentId)!.children.push(node);
     } else {
-      const node = nodeMap.get(f.id);
-      if (node) {
-        roots.push(node);
-      }
+      roots.push(node);
     }
   }
-
   return roots;
 }
 
@@ -176,7 +160,7 @@ function renderFolderTree(
           <Folder className="h-3.5 w-3.5 flex-shrink-0" />
           <span className="min-w-0 flex-1 truncate">{node.folder.displayName}</span>
           <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
-            {node.folder.photoCount}
+            {node.folder.totalPhotoCount ?? node.folder.photoCount}
           </span>
         </button>
       </div>
@@ -733,7 +717,7 @@ export function Sidebar({
               onDragOver={(e) => handleFolderDragOver(e, folder.id)}
               onDragLeave={handleFolderDragLeave}
               onDrop={(e) => handleFolderDrop(e, folder.id)}
-              title={`${folder.displayName} (${folder.photoCount})\n${t("rightClickDelete")}`}
+              title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickDelete")}`}
             >
               <Folder className="h-4 w-4" />
             </button>

@@ -359,7 +359,7 @@ function SettingsPage() {
   const { data: indexStats } = useQuery({
     queryKey: ["indexStats"],
     queryFn: () => ipc.client.photos.getIndexStats({}),
-    staleTime: 30_000,
+    staleTime: 0, // thumbnail/file counts change externally, always fetch fresh
     refetchOnWindowFocus: false,
   });
 

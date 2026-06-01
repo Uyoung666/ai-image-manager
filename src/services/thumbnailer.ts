@@ -261,6 +261,26 @@ export function getThumbnailDiskUsage(): {
   return { dir, bytes, fileCount };
 }
 
+/**
+ * Delete all thumbnail variants for a single photo from disk and memory cache.
+ * Safe to call even if the photo has no thumbnails — errors are silently caught.
+ */
+export function deletePhotoThumbnails(imagePath: string): void {
+  if (!thumbnailDir) return;
+
+  for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
+    const thumbPath = getThumbnailPath(imagePath, size);
+    try {
+      if (fs.existsSync(thumbPath)) {
+        fs.unlinkSync(thumbPath);
+      }
+    } catch {
+      // best-effort: permission errors or locked files are not fatal
+    }
+    memoryCache?.delete(thumbPath);
+  }
+}
+
 export function clearThumbnailDiskCache(): {
   fileCount: number;
   freedMB: number;

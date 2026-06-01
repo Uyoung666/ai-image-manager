@@ -31,7 +31,9 @@ interface CullSession {
 interface Folder {
   displayName: string;
   id: number;
+  parentId: number | null;
   photoCount: number;
+  totalPhotoCount?: number;
 }
 
 function CullListPage() {
@@ -366,7 +368,7 @@ function CullListPage() {
                     >
                       {f.displayName}
                       <span className="ml-2 text-[10px] text-muted-foreground/50">
-                        ({f.photoCount})
+                        ({f.totalPhotoCount ?? f.photoCount})
                       </span>
                     </button>
                   ))}

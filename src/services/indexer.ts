@@ -8,9 +8,10 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
 import { createLogger } from "@/utils/logger";
+import { deletePhotoVectors } from "./ai-embedder";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
-import { generateThumbnail } from "./thumbnailer";
+import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 import { extractDominantColors } from "./color-extractor";
 import { extractRawPreview, isRawFile } from "./raw-preview";
 
@@ -86,6 +87,10 @@ export function isIndexing(): boolean {
 
 export function getSupportedExtensions(): string[] {
   return Array.from(SUPPORTED_EXTENSIONS);
+}
+
+function getFolderDepth(folderPath: string): number {
+  return folderPath.split(path.sep).filter(Boolean).length;
 }
 
 function shouldIndex(filePath: string): boolean {
@@ -433,7 +438,7 @@ async function indexSingleFile(
         .get();
       if (
         newFolder &&
-        (!existingFolder || newFolder.path.length > existingFolder.path.length)
+        (!existingFolder || getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
       ) {
         db.update(photos)
           .set({ folderId })
@@ -512,6 +517,7 @@ export async function scanFolder(
       id: result.insertedId,
       path: resolvedPath,
       displayName: path.basename(resolvedPath),
+      parentId: null,
       photoCount: 0,
       lastScannedAt: null,
       createdAt: Date.now(),
@@ -547,30 +553,55 @@ export async function scanFolder(
   }
   await walk(resolvedPath);
 
-  // Auto-discover subdirectories that contain images and create folder records
+  // Auto-discover subdirectories that contain images and create folder records.
+  // Walk up from each file's directory to the scan root, creating any missing
+  // intermediate folder records with proper parentId linkage.
   const dirToFolderId = new Map<string, number>();
   dirToFolderId.set(resolvedPath, folderId);
 
   for (const f of files) {
-    const dir = path.dirname(f);
-    if (dir === resolvedPath || dirToFolderId.has(dir)) {
-      continue;
+    let dir = path.dirname(f);
+
+    // Collect missing ancestor directories (bottom-up)
+    const missing: string[] = [];
+    while (dir !== resolvedPath && !dirToFolderId.has(dir)) {
+      missing.unshift(dir);
+      dir = path.dirname(dir);
     }
-    const subFolder = db
-      .select({ id: folders.id })
-      .from(folders)
-      .where(eq(folders.path, dir))
-      .get();
-    if (subFolder) {
-      dirToFolderId.set(dir, subFolder.id);
-    } else {
-      const result = db
-        .insert(folders)
-        .values({ path: dir, displayName: path.basename(dir) })
-        .returning({ insertedId: folders.id })
+
+    // Create missing directories top-down so parentId is available
+    for (const d of missing) {
+      const parentDir = path.dirname(d);
+      const parentId = dirToFolderId.get(parentDir) ?? null;
+
+      let subFolder = db
+        .select({ id: folders.id })
+        .from(folders)
+        .where(eq(folders.path, d))
         .get();
-      if (result) {
-        dirToFolderId.set(dir, result.insertedId);
+      if (!subFolder) {
+        const result = db
+          .insert(folders)
+          .values({
+            path: d,
+            displayName: path.basename(d),
+            parentId,
+          })
+          .returning({ insertedId: folders.id })
+          .get();
+        if (result) {
+          subFolder = { id: result.insertedId };
+        }
+      } else if (subFolder) {
+        // Existing folder record — update parentId if missing
+        db.update(folders)
+          .set({ parentId })
+          .where(eq(folders.id, subFolder.id))
+          .run();
+      }
+
+      if (subFolder) {
+        dirToFolderId.set(d, subFolder.id);
       }
     }
   }
@@ -650,7 +681,7 @@ export async function scanFolder(
               .get();
             if (
               newFolder &&
-              (!existingFolder || newFolder.path.length > existingFolder.path.length)
+              (!existingFolder || getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
             ) {
               db.update(photos)
                 .set({ folderId: fileFolderId })
@@ -919,6 +950,10 @@ export function startWatching(
           if (photo) {
             db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
             db.delete(photos).where(eq(photos.id, photo.id)).run();
+            deletePhotoThumbnails(filePath);
+            deletePhotoVectors([photo.id]).catch((err) =>
+              log.error({ err, photoId: photo.id }, "Watcher: vector cleanup failed on unlink")
+            );
 
             if (photo.folderId) {
               db.update(folders)
@@ -1021,6 +1056,10 @@ export function watchFolder(
         if (photo) {
           db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
           db.delete(photos).where(eq(photos.id, photo.id)).run();
+          deletePhotoThumbnails(filePath);
+          deletePhotoVectors([photo.id]).catch((err) =>
+            log.error({ err, photoId: photo.id }, "Watcher: vector cleanup failed on unlink")
+          );
 
           if (photo.folderId) {
             db.update(folders)

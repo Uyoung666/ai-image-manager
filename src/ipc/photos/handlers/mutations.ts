@@ -2,7 +2,7 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { shell } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -10,11 +10,66 @@ import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { deletePhotoVectors } from "@/services/ai-embedder";
 import {
   clearThumbnailDiskCache,
+  deletePhotoThumbnails,
   generateThumbnail,
   getThumbnailPath,
 } from "@/services/thumbnailer";
 import { IdSchema } from "./shared";
 import { invalidateStatsCache } from "./stats";
+
+/**
+ * Unified hard-delete: removes photo DB records, updates folder photoCounts,
+ * and cleans up AI vectors. All DB operations run in a single transaction.
+ * Only decrements photoCount for photos that were NOT already soft-deleted,
+ * avoiding double-counting when called from emptyTrash/permanentlyDeletePhotos.
+ */
+function performHardDelete(photoIds: number[]): void {
+  if (photoIds.length === 0) return;
+
+  const db = getDatabase();
+
+  // Only decrement folder counts for photos that aren't already soft-deleted.
+  // Soft-delete (deletePhoto/deletePhotos) already decremented the count,
+  // so emptyTrash/permanentlyDeletePhotos must not decrement again.
+  const photoFolders = db
+    .select({ path: photos.path, folderId: photos.folderId, deletedAt: photos.deletedAt })
+    .from(photos)
+    .where(inArray(photos.id, photoIds))
+    .all();
+
+  const countsByFolder = new Map<number, number>();
+  for (const pf of photoFolders) {
+    if (pf.folderId && pf.deletedAt === null) {
+      countsByFolder.set(
+        pf.folderId,
+        (countsByFolder.get(pf.folderId) || 0) + 1
+      );
+    }
+  }
+
+  db.transaction(() => {
+    db.delete(exifData).where(inArray(exifData.photoId, photoIds)).run();
+    db.delete(photoTags).where(inArray(photoTags.photoId, photoIds)).run();
+    db.delete(photos).where(inArray(photos.id, photoIds)).run();
+
+    for (const [fid, count] of countsByFolder) {
+      db.update(folders)
+        .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
+        .where(eq(folders.id, fid))
+        .run();
+    }
+  });
+
+  // Clean up thumbnails and vectors (outside transaction, best-effort)
+  for (const pf of photoFolders) {
+    deletePhotoThumbnails(pf.path);
+  }
+  deletePhotoVectors(photoIds).catch((err) =>
+    console.error("[AI] performHardDelete vector cleanup failed:", err)
+  );
+
+  invalidateStatsCache();
+}
 
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
@@ -98,7 +153,7 @@ export const cleanupOrphanPhotos = os.handler(async () => {
       db
         .select({ c: sql<number>`count(*)` })
         .from(photos)
-        .where(eq(photos.folderId, f.id))
+        .where(and(eq(photos.folderId, f.id), isNull(photos.deletedAt)))
         .get()?.c ?? 0;
     db.update(folders)
       .set({ photoCount: count })
@@ -158,6 +213,18 @@ export const movePhotos = os
         db.update(photos)
           .set({ path: newPath, folderId: input.targetFolderId })
           .where(eq(photos.id, id))
+          .run();
+
+        // Update source and target folder photoCounts
+        if (photo.folderId) {
+          db.update(folders)
+            .set({ photoCount: sql`MAX(0, photo_count - 1)` })
+            .where(eq(folders.id, photo.folderId))
+            .run();
+        }
+        db.update(folders)
+          .set({ photoCount: sql`photo_count + 1` })
+          .where(eq(folders.id, input.targetFolderId))
           .run();
 
         results.push({ id });
@@ -456,13 +523,7 @@ export const permanentlyDeletePhotos = os
         await shell.trashItem(p.path);
       }
     }
-    db.delete(exifData).where(inArray(exifData.photoId, input.ids)).run();
-    db.delete(photoTags).where(inArray(photoTags.photoId, input.ids)).run();
-    db.delete(photos).where(inArray(photos.id, input.ids)).run();
-    deletePhotoVectors(input.ids).catch((err) =>
-      console.error("[AI] permanentlyDeletePhotos vector cleanup failed:", err)
-    );
-    invalidateStatsCache();
+    performHardDelete(input.ids);
     return { deleted: input.ids.length };
   });
 
@@ -483,12 +544,6 @@ export const emptyTrash = os.handler(async () => {
       await shell.trashItem(p.path);
     }
   }
-  db.delete(exifData).where(inArray(exifData.photoId, ids)).run();
-  db.delete(photoTags).where(inArray(photoTags.photoId, ids)).run();
-  db.delete(photos).where(inArray(photos.id, ids)).run();
-  deletePhotoVectors(ids).catch((err) =>
-    console.error("[AI] emptyTrash vector cleanup failed:", err)
-  );
-  invalidateStatsCache();
+  performHardDelete(ids);
   return { deleted: ids.length };
 });

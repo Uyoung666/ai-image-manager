@@ -6,6 +6,8 @@ import { app, BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
+import { reloadFolderMatcher } from "@/services/folder-matcher";
+import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import {
   scanFolder as scanFolderService,
   watchFolder,
@@ -73,49 +75,133 @@ export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
 
 export const getFolders = os.handler(() => {
   const db = getDatabase();
-  return db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
+  const allFolders = db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
+
+  // Build children map for recursive count computation
+  const childrenMap = new Map<number, number[]>();
+  for (const f of allFolders) {
+    if (f.parentId != null) {
+      const list = childrenMap.get(f.parentId);
+      if (list) {
+        list.push(f.id);
+      } else {
+        childrenMap.set(f.parentId, [f.id]);
+      }
+    }
+  }
+
+  // Compute recursive totalPhotoCount per folder
+  const recursiveCache = new Map<number, number>();
+  function computeRecursive(folderId: number): number {
+    const cached = recursiveCache.get(folderId);
+    if (cached !== undefined) return cached;
+
+    const folder = allFolders.find((f) => f.id === folderId);
+    if (!folder) return 0;
+
+    let total = folder.photoCount;
+    const children = childrenMap.get(folderId);
+    if (children) {
+      for (const childId of children) {
+        total += computeRecursive(childId);
+      }
+    }
+    recursiveCache.set(folderId, total);
+    return total;
+  }
+
+  return allFolders.map((f) => ({
+    ...f,
+    totalPhotoCount: computeRecursive(f.id),
+  }));
 });
 
 export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const folder = db
-    .select({ path: folders.path })
+    .select({ id: folders.id, path: folders.path })
     .from(folders)
     .where(eq(folders.id, input.id))
     .get();
-  if (folder) {
-    const folderPhotoIds = db
-      .select({ id: photos.id })
-      .from(photos)
-      .where(eq(photos.folderId, input.id))
-      .all()
-      .map((p) => p.id);
+  if (!folder) {
+    return { success: true };
+  }
 
-    const escapedPath = folder.path.replace(/'/g, "''");
-    const normalizedPath = escapedPath.replace(/\\/g, "/");
-    const orphanPhotoIds = db
-      .select({ id: photos.id })
-      .from(photos)
-      .where(
-        sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
-          SELECT id FROM folders
-        )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${normalizedPath + "/%"}`
-      )
-      .all()
-      .map((p) => p.id);
-    const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
+  // 1) Recursively collect all descendant folder IDs via parentId chain (BFS + cycle detection)
+  const descendantIds: number[] = [];
+  const visited = new Set<number>([input.id]);
+  const queue = [input.id];
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const children = db
+      .select({ id: folders.id })
+      .from(folders)
+      .where(eq(folders.parentId, currentId))
+      .all();
+    for (const child of children) {
+      if (visited.has(child.id)) continue; // cycle guard
+      visited.add(child.id);
+      descendantIds.push(child.id);
+      queue.push(child.id);
+    }
+  }
 
+  const allFolderIds = [input.id, ...descendantIds];
+
+  // 2) Collect all photos belonging to any of these folders
+  const folderPhotos = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(inArray(photos.folderId, allFolderIds))
+    .all();
+  const folderPhotoIds = folderPhotos.map((p) => p.id);
+
+  // 3) Also catch orphan photos under the folder path that have no valid folderId
+  const escapedPath = folder.path.replace(/'/g, "''");
+  const normalizedPath = escapedPath.replace(/\\/g, "/");
+  const orphanPhotos = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(
+      sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
+        SELECT id FROM folders
+      )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${normalizedPath + "/%"}`
+    )
+    .all();
+  const orphanPhotoIds = orphanPhotos.map((p) => p.id);
+
+  const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
+  const allPhotoPaths = [...folderPhotos, ...orphanPhotos].map((p) => p.path);
+
+  // 4) Execute deletions in a transaction
+  // parent_id FK uses ON DELETE SET NULL, so deletion order is safe in any direction
+  db.transaction(() => {
     if (allPhotoIds.length > 0) {
       db.delete(exifData).where(inArray(exifData.photoId, allPhotoIds)).run();
       db.delete(photoTags).where(inArray(photoTags.photoId, allPhotoIds)).run();
       db.delete(photos).where(inArray(photos.id, allPhotoIds)).run();
-      deletePhotoVectors(allPhotoIds).catch((err) =>
-        console.error("[AI] deleteFolder vector cleanup failed:", err)
-      );
+    }
+
+    for (const fid of descendantIds) {
+      db.delete(folders).where(eq(folders.id, fid)).run();
     }
 
     db.delete(folders).where(eq(folders.id, input.id)).run();
+  });
+
+  // 5) Clean up thumbnails, AI vectors (outside transaction, best-effort)
+  for (const p of allPhotoPaths) {
+    deletePhotoThumbnails(p);
   }
+  if (allPhotoIds.length > 0) {
+    deletePhotoVectors(allPhotoIds).catch((err) =>
+      console.error("[AI] deleteFolder vector cleanup failed:", err)
+    );
+  }
+
+  // 6) Reload folder matcher so watchers pick up the change
+  reloadFolderMatcher();
+
   return { success: true };
 });
 

@@ -17,7 +17,9 @@ export interface Folder {
   displayName: string;
   id: number;
   path: string;
+  parentId: number | null;
   photoCount: number;
+  totalPhotoCount?: number;
 }
 
 export interface PhotoListResponse {
