@@ -1,11 +1,11 @@
-import { useNavigate } from "@tanstack/react-router";
-import { getTagDisplayName } from "@/localization/tag-display";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Album,
   ChevronDown,
   ChevronRight,
   CircleHelp,
   Folder,
+  Images,
   LayoutDashboard,
   Loader2,
   PanelLeftClose,
@@ -39,6 +39,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ipc } from "@/ipc/manager";
+import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import { AiProgressBar } from "./AiProgressBar";
 
@@ -93,7 +94,7 @@ function buildFolderTree(folders: FolderInfo[]): FolderTreeNode[] {
   for (const f of folders) {
     const node = nodeMap.get(f.id)!;
     if (f.parentId != null && nodeMap.has(f.parentId)) {
-      nodeMap.get(f.parentId)!.children.push(node);
+      nodeMap.get(f.parentId)?.children.push(node);
     } else {
       roots.push(node);
     }
@@ -112,7 +113,7 @@ function renderFolderTree(
   dragOverId: number | null,
   onDragOver: (e: React.DragEvent, id: number) => void,
   onDragLeave: () => void,
-  onDrop: (e: React.DragEvent, id: number) => void,
+  onDrop: (e: React.DragEvent, id: number) => void
 ): ReactNode[] {
   return nodes.flatMap((node) => {
     const hasChildren = node.children.length > 0;
@@ -139,7 +140,7 @@ function renderFolderTree(
           )}
         </button>
         <button
-          className={`min-w-0 flex flex-1 items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
             isDragOver
               ? "bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
@@ -158,7 +159,9 @@ function renderFolderTree(
           onDrop={(e) => onDrop(e, node.folder.id)}
         >
           <Folder className="h-3.5 w-3.5 flex-shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{node.folder.displayName}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {node.folder.displayName}
+          </span>
           <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
             {node.folder.totalPhotoCount ?? node.folder.photoCount}
           </span>
@@ -180,7 +183,7 @@ function renderFolderTree(
             dragOverId,
             onDragOver,
             onDragLeave,
-            onDrop,
+            onDrop
           ),
         ]
       : [row];
@@ -196,7 +199,7 @@ function buildTagTree(tags: TagInfo[]): TagTreeNode[] {
   }
   for (const t of tags) {
     if (t.parentId && nodeMap.has(t.parentId)) {
-      nodeMap.get(t.parentId)!.children.push(nodeMap.get(t.id)!);
+      nodeMap.get(t.parentId)?.children.push(nodeMap.get(t.id)!);
     } else {
       roots.push(nodeMap.get(t.id)!);
     }
@@ -244,7 +247,7 @@ function renderTagTree(
           )}
         </button>
         <button
-          className={`group/tag min-w-0 flex flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+          className={`group/tag flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
             isDragOver
               ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
@@ -262,10 +265,12 @@ function renderTagTree(
           onDrop={(e) => onDrop(e, node.tag.id)}
         >
           <span
-            className="h-2 w-2 flex-shrink-0 rounded-full"
+            className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
             style={{ background: node.tag.color || "var(--primary)" }}
           />
-          <span className="min-w-0 flex-1 truncate">{getTagDisplayName(node.tag.name, language)}</span>
+          <span className="min-w-0 flex-1 truncate">
+            {getTagDisplayName(node.tag.name, language)}
+          </span>
           <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
             {node.tag.photoCount}
           </span>
@@ -313,6 +318,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const [folderCtx, setFolderCtx] = useState<{
     folderId: number;
     displayName: string;
@@ -326,11 +332,8 @@ export function Sidebar({
   const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
   const [dragOverAlbumNav, setDragOverAlbumNav] = useState(false);
-  const [openSection, setOpenSection] = useState<
-    "folders" | "tags" | null
-  >("folders");
-  const foldersCollapsed = openSection !== "folders";
-  const tagsCollapsed = openSection !== "tags";
+  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
+  const [tagsCollapsed, setTagsCollapsed] = useState(false);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<number>>(
     new Set()
   );
@@ -372,17 +375,25 @@ export function Sidebar({
       const items = Array.from(e.dataTransfer.items);
       const folders: string[] = [];
       for (const item of items) {
-        if (item.kind !== "file") continue;
+        if (item.kind !== "file") {
+          continue;
+        }
         const entry = item.webkitGetAsEntry?.();
         const file = item.getAsFile();
-        if (!file) continue;
+        if (!file) {
+          continue;
+        }
         const filePath = (window as any).electronAPI?.getFilePath?.(file);
-        if (!filePath) continue;
+        if (!filePath) {
+          continue;
+        }
         if (entry?.isDirectory) {
           folders.push(filePath);
         } else {
           const parent = filePath.replace(/[\\/][^\\/]+$/, "");
-          if (parent && !folders.includes(parent)) folders.push(parent);
+          if (parent && !folders.includes(parent)) {
+            folders.push(parent);
+          }
         }
       }
       for (const folder of folders) {
@@ -527,7 +538,7 @@ export function Sidebar({
         clearInterval(interval);
       }
     };
-  }, [totalPhotos, activeFolderId]);
+  }, [totalPhotos, activeFolderId, activeTagId, onSelectTag]);
 
   useEffect(() => {
     function handler(event: MessageEvent) {
@@ -646,7 +657,7 @@ export function Sidebar({
         setExpandedFolderIds(new Set(rootsWithChildren));
       }
     }
-  }, [folders.length]);
+  }, [folders.length, folderTree.filter]);
 
   function handleFolderContextMenu(
     e: React.MouseEvent,
@@ -661,7 +672,7 @@ export function Sidebar({
   if (collapsed) {
     return (
       <div
-        className="flex h-full w-12 flex-col items-center border-border border-r bg-secondary py-3"
+        className="flex h-full w-12 flex-col items-center border-sidebar-border border-r bg-sidebar py-3"
         onDragOver={handleSidebarDragOver}
         onDrop={handleSidebarDrop}
       >
@@ -683,7 +694,7 @@ export function Sidebar({
             onClick={() => onSelectFolder(null)}
             title={t("sidebarAllPhotos")}
           >
-            <Folder className="h-4 w-4" />
+            <Images className="h-4 w-4" />
           </button>
 
           {onSelectFavorites && (
@@ -714,8 +725,8 @@ export function Sidebar({
               onContextMenu={(e) =>
                 handleFolderContextMenu(e, folder.id, folder.displayName)
               }
-              onDragOver={(e) => handleFolderDragOver(e, folder.id)}
               onDragLeave={handleFolderDragLeave}
+              onDragOver={(e) => handleFolderDragOver(e, folder.id)}
               onDrop={(e) => handleFolderDrop(e, folder.id)}
               title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickDelete")}`}
             >
@@ -790,8 +801,13 @@ export function Sidebar({
             )}
           </button>
 
+          {/* Content group */}
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname === "/dashboard"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/dashboard" })}
             title={t("sidebarDashboard")}
           >
@@ -799,7 +815,11 @@ export function Sidebar({
           </button>
 
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname.startsWith("/albums")
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/albums" as const })}
             title={t("sidebarAlbums")}
           >
@@ -807,7 +827,26 @@ export function Sidebar({
           </button>
 
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname === "/people"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
+            onClick={() => navigate({ to: "/people" })}
+            title={t("people")}
+          >
+            <Users className="h-4 w-4" />
+          </button>
+
+          <div className="my-0.5 w-4 border-border border-t" />
+
+          {/* Tool group */}
+          <button
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname === "/duplicates"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/duplicates" })}
             title={t("duplicates")}
           >
@@ -815,7 +854,11 @@ export function Sidebar({
           </button>
 
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname.startsWith("/cull")
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/cull" })}
             title={t("cull")}
           >
@@ -823,23 +866,26 @@ export function Sidebar({
           </button>
 
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() => navigate({ to: "/people" })}
-            title={t("people")}
-          >
-            <Users className="h-4 w-4" />
-          </button>
-
-          <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname === "/trash"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/trash" })}
             title={t("trash")}
           >
             <Trash2 className="h-4 w-4" />
           </button>
 
+          <div className="my-0.5 w-4 border-border border-t" />
+
+          {/* System group */}
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+              location.pathname === "/settings"
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
             onClick={() => navigate({ to: "/settings" })}
             title={t("sidebarSettings")}
           >
@@ -863,7 +909,7 @@ export function Sidebar({
   // Expanded: full sidebar
   return (
     <div
-      className="flex h-full w-[240px] select-none flex-col border-border border-r bg-secondary"
+      className="flex h-full w-[240px] select-none flex-col border-sidebar-border border-r bg-sidebar"
       onDragOver={handleSidebarDragOver}
       onDrop={handleSidebarDrop}
     >
@@ -877,19 +923,53 @@ export function Sidebar({
             {t("photosCount", { count: totalPhotos.toLocaleString() })}
           </p>
         </div>
-        <button
-          className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-          onClick={onToggleCollapse}
-          title={t("collapseSidebar")}
-        >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() =>
+              document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
+            }
+            title={t("keyboardHelpTitle")}
+          >
+            <CircleHelp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={onToggleCollapse}
+            title={t("collapseSidebar")}
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="space-y-1 px-3 py-2">
+      {/* AI Progress Bar */}
+      <div className="px-3 py-2">
+        <AiProgressBar />
+      </div>
+
+      {/* Scan progress */}
+      {scanProgress && (
+        <div className="px-3 pb-2">
+          <div className="rounded-[6px] bg-card px-3 py-2">
+            <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
+            {scanningFolder && (
+              <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
+                {t("scanningPath", { path: scanningFolder })}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Separator */}
+      <div className="mx-3 border-border border-t" />
+
+      {/* Content area — dual flex-1 sections */}
+      <div className="flex min-h-0 flex-1 flex-col px-3 pt-2">
+        {/* All Photos + Favorites — content filters */}
         <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+          className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
             activeFolderId === null && !favoriteActive
               ? "bg-primary/15 text-primary"
               : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -900,6 +980,7 @@ export function Sidebar({
             onSelectFolder(null);
           }}
         >
+          <Images className="h-3.5 w-3.5" />
           {t("sidebarAllPhotos")}
         </button>
         {onSelectFavorites && (
@@ -915,57 +996,43 @@ export function Sidebar({
             {t("favorite")}
           </button>
         )}
-        <button
-          className="flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-          disabled={scanningFolder !== null}
-          onClick={() => onAddFolder()}
-        >
-          {scanningFolder ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Plus className="h-3.5 w-3.5" />
-          )}
-          {t("sidebarAddFolder")}
-        </button>
-        <AiProgressBar />
-      </div>
 
-      {/* Scan progress */}
-      {scanProgress && (
-        <div className="px-3 py-1.5">
-          <div className="rounded-[6px] bg-card px-3 py-2">
-            <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
-            {scanningFolder && (
-              <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
-                {t("scanningPath", { path: scanningFolder })}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+        <div className="my-2 border-border border-t" />
 
-      {/* Separator */}
-      <div className="mx-3 my-2 border-border border-t" />
-
-      {/* Scrollable area: fills remaining space, pushes footer to bottom */}
-      <div className="flex min-h-0 flex-1 flex-col px-3">
         {/* Folders */}
         <div
           className={`flex flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
         >
-          <button
-            className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
-            onClick={() =>
-              setOpenSection(openSection === "folders" ? null : "folders")
-            }
-          >
-            <p className="flex-1 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
-              {t("sidebarFolders")}
-            </p>
-            <ChevronDown
-              className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
-            />
-          </button>
+          <div className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 transition-colors hover:bg-foreground/5">
+            <button
+              className="flex flex-1 items-center gap-1 text-left"
+              onClick={() => setFoldersCollapsed((v) => !v)}
+            >
+              <p
+                className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+              >
+                {t("sidebarFolders")}
+              </p>
+              <ChevronDown
+                className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
+              />
+            </button>
+            <button
+              className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
+              disabled={scanningFolder !== null}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddFolder();
+              }}
+              title={t("sidebarAddFolder")}
+            >
+              {scanningFolder ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Plus className="h-3 w-3" />
+              )}
+            </button>
+          </div>
           {!foldersCollapsed && (
             <div className="flex-1 overflow-y-auto">
               {folderTree.length === 0 ? (
@@ -992,7 +1059,7 @@ export function Sidebar({
                   dragOverFolderId,
                   handleFolderDragOver,
                   handleFolderDragLeave,
-                  handleFolderDrop,
+                  handleFolderDrop
                 )
               )}
             </div>
@@ -1008,147 +1075,142 @@ export function Sidebar({
             >
               <button
                 className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
-                onClick={() =>
-                  setOpenSection(openSection === "tags" ? null : "tags")
-                }
+                onClick={() => setTagsCollapsed((v) => !v)}
               >
-                <p className="flex-1 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+                <p
+                  className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                >
                   {t("sidebarTags")}
                 </p>
                 <ChevronDown
                   className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
                 />
               </button>
-              {!tagsCollapsed && (
-                <>
-                  {tags.length > 0 ? (
-                    <>
-                      <div className="px-1 pb-1">
-                        <input
-                          className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                          onChange={(e) => setTagSearch(e.target.value)}
-                          placeholder={t("tagSearchPlaceholder")}
-                          value={tagSearch}
-                        />
-                      </div>
-                      <div className="flex-1 overflow-y-auto">
-                        {(() => {
-                          const filtered = tags.filter((t) =>
-                            tagSearch
-                              ? t.name
-                                  .toLowerCase()
-                                  .includes(tagSearch.toLowerCase())
-                              : true
-                          );
-                          // Build tree from filtered flat list, including ancestors
-                          const allIds = new Set(filtered.map((t) => t.id));
-                          // Include parents of filtered items so tree structure is preserved
-                          for (const t of filtered) {
-                            let cur = t.parentId;
-                            while (cur) {
-                              if (allIds.has(cur)) {
-                                break;
-                              }
-                              const parent = tags.find((p) => p.id === cur);
-                              if (parent) {
-                                allIds.add(cur);
-                                cur = parent.parentId;
-                              } else {
-                                break;
-                              }
+              {!tagsCollapsed &&
+                (tags.length > 0 ? (
+                  <>
+                    <div className="px-1 pb-1">
+                      <input
+                        className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                        onChange={(e) => setTagSearch(e.target.value)}
+                        placeholder={t("tagSearchPlaceholder")}
+                        value={tagSearch}
+                      />
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      {(() => {
+                        const filtered = tags.filter((t) =>
+                          tagSearch
+                            ? t.name
+                                .toLowerCase()
+                                .includes(tagSearch.toLowerCase())
+                            : true
+                        );
+                        const allIds = new Set(filtered.map((t) => t.id));
+                        for (const t of filtered) {
+                          let cur = t.parentId;
+                          while (cur) {
+                            if (allIds.has(cur)) {
+                              break;
+                            }
+                            const parent = tags.find((p) => p.id === cur);
+                            if (parent) {
+                              allIds.add(cur);
+                              cur = parent.parentId;
+                            } else {
+                              break;
                             }
                           }
-                          const visible = tags.filter((t) => allIds.has(t.id));
-                          const tree = buildTagTree(visible);
-                          return renderTagTree(
-                            tree,
-                            0,
-                            expandedTagIds,
-                            (id) => {
-                              const next = new Set(expandedTagIds);
-                              if (next.has(id)) {
-                                next.delete(id);
-                              } else {
-                                next.add(id);
-                              }
-                              setExpandedTagIds(next);
-                            },
-                            activeTagId,
-                            (nextId) => {
-                              setActiveTagId(nextId);
-                              onSelectTag?.(nextId);
-                            },
-                            (e, id, name) => {
-                              e.preventDefault();
-                              setTagCtx({
-                                tagId: id,
-                                tagName: name,
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            },
-                            handleSidebarDragOver,
-                            (id) => setDragOverTagId(id),
-                            (e) => {
-                              if (
-                                !(e.currentTarget as HTMLElement).contains(
-                                  e.relatedTarget as Node
-                                )
-                              ) {
-                                setDragOverTagId(null);
-                              }
-                            },
-                            (e, id) => handleDropOnTag(e, id),
-                            dragOverTagId,
-                            i18n.language
-                          );
-                        })()}
-                      </div>
-                      {!tags.some((t) => t.photoCount > 0) && (
-                        <div className="px-1 py-1">
-                          <button
-                            className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
-                            onClick={async () => {
-                              try {
-                                await ipc.client.photos.batchGenerateTags({});
-                                const updated = await ipc.client.photos.getTags(
-                                  {}
-                                );
-                                setTags((updated as TagInfo[]) || []);
-                                toast.success(t("aiTagsGenerated"));
-                              } catch {
-                                toast.error(t("aiTagsFailed"));
-                              }
-                            }}
-                          >
-                            <ScanSearch className="h-3.5 w-3.5" />
-                            {t("tagBatchGenerate")}
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="px-3 py-1">
-                      <button
-                        className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                        onClick={async () => {
-                          try {
-                            await ipc.client.photos.batchGenerateTags({});
-                            const updated = await ipc.client.photos.getTags({});
-                            setTags((updated as TagInfo[]) || []);
-                            toast.success(t("aiTagsGenerated"));
-                          } catch {
-                            toast.error(t("aiTagsFailed"));
-                          }
-                        }}
-                      >
-                        <ScanSearch className="h-3.5 w-3.5" />
-                        {t("tagBatchGenerate")}
-                      </button>
+                        }
+                        const visible = tags.filter((t) => allIds.has(t.id));
+                        const tree = buildTagTree(visible);
+                        return renderTagTree(
+                          tree,
+                          0,
+                          expandedTagIds,
+                          (id) => {
+                            const next = new Set(expandedTagIds);
+                            if (next.has(id)) {
+                              next.delete(id);
+                            } else {
+                              next.add(id);
+                            }
+                            setExpandedTagIds(next);
+                          },
+                          activeTagId,
+                          (nextId) => {
+                            setActiveTagId(nextId);
+                            onSelectTag?.(nextId);
+                          },
+                          (e, id, name) => {
+                            e.preventDefault();
+                            setTagCtx({
+                              tagId: id,
+                              tagName: name,
+                              x: e.clientX,
+                              y: e.clientY,
+                            });
+                          },
+                          handleSidebarDragOver,
+                          (id) => setDragOverTagId(id),
+                          (e) => {
+                            if (
+                              !(e.currentTarget as HTMLElement).contains(
+                                e.relatedTarget as Node
+                              )
+                            ) {
+                              setDragOverTagId(null);
+                            }
+                          },
+                          (e, id) => handleDropOnTag(e, id),
+                          dragOverTagId,
+                          i18n.language
+                        );
+                      })()}
                     </div>
-                  )}
-                </>
-              )}
+                    {!tags.some((t) => t.photoCount > 0) && (
+                      <div className="px-1 py-1">
+                        <button
+                          className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
+                          onClick={async () => {
+                            try {
+                              await ipc.client.photos.batchGenerateTags({});
+                              const updated = await ipc.client.photos.getTags(
+                                {}
+                              );
+                              setTags((updated as TagInfo[]) || []);
+                              toast.success(t("aiTagsGenerated"));
+                            } catch {
+                              toast.error(t("aiTagsFailed"));
+                            }
+                          }}
+                        >
+                          <ScanSearch className="h-3.5 w-3.5" />
+                          {t("tagBatchGenerate")}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="px-3 py-1">
+                    <button
+                      className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                      onClick={async () => {
+                        try {
+                          await ipc.client.photos.batchGenerateTags({});
+                          const updated = await ipc.client.photos.getTags({});
+                          setTags((updated as TagInfo[]) || []);
+                          toast.success(t("aiTagsGenerated"));
+                        } catch {
+                          toast.error(t("aiTagsFailed"));
+                        }
+                      }}
+                    >
+                      <ScanSearch className="h-3.5 w-3.5" />
+                      {t("tagBatchGenerate")}
+                    </button>
+                  </div>
+                ))}
               <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
                 {t("aiTagDisclaimer")}
               </p>
@@ -1159,8 +1221,13 @@ export function Sidebar({
 
       {/* Footer */}
       <div className="border-border border-t px-3 py-2">
+        {/* Content group */}
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname === "/dashboard"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
           onClick={() => navigate({ to: "/dashboard" })}
         >
           <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
@@ -1170,7 +1237,9 @@ export function Sidebar({
           className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
             dragOverAlbumNav
               ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              : location.pathname.startsWith("/albums")
+                ? "bg-primary/15 text-primary"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onClick={() => navigate({ to: "/albums" as const })}
           onDragEnter={() => setDragOverAlbumNav(true)}
@@ -1191,48 +1260,67 @@ export function Sidebar({
           )}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname === "/people"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
+          onClick={() => navigate({ to: "/people" })}
+        >
+          <Users className="mr-2 inline h-3.5 w-3.5" />
+          {t("people")}
+        </button>
+
+        <div className="my-1.5 border-border border-t" />
+
+        {/* Tool group */}
+        <button
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname === "/duplicates"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
           onClick={() => navigate({ to: "/duplicates" })}
         >
           <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
           {t("duplicates")}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname.startsWith("/cull")
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
           onClick={() => navigate({ to: "/cull" })}
         >
           <Swords className="mr-2 inline h-3.5 w-3.5" />
           {t("cull")}
         </button>
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-          onClick={() => navigate({ to: "/people" })}
-        >
-          <Users className="mr-2 inline h-3.5 w-3.5" />
-          {t("people")}
-        </button>
-        <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname === "/trash"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
           onClick={() => navigate({ to: "/trash" })}
         >
           <Trash2 className="mr-2 inline h-3.5 w-3.5" />
           {t("trash")}
         </button>
+
+        <div className="my-1.5 border-border border-t" />
+
+        {/* System group */}
         <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            location.pathname === "/settings"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+          }`}
           onClick={() => navigate({ to: "/settings" })}
         >
           <Settings className="mr-2 inline h-3.5 w-3.5" />
           {t("sidebarSettings")}
-        </button>
-        <button
-          className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-          onClick={() =>
-            document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
-          }
-        >
-          <CircleHelp className="mr-2 inline h-3.5 w-3.5" />
-          {t("keyboardHelpTitle")}
         </button>
       </div>
 
@@ -1256,7 +1344,10 @@ export function Sidebar({
         <div
           className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
           ref={ctxRef}
-          style={{ left: folderCtx.x, top: folderCtx.y }}
+          style={{
+            left: Math.min(folderCtx.x, window.innerWidth - 160),
+            top: Math.min(folderCtx.y, window.innerHeight - 100),
+          }}
         >
           <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {folderCtx.displayName}
@@ -1280,7 +1371,10 @@ export function Sidebar({
         <div
           className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
           ref={ctxRef}
-          style={{ left: tagCtx.x, top: tagCtx.y }}
+          style={{
+            left: Math.min(tagCtx.x, window.innerWidth - 160),
+            top: Math.min(tagCtx.y, window.innerHeight - 140),
+          }}
         >
           <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {tagCtx.tagName}

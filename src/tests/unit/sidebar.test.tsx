@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 // Mock react-router navigation
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/" }),
 }));
 
 // Mock AiProgressBar
@@ -18,6 +19,7 @@ describe("Sidebar", () => {
     collapsed: false,
     folders: [] as Array<{
       id: number;
+      parentId: number | null;
       path: string;
       displayName: string;
       photoCount: number;
@@ -43,7 +45,7 @@ describe("Sidebar", () => {
 
   it("shows Add Folder button", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByText("添加文件夹")).toBeInTheDocument();
+    expect(screen.getByTitle("添加文件夹")).toBeInTheDocument();
   });
 
   it("shows all photos button", () => {
@@ -55,8 +57,8 @@ describe("Sidebar", () => {
     const folderProps = {
       ...baseProps,
       folders: [
-        { id: 1, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
-        { id: 2, path: "C:/Travel", displayName: "Travel", photoCount: 200 },
+        { id: 1, parentId: null, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
+        { id: 2, parentId: null, path: "C:/Travel", displayName: "Travel", photoCount: 200 },
       ],
     };
     render(<Sidebar {...folderProps} />);
@@ -69,7 +71,7 @@ describe("Sidebar", () => {
       ...baseProps,
       activeFolderId: 1,
       folders: [
-        { id: 1, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
+        { id: 1, parentId: null, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
       ],
     };
     render(<Sidebar {...activeProps} />);
