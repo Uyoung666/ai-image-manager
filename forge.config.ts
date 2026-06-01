@@ -18,7 +18,7 @@ const config: ForgeConfig = {
       : {}),
     asar: {
       unpack:
-        "**/{better-sqlite3,sharp,@lancedb,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exiftool-vendored,exiftool-vendored.exe}/**",
+        "**/{better-sqlite3,sharp,@lancedb,@lancedb/lancedb-win32-x64-msvc,@lancedb/lancedb-win32-arm64-msvc,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exiftool-vendored,exiftool-vendored.exe}/**",
     },
     extraResource: ["models", "drizzle", "assets/icon.png"],
     name: "AI Image Manager",
@@ -65,6 +65,8 @@ const config: ForgeConfig = {
             "file-uri-to-path",
             "sharp",
             "@lancedb",
+            "@lancedb/lancedb-win32-x64-msvc",
+            "@lancedb/lancedb-win32-arm64-msvc",
             "@img",
             "detect-libc",
             "semver",

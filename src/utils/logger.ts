@@ -27,7 +27,7 @@ export const logger = pino(
   },
   pino.destination({
     dest: logFile,
-    sync: false,
+    sync: true,
     mkdir: true,
   })
 );

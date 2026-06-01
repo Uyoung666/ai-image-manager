@@ -71,15 +71,24 @@ process.on("uncaughtException", (err) => {
   const message = String(err);
   const detail = err?.stack ?? message;
   crashLog(`UNCAUGHT ${message}\n${detail}`);
-  log.fatal({ err }, "FATAL - uncaught exception");
+  try {
+    log.fatal({ err }, "FATAL - uncaught exception");
+  } catch (logErr) {
+    crashLog(`LOGGER FAILED ${String(logErr)}`);
+  }
   dialog.showErrorBox("Fatal Error", message);
   app.quit();
 });
 
 process.on("unhandledRejection", (reason) => {
   const message = String(reason);
-  crashLog(`REJECTION ${message}`);
-  log.fatal({ reason }, "FATAL - unhandled rejection");
+  const detail = reason instanceof Error ? (reason.stack ?? message) : message;
+  crashLog(`REJECTION ${detail}`);
+  try {
+    log.fatal({ reason }, "FATAL - unhandled rejection");
+  } catch (logErr) {
+    crashLog(`LOGGER FAILED ${String(logErr)}`);
+  }
   dialog.showErrorBox("Fatal Error", message);
   app.quit();
 });

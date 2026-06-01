@@ -6,7 +6,43 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
-import * as schema from "./schema";
+import {
+  albumPhotos,
+  albums,
+  appSettings,
+  cloudConfigs,
+  cloudSyncLog,
+  cullActionLogs,
+  cullSessionPhotos,
+  cullSessions,
+  exifData,
+  faceIdentities,
+  faceIdentityMembers,
+  faceVectors,
+  folders,
+  photos,
+  photoTags,
+  tags,
+} from "./schema";
+
+const schema = {
+  albumPhotos,
+  albums,
+  appSettings,
+  cloudConfigs,
+  cloudSyncLog,
+  cullActionLogs,
+  cullSessionPhotos,
+  cullSessions,
+  exifData,
+  faceIdentities,
+  faceIdentityMembers,
+  faceVectors,
+  folders,
+  photos,
+  photoTags,
+  tags,
+};
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,9 +124,15 @@ export function initDatabase(): ReturnType<typeof drizzle> {
 
   // Auto-run migrations on startup
   const migrationsFolder = getMigrationsFolder();
-  console.log(`[DB] Running migrations from: ${migrationsFolder}`);
-  migrate(dbInstance, { migrationsFolder });
-  console.log("[DB] Migrations complete");
+  try {
+    console.log(`[DB] Running migrations from: ${migrationsFolder}`);
+    migrate(dbInstance, { migrationsFolder });
+    console.log("[DB] Migrations complete");
+  } catch (err) {
+    closeDatabase();
+    dbInstance = null;
+    throw err;
+  }
 
   // Repair self-referencing tags (can happen if a category parent name matches a candidate tag)
   const selfRef = sqlite
