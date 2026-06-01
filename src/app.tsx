@@ -1,8 +1,8 @@
 import { RouterProvider } from "@tanstack/react-router";
-import React, { useEffect } from "react";
+import React, { useCallback, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 import { updateAppLanguage } from "./actions/language";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -11,7 +11,7 @@ import { router } from "./utils/routes";
 import "./localization/i18n";
 
 export default function App() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   useEffect(() => {
     syncWithLocalTheme();
@@ -22,6 +22,29 @@ export default function App() {
   useEffect(() => {
     return listenSystemThemeChanges();
   }, []);
+
+  // Listen for update availability
+  const handleUpdate = useCallback(
+    (event: MessageEvent) => {
+      if (event.data?.channel === "update:available") {
+        toast(t("updateDownloaded", { version: event.data.version }), {
+          duration: 30000,
+          action: {
+            label: t("updateRestart"),
+            onClick: () => {
+              window.electronAPI?.restartApp?.();
+            },
+          },
+        });
+      }
+    },
+    [t]
+  );
+
+  useEffect(() => {
+    window.addEventListener("message", handleUpdate);
+    return () => window.removeEventListener("message", handleUpdate);
+  }, [handleUpdate]);
 
   return (
     <ErrorBoundary>

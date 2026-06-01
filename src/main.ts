@@ -551,8 +551,37 @@ function checkForUpdates() {
       type: UpdateSourceType.ElectronPublicUpdateService,
       repo: "Uyoung666/ai-image-manager",
     },
+    notifyUser: true,
+    onNotifyUser: (info) => {
+      log.info(
+        { version: info.releaseName, url: info.updateURL },
+        "Update downloaded — notifying renderer"
+      );
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("update:available", {
+          version: info.releaseName,
+          releaseDate: info.releaseDate,
+          releaseNotes: info.releaseNotes,
+        });
+      }
+    },
+    logger: {
+      log: (msg) => log.info(`[updater] ${msg}`),
+      info: (msg) => log.info(`[updater] ${msg}`),
+      warn: (msg) => log.warn(`[updater] ${msg}`),
+      error: (msg) => log.error(`[updater] ${msg}`),
+    },
   });
+  log.info("Update checker started");
 }
+
+ipcMain.on("app:restart", () => {
+  app.relaunch({
+    args: process.argv.slice(1).concat(["--relaunch"]),
+    execPath: process.execPath,
+  });
+  app.quit();
+});
 
 // ── IPC / oRPC setup ─────────────────────────────────────────────────
 async function setupORPC() {

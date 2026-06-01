@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startDrag: (filePath: string): void => {
     ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath);
   },
+  restartApp: (): void => {
+    ipcRenderer.send("app:restart");
+  },
 });
 
 ipcRenderer.on("global-shortcut:search", () => {
@@ -42,4 +45,8 @@ ipcRenderer.on("theme:system-changed", (_event, resolved) => {
 
 ipcRenderer.on("data-path-migrate-progress", (_event, payload) => {
   window.postMessage({ channel: "data-path-migrate-progress", ...payload }, "*");
+});
+
+ipcRenderer.on("update:available", (_event, info) => {
+  window.postMessage({ channel: "update:available", ...info }, "*");
 });

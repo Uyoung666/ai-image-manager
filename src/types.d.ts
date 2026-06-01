@@ -5,3 +5,12 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 declare module "*.css";
+
+interface Window {
+  electronAPI: {
+    getFilePath: (file: File) => string;
+    preloadReady: boolean;
+    startDrag: (filePath: string) => void;
+    restartApp: () => void;
+  };
+}
