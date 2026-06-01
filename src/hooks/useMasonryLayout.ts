@@ -30,12 +30,6 @@ export function useMasonryLayout(
   gap: number,
   groupHeaders?: GroupHeaderInput[]
 ): MasonryLayout {
-  const firstW = items.length > 0 ? items[0].width : 0;
-  const firstH = items.length > 0 ? items[0].height : 0;
-  const lastW = items.length > 0 ? items[items.length - 1].width : 0;
-  const lastH = items.length > 0 ? items[items.length - 1].height : 0;
-  const headerCount = groupHeaders?.length ?? 0;
-
   return useMemo(() => {
     if (containerWidth <= 0 || columnCount <= 0 || items.length === 0) {
       return { positions: [], totalHeight: 0, headerPositions: [] };
@@ -105,15 +99,5 @@ export function useMasonryLayout(
     }
 
     return { positions, totalHeight, headerPositions };
-  }, [
-    items.length,
-    containerWidth,
-    columnCount,
-    gap,
-    firstW,
-    firstH,
-    lastW,
-    lastH,
-    headerCount,
-  ]);
+  }, [items, containerWidth, columnCount, gap, groupHeaders]);
 }

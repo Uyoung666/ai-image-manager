@@ -70,7 +70,7 @@ export function MasonryGrid({
   columnCount,
   gap,
   groupHeaders,
-  overscan = 5,
+  overscan = 3,
   renderItem,
   onEndReached,
   onMarqueeSelect,
@@ -86,6 +86,7 @@ export function MasonryGrid({
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number>(0);
 
   // Marquee selection state
   const [marquee, setMarquee] = useState<{
@@ -108,26 +109,30 @@ export function MasonryGrid({
   const HEADER_HEIGHT = 36;
 
   const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (el) {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
-      setShowScrollTop(el.scrollTop > el.clientHeight * 2);
-      setIsScrolling(true);
-      if (scrollTimerRef.current) {
-        clearTimeout(scrollTimerRef.current);
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const el = scrollRef.current;
+      if (el) {
+        setScrollTop(el.scrollTop);
+        setViewportHeight(el.clientHeight);
+        setShowScrollTop(el.scrollTop > el.clientHeight * 2);
+        setIsScrolling(true);
+        if (scrollTimerRef.current) {
+          clearTimeout(scrollTimerRef.current);
+        }
+        scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 1200);
       }
-      scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 1200);
-    }
+    });
   }, []);
 
   // Sync viewportHeight before paint to avoid blank waterfall on cold start
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && el.clientHeight > 0 && viewportHeight !== el.clientHeight) {
+    if (el && el.clientHeight > 0) {
       setViewportHeight(el.clientHeight);
     }
-  });
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -137,6 +142,19 @@ export function MasonryGrid({
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;

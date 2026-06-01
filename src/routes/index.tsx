@@ -266,6 +266,8 @@ function HomePage() {
 
   // Active photo list: search results or paginated query
   const photos = isSearching ? (searchResults ?? []) : pagedPhotos;
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
 
@@ -328,7 +330,7 @@ function HomePage() {
 
   const handleToggleFavorite = useCallback(
     async (id: number) => {
-      const photo = photos.find((p) => p.id === id);
+      const photo = photosRef.current.find((p) => p.id === id);
       if (!photo) {
         return;
       }
@@ -349,7 +351,7 @@ function HomePage() {
         },
       });
     },
-    [photos]
+    []
   );
 
   const toggleSidebar = useCallback(() => {
@@ -476,14 +478,14 @@ function HomePage() {
     (id: number, event: React.MouseEvent) => {
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        const idx = photos.findIndex((p) => p.id === id);
+        const idx = photosRef.current.findIndex((p) => p.id === id);
         if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
           const [from, to] =
             lastClickedIdx < idx
               ? [lastClickedIdx, idx]
               : [idx, lastClickedIdx];
           for (let i = from; i <= to; i++) {
-            next.add(photos[i].id);
+            next.add(photosRef.current[i].id);
           }
         } else if (event.ctrlKey || event.metaKey) {
           next.has(id) ? next.delete(id) : next.add(id);
@@ -500,17 +502,17 @@ function HomePage() {
         return next;
       });
     },
-    [photos, lastClickedIdx]
+    [lastClickedIdx]
   );
 
   const handleDoubleClick = useCallback(
     (id: number) => {
-      const idx = photos.findIndex((p) => p.id === id);
+      const idx = photosRef.current.findIndex((p) => p.id === id);
       if (idx >= 0) {
         setLightboxIndex(idx);
       }
     },
-    [photos]
+    []
   );
   async function handleSearch(
     query: string,
@@ -626,7 +628,7 @@ function HomePage() {
       setSearchLoading(false);
     }
   }
-  function handleContextMenu(e: React.MouseEvent) {
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
     const card = (e.target as HTMLElement).closest(
       "[data-photo-id]"
     ) as HTMLElement | null;
@@ -646,7 +648,7 @@ function HomePage() {
       photoId: id,
       photoPath: path,
     });
-  }
+  }, []);
 
   async function handleOpenExplorer(filePath: string) {
     await ipc.client.shell.openInExplorer({ path: filePath });
@@ -962,6 +964,40 @@ function HomePage() {
     toggleSidebar,
   ]);
 
+  const handleKeyboardSelect = useCallback(
+    (id: number) => {
+      setSelectedIds(new Set([id]));
+      const idx = photosRef.current.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        setLastClickedIdx(idx);
+      }
+    },
+    []
+  );
+
+  const handleMarqueeSelect = useCallback(
+    (ids: Set<number>) => {
+      if (ids.size > 0) {
+        setSelectedIds(ids);
+      }
+    },
+    []
+  );
+
+  const handleSortChange = useCallback(
+    (s: SortField, o: SortOrder) => {
+      setSortField(s);
+      setSortOrder(o);
+      try {
+        localStorage.setItem(GRID_SORT_FIELD_KEY, s);
+        localStorage.setItem(GRID_SORT_ORDER_KEY, o);
+      } catch {
+        /* ignore */
+      }
+    },
+    []
+  );
+
   const hasPhotos =
     photos.length > 0 ||
     (loading && photos.length === 0) ||
@@ -1056,29 +1092,10 @@ function HomePage() {
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
                 onEndReached={handleEndReached}
-                onKeyboardSelect={(id) => {
-                  setSelectedIds(new Set([id]));
-                  const idx = photos.findIndex((p) => p.id === id);
-                  if (idx >= 0) {
-                    setLastClickedIdx(idx);
-                  }
-                }}
-                onMarqueeSelect={(ids) => {
-                  if (ids.size > 0) {
-                    setSelectedIds(ids);
-                  }
-                }}
+                onKeyboardSelect={handleKeyboardSelect}
+                onMarqueeSelect={handleMarqueeSelect}
                 onSelect={handleSelect}
-                onSortChange={(s, o) => {
-                  setSortField(s);
-                  setSortOrder(o);
-                  try {
-                    localStorage.setItem(GRID_SORT_FIELD_KEY, s);
-                    localStorage.setItem(GRID_SORT_ORDER_KEY, o);
-                  } catch {
-                    /* ignore */
-                  }
-                }}
+                onSortChange={handleSortChange}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
                 searchQuery={searchQuery}

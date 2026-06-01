@@ -91,6 +91,8 @@ export function PhotoGrid({
   const observerRef = useRef<ResizeObserver | null>(null);
   const targetColWidthRef = useRef(targetColWidth);
   targetColWidthRef.current = targetColWidth;
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (observerRef.current) {
@@ -185,11 +187,17 @@ export function PhotoGrid({
     []
   );
 
+  const getDragIds = useCallback((id: number) => {
+    const current = selectedIdsRef.current;
+    return current.has(id) ? [...current] : [id];
+  }, []);
+
   const renderItem = useCallback(
     (photo: Photo) => (
       <PhotoCard
         deleting={deletingIds?.has(photo.id)}
         filename={photo.filename}
+        getDragIds={getDragIds}
         height={photo.height}
         id={photo.id}
         isFavorite={photo.isFavorite}
@@ -199,7 +207,6 @@ export function PhotoGrid({
         onToggleFavorite={onToggleFavorite}
         path={photo.path}
         searchQuery={searchQuery}
-        selectedIds={selectedIds}
         similarity={photo.similarity}
         thumbnailPath={photo.thumbnailPath}
         width={photo.width}
@@ -212,19 +219,11 @@ export function PhotoGrid({
       onDoubleClick,
       onToggleFavorite,
       searchQuery,
+      getDragIds,
     ]
   );
 
-  const masonryItems = useMemo(
-    () =>
-      photos.map((p) => ({
-        ...p,
-        width: p.width,
-        height: p.height,
-        id: p.id,
-      })),
-    [photos]
-  );
+  const masonryItems = useMemo(() => photos, [photos]);
 
   const groupHeaders = useMemo((): GroupHeader[] => {
     if (sort !== "date" || photos.length === 0) {
@@ -232,6 +231,10 @@ export function PhotoGrid({
     }
     const headers: GroupHeader[] = [];
     let lastKey = "";
+    const dtf = new Intl.DateTimeFormat(i18n.language, {
+      year: "numeric",
+      month: "long",
+    });
     for (let i = 0; i < photos.length; i++) {
       const ts = photos[i].fileDate;
       if (!ts) {
@@ -243,10 +246,7 @@ export function PhotoGrid({
         lastKey = key;
         headers.push({
           beforeIndex: i,
-          label: new Intl.DateTimeFormat(i18n.language, {
-            year: "numeric",
-            month: "long",
-          }).format(d),
+          label: dtf.format(d),
         });
       }
     }

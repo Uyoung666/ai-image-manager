@@ -1,10 +1,11 @@
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoCardProps {
   deleting?: boolean;
   filename: string;
+  getDragIds?: (id: number) => number[];
   height: number;
   id: number;
   isFavorite?: boolean;
@@ -14,11 +15,12 @@ interface PhotoCardProps {
   onToggleFavorite?: (id: number) => void;
   path: string;
   searchQuery?: string;
-  selectedIds?: Set<number>;
   similarity?: number;
   thumbnailPath: string | null;
   width: number;
 }
+
+const imageLoadState = new Map<string, "loaded" | "error">();
 
 function HighlightText({ text, query }: { text: string; query?: string }) {
   if (!query) {
@@ -47,18 +49,22 @@ export const PhotoCard = memo(function PhotoCard({
   width,
   height,
   isSelected,
+  getDragIds,
   isFavorite,
   deleting,
   searchQuery,
-  selectedIds,
   similarity,
   onClick,
   onDoubleClick,
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
+  const url = useMemo(
+    () => (thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path)),
+    [thumbnailPath, path]
+  );
+  const [loaded, setLoaded] = useState(() => imageLoadState.get(url) === "loaded");
+  const [error, setError] = useState(() => imageLoadState.get(url) === "error");
   const starRef = useRef<HTMLButtonElement>(null);
 
   const handleDragStart = useCallback(
@@ -69,8 +75,8 @@ export const PhotoCard = memo(function PhotoCard({
         (window as any).electronAPI?.startDrag?.(path);
         return;
       }
-      // Plain drag → internal DnD (sidebar albums/tags)
-      const ids = selectedIds?.has(id) ? [...selectedIds] : [id];
+      // Use stable callback (reads selectedIds via ref) to avoid breaking memo
+      const ids = getDragIds?.(id) ?? [id];
       e.dataTransfer.setData("application/x-photo-ids", JSON.stringify(ids));
       e.dataTransfer.effectAllowed = "move";
 
@@ -85,12 +91,8 @@ export const PhotoCard = memo(function PhotoCard({
         requestAnimationFrame(() => document.body.removeChild(ghost));
       }
     },
-    [id, path, selectedIds]
+    [id, path, getDragIds, t]
   );
-
-  const src = thumbnailPath
-    ? toLocalMediaUrl(thumbnailPath)
-    : toLocalMediaUrl(path);
 
   // Clamp extreme aspect ratios for visual consistency (P1-1)
   const rawAspect = width && height ? width / height : 4 / 3;
@@ -166,10 +168,11 @@ export const PhotoCard = memo(function PhotoCard({
             ? "scale-100 opacity-100 blur-0"
             : "scale-[1.02] opacity-0 blur-[6px]"
         }`}
+        decoding="async"
         loading="lazy"
-        onError={() => setError(true)}
-        onLoad={() => setLoaded(true)}
-        src={src}
+        onError={() => { imageLoadState.set(url, "error"); setError(true); }}
+        onLoad={() => { imageLoadState.set(url, "loaded"); setLoaded(true); }}
+        src={url}
       />
 
       {/* Hover overlay */}

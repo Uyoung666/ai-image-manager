@@ -131,6 +131,9 @@ function AlbumDetailPage() {
     return sorted;
   }, [album?.photos, sortField, sortOrder]);
 
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+
   // Sync detailPhoto when single photo selected
   useEffect(() => {
     if (detailDismissed) return;
@@ -143,13 +146,13 @@ function AlbumDetailPage() {
     }
   }, [selectedIds, photos, detailDismissed, detailPhoto]);
 
-  function handleSelect(id: number, event: React.MouseEvent) {
+  const handleSelect = useCallback((id: number, event: React.MouseEvent) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      const idx = photos.findIndex((p) => p.id === id);
+      const idx = photosRef.current.findIndex((p) => p.id === id);
       if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
         const [from, to] = lastClickedIdx < idx ? [lastClickedIdx, idx] : [idx, lastClickedIdx];
-        for (let i = from; i <= to; i++) next.add(photos[i].id);
+        for (let i = from; i <= to; i++) next.add(photosRef.current[i].id);
       } else if (event.ctrlKey || event.metaKey) {
         next.has(id) ? next.delete(id) : next.add(id);
         if (idx >= 0) setLastClickedIdx(idx);
@@ -160,7 +163,7 @@ function AlbumDetailPage() {
       }
       return next;
     });
-  }
+  }, [lastClickedIdx]);
 
   const [allFavorite, setAllFavorite] = useState(false);
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<number[]>([]);
@@ -177,8 +180,8 @@ function AlbumDetailPage() {
     queryClient.invalidateQueries({ queryKey: ["photos"] });
   }
 
-  function handleToggleFavorite(id: number) {
-    const photo = photos.find((p) => p.id === id);
+  const handleToggleFavorite = useCallback((id: number) => {
+    const photo = photosRef.current.find((p) => p.id === id);
     if (!photo) return;
     const prevVal = !!photo.isFavorite;
     const newVal = !prevVal;
@@ -212,7 +215,7 @@ function AlbumDetailPage() {
         },
       });
     });
-  }
+  }, []);
 
   async function handleDeleteSelected() {
     setConfirmDeleteIds(Array.from(selectedIds));
@@ -292,12 +295,12 @@ function AlbumDetailPage() {
     }
   }
 
-  function handleDoubleClick(id: number) {
-    const idx = photos.findIndex((p) => p.id === id);
+  const handleDoubleClick = useCallback((id: number) => {
+    const idx = photosRef.current.findIndex((p) => p.id === id);
     if (idx >= 0) setLightboxIndex(idx);
-  }
+  }, []);
 
-  function handleContextMenu(e: React.MouseEvent) {
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
     const card = (e.target as HTMLElement).closest("[data-photo-id]") as HTMLElement | null;
     if (!card) return;
     const id = Number.parseInt(card.dataset.photoId || "", 10);
@@ -305,7 +308,7 @@ function AlbumDetailPage() {
     if (!id) return;
     e.preventDefault();
     setCtxMenu({ open: true, x: e.clientX, y: e.clientY, photoId: id, photoPath: path });
-  }
+  }, []);
 
   async function handleOpenExplorer(filePath: string) {
     await ipc.client.shell.openInExplorer({ path: filePath });
@@ -481,6 +484,31 @@ function AlbumDetailPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [photos, selectedIds, renameDialogOpen, convertDialogOpen, quickPreviewIndex, detailPhoto]);
 
+  const handleKeyboardSelect = useCallback(
+    (id: number) => {
+      setSelectedIds(new Set([id]));
+      const idx = photosRef.current.findIndex((p) => p.id === id);
+      if (idx >= 0) setLastClickedIdx(idx);
+    },
+    []
+  );
+
+  const handleMarqueeSelect = useCallback(
+    (ids: Set<number>) => {
+      if (ids.size > 0) setSelectedIds(ids);
+    },
+    []
+  );
+
+  const handleSortChange = useCallback(
+    (s: SortField, o: SortOrder) => {
+      setSortField(s);
+      setSortOrder(o);
+      try { localStorage.setItem(GRID_SORT_FIELD_KEY, s); localStorage.setItem(GRID_SORT_ORDER_KEY, o); } catch { /* ignore */ }
+    },
+    []
+  );
+
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
@@ -583,20 +611,10 @@ function AlbumDetailPage() {
             loading={loading}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
-            onKeyboardSelect={(id) => {
-              setSelectedIds(new Set([id]));
-              const idx = photos.findIndex((p) => p.id === id);
-              if (idx >= 0) setLastClickedIdx(idx);
-            }}
-            onMarqueeSelect={(ids) => {
-              if (ids.size > 0) setSelectedIds(ids);
-            }}
+            onKeyboardSelect={handleKeyboardSelect}
+            onMarqueeSelect={handleMarqueeSelect}
             onSelect={handleSelect}
-            onSortChange={(s, o) => {
-              setSortField(s);
-              setSortOrder(o);
-              try { localStorage.setItem(GRID_SORT_FIELD_KEY, s); localStorage.setItem(GRID_SORT_ORDER_KEY, o); } catch { /* ignore */ }
-            }}
+            onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             photos={photos as any}
             selectedIds={selectedIds}
