@@ -4,16 +4,16 @@ import type { SQL } from "drizzle-orm";
 import {
   and,
   desc,
+  eq,
   gte,
   inArray,
-  isNotNull,
   isNull,
   like,
   lte,
   sql,
 } from "drizzle-orm";
 import { getDatabase } from "@/db";
-import { exifData, photos } from "@/db/schema";
+import { exifData, photos, photoTags, tags } from "@/db/schema";
 import {
   extractTemporalContext,
   parseChineseQuery,
@@ -233,11 +233,18 @@ export const searchCompound = os
       if (rgb) {
         // 动态构建 SQL：颜色搜索 + 可选 EXIF 叠加
         const exifActive =
-          dateFrom || dateTo || cameraModel || lensModel ||
-          focalMin !== undefined || focalMax !== undefined ||
-          apertureMin !== undefined || apertureMax !== undefined ||
-          isoMin !== undefined || isoMax !== undefined ||
-          shutterMin !== undefined || shutterMax !== undefined;
+          dateFrom ||
+          dateTo ||
+          cameraModel ||
+          lensModel ||
+          focalMin !== undefined ||
+          focalMax !== undefined ||
+          apertureMin !== undefined ||
+          apertureMax !== undefined ||
+          isoMin !== undefined ||
+          isoMax !== undefined ||
+          shutterMin !== undefined ||
+          shutterMax !== undefined;
 
         let colorSQL = sql``;
         if (exifActive) {
@@ -245,18 +252,48 @@ export const searchCompound = os
           const conditions: SQL[] = [];
           conditions.push(sql`p.deleted_at IS NULL`);
           conditions.push(sql`p.dominant_colors IS NOT NULL`);
-          if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
-          if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
-          if (cameraModel) conditions.push(sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`);
-          if (lensModel) conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
-          if (focalMin !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
-          if (focalMax !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
-          if (apertureMin !== undefined) conditions.push(sql`e.aperture >= ${apertureMin}`);
-          if (apertureMax !== undefined) conditions.push(sql`e.aperture <= ${apertureMax}`);
-          if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
-          if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
-          if (shutterMin !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`);
-          if (shutterMax !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`);
+          if (dateFrom) {
+            conditions.push(sql`e.date_taken >= ${dateFrom}`);
+          }
+          if (dateTo) {
+            conditions.push(sql`e.date_taken <= ${dateTo}`);
+          }
+          if (cameraModel) {
+            conditions.push(
+              sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`
+            );
+          }
+          if (lensModel) {
+            conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
+          }
+          if (focalMin !== undefined) {
+            conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
+          }
+          if (focalMax !== undefined) {
+            conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
+          }
+          if (apertureMin !== undefined) {
+            conditions.push(sql`e.aperture >= ${apertureMin}`);
+          }
+          if (apertureMax !== undefined) {
+            conditions.push(sql`e.aperture <= ${apertureMax}`);
+          }
+          if (isoMin !== undefined) {
+            conditions.push(sql`e.iso >= ${isoMin}`);
+          }
+          if (isoMax !== undefined) {
+            conditions.push(sql`e.iso <= ${isoMax}`);
+          }
+          if (shutterMin !== undefined) {
+            conditions.push(
+              sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`
+            );
+          }
+          if (shutterMax !== undefined) {
+            conditions.push(
+              sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`
+            );
+          }
 
           colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
               FROM photos p
@@ -274,17 +311,15 @@ export const searchCompound = os
               LIMIT ${limit}`;
         }
 
-        const results = db.all(colorSQL) as Array<Record<string, unknown> & { dist: number }>;
+        const results = db.all(colorSQL) as Array<
+          Record<string, unknown> & { dist: number }
+        >;
 
         const photoList = results.map((r) => ({
           ...r,
           id: r.id as number,
           similarity:
-            Math.round(
-              (1 /
-                (1 + Math.sqrt(r.dist || 0))) *
-                10_000
-            ) / 10_000,
+            Math.round((1 / (1 + Math.sqrt(r.dist || 0))) * 10_000) / 10_000,
         }));
 
         return {
@@ -295,37 +330,65 @@ export const searchCompound = os
       }
     }
 
-    // If text query: AI search first, then apply EXIF filters on the results
+    // Text query: run AI vector search + tag name search + filename search in parallel
     if (query?.trim()) {
-      const aiResults = await aiSearchByText(query.trim(), 200);
-      const photoIds = aiResults.map((r) => r.photoId);
+      const q = query.trim();
 
-      if (photoIds.length === 0) {
-        const fallbackResults = db
-          .select()
+      // 1) Run all three searches in parallel
+      const [aiResults, tagPhotoRows, filenamePhotoRows] = await Promise.all([
+        aiSearchByText(q, 200),
+        db
+          .select({ id: photos.id })
           .from(photos)
-          .where(like(photos.filename, `%${query.trim()}%`))
-          .limit(limit)
-          .all();
-        if (fallbackResults.length > 0) {
-          return {
-            results: fallbackResults.map((p) => ({ ...p, similarity: 0 })),
-            query: query.trim(),
-            total: fallbackResults.length,
-            fallback: "filename" as const,
-          };
+          .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+          .innerJoin(tags, eq(tags.id, photoTags.tagId))
+          .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
+          .all(),
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`)))
+          .all(),
+      ]);
+
+      // 2) Merge with dedup: tag > filename > AI, keep max similarity per photo
+      const merged = new Map<number, { photoId: number; similarity: number }>();
+
+      for (const r of tagPhotoRows) {
+        merged.set(r.id, { photoId: r.id, similarity: 1.0 });
+      }
+      for (const r of filenamePhotoRows) {
+        const existing = merged.get(r.id);
+        if (!existing || existing.similarity < 0.7) {
+          merged.set(r.id, { photoId: r.id, similarity: 0.7 });
         }
-        return { results: [], query: query.trim(), total: 0 };
+      }
+      for (const r of aiResults) {
+        const existing = merged.get(r.photoId);
+        if (!existing || existing.similarity < r.similarity) {
+          merged.set(r.photoId, {
+            photoId: r.photoId,
+            similarity: r.similarity,
+          });
+        }
       }
 
+      const mergedList = [...merged.values()];
+
+      if (mergedList.length === 0) {
+        return { results: [], query: q, total: 0 };
+      }
+
+      // 3) If no EXIF filters, return merged results directly
       if (!hasExifFilters) {
+        const allIds = mergedList.map((r) => r.photoId);
         const photoList = db
           .select()
           .from(photos)
-          .where(inArray(photos.id, photoIds))
+          .where(inArray(photos.id, allIds))
           .all();
         const photoMap = new Map(photoList.map((p) => [p.id, p]));
-        const merged = aiResults
+        const combined = mergedList
           .map((r) => {
             const photo = photoMap.get(r.photoId);
             if (!photo) {
@@ -341,70 +404,72 @@ export const searchCompound = os
             (p): p is NonNullable<typeof p> => p !== null && p.id != null
           );
 
-        const scored = applyTimeDecay(merged);
+        const scored = applyTimeDecay(combined);
         return {
           results: scored.slice(0, limit),
-          query: query.trim(),
+          query: q,
           total: scored.length,
         };
       }
-      // Apply EXIF filters on AI results
-      const aiExifConditions: SQL[] = [];
+
+      // 4) Apply EXIF filters on merged results
+      const allIds = mergedList.map((r) => r.photoId);
+      const exifConditions: SQL[] = [];
 
       if (dateFrom) {
-        aiExifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
+        exifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
       }
       if (dateTo) {
-        aiExifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
+        exifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
       }
       if (cameraModel) {
-        aiExifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
+        exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
       }
       if (lensModel) {
-        aiExifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
+        exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
       }
       if (focalMin !== undefined) {
-        aiExifConditions.push(gte(exifData.focalLengthNum, focalMin));
+        exifConditions.push(gte(exifData.focalLengthNum, focalMin));
       }
       if (focalMax !== undefined) {
-        aiExifConditions.push(lte(exifData.focalLengthNum, focalMax));
+        exifConditions.push(lte(exifData.focalLengthNum, focalMax));
       }
       if (apertureMin !== undefined) {
-        aiExifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
+        exifConditions.push(sql`${exifData.aperture} >= ${apertureMin}`);
       }
       if (apertureMax !== undefined) {
-        aiExifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
+        exifConditions.push(sql`${exifData.aperture} <= ${apertureMax}`);
       }
       if (isoMin !== undefined) {
-        aiExifConditions.push(gte(exifData.iso, isoMin));
+        exifConditions.push(gte(exifData.iso, isoMin));
       }
       if (isoMax !== undefined) {
-        aiExifConditions.push(lte(exifData.iso, isoMax));
+        exifConditions.push(lte(exifData.iso, isoMax));
       }
       if (shutterMin !== undefined) {
-        aiExifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
+        exifConditions.push(gte(exifData.shutterSpeedNum, shutterMin));
       }
       if (shutterMax !== undefined) {
-        aiExifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
+        exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
       }
 
-      const aiExifBaseQuery = db
+      const exifBaseQuery = db
         .select({ photoId: exifData.photoId })
         .from(exifData)
-        .where(inArray(exifData.photoId, photoIds))
+        .where(inArray(exifData.photoId, allIds))
         .$dynamic();
 
       const filteredExif = (
-        aiExifConditions.length > 0
-          ? aiExifBaseQuery.where(and(...aiExifConditions))
-          : aiExifBaseQuery
+        exifConditions.length > 0
+          ? exifBaseQuery.where(and(...exifConditions))
+          : exifBaseQuery
       ).all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
 
-      const filtered = aiResults.filter((r) => validIds.has(r.photoId));
+      const filtered = mergedList.filter((r) => validIds.has(r.photoId));
 
       if (filtered.length === 0) {
-        return { results: [], query: query.trim(), total: 0 };
+        return { results: [], query: q, total: 0 };
       }
       const filteredIds = filtered.map((r) => r.photoId);
       const photoList = db
@@ -413,7 +478,7 @@ export const searchCompound = os
         .where(inArray(photos.id, filteredIds))
         .all();
       const photoMap = new Map(photoList.map((p) => [p.id, p]));
-      const merged = filtered
+      const combined = filtered
         .map((r) => {
           const photo = photoMap.get(r.photoId);
           if (!photo) {
@@ -427,10 +492,10 @@ export const searchCompound = os
         })
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-      const scored = applyTimeDecay(merged);
+      const scored = applyTimeDecay(combined);
       return {
         results: scored.slice(0, limit),
-        query: query.trim(),
+        query: q,
         total: scored.length,
       };
     }

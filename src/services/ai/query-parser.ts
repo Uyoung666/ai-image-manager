@@ -1,9 +1,9 @@
+import { getDictionaryManager } from "../dictionary-manager";
 import {
   CHAR_DECOMPOSE,
   type DictCategory,
   ZH_TO_EN_SEARCH,
 } from "./zh-en-dict";
-import { getDictionaryManager } from "../dictionary-manager";
 
 export interface ParsedQuery {
   activity: string[];
@@ -192,6 +192,25 @@ export function generateSearchPrompts(parsed: ParsedQuery): string[] {
   }
 
   return prompts;
+}
+
+// 计算中文查询中被词典覆盖的字符比例（0.0~1.0）
+// 用于自适应调整向量搜索的余弦距离阈值：覆盖率越低，阈值越严格
+export function getQueryCoverage(query: string, parsed: ParsedQuery): number {
+  const trimmed = query.trim();
+  const chineseChars = trimmed.replace(/[^一-鿿]/g, "");
+  if (chineseChars.length === 0) {
+    return 1.0; // 无中文，视为完全覆盖
+  }
+
+  const unknownChars = new Set(parsed.unknown);
+  let uncoveredCount = 0;
+  for (const char of chineseChars) {
+    if (unknownChars.has(char)) {
+      uncoveredCount++;
+    }
+  }
+  return Math.max(0, 1 - uncoveredCount / chineseChars.length);
 }
 
 export function extractTemporalContext(

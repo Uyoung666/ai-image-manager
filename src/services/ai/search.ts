@@ -4,7 +4,11 @@ import path from "node:path";
 import { app } from "electron";
 import { WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel, loadModel } from "./model-loader";
-import { generateSearchPrompts, parseChineseQuery } from "./query-parser";
+import {
+  generateSearchPrompts,
+  getQueryCoverage,
+  parseChineseQuery,
+} from "./query-parser";
 import {
   _localModelPath,
   embeddingModel,
@@ -119,9 +123,15 @@ export function embedImageInWorker(
   });
 }
 
+// 自适应阈值范围：覆盖率 0% → 0.35, 覆盖率 100% → 0.75
+function adaptiveThreshold(coverage: number): number {
+  return 0.35 + coverage * 0.4;
+}
+
 async function fallbackSearch(
   queryVector: number[],
-  limit: number
+  limit: number,
+  maxDistance = 0.75
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!photoTable) {
     return [];
@@ -185,9 +195,8 @@ async function fallbackSearch(
 
   allScored.sort((a, b) => a.distance - b.distance);
 
-  const MAX_DISTANCE = 0.75;
   return allScored
-    .filter((r) => r.distance <= MAX_DISTANCE)
+    .filter((r) => r.distance <= maxDistance)
     .slice(0, limit)
     .map((r) => ({
       photoId: r.photoId,
@@ -197,7 +206,8 @@ async function fallbackSearch(
 
 async function singleVectorSearch(
   text: string,
-  limit: number
+  limit: number,
+  maxCosineDistance = 0.75
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!(embeddingModel && photoTable)) {
     return [];
@@ -224,17 +234,16 @@ async function singleVectorSearch(
   }
 
   if (rawResults.length === 0) {
-    return fallbackSearch(queryVector, limit);
+    return fallbackSearch(queryVector, limit, maxCosineDistance);
   }
 
-  const MAX_COSINE_DISTANCE = 0.75;
   const filtered = rawResults.filter(
-    (r) => (r._distance as number) <= MAX_COSINE_DISTANCE
+    (r) => (r._distance as number) <= maxCosineDistance
   );
 
   if (filtered.length === 0) {
     console.log(
-      `[AI] All ${rawResults.length} results above threshold ${MAX_COSINE_DISTANCE}, returning empty`
+      `[AI] All ${rawResults.length} results above threshold ${maxCosineDistance}, returning empty`
     );
     return [];
   }
@@ -251,10 +260,11 @@ async function singleVectorSearch(
 
 async function multiPromptSearch(
   prompts: string[],
-  limit: number
+  limit: number,
+  maxCosineDistance = 0.75
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   const resultSets = await Promise.all(
-    prompts.map((p) => singleVectorSearch(p, limit * 2))
+    prompts.map((p) => singleVectorSearch(p, limit * 2, maxCosineDistance))
   );
 
   const weights = [1.0, 0.7, 0.5];
@@ -306,18 +316,28 @@ export async function searchByText(
 
   if (hasChinese) {
     const parsed = parseChineseQuery(query);
+    const coverage = getQueryCoverage(query, parsed);
+    const threshold = adaptiveThreshold(coverage);
     const prompts = generateSearchPrompts(parsed);
 
     console.log(
-      `[AI] searchByText: "${query}" → ${prompts.length} prompts: ${JSON.stringify(prompts)}`
+      `[AI] searchByText: "${query}" → coverage=${(coverage * 100).toFixed(0)}% threshold=${threshold.toFixed(2)} prompts=${prompts.length}: ${JSON.stringify(prompts)}`
     );
 
-    let results = await multiPromptSearch(prompts, limit);
+    let results: Array<{ photoId: number; similarity: number }> = [];
+    if (prompts.length > 0) {
+      results = await multiPromptSearch(prompts, limit, threshold);
+    }
 
     // Fallback: try raw query directly if multi-prompt returned nothing
-    if (results.length === 0) {
+    // But only when coverage is high enough — raw Chinese is meaningless for CLIP
+    if (results.length === 0 && coverage >= 0.5) {
       console.log("[AI] Multi-prompt returned 0, trying raw query embedding");
-      results = await singleVectorSearch(query, limit);
+      results = await singleVectorSearch(query, limit, threshold);
+    } else if (results.length === 0) {
+      console.log(
+        `[AI] Low coverage (${(coverage * 100).toFixed(0)}%), skipping raw Chinese fallback`
+      );
     }
 
     return results;
