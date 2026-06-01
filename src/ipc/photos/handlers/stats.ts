@@ -386,29 +386,29 @@ export const getStats = os.handler(() => {
   return result;
 });
 
-function computeFileHash(filePath: string): string | null {
+async function computeFileHash(filePath: string): Promise<string | null> {
   try {
-    const fd = fs.openSync(filePath, "r");
-    const stat = fs.fstatSync(fd);
+    const fd = await fs.promises.open(filePath, "r");
+    const stat = await fd.stat();
     const size = stat.size;
     const hash = crypto.createHash("sha256");
 
     if (size <= 8192) {
       const buf = Buffer.alloc(size);
-      fs.readSync(fd, buf, 0, size, 0);
+      await fd.read(buf, 0, size, 0);
       hash.update(buf);
     } else {
       const head = Buffer.alloc(4096);
-      fs.readSync(fd, head, 0, 4096, 0);
+      await fd.read(head, 0, 4096, 0);
       hash.update(head);
       const tail = Buffer.alloc(4096);
-      fs.readSync(fd, tail, 0, 4096, size - 4096);
+      await fd.read(tail, 0, 4096, size - 4096);
       hash.update(tail);
       const sizeBuffer = Buffer.alloc(8);
       sizeBuffer.writeBigInt64LE(BigInt(size));
       hash.update(sizeBuffer);
     }
-    fs.closeSync(fd);
+    await fd.close();
     return hash.digest("hex");
   } catch {
     return null;
@@ -538,6 +538,7 @@ export const findDuplicates = os
         createdAt: photos.createdAt,
       })
       .from(photos)
+      .where(isNull(photos.deletedAt))
       .all();
 
     if (allPhotos.length === 0) {
@@ -576,7 +577,7 @@ export const findDuplicates = os
       // Compute content hash for photos in this group that don't have one yet
       for (const p of group) {
         if (!p.contentHash) {
-          const hash = computeFileHash(p.path);
+          const hash = await computeFileHash(p.path);
           if (hash) {
             p.contentHash = hash;
             db.update(photos)
@@ -704,33 +705,38 @@ export const findDuplicates = os
         if (c.phashDistance <= 3) {
           // High confidence without CLIP
           confirmedPairs.push(c);
+        } else if (c.phashDistance <= input.threshold) {
+          // distance 4-8 without vectors: keep as pending for manual review
+          c.matchType = "phash";
+          confirmedPairs.push(c);
         }
-        // distance 4-8 without vectors: skip (too uncertain)
       }
     }
 
     // --- Persist results ---
     // Clear old results before inserting new ones
-    db.delete(duplicatePairs).run();
+    db.transaction(() => {
+      db.delete(duplicatePairs).run();
 
-    if (confirmedPairs.length > 0) {
-      for (const pair of confirmedPairs) {
-        db.insert(duplicatePairs)
-          .values({
-            photoAId: pair.photoAId,
-            photoBId: pair.photoBId,
-            matchType: pair.matchType,
-            phashDistance: pair.phashDistance,
-            clipSimilarity: pair.clipSimilarity,
-            status:
-              pair.matchType === "exact" || pair.matchType === "clip_confirmed"
-                ? "confirmed"
-                : "pending",
-          })
-          .onConflictDoNothing()
-          .run();
+      if (confirmedPairs.length > 0) {
+        for (const pair of confirmedPairs) {
+          db.insert(duplicatePairs)
+            .values({
+              photoAId: pair.photoAId,
+              photoBId: pair.photoBId,
+              matchType: pair.matchType,
+              phashDistance: pair.phashDistance,
+              clipSimilarity: pair.clipSimilarity,
+              status:
+                pair.matchType === "exact" || pair.matchType === "clip_confirmed"
+                  ? "confirmed"
+                  : "pending",
+            })
+            .onConflictDoNothing()
+            .run();
+        }
       }
-    }
+    });
 
     // Record detection run
     const maxId = allPhotos.reduce((max, p) => Math.max(max, p.id), 0);

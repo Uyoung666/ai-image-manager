@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeft, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
@@ -27,6 +29,24 @@ interface DuplicatePair {
 }
 
 type RetentionStrategy = "larger" | "older" | "manual";
+
+// ──────────────────────────────────────────────────────────────
+// Row type for virtual scrolling: header or pair
+// ──────────────────────────────────────────────────────────────
+
+type DuplicateRow =
+  | {
+      type: "header";
+      key: string;
+      title: string;
+      label: { text: string; color: string };
+      count: number;
+    }
+  | { type: "pair"; pair: DuplicatePair; pairKey: string };
+
+// ──────────────────────────────────────────────────────────────
+// Helpers (module-level — no dependency on component state)
+// ──────────────────────────────────────────────────────────────
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) {
@@ -81,280 +101,11 @@ function pickDeletion(
   return a.createdAt <= b.createdAt ? b.id : a.id;
 }
 
-function DuplicatesPage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [pairs, setPairs] = useState<DuplicatePair[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [strategy, setStrategy] = useState<RetentionStrategy>("manual");
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+// ──────────────────────────────────────────────────────────────
+// PairCard — memo'd for virtual scrolling stability
+// ──────────────────────────────────────────────────────────────
 
-  const loadDuplicates = useCallback(async (forceRescan = false) => {
-    if (forceRescan) {
-      setScanning(true);
-    } else {
-      setLoading(true);
-    }
-    try {
-      const result = await ipc.client.photos.findDuplicates({
-        threshold: 8,
-        forceRescan,
-      });
-      const data = result as {
-        duplicates: DuplicatePair[];
-        fromCache: boolean;
-      };
-      setPairs(data.duplicates || []);
-      setSelected(new Set());
-    } catch (err) {
-      console.error("[loadDuplicates] failed:", err);
-    } finally {
-      setLoading(false);
-      setScanning(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDuplicates();
-  }, [loadDuplicates]);
-
-  const grouped = useMemo(() => {
-    const exact: DuplicatePair[] = [];
-    const clipConfirmed: DuplicatePair[] = [];
-    const phash: DuplicatePair[] = [];
-    for (const p of pairs) {
-      if (p.matchType === "exact") {
-        exact.push(p);
-      } else if (p.matchType === "clip_confirmed") {
-        clipConfirmed.push(p);
-      } else {
-        phash.push(p);
-      }
-    }
-    return { exact, clipConfirmed, phash };
-  }, [pairs]);
-
-  function toggleSelect(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
-
-  useEffect(() => {
-    if (strategy === "manual") {
-      setSelected(new Set());
-      return;
-    }
-    const newSelected = new Set<number>();
-    for (const pair of pairs) {
-      const toDelete = pickDeletion(pair, strategy);
-      if (toDelete) {
-        newSelected.add(toDelete);
-      }
-    }
-    setSelected(newSelected);
-  }, [strategy, pairs]);
-
-  async function handleDismiss(pair: DuplicatePair) {
-    if (pair.pairId) {
-      try {
-        await ipc.client.photos.dismissDuplicate({ pairId: pair.pairId });
-      } catch (err) {
-        console.error("[handleDismiss] failed:", err);
-      }
-    }
-    setPairs((prev) => prev.filter((p) => p !== pair));
-  }
-
-  async function handleDeleteSelected() {
-    if (selected.size === 0) {
-      return;
-    }
-    setDeleting(true);
-    try {
-      await ipc.client.photos.deletePhotos({ ids: Array.from(selected) });
-      setPairs((prev) =>
-        prev.filter(
-          (p) => !(selected.has(p.photoA.id) || selected.has(p.photoB.id))
-        )
-      );
-      setSelected(new Set());
-    } catch {
-      toast.error(t("duplicateDeleteFailed"));
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  async function handleDeleteSingle(id: number) {
-    setDeleting(true);
-    try {
-      await ipc.client.photos.deletePhoto({ id });
-      setPairs((prev) =>
-        prev.filter((p) => p.photoA.id !== id && p.photoB.id !== id)
-      );
-      setSelected((prev) => {
-        const n = new Set(prev);
-        n.delete(id);
-        return n;
-      });
-    } catch {
-      toast.error(t("duplicateDeleteFailed"));
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full flex-col bg-background">
-      {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div className="flex items-center gap-4">
-          <button
-            className="text-muted-foreground hover:text-foreground"
-            onClick={() => navigate({ to: "/" })}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="font-[590] text-[18px] text-foreground">
-            {t("duplicatesTitle")}
-          </h1>
-          <span className="text-[13px] text-muted-foreground/70">
-            {t("duplicateGroups", { count: pairs.length })}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-            disabled={scanning}
-            onClick={() => loadDuplicates(true)}
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`}
-            />
-            {t("rescan")}
-          </button>
-          {selected.size > 0 && (
-            <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/30 hover:bg-destructive/5"
-              disabled={deleting}
-              onClick={handleDeleteSelected}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t("deleteSelectedCount", { count: selected.size })}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Strategy selector */}
-      {pairs.length > 0 && (
-        <div className="flex items-center gap-3 border-border border-b px-6 py-3">
-          <span className="text-[12px] text-muted-foreground/70">
-            {t("retentionStrategy")}
-          </span>
-          {(
-            [
-              ["manual", t("manualSelection")],
-              ["larger", t("keepLargerFile")],
-              ["older", t("keepOlderCreated")],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              className={`rounded-[6px] px-2.5 py-1 text-[11px] transition-colors ${
-                strategy === key
-                  ? "bg-primary/10 font-[510] text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              key={key}
-              onClick={() => setStrategy(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto">
-        {pairs.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
-              <p className="mt-3 font-[510] text-[16px] text-foreground">
-                {t("noDuplicatesTitle")}
-              </p>
-              <p className="mt-2 text-[13px] text-muted-foreground/70">
-                {t("noDuplicatesDescription")}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6 p-6">
-          {/* Grouped sections */}
-          {(
-            [
-              ["exact", grouped.exact, t("exactDuplicate")],
-              ["clip_confirmed", grouped.clipConfirmed, t("visualDuplicate")],
-              ["phash", grouped.phash, t("highlySimilar")],
-            ] as const
-          ).map(([key, items, title]) => {
-            if (items.length === 0) {
-              return null;
-            }
-            const label = getMatchLabel(key, t);
-            return (
-              <div key={key}>
-                <div className="mb-3 flex items-center gap-2">
-                  <span
-                    className={`rounded-[4px] px-2 py-0.5 font-[510] text-[11px] ${label.color}`}
-                  >
-                    {title}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground/70">
-                    {t("duplicateGroups", { count: items.length })}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {items.map((pair) => (
-                    <PairCard
-                      deleting={deleting}
-                      key={`${pair.photoA.id}-${pair.photoB.id}`}
-                      onDelete={handleDeleteSingle}
-                      onDismiss={() => handleDismiss(pair)}
-                      onToggle={toggleSelect}
-                      pair={pair}
-                      selected={selected}
-                      t={t}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      </div>
-    </div>
-  );
-}
-
-function PairCard({
+const PairCard = memo(function PairCard({
   pair,
   selected,
   onToggle,
@@ -408,10 +159,11 @@ function PairCard({
               className={`flex flex-col ${idx === 0 ? "border-border border-r" : ""} ${isSelected ? "bg-destructive/5" : ""}`}
               key={photo.id}
             >
-              <div className="relative flex items-center justify-center bg-background p-4">
+              <div className="relative flex min-h-[220px] items-center justify-center bg-background p-4">
                 <img
                   alt={photo.filename}
                   className="max-h-[220px] rounded-[4px] object-contain"
+                  loading="lazy"
                   src={toLocalMediaUrl(photo.path)}
                 />
                 {isSelected && (
@@ -453,6 +205,405 @@ function PairCard({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+});
+
+// ──────────────────────────────────────────────────────────────
+// DuplicatesPage — main component
+// ──────────────────────────────────────────────────────────────
+
+function DuplicatesPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [deleting, setDeleting] = useState(false);
+  const [strategy, setStrategy] = useState<RetentionStrategy>("manual");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  // ── TanStack Query: duplicates data ──
+
+  const {
+    data: pairsData,
+    isLoading: loading,
+  } = useQuery({
+    queryKey: ["duplicates"],
+    queryFn: async () => {
+      const result = await ipc.client.photos.findDuplicates({
+        threshold: 8,
+        forceRescan: false,
+      });
+      return result as {
+        duplicates: DuplicatePair[];
+        fromCache: boolean;
+      };
+    },
+    staleTime: 30_000,
+  });
+
+  const pairs = pairsData?.duplicates || [];
+
+  // ── Local scanning state (for rescan spinner) ──
+
+  const [scanning, setScanning] = useState(false);
+
+  const handleRescan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const result = await ipc.client.photos.findDuplicates({
+        threshold: 8,
+        forceRescan: true,
+      });
+      queryClient.setQueryData(["duplicates"], result);
+    } catch (err) {
+      console.error("[handleRescan] failed:", err);
+    } finally {
+      setScanning(false);
+    }
+  }, [queryClient]);
+
+  // ── Grouped pairs → flattened rows for virtualizer ──
+
+  const grouped = useMemo(() => {
+    const exact: DuplicatePair[] = [];
+    const clipConfirmed: DuplicatePair[] = [];
+    const phash: DuplicatePair[] = [];
+    for (const p of pairs) {
+      if (p.matchType === "exact") {
+        exact.push(p);
+      } else if (p.matchType === "clip_confirmed") {
+        clipConfirmed.push(p);
+      } else {
+        phash.push(p);
+      }
+    }
+    return { exact, clipConfirmed, phash };
+  }, [pairs]);
+
+  const allRows = useMemo((): DuplicateRow[] => {
+    const rows: DuplicateRow[] = [];
+    const sections = [
+      ["exact", grouped.exact, t("exactDuplicate")],
+      ["clip_confirmed", grouped.clipConfirmed, t("visualDuplicate")],
+      ["phash", grouped.phash, t("highlySimilar")],
+    ] as const;
+    for (const [key, items, title] of sections) {
+      if (items.length === 0) continue;
+      const label = getMatchLabel(key, t);
+      rows.push({ type: "header", key, title, label, count: items.length });
+      for (const pair of items) {
+        rows.push({
+          type: "pair",
+          pair,
+          pairKey: `${pair.photoA.id}-${pair.photoB.id}`,
+        });
+      }
+    }
+    return rows;
+  }, [grouped, t]);
+
+  // ── useVirtualizer ──
+
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: allRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => (allRows[index].type === "header" ? 36 : 355),
+    getItemKey: (index) => {
+      const row = allRows[index];
+      return row.type === "header" ? `h-${row.key}` : `p-${row.pairKey}`;
+    },
+    overscan: 5,
+  });
+
+  // ── Selection & filters ──
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (strategy === "manual") {
+      setSelected(new Set());
+      return;
+    }
+    const newSelected = new Set<number>();
+    for (const pair of pairs) {
+      const toDelete = pickDeletion(pair, strategy);
+      if (toDelete) {
+        newSelected.add(toDelete);
+      }
+    }
+    setSelected(newSelected);
+  }, [strategy, pairs]);
+
+  // ── Dismiss (ignore) a pair — optimistic update ──
+
+  async function handleDismiss(pair: DuplicatePair) {
+    if (pair.pairId) {
+      try {
+        await ipc.client.photos.dismissDuplicate({ pairId: pair.pairId });
+      } catch (err) {
+        console.error("[handleDismiss] failed:", err);
+      }
+    }
+    // Optimistic: remove from query cache
+    queryClient.setQueryData<{ duplicates: DuplicatePair[]; fromCache?: boolean }>(
+      ["duplicates"],
+      (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          duplicates: prev.duplicates.filter(
+            (p) =>
+              !(
+                p.photoA.id === pair.photoA.id && p.photoB.id === pair.photoB.id
+              )
+          ),
+        };
+      },
+    );
+  }
+
+  // ── Delete selected ──
+
+  async function handleDeleteSelected() {
+    if (selected.size === 0) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await ipc.client.photos.deletePhotos({ ids: Array.from(selected) });
+      // Optimistic: remove affected pairs from query cache
+      queryClient.setQueryData<{ duplicates: DuplicatePair[]; fromCache?: boolean }>(
+        ["duplicates"],
+        (prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            duplicates: prev.duplicates.filter(
+              (p) => !(selected.has(p.photoA.id) || selected.has(p.photoB.id))
+            ),
+          };
+        },
+      );
+      setSelected(new Set());
+    } catch {
+      toast.error(t("duplicateDeleteFailed"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // ── Delete single ──
+
+  async function handleDeleteSingle(id: number) {
+    setDeleting(true);
+    try {
+      await ipc.client.photos.deletePhoto({ id });
+      // Optimistic: remove affected pairs from query cache
+      queryClient.setQueryData<{ duplicates: DuplicatePair[]; fromCache?: boolean }>(
+        ["duplicates"],
+        (prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            duplicates: prev.duplicates.filter(
+              (p) => p.photoA.id !== id && p.photoB.id !== id
+            ),
+          };
+        },
+      );
+      setSelected((prev) => {
+        const n = new Set(prev);
+        n.delete(id);
+        return n;
+      });
+    } catch {
+      toast.error(t("duplicateDeleteFailed"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  // ── Stable callback refs for PairCard (avoids stale closures) ──
+
+  const toggleSelectRef = useRef(toggleSelect);
+  const handleDeleteSingleRef = useRef(handleDeleteSingle);
+  const handleDismissRef = useRef(handleDismiss);
+  useEffect(() => {
+    toggleSelectRef.current = toggleSelect;
+  }, [pairs, selected, strategy]); // re-stabilise when deps change
+  useEffect(() => {
+    handleDeleteSingleRef.current = handleDeleteSingle;
+  }, [pairs, selected, deleting]);
+  useEffect(() => {
+    handleDismissRef.current = handleDismiss;
+  }, [pairs]);
+
+  const stableToggleSelect = useCallback(
+    (id: number) => toggleSelectRef.current(id),
+    [],
+  );
+  const stableDeleteSingle = useCallback(
+    (id: number) => handleDeleteSingleRef.current(id),
+    [],
+  );
+  const stableDismiss = useCallback(
+    (pair: DuplicatePair) => handleDismissRef.current(pair),
+    [],
+  );
+
+  // ── Loading state ──
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // ── Render ──
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between border-border border-b px-6 py-4">
+        <div className="flex items-center gap-4">
+          <button
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => navigate({ to: "/" })}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h1 className="font-[590] text-[18px] text-foreground">
+            {t("duplicatesTitle")}
+          </h1>
+          <span className="text-[13px] text-muted-foreground/70">
+            {t("duplicateGroups", { count: pairs.length })}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+            disabled={scanning}
+            onClick={handleRescan}
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`}
+            />
+            {t("rescan")}
+          </button>
+          {selected.size > 0 && (
+            <button
+              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/30 hover:bg-destructive/5"
+              disabled={deleting}
+              onClick={handleDeleteSelected}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t("deleteSelectedCount", { count: selected.size })}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Strategy selector */}
+      {pairs.length > 0 && (
+        <div className="flex items-center gap-3 border-border border-b px-6 py-3">
+          <span className="text-[12px] text-muted-foreground/70">
+            {t("retentionStrategy")}
+          </span>
+          {(
+            [
+              ["manual", t("manualSelection")],
+              ["larger", t("keepLargerFile")],
+              ["older", t("keepOlderCreated")],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              className={`rounded-[6px] px-2.5 py-1 text-[11px] transition-colors ${
+                strategy === key
+                  ? "bg-primary/10 font-[510] text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              key={key}
+              onClick={() => setStrategy(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Virtual-scrolled content */}
+      <div ref={parentRef} className="flex-1 overflow-y-auto p-6">
+        {pairs.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
+              <p className="mt-3 font-[510] text-[16px] text-foreground">
+                {t("noDuplicatesTitle")}
+              </p>
+              <p className="mt-2 text-[13px] text-muted-foreground/70">
+                {t("noDuplicatesDescription")}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const row = allRows[virtualItem.index];
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  {row.type === "header" ? (
+                    <div className="flex items-center gap-2 pb-3">
+                      <span
+                        className={`rounded-[4px] px-2 py-0.5 font-[510] text-[11px] ${row.label.color}`}
+                      >
+                        {row.title}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground/70">
+                        {t("duplicateGroups", { count: row.count })}
+                      </span>
+                    </div>
+                  ) : (
+                    <PairCard
+                      deleting={deleting}
+                      key={row.pairKey}
+                      onDelete={stableDeleteSingle}
+                      onDismiss={() => stableDismiss(row.pair)}
+                      onToggle={stableToggleSelect}
+                      pair={row.pair}
+                      selected={selected}
+                      t={t}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
