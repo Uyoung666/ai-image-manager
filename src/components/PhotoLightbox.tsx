@@ -291,7 +291,7 @@ export function PhotoLightbox({
       slide: { padding: "0 60px" },
       captionsTitleContainer: {
         background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
-        padding: "10px 16px",
+        padding: "10px 16px 10px 120px",
         ...overlayStyle,
       },
       captionsDescriptionContainer: {
