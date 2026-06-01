@@ -143,6 +143,16 @@ export function PhotoLightbox({
     setPlaying((p) => !p);
   }, []);
 
+  const handleInfoNavigate = useCallback(
+    (direction: "prev" | "next") => {
+      setPhotoIndex((prev) => {
+        if (direction === "prev") return prev > 0 ? prev - 1 : photos.length - 1;
+        return (prev + 1) % photos.length;
+      });
+    },
+    [photos.length]
+  );
+
   const cycleDelay = useCallback(() => {
     const currentIdx = SLIDESHOW_DELAYS.findIndex((d) => d.value === delay);
     const nextIdx = (currentIdx + 1) % SLIDESHOW_DELAYS.length;
@@ -394,6 +404,7 @@ export function PhotoLightbox({
           <PhotoDetailPanel
             photo={photos[photoIndex]}
             onClose={() => setInfoPanelVisible(false)}
+            onNavigate={handleInfoNavigate}
             onOpenExplorer={async (path) => {
               await ipc.client.shell.openInExplorer({ path });
             }}

@@ -31,7 +31,11 @@ const SHORTCUTS: Shortcut[] = [
   { sectionKey: "shortcutInterface", keyLabels: ["["], labelKey: "shortcutToggleSidebar" },
   { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "K"], labelKey: "shortcutGlobalSearch" },
   { sectionKey: "shortcutInterface", keyLabels: ["?"], labelKey: "shortcutHelp" },
+  { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "Shift", "F"], labelKey: "shortcutGlobalFocusSearch" },
+  { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "Shift", "H"], labelKey: "shortcutGlobalHideWindow" },
+  { sectionKey: "shortcutLightbox", keyLabels: ["←", "→"], labelKey: "shortcutLightboxNavigate" },
   { sectionKey: "shortcutLightbox", keyLabels: ["Space"], labelKey: "shortcutSlideshow" },
+  { sectionKey: "shortcutLightbox", keyLabels: ["I"], labelKey: "shortcutLightboxInfo" },
   { sectionKey: "shortcutLightbox", keyLabels: ["Esc"], labelKey: "shortcutExitLightbox" },
 ];
 
