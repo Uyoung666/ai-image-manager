@@ -32,6 +32,8 @@ Virtual-scrolled masonry layout, 60fps with 100K+ photos. Timeline grouping, fol
 | ![Home](screenshots/01-home.png) | ![Lightbox](screenshots/04-lightbox-preview.png) |
 |:---:|:---:|
 | Home | Lightbox |
+| ![Photo Detail](screenshots/05-photo-detail.png) | ![Shortcuts](screenshots/02-keyboard-shortcuts.png) |
+| EXIF Detail | Keyboard Shortcuts |
 
 ### AI Search
 
@@ -55,9 +57,9 @@ Rate, compare, and narrow down large batches. Three modes:
 
 Camera/lens usage stats, focal/aperture/shutter/ISO distributions, capture time heatmap, color analysis (hue/saturation/lightness), GPS map. Click any chart bar to drill down into matching photos.
 
-| ![Dashboard](screenshots/07-dashboard.png) | ![Photo Detail](screenshots/05-photo-detail.png) |
+| ![Overview](screenshots/07-dashboard.png) | ![Color Analysis](screenshots/07b-dashboard-2.png) |
 |:---:|:---:|
-| Dashboard | EXIF Detail |
+| Overview | Color Analysis |
 
 ### Face Recognition
 

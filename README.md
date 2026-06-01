@@ -32,6 +32,8 @@
 | ![首页](screenshots/01-home.png) | ![预览](screenshots/04-lightbox-preview.png) |
 |:---:|:---:|
 | 首页浏览 | 全屏灯箱 |
+| ![照片详情](screenshots/05-photo-detail.png) | ![快捷键](screenshots/02-keyboard-shortcuts.png) |
+| EXIF 详情 | 快捷键面板 |
 
 ### AI 搜索
 
@@ -55,9 +57,9 @@
 
 相机/镜头使用统计，焦段/光圈/快门/ISO 分布，拍摄时间热力图，色彩分析（色相/饱和度/明度），GPS 地图。点击图表可下钻搜索。
 
-| ![仪表盘](screenshots/07-dashboard.png) | ![照片详情](screenshots/05-photo-detail.png) |
+| ![数据总览](screenshots/07-dashboard.png) | ![色彩分析](screenshots/07b-dashboard-2.png) |
 |:---:|:---:|
-| 数据仪表盘 | EXIF 详情 |
+| 数据总览 | 色彩分析 |
 
 ### 人脸识别
 
