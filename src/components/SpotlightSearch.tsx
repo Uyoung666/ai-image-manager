@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
   Star,
+  Swords,
   Tag,
   Trash2,
   Users,
@@ -45,6 +46,12 @@ interface AlbumResult {
   name: string;
 }
 
+interface PersonResult {
+  id: number;
+  name: string;
+  faceCount: number;
+}
+
 export function SpotlightSearch() {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -52,9 +59,19 @@ export function SpotlightSearch() {
   const [photoResults, setPhotoResults] = useState<PhotoResult[]>([]);
   const [tagResults, setTagResults] = useState<TagResult[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumResult[]>([]);
+  const [personResults, setPersonResults] = useState<PersonResult[]>([]);
   const [searching, setSearching] = useState(false);
   const navigate = useNavigate();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus search input when panel opens
+  useEffect(() => {
+    if (open) {
+      // RAF ensures DOM is painted before focus
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [open]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -75,28 +92,40 @@ export function SpotlightSearch() {
       setPhotoResults([]);
       setTagResults([]);
       setAlbumResults([]);
+      setPersonResults([]);
       return;
     }
     setSearching(true);
+    const qLower = q.toLowerCase();
     try {
-      const [photos, tags, albums] = await Promise.all([
-        ipc.client.photos.listPhotos({
-          search: q,
+      const [photos, tags, albums, faces] = await Promise.all([
+        ipc.client.photos.searchCompound({
+          query: q,
           limit: 5,
-          offset: 0,
         }),
         ipc.client.photos.getTags({}),
         ipc.client.albums.listAlbums({}),
+        ipc.client.faces.listFaceIdentities({}),
       ]);
-      setPhotoResults((photos.items as PhotoResult[]).slice(0, 5));
+      setPhotoResults(
+        ((photos as { results?: PhotoResult[] }).results || []).slice(0, 5)
+      );
       setTagResults(
         ((tags as TagResult[]) || [])
-          .filter((t) => t.name.toLowerCase().includes(q.toLowerCase()))
+          .filter((t) => t.name.toLowerCase().includes(qLower))
           .slice(0, 5)
       );
       setAlbumResults(
         ((albums as AlbumResult[]) || [])
-          .filter((a) => a.name.toLowerCase().includes(q.toLowerCase()))
+          .filter((a) => a.name.toLowerCase().includes(qLower))
+          .slice(0, 5)
+      );
+      setPersonResults(
+        ((faces as PersonResult[]) || [])
+          .filter(
+            (p) =>
+              p.name && p.name.toLowerCase().includes(qLower)
+          )
           .slice(0, 5)
       );
     } catch {
@@ -132,7 +161,7 @@ export function SpotlightSearch() {
       title: t("spotlightAllPhotosTitle"),
       subtitle: t("spotlightAllPhotosSubtitle"),
       icon: <FileImage className="h-4 w-4" />,
-      action: () => navigate({ to: "/" }),
+      action: () => navigate({ to: "/", search: { reset: true } }),
       group: t("spotlightNavigationGroup"),
     },
     {
@@ -140,7 +169,7 @@ export function SpotlightSearch() {
       title: t("favorites"),
       subtitle: t("spotlightFavoritesSubtitle"),
       icon: <Star className="h-4 w-4" />,
-      action: () => navigate({ to: "/" }),
+      action: () => navigate({ to: "/", search: { favoriteOnly: true } }),
       group: t("spotlightNavigationGroup"),
     },
     {
@@ -165,6 +194,14 @@ export function SpotlightSearch() {
       subtitle: t("spotlightDuplicatesSubtitle"),
       icon: <ScanSearch className="h-4 w-4" />,
       action: () => navigate({ to: "/duplicates" }),
+      group: t("spotlightNavigationGroup"),
+    },
+    {
+      id: "nav-cull",
+      title: t("cullTitle"),
+      subtitle: t("spotlightCullSubtitle"),
+      icon: <Swords className="h-4 w-4" />,
+      action: () => navigate({ to: "/cull" }),
       group: t("spotlightNavigationGroup"),
     },
     {
@@ -214,6 +251,7 @@ export function SpotlightSearch() {
           <div className="flex items-center border-border border-b px-4">
             <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <Command.Input
+              ref={inputRef}
               className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
               placeholder={t("spotlightSearchPlaceholder")}
@@ -238,7 +276,11 @@ export function SpotlightSearch() {
                   <Command.Item
                     className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={`photo-${photo.id}`}
-                    onSelect={() => handleSelect(() => navigate({ to: "/" }))}
+                    onSelect={() =>
+                      handleSelect(() =>
+                        navigate({ to: "/", search: { searchQuery: query } })
+                      )
+                    }
                     value={`photo ${photo.filename}`}
                   >
                     {photo.thumbnailPath ? (
@@ -268,7 +310,14 @@ export function SpotlightSearch() {
                   <Command.Item
                     className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={`tag-${tag.id}`}
-                    onSelect={() => handleSelect(() => navigate({ to: "/" }))}
+                    onSelect={() =>
+                      handleSelect(() =>
+                        navigate({
+                          to: "/",
+                          search: { tagId: tag.id },
+                        })
+                      )
+                    }
                     value={`tag ${tag.name}`}
                   >
                     <span
@@ -277,6 +326,38 @@ export function SpotlightSearch() {
                     />
                     <span>{getTagDisplayName(tag.name, i18n.language)}</span>
                     <Tag className="ml-auto h-3 w-3 text-muted-foreground" />
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
+
+            {/* Person results */}
+            {personResults.length > 0 && (
+              <Command.Group
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                heading={t("people")}
+              >
+                {personResults.map((person) => (
+                  <Command.Item
+                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    key={`person-${person.id}`}
+                    onSelect={() =>
+                      handleSelect(() =>
+                        navigate({
+                          to: "/",
+                          search: { searchQuery: person.name },
+                        })
+                      )
+                    }
+                    value={`person ${person.name}`}
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10">
+                      <Users className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <span>{person.name}</span>
+                    <span className="ml-auto text-[10px] text-muted-foreground">
+                      {person.faceCount} {t("photos")}
+                    </span>
                   </Command.Item>
                 ))}
               </Command.Group>

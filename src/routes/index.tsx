@@ -134,6 +134,48 @@ function HomePage() {
       return;
     }
     drillConsumed.current = true;
+
+    // Handle reset from SpotlightSearch "All Photos"
+    if (drillParams.reset) {
+      navigate({ to: "/", search: {}, replace: true });
+      setSearchMode(null);
+      setSearchQuery("");
+      setSearchTime(undefined);
+      setSearchResults(null);
+      setColorHex(null);
+      setFavoriteOnly(false);
+      setActiveFolderId(null);
+      setActiveTagId(null);
+      return;
+    }
+
+    // Handle tagId navigation from SpotlightSearch
+    if (drillParams.tagId != null) {
+      const tagId = drillParams.tagId;
+      navigate({ to: "/", search: {}, replace: true });
+      setSearchMode(null);
+      setSearchQuery("");
+      setSearchTime(undefined);
+      setSearchResults(null);
+      setFavoriteOnly(false);
+      setActiveFolderId(null);
+      setActiveTagId(tagId);
+      return;
+    }
+
+    // Handle favoriteOnly navigation from SpotlightSearch
+    if (drillParams.favoriteOnly) {
+      navigate({ to: "/", search: {}, replace: true });
+      setSearchMode(null);
+      setSearchQuery("");
+      setSearchTime(undefined);
+      setSearchResults(null);
+      setFavoriteOnly(true);
+      setActiveFolderId(null);
+      setActiveTagId(null);
+      return;
+    }
+
     setShowDrillBanner(true);
 
     // Build filters
@@ -1307,16 +1349,20 @@ export const Route = createFileRoute("/")({
     lensModel?: string;
     dateFrom?: string;
     dateTo?: string;
+    favoriteOnly?: boolean;
     focalMax?: string;
     focalMin?: string;
     isoMax?: string;
     isoMin?: string;
     colorHex?: string;
+    reset?: boolean;
     searchQuery?: string;
     shutterMax?: string;
     shutterMin?: string;
+    tagId?: number;
   } => ({
     colorHex: search.colorHex as string | undefined,
+    reset: search.reset === true || search.reset === "true" ? true : undefined,
     searchQuery: search.searchQuery as string | undefined,
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,
@@ -1324,11 +1370,13 @@ export const Route = createFileRoute("/")({
     lensModel: search.lensModel as string | undefined,
     dateFrom: search.dateFrom as string | undefined,
     dateTo: search.dateTo as string | undefined,
+    favoriteOnly: search.favoriteOnly === true || search.favoriteOnly === "true" ? true : undefined,
     focalMax: search.focalMax as string | undefined,
     focalMin: search.focalMin as string | undefined,
     isoMax: search.isoMax as string | undefined,
     isoMin: search.isoMin as string | undefined,
     shutterMax: search.shutterMax as string | undefined,
     shutterMin: search.shutterMin as string | undefined,
+    tagId: search.tagId != null ? Number(search.tagId) : undefined,
   }),
 });

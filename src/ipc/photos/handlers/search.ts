@@ -13,7 +13,15 @@ import {
   sql,
 } from "drizzle-orm";
 import { getDatabase } from "@/db";
-import { exifData, photos, photoTags, tags } from "@/db/schema";
+import {
+  exifData,
+  faceIdentities,
+  faceIdentityMembers,
+  faceVectors,
+  photos,
+  photoTags,
+  tags,
+} from "@/db/schema";
 import {
   extractTemporalContext,
   parseChineseQuery,
@@ -22,6 +30,9 @@ import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
 } from "@/services/ai-embedder";
+import type { RewrittenQuery } from "@/services/query-rewrite";
+import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
+import { rerankWithCLIPScore } from "@/services/rerank";
 import {
   applyTimeDecay,
   CompoundSearchSchema,
@@ -186,20 +197,6 @@ export const searchCompound = os
       limit,
     } = input;
 
-    const hasExifFilters =
-      dateFrom ||
-      dateTo ||
-      cameraModel ||
-      lensModel ||
-      focalMin ||
-      focalMax ||
-      apertureMin ||
-      apertureMax ||
-      isoMin ||
-      isoMax ||
-      shutterMin ||
-      shutterMax;
-
     // Color search: if colorHex provided, or query is a hex code
     function parseHexColor(
       hex: string
@@ -330,32 +327,87 @@ export const searchCompound = os
       }
     }
 
-    // Text query: run AI vector search + tag name search + filename search in parallel
-    if (query?.trim()) {
-      const q = query.trim();
+    // Pre-process: extract time filter from natural language
+    let effectiveDateFrom = dateFrom;
+    let effectiveDateTo = dateTo;
+    let rewrittenTimeFilter: RewrittenQuery["timeFilter"] | undefined;
+    let searchText = query;
+    if (searchText?.trim()) {
+      const q = searchText.trim();
+      if (CHINESE_CHAR_RE.test(q)) {
+        const rewritten = rewriteQuery(q);
+        if (!(effectiveDateFrom || effectiveDateTo) && rewritten.timeFilter) {
+          effectiveDateFrom = rewritten.timeFilter.from;
+          effectiveDateTo = rewritten.timeFilter.to;
+        }
+        rewrittenTimeFilter = rewritten.timeFilter;
+        // Pure time query → clear searchText, fall through to EXIF-only path
+        searchText = rewritten.cleanQuery.trim() || undefined;
+      }
+    }
 
-      // 1) Run all three searches in parallel
-      const [aiResults, tagPhotoRows, filenamePhotoRows] = await Promise.all([
-        aiSearchByText(q, 200),
-        db
-          .select({ id: photos.id })
-          .from(photos)
-          .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
-          .innerJoin(tags, eq(tags.id, photoTags.tagId))
-          .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
-          .all(),
-        db
-          .select({ id: photos.id })
-          .from(photos)
-          .where(and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`)))
-          .all(),
-      ]);
+    // Text query: multi-source retrieval → dedup → rerank
+    if (searchText?.trim()) {
+      const q = searchText.trim();
 
-      // 2) Merge with dedup: tag > filename > AI, keep max similarity per photo
+      const [aiResults, tagPhotoRows, filenamePhotoRows, personPhotoRows] =
+        await Promise.all([
+          aiSearchByText(q, 200),
+          db
+            .select({ id: photos.id })
+            .from(photos)
+            .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+            .innerJoin(tags, eq(tags.id, photoTags.tagId))
+            .where(
+              and(
+                isNull(photos.deletedAt),
+                like(tags.name, `%${q}%`)
+              )
+            )
+            .all(),
+          db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(
+              and(
+                isNull(photos.deletedAt),
+                like(photos.filename, `%${q}%`)
+              )
+            )
+            .all(),
+          // Person name search: match face_identities.name
+          db
+            .select({ id: photos.id })
+            .from(photos)
+            .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
+            .innerJoin(
+              faceIdentityMembers,
+              eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+            )
+            .innerJoin(
+              faceIdentities,
+              eq(faceIdentities.id, faceIdentityMembers.identityId)
+            )
+            .where(
+              and(
+                isNull(photos.deletedAt),
+                like(faceIdentities.name, `%${q}%`)
+              )
+            )
+            .all(),
+        ]);
+
+      // Merge with dedup priority: person > tag > filename > AI
       const merged = new Map<number, { photoId: number; similarity: number }>();
 
-      for (const r of tagPhotoRows) {
+      for (const r of personPhotoRows) {
         merged.set(r.id, { photoId: r.id, similarity: 1.0 });
+      }
+      for (const r of tagPhotoRows) {
+        const existing = merged.get(r.id);
+        if (!existing || existing.similarity < 0.95) {
+          merged.set(r.id, { photoId: r.id, similarity: 0.95 });
+        }
       }
       for (const r of filenamePhotoRows) {
         const existing = merged.get(r.id);
@@ -376,19 +428,80 @@ export const searchCompound = os
       const mergedList = [...merged.values()];
 
       if (mergedList.length === 0) {
+        // If time filter was parsed from query, skip AI and do plain date filter
+        if (effectiveDateFrom || effectiveDateTo) {
+          const dateConditions: SQL[] = [];
+          if (effectiveDateFrom)
+            dateConditions.push(gte(exifData.dateTaken, effectiveDateFrom));
+          if (effectiveDateTo)
+            dateConditions.push(lte(exifData.dateTaken, effectiveDateTo));
+          const dateFiltered = db
+            .select({ photoId: exifData.photoId })
+            .from(exifData)
+            .where(and(...dateConditions))
+            .limit(limit)
+            .all();
+          const datePhotoIds = dateFiltered
+            .map((e) => e.photoId)
+            .filter(Boolean) as number[];
+          if (datePhotoIds.length > 0) {
+            const datePhotos = db
+              .select()
+              .from(photos)
+              .where(and(isNull(photos.deletedAt), inArray(photos.id, datePhotoIds)))
+              .orderBy(desc(photos.fileDate))
+              .limit(limit)
+              .all();
+            return {
+              results: datePhotos,
+              query: q,
+              total: datePhotos.length,
+              ...(rewrittenTimeFilter
+                ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+                : {}),
+            };
+          }
+        }
         return { results: [], query: q, total: 0 };
       }
 
-      // 3) If no EXIF filters, return merged results directly
-      if (!hasExifFilters) {
-        const allIds = mergedList.map((r) => r.photoId);
+      let rerankedList = mergedList;
+      try {
+        if (mergedList.length > 20 && q) {
+          const rerankTopK = Math.max(limit, 200);
+          rerankedList = await rerankWithCLIPScore(
+            q,
+            mergedList,
+            rerankTopK
+          );
+        }
+      } catch {
+        // Rerank failed, continue with merged results
+      }
+
+      const hasExifOrTimeFilter =
+        effectiveDateFrom ||
+        effectiveDateTo ||
+        cameraModel ||
+        lensModel ||
+        focalMin !== undefined ||
+        focalMax !== undefined ||
+        apertureMin !== undefined ||
+        apertureMax !== undefined ||
+        isoMin !== undefined ||
+        isoMax !== undefined ||
+        shutterMin !== undefined ||
+        shutterMax !== undefined;
+
+      if (!hasExifOrTimeFilter) {
+        const allIds = rerankedList.map((r) => r.photoId);
         const photoList = db
           .select()
           .from(photos)
           .where(inArray(photos.id, allIds))
           .all();
         const photoMap = new Map(photoList.map((p) => [p.id, p]));
-        const combined = mergedList
+        const combined = rerankedList
           .map((r) => {
             const photo = photoMap.get(r.photoId);
             if (!photo) {
@@ -404,23 +517,34 @@ export const searchCompound = os
             (p): p is NonNullable<typeof p> => p !== null && p.id != null
           );
 
-        const scored = applyTimeDecay(combined);
+        const temporalBoost =
+          effectiveDateFrom && effectiveDateTo
+            ? {
+                targetFrom: effectiveDateFrom,
+                targetTo: effectiveDateTo,
+                factor: 1.4,
+              }
+            : undefined;
+        const scored = applyTimeDecay(combined, { temporalBoost });
         return {
           results: scored.slice(0, limit),
           query: q,
           total: scored.length,
+          ...(rewrittenTimeFilter
+            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+            : {}),
         };
       }
 
-      // 4) Apply EXIF filters on merged results
-      const allIds = mergedList.map((r) => r.photoId);
+      // 7) Apply EXIF/time filters on merged results
+      const allIds = rerankedList.map((r) => r.photoId);
       const exifConditions: SQL[] = [];
 
-      if (dateFrom) {
-        exifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
+      if (effectiveDateFrom) {
+        exifConditions.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
       }
-      if (dateTo) {
-        exifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
+      if (effectiveDateTo) {
+        exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
       }
       if (cameraModel) {
         exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
@@ -466,10 +590,17 @@ export const searchCompound = os
       ).all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
 
-      const filtered = mergedList.filter((r) => validIds.has(r.photoId));
+      const filtered = rerankedList.filter((r) => validIds.has(r.photoId));
 
       if (filtered.length === 0) {
-        return { results: [], query: q, total: 0 };
+        return {
+          results: [],
+          query: q,
+          total: 0,
+          ...(rewrittenTimeFilter
+            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+            : {}),
+        };
       }
       const filteredIds = filtered.map((r) => r.photoId);
       const photoList = db
@@ -497,11 +628,27 @@ export const searchCompound = os
         results: scored.slice(0, limit),
         query: q,
         total: scored.length,
+        ...(rewrittenTimeFilter
+          ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+          : {}),
       };
     }
 
     // No text query: EXIF-only filter
-    if (!hasExifFilters) {
+    const hasEffectiveFilters =
+      effectiveDateFrom ||
+      effectiveDateTo ||
+      cameraModel ||
+      lensModel ||
+      focalMin !== undefined ||
+      focalMax !== undefined ||
+      apertureMin !== undefined ||
+      apertureMax !== undefined ||
+      isoMin !== undefined ||
+      isoMax !== undefined ||
+      shutterMin !== undefined ||
+      shutterMax !== undefined;
+    if (!hasEffectiveFilters) {
       const items = db
         .select()
         .from(photos)
@@ -520,11 +667,15 @@ export const searchCompound = os
 
     const exifConditions: SQL[] = [];
 
-    if (dateFrom) {
-      exifConditions.push(sql`${exifData.dateTaken} >= ${dateFrom}`);
+    if (effectiveDateFrom) {
+      exifConditions.push(
+        sql`${exifData.dateTaken} >= ${effectiveDateFrom}`
+      );
     }
-    if (dateTo) {
-      exifConditions.push(sql`${exifData.dateTaken} <= ${dateTo}`);
+    if (effectiveDateTo) {
+      exifConditions.push(
+        sql`${exifData.dateTaken} <= ${effectiveDateTo}`
+      );
     }
     if (cameraModel) {
       exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));

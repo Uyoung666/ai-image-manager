@@ -40,17 +40,14 @@ const CATEGORY_TO_SLOT: Record<DictCategory, keyof ParsedQuery> = {
   object: "subject",
 };
 
-// 获取合并后的词典（包含用户自定义）
 function getMergedDict() {
   try {
     return getDictionaryManager().getMergedDictionary();
   } catch {
-    // 降级到内置词典
     return ZH_TO_EN_SEARCH;
   }
 }
 
-// Sort dictionary keys by length descending for greedy matching
 function getSortedDictKeys() {
   return Object.keys(getMergedDict()).sort((a, b) => b.length - a.length);
 }
@@ -194,23 +191,34 @@ export function generateSearchPrompts(parsed: ParsedQuery): string[] {
   return prompts;
 }
 
+const CJK_FUNCTION_WORDS = new Set([
+  "的", "了", "着", "过", "地", "得",
+  "吗", "呢", "吧", "啊", "呀", "嘛",
+  "和", "与", "或", "及", "等",
+  "在", "是", "有", "这", "那", "也",
+]);
+
 // 计算中文查询中被词典覆盖的字符比例（0.0~1.0）
 // 用于自适应调整向量搜索的余弦距离阈值：覆盖率越低，阈值越严格
 export function getQueryCoverage(query: string, parsed: ParsedQuery): number {
   const trimmed = query.trim();
+  // 只统计有意义的中文字符（排除虚词）
   const chineseChars = trimmed.replace(/[^一-鿿]/g, "");
-  if (chineseChars.length === 0) {
-    return 1.0; // 无中文，视为完全覆盖
+  const meaningfulChars = [...chineseChars].filter(
+    (c) => !CJK_FUNCTION_WORDS.has(c)
+  );
+  if (meaningfulChars.length === 0) {
+    return 1.0; // 只有虚词，视为完全覆盖
   }
 
   const unknownChars = new Set(parsed.unknown);
   let uncoveredCount = 0;
-  for (const char of chineseChars) {
+  for (const char of meaningfulChars) {
     if (unknownChars.has(char)) {
       uncoveredCount++;
     }
   }
-  return Math.max(0, 1 - uncoveredCount / chineseChars.length);
+  return Math.max(0, 1 - uncoveredCount / meaningfulChars.length);
 }
 
 export function extractTemporalContext(

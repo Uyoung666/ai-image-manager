@@ -1,4 +1,4 @@
-import { Clock, Filter, ImageUp, Search, Tag, X } from "lucide-react";
+import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -11,6 +11,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 import { hexToColorName } from "@/utils/color-name";
+import {
+  buildPersonTrie,
+  getSearchSuggestions,
+} from "@/utils/search-suggestions";
 import { cn } from "@/utils/tailwind";
 import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterPresets } from "./FilterPresets";
@@ -23,6 +27,65 @@ interface TagInfo {
   id: number;
   name: string;
 }
+
+interface TimePreset {
+  getRange: () => { dateFrom: string; dateTo: string };
+  label: string;
+}
+
+function formatDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const TIME_PRESETS: TimePreset[] = [
+  {
+    label: "今天",
+    getRange: () => {
+      const d = formatDate(new Date());
+      return { dateFrom: d, dateTo: d };
+    },
+  },
+  {
+    label: "本周",
+    getRange: () => {
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - diff);
+      return { dateFrom: formatDate(monday), dateTo: formatDate(now) };
+    },
+  },
+  {
+    label: "本月",
+    getRange: () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+    },
+  },
+  {
+    label: "今年",
+    getRange: () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), 0, 1);
+      return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+    },
+  },
+  {
+    label: "去年",
+    getRange: () => {
+      const y = new Date().getFullYear() - 1;
+      return {
+        dateFrom: formatDate(new Date(y, 0, 1)),
+        dateTo: formatDate(new Date(y, 11, 31)),
+      };
+    },
+  },
+];
 
 function loadHistory(): string[] {
   try {
@@ -147,6 +210,42 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     const [showCameraSuggestions, setShowCameraSuggestions] = useState(false);
     const [lensModels, setLensModels] = useState<string[]>([]);
     const [showLensSuggestions, setShowLensSuggestions] = useState(false);
+    // Person names for search suggestions and AI-powered dictionary suggestions
+    const [personNames, setPersonNames] = useState<string[]>([]);
+    const [dictSuggestionsEnabled, setDictSuggestionsEnabled] = useState(false);
+
+    // Fetch person names for search suggestions
+    useEffect(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const result = (await (ipc.client as any).faces.listFaceIdentities(
+            {}
+          )) as any[];
+          if (!cancelled && Array.isArray(result)) {
+            const names = result
+              .filter((f: any) => f.name && f.name.trim())
+              .map((f: any) => f.name.trim());
+            setPersonNames(names);
+            if (names.length > 0) {
+              buildPersonTrie(names);
+            }
+          }
+        } catch {
+          // Face module may not be ready
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    // Enable AI dictionary suggestions once tags are loaded
+    useEffect(() => {
+      if (tags.length > 0) {
+        setDictSuggestionsEnabled(true);
+      }
+    }, [tags]);
 
     useEffect(() => {
       ipc.client.photos
@@ -171,7 +270,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         });
     }, []);
 
-    // Filter suggestions: matching tags + recent searches
+    // Filter suggestions: person names + dictionary + tags + recent searches
     const suggestions = useMemo(() => {
       const q = query.trim().toLowerCase();
       if (!q) {
@@ -180,21 +279,58 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
           .slice(0, 8)
           .map((h) => ({ type: "history" as const, text: h }));
       }
-      // With query: show matching tags first, then matching history
+
+      const all: Array<{
+        type: "person" | "dictionary" | "tag" | "history";
+        text: string;
+        color?: string;
+        category?: string;
+      }> = [];
+
+      // 1) Person name matches
+      const matchingPersons = personNames
+        .filter((n) => n.toLowerCase().includes(q))
+        .slice(0, 3);
+      const seen = new Set<string>();
+      for (const name of matchingPersons) {
+        all.push({ type: "person", text: name, category: "person" });
+        seen.add(name.toLowerCase());
+      }
+
+      // 2) AI dictionary suggestions (from search-suggestions)
+      // Allow single-char for pinyin matching (e.g. "h" → "海")
+      if (dictSuggestionsEnabled && q.length >= 1) {
+        const dictSuggestions = getSearchSuggestions(q, 4);
+        for (const s of dictSuggestions) {
+          if (seen.has(s.word.toLowerCase())) continue;
+          all.push({
+            type: "dictionary",
+            text: s.word,
+            category: s.category,
+          });
+        }
+      }
+
+      // 3) Tag matches
       const matchingTags = tags
         .filter((t) => t.name.toLowerCase().includes(q))
-        .slice(0, 5)
+        .slice(0, 4)
         .map((t) => ({
           type: "tag" as const,
           text: t.name,
           color: t.color || "var(--primary)",
         }));
+      all.push(...matchingTags);
+
+      // 4) History matches
       const matchingHistory = history
         .filter((h) => h.toLowerCase().includes(q) && h !== q)
         .slice(0, 3)
         .map((h) => ({ type: "history" as const, text: h }));
-      return [...matchingTags, ...matchingHistory];
-    }, [query, tags, history]);
+      all.push(...matchingHistory);
+
+      return all;
+    }, [query, tags, history, personNames, dictSuggestionsEnabled]);
 
     useEffect(() => {
       if (imageSearchActive) {
@@ -318,7 +454,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     }
 
     function handleSuggestionClick(suggestion: {
-      type: "tag" | "history";
+      type: "person" | "dictionary" | "tag" | "history";
       text: string;
     }) {
       setQuery(suggestion.text);
@@ -443,10 +579,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     function handleFilterKeyDown(e: React.KeyboardEvent) {
       if (e.key === "Enter") {
         e.preventDefault();
-        onSearch(
-          query.trim(),
-          hasActiveFilters ? filters : undefined
-        );
+        onSearch(query.trim(), hasActiveFilters ? filters : undefined);
       }
     }
 
@@ -593,28 +726,62 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             </button>
           </div>
 
+          {/* Time quick presets */}
+          {!imageSearchActive && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
+              {TIME_PRESETS.map((preset) => (
+                <button
+                  className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                  key={preset.label}
+                  onClick={() => {
+                    const range = preset.getRange();
+                    const newFilters: ExifFilters = {
+                      ...filters,
+                      dateFrom: range.dateFrom,
+                      dateTo: range.dateTo,
+                    };
+                    setFilters(newFilters);
+                    const q = query.trim();
+                    queueMicrotask(() =>
+                      onSearch(
+                        q,
+                        Object.values(newFilters).some((v) => v)
+                          ? newFilters
+                          : undefined
+                      )
+                    );
+                  }}
+                  type="button"
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Search status line — shows mode, timing, and result count */}
           {(searchMode ||
             searchTime !== undefined ||
             resultCount !== undefined) && (
             <div className="mt-2 flex items-center gap-2 text-[11px]">
               {searchMode && (
-                <span className="rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary inline-flex items-center gap-1">
-                  {searchMode === "text"
-                    ? t("searchModeSemantic")
-                    : searchMode === "image"
-                      ? t("searchModeImage")
-                      : searchMode === "color" && colorHex
-                        ? (
-                          <>
-                            <span
-                              className="inline-block h-2.5 w-2.5 rounded-full"
-                              style={{ backgroundColor: `#${colorHex}` }}
-                            />
-                            {hexToColorName(`#${colorHex}`, "zh")}
-                          </>
-                        )
-                        : t("searchModeExif")}
+                <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary">
+                  {searchMode === "text" ? (
+                    t("searchModeSemantic")
+                  ) : searchMode === "image" ? (
+                    t("searchModeImage")
+                  ) : searchMode === "color" && colorHex ? (
+                    <>
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-full"
+                        style={{ backgroundColor: `#${colorHex}` }}
+                      />
+                      {hexToColorName(`#${colorHex}`, "zh")}
+                    </>
+                  ) : (
+                    t("searchModeExif")
+                  )}
                 </span>
               )}
               {searchTime !== undefined && (
@@ -1160,7 +1327,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                   <button
                     className="rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary hover:bg-primary/20"
                     onClick={() => {
-                      onSearch(query.trim(), hasActiveFilters ? filters : undefined);
+                      onSearch(
+                        query.trim(),
+                        hasActiveFilters ? filters : undefined
+                      );
                       setShowFilters(false);
                     }}
                   >
@@ -1199,15 +1369,35 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 onClick={() => handleSuggestionClick(s)}
                 onMouseDown={(e) => e.preventDefault()}
               >
-                {s.type === "tag" ? (
+                {s.type === "person" ? (
+                  <>
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px]">
+                      👤
+                    </span>
+                    <span className="truncate">{s.text}</span>
+                    <span className="ml-auto flex-shrink-0 rounded-[3px] bg-blue-500/10 px-1 text-[10px] text-blue-500">
+                      人物
+                    </span>
+                  </>
+                ) : s.type === "dictionary" ? (
+                  <>
+                    <Search className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                    <span className="truncate">{s.text}</span>
+                    {s.category && (
+                      <span className="ml-auto flex-shrink-0 rounded-[3px] bg-primary/10 px-1 text-[10px] text-primary/70">
+                        {s.category}
+                      </span>
+                    )}
+                  </>
+                ) : s.type === "tag" ? (
                   <>
                     <span
                       className="h-2 w-2 flex-shrink-0 rounded-full"
                       style={{ background: s.color }}
                     />
                     <span className="truncate">{s.text}</span>
-                    <span className="ml-auto flex-shrink-0 text-[10px] text-muted-foreground/70">
-                      <Tag className="h-3 w-3" />
+                    <span className="ml-auto flex-shrink-0 rounded-[3px] bg-green-500/10 px-1 text-[10px] text-green-500">
+                      标签
                     </span>
                   </>
                 ) : (
