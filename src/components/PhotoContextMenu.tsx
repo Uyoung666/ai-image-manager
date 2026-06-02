@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   FolderOpen,
+  MinusCircle,
   Share2,
   Star,
   Trash2,
@@ -26,6 +27,7 @@ interface PhotoContextMenuProps {
   onDelete: (id: number) => void;
   onExport: (id: number) => void;
   onOpenExplorer: (path: string) => void;
+  onRemoveFromAlbum?: (id: number) => void;
   onShare?: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   onUploadToCloud?: (id: number) => void;
@@ -42,6 +44,7 @@ export function PhotoContextMenu({
   onOpenExplorer,
   onToggleFavorite,
   onUploadToCloud,
+  onRemoveFromAlbum,
   onShare,
 }: PhotoContextMenuProps) {
   const { t } = useTranslation();
@@ -150,6 +153,21 @@ export function PhotoContextMenu({
         <Album className="h-3.5 w-3.5 flex-shrink-0" />
         {t("addToAlbum")}
       </button>
+      {onRemoveFromAlbum && (
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          disabled={menu.photoId === null}
+          onClick={() => {
+            if (menu.photoId !== null) {
+              onRemoveFromAlbum(menu.photoId);
+            }
+            onClose();
+          }}
+        >
+          <MinusCircle className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("removeFromAlbum")}
+        </button>
+      )}
       <button
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={menu.photoId === null}

@@ -278,6 +278,22 @@ function AlbumDetailPage() {
     setSelectedIds(new Set());
   }
 
+  async function handleRemoveFromAlbum(id: number) {
+    if (!album) return;
+    await ipc.client.albums.removePhotosFromAlbum({
+      albumId: album.id, photoIds: [id],
+    });
+    setAlbum((prev) =>
+      prev ? { ...prev, photos: prev.photos.filter((p) => p.id !== id) } : prev
+    );
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+    toast.success(t("toastRemovedFromAlbum"));
+  }
+
   async function handleDeleteAlbum() {
     if (!album) return;
     await ipc.client.albums.deleteAlbum({ id: album.id });
@@ -493,9 +509,14 @@ function AlbumDetailPage() {
     []
   );
 
+  const marqueeJustCompleted = useRef(false);
+
   const handleMarqueeSelect = useCallback(
     (ids: Set<number>) => {
-      if (ids.size > 0) setSelectedIds(ids);
+      if (ids.size > 0) {
+        setSelectedIds(ids);
+        marqueeJustCompleted.current = true;
+      }
     },
     []
   );
@@ -603,6 +624,10 @@ function AlbumDetailPage() {
           onClick={(e) => {
             const target = e.target as HTMLElement;
             if (target.closest("[data-masonry-scroll]") && !target.closest("[data-photo-id]")) {
+              if (marqueeJustCompleted.current) {
+                marqueeJustCompleted.current = false;
+                return;
+              }
               setSelectedIds(new Set());
             }
           }}
@@ -708,6 +733,7 @@ function AlbumDetailPage() {
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
+        onRemoveFromAlbum={album?.isSmart ? undefined : handleRemoveFromAlbum}
         onShare={handleShare}
         onToggleFavorite={handleToggleFavorite}
         onUploadToCloud={handleUploadToCloud}

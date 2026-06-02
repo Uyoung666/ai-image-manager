@@ -669,13 +669,15 @@ export function Sidebar({
   }
 
   // Collapsed: icon-only bar
-  if (collapsed) {
-    return (
-      <div
-        className="flex h-full w-12 flex-col items-center border-sidebar-border border-r bg-sidebar py-3"
-        onDragOver={handleSidebarDragOver}
-        onDrop={handleSidebarDrop}
-      >
+
+  return (
+    <>
+      {collapsed ? (
+        <div
+          className="flex h-full w-12 flex-col items-center border-sidebar-border border-r bg-sidebar py-3"
+          onDragOver={handleSidebarDragOver}
+          onDrop={handleSidebarDrop}
+        >
         <button
           className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
           onClick={onToggleCollapse}
@@ -691,7 +693,11 @@ export function Sidebar({
                 ? "bg-primary/15 text-primary"
                 : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
             }`}
-            onClick={() => onSelectFolder(null)}
+            onClick={() => {
+              setActiveTagId(null);
+              onSelectTag?.(null);
+              onSelectFolder(null);
+            }}
             title={t("sidebarAllPhotos")}
           >
             <Images className="h-4 w-4" />
@@ -750,37 +756,82 @@ export function Sidebar({
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-48 p-0" sideOffset={8}>
-                <div className="max-h-[320px] overflow-y-auto p-1.5">
+                <div className="p-1.5">
                   <p className="px-2 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("sidebarTags")}
                   </p>
-                  {renderTagTree(
-                    buildTagTree(tags),
-                    0,
-                    expandedTagIds,
-                    (id) => {
-                      const next = new Set(expandedTagIds);
-                      if (next.has(id)) {
-                        next.delete(id);
-                      } else {
-                        next.add(id);
+                  <div className="px-1 pb-1">
+                    <input
+                      className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                      onChange={(e) => setTagSearch(e.target.value)}
+                      placeholder={t("tagSearchPlaceholder")}
+                      value={tagSearch}
+                    />
+                  </div>
+                  <div className="max-h-[280px] overflow-y-auto">
+                    {(() => {
+                      const filtered = tags.filter((t) =>
+                        tagSearch
+                          ? t.name
+                              .toLowerCase()
+                              .includes(tagSearch.toLowerCase())
+                          : true
+                      );
+                      const allIds = new Set(filtered.map((t) => t.id));
+                      for (const t of filtered) {
+                        let cur = t.parentId;
+                        while (cur) {
+                          if (allIds.has(cur)) {
+                            break;
+                          }
+                          const parent = tags.find((p) => p.id === cur);
+                          if (parent) {
+                            allIds.add(cur);
+                            cur = parent.parentId;
+                          } else {
+                            break;
+                          }
+                        }
                       }
-                      setExpandedTagIds(next);
-                    },
-                    activeTagId,
-                    (nextId) => {
-                      setActiveTagId(nextId);
-                      onSelectTag?.(nextId);
-                      setTagPopoverOpen(false);
-                    },
-                    () => {},
-                    () => {},
-                    () => {},
-                    () => {},
-                    () => {},
-                    null,
-                    i18n.language
-                  )}
+                      const visible = tags.filter((t) => allIds.has(t.id));
+                      const tree = buildTagTree(visible);
+                      return renderTagTree(
+                        tree,
+                        0,
+                        expandedTagIds,
+                        (id) => {
+                          const next = new Set(expandedTagIds);
+                          if (next.has(id)) {
+                            next.delete(id);
+                          } else {
+                            next.add(id);
+                          }
+                          setExpandedTagIds(next);
+                        },
+                        activeTagId,
+                        (nextId) => {
+                          setActiveTagId(nextId);
+                          onSelectTag?.(nextId);
+                          setTagPopoverOpen(false);
+                        },
+                        (e, id, name) => {
+                          e.preventDefault();
+                          setTagCtx({
+                            tagId: id,
+                            tagName: name,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        },
+                        () => {},
+                        () => {},
+                        () => {},
+                        () => {},
+                        null,
+                        i18n.language
+                      );
+                    })()}
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>
@@ -903,11 +954,7 @@ export function Sidebar({
           </button>
         </div>
       </div>
-    );
-  }
-
-  // Expanded: full sidebar
-  return (
+    ) : (
     <div
       className="flex h-full w-[240px] select-none flex-col border-sidebar-border border-r bg-sidebar"
       onDragOver={handleSidebarDragOver}
@@ -1323,6 +1370,8 @@ export function Sidebar({
           {t("sidebarSettings")}
         </button>
       </div>
+    </div>
+      )}
 
       {/* Delete tag confirmation dialog */}
       <ConfirmDialog
@@ -1468,6 +1517,6 @@ export function Sidebar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
