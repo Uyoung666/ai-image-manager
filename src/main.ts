@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   app,
+  autoUpdater,
   BrowserWindow,
   dialog,
   globalShortcut,
@@ -544,6 +545,20 @@ function createWindow() {
   }
 }
 
+// ── Auto-update state (persisted in main process so settings page can query on mount) ─
+import { setUpdateState } from "@/services/update-state";
+
+function broadcastUpdateStatus(payload: Record<string, unknown>) {
+  setUpdateState({
+    phase: payload.phase as string,
+    version: payload.version as string | undefined,
+    message: payload.message as string | undefined,
+  });
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send("update:status", payload);
+  }
+}
+
 // ── Auto-update check ────────────────────────────────────────────────
 function checkForUpdates() {
   updateElectronApp({
@@ -564,6 +579,7 @@ function checkForUpdates() {
           releaseNotes: info.releaseNotes,
         });
       }
+      broadcastUpdateStatus({ phase: "downloaded", version: info.releaseName });
     },
     logger: {
       log: (msg) => log.info(`[updater] ${msg}`),
@@ -572,6 +588,41 @@ function checkForUpdates() {
       error: (msg) => log.error(`[updater] ${msg}`),
     },
   });
+
+  autoUpdater.on("checking-for-update", () => {
+    broadcastUpdateStatus({ phase: "checking" });
+  });
+
+  autoUpdater.on("update-available", () => {
+    broadcastUpdateStatus({ phase: "downloading" });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    broadcastUpdateStatus({ phase: "up-to-date" });
+  });
+
+  autoUpdater.on("error", (err) => {
+    broadcastUpdateStatus({
+      phase: "error",
+      message: err?.message || String(err),
+    });
+  });
+
+  // download-progress: try to forward (Electron 41 types removed it, but Squirrel may still emit)
+  try {
+    (autoUpdater as any).on("download-progress", (progress: any) => {
+      broadcastUpdateStatus({
+        phase: "downloading",
+        percent: Math.round(progress.percent || 0),
+        bytesPerSecond: progress.bytesPerSecond,
+        transferred: progress.transferred,
+        total: progress.total,
+      });
+    });
+  } catch {
+    /* download-progress not available */
+  }
+
   log.info("Update checker started");
 }
 
@@ -644,7 +695,9 @@ async function runStartupCleanup() {
         db
           .select({ c: sql<number>`count(*)` })
           .from(photos)
-          .where(and(sql`${photos.folderId} = ${f.id}`, isNull(photos.deletedAt)))
+          .where(
+            and(sql`${photos.folderId} = ${f.id}`, isNull(photos.deletedAt))
+          )
           .get()?.c ?? 0;
       db.update(folders)
         .set({ photoCount: count })

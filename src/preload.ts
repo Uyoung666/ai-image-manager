@@ -44,9 +44,16 @@ ipcRenderer.on("theme:system-changed", (_event, resolved) => {
 });
 
 ipcRenderer.on("data-path-migrate-progress", (_event, payload) => {
-  window.postMessage({ channel: "data-path-migrate-progress", ...payload }, "*");
+  window.postMessage(
+    { channel: "data-path-migrate-progress", ...payload },
+    "*"
+  );
 });
 
 ipcRenderer.on("update:available", (_event, info) => {
   window.postMessage({ channel: "update:available", ...info }, "*");
+});
+
+ipcRenderer.on("update:status", (_event, payload) => {
+  window.postMessage({ channel: "update:status", ...payload }, "*");
 });

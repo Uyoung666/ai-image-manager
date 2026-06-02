@@ -1,8 +1,10 @@
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { openExternalLink } from "@/actions/shell";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { CloudConfigPanel } from "@/components/CloudConfigPanel";
 import LangToggle from "@/components/lang-toggle";
@@ -105,8 +107,8 @@ function MirrorSettingsSection() {
           </label>
           <select
             className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
-            value={mirror}
             onChange={(e) => setMirror(e.target.value)}
+            value={mirror}
           >
             {mirrorOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -125,11 +127,11 @@ function MirrorSettingsSection() {
               {t("aiMirrorCustomUrl")}
             </label>
             <input
-              type="text"
               className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
-              placeholder="https://your-mirror.com"
-              value={customMirror}
               onChange={(e) => setCustomMirror(e.target.value)}
+              placeholder="https://your-mirror.com"
+              type="text"
+              value={customMirror}
             />
           </div>
         )}
@@ -343,6 +345,257 @@ function DataDirSection() {
   );
 }
 
+type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "up-to-date"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+function UpdateSection() {
+  const { t } = useTranslation();
+  const [phase, setPhase] = useState<UpdatePhase>("idle");
+  const [updateVersion, setUpdateVersion] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [lastCheckTime, setLastCheckTime] = useState<string>("");
+  const [appVersion, setAppVersion] = useState("");
+
+  // Load app version on mount
+  useEffect(() => {
+    ipc.client.app.appVersion({}).then((v) => setAppVersion(v as string));
+  }, []);
+
+  // Restore cached update status on mount (e.g. auto-download completed while on another page)
+  useEffect(() => {
+    ipc.client.app.getUpdateStatus({}).then((status: any) => {
+      if (!status || status.phase === "idle") {
+        return;
+      }
+      setPhase(status.phase);
+      if (status.version) {
+        setUpdateVersion(status.version);
+      }
+      if (status.message && status.message !== "DEV_MODE") {
+        setErrorMsg(status.message);
+      }
+    });
+  }, []);
+
+  // Listen for update status events from main process
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      const data = event.data;
+      if (!data || data.channel !== "update:status") {
+        return;
+      }
+
+      switch (data.phase) {
+        case "checking":
+          setPhase("checking");
+          break;
+        case "downloading":
+          setPhase("downloading");
+          if (data.version) {
+            setUpdateVersion(data.version);
+          }
+          break;
+        case "up-to-date":
+          setPhase("up-to-date");
+          setLastCheckTime(new Date().toLocaleTimeString());
+          break;
+        case "downloaded":
+          setPhase("downloaded");
+          if (data.version) {
+            setUpdateVersion(data.version);
+          }
+          break;
+        case "error":
+          setPhase("error");
+          setErrorMsg(
+            data.message === "DEV_MODE"
+              ? t("updateDevMode")
+              : data.message || t("updateError")
+          );
+          break;
+      }
+    }
+    // Also listen for update:available to sync state
+    function onUpdateAvailable(event: MessageEvent) {
+      if (event.data?.channel === "update:available") {
+        setPhase("downloaded");
+        setUpdateVersion(event.data.version || "");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    window.addEventListener("message", onUpdateAvailable);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("message", onUpdateAvailable);
+    };
+  }, [t]);
+
+  async function handleCheck() {
+    setPhase("checking");
+    setErrorMsg("");
+    try {
+      const result = await ipc.client.app.checkForUpdates({});
+      const data = result as { ok?: boolean; error?: string } | undefined;
+      if (!data?.ok) {
+        setPhase("error");
+        setErrorMsg(
+          data?.error === "DEV_MODE"
+            ? t("updateDevMode")
+            : data?.error || t("updateError")
+        );
+      }
+    } catch (err: any) {
+      setPhase("error");
+      setErrorMsg(err?.message || t("updateError"));
+    }
+  }
+
+  function handleRestart() {
+    window.electronAPI?.restartApp?.();
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-[590] text-[14px] text-foreground">
+        {t("settingsUpdate")}
+      </h2>
+      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+        {/* Current version */}
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] text-muted-foreground">
+            {t("settingsVersion")}
+          </span>
+          <span className="text-[13px] text-foreground">
+            {appVersion || "..."}
+          </span>
+        </div>
+
+        {/* Status area */}
+        <div className="border-border border-t pt-3">
+          {/* Checking */}
+          {phase === "checking" && (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-[13px] text-muted-foreground">
+                {t("updateChecking")}
+              </span>
+            </div>
+          )}
+
+          {/* Up to date */}
+          {phase === "up-to-date" && (
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] text-green-600">✓</span>
+                <span className="text-[13px] text-muted-foreground">
+                  {t("updateUpToDate")}
+                </span>
+              </div>
+              {lastCheckTime && (
+                <p className="mt-1 text-[11px] text-muted-foreground/60">
+                  {t("updateLastCheck", { time: lastCheckTime })}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Downloading (indeterminate progress bar with stripe animation) */}
+          {phase === "downloading" && (
+            <div>
+              <p className="text-[13px] text-muted-foreground">
+                {updateVersion
+                  ? t("updateFound", { version: updateVersion })
+                  : t("updateDownloading")}
+              </p>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full animate-pulse rounded-full bg-primary"
+                  style={{
+                    width: "60%",
+                    backgroundImage:
+                      "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)",
+                    backgroundSize: "200% 100%",
+                    animation: "pulse 1.5s ease-in-out infinite",
+                  }}
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground/60">
+                {t("updateDownloading")}
+              </p>
+            </div>
+          )}
+
+          {/* Downloaded */}
+          {phase === "downloaded" && (
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] text-green-600">✓</span>
+                <span className="text-[13px] text-muted-foreground">
+                  {t("updateDownloadedStatus", { version: updateVersion })}
+                </span>
+              </div>
+              <button
+                className="mt-2 w-full rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+                onClick={handleRestart}
+              >
+                {t("updateRestartNow")}
+              </button>
+            </div>
+          )}
+
+          {/* Idle (no check done yet) */}
+          {phase === "idle" && (
+            <p className="text-[13px] text-muted-foreground/70">
+              {appVersion
+                ? t("updateStatusIdle", { version: appVersion })
+                : "..."}
+            </p>
+          )}
+
+          {/* Error */}
+          {phase === "error" && (
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] text-destructive">✗</span>
+                <span className="text-[13px] text-destructive">
+                  {errorMsg || t("updateError")}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action button */}
+        <div className="border-border border-t pt-3">
+          {phase === "downloaded" ? null : (
+            <button
+              className="w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={phase === "checking" || phase === "downloading"}
+              onClick={handleCheck}
+            >
+              {phase === "checking" || phase === "downloading" ? (
+                <span className="flex items-center justify-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t("updateChecking")}
+                </span>
+              ) : phase === "error" ? (
+                t("updateRetry")
+              ) : (
+                t("updateCheckBtn")
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -355,6 +608,16 @@ function SettingsPage() {
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const [appVersion, setAppVersion] = useState("");
   const [samplePhoto, setSamplePhoto] = useState("");
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopyPath = useCallback((path: string) => {
+    if (!path) return;
+    navigator.clipboard.writeText(path).catch(() => {});
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    setCopiedPath(path);
+    copyTimerRef.current = setTimeout(() => setCopiedPath(null), 2000);
+  }, []);
 
   const { data: indexStats } = useQuery({
     queryKey: ["indexStats"],
@@ -478,8 +741,8 @@ function SettingsPage() {
       <div className="flex min-h-0 flex-1">
         {/* ── Left column: General settings ── */}
         <div
-          className="flex-1 space-y-6 overflow-y-auto p-6"
-          style={{ maxWidth: 420 }}
+          className="flex-1 min-w-0 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          style={{ maxWidth: 440 }}
         >
           <section className="space-y-3">
             <h2 className="font-[590] text-[14px] text-foreground">
@@ -530,10 +793,13 @@ function SettingsPage() {
                           {t("settingsThumbnailCacheLocation")}
                         </span>
                         <span
-                          className="truncate font-mono text-[11px] text-muted-foreground/80"
-                          title={indexStats.thumbnailCacheDir}
+                          className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
+                            copiedPath === indexStats.thumbnailCacheDir ? "text-green-600" : "text-muted-foreground/80"
+                          }`}
+                          title={indexStats.thumbnailCacheDir || ""}
+                          onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
                         >
-                          {indexStats.thumbnailCacheDir || "-"}
+                          {copiedPath === indexStats.thumbnailCacheDir ? "✓ 已复制" : (indexStats.thumbnailCacheDir || "-")}
                         </span>
                       </div>
                       <div className="flex items-baseline gap-2">
@@ -550,12 +816,32 @@ function SettingsPage() {
                     </div>
                   )}
                 </div>
-                <button
-                  className="shrink-0 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
-                  onClick={handleClearCache}
-                >
-                  {clearCacheStatus || t("settingsClear")}
-                </button>
+                <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+                  <AlertDialogTrigger asChild>
+                    <button
+                      className="shrink-0 max-w-[140px] truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                      title={clearCacheStatus || t("settingsClear")}
+                    >
+                      {clearCacheStatus || t("settingsClear")}
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent size="sm">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {t("clearThumbConfirmTitle")}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t("clearThumbConfirmDesc")}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleClearCache}>
+                        {t("confirm")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
               <div className="mt-3 flex items-start justify-between gap-3 border-border border-t pt-3">
                 <div className="min-w-0 flex-1">
@@ -564,6 +850,7 @@ function SettingsPage() {
                   </span>
                   <p className="mt-0.5 text-[11px] text-muted-foreground/70">
                     {t("settingsInvalidIndexHint")}
+                    {cleanupCount > 0 && " "}
                     {cleanupCount > 0 &&
                       t("lastCleanupCount", { count: cleanupCount })}
                   </p>
@@ -598,21 +885,25 @@ function SettingsPage() {
                           {t("settingsIndexDbLocation")}
                         </span>
                         <span
-                          className="truncate font-mono text-[11px] text-muted-foreground/80"
-                          title={indexStats.databasePath}
+                          className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
+                            copiedPath === indexStats.databasePath ? "text-green-600" : "text-muted-foreground/80"
+                          }`}
+                          title={indexStats.databasePath || ""}
+                          onClick={() => handleCopyPath(indexStats.databasePath)}
                         >
-                          {indexStats.databasePath || "-"}
+                          {copiedPath === indexStats.databasePath ? "✓ 已复制" : (indexStats.databasePath || "-")}
                         </span>
                       </div>
                     </div>
                   )}
                 </div>
                 <button
-                  className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                  className="flex shrink-0 items-center gap-1.5 max-w-[140px] rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
                   onClick={handleCleanupOrphans}
+                  title={cleanupStatus || t("cleanupInvalidRecords")}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {cleanupStatus || t("cleanupInvalidRecords")}
+                  <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{cleanupStatus || t("cleanupInvalidRecords")}</span>
                 </button>
               </div>
             </div>
@@ -628,34 +919,6 @@ function SettingsPage() {
             </h2>
             <CloudConfigPanel />
           </section>
-
-          <section className="space-y-3">
-            <h2 className="font-[590] text-[14px] text-foreground">
-              {t("settingsAbout")}
-            </h2>
-            <div className="rounded-[8px] border border-border bg-secondary p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] text-muted-foreground">
-                  {t("settingsVersion")}
-                </span>
-                <span className="text-[13px] text-foreground">
-                  {appVersion || "..."}
-                </span>
-              </div>
-              <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
-                <span className="text-[13px] text-muted-foreground">
-                  {t("settingsLicense")}
-                </span>
-                <span className="text-[13px] text-foreground">MIT</span>
-              </div>
-              <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
-                <span className="text-[13px] text-muted-foreground">
-                  {t("settingsAuthor")}
-                </span>
-                <span className="text-[13px] text-foreground">Uyoung</span>
-              </div>
-            </div>
-          </section>
         </div>
 
         {/* ── Divider ── */}
@@ -663,7 +926,7 @@ function SettingsPage() {
 
         {/* ── Right column: Watermark ── */}
         <div
-          className="flex-1 space-y-4 overflow-y-auto p-6"
+          className="min-w-0 flex-1 space-y-4 overflow-y-auto p-6"
           style={{ maxWidth: 560 }}
         >
           <section className="space-y-3">
@@ -862,6 +1125,60 @@ function SettingsPage() {
                 </div>
               </div>
             )}
+          </section>
+        </div>
+
+        {/* ── Divider ── */}
+        <div className="w-px self-stretch border-border border-l" />
+
+        {/* ── Right column: Update & About ── */}
+        <div
+          className="flex-1 min-w-0 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          style={{ maxWidth: 380 }}
+        >
+          <UpdateSection />
+
+          <section className="space-y-3">
+            <h2 className="font-[590] text-[14px] text-foreground">
+              {t("settingsAbout")}
+            </h2>
+            <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] text-muted-foreground">
+                  {t("settingsVersion")}
+                </span>
+                <span className="text-[13px] text-foreground">
+                  {appVersion || "..."}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-border border-t pt-3">
+                <span className="text-[13px] text-muted-foreground">
+                  {t("settingsLicense")}
+                </span>
+                <span className="text-[13px] text-foreground">MIT</span>
+              </div>
+              <div className="flex items-center justify-between border-border border-t pt-3">
+                <span className="text-[13px] text-muted-foreground">
+                  {t("settingsAuthor")}
+                </span>
+                <span className="text-[13px] text-foreground">Uyoung</span>
+              </div>
+              {/* GitHub link */}
+              <div className="border-border border-t pt-3">
+                <button
+                  className="flex w-full items-center gap-2 rounded-[6px] border border-input px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                  onClick={() =>
+                    openExternalLink(
+                      "https://github.com/Uyoung666/ai-image-manager"
+                    )
+                  }
+                  title={t("settingsOpenGitHub")}
+                >
+                  <SiGithub className="h-4 w-4" />
+                  <span>{t("settingsGitHub")}</span>
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </div>
