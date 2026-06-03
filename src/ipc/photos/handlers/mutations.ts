@@ -24,7 +24,9 @@ import { invalidateStatsCache } from "./stats";
  * avoiding double-counting when called from emptyTrash/permanentlyDeletePhotos.
  */
 function performHardDelete(photoIds: number[]): void {
-  if (photoIds.length === 0) return;
+  if (photoIds.length === 0) {
+    return;
+  }
 
   const db = getDatabase();
 
@@ -32,7 +34,11 @@ function performHardDelete(photoIds: number[]): void {
   // Soft-delete (deletePhoto/deletePhotos) already decremented the count,
   // so emptyTrash/permanentlyDeletePhotos must not decrement again.
   const photoFolders = db
-    .select({ path: photos.path, folderId: photos.folderId, deletedAt: photos.deletedAt })
+    .select({
+      path: photos.path,
+      folderId: photos.folderId,
+      deletedAt: photos.deletedAt,
+    })
     .from(photos)
     .where(inArray(photos.id, photoIds))
     .all();
@@ -191,10 +197,7 @@ export const movePhotos = os
           continue;
         }
 
-        const newPath = path.join(
-          targetFolder.path,
-          path.basename(photo.path)
-        );
+        const newPath = path.join(targetFolder.path, path.basename(photo.path));
         if (fs.existsSync(newPath) && newPath !== photo.path) {
           results.push({ id, error: "目标文件夹已存在同名文件" });
           continue;
@@ -467,6 +470,12 @@ export const toggleFavorite = os
 export const listDeletedPhotos = os.handler(() => {
   const db = getDatabase();
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+  // Trigger background cleanup for photos that crossed the 30-day threshold while app was running
+  cleanupExpiredTrash().catch((err) =>
+    console.warn("[TrashCleanup] Background cleanup failed:", err)
+  );
+
   return db
     .select()
     .from(photos)
@@ -547,3 +556,50 @@ export const emptyTrash = os.handler(async () => {
   performHardDelete(ids);
   return { deleted: ids.length };
 });
+
+/**
+ * Clean up photos that have been in trash for over 30 days.
+ * Called at app startup to enforce the 30-day retention policy.
+ * Returns the count of permanently deleted photos.
+ */
+export async function cleanupExpiredTrash(): Promise<number> {
+  const db = getDatabase();
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+  const expiredPhotos = db
+    .select({ id: photos.id, path: photos.path })
+    .from(photos)
+    .where(
+      sql`${photos.deletedAt} IS NOT NULL AND ${photos.deletedAt} <= ${thirtyDaysAgo}`
+    )
+    .all();
+
+  if (expiredPhotos.length === 0) {
+    return 0;
+  }
+
+  console.log(
+    `[TrashCleanup] Removing ${expiredPhotos.length} expired photos (older than 30 days)...`
+  );
+
+  for (const p of expiredPhotos) {
+    try {
+      if (fs.existsSync(p.path)) {
+        await shell.trashItem(p.path);
+      }
+    } catch (err) {
+      console.warn(
+        `[TrashCleanup] Failed to trash file: ${p.path}`,
+        (err as Error)?.message
+      );
+    }
+  }
+
+  const ids = expiredPhotos.map((p) => p.id);
+  performHardDelete(ids);
+
+  console.log(
+    `[TrashCleanup] Permanently deleted ${expiredPhotos.length} expired photos`
+  );
+  return expiredPhotos.length;
+}

@@ -38,7 +38,9 @@ type NumberOp = "operatorGte" | "operatorLte" | "operatorRange";
 type TagsOp = "operatorContainsAny" | "operatorContainsAll";
 
 interface SmartRule {
+  dateFrom?: string;
   datePreset?: DatePreset;
+  dateTo?: string;
   max?: string;
   numberOp?: NumberOp;
   stringOp?: StringOp;
@@ -75,6 +77,23 @@ const FORMATS = [
   "heic",
   "gif",
   "bmp",
+  "ico",
+  // RAW formats
+  "cr2",
+  "cr3",
+  "nef",
+  "nrw",
+  "arw",
+  "srf",
+  "sr2",
+  "dng",
+  "orf",
+  "rw2",
+  "raf",
+  "pef",
+  "rwl",
+  "3fr",
+  "raw",
 ];
 
 function toSmartPresetValue(preset: DatePreset): string {
@@ -314,7 +333,15 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
           if (r.datePreset && r.datePreset !== "smartPresetCustom") {
             return { ...base, preset: toSmartPresetValue(r.datePreset) };
           }
-          return { ...base, value: r.value };
+          return {
+            ...base,
+            ...(r.dateFrom
+              ? { dateFrom: new Date(r.dateFrom).getTime() }
+              : {}),
+            ...(r.dateTo
+              ? { dateTo: new Date(r.dateTo).setHours(23, 59, 59, 999) }
+              : {}),
+          };
         case "cameraModel":
         case "lensModel":
           return {
@@ -583,14 +610,27 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
 
                 {rule.type === "dateRange" &&
                 (rule.datePreset === "smartPresetCustom" || !rule.datePreset) ? (
-                  <input
-                    className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                    onChange={(e) =>
-                      updateRule(idx, { value: e.target.value })
-                    }
-                    placeholder={t("dateOrTimestampPlaceholder")}
-                    value={rule.value}
-                  />
+                  <div className="flex flex-1 items-center gap-1">
+                    <input
+                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
+                      onChange={(e) =>
+                        updateRule(idx, { dateFrom: e.target.value })
+                      }
+                      type="date"
+                      value={rule.dateFrom || ""}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      {t("dateRangeTo")}
+                    </span>
+                    <input
+                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
+                      onChange={(e) =>
+                        updateRule(idx, { dateTo: e.target.value })
+                      }
+                      type="date"
+                      value={rule.dateTo || ""}
+                    />
+                  </div>
                 ) : rule.type === "fileFormat" ? (
                   <select
                     className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"

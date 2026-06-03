@@ -23,8 +23,10 @@ import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
 import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
+import { cleanupExpiredTrash } from "@/ipc/photos/handlers/mutations";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
+import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
   getSendToFilePaths,
@@ -687,6 +689,19 @@ async function runStartupCleanup() {
     log.warn({ err }, "Orphan cleanup skipped");
   }
 
+  // ── Expired trash cleanup: permanently delete photos in trash > 30 days ──
+  try {
+    const expiredCount = await cleanupExpiredTrash();
+    if (expiredCount > 0) {
+      log.info(
+        { count: expiredCount },
+        "Startup cleanup: removed expired trash photos"
+      );
+    }
+  } catch (err) {
+    log.warn({ err }, "Expired trash cleanup skipped");
+  }
+
   try {
     const db = getDatabase();
     const allFolders = db.select({ id: folders.id }).from(folders).all();
@@ -793,7 +808,29 @@ app.whenReady().then(async () => {
         }
 
         if (!fs.existsSync(resolved)) {
-          return new Response(null, { status: 404 });
+          const thumbDir = getThumbnailDir();
+          if (thumbDir && resolved.startsWith(thumbDir)) {
+            const photo = db
+              .select({ path: photos.path })
+              .from(photos)
+              .where(eq(photos.thumbnailPath, resolved))
+              .get();
+            if (photo) {
+              try {
+                await generateThumbnail(photo.path, "md");
+              } catch (e) {
+                log.warn(
+                  { filePath: resolved, err: e },
+                  "local-media: Thumbnail regeneration failed"
+                );
+                return new Response(null, { status: 404 });
+              }
+            } else {
+              return new Response(null, { status: 404 });
+            }
+          } else {
+            return new Response(null, { status: 404 });
+          }
         }
 
         const ext = path.extname(resolved).toLowerCase();

@@ -173,6 +173,9 @@ i18n.use(initReactI18next).init({
         themeSystem: "跟随系统",
         cacheCleanedDetail: "已清理 {{count}} 个缓存文件，释放 {{size}} MB",
         clearCacheFailed: "清理失败",
+        clearThumbConfirmTitle: "确认清除缩略图缓存",
+        clearThumbConfirmDesc:
+          "清除后所有缩略图需要重新生成，瀑布流中的图片将暂时无法显示。确定要清除吗？",
         cleanupInvalidIndex: "清理无效索引记录",
         lastCleanupCount: "（上次清理: {{count}} 条）",
         cleanupInvalidRecords: "清理无效记录",
@@ -542,6 +545,7 @@ i18n.use(initReactI18next).init({
         operatorContainsAny: "包含任一",
         operatorContainsAll: "包含全部",
         dateOrTimestampPlaceholder: "YYYY-MM-DD 或 时间戳",
+        dateRangeTo: "至",
         chooseFormat: "选择格式",
         valuePlaceholder: "值",
         maxValuePlaceholder: "最大值",
@@ -1042,6 +1046,9 @@ i18n.use(initReactI18next).init({
         cacheCleanedDetail:
           "Cleared {{count}} cached files and freed {{size}} MB",
         clearCacheFailed: "Clear failed",
+        clearThumbConfirmTitle: "Clear Thumbnail Cache",
+        clearThumbConfirmDesc:
+          "After clearing, all thumbnails will need to be regenerated and images in the grid will temporarily not display. Continue?",
         cleanupInvalidIndex: "Clean Invalid Index Records",
         lastCleanupCount: "(Last cleanup: {{count}} records)",
         cleanupInvalidRecords: "Clean Invalid Records",
@@ -1421,6 +1428,7 @@ i18n.use(initReactI18next).init({
         operatorContainsAny: "Contains Any",
         operatorContainsAll: "Contains All",
         dateOrTimestampPlaceholder: "YYYY-MM-DD or timestamp",
+        dateRangeTo: "to",
         chooseFormat: "Choose format",
         valuePlaceholder: "Value",
         maxValuePlaceholder: "Max value",

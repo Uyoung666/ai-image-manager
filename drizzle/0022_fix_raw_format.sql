@@ -1,0 +1,1 @@
+UPDATE photos SET format = LOWER(REPLACE(SUBSTR(filename, -4), '.', '')) WHERE LOWER(SUBSTR(filename, -4)) IN ('.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.dng', '.orf', '.rw2', '.raf', '.pef', '.rwl', '.3fr', '.raw');

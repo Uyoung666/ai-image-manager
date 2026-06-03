@@ -211,19 +211,24 @@ async function readBasicMeta(filePath: string): Promise<{
   hasAlpha: boolean;
 } | null> {
   try {
+    const raw = isRawFile(filePath);
     // For RAW files, read metadata from the embedded JPEG preview
     let input: string | Buffer = filePath;
-    if (isRawFile(filePath)) {
+    if (raw) {
       const preview = await extractRawPreview(filePath);
       if (preview) {
         input = preview;
       }
     }
     const meta = await sharp(input).metadata();
+    // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
+    const format = raw
+      ? path.extname(filePath).toLowerCase().replace(".", "")
+      : (meta.format || "");
     return {
       width: meta.width || 0,
       height: meta.height || 0,
-      format: meta.format || "",
+      format,
       colorSpace: meta.space || "",
       hasAlpha: meta.hasAlpha,
     };

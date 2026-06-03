@@ -1,6 +1,11 @@
-import { and, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos, photoTags, tags } from "@/db/schema";
+
+const RAW_EXTENSIONS = [
+  "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng",
+  "orf", "rw2", "raf", "pef", "rwl", "3fr", "raw",
+];
 
 // --- Rule type definitions ---
 
@@ -263,10 +268,33 @@ function evaluateRule(rule: SmartRule): number[] {
     }
 
     case "fileFormat": {
+      // Match format column or filename extension; "raw" matches all RAW formats
+      if (rule.value.toLowerCase() === "raw") {
+        const patterns = RAW_EXTENSIONS.map((ext) => `%.${ext}`);
+        const rows = db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(
+            or(
+              inArray(photos.format, RAW_EXTENSIONS),
+              ...patterns.map((p) =>
+                sql`LOWER(${photos.filename}) LIKE ${p}`
+              )
+            )
+          )
+          .all();
+        return rows.map((r) => r.id);
+      }
+      const needle = `.${rule.value.toLowerCase()}`;
       const rows = db
         .select({ id: photos.id })
         .from(photos)
-        .where(eq(photos.format, rule.value))
+        .where(
+          or(
+            eq(photos.format, rule.value),
+            sql`LOWER(${photos.filename}) LIKE ${`%${needle}`}`
+          )
+        )
         .all();
       return rows.map((r) => r.id);
     }

@@ -142,6 +142,24 @@ export function initDatabase(): ReturnType<typeof drizzle> {
     console.log(`[DB] Repaired ${selfRef.changes} self-referencing tag(s)`);
   }
 
+  // Repair RAW format: legacy data stored as "jpeg" from embedded preview
+  const rawFormats = [
+    "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng",
+    "orf", "rw2", "raf", "pef", "rwl", "3fr", "raw",
+  ];
+  let rawFixed = 0;
+  for (const rf of rawFormats) {
+    const result = sqlite
+      .prepare(
+        "UPDATE photos SET format = ? WHERE LOWER(filename) LIKE ? AND format != ?"
+      )
+      .run(rf, `%.${rf}`, rf);
+    rawFixed += result.changes;
+  }
+  if (rawFixed > 0) {
+    console.log(`[DB] Repaired ${rawFixed} RAW photo(s) format`);
+  }
+
   // Heal stale thumbnail_path values. The thumbnailer stores absolute paths
   // (e.g. "C:/.../AI Image Manager/thumbnails/<hash>.webp") in the DB, so a
   // data-path migration leaves every row pointing at the old location. The

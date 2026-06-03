@@ -4,6 +4,17 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { openExternalLink } from "@/actions/shell";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { CloudConfigPanel } from "@/components/CloudConfigPanel";
@@ -601,6 +612,7 @@ function SettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [clearCacheStatus, setClearCacheStatus] = useState("");
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [cleanupStatus, setCleanupStatus] = useState("");
   const [cleanupCount, setCleanupCount] = useState(0);
   const [wm, setWm] = useState<WatermarkSettings>(DEFAULT_WM);
@@ -690,6 +702,7 @@ function SettingsPage() {
   }, [wm, wmLoaded]);
 
   async function handleClearCache() {
+    setClearDialogOpen(false);
     setClearCacheStatus(t("settingsClearing"));
     try {
       const result = await ipc.client.photos.clearThumbCache({});

@@ -63,9 +63,89 @@ function PeoplePage() {
     }
   }, []);
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) {
+      return;
+    }
+    pollRef.current = setInterval(async () => {
+      try {
+        const p = (await ipc.client.faces.getDetectionProgress({})) as {
+          phase: string;
+          processed: number;
+          total?: number;
+        };
+        if (p.phase === "complete") {
+          setProgress(t("detectionCompleteCount", { count: p.processed }));
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          setDetecting(false);
+          loadIdentities();
+        } else if (p.phase === "running") {
+          setProgress(
+            t("detectingFacesProgress", {
+              processed: p.processed,
+              total: p.total,
+            })
+          );
+        } else {
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          setDetecting(false);
+          setProgress("");
+        }
+      } catch (err) {
+        console.error("[detectionPoll] failed:", err);
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+        setDetecting(false);
+      }
+    }, 2000);
+  }, [loadIdentities, t]);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  // On mount: check if detection is already running in background
   useEffect(() => {
     loadIdentities();
-  }, [loadIdentities]);
+    ipc.client.faces
+      .getDetectionProgress({})
+      .then((p: unknown) => {
+        const progress = p as {
+          phase: string;
+          processed: number;
+          total?: number;
+        };
+        if (progress.phase === "running") {
+          setDetecting(true);
+          setProgress(
+            t("detectingFacesProgress", {
+              processed: progress.processed,
+              total: progress.total,
+            })
+          );
+          startPolling();
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      stopPolling();
+    };
+  }, [loadIdentities, startPolling, stopPolling, t]);
 
   async function handleStartDetection(rescan = false) {
     setDetecting(true);
@@ -78,37 +158,7 @@ function PeoplePage() {
       })) as { started: boolean; photoCount?: number; message?: string };
       if (result.started) {
         setProgress(t("detectingFacesCount", { count: result.photoCount }));
-        // Poll for progress
-        const poll = setInterval(async () => {
-          try {
-            const p = (await ipc.client.faces.getDetectionProgress({})) as {
-              phase: string;
-              processed: number;
-              total?: number;
-            };
-            if (p.phase === "complete") {
-              setProgress(t("detectionCompleteCount", { count: p.processed }));
-              clearInterval(poll);
-              setDetecting(false);
-              loadIdentities();
-            } else if (p.phase === "running") {
-              setProgress(
-                t("detectingFacesProgress", {
-                  processed: p.processed,
-                  total: p.total,
-                })
-              );
-            } else {
-              clearInterval(poll);
-              setDetecting(false);
-              setProgress("");
-            }
-          } catch (err) {
-            console.error("[detectionPoll] failed:", err);
-            clearInterval(poll);
-            setDetecting(false);
-          }
-        }, 2000);
+        startPolling();
       } else {
         setProgress(result.message || t("startFailed"));
         setDetecting(false);
