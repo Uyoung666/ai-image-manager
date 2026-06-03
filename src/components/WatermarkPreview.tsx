@@ -231,8 +231,8 @@ export function WatermarkPreview({ wm, samplePhotoPath, onSettingsChange }: Prop
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
     ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillText(`锚点 ${wm.anchor}  间距 ${mp}px (${wm.margin}%)`, cw - 8, ch - 8);
-  }, [wm, sampleImg, wmImg, dragging, loadError]);
+    ctx.fillText(t("watermarkReadout", { anchor: wm.anchor, marginPx: mp, marginPct: wm.margin }), cw - 8, ch - 8);
+  }, [wm, sampleImg, wmImg, dragging, loadError, t]);
 
   useEffect(() => { draw(); }, [draw]);
 

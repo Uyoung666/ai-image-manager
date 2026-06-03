@@ -25,6 +25,7 @@ export type SortOrder = "asc" | "desc";
 interface PhotoGridProps {
   deletingIds?: Set<number>;
   emptyState?: React.ReactNode;
+  error?: string;
   loading: boolean;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
@@ -73,6 +74,7 @@ export function PhotoGrid({
   sort = "date",
   sortOrder = "desc",
   emptyState,
+  error,
   onSelect,
   onDoubleClick,
   onContextMenu,
@@ -287,6 +289,7 @@ export function PhotoGrid({
   }
 
   if (!loading && photos.length === 0) {
+    const isError = !!error;
     return (
       <div className="flex flex-1 flex-col">
         <div className="flex items-center justify-between border-border border-b px-4 py-2">
@@ -295,10 +298,32 @@ export function PhotoGrid({
           </span>
         </div>
         <div className="flex flex-1 items-center justify-center">
-          {emptyState ?? (
-            <span className="text-[13px] text-muted-foreground/70">
-              {t("noPhotos")}
-            </span>
+          {isError ? (
+            <div className="flex flex-col items-center gap-3 px-6 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">
+                <svg
+                  aria-hidden="true"
+                  className="h-5 w-5 text-danger"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+              <p className="text-[13px] text-muted-foreground/70">{error}</p>
+            </div>
+          ) : (
+            emptyState ?? (
+              <span className="text-[13px] text-muted-foreground/70">
+                {t("noPhotos")}
+              </span>
+            )
           )}
         </div>
       </div>

@@ -5,6 +5,8 @@ import { ArrowLeft, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -221,6 +223,9 @@ function DuplicatesPage() {
   const [deleting, setDeleting] = useState(false);
   const [strategy, setStrategy] = useState<RetentionStrategy>("manual");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [deleteSingleId, setDeleteSingleId] = useState<number | null>(null);
+  const [pendingStrategy, setPendingStrategy] =
+    useState<RetentionStrategy | null>(null);
 
   // ── TanStack Query: duplicates data ──
 
@@ -408,6 +413,13 @@ function DuplicatesPage() {
   // ── Delete single ──
 
   async function handleDeleteSingle(id: number) {
+    setDeleteSingleId(id);
+  }
+
+  async function confirmDeleteSingle() {
+    if (deleteSingleId === null) return;
+    const id = deleteSingleId;
+    setDeleteSingleId(null);
     setDeleting(true);
     try {
       await ipc.client.photos.deletePhoto({ id });
@@ -455,6 +467,13 @@ function DuplicatesPage() {
     (id: number) => toggleSelectRef.current(id),
     [],
   );
+  function confirmStrategyChange() {
+    if (pendingStrategy) {
+      setStrategy(pendingStrategy);
+      setPendingStrategy(null);
+    }
+  }
+
   const stableDeleteSingle = useCallback(
     (id: number) => handleDeleteSingleRef.current(id),
     [],
@@ -538,7 +557,21 @@ function DuplicatesPage() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
               key={key}
-              onClick={() => setStrategy(key)}
+              onClick={() => {
+                if (key === "manual") {
+                  setStrategy(key);
+                  return;
+                }
+                let autoCount = 0;
+                for (const pair of pairs) {
+                  if (pickDeletion(pair, key)) autoCount++;
+                }
+                if (autoCount > 0) {
+                  setPendingStrategy(key);
+                } else {
+                  setStrategy(key);
+                }
+              }}
             >
               {label}
             </button>
@@ -605,6 +638,29 @@ function DuplicatesPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDeleteDialog
+        count={1}
+        onCancel={() => setDeleteSingleId(null)}
+        onConfirm={confirmDeleteSingle}
+        open={deleteSingleId !== null}
+      />
+
+      <ConfirmDialog
+        confirmText={t("confirm")}
+        description={t("strategyAutoSelectDesc", {
+          count: pendingStrategy
+            ? pairs.reduce((acc, pair) => {
+                const toDelete = pickDeletion(pair, pendingStrategy);
+                return toDelete ? acc + 1 : acc;
+              }, 0)
+            : 0,
+        })}
+        onCancel={() => setPendingStrategy(null)}
+        onConfirm={confirmStrategyChange}
+        open={pendingStrategy !== null}
+        title={t("strategyAutoSelectTitle")}
+      />
     </div>
   );
 }

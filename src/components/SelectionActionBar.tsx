@@ -45,6 +45,7 @@ export function SelectionActionBar({
   const { t } = useTranslation();
   const [animating, setAnimating] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [executing, setExecuting] = useState<string | null>(null);
   const mountedRef = useRef(selectedCount > 0);
 
   useEffect(() => {
@@ -58,6 +59,18 @@ export function SelectionActionBar({
       setVisible(false);
     }
   }, [selectedCount]);
+
+  function wrapAction(key: string, handler?: () => void): (() => void) | undefined {
+    if (!handler) return undefined;
+    return async () => {
+      setExecuting(key);
+      try {
+        await handler();
+      } finally {
+        setExecuting(null);
+      }
+    };
+  }
 
   if (!(animating || mountedRef.current)) {
     return null;
@@ -150,9 +163,11 @@ export function SelectionActionBar({
             <div className="mx-1 h-4 w-px bg-border" />
             <ActionButton
               className="text-destructive hover:bg-destructive/10"
+              disabled={executing !== null}
+              executing={executing === "delete"}
               icon={<Trash2 size={15} />}
               label={t("delete")}
-              onClick={onDelete}
+              onClick={wrapAction("delete", onDelete)}
             />
           </>
         )}
@@ -176,19 +191,28 @@ function ActionButton({
   label,
   onClick,
   className = "",
+  disabled = false,
+  executing = false,
 }: {
   className?: string;
+  disabled?: boolean;
+  executing?: boolean;
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
 }) {
   return (
     <button
-      className={`flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-[11px] text-foreground/80 transition-colors hover:bg-foreground/8 hover:text-foreground ${className}`}
+      className={`flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-[11px] text-foreground/80 transition-colors hover:bg-foreground/8 hover:text-foreground disabled:opacity-40 ${className}`}
+      disabled={disabled || executing}
       onClick={onClick}
       title={label}
     >
-      {icon}
+      {executing ? (
+        <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+      ) : (
+        icon
+      )}
       <span className="hidden sm:inline">{label}</span>
     </button>
   );

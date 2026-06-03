@@ -26,12 +26,12 @@ import { ipcContext } from "@/ipc/context";
 import { cleanupExpiredTrash } from "@/ipc/photos/handlers/mutations";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
-import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
   getSendToFilePaths,
   setupSendToShortcut,
 } from "@/services/sendto-integration";
+import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { createLogger } from "./utils/logger.js";
@@ -247,12 +247,88 @@ function getWindowStore() {
   return windowStore;
 }
 
+// ── Tray language store ────────────────────────────────────────────
+type TrayLang = "zh" | "en";
+
+const trayLabels: Record<
+  TrayLang,
+  { showWindow: string; launchAtStartup: string; quit: string; tooltip: string }
+> = {
+  zh: {
+    showWindow: "显示窗口",
+    launchAtStartup: "开机自启",
+    quit: "退出",
+    tooltip: "AI 图片管理器",
+  },
+  en: {
+    showWindow: "Show Window",
+    launchAtStartup: "Launch at Startup",
+    quit: "Quit",
+    tooltip: "AI Image Manager",
+  },
+};
+
+function getTrayLangStore(): Store<{ language: string }> {
+  if (!trayLangStore) {
+    trayLangStore = new Store<{ language: string }>({
+      name: "tray-lang",
+      defaults: { language: "zh" },
+    });
+  }
+  return trayLangStore;
+}
+
+let trayLangStore: Store<{ language: string }> | null = null;
+
+function tTray(key: keyof (typeof trayLabels)["zh"]): string {
+  const lang = (getTrayLangStore().get("language") as string) || "zh";
+  const safe = (trayLabels as Record<string, Record<string, string>>)[lang];
+  return safe?.[key] ?? trayLabels.zh[key];
+}
+
 // ── Tray icon ────────────────────────────────────────────────────────
 function getIconPath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "icon.png");
   }
   return path.join(app.getAppPath(), "assets", "icon.png");
+}
+
+function buildTrayMenu(): Electron.Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: tTray("showWindow"),
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      },
+    },
+    { type: "separator" },
+    {
+      label: tTray("launchAtStartup"),
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        app.setLoginItemSettings({ openAtLogin: menuItem.checked });
+      },
+    },
+    { type: "separator" },
+    {
+      label: tTray("quit"),
+      click: () => {
+        app.quit();
+      },
+    },
+  ]);
+}
+
+function rebuildTrayMenu() {
+  if (tray) {
+    tray.setContextMenu(buildTrayMenu());
+    tray.setToolTip(tTray("tooltip"));
+  }
 }
 
 function createTray() {
@@ -263,37 +339,9 @@ function createTray() {
   } else {
     tray = new Tray(nativeImage.createEmpty());
   }
-  tray.setToolTip("AI Image Manager");
+  tray.setToolTip(tTray("tooltip"));
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Show Window",
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Launch at Startup",
-      type: "checkbox",
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (menuItem) => {
-        app.setLoginItemSettings({ openAtLogin: menuItem.checked });
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Quit",
-      click: () => {
-        app.exit();
-      },
-    },
-  ]);
-
-  tray.setContextMenu(contextMenu);
+  tray.setContextMenu(buildTrayMenu());
 
   tray.on("double-click", () => {
     if (mainWindow) {
@@ -634,6 +682,14 @@ ipcMain.on("app:restart", () => {
     execPath: process.execPath,
   });
   app.quit();
+});
+
+// Sync language from renderer to main process (updates tray menu labels)
+ipcMain.on("app:language-changed", (_event, lang: string) => {
+  if (lang && (lang === "zh" || lang === "en")) {
+    getTrayLangStore().set("language", lang);
+    rebuildTrayMenu();
+  }
 });
 
 // ── IPC / oRPC setup ─────────────────────────────────────────────────

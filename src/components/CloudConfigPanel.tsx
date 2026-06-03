@@ -1,6 +1,7 @@
 ﻿import { Cloud, Link2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ipc } from "@/ipc/manager";
 
 interface CloudConfig {
@@ -38,6 +39,7 @@ export function CloudConfigPanel() {
     Record<number, { result: string; success: boolean | null }>
   >({});
   const [testingId, setTestingId] = useState<number | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const loadConfigs = useCallback(async () => {
     try {
@@ -91,8 +93,14 @@ export function CloudConfigPanel() {
   }
 
   async function handleDelete(id: number) {
+    setDeleteConfirmId(id);
+  }
+
+  async function confirmDelete() {
+    if (deleteConfirmId === null) return;
     try {
-      await ipc.client.cloud.deleteCloudConfig({ id });
+      await ipc.client.cloud.deleteCloudConfig({ id: deleteConfirmId });
+      setDeleteConfirmId(null);
       loadConfigs();
     } catch {
       /* ignore */
@@ -313,6 +321,18 @@ export function CloudConfigPanel() {
       {!loading && configs.length === 0 && !showAdd && (
         <p className="text-[11px] text-muted-foreground/70">{t("cloudNoConfigShort")}</p>
       )}
+
+      <ConfirmDialog
+        confirmText={t("delete")}
+        description={t("cloudDeleteConfirmDesc", {
+          name: configs.find((c) => c.id === deleteConfirmId)?.name ?? "",
+        })}
+        destructive
+        onCancel={() => setDeleteConfirmId(null)}
+        onConfirm={confirmDelete}
+        open={deleteConfirmId !== null}
+        title={t("cloudDeleteConfirmTitle")}
+      />
     </div>
   );
 }

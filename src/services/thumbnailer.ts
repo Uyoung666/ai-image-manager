@@ -277,7 +277,7 @@ export function deletePhotoThumbnails(imagePath: string): void {
     } catch {
       // best-effort: permission errors or locked files are not fatal
     }
-    memoryCache?.delete(thumbPath);
+    memoryCache?.delete(`${imagePath}_${size}`);
   }
 }
 

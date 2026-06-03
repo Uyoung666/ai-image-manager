@@ -18,6 +18,7 @@ import {
   getPhotoExif,
   listPhotos,
   scanFolder,
+  stopScanning,
 } from "./handlers/listing";
 import {
   cleanupOrphanPhotos,
@@ -103,6 +104,7 @@ export const photos = {
   setWatermarkSettings,
   startAiIndexing,
   stopAiIndexing,
+  stopScanning,
   suggestTags,
   toggleFavorite,
   generateAndUploadShare,

@@ -79,6 +79,7 @@ interface IndexProgress {
 
 type ProgressCallback = (progress: IndexProgress) => void;
 let isScanning = false;
+let wasCancelled = false;
 let watchers: FSWatcher[] = [];
 
 export function isIndexing(): boolean {
@@ -492,9 +493,16 @@ async function indexSingleFile(
 export async function scanFolder(
   folderPath: string,
   onProgress?: ProgressCallback
-): Promise<{ folderId: number; photoIds: number[]; skipped: number }> {
+): Promise<{
+  folderId: number;
+  photoIds: number[];
+  skipped: number;
+  cancelled: boolean;
+  folderExisted: boolean;
+}> {
   const db = getDatabase();
   isScanning = true;
+  wasCancelled = false;
 
   const resolvedPath = path.resolve(folderPath);
   if (!fs.existsSync(resolvedPath)) {
@@ -506,6 +514,7 @@ export async function scanFolder(
     .from(folders)
     .where(eq(folders.path, resolvedPath))
     .get();
+  const folderExisted = !!folder;
   if (!folder) {
     const result = db
       .insert(folders)
@@ -881,7 +890,7 @@ export async function scanFolder(
   // vectors are available in LanceDB. This avoids expensive per-photo worker
   // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
 
-  return { folderId, photoIds, skipped };
+  return { folderId, photoIds, skipped, cancelled: wasCancelled, folderExisted };
 }
 
 export function startWatching(
@@ -1155,4 +1164,5 @@ export async function cleanupOrphanedRecords(): Promise<{
 
 export function stopScanning(): void {
   isScanning = false;
+  wasCancelled = true;
 }

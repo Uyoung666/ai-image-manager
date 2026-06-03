@@ -1,5 +1,7 @@
 import { Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { ExifFilters } from "./SearchBar";
 
 interface FilterPreset {
@@ -36,10 +38,12 @@ export function FilterPresets({
   currentFilters,
   onLoadPreset,
 }: FilterPresetsProps) {
+  const { t } = useTranslation();
   const [presets, setPresets] = useState<FilterPreset[]>([]);
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState<string | null>(null);
 
   useEffect(() => {
     setPresets(loadPresets());
@@ -65,9 +69,15 @@ export function FilterPresets({
   }
 
   function handleDelete(name: string) {
-    const updated = presets.filter((p) => p.name !== name);
+    setDeleteConfirmName(name);
+  }
+
+  function confirmDelete() {
+    if (!deleteConfirmName) return;
+    const updated = presets.filter((p) => p.name !== deleteConfirmName);
     setPresets(updated);
     savePresets(updated);
+    setDeleteConfirmName(null);
   }
 
   const hasActiveFilters = Object.values(currentFilters).some(
@@ -88,7 +98,7 @@ export function FilterPresets({
             type="button"
           >
             <Save className="h-3 w-3" />
-            保存预设
+            {t("filterSavePreset")}
           </button>
           {showSave && (
             <div className="absolute bottom-full left-0 z-50 mb-1 rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5">
@@ -101,7 +111,7 @@ export function FilterPresets({
                       handleSave();
                     }
                   }}
-                  placeholder="预设名称..."
+                  placeholder={t("filterPresetNamePlaceholder")}
                   value={presetName}
                 />
                 <button
@@ -109,7 +119,7 @@ export function FilterPresets({
                   onClick={handleSave}
                   type="button"
                 >
-                  保存
+                  {t("save")}
                 </button>
               </div>
             </div>
@@ -128,7 +138,7 @@ export function FilterPresets({
             }}
             type="button"
           >
-            加载预设 ({presets.length})
+            {t("filterLoadPresets", { count: presets.length })}
           </button>
           {showLoad && (
             <div className="absolute right-0 bottom-full z-50 mb-1 min-w-[180px] rounded-[6px] border border-border bg-popover p-1.5 shadow-lg ring-1 ring-foreground/5">
@@ -160,6 +170,16 @@ export function FilterPresets({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        confirmText={t("delete")}
+        description={t("filterDeletePresetDesc", { name: deleteConfirmName ?? "" })}
+        destructive
+        onCancel={() => setDeleteConfirmName(null)}
+        onConfirm={confirmDelete}
+        open={deleteConfirmName !== null}
+        title={t("filterDeletePresetTitle")}
+      />
     </div>
   );
 }

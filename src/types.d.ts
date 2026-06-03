@@ -12,5 +12,6 @@ interface Window {
     preloadReady: boolean;
     startDrag: (filePath: string) => void;
     restartApp: () => void;
+    setLanguage: (lang: string) => void;
   };
 }

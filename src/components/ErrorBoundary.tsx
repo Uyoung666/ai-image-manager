@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface Props {
@@ -51,16 +51,54 @@ function ErrorBoundaryInner({
   onReset: () => void;
 }) {
   const { t } = useTranslation();
+  const [showDetails, setShowDetails] = useState(false);
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <ErrorBoundaryMessage error={error} />
-      <button
-        className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
-        onClick={onReset}
+      <p className="text-[12px] text-muted-foreground">
+        {t("errorGeneric")}
+      </p>
+      <details
+        className="max-h-[120px] max-w-[500px] overflow-auto rounded-[6px] bg-muted/50 p-2 text-left"
+        onToggle={(e) => setShowDetails(e.currentTarget.open)}
+        open={showDetails}
       >
-        {t("aiRetry")}
-      </button>
+        <summary className="cursor-pointer text-[11px] text-muted-foreground/70">
+          {t("errorShowDetails")}
+        </summary>
+        <pre className="mt-1 whitespace-pre-wrap font-mono text-[10px] text-muted-foreground">
+          {error.message || t("errorUnknown")}
+          {"\n\n"}
+          {error.stack}
+        </pre>
+      </details>
+      <div className="flex gap-2">
+        <button
+          className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
+          onClick={onReset}
+        >
+          {t("retry")}
+        </button>
+        <button
+          className="rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => {
+            navigator.clipboard.writeText(
+              `${error.message}\n\n${error.stack || ""}`
+            );
+          }}
+        >
+          {t("errorCopy")}
+        </button>
+        <button
+          className="rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => {
+            window.location.reload();
+          }}
+        >
+          {t("refresh")}
+        </button>
+      </div>
     </div>
   );
 }

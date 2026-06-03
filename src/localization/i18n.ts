@@ -71,6 +71,7 @@ i18n.use(initReactI18next).init({
         noExifData: "无 EXIF 数据",
 
         // Dashboard
+        dashboardLoadFailed: "数据加载失败，请检查数据目录是否可访问",
         dashboardTitle: "数据仪表盘",
         totalPhotos: "照片总数",
         aiProcessed: "AI 已处理",
@@ -203,6 +204,7 @@ i18n.use(initReactI18next).init({
         chooseFile: "选择文件",
         changeFile: "更换文件",
         clear: "清除",
+        watermarkReadout: "锚点 {{anchor}}  间距 {{marginPx}}px ({{marginPct}}%)",
         watermarkPosition: "位置",
         positionTopLeft: "左上",
         positionTopRight: "右上",
@@ -260,6 +262,7 @@ i18n.use(initReactI18next).init({
         toastFolderRemoved: "已移除文件夹",
         toastDeleteFolderFailed: "删除文件夹失败",
         toastSearchFailed: "搜索失败",
+        searchPartialFailed: "部分搜索失败，结果可能不完整",
         toastDeletedCount: "已删除 {{count}} 张照片",
         toastDeleteFailed: "删除照片失败",
         photosMoved: "已移动 {{count}} 张照片",
@@ -355,6 +358,8 @@ i18n.use(initReactI18next).init({
         cloudConnectionFailed: "连接失败: {{error}}",
         cloudUnknownError: "未知错误",
         cloudTestException: "测试异常",
+        cloudDeleteConfirmTitle: "删除云存储配置",
+        cloudDeleteConfirmDesc: "确定要删除云存储配置「{{name}}」吗？此操作不可撤销。",
 
         // AI progress
         aiInitFailed: "AI 初始化失败",
@@ -393,6 +398,9 @@ i18n.use(initReactI18next).init({
 
         // Error boundary
         errorBoundaryTitle: "出现了一些问题",
+        errorGeneric: "应用遇到了一个意外错误，请尝试重试",
+        errorShowDetails: "查看错误详情",
+        errorCopy: "复制错误",
         errorUnknown: "未知错误",
 
         // Export
@@ -434,6 +442,11 @@ i18n.use(initReactI18next).init({
         focalGte: "焦段 ≥ {{value}}mm",
         focalLte: "焦段 ≤ {{value}}mm",
         clearAll: "清除全部",
+        filterSavePreset: "保存预设",
+        filterPresetNamePlaceholder: "预设名称...",
+        filterLoadPresets: "加载预设 ({{count}})",
+        filterDeletePresetTitle: "删除筛选预设",
+        filterDeletePresetDesc: "确定要删除预设「{{name}}」吗？此操作不可撤销。",
         drillDownActiveHint: "已从仪表盘钻取，可在下方继续叠加筛选条件",
         backToDashboard: "返回仪表盘",
         dateRangeLabel: "日期范围",
@@ -524,6 +537,8 @@ i18n.use(initReactI18next).init({
         smartAlbumMatchedCount: "匹配到 {{count}} 张照片",
         smartAlbumSearchTags: "搜索标签...",
         smartAlbumNoMatchingTags: "无匹配标签",
+        smartAlbumDiscardTitle: "放弃更改？",
+        smartAlbumDiscardDesc: "你配置了规则但尚未保存，关闭后将丢失所有更改。确定放弃吗？",
         smartAlbumNoTags: "暂无标签，请先进行 AI 索引",
         smartRuleDateTaken: "拍摄日期",
         smartRuleCameraModel: "相机型号",
@@ -640,6 +655,8 @@ i18n.use(initReactI18next).init({
         pendingDelete: "待删除",
         selectDelete: "选中删除",
         deselect: "取消选中",
+        strategyAutoSelectTitle: "自动选择删除",
+        strategyAutoSelectDesc: "此策略将自动选中 {{count}} 张照片标记为待删除，是否继续？",
         deleteNow: "立即删除",
         peopleCount: "{{count}} 个人物分组",
         peopleDescription: "人脸识别与人物管理",
@@ -691,6 +708,10 @@ i18n.use(initReactI18next).init({
         trashEmptied: "回收站已清空",
         emptyTrashFailed: "清空失败",
         today: "今天",
+        thisWeek: "本周",
+        thisMonth: "本月",
+        thisYear: "今年",
+        lastYear: "去年",
         yesterday: "昨天",
         daysAgo: "{{count}} 天前",
         weeksAgo: "{{count}} 周前",
@@ -776,6 +797,7 @@ i18n.use(initReactI18next).init({
         cullMode: "选片模式",
         cullCreateHint: "选择文件夹后将导入该文件夹下全部照片",
         cullSelectFolder: "选择照片来源文件夹",
+        cullSelectFolderHint: "请先选择一个文件夹，或返回首页从照片中选取",
         cullNoFolders: "还没有添加文件夹，点击下方按钮回到首页从照片中选取",
         cullSelectPhotosToStart: "去首页选择照片",
         cullModeDuel: "对决模式",
@@ -860,11 +882,14 @@ i18n.use(initReactI18next).init({
         cullTrashConfirmTitle: "确认淘汰",
         cullTrashConfirmMsg:
           "将 {{count}} 张淘汰照片移入回收站？此操作可撤销。",
+        cullRemainingPks: "剩余 ~{{count}} 次",
+        cullProgressDetail: "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · 剩余 ~{{count}} 次",
         cullTrashConfirmBtn: "移入回收站",
         // Common
         loading: "加载中…",
         error: "出错了",
         empty: "暂无数据",
+        copied: "已复制",
         confirm: "确定",
         cancel: "取消",
       },
@@ -931,6 +956,7 @@ i18n.use(initReactI18next).init({
         filePath: "File Path",
         noExifData: "No EXIF data",
 
+        dashboardLoadFailed: "Failed to load data. Check if the data directory is accessible.",
         dashboardTitle: "Dashboard",
         totalPhotos: "Total Photos",
         aiProcessed: "AI Processed",
@@ -1076,6 +1102,7 @@ i18n.use(initReactI18next).init({
         chooseFile: "Choose file",
         changeFile: "Change file",
         clear: "Clear",
+        watermarkReadout: "Anchor {{anchor}}  Margin {{marginPx}}px ({{marginPct}}%)",
         watermarkPosition: "Position",
         positionTopLeft: "Top Left",
         positionTopRight: "Top Right",
@@ -1135,6 +1162,7 @@ i18n.use(initReactI18next).init({
         toastFolderRemoved: "Folder removed",
         toastDeleteFolderFailed: "Failed to delete folder",
         toastSearchFailed: "Search failed",
+        searchPartialFailed: "Some search results may be incomplete",
         toastDeletedCount: "Deleted {{count}} photos",
         toastDeleteFailed: "Failed to delete photos",
         photosMoved: "Moved {{count}} photos",
@@ -1231,6 +1259,8 @@ i18n.use(initReactI18next).init({
         cloudConnectionFailed: "Connection failed: {{error}}",
         cloudUnknownError: "Unknown error",
         cloudTestException: "Test failed",
+        cloudDeleteConfirmTitle: "Delete Cloud Configuration",
+        cloudDeleteConfirmDesc: "Delete cloud configuration \"{{name}}\"? This cannot be undone.",
 
         // AI progress
         aiInitFailed: "AI initialization failed",
@@ -1273,6 +1303,9 @@ i18n.use(initReactI18next).init({
 
         // Error boundary
         errorBoundaryTitle: "Something went wrong",
+        errorGeneric: "The app encountered an unexpected error. Please try again.",
+        errorShowDetails: "View error details",
+        errorCopy: "Copy error",
         errorUnknown: "Unknown error",
 
         // Export
@@ -1316,6 +1349,11 @@ i18n.use(initReactI18next).init({
         focalGte: "Focal length ≥ {{value}}mm",
         focalLte: "Focal length ≤ {{value}}mm",
         clearAll: "Clear all",
+        filterSavePreset: "Save Preset",
+        filterPresetNamePlaceholder: "Preset name...",
+        filterLoadPresets: "Load presets ({{count}})",
+        filterDeletePresetTitle: "Delete Filter Preset",
+        filterDeletePresetDesc: "Delete preset \"{{name}}\"? This cannot be undone.",
         drillDownActiveHint:
           "Drilled down from dashboard. You can add more filters below.",
         backToDashboard: "Back to Dashboard",
@@ -1407,6 +1445,8 @@ i18n.use(initReactI18next).init({
         smartAlbumMatchedCount: "{{count}} photos matched",
         smartAlbumSearchTags: "Search tags...",
         smartAlbumNoMatchingTags: "No matching tags",
+        smartAlbumDiscardTitle: "Discard Changes?",
+        smartAlbumDiscardDesc: "You have unsaved rules. Closing will discard all changes. Continue?",
         smartAlbumNoTags: "No tags yet. Run AI indexing first.",
         smartRuleDateTaken: "Date Taken",
         smartRuleCameraModel: "Camera Model",
@@ -1528,6 +1568,8 @@ i18n.use(initReactI18next).init({
         pendingDelete: "Pending delete",
         selectDelete: "Select to delete",
         deselect: "Deselect",
+        strategyAutoSelectTitle: "Auto-Select for Deletion",
+        strategyAutoSelectDesc: "This strategy will auto-select {{count}} photos for deletion. Continue?",
         deleteNow: "Delete now",
         peopleCount: "{{count}} people groups",
         peopleDescription: "Face recognition and people management",
@@ -1582,6 +1624,10 @@ i18n.use(initReactI18next).init({
         trashEmptied: "Trash emptied",
         emptyTrashFailed: "Failed to empty trash",
         today: "Today",
+        thisWeek: "This Week",
+        thisMonth: "This Month",
+        thisYear: "This Year",
+        lastYear: "Last Year",
         yesterday: "Yesterday",
         daysAgo: "{{count}} days ago",
         weeksAgo: "{{count}} weeks ago",
@@ -1672,6 +1718,7 @@ i18n.use(initReactI18next).init({
         cullCreateHint:
           "Select a folder to import all its photos into the session",
         cullSelectFolder: "Select photo source folder",
+        cullSelectFolderHint: "Please select a folder first, or go back to home to pick photos manually",
         cullNoFolders:
           "No folders added yet. Go to home page to select photos manually.",
         cullSelectPhotosToStart: "Go to Home to Select",
@@ -1762,11 +1809,14 @@ i18n.use(initReactI18next).init({
         cullTrashConfirmTitle: "Confirm Trash",
         cullTrashConfirmMsg:
           "Move {{count}} rejected photos to trash? This can be undone.",
+        cullRemainingPks: "~{{count}} remaining",
+        cullProgressDetail: "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · ~{{count}} remaining",
         cullTrashConfirmBtn: "Move to Trash",
         // Common
         loading: "Loading...",
         error: "Error",
         empty: "No data",
+        copied: "Copied",
         confirm: "Confirm",
         cancel: "Cancel",
       },

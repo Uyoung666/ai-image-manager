@@ -473,18 +473,24 @@ function HomePage() {
       const scanResult = await ipc.client.photos.scanFolder({
         path: folderPath,
       });
-      const skipped = scanResult.skipped || 0;
-      const count = scanResult.photoIds?.length || 0;
-      setScanProgress(
-        skipped > 0
-          ? t("scanningSkipped", { count, skipped })
-          : t("scanningComplete", { count })
-      );
-      toast.success(
-        skipped > 0
-          ? t("toastPhotosIndexedSkipped", { count, skipped })
-          : t("toastPhotosIndexed", { count })
-      );
+      // User cancelled — backend already cleaned up, just clear progress
+      if ((scanResult as Record<string, unknown>).cancelled) {
+        setScanProgress("");
+      } else {
+        const skipped = scanResult.skipped || 0;
+        const count = scanResult.photoIds?.length || 0;
+        setScanProgress(
+          skipped > 0
+            ? t("scanningSkipped", { count, skipped })
+            : t("scanningComplete", { count })
+        );
+        toast.success(
+          skipped > 0
+            ? t("toastPhotosIndexedSkipped", { count, skipped })
+            : t("toastPhotosIndexed", { count })
+        );
+      }
+      // Always refresh UI — cancelled imports need stale folders/photos cleared
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
     } catch (err: any) {
@@ -502,6 +508,13 @@ function HomePage() {
         }
       };
       setTimeout(clearIfIdle, 3000);
+    }
+  }
+  async function handleCancelScan() {
+    try {
+      await ipc.client.photos.stopScanning({});
+    } catch (err) {
+      console.error("[cancelScan] failed:", err);
     }
   }
   async function handleDeleteFolder(id: number) {
@@ -1073,6 +1086,7 @@ function HomePage() {
           setFavoriteOnly(false);
         }}
         onSelectTag={handleSelectTag}
+        onCancelScan={handleCancelScan}
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}

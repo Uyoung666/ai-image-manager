@@ -19,6 +19,7 @@ export {
 } from "./query-parser";
 export { searchByImage, searchByText } from "./search";
 export type { EmbedProgress, EmbedProgressCallback } from "./state";
+export { poolCancelled, setPoolCancelled } from "./state";
 export { batchSuggestTags, CANDIDATE_TAGS, suggestTags } from "./tag-suggester";
 export { embedText } from "./text-embedder";
 export {

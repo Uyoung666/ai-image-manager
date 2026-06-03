@@ -12,8 +12,12 @@ import {
 } from "@/services/ai-embedder";
 
 export const startAiIndexing = os.handler(() => {
-  // Fire-and-forget: launch embedding in background, poll progress via getAiProgress
-  embedAllPhotos()
+  embedAllPhotos((aiProgress) => {
+    const { BrowserWindow } = require("electron");
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ai-progress", aiProgress);
+    }
+  })
     .then((count) => {
       console.log(`[AI] Embedding complete: ${count} photos processed`);
     })

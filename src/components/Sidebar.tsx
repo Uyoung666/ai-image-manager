@@ -69,6 +69,7 @@ interface SidebarProps {
   favoriteActive?: boolean;
   folders: FolderInfo[];
   onAddFolder: (externalPath?: string) => void;
+  onCancelScan?: () => void;
   onDeleteFolder: (id: number, displayName: string) => void;
   onSelectFavorites?: () => void;
   onSelectFolder: (id: number | null) => void;
@@ -309,6 +310,7 @@ export function Sidebar({
   onSelectFolder,
   onSelectFavorites,
   onAddFolder,
+  onCancelScan,
   onDeleteFolder,
   onSelectTag,
   onToggleCollapse,
@@ -999,7 +1001,18 @@ export function Sidebar({
       {scanProgress && (
         <div className="px-3 pb-2">
           <div className="rounded-[6px] bg-card px-3 py-2">
-            <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
+              {scanningFolder && onCancelScan && (
+                <button
+                  className="shrink-0 rounded-[4px] px-2 py-0.5 text-[10px] font-[510] text-danger transition-colors hover:bg-danger/10"
+                  onClick={onCancelScan}
+                  type="button"
+                >
+                  {t("cancel")}
+                </button>
+              )}
+            </div>
             {scanningFolder && (
               <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
                 {t("scanningPath", { path: scanningFolder })}

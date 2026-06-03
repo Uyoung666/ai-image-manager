@@ -40,52 +40,54 @@ function formatDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-const TIME_PRESETS: TimePreset[] = [
-  {
-    label: "今天",
-    getRange: () => {
-      const d = formatDate(new Date());
-      return { dateFrom: d, dateTo: d };
+function getTimePresets(t: (key: string) => string): TimePreset[] {
+  return [
+    {
+      label: t("today"),
+      getRange: () => {
+        const d = formatDate(new Date());
+        return { dateFrom: d, dateTo: d };
+      },
     },
-  },
-  {
-    label: "本周",
-    getRange: () => {
-      const now = new Date();
-      const dayOfWeek = now.getDay();
-      const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - diff);
-      return { dateFrom: formatDate(monday), dateTo: formatDate(now) };
+    {
+      label: t("thisWeek"),
+      getRange: () => {
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diff);
+        return { dateFrom: formatDate(monday), dateTo: formatDate(now) };
+      },
     },
-  },
-  {
-    label: "本月",
-    getRange: () => {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+    {
+      label: t("thisMonth"),
+      getRange: () => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+      },
     },
-  },
-  {
-    label: "今年",
-    getRange: () => {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), 0, 1);
-      return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+    {
+      label: t("thisYear"),
+      getRange: () => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), 0, 1);
+        return { dateFrom: formatDate(start), dateTo: formatDate(now) };
+      },
     },
-  },
-  {
-    label: "去年",
-    getRange: () => {
-      const y = new Date().getFullYear() - 1;
-      return {
-        dateFrom: formatDate(new Date(y, 0, 1)),
-        dateTo: formatDate(new Date(y, 11, 31)),
-      };
+    {
+      label: t("lastYear"),
+      getRange: () => {
+        const y = new Date().getFullYear() - 1;
+        return {
+          dateFrom: formatDate(new Date(y, 0, 1)),
+          dateTo: formatDate(new Date(y, 11, 31)),
+        };
+      },
     },
-  },
-];
+  ];
+}
 
 function loadHistory(): string[] {
   try {
@@ -200,6 +202,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     ref
   ) => {
     const { t } = useTranslation();
+    const timePresets = useMemo(() => getTimePresets(t), [t]);
     const [query, setQuery] = useState(
       imageSearchActive ? t("imageSearchToken") : ""
     );
@@ -730,7 +733,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
           {!imageSearchActive && (
             <div className="mt-2 flex items-center gap-1.5">
               <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
-              {TIME_PRESETS.map((preset) => (
+              {timePresets.map((preset) => (
                 <button
                   className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
                   key={preset.label}

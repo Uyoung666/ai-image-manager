@@ -812,7 +812,7 @@ function SettingsPage() {
                           title={indexStats.thumbnailCacheDir || ""}
                           onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
                         >
-                          {copiedPath === indexStats.thumbnailCacheDir ? "✓ 已复制" : (indexStats.thumbnailCacheDir || "-")}
+                          {copiedPath === indexStats.thumbnailCacheDir ? t("copied") : (indexStats.thumbnailCacheDir || "-")}
                         </span>
                       </div>
                       <div className="flex items-baseline gap-2">
@@ -904,7 +904,7 @@ function SettingsPage() {
                           title={indexStats.databasePath || ""}
                           onClick={() => handleCopyPath(indexStats.databasePath)}
                         >
-                          {copiedPath === indexStats.databasePath ? "✓ 已复制" : (indexStats.databasePath || "-")}
+                          {copiedPath === indexStats.databasePath ? t("copied") : (indexStats.databasePath || "-")}
                         </span>
                       </div>
                     </div>

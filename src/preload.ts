@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   restartApp: (): void => {
     ipcRenderer.send("app:restart");
   },
+  setLanguage: (lang: string): void => {
+    ipcRenderer.send("app:language-changed", lang);
+  },
 });
 
 ipcRenderer.on("global-shortcut:search", () => {

@@ -33,9 +33,12 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
 
   return (
     <div className="flex w-full items-stretch justify-between">
-      <div className="draglayer w-full">
+      <div
+        className="draglayer w-full"
+        onDoubleClick={maximizeWindow}
+      >
         {title && !isMacOS && (
-          <div className="flex flex-1 select-none whitespace-nowrap p-2 text-gray-400 text-xs">
+          <div className="flex flex-1 select-none whitespace-nowrap p-2 text-muted-foreground text-xs">
             {title}
           </div>
         )}
@@ -54,7 +57,8 @@ function WindowButtons() {
   return (
     <div className="flex">
       <button
-        className="p-2 hover:bg-slate-300"
+        aria-label="Minimize"
+        className="p-2 hover:bg-muted"
         onClick={minimizeWindow}
         title="Minimize"
         type="button"
@@ -70,7 +74,8 @@ function WindowButtons() {
         </svg>
       </button>
       <button
-        className="p-2 hover:bg-slate-300"
+        aria-label="Maximize"
+        className="p-2 hover:bg-muted"
         onClick={maximizeWindow}
         title="Maximize"
         type="button"
@@ -93,7 +98,8 @@ function WindowButtons() {
         </svg>
       </button>
       <button
-        className="p-2 hover:bg-red-300"
+        aria-label="Close"
+        className="p-2 hover:bg-destructive/20 hover:text-destructive"
         onClick={closeWindow}
         title="Close"
         type="button"

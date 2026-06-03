@@ -4,12 +4,21 @@ import { ORPCError, os } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { app, BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos, photoTags, tags } from "@/db/schema";
+import {
+  exifData,
+  faceIdentities,
+  faceIdentityMembers,
+  folders,
+  photos,
+  photoTags,
+  tags,
+} from "@/db/schema";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import {
   scanFolder as scanFolderService,
+  stopScanning as stopScanningService,
   watchFolder,
 } from "@/services/indexer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
@@ -39,6 +48,71 @@ export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
         win.webContents.send("scan-progress", progress);
       }
     });
+
+    // If the user cancelled the scan, clean up partially imported data
+    if (result.cancelled) {
+      const db = getDatabase();
+
+      if (result.photoIds.length > 0) {
+        const ids = result.photoIds;
+
+        // Collect photo paths for thumbnail cleanup
+        const records = db
+          .select({ id: photos.id, path: photos.path })
+          .from(photos)
+          .where(inArray(photos.id, ids))
+          .all();
+
+        db.transaction(() => {
+          db.delete(exifData).where(inArray(exifData.photoId, ids)).run();
+          db.delete(photoTags).where(inArray(photoTags.photoId, ids)).run();
+          db.delete(photos).where(inArray(photos.id, ids)).run();
+        });
+
+        for (const r of records) {
+          deletePhotoThumbnails(r.path);
+        }
+        deletePhotoVectors(ids).catch(() => {
+          /* best-effort */
+        });
+      }
+
+      // If the folder was newly created in this scan, remove it and all descendants
+      if (!result.folderExisted) {
+        // Recursively collect all descendant folder IDs via BFS
+        const descendantIds: number[] = [];
+        const visited = new Set<number>([result.folderId]);
+        const queue = [result.folderId];
+        while (queue.length > 0) {
+          const currentId = queue.shift()!;
+          const children = db
+            .select({ id: folders.id })
+            .from(folders)
+            .where(eq(folders.parentId, currentId))
+            .all();
+          for (const child of children) {
+            if (visited.has(child.id)) continue;
+            visited.add(child.id);
+            descendantIds.push(child.id);
+            queue.push(child.id);
+          }
+        }
+        // Delete descendants first, then root
+        for (const fid of descendantIds) {
+          db.delete(folders).where(eq(folders.id, fid)).run();
+        }
+        db.delete(folders).where(eq(folders.id, result.folderId)).run();
+        reloadFolderMatcher();
+      }
+
+      invalidateStatsCache();
+      return {
+        cancelled: true,
+        photoIds: [],
+        skipped: 0,
+        folderId: result.folderId,
+      };
+    }
 
     watchFolder(input.path, (photoId, event) => {
       for (const win of BrowserWindow.getAllWindows()) {
@@ -71,6 +145,11 @@ export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
     const message = (err as Error)?.message ?? String(err);
     throw new ORPCError("INTERNAL_SERVER_ERROR", { message });
   }
+});
+
+export const stopScanning = os.handler(() => {
+  stopScanningService();
+  return { stopped: true };
 });
 
 export const getFolders = os.handler(() => {
@@ -188,6 +267,31 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 
     db.delete(folders).where(eq(folders.id, input.id)).run();
   });
+
+  // 4b) Clean up face identities orphaned by cascade deletion
+  if (allPhotoIds.length > 0) {
+    // Delete identities that no longer have any members
+    const emptyIds = db
+      .select({ id: faceIdentities.id })
+      .from(faceIdentities)
+      .leftJoin(
+        faceIdentityMembers,
+        eq(faceIdentityMembers.identityId, faceIdentities.id)
+      )
+      .where(sql`${faceIdentityMembers.faceVectorId} IS NULL`)
+      .all()
+      .map((r) => r.id);
+    if (emptyIds.length > 0) {
+      db.delete(faceIdentities).where(inArray(faceIdentities.id, emptyIds)).run();
+    }
+    // Recalculate faceCount for identities that still have members
+    db.run(
+      sql`UPDATE face_identities SET face_count = (
+        SELECT COUNT(*) FROM face_identity_members
+        WHERE face_identity_members.identity_id = face_identities.id
+      )`
+    );
+  }
 
   // 5) Clean up thumbnails, AI vectors (outside transaction, best-effort)
   for (const p of allPhotoPaths) {

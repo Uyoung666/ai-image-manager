@@ -1,4 +1,5 @@
 import { ChevronRight, Home, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { ExifFilters } from "./SearchBar";
 
 interface FilterBreadcrumbProps {
@@ -14,6 +15,7 @@ export function FilterBreadcrumb({
   onClearAll,
   getFilterLabel,
 }: FilterBreadcrumbProps) {
+  const { t } = useTranslation();
   const activeFilters = (
     Object.keys(filters) as Array<keyof ExifFilters>
   ).filter((key) => filters[key] !== undefined && filters[key] !== "");
@@ -48,7 +50,7 @@ export function FilterBreadcrumb({
         onClick={onClearAll}
         type="button"
       >
-        清除全部
+        {t("clearAll")}
       </button>
     </div>
   );

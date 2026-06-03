@@ -2,6 +2,7 @@ import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/localization/i18n";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Dialog,
   DialogContent,
@@ -270,6 +271,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
   const [description, setDescription] = useState("");
   const [rules, setRules] = useState<SmartRule[]>([]);
   const [creating, setCreating] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewTimer, setPreviewTimer] = useState<ReturnType<
     typeof setTimeout
@@ -472,7 +474,11 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
     <Dialog
       onOpenChange={(next) => {
         if (!(next || creating)) {
-          onClose();
+          if (rules.length > 0) {
+            setShowCloseConfirm(true);
+          } else {
+            onClose();
+          }
         }
       }}
       open={open}
@@ -726,6 +732,17 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
           </button>
         </DialogFooter>
       </DialogContent>
+      <ConfirmDialog
+        confirmText={t("confirm")}
+        description={t("smartAlbumDiscardDesc")}
+        onCancel={() => setShowCloseConfirm(false)}
+        onConfirm={() => {
+          setShowCloseConfirm(false);
+          onClose();
+        }}
+        open={showCloseConfirm}
+        title={t("smartAlbumDiscardTitle")}
+      />
     </Dialog>
   );
 }

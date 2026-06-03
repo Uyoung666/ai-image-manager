@@ -54,6 +54,7 @@ function CullListPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const composingRef = useRef(false);
+  const [noFolderHint, setNoFolderHint] = useState(false);
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -85,14 +86,13 @@ function CullListPage() {
       return;
     }
 
-    // If no folder selected, navigate to home to select photos manually
     if (!selectedFolderId) {
-      setCreateOpen(false);
-      navigate({ to: "/" });
+      setNoFolderHint(true);
       return;
     }
 
     setCreating(true);
+    setNoFolderHint(false);
     try {
       const result = (await ipc.client.cull.createSession({
         name: newName.trim(),
@@ -169,6 +169,7 @@ function CullListPage() {
             setNewPkMode("standard");
             setNewSortStrategy("time");
             setSelectedFolderId(null);
+            setNoFolderHint(false);
             loadFolders();
             setCreateOpen(true);
           }}
@@ -379,6 +380,12 @@ function CullListPage() {
             <p className="text-[11px] text-muted-foreground/60">
               {t("cullCreateHint")}
             </p>
+
+            {noFolderHint && (
+              <p className="text-[11px] text-destructive">
+                {t("cullSelectFolderHint")}
+              </p>
+            )}
 
             {/* Actions */}
             <div className="flex justify-end gap-2 pt-2">

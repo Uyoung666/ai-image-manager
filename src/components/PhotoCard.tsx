@@ -134,6 +134,18 @@ export const PhotoCard = memo(function PhotoCard({
         <span className="max-w-full truncate px-2 text-[10px] text-muted-foreground/70">
           {filename}
         </span>
+        <button
+          className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
+          onClick={(e) => {
+            e.stopPropagation();
+            imageLoadState.delete(url);
+            setError(false);
+            setLoaded(false);
+          }}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }

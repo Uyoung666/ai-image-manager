@@ -16,6 +16,7 @@ import {
   setIsEmbedding,
   setIsModelLoaded,
   setLocalModelPath,
+  setPoolCancelled,
 } from "./state";
 
 function detectDefaultMirror(): string | null {
@@ -319,6 +320,7 @@ export function isAiModelLoaded(): boolean {
 
 export function stopEmbedding(): void {
   setIsEmbedding(false);
+  setPoolCancelled(true);
 }
 
 export function getEmbeddingProgress(): EmbedProgress & {

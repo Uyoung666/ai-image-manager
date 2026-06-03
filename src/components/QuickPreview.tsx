@@ -25,6 +25,8 @@ export function QuickPreview({
 }: QuickPreviewProps) {
   const { t, i18n } = useTranslation();
   const [loaded, setLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+  const [srcKey, setSrcKey] = useState(0);
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
@@ -38,6 +40,7 @@ export function QuickPreview({
 
   useEffect(() => {
     setLoaded(false);
+    setImgError(false);
     setScale(1);
     setTranslate({ x: 0, y: 0 });
   }, [photo.id]);
@@ -128,19 +131,37 @@ export function QuickPreview({
         className="relative flex max-h-[90vh] max-w-[90vw] flex-col items-center"
         onClick={(e) => e.stopPropagation()}
       >
-        <img
-          alt={photo.filename}
-          className={`max-h-[80vh] max-w-[90vw] rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"} ${scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-          draggable={false}
-          onDoubleClick={handleDoubleClick}
-          onLoad={() => setLoaded(true)}
-          onMouseDown={handleMouseDown}
-          src={toLocalMediaUrl(photo.path)}
-          style={{
-            transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
-          }}
-        />
-        {!loaded && (
+        {imgError ? (
+          <div className="flex flex-col items-center gap-3 rounded-[8px] bg-muted/20 p-12">
+            <span className="text-[14px] text-white/60">{t("cullImageLoadError")}</span>
+            <button
+              className="rounded-[6px] bg-white/10 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/20"
+              onClick={() => {
+                setImgError(false);
+                setLoaded(false);
+                setSrcKey((k) => k + 1);
+              }}
+            >
+              {t("retry")}
+            </button>
+          </div>
+        ) : (
+          <img
+            alt={photo.filename}
+            className={`max-h-[80vh] max-w-[90vw] rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"} ${scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+            draggable={false}
+            key={srcKey}
+            onDoubleClick={handleDoubleClick}
+            onError={() => setImgError(true)}
+            onLoad={() => setLoaded(true)}
+            onMouseDown={handleMouseDown}
+            src={toLocalMediaUrl(photo.path)}
+            style={{
+              transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
+            }}
+          />
+        )}
+        {!loaded && !imgError && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           </div>

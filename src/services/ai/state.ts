@@ -24,6 +24,7 @@ export let isModelLoaded = false;
 export let isVectorDBReady = false;
 export let embeddingModel: EmbeddingModel | null = null;
 export let isEmbedding = false;
+export let poolCancelled = false;
 export let currentProgress: EmbedProgress = {
   processed: 0,
   total: 0,
@@ -49,6 +50,9 @@ export function setEmbeddingModel(m: EmbeddingModel | null): void {
 }
 export function setIsEmbedding(v: boolean): void {
   isEmbedding = v;
+}
+export function setPoolCancelled(v: boolean): void {
+  poolCancelled = v;
 }
 export function setCurrentProgress(p: EmbedProgress): void {
   currentProgress = p;

@@ -38,7 +38,7 @@ export function AiProgressBar() {
     });
   }, [fetchProgress]);
 
-  // Poll while active
+  // Poll while active (fast: 500ms)
   useEffect(() => {
     if (!progress?.isActive || pollingRef.current) {
       return;
@@ -64,6 +64,37 @@ export function AiProgressBar() {
     return () => {
       clearTimeout(timer);
       pollingRef.current = false;
+    };
+  }, [progress?.isActive, fetchProgress]);
+
+  // Slow poll when idle — detects auto-started embeddings (e.g. after folder import)
+  const slowPollRef = useRef(false);
+  useEffect(() => {
+    if (progress?.isActive || slowPollRef.current) {
+      return;
+    }
+
+    slowPollRef.current = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      const p = await fetchProgress();
+      if (p) {
+        setProgress(p);
+      }
+      // Stop slow poll once embedding is detected (fast poll takes over)
+      if (p?.isActive) {
+        slowPollRef.current = false;
+        return;
+      }
+      timer = setTimeout(poll, 2000);
+    };
+
+    timer = setTimeout(poll, 2000);
+
+    return () => {
+      clearTimeout(timer);
+      slowPollRef.current = false;
     };
   }, [progress?.isActive, fetchProgress]);
 
@@ -104,6 +135,12 @@ export function AiProgressBar() {
     if (p) {
       setProgress(p);
     }
+  }
+
+  async function handleCancel() {
+    await ipc.client.photos.stopAiIndexing({});
+    setPaused(false);
+    setProgress(null);
   }
 
   if (progress?.phase === "error" || lastError) {
@@ -210,15 +247,14 @@ export function AiProgressBar() {
       : progress.total > 0
         ? Math.round((progress.processed / progress.total) * 100)
         : 0;
-  const phaseLabel =
-    progress.phase === "loading"
+  const phaseLabel = paused
+    ? t("aiPaused")
+    : progress.phase === "loading"
       ? progress.downloadPercent == null
         ? t("aiLoadingClip")
         : t("aiLoadingClip", { percent: progress.downloadPercent })
       : progress.phase === "complete"
-        ? paused
-          ? t("aiPaused")
-          : t("aiComplete")
+        ? t("aiComplete")
         : t("aiIndexingProgress", {
             processed: progress.processed,
             total: progress.total,
@@ -241,15 +277,23 @@ export function AiProgressBar() {
           {progress.currentFile}
         </p>
       )}
-      {progress.phase !== "complete" && (
+      {progress.phase === "embedding" && (
         <div className="mt-2 flex gap-1">
           {paused ? (
-            <button
-              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/10"
-              onClick={handleResume}
-            >
-              {t("aiResume")}
-            </button>
+            <>
+              <button
+                className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/10"
+                onClick={handleResume}
+              >
+                {t("aiResume")}
+              </button>
+              <button
+                className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={handleCancel}
+              >
+                {t("cancel")}
+              </button>
+            </>
           ) : (
             <button
               className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"

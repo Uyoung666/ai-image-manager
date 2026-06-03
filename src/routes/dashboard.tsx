@@ -132,6 +132,7 @@ function DashboardPage() {
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
   const [colorLoading, setColorLoading] = useState(true);
   const [colorData, setColorData] = useState<ColorDistributionUI | null>(null);
@@ -146,7 +147,7 @@ function DashboardPage() {
         const result = await ipc.client.photos.getStats({});
         if (!cancelled) setData(result as DashboardData);
       } catch {
-        /* ignore */
+        if (!cancelled) setError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -156,7 +157,7 @@ function DashboardPage() {
     ipc.client.photos
       .getColorDistribution()
       .then((result) => { if (!cancelled) setColorData(result as ColorDistributionUI); })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setColorLoading(false); });
 
     return () => { cancelled = true; };
@@ -366,6 +367,41 @@ function DashboardPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">
+          <svg
+            aria-hidden="true"
+            className="h-5 w-5 text-danger"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+        <p className="font-[510] text-[13px] text-foreground">{t("errorBoundaryTitle")}</p>
+        <p className="text-[12px] text-muted-foreground">{t("dashboardLoadFailed")}</p>
+        <button
+          className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
+          onClick={() => {
+            setError(false);
+            setLoading(true);
+            window.location.reload();
+          }}
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }

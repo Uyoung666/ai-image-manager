@@ -528,7 +528,12 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             );
             const pct = Math.min(100, Math.round((pkCount / totalWork) * 100));
             const remainingPks = Math.max(0, totalWork - pkCount);
-            return `${pkCount} / ~${totalWork} PKs (${pct}%) · 剩余 ~${remainingPks} 次`;
+            return t("cullProgressDetail", {
+              pkCount,
+              totalWork,
+              pct,
+              count: remainingPks,
+            });
           })()}
         </span>
         <span className="ml-2 rounded-[3px] bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">

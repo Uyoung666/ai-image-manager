@@ -470,9 +470,20 @@ async function clusterUnassignedFaces(): Promise<void> {
         .onConflictDoNothing()
         .run();
 
+      // If the identity's representative photo was deleted (e.g. folder removed),
+      // restore it with this newly matched face's photo.
+      const cur = db
+        .select({ representativePhotoId: faceIdentities.representativePhotoId })
+        .from(faceIdentities)
+        .where(eq(faceIdentities.id, match.identityId))
+        .get();
+
       db.update(faceIdentities)
         .set({
           faceCount: sql`(SELECT COUNT(*) FROM face_identity_members WHERE identity_id = ${match.identityId})`,
+          ...(cur?.representativePhotoId
+            ? {}
+            : { representativePhotoId: face.photoId }),
         })
         .where(eq(faceIdentities.id, match.identityId))
         .run();

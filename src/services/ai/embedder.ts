@@ -13,9 +13,11 @@ import {
   currentProgress,
   isEmbedding,
   photoTable,
+  poolCancelled,
   setCurrentProgress,
   setIsEmbedding,
   setLocalModelPath,
+  setPoolCancelled,
 } from "./state";
 import { batchSuggestTags } from "./tag-suggester";
 import {
@@ -232,6 +234,11 @@ export async function embedAllPhotos(
   }
   setIsEmbedding(true);
 
+  // Allow previous cancelled pool to fully settle before starting fresh
+  if (poolCancelled) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
   try {
     const db = getDatabase();
 
@@ -405,17 +412,24 @@ export async function embedAllPhotos(
       await initWorkerPool(_localModelPath!);
       poolReady = true;
 
-      const poolResults = await embedWithPool(unprocessed, (done, tot) => {
-        setCurrentProgress({
-          processed: done,
-          total: tot,
-          phase: "embedding",
-          currentFile: `pool: ${done}/${tot}`,
-          downloadPercent: undefined,
-          loadingStartedAt: null,
-        });
-        onProgress?.(currentProgress);
-      });
+      setPoolCancelled(false);
+      const poolResults = await embedWithPool(
+        unprocessed,
+        (done, tot) => {
+          setCurrentProgress({
+            processed: done,
+            total: tot,
+            phase: "embedding",
+            currentFile: `pool: ${done}/${tot}`,
+            downloadPercent: undefined,
+            loadingStartedAt: null,
+          });
+          if (isEmbedding) {
+            onProgress?.(currentProgress);
+          }
+        },
+        () => poolCancelled
+      );
       // Persist results to LanceDB and SQLite — batch write
       const successResults = poolResults.filter(
         (r) => r.vector && r.vector.length > 0
@@ -575,7 +589,7 @@ export async function embedAllPhotos(
     } else {
       setCurrentProgress({
         processed,
-        total: processed,
+        total,
         phase: "complete",
         currentFile: "",
         downloadPercent: undefined,

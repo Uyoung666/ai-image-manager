@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { toast } from "sonner";
 
 interface SearchResult {
   action: () => void;
@@ -98,7 +99,7 @@ export function SpotlightSearch() {
     setSearching(true);
     const qLower = q.toLowerCase();
     try {
-      const [photos, tags, albums, faces] = await Promise.all([
+      const [photos, tags, albums, faces] = await Promise.allSettled([
         ipc.client.photos.searchCompound({
           query: q,
           limit: 5,
@@ -107,29 +108,46 @@ export function SpotlightSearch() {
         ipc.client.albums.listAlbums({}),
         ipc.client.faces.listFaceIdentities({}),
       ]);
-      setPhotoResults(
-        ((photos as { results?: PhotoResult[] }).results || []).slice(0, 5)
-      );
-      setTagResults(
-        ((tags as TagResult[]) || [])
-          .filter((t) => t.name.toLowerCase().includes(qLower))
-          .slice(0, 5)
-      );
-      setAlbumResults(
-        ((albums as AlbumResult[]) || [])
-          .filter((a) => a.name.toLowerCase().includes(qLower))
-          .slice(0, 5)
-      );
-      setPersonResults(
-        ((faces as PersonResult[]) || [])
-          .filter(
-            (p) =>
-              p.name && p.name.toLowerCase().includes(qLower)
-          )
-          .slice(0, 5)
-      );
+      const failed = [photos, tags, albums, faces].filter(
+        (r) => r.status === "rejected"
+      ).length;
+
+      if (photos.status === "fulfilled") {
+        setPhotoResults(
+          ((photos.value as { results?: PhotoResult[] }).results || []).slice(0, 5)
+        );
+      }
+      if (tags.status === "fulfilled") {
+        setTagResults(
+          ((tags.value as TagResult[]) || [])
+            .filter((t) => t.name.toLowerCase().includes(qLower))
+            .slice(0, 5)
+        );
+      }
+      if (albums.status === "fulfilled") {
+        setAlbumResults(
+          ((albums.value as AlbumResult[]) || [])
+            .filter((a) => a.name.toLowerCase().includes(qLower))
+            .slice(0, 5)
+        );
+      }
+      if (faces.status === "fulfilled") {
+        setPersonResults(
+          ((faces.value as PersonResult[]) || [])
+            .filter(
+              (p) =>
+                p.name && p.name.toLowerCase().includes(qLower)
+            )
+            .slice(0, 5)
+        );
+      }
+      if (failed > 0 && failed < 4) {
+        toast.error(t("searchPartialFailed"));
+      } else if (failed === 4) {
+        toast.error(t("toastSearchFailed"));
+      }
     } catch {
-      // ignore
+      toast.error(t("toastSearchFailed"));
     } finally {
       setSearching(false);
     }

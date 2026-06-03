@@ -385,7 +385,8 @@ export async function embedSingleImage(
  */
 export async function embedWithPool(
   photos: Array<{ id: number; path: string }>,
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number, total: number) => void,
+  shouldCancel?: () => boolean
 ): Promise<EmbedResult[]> {
   if (!initialized) {
     throw new Error("Worker pool not initialized");
@@ -407,8 +408,12 @@ export async function embedWithPool(
 
   async function worker(): Promise<void> {
     while (cursor < batchList.length) {
+      if (shouldCancel?.()) break;
       const idx = cursor++;
       if (idx >= batchList.length) break;
+      if (shouldCancel?.()) {
+        break;
+      }
       const batch = batchList[idx];
       try {
         const results = await dispatchBatch(batch);
