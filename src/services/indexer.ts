@@ -292,6 +292,29 @@ interface PhotoRecord {
   dominantColors: string | null;
 }
 
+// Parse shutter speed text (e.g. "0.001", "1/1000") to numeric seconds
+function parseShutterSpeedToNum(value: string | undefined): number | null {
+  if (value === undefined || value === "") return null;
+  // Fraction format: "1/1000", "1/60" etc.
+  const fracMatch = value.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+  if (fracMatch) {
+    const num = Number.parseFloat(fracMatch[1]);
+    const den = Number.parseFloat(fracMatch[2]);
+    if (den !== 0) return num / den;
+    return null;
+  }
+  // Decimal string: "0.001", "0.5" etc.
+  const num = Number.parseFloat(value);
+  return Number.isFinite(num) && num >= 0 ? num : null;
+}
+
+// Parse focal length text (e.g. "85", "24-70") to numeric value (first number)
+function parseFocalLengthToNum(value: string | undefined): number | null {
+  if (value === undefined || value === "") return null;
+  const num = Number.parseFloat(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+}
+
 interface ExifRecord {
   photoId: number;
   cameraMake?: string;
@@ -300,8 +323,10 @@ interface ExifRecord {
   lensModel?: string;
   focalLength?: string;
   focalLength35mm?: string;
+  focalLengthNum?: number | null;
   aperture?: number;
   shutterSpeed?: string;
+  shutterSpeedNum?: number | null;
   iso?: number;
   exposureCompensation?: number;
   dateTaken?: number | null;
@@ -381,16 +406,20 @@ async function preparePhotoRecord(
   let exifRecord: ExifRecord | null = null;
 
   if (exif && Object.keys(exif).length > 0) {
+    const focalLengthStr = exif.FocalLength?.toString();
+    const shutterSpeedStr = exif.ExposureTime?.toString();
     exifRecord = {
       photoId: 0, // Will be set after insert
       cameraMake: exif.Make as string,
       cameraModel: exif.Model as string,
       lensMake: exif.LensMake as string,
       lensModel: exif.LensModel as string,
-      focalLength: exif.FocalLength?.toString(),
+      focalLength: focalLengthStr,
       focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
+      focalLengthNum: parseFocalLengthToNum(focalLengthStr),
       aperture: exif.FNumber as number,
-      shutterSpeed: exif.ExposureTime?.toString(),
+      shutterSpeed: shutterSpeedStr,
+      shutterSpeedNum: parseShutterSpeedToNum(shutterSpeedStr),
       iso: exif.ISO as number,
       exposureCompensation: exif.ExposureCompensation as number,
       dateTaken: exif.DateTimeOriginal
