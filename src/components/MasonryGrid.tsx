@@ -85,6 +85,7 @@ export function MasonryGrid({
   const [viewportHeight, setViewportHeight] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
+  const [currentTimeLabel, setCurrentTimeLabel] = useState("");
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number>(0);
 
@@ -106,6 +107,9 @@ export function MasonryGrid({
     groupHeaders
   );
 
+  const headerPositionsRef = useRef(headerPositions);
+  headerPositionsRef.current = headerPositions;
+
   const HEADER_HEIGHT = 36;
 
   const handleScroll = useCallback(() => {
@@ -122,6 +126,20 @@ export function MasonryGrid({
           clearTimeout(scrollTimerRef.current);
         }
         scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 600);
+        const headers = headerPositionsRef.current;
+        let nextLabel = "";
+        if (headers.length > 0) {
+          for (let i = headers.length - 1; i >= 0; i--) {
+            if (headers[i].top <= el.scrollTop + 100) {
+              nextLabel = headers[i].label;
+              break;
+            }
+          }
+          if (!nextLabel) {
+            nextLabel = headers[0]?.label || "";
+          }
+        }
+        setCurrentTimeLabel((prev) => (prev !== nextLabel ? nextLabel : prev));
       }
     });
   }, []);
@@ -271,10 +289,21 @@ export function MasonryGrid({
     if (positions.length === 0) {
       return 400;
     }
-    const avgHeight =
-      positions.reduce((sum, p) => sum + p.height, 0) / positions.length;
-    return avgHeight * overscan;
-  }, [positions, overscan]);
+    if (positions.length <= columnCount * 10) {
+      const avgHeight =
+        positions.reduce((sum, p) => sum + p.height, 0) / positions.length;
+      return avgHeight * overscan;
+    }
+    const sampleSize = columnCount * 6;
+    const step = Math.floor(positions.length / sampleSize);
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < positions.length; i += step) {
+      sum += positions[i].height;
+      count++;
+    }
+    return (sum / count) * overscan;
+  }, [positions, overscan, columnCount]);
 
   const visibleItems = useMemo(() => {
     if (positions.length === 0) {
@@ -339,20 +368,6 @@ export function MasonryGrid({
       return () => clearTimeout(timer);
     }
   }, [visibleItems.length]);
-
-  const currentTimeLabel = useMemo(() => {
-    if (headerPositions.length === 0) {
-      return "";
-    }
-    let label = "";
-    for (let i = headerPositions.length - 1; i >= 0; i--) {
-      if (headerPositions[i].top <= scrollTop + 100) {
-        label = headerPositions[i].label;
-        break;
-      }
-    }
-    return label || headerPositions[0]?.label || "";
-  }, [headerPositions, scrollTop]);
 
   // Marquee selection handlers
   const handleMarqueeStart = useCallback(

@@ -13,6 +13,7 @@ import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoGrid } from "@/components/PhotoGrid";
+import { clearImageLoadCache } from "@/components/PhotoCard";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import { SearchBar, type ExifFilters, type SearchBarHandle } from "@/components/SearchBar";
@@ -250,6 +251,7 @@ function HomePage() {
       if (event.data?.channel === "file-change") {
         queryClient.invalidateQueries({ queryKey: ["photos"] });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
+        clearImageLoadCache();
       }
       if (event.data?.channel === "scan-progress") {
         const { scanned, total, phase } = event.data;

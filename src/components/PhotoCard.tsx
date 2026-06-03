@@ -20,7 +20,20 @@ interface PhotoCardProps {
   width: number;
 }
 
+const MAX_IMAGE_LOAD_CACHE = 500;
 const imageLoadState = new Map<string, "loaded" | "error">();
+
+function setImageLoadState(key: string, value: "loaded" | "error") {
+  imageLoadState.set(key, value);
+  if (imageLoadState.size > MAX_IMAGE_LOAD_CACHE) {
+    const oldest = imageLoadState.keys().next().value;
+    if (oldest) imageLoadState.delete(oldest);
+  }
+}
+
+export function clearImageLoadCache() {
+  imageLoadState.clear();
+}
 
 function HighlightText({ text, query }: { text: string; query?: string }) {
   if (!query) {
@@ -128,7 +141,7 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       aria-selected={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
         deleting
           ? "scale-95 opacity-0 duration-180"
           : isSelected
@@ -170,8 +183,8 @@ export const PhotoCard = memo(function PhotoCard({
         }`}
         decoding="async"
         loading="lazy"
-        onError={() => { imageLoadState.set(url, "error"); setError(true); }}
-        onLoad={() => { imageLoadState.set(url, "loaded"); setLoaded(true); }}
+        onError={() => { setImageLoadState(url, "error"); setError(true); }}
+        onLoad={() => { setImageLoadState(url, "loaded"); setLoaded(true); }}
         src={url}
       />
 

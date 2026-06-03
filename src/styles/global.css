@@ -213,6 +213,11 @@
     background: var(--foreground-secondary);
   }
 
+  [data-masonry-scroll] {
+    will-change: scroll-position;
+    transform: translateZ(0);
+  }
+
   /* Theme transition — smooth color shift on theme switch */
   html.transitioning *,
   html.transitioning *::before,

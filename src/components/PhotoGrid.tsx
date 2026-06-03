@@ -223,8 +223,6 @@ export function PhotoGrid({
     ]
   );
 
-  const masonryItems = useMemo(() => photos, [photos]);
-
   const groupHeaders = useMemo((): GroupHeader[] => {
     if (sort !== "date" || photos.length === 0) {
       return [];
@@ -363,7 +361,7 @@ export function PhotoGrid({
           containerWidth={containerWidth - 16}
           gap={GAP}
           groupHeaders={groupHeaders}
-          items={masonryItems}
+          items={photos}
           onEndReached={onEndReached}
           onMarqueeSelect={onMarqueeSelect}
           renderItem={renderItem}

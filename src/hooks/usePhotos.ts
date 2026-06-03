@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { ipc } from "@/ipc/manager";
 import type { PhotoListResponse } from "@/types/photo";
 
@@ -49,6 +49,8 @@ export function usePhotos({
       const nextOffset = lastPage.offset + lastPage.limit;
       return nextOffset < lastPage.total ? nextOffset : undefined;
     },
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60_000,
     enabled,
   });
 }
