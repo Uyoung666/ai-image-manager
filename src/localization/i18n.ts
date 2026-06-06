@@ -409,9 +409,36 @@ i18n.use(initReactI18next).init({
         // GPU acceleration
         gpuAcceleration: "GPU 加速",
         gpuEnableAcceleration: "启用 GPU 加速（DirectML）",
-        gpuAccelerationHint: "使用显卡加速人脸识别和图像索引，可提升 3-4 倍性能。支持 NVIDIA/AMD/Intel 显卡",
+        gpuAccelerationHint:
+          "使用显卡加速人脸识别和图像索引，可提升 3-4 倍性能。支持 NVIDIA/AMD/Intel 显卡",
         gpuRestartHint: "修改后需重新启动索引任务才能生效",
-        gpuSaved: "GPU 设置已保存",
+        gpuSaved: "已保存",
+
+        // GPU detection
+        gpuDetect: "检测 GPU",
+        gpuDetecting: "正在检测…",
+        gpuRetryDetect: "重新检测",
+        gpuDetectedOk: "DirectML 可用",
+        gpuDetectedUnsupported: "您的系统不支持 DirectML GPU 加速",
+        gpuDetectedError: "检测失败",
+        gpuNotDetected: '未检测 — 点击"检测 GPU"',
+        gpuStatusFace: "人脸识别",
+        gpuStatusEmbed: "图像嵌入",
+        gpuStatusActive: "GPU 加速中",
+        gpuStatusInactive: "未加速",
+        gpuStatusUnsupported: "暂不支持",
+
+        // GPU detection dialog
+        gpuDetectionTitle: "检测到支持 GPU 加速",
+        gpuDetectionDescription:
+          "检测到您的 {{gpuName}} 支持 DirectML 加速，开启后可大幅提升人脸识别速度。",
+        gpuDetectionDescriptionGeneric:
+          "检测到您的显卡支持 DirectML 加速，开启后可大幅提升人脸识别速度。",
+        gpuDetectionFaceSpeed: "人脸识别预计提速 6.6 倍",
+        gpuDetectionEmbedNote: "图像嵌入暂不支持 GPU（已知上游限制）",
+        gpuDetectionHint: "可随时在设置中关闭，仅在索引时占用少量显存。",
+        gpuDetectionEnable: "开启 GPU 加速",
+        gpuDetectionSkip: "暂不开启",
 
         // Error boundary
         errorBoundaryTitle: "出现了一些问题",
@@ -1343,9 +1370,37 @@ i18n.use(initReactI18next).init({
         gpuEnableAcceleration: "Enable GPU Acceleration (DirectML)",
         gpuAccelerationHint:
           "Use GPU to accelerate face recognition and image indexing, 3-4x faster. Supports NVIDIA/AMD/Intel GPUs",
-        gpuRestartHint:
-          "Restart indexing tasks to apply changes",
-        gpuSaved: "GPU settings saved",
+        gpuRestartHint: "Restart indexing tasks to apply changes",
+        gpuSaved: "Saved",
+
+        // GPU detection
+        gpuDetect: "Detect GPU",
+        gpuDetecting: "Detecting…",
+        gpuRetryDetect: "Retry detection",
+        gpuDetectedOk: "DirectML available",
+        gpuDetectedUnsupported:
+          "Your system does not support DirectML GPU acceleration",
+        gpuDetectedError: "Detection failed",
+        gpuNotDetected: 'Not detected — click "Detect GPU"',
+        gpuStatusFace: "Face recognition",
+        gpuStatusEmbed: "Image embedding",
+        gpuStatusActive: "GPU accelerated",
+        gpuStatusInactive: "Not accelerated",
+        gpuStatusUnsupported: "Not supported",
+
+        // GPU detection dialog
+        gpuDetectionTitle: "GPU Acceleration Available",
+        gpuDetectionDescription:
+          "Your {{gpuName}} supports DirectML acceleration. Enabling it will significantly speed up face recognition.",
+        gpuDetectionDescriptionGeneric:
+          "Your GPU supports DirectML acceleration. Enabling it will significantly speed up face recognition.",
+        gpuDetectionFaceSpeed: "Face recognition: ~6.6× faster",
+        gpuDetectionEmbedNote:
+          "Image embedding not accelerated yet (known upstream limitation)",
+        gpuDetectionHint:
+          "You can disable this anytime in Settings. GPU acceleration only uses VRAM during indexing.",
+        gpuDetectionEnable: "Enable GPU Acceleration",
+        gpuDetectionSkip: "Not Now",
 
         // Error boundary
         errorBoundaryTitle: "Something went wrong",

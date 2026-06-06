@@ -973,9 +973,23 @@ app.whenReady().then(async () => {
     log.info("Window ready — starting background services...");
 
     // ── Step 3: Non-blocking background initialization ───────────────
-    startBackgroundServices().catch((err) =>
-      log.warn({ err }, "Non-critical services degraded")
-    );
+    startBackgroundServices()
+      .then(() => {
+        // GPU detection runs after all services are up and models are
+        // available.  Defer a further 1 s so the renderer has time to
+        // mount its message listener before we send the prompt.
+        setTimeout(async () => {
+          try {
+            const { probeAndNotifyIfNeeded } = await import(
+              "@/services/gpu-detector"
+            );
+            await probeAndNotifyIfNeeded();
+          } catch (err) {
+            log.warn({ err }, "GPU detection skipped");
+          }
+        }, 1000);
+      })
+      .catch((err) => log.warn({ err }, "Non-critical services degraded"));
 
     // ── Background color data backfill (non-blocking, deferred 5s) ─────
     setTimeout(async () => {

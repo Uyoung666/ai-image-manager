@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { openExternalLink } from "@/actions/shell";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { CloudConfigPanel } from "@/components/CloudConfigPanel";
+import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
 import {
@@ -237,79 +238,6 @@ function MirrorSettingsSection() {
         </p>
         <p className="text-[11px] text-muted-foreground/70">
           {t("aiMirrorRestartHint")}
-        </p>
-      </div>
-    </section>
-  );
-}
-
-function GpuSettingsSection() {
-  const { t } = useTranslation();
-  const [enabled, setEnabled] = useState(false);
-  const [saveStatus, setSaveStatus] = useState("");
-
-  useEffect(() => {
-    ipc.client.settings.getGpuSettings({}).then((r: any) => {
-      setEnabled(r.enabled || false);
-    });
-  }, []);
-
-  async function handleSave() {
-    setSaveStatus(t("saving"));
-    try {
-      await ipc.client.settings.setGpuSettings({ enabled });
-      setSaveStatus(t("gpuSaved"));
-      setTimeout(() => setSaveStatus(""), 3000);
-    } catch {
-      setSaveStatus(t("saveFailed"));
-      setTimeout(() => setSaveStatus(""), 3000);
-      setEnabled(!enabled);
-    }
-  }
-
-  return (
-    <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">
-        {t("gpuAcceleration")}
-      </h2>
-      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-[13px] text-muted-foreground">
-              {t("gpuEnableAcceleration")}
-            </span>
-            <p className="mt-1 text-[11px] text-muted-foreground/70">
-              {t("gpuAccelerationHint")}
-            </p>
-          </div>
-          <button
-            className={`h-5 w-9 rounded-full transition-colors ${
-              enabled ? "bg-primary" : "bg-muted"
-            }`}
-            onClick={() => setEnabled(!enabled)}
-          >
-            <div
-              className={`h-4 w-4 rounded-full bg-white transition-transform ${
-                enabled ? "translate-x-[18px]" : "translate-x-[2px]"
-              }`}
-            />
-          </button>
-        </div>
-
-        <div className="flex gap-2 border-border border-t pt-3">
-          <button
-            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-            onClick={handleSave}
-          >
-            {saveStatus || t("save")}
-          </button>
-        </div>
-
-        {saveStatus && saveStatus !== t("saving") && (
-          <p className="text-[12px] text-muted-foreground">{saveStatus}</p>
-        )}
-        <p className="text-[11px] text-muted-foreground/70">
-          {t("gpuRestartHint")}
         </p>
       </div>
     </section>
@@ -1099,7 +1027,7 @@ function SettingsPage() {
           <DataDirSection />
 
           <MirrorSettingsSection />
-          <GpuSettingsSection />
+          <GpuSettingsCard />
 
           <section className="space-y-3">
             <h2 className="font-[590] text-[14px] text-foreground">

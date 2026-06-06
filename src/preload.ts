@@ -63,3 +63,11 @@ ipcRenderer.on("update:available", (_event, info) => {
 ipcRenderer.on("update:status", (_event, payload) => {
   window.postMessage({ channel: "update:status", ...payload }, "*");
 });
+
+ipcRenderer.on("gpu:prompt-user", (_event, payload) => {
+  window.postMessage({ channel: "gpu:prompt-user", ...payload }, "*");
+});
+
+ipcRenderer.on("gpu:detection-done", (_event, payload) => {
+  window.postMessage({ channel: "gpu:detection-done", ...payload }, "*");
+});

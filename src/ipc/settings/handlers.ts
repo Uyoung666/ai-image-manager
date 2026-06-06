@@ -331,9 +331,31 @@ export const checkMirrorHealth = os.handler(async () => {
   return { results };
 });
 
+const VIRTUAL_GPU_RE =
+  /virtual|mumu|remote\s*display|basic\s*display|hyper-?v|vmware|virtualbox|citrix|parsec|indirect\s*display/i;
+
 export const getGpuSettings = os.handler(() => {
   const enabled = getSetting("gpu.enabled") === "true";
-  return { enabled };
+  const promptShown = getSetting("gpu.promptShown") === "true";
+  let detected: Record<string, unknown> | null = null;
+  const raw = getSetting("gpu.detected");
+  if (raw) {
+    try {
+      detected = JSON.parse(raw);
+      // Reject stale cache that captured a virtual display adapter
+      // (e.g. MuMu, Hyper-V) instead of the real GPU.
+      if (
+        detected &&
+        typeof detected.gpuName === "string" &&
+        VIRTUAL_GPU_RE.test(detected.gpuName)
+      ) {
+        detected = null;
+      }
+    } catch {
+      /* ignore malformed */
+    }
+  }
+  return { enabled, detected, promptShown };
 });
 
 export const setGpuSettings = os
@@ -346,3 +368,18 @@ export const setGpuSettings = os
     setSetting("gpu.enabled", String(input.enabled));
     return { ok: true };
   });
+
+export const checkGpuCapability = os.handler(async () => {
+  const { probeGpuCapability, cacheDetectionResult, findModelsDir } =
+    await import("@/services/gpu-detector");
+  const modelsDir = findModelsDir();
+  const result = await probeGpuCapability(modelsDir);
+  cacheDetectionResult(result);
+  return result;
+});
+
+export const markGpuPromptShown = os.handler(async () => {
+  const { markPromptShown } = await import("@/services/gpu-detector");
+  markPromptShown();
+  return { ok: true };
+});

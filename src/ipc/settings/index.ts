@@ -1,10 +1,12 @@
 import {
+  checkGpuCapability,
   checkMirrorHealth,
   getAllAppSettings,
   getAppSetting,
   getDataPathInfo,
   getGpuSettings,
   getMirrorSettings,
+  markGpuPromptShown,
   setAppSetting,
   setDataPath,
   setGpuSettings,
@@ -22,4 +24,6 @@ export const settings = {
   setGpuSettings,
   setMirrorSettings,
   checkMirrorHealth,
+  checkGpuCapability,
+  markGpuPromptShown,
 };
