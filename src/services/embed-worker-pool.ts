@@ -5,7 +5,7 @@ import path from "node:path";
 import { app } from "electron";
 import { createLogger } from "@/utils/logger";
 
-const log = createLogger('embed-worker-pool');
+const log = createLogger("embed-worker-pool");
 
 interface EmbedResult {
   error?: string;
@@ -30,7 +30,7 @@ interface QueuedRequest {
   resolve: (results: EmbedResult[]) => void;
 }
 
-const BATCH_SIZE = 15;
+const BATCH_SIZE = 25;
 const WORKER_TIMEOUT = 300_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const RESPAWN_DELAY_MS = 1000;
@@ -38,6 +38,7 @@ const RESPAWN_DELAY_MS = 1000;
 let slots: WorkerSlot[] = [];
 let requestQueue: QueuedRequest[] = [];
 let modelPath: string | null = null;
+let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
 
@@ -182,7 +183,7 @@ function handleWorkerDeath(slot: WorkerSlot): void {
       const newSlot = spawnWorker(slot.index);
       newSlot.consecutiveFailures = slot.consecutiveFailures;
       slots[slot.index] = newSlot;
-      newSlot.process.send({ type: "init", modelPath });
+      newSlot.process.send({ type: "init", modelPath, useGPU: poolUseGPU });
     }, RESPAWN_DELAY_MS);
   } else {
     console.warn(
@@ -213,7 +214,9 @@ function dispatchToSlot(
   slot.pendingResolve = resolve;
   slot.pendingReject = reject;
 
-  console.log(`[Pool] Dispatching ${photos.length} photos to Worker ${slot.index}`);
+  console.log(
+    `[Pool] Dispatching ${photos.length} photos to Worker ${slot.index}`
+  );
 
   const timeout = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
@@ -235,12 +238,13 @@ function dispatchToSlot(
 }
 
 /** Start worker pool. Workers load the CLIP model once and stay alive. */
-export async function initWorkerPool(mp: string): Promise<void> {
+export async function initWorkerPool(mp: string, useGPU = false): Promise<void> {
   if (initialized && slots.some((s) => s.status !== "dead")) {
     return;
   }
 
   modelPath = mp;
+  poolUseGPU = useGPU;
   slots = [];
   requestQueue = [];
 
@@ -282,7 +286,7 @@ export async function initWorkerPool(mp: string): Promise<void> {
 
   // Send init to all workers
   for (const slot of slots) {
-    slot.process.send({ type: "init", modelPath });
+    slot.process.send({ type: "init", modelPath, useGPU: poolUseGPU });
   }
 
   await Promise.all(readyPromises);
@@ -301,7 +305,7 @@ function dispatchBatch(
         reject(new Error("Worker pool not initialized and no model path"));
         return;
       }
-      initWorkerPool(modelPath)
+      initWorkerPool(modelPath, poolUseGPU)
         .then(() => {
           const idleSlot = slots.find((s) => s.status === "idle");
           if (idleSlot) {
@@ -408,9 +412,13 @@ export async function embedWithPool(
 
   async function worker(): Promise<void> {
     while (cursor < batchList.length) {
-      if (shouldCancel?.()) break;
+      if (shouldCancel?.()) {
+        break;
+      }
       const idx = cursor++;
-      if (idx >= batchList.length) break;
+      if (idx >= batchList.length) {
+        break;
+      }
       if (shouldCancel?.()) {
         break;
       }
@@ -421,8 +429,12 @@ export async function embedWithPool(
       } catch (err: any) {
         console.warn(`[Pool] Batch failed: ${err.message}`);
         if (batch.length > 1) {
-          const left = await processResultsFallback(batch.slice(0, Math.floor(batch.length / 2)));
-          const right = await processResultsFallback(batch.slice(Math.floor(batch.length / 2)));
+          const left = await processResultsFallback(
+            batch.slice(0, Math.floor(batch.length / 2))
+          );
+          const right = await processResultsFallback(
+            batch.slice(Math.floor(batch.length / 2))
+          );
           allResults.push(...left, ...right);
         } else {
           allResults.push({ id: batch[0].id, error: err.message });

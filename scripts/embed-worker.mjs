@@ -1,22 +1,16 @@
 /**
- * Persistent CLIP image embedding worker.
+ * Persistent CLIP image embedding worker (DirectML GPU accelerated).
  *
- * Runs as a child process via fork(). Loads the CLIP vision model once, then
- * processes batches as they arrive — no model reload per batch.
+ * Runs as a child process via fork(). Loads the CLIP vision ONNX model once
+ * via onnxruntime-node (native, supports DirectML), then processes batches
+ * as they arrive — no model reload per batch.
  *
  * IPC protocol:
- *   Parent sends: { type: "init", modelPath: "..." }
- *   Worker sends: { type: "ready" }
- *   Parent sends: { type: "embed", modelPath: "...", photos: [{ id, path }, ...] }
- *   Worker sends: { type: "result", results: [{ id, vector?, error? }] }
- *   Parent sends: { type: "shutdown" } — worker exits.
- *
- * Architecture — Manual Tensor Construction:
- *   Image preprocessing (resize, normalize, NCHW layout) uses sharp + pure
- *   JS only. CLIP vision inference runs through @xenova/transformers, which
- *   delegates to onnxruntime-node (native CPU) inside this forked child
- *   process. The historical GLib conflict only applied to ONNX WASM in the
- *   main process; the native ORT backend has no GLib dependency.
+ *   Parent → { type: "init",   modelPath, useGPU }
+ *   Worker → { type: "ready" }
+ *   Parent → { type: "embed",  photos: [{ id, path }, ...] }
+ *   Worker → { type: "result", results: [{ id, vector?, error? }] }
+ *   Parent → { type: "shutdown" } — worker exits.
  */
 
 import { execFileSync } from "node:child_process";
@@ -28,8 +22,21 @@ const require = createRequire(import.meta.url);
 const exiftoolPath = require("exiftool-vendored.exe");
 
 const RAW_EXTENSIONS = new Set([
-  ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-  ".dng", ".orf", ".rw2", ".raf", ".pef", ".rwl", ".3fr", ".raw",
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".nrw",
+  ".arw",
+  ".srf",
+  ".sr2",
+  ".dng",
+  ".orf",
+  ".rw2",
+  ".raf",
+  ".pef",
+  ".rwl",
+  ".3fr",
+  ".raw",
 ]);
 
 function isRawFile(filePath) {
@@ -39,22 +46,24 @@ function isRawFile(filePath) {
 function extractRawPreview(filePath) {
   try {
     const buf = execFileSync(exiftoolPath, ["-b", "-JpgFromRaw", filePath], {
-      timeout: 15000,
+      timeout: 15_000,
       maxBuffer: 50 * 1024 * 1024,
     });
-    if (buf && buf.length > 0) return buf;
+    if (buf && buf.length > 0) {
+      return buf;
+    }
   } catch {}
   try {
     const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
-      timeout: 15000,
+      timeout: 15_000,
       maxBuffer: 50 * 1024 * 1024,
     });
-    if (buf && buf.length > 0) return buf;
+    if (buf && buf.length > 0) {
+      return buf;
+    }
   } catch {}
   return null;
 }
-
-process.env.ORT_WASM_NUM_THREADS = "1";
 
 // --- CLIP ViT-B/32 preprocessing constants ---
 const CLIP_SIZE = 224;
@@ -62,9 +71,22 @@ const CLIP_MEAN = [0.481_454_66, 0.457_827_5, 0.408_210_73];
 const CLIP_STD = [0.268_629_54, 0.261_302_58, 0.275_777_11];
 
 // --- Module-level model cache ---
-let cachedModel = null;
-let cachedProcessor = null;
-let Tensor = null;
+let ortSession = null;
+// onnxruntime-node lazy-loaded singleton
+let _ort = null;
+async function loadOrt() {
+  if (_ort) return _ort;
+  // Use the module-level `require` (line 24) — it already resolves from
+  // the script's location and is more reliable than creating a new one.
+  try {
+    _ort = require("onnxruntime-node");
+  } catch {
+    // Fallback: resolve from project root (packaged builds may differ)
+    const projectRoot = path.resolve(import.meta.dirname, "..");
+    _ort = require(path.join(projectRoot, "node_modules", "onnxruntime-node"));
+  }
+  return _ort;
+}
 
 /**
  * Preprocess image: sharp decode + resize + normalize → Float32Array(NCHW).
@@ -98,60 +120,43 @@ async function preprocessCLIP(filePath) {
   return floatData;
 }
 
-// --- Init handler: load model once ---
+// --- Init handler: load CLIP vision ONNX model directly ---
 async function handleInit(msg) {
-  const { modelPath } = msg;
-  console.error(`[Worker] Loading CLIP model from: ${modelPath}`);
-
-  const { AutoProcessor, CLIPVisionModelWithProjection, env } = await import(
-    "@xenova/transformers"
+  const { modelPath, useGPU } = msg;
+  const onnxPath = path.join(
+    modelPath, "Xenova", "clip-vit-base-patch32", "onnx",
+    "vision_model_quantized.onnx"
   );
-  const tfMod = await import("@xenova/transformers");
-  Tensor = tfMod.Tensor;
+  console.error(`[Worker] Loading CLIP vision ONNX: ${onnxPath}`);
 
-  env.localModelPath = modelPath;
-  env.allowRemoteModels = true;
-  env.backends.onnx.wasm.numThreads = 1;
+  const { InferenceSession } = await loadOrt();
 
-  // 自动检测中文环境并设置镜像
-  const mirror =
-    process.env.HF_MIRROR ||
-    process.env.HF_ENDPOINT ||
-    (process.env.LANG?.startsWith("zh") || process.env.LC_ALL?.startsWith("zh")
-      ? "https://hf-mirror.com"
-      : null);
+  // NOTE: DML crashes on ViT-B/32 (0xFFFF0003) in both onnxruntime 1.26.0
+  // and 1.27.0-dev. Keep CPU-only until upstream fixes DML shader compilation
+  // for Transformer models (LayerNorm/Gelu/MultiHeadAttention ops).
+  const executionProviders = ["cpu"];
+  console.error("[Worker] Creating session with: [cpu]");
 
-  if (mirror) {
-    env.remoteHost = mirror;
-    env.remotePathTemplate = "{model}/resolve/main/";
-    console.error(`[Worker] Using HF mirror: ${mirror}`);
-  }
-
-  const MODEL_ID = "Xenova/clip-vit-base-patch32";
-
-  cachedModel = await CLIPVisionModelWithProjection.from_pretrained(MODEL_ID, {
-    quantized: true,
+  ortSession = await InferenceSession.create(onnxPath, {
+    executionProviders,
+    logSeverityLevel: 3,
+    graphOptimizationLevel: "all",
+    enableCpuMemArena: true,
   });
-
-  try {
-    cachedProcessor = await AutoProcessor.from_pretrained(MODEL_ID);
-  } catch {
-    console.error("[Worker] AutoProcessor unavailable — manual-only mode");
-  }
+  console.error("[Worker] CLIP model loaded, ready for batches");
 
   process.send?.({ type: "ready" });
-  console.error("[Worker] Model loaded, ready for batches");
 }
 
 // --- Embed handler: process a batch ---
 async function handleEmbed(msg) {
   const { photos, modelPath } = msg;
 
-  // Auto-init if model not loaded yet (single-shot mode from embedImageInWorker)
-  if (!cachedModel && modelPath) {
+  // Auto-init if model not loaded yet
+  if (!ortSession && modelPath) {
     await handleInit({ modelPath });
   }
-  if (!(cachedModel && Tensor)) {
+  if (!ortSession) {
     process.send?.({
       type: "result",
       results: (photos || []).map((p) => ({
@@ -162,13 +167,13 @@ async function handleEmbed(msg) {
     return;
   }
 
+  const ort = await loadOrt();
+  const batchStartMs = Date.now();
   const results = [];
 
   for (let i = 0; i < photos.length; i++) {
     const photo = photos[i];
     try {
-      let output;
-
       // Resolve input: for RAW files, extract embedded JPEG preview
       let imageInput = photo.path;
       if (isRawFile(photo.path)) {
@@ -178,68 +183,12 @@ async function handleEmbed(msg) {
         }
       }
 
-      // Primary: manual tensor construction (avoids GLib conflict)
-      try {
-        const floatData = await preprocessCLIP(imageInput);
-        const pixelValues = new Tensor("float32", floatData, [
-          1,
-          3,
-          CLIP_SIZE,
-          CLIP_SIZE,
-        ]);
-        output = await cachedModel({ pixel_values: pixelValues });
-      } catch (manualErr) {
-        if (!cachedProcessor) {
-          throw manualErr;
-        }
-
-        console.error(
-          `[Worker] Manual tensor failed for ${path.basename(photo.path)}, trying AutoProcessor: ${manualErr.message}`
-        );
-
-        // Fallback: RawImage pipeline
-        const { RawImage } = await import("@xenova/transformers");
-        let image;
-        try {
-          const { data: imgData, info: imgInfo } = await sharp(imageInput, {
-            failOn: "none",
-          })
-            .ensureAlpha()
-            .raw()
-            .toBuffer({ resolveWithObject: true });
-          image = new RawImage(
-            new Uint8ClampedArray(
-              imgData.buffer,
-              imgData.byteOffset,
-              imgData.byteLength
-            ),
-            imgInfo.width,
-            imgInfo.height,
-            imgInfo.channels
-          );
-        } catch {
-          const pngBuffer = await sharp(imageInput, { failOn: "none" })
-            .png()
-            .toBuffer();
-          const { data: pngData, info: pngInfo } = await sharp(pngBuffer)
-            .ensureAlpha()
-            .raw()
-            .toBuffer({ resolveWithObject: true });
-          image = new RawImage(
-            new Uint8ClampedArray(
-              pngData.buffer,
-              pngData.byteOffset,
-              pngData.byteLength
-            ),
-            pngInfo.width,
-            pngInfo.height,
-            pngInfo.channels
-          );
-        }
-
-        const inputs = await cachedProcessor(image);
-        output = await cachedModel(inputs);
-      }
+      // Preprocess + run ONNX inference directly (no transformers overhead)
+      const floatData = await preprocessCLIP(imageInput);
+      const pixelValues = new ort.Tensor("float32", floatData, [
+        1, 3, CLIP_SIZE, CLIP_SIZE,
+      ]);
+      const output = await ortSession.run({ pixel_values: pixelValues });
 
       const { image_embeds } = output;
       const vec = Array.from(image_embeds.data);
@@ -264,6 +213,11 @@ async function handleEmbed(msg) {
       results.push({ id: photo.id, error: err.message });
     }
   }
+
+  const batchMs = Date.now() - batchStartMs;
+  console.error(
+    `[Worker] Batch done: ${results.length} photos in ${batchMs}ms (${Math.round(batchMs / results.length)}ms/photo)`
+  );
 
   process.send?.({ type: "result", results });
 }

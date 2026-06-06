@@ -5,6 +5,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel } from "./model-loader";
 import type { EmbedProgressCallback } from "./state";
@@ -80,7 +81,9 @@ interface EmbedResult {
 }
 
 function batchUpdatePhotoStatus(db: any, photoIds: number[]): void {
-  if (photoIds.length === 0) return;
+  if (photoIds.length === 0) {
+    return;
+  }
 
   const CHUNK_SIZE = 500;
 
@@ -409,7 +412,8 @@ export async function embedAllPhotos(
       const { initWorkerPool, embedWithPool } = await import(
         "@/services/embed-worker-pool"
       );
-      await initWorkerPool(_localModelPath!);
+      const useGPU = getSetting("gpu.enabled") === "true";
+      await initWorkerPool(_localModelPath!, useGPU);
       poolReady = true;
 
       setPoolCancelled(false);
