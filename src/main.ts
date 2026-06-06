@@ -13,6 +13,7 @@ import {
   nativeTheme,
   protocol,
   screen,
+  shell,
   Tray,
 } from "electron";
 import { ipcMain } from "electron/main";
@@ -689,6 +690,14 @@ ipcMain.on("app:language-changed", (_event, lang: string) => {
   if (lang && (lang === "zh" || lang === "en")) {
     getTrayLangStore().set("language", lang);
     rebuildTrayMenu();
+  }
+});
+
+ipcMain.on("shell:open-external", (_event, url: string) => {
+  if (url && typeof url === "string") {
+    shell.openExternal(url).catch((err) => {
+      log.error("Failed to open external URL:", err);
+    });
   }
 });
 

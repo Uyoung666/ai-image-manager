@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   setLanguage: (lang: string): void => {
     ipcRenderer.send("app:language-changed", lang);
   },
+  openExternal: (url: string): void => {
+    ipcRenderer.send("shell:open-external", url);
+  },
 });
 
 ipcRenderer.on("global-shortcut:search", () => {

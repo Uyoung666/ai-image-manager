@@ -680,475 +680,88 @@ export function Sidebar({
           onDragOver={handleSidebarDragOver}
           onDrop={handleSidebarDrop}
         >
-        <button
-          className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-          onClick={onToggleCollapse}
-          title={t("expandSidebar")}
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
-
-        <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
           <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              activeFolderId === null && !favoriteActive
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => {
-              setActiveTagId(null);
-              onSelectTag?.(null);
-              onSelectFolder(null);
-            }}
-            title={t("sidebarAllPhotos")}
+            className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={onToggleCollapse}
+            title={t("expandSidebar")}
           >
-            <Images className="h-4 w-4" />
+            <PanelLeftOpen className="h-4 w-4" />
           </button>
 
-          {onSelectFavorites && (
+          <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                favoriteActive
+                activeFolderId === null && !favoriteActive
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
-              onClick={onSelectFavorites}
-              title={t("favorite")}
+              onClick={() => {
+                setActiveTagId(null);
+                onSelectTag?.(null);
+                onSelectFolder(null);
+              }}
+              title={t("sidebarAllPhotos")}
             >
-              <Star className="h-4 w-4" />
+              <Images className="h-4 w-4" />
             </button>
-          )}
 
-          {folders.map((folder) => (
-            <button
-              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                dragOverFolderId === folder.id
-                  ? "bg-primary/20 text-primary ring-1 ring-primary/50"
-                  : activeFolderId === folder.id
+            {onSelectFavorites && (
+              <button
+                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                  favoriteActive
                     ? "bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              }`}
-              key={folder.id}
-              onClick={() => onSelectFolder(folder.id)}
-              onContextMenu={(e) =>
-                handleFolderContextMenu(e, folder.id, folder.displayName)
-              }
-              onDragLeave={handleFolderDragLeave}
-              onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-              onDrop={(e) => handleFolderDrop(e, folder.id)}
-              title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickDelete")}`}
-            >
-              <Folder className="h-4 w-4" />
-            </button>
-          ))}
+                }`}
+                onClick={onSelectFavorites}
+                title={t("favorite")}
+              >
+                <Star className="h-4 w-4" />
+              </button>
+            )}
 
-          {/* Tags popover — available when collapsed */}
-          {tags.length > 0 && (
-            <Popover onOpenChange={setTagPopoverOpen} open={tagPopoverOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    activeTagId
+            {folders.map((folder) => (
+              <button
+                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                  dragOverFolderId === folder.id
+                    ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+                    : activeFolderId === folder.id
                       ? "bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  title={t("sidebarTags")}
-                >
-                  <Tag className="h-4 w-4" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-48 p-0" sideOffset={8}>
-                <div className="p-1.5">
-                  <p className="px-2 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-                    {t("sidebarTags")}
-                  </p>
-                  <div className="px-1 pb-1">
-                    <input
-                      className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                      onChange={(e) => setTagSearch(e.target.value)}
-                      placeholder={t("tagSearchPlaceholder")}
-                      value={tagSearch}
-                    />
-                  </div>
-                  <div className="max-h-[280px] overflow-y-auto">
-                    {(() => {
-                      const filtered = tags.filter((t) =>
-                        tagSearch
-                          ? t.name
-                              .toLowerCase()
-                              .includes(tagSearch.toLowerCase())
-                          : true
-                      );
-                      const allIds = new Set(filtered.map((t) => t.id));
-                      for (const t of filtered) {
-                        let cur = t.parentId;
-                        while (cur) {
-                          if (allIds.has(cur)) {
-                            break;
-                          }
-                          const parent = tags.find((p) => p.id === cur);
-                          if (parent) {
-                            allIds.add(cur);
-                            cur = parent.parentId;
-                          } else {
-                            break;
-                          }
-                        }
-                      }
-                      const visible = tags.filter((t) => allIds.has(t.id));
-                      const tree = buildTagTree(visible);
-                      return renderTagTree(
-                        tree,
-                        0,
-                        expandedTagIds,
-                        (id) => {
-                          const next = new Set(expandedTagIds);
-                          if (next.has(id)) {
-                            next.delete(id);
-                          } else {
-                            next.add(id);
-                          }
-                          setExpandedTagIds(next);
-                        },
-                        activeTagId,
-                        (nextId) => {
-                          setActiveTagId(nextId);
-                          onSelectTag?.(nextId);
-                          setTagPopoverOpen(false);
-                        },
-                        (e, id, name) => {
-                          e.preventDefault();
-                          setTagCtx({
-                            tagId: id,
-                            tagName: name,
-                            x: e.clientX,
-                            y: e.clientY,
-                          });
-                        },
-                        () => {},
-                        () => {},
-                        () => {},
-                        () => {},
-                        null,
-                        i18n.language
-                      );
-                    })()}
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
-
-        <div className="flex flex-col items-center gap-1 px-1.5">
-          <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-            disabled={scanningFolder !== null}
-            onClick={() => onAddFolder()}
-            title={t("sidebarAddFolder")}
-          >
-            {scanningFolder ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-          </button>
-
-          {/* Content group */}
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname === "/dashboard"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/dashboard" })}
-            title={t("sidebarDashboard")}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-          </button>
-
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname.startsWith("/albums")
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/albums" as const })}
-            title={t("sidebarAlbums")}
-          >
-            <Album className="h-4 w-4" />
-          </button>
-
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname === "/people"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/people" })}
-            title={t("people")}
-          >
-            <Users className="h-4 w-4" />
-          </button>
-
-          <div className="my-0.5 w-4 border-border border-t" />
-
-          {/* Tool group */}
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname === "/duplicates"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/duplicates" })}
-            title={t("duplicates")}
-          >
-            <ScanSearch className="h-4 w-4" />
-          </button>
-
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname.startsWith("/cull")
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/cull" })}
-            title={t("cull")}
-          >
-            <Swords className="h-4 w-4" />
-          </button>
-
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname === "/trash"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/trash" })}
-            title={t("trash")}
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-
-          <div className="my-0.5 w-4 border-border border-t" />
-
-          {/* System group */}
-          <button
-            className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-              location.pathname === "/settings"
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={() => navigate({ to: "/settings" })}
-            title={t("sidebarSettings")}
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-
-          <button
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() =>
-              document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
-            }
-            title={t("keyboardHelpTitle")}
-          >
-            <CircleHelp className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-    ) : (
-    <div
-      className="flex h-full w-[240px] select-none flex-col border-sidebar-border border-r bg-sidebar"
-      onDragOver={handleSidebarDragOver}
-      onDrop={handleSidebarDrop}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-4 py-3">
-        <div>
-          <h2 className="font-[590] text-[14px] text-foreground">
-            {t("appName")}
-          </h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-            {t("photosCount", { count: totalPhotos.toLocaleString() })}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() =>
-              document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }))
-            }
-            title={t("keyboardHelpTitle")}
-          >
-            <CircleHelp className="h-3.5 w-3.5" />
-          </button>
-          <button
-            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={onToggleCollapse}
-            title={t("collapseSidebar")}
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* AI Progress Bar */}
-      <div className="px-3 py-2">
-        <AiProgressBar />
-      </div>
-
-      {/* Scan progress */}
-      {scanProgress && (
-        <div className="px-3 pb-2">
-          <div className="rounded-[6px] bg-card px-3 py-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-muted-foreground">{scanProgress}</p>
-              {scanningFolder && onCancelScan && (
-                <button
-                  className="shrink-0 rounded-[4px] px-2 py-0.5 text-[10px] font-[510] text-danger transition-colors hover:bg-danger/10"
-                  onClick={onCancelScan}
-                  type="button"
-                >
-                  {t("cancel")}
-                </button>
-              )}
-            </div>
-            {scanningFolder && (
-              <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
-                {t("scanningPath", { path: scanningFolder })}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Separator */}
-      <div className="mx-3 border-border border-t" />
-
-      {/* Content area — dual flex-1 sections */}
-      <div className="flex min-h-0 flex-1 flex-col px-3 pt-2">
-        {/* All Photos + Favorites — content filters */}
-        <button
-          className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            activeFolderId === null && !favoriteActive
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => {
-            setActiveTagId(null);
-            onSelectTag?.(null);
-            onSelectFolder(null);
-          }}
-        >
-          <Images className="h-3.5 w-3.5" />
-          {t("sidebarAllPhotos")}
-        </button>
-        {onSelectFavorites && (
-          <button
-            className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-              favoriteActive
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-            onClick={onSelectFavorites}
-          >
-            <Star className="h-3.5 w-3.5" />
-            {t("favorite")}
-          </button>
-        )}
-
-        <div className="my-2 border-border border-t" />
-
-        {/* Folders */}
-        <div
-          className={`flex flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
-        >
-          <div className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 transition-colors hover:bg-foreground/5">
-            <button
-              className="flex flex-1 items-center gap-1 text-left"
-              onClick={() => setFoldersCollapsed((v) => !v)}
-            >
-              <p
-                className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                }`}
+                key={folder.id}
+                onClick={() => onSelectFolder(folder.id)}
+                onContextMenu={(e) =>
+                  handleFolderContextMenu(e, folder.id, folder.displayName)
+                }
+                onDragLeave={handleFolderDragLeave}
+                onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                onDrop={(e) => handleFolderDrop(e, folder.id)}
+                title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickDelete")}`}
               >
-                {t("sidebarFolders")}
-              </p>
-              <ChevronDown
-                className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
-              />
-            </button>
-            <button
-              className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
-              disabled={scanningFolder !== null}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddFolder();
-              }}
-              title={t("sidebarAddFolder")}
-            >
-              {scanningFolder ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Plus className="h-3 w-3" />
-              )}
-            </button>
-          </div>
-          {!foldersCollapsed && (
-            <div className="flex-1 overflow-y-auto">
-              {folderTree.length === 0 ? (
-                <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
-                  {t("sidebarNoFolders")}
-                </p>
-              ) : (
-                renderFolderTree(
-                  folderTree,
-                  0,
-                  expandedFolderIds,
-                  (id) => {
-                    const next = new Set(expandedFolderIds);
-                    if (next.has(id)) {
-                      next.delete(id);
-                    } else {
-                      next.add(id);
-                    }
-                    setExpandedFolderIds(next);
-                  },
-                  activeFolderId,
-                  onSelectFolder,
-                  handleFolderContextMenu,
-                  dragOverFolderId,
-                  handleFolderDragOver,
-                  handleFolderDragLeave,
-                  handleFolderDrop
-                )
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tags */}
-        {(tags.length > 0 || totalPhotos > 0) && (
-          <>
-            <div className="mx-3 my-2 border-border border-t" />
-            <div
-              className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
-            >
-              <button
-                className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
-                onClick={() => setTagsCollapsed((v) => !v)}
-              >
-                <p
-                  className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
-                >
-                  {t("sidebarTags")}
-                </p>
-                <ChevronDown
-                  className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
-                />
+                <Folder className="h-4 w-4" />
               </button>
-              {!tagsCollapsed &&
-                (tags.length > 0 ? (
-                  <>
+            ))}
+
+            {/* Tags popover — available when collapsed */}
+            {tags.length > 0 && (
+              <Popover onOpenChange={setTagPopoverOpen} open={tagPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                      activeTagId
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    title={t("sidebarTags")}
+                  >
+                    <Tag className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-48 p-0" sideOffset={8}>
+                  <div className="p-1.5">
+                    <p className="px-2 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                      {t("sidebarTags")}
+                    </p>
                     <div className="px-1 pb-1">
                       <input
                         className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
@@ -1157,7 +770,7 @@ export function Sidebar({
                         value={tagSearch}
                       />
                     </div>
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="max-h-[280px] overflow-y-auto">
                       {(() => {
                         const filtered = tags.filter((t) =>
                           tagSearch
@@ -1201,6 +814,7 @@ export function Sidebar({
                           (nextId) => {
                             setActiveTagId(nextId);
                             onSelectTag?.(nextId);
+                            setTagPopoverOpen(false);
                           },
                           (e, id, name) => {
                             e.preventDefault();
@@ -1211,27 +825,452 @@ export function Sidebar({
                               y: e.clientY,
                             });
                           },
-                          handleSidebarDragOver,
-                          (id) => setDragOverTagId(id),
-                          (e) => {
-                            if (
-                              !(e.currentTarget as HTMLElement).contains(
-                                e.relatedTarget as Node
-                              )
-                            ) {
-                              setDragOverTagId(null);
-                            }
-                          },
-                          (e, id) => handleDropOnTag(e, id),
-                          dragOverTagId,
+                          () => {},
+                          () => {},
+                          () => {},
+                          () => {},
+                          null,
                           i18n.language
                         );
                       })()}
                     </div>
-                    {!tags.some((t) => t.photoCount > 0) && (
-                      <div className="px-1 py-1">
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+
+          <div className="flex flex-col items-center gap-1 px-1.5">
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+              disabled={scanningFolder !== null}
+              onClick={() => onAddFolder()}
+              title={t("sidebarAddFolder")}
+            >
+              {scanningFolder ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+            </button>
+
+            {/* Content group */}
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname === "/dashboard"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/dashboard" })}
+              title={t("sidebarDashboard")}
+            >
+              <LayoutDashboard className="h-4 w-4" />
+            </button>
+
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname.startsWith("/albums")
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/albums" as const })}
+              title={t("sidebarAlbums")}
+            >
+              <Album className="h-4 w-4" />
+            </button>
+
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname === "/people"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/people" })}
+              title={t("people")}
+            >
+              <Users className="h-4 w-4" />
+            </button>
+
+            <div className="my-0.5 w-4 border-border border-t" />
+
+            {/* Tool group */}
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname === "/duplicates"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/duplicates" })}
+              title={t("duplicates")}
+            >
+              <ScanSearch className="h-4 w-4" />
+            </button>
+
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname.startsWith("/cull")
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/cull" })}
+              title={t("cull")}
+            >
+              <Swords className="h-4 w-4" />
+            </button>
+
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname === "/trash"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/trash" })}
+              title={t("trash")}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+
+            <div className="my-0.5 w-4 border-border border-t" />
+
+            {/* System group */}
+            <button
+              className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                location.pathname === "/settings"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/settings" })}
+              title={t("sidebarSettings")}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              onClick={() =>
+                document.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "?" })
+                )
+              }
+              title={t("keyboardHelpTitle")}
+            >
+              <CircleHelp className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="flex h-full w-[240px] select-none flex-col border-sidebar-border border-r bg-sidebar"
+          onDragOver={handleSidebarDragOver}
+          onDrop={handleSidebarDrop}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-border border-b px-4 py-3">
+            <div>
+              <button
+                className="font-[590] text-[14px] text-foreground transition-colors hover:text-primary"
+                onClick={() => {
+                  window.electronAPI?.openExternal(
+                    "https://ai-image-manager.uyoungvision.cn/"
+                  );
+                }}
+                title="访问项目网站"
+                type="button"
+              >
+                {t("appName")}
+              </button>
+              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                {t("photosCount", { count: totalPhotos.toLocaleString() })}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={() =>
+                  document.dispatchEvent(
+                    new KeyboardEvent("keydown", { key: "?" })
+                  )
+                }
+                title={t("keyboardHelpTitle")}
+              >
+                <CircleHelp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={onToggleCollapse}
+                title={t("collapseSidebar")}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* AI Progress Bar */}
+          <div className="px-3 py-2">
+            <AiProgressBar />
+          </div>
+
+          {/* Scan progress */}
+          {scanProgress && (
+            <div className="px-3 pb-2">
+              <div className="rounded-[6px] bg-card px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-muted-foreground">
+                    {scanProgress}
+                  </p>
+                  {scanningFolder && onCancelScan && (
+                    <button
+                      className="shrink-0 rounded-[4px] px-2 py-0.5 font-[510] text-[10px] text-danger transition-colors hover:bg-danger/10"
+                      onClick={onCancelScan}
+                      type="button"
+                    >
+                      {t("cancel")}
+                    </button>
+                  )}
+                </div>
+                {scanningFolder && (
+                  <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
+                    {t("scanningPath", { path: scanningFolder })}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Separator */}
+          <div className="mx-3 border-border border-t" />
+
+          {/* Content area — dual flex-1 sections */}
+          <div className="flex min-h-0 flex-1 flex-col px-3 pt-2">
+            {/* All Photos + Favorites — content filters */}
+            <button
+              className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                activeFolderId === null && !favoriteActive
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => {
+                setActiveTagId(null);
+                onSelectTag?.(null);
+                onSelectFolder(null);
+              }}
+            >
+              <Images className="h-3.5 w-3.5" />
+              {t("sidebarAllPhotos")}
+            </button>
+            {onSelectFavorites && (
+              <button
+                className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                  favoriteActive
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                }`}
+                onClick={onSelectFavorites}
+              >
+                <Star className="h-3.5 w-3.5" />
+                {t("favorite")}
+              </button>
+            )}
+
+            <div className="my-2 border-border border-t" />
+
+            {/* Folders */}
+            <div
+              className={`flex flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
+            >
+              <div className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 transition-colors hover:bg-foreground/5">
+                <button
+                  className="flex flex-1 items-center gap-1 text-left"
+                  onClick={() => setFoldersCollapsed((v) => !v)}
+                >
+                  <p
+                    className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                  >
+                    {t("sidebarFolders")}
+                  </p>
+                  <ChevronDown
+                    className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
+                  />
+                </button>
+                <button
+                  className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
+                  disabled={scanningFolder !== null}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddFolder();
+                  }}
+                  title={t("sidebarAddFolder")}
+                >
+                  {scanningFolder ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Plus className="h-3 w-3" />
+                  )}
+                </button>
+              </div>
+              {!foldersCollapsed && (
+                <div className="flex-1 overflow-y-auto">
+                  {folderTree.length === 0 ? (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
+                      {t("sidebarNoFolders")}
+                    </p>
+                  ) : (
+                    renderFolderTree(
+                      folderTree,
+                      0,
+                      expandedFolderIds,
+                      (id) => {
+                        const next = new Set(expandedFolderIds);
+                        if (next.has(id)) {
+                          next.delete(id);
+                        } else {
+                          next.add(id);
+                        }
+                        setExpandedFolderIds(next);
+                      },
+                      activeFolderId,
+                      onSelectFolder,
+                      handleFolderContextMenu,
+                      dragOverFolderId,
+                      handleFolderDragOver,
+                      handleFolderDragLeave,
+                      handleFolderDrop
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Tags */}
+            {(tags.length > 0 || totalPhotos > 0) && (
+              <>
+                <div className="mx-3 my-2 border-border border-t" />
+                <div
+                  className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
+                >
+                  <button
+                    className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
+                    onClick={() => setTagsCollapsed((v) => !v)}
+                  >
+                    <p
+                      className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                    >
+                      {t("sidebarTags")}
+                    </p>
+                    <ChevronDown
+                      className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
+                    />
+                  </button>
+                  {!tagsCollapsed &&
+                    (tags.length > 0 ? (
+                      <>
+                        <div className="px-1 pb-1">
+                          <input
+                            className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                            onChange={(e) => setTagSearch(e.target.value)}
+                            placeholder={t("tagSearchPlaceholder")}
+                            value={tagSearch}
+                          />
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                          {(() => {
+                            const filtered = tags.filter((t) =>
+                              tagSearch
+                                ? t.name
+                                    .toLowerCase()
+                                    .includes(tagSearch.toLowerCase())
+                                : true
+                            );
+                            const allIds = new Set(filtered.map((t) => t.id));
+                            for (const t of filtered) {
+                              let cur = t.parentId;
+                              while (cur) {
+                                if (allIds.has(cur)) {
+                                  break;
+                                }
+                                const parent = tags.find((p) => p.id === cur);
+                                if (parent) {
+                                  allIds.add(cur);
+                                  cur = parent.parentId;
+                                } else {
+                                  break;
+                                }
+                              }
+                            }
+                            const visible = tags.filter((t) =>
+                              allIds.has(t.id)
+                            );
+                            const tree = buildTagTree(visible);
+                            return renderTagTree(
+                              tree,
+                              0,
+                              expandedTagIds,
+                              (id) => {
+                                const next = new Set(expandedTagIds);
+                                if (next.has(id)) {
+                                  next.delete(id);
+                                } else {
+                                  next.add(id);
+                                }
+                                setExpandedTagIds(next);
+                              },
+                              activeTagId,
+                              (nextId) => {
+                                setActiveTagId(nextId);
+                                onSelectTag?.(nextId);
+                              },
+                              (e, id, name) => {
+                                e.preventDefault();
+                                setTagCtx({
+                                  tagId: id,
+                                  tagName: name,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              },
+                              handleSidebarDragOver,
+                              (id) => setDragOverTagId(id),
+                              (e) => {
+                                if (
+                                  !(e.currentTarget as HTMLElement).contains(
+                                    e.relatedTarget as Node
+                                  )
+                                ) {
+                                  setDragOverTagId(null);
+                                }
+                              },
+                              (e, id) => handleDropOnTag(e, id),
+                              dragOverTagId,
+                              i18n.language
+                            );
+                          })()}
+                        </div>
+                        {!tags.some((t) => t.photoCount > 0) && (
+                          <div className="px-1 py-1">
+                            <button
+                              className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
+                              onClick={async () => {
+                                try {
+                                  await ipc.client.photos.batchGenerateTags({});
+                                  const updated =
+                                    await ipc.client.photos.getTags({});
+                                  setTags((updated as TagInfo[]) || []);
+                                  toast.success(t("aiTagsGenerated"));
+                                } catch {
+                                  toast.error(t("aiTagsFailed"));
+                                }
+                              }}
+                            >
+                              <ScanSearch className="h-3.5 w-3.5" />
+                              {t("tagBatchGenerate")}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="px-3 py-1">
                         <button
-                          className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
+                          className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
                           onClick={async () => {
                             try {
                               await ipc.client.photos.batchGenerateTags({});
@@ -1249,141 +1288,120 @@ export function Sidebar({
                           {t("tagBatchGenerate")}
                         </button>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="px-3 py-1">
-                    <button
-                      className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                      onClick={async () => {
-                        try {
-                          await ipc.client.photos.batchGenerateTags({});
-                          const updated = await ipc.client.photos.getTags({});
-                          setTags((updated as TagInfo[]) || []);
-                          toast.success(t("aiTagsGenerated"));
-                        } catch {
-                          toast.error(t("aiTagsFailed"));
-                        }
-                      }}
-                    >
-                      <ScanSearch className="h-3.5 w-3.5" />
-                      {t("tagBatchGenerate")}
-                    </button>
-                  </div>
-                ))}
-              <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
-                {t("aiTagDisclaimer")}
-              </p>
-            </div>
-          </>
-        )}
-      </div>
+                    ))}
+                  <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
+                    {t("aiTagDisclaimer")}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
 
-      {/* Footer */}
-      <div className="border-border border-t px-3 py-2">
-        {/* Content group */}
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname === "/dashboard"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/dashboard" })}
-        >
-          <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
-          {t("sidebarDashboard")}
-        </button>
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            dragOverAlbumNav
-              ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
-              : location.pathname.startsWith("/albums")
-                ? "bg-primary/15 text-primary"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/albums" as const })}
-          onDragEnter={() => setDragOverAlbumNav(true)}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-              setDragOverAlbumNav(false);
-            }
-          }}
-          onDragOver={handleSidebarDragOver}
-          onDrop={handleDropOnAlbumNav}
-        >
-          <Album className="mr-2 inline h-3.5 w-3.5" />
-          {t("sidebarAlbums")}
-          {dragOverAlbumNav && (
-            <span className="ml-auto text-[10px] text-primary">
-              {t("tagDropHint")}
-            </span>
-          )}
-        </button>
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname === "/people"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/people" })}
-        >
-          <Users className="mr-2 inline h-3.5 w-3.5" />
-          {t("people")}
-        </button>
+          {/* Footer */}
+          <div className="border-border border-t px-3 py-2">
+            {/* Content group */}
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname === "/dashboard"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/dashboard" })}
+            >
+              <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
+              {t("sidebarDashboard")}
+            </button>
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                dragOverAlbumNav
+                  ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
+                  : location.pathname.startsWith("/albums")
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/albums" as const })}
+              onDragEnter={() => setDragOverAlbumNav(true)}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setDragOverAlbumNav(false);
+                }
+              }}
+              onDragOver={handleSidebarDragOver}
+              onDrop={handleDropOnAlbumNav}
+            >
+              <Album className="mr-2 inline h-3.5 w-3.5" />
+              {t("sidebarAlbums")}
+              {dragOverAlbumNav && (
+                <span className="ml-auto text-[10px] text-primary">
+                  {t("tagDropHint")}
+                </span>
+              )}
+            </button>
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname === "/people"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/people" })}
+            >
+              <Users className="mr-2 inline h-3.5 w-3.5" />
+              {t("people")}
+            </button>
 
-        <div className="my-1.5 border-border border-t" />
+            <div className="my-1.5 border-border border-t" />
 
-        {/* Tool group */}
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname === "/duplicates"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/duplicates" })}
-        >
-          <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
-          {t("duplicates")}
-        </button>
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname.startsWith("/cull")
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/cull" })}
-        >
-          <Swords className="mr-2 inline h-3.5 w-3.5" />
-          {t("cull")}
-        </button>
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname === "/trash"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/trash" })}
-        >
-          <Trash2 className="mr-2 inline h-3.5 w-3.5" />
-          {t("trash")}
-        </button>
+            {/* Tool group */}
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname === "/duplicates"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/duplicates" })}
+            >
+              <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
+              {t("duplicates")}
+            </button>
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname.startsWith("/cull")
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/cull" })}
+            >
+              <Swords className="mr-2 inline h-3.5 w-3.5" />
+              {t("cull")}
+            </button>
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname === "/trash"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/trash" })}
+            >
+              <Trash2 className="mr-2 inline h-3.5 w-3.5" />
+              {t("trash")}
+            </button>
 
-        <div className="my-1.5 border-border border-t" />
+            <div className="my-1.5 border-border border-t" />
 
-        {/* System group */}
-        <button
-          className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-            location.pathname === "/settings"
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          }`}
-          onClick={() => navigate({ to: "/settings" })}
-        >
-          <Settings className="mr-2 inline h-3.5 w-3.5" />
-          {t("sidebarSettings")}
-        </button>
-      </div>
-    </div>
+            {/* System group */}
+            <button
+              className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                location.pathname === "/settings"
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              }`}
+              onClick={() => navigate({ to: "/settings" })}
+            >
+              <Settings className="mr-2 inline h-3.5 w-3.5" />
+              {t("sidebarSettings")}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Delete tag confirmation dialog */}
