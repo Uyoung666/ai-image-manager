@@ -63,11 +63,13 @@ export function PhotoLightbox({
   const programmaticRef = useRef(false);
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [infoPanelVisible, setInfoPanelVisible] = useState(false);
+  const [rotation, setRotation] = useState(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelAnchor, setPanelAnchor] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setPhotoIndex(index);
+    setRotation(0);
   }, [index]);
 
   // Preload adjacent photos for instant switching
@@ -172,6 +174,15 @@ export function PhotoLightbox({
         e.stopImmediatePropagation();
         setInfoPanelVisible((v) => !v);
       }
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.shiftKey) {
+          setRotation((prev) => (prev - 90) % 360);
+        } else {
+          setRotation((prev) => (prev + 90) % 360);
+        }
+      }
     }
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
@@ -266,6 +277,7 @@ export function PhotoLightbox({
       }
       setPhotoIndex(newIndex);
       setPlaying(false);
+      setRotation(0);
     },
     []
   );
@@ -280,6 +292,9 @@ export function PhotoLightbox({
   const currentDelayLabel =
     SLIDESHOW_DELAYS.find((d) => d.value === delay)?.label || "5s";
 
+  // 当旋转90度或270度时需要调整容器尺寸以适应屏幕
+  const isRotated90or270 = rotation % 180 !== 0;
+
   const lightboxStyles = useMemo(() => {
     const fadeIn = { opacity: 1, pointerEvents: "auto" as const, transition: "opacity 150ms ease-in" };
     const fadeOut = { opacity: 0, pointerEvents: "none" as const, transition: "opacity 300ms ease-out" };
@@ -288,7 +303,11 @@ export function PhotoLightbox({
     return {
       container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
       toolbar: { padding: "8px 12px", ...overlayStyle },
-      slide: { padding: "0 60px" },
+      slide: {
+        padding: "0 60px",
+        // 旋转90/270度时增加额外空间以防止溢出
+        ...(isRotated90or270 ? { padding: "60px 0" } : {})
+      },
       captionsTitleContainer: {
         background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
         padding: "10px 16px 10px 120px",
@@ -302,7 +321,7 @@ export function PhotoLightbox({
       thumbnail: { border: "2px solid transparent", borderRadius: 4 },
       thumbnailsTrack: { padding: "6px 0" }
     };
-  }, [overlayVisible]);
+  }, [overlayVisible, isRotated90or270]);
 
   return (
     <>
@@ -310,7 +329,16 @@ export function PhotoLightbox({
         animation={{ navigation: 0 }}
         carousel={{
           finite: false,
-          imageProps: { style: { transition: "none" } },
+          imageProps: {
+            style: {
+              transition: "none",
+              transform: `rotate(${rotation}deg)`,
+              // 旋转90/270度时限制尺寸以防止溢出
+              maxWidth: isRotated90or270 ? "90vh" : "100%",
+              maxHeight: isRotated90or270 ? "90vw" : "100%",
+              objectFit: "contain",
+            }
+          },
         }}
         close={() => onClose(photoIndex)}
         index={photoIndex}
@@ -349,6 +377,48 @@ export function PhotoLightbox({
               <circle cx="12" cy="12" r="10" />
               <path d="M12 16v-4" strokeLinecap="round" />
               <circle cx="12" cy="8" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>,
+          <button
+            aria-label={t("rotateLeft")}
+            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            key="rotate-left"
+            onClick={() => setRotation((prev) => (prev - 90) % 360)}
+            title={t("rotateLeft")}
+            type="button"
+          >
+            <svg
+              fill="none"
+              height="20"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              width="20"
+            >
+              <path d="M2.5 2v6h6M2.66 15.57a10 10 0 1 0 .57-8.38" />
+            </svg>
+          </button>,
+          <button
+            aria-label={t("rotateRight")}
+            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+            key="rotate-right"
+            onClick={() => setRotation((prev) => (prev + 90) % 360)}
+            title={t("rotateRight")}
+            type="button"
+          >
+            <svg
+              fill="none"
+              height="20"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              width="20"
+            >
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38" />
             </svg>
           </button>,
           <button

@@ -29,6 +29,7 @@ export function QuickPreview({
   const [srcKey, setSrcKey] = useState(0);
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [rotation, setRotation] = useState(0);
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const scaleRef = useRef(1);
@@ -43,6 +44,7 @@ export function QuickPreview({
     setImgError(false);
     setScale(1);
     setTranslate({ x: 0, y: 0 });
+    setRotation(0);
   }, [photo.id]);
 
   useEffect(() => {
@@ -59,6 +61,14 @@ export function QuickPreview({
         e.preventDefault();
         e.stopImmediatePropagation();
         onNavigateRef.current(1);
+      } else if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.shiftKey) {
+          setRotation((prev) => (prev - 90) % 360);
+        } else {
+          setRotation((prev) => (prev + 90) % 360);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown, true);
@@ -121,6 +131,11 @@ export function QuickPreview({
       })
     : null;
 
+  // 当旋转90度或270度时，宽高需要交换，调整最大尺寸以适应屏幕
+  const isRotated90or270 = rotation % 180 !== 0;
+  const maxWidth = isRotated90or270 ? "80vh" : "90vw";
+  const maxHeight = isRotated90or270 ? "90vw" : "80vh";
+
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -148,7 +163,7 @@ export function QuickPreview({
         ) : (
           <img
             alt={photo.filename}
-            className={`max-h-[80vh] max-w-[90vw] rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"} ${scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+            className={`rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"} ${scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
             draggable={false}
             key={srcKey}
             onDoubleClick={handleDoubleClick}
@@ -157,7 +172,9 @@ export function QuickPreview({
             onMouseDown={handleMouseDown}
             src={toLocalMediaUrl(photo.path)}
             style={{
-              transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
+              maxWidth,
+              maxHeight,
+              transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px) rotate(${rotation}deg)`,
             }}
           />
         )}
@@ -173,6 +190,31 @@ export function QuickPreview({
           </span>
           {dateStr && <span>{dateStr}</span>}
           {scale !== 1 && <span>{Math.round(scale * 100)}%</span>}
+          {rotation !== 0 && <span>{rotation}°</span>}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            className="rounded-[6px] bg-white/10 px-2 py-1 text-[11px] text-white/70 hover:bg-white/20 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRotation((prev) => (prev - 90) % 360);
+            }}
+            title={t("rotateLeft")}
+            type="button"
+          >
+            ↶
+          </button>
+          <button
+            className="rounded-[6px] bg-white/10 px-2 py-1 text-[11px] text-white/70 hover:bg-white/20 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRotation((prev) => (prev + 90) % 360);
+            }}
+            title={t("rotateRight")}
+            type="button"
+          >
+            ↷
+          </button>
         </div>
         <div className="mt-2 text-[11px] text-white/40">
           {t("quickPreviewHelp")}
