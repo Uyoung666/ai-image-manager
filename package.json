@@ -43,6 +43,7 @@
     "@tanstack/react-virtual": "^3.13.24",
     "@types/leaflet": "^1.9.21",
     "@xenova/transformers": "^2.17.2",
+    "onnxruntime-node": "^1.20.0",
     "archiver": "^8.0.0",
     "better-sqlite3": "^12.9.0",
     "chokidar": "^5.0.0",
@@ -127,6 +128,7 @@
       "@electron/fuses": "^2"
     },
     "@xenova/transformers": {
+      "onnxruntime-node": "$onnxruntime-node",
       "sharp": "$sharp"
     }
   }

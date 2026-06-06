@@ -1,5 +1,3 @@
-import type { ChildProcess } from "node:child_process";
-import { fork } from "node:child_process";
 import fs from "node:fs";
 import https from "node:https";
 import path from "node:path";
@@ -12,49 +10,16 @@ import {
   faceVectors,
   photos,
 } from "@/db/schema";
+import {
+  detectFacesWithPool,
+  initFaceWorkerPool,
+  shutdownFacePool,
+} from "@/services/face-worker-pool";
+import { getSetting } from "@/services/settings-manager";
 
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 40;
 const CLUSTERING_THRESHOLD = 0.55;
 let detectionRunning = false;
-
-function findWorkerScript(): string {
-  if (app.isPackaged) {
-    // Preferred: app.asar.unpacked/scripts/face-worker.mjs — sibling of
-    // app.asar.unpacked/node_modules/, so ESM `import sharp from "sharp"`
-    // resolves correctly via Node's normal node_modules lookup.
-    const unpacked = path.join(
-      process.resourcesPath,
-      "app.asar.unpacked",
-      "scripts",
-      "face-worker.mjs"
-    );
-    if (fs.existsSync(unpacked)) {
-      return unpacked;
-    }
-    // Backward-compat: legacy extraResource layout (resources/scripts/...).
-    const bundled = path.join(
-      process.resourcesPath,
-      "scripts",
-      "face-worker.mjs"
-    );
-    if (fs.existsSync(bundled)) {
-      return bundled;
-    }
-  } else {
-    const cwd = process.cwd();
-    const candidate = path.join(cwd, "scripts", "face-worker.mjs");
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-    const alt = path.join(app.getAppPath(), "scripts", "face-worker.mjs");
-    if (fs.existsSync(alt)) {
-      return alt;
-    }
-  }
-  throw new Error(
-    "Cannot find face-worker.mjs — expected in scripts/ directory"
-  );
-}
 
 function findModelsDir(): string {
   if (app.isPackaged) {
@@ -195,52 +160,6 @@ export function isFaceDetectionRunning(): boolean {
   return detectionRunning;
 }
 
-function runWorker(
-  photoBatch: Array<{ id: number; path: string }>
-): Promise<FaceDetectionResult[]> {
-  return new Promise((resolve, reject) => {
-    const workerPath = findWorkerScript();
-    const modelsDir = findModelsDir();
-    let worker: ChildProcess;
-
-    try {
-      worker = fork(workerPath, [], { stdio: ["pipe", "pipe", "pipe", "ipc"] });
-    } catch (err: any) {
-      reject(new Error(`Failed to fork face-worker: ${err.message}`));
-      return;
-    }
-
-    worker.on("message", (msg: any) => {
-      if (msg.type === "result") {
-        resolve(msg.results);
-        worker.kill();
-      }
-    });
-
-    worker.on("error", (err) => {
-      reject(err);
-      worker.kill();
-    });
-
-    worker.on("exit", (code) => {
-      if (code !== 0 && code !== null) {
-        reject(new Error(`Face-worker exited with code ${code}`));
-      }
-    });
-
-    if (worker.stderr) {
-      worker.stderr.on("data", (data: Buffer) => {
-        const msg = data.toString().trim();
-        if (msg) {
-          console.log(`[FaceWorker] ${msg}`);
-        }
-      });
-    }
-
-    worker.send({ type: "detect", photos: photoBatch, modelsDir });
-  });
-}
-
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   let normA = 0;
@@ -336,52 +255,61 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
       phase: "running",
     };
 
-    // Process in batches
-    for (let i = 0; i < photoRows.length; i += BATCH_SIZE) {
-      const batch = photoRows.slice(i, i + BATCH_SIZE);
-      try {
-        const results = await runWorker(batch);
+    // Start persistent face-worker pool (GPU context reused across batches)
+    const modelsDir = findModelsDir();
+    const useGPU = getSetting("gpu.enabled") === "true";
+    await initFaceWorkerPool(modelsDir, useGPU);
 
-        for (const r of results) {
-          if (!r.faces.length) {
-            continue;
-          }
+    try {
+      const poolResults = await detectFacesWithPool(
+        photoRows,
+        BATCH_SIZE,
+        (processed, total) => {
+          currentProgress.processed = processed;
+        },
+        () => !detectionRunning
+      );
 
-          for (const face of r.faces) {
-            try {
-              db.insert(faceVectors)
-                .values({
-                  photoId: r.id,
-                  faceIndex: face.faceIndex,
-                  bboxX: face.bbox.x,
-                  bboxY: face.bbox.y,
-                  bboxWidth: face.bbox.width,
-                  bboxHeight: face.bbox.height,
-                  confidence: face.confidence,
-                  embedding: face.embedding
-                    ? JSON.stringify(face.embedding)
-                    : null,
-                })
-                .run();
-              totalFaces++;
-            } catch {
-              /* skip duplicates */
-            }
-          }
+      for (const r of poolResults) {
+        if (!r.faces.length) {
+          continue;
         }
 
-        // Mark batch photos as face-processed
-        const batchIds = batch.map((p) => p.id);
+        for (const face of r.faces) {
+          try {
+            db.insert(faceVectors)
+              .values({
+                photoId: r.id,
+                faceIndex: face.faceIndex,
+                bboxX: face.bbox.x,
+                bboxY: face.bbox.y,
+                bboxWidth: face.bbox.width,
+                bboxHeight: face.bbox.height,
+                confidence: face.confidence,
+                embedding: face.embedding
+                  ? JSON.stringify(face.embedding)
+                  : null,
+              })
+              .run();
+            totalFaces++;
+          } catch {
+            /* skip duplicates */
+          }
+        }
+      }
+
+      // Mark all processed photos as face-processed
+      const processedIds = poolResults.map((r) => r.id);
+      // Batch the UPDATE: split into chunks to avoid SQLite variable limit
+      for (let i = 0; i < processedIds.length; i += BATCH_SIZE) {
+        const chunk = processedIds.slice(i, i + BATCH_SIZE);
         db.update(photos)
           .set({ isFaceProcessed: true })
-          .where(inArray(photos.id, batchIds))
+          .where(inArray(photos.id, chunk))
           .run();
-
-        currentProgress.processed = Math.min(i + BATCH_SIZE, photoRows.length);
-      } catch (err: any) {
-        console.error(`[FaceDetector] Batch failed: ${err.message}`);
-        currentProgress.processed = Math.min(i + BATCH_SIZE, photoRows.length);
       }
+    } finally {
+      shutdownFacePool();
     }
 
     // --- Clustering: assign faces to identities ---

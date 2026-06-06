@@ -3,9 +3,11 @@ import {
   getAllAppSettings,
   getAppSetting,
   getDataPathInfo,
+  getGpuSettings,
   getMirrorSettings,
   setAppSetting,
   setDataPath,
+  setGpuSettings,
   setMirrorSettings,
 } from "./handlers";
 
@@ -15,7 +17,9 @@ export const settings = {
   setAppSetting,
   getDataPathInfo,
   setDataPath,
+  getGpuSettings,
   getMirrorSettings,
+  setGpuSettings,
   setMirrorSettings,
   checkMirrorHealth,
 };

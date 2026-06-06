@@ -330,3 +330,19 @@ export const checkMirrorHealth = os.handler(async () => {
   const results = await checkAllMirrors();
   return { results };
 });
+
+export const getGpuSettings = os.handler(() => {
+  const enabled = getSetting("gpu.enabled") === "true";
+  return { enabled };
+});
+
+export const setGpuSettings = os
+  .input(
+    z.object({
+      enabled: z.boolean(),
+    })
+  )
+  .handler(async ({ input }) => {
+    setSetting("gpu.enabled", String(input.enabled));
+    return { ok: true };
+  });

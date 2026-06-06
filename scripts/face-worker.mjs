@@ -23,8 +23,21 @@ const faceRequire = createRequire(import.meta.url);
 const exiftoolPath = faceRequire("exiftool-vendored.exe");
 
 const RAW_EXTENSIONS = new Set([
-  ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2",
-  ".dng", ".orf", ".rw2", ".raf", ".pef", ".rwl", ".3fr", ".raw",
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".nrw",
+  ".arw",
+  ".srf",
+  ".sr2",
+  ".dng",
+  ".orf",
+  ".rw2",
+  ".raf",
+  ".pef",
+  ".rwl",
+  ".3fr",
+  ".raw",
 ]);
 
 function isRawFile(filePath) {
@@ -34,17 +47,21 @@ function isRawFile(filePath) {
 function extractRawPreview(filePath) {
   try {
     const buf = execFileSync(exiftoolPath, ["-b", "-JpgFromRaw", filePath], {
-      timeout: 15000,
+      timeout: 15_000,
       maxBuffer: 50 * 1024 * 1024,
     });
-    if (buf && buf.length > 0) return buf;
+    if (buf && buf.length > 0) {
+      return buf;
+    }
   } catch {}
   try {
     const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
-      timeout: 15000,
+      timeout: 15_000,
       maxBuffer: 50 * 1024 * 1024,
     });
-    if (buf && buf.length > 0) return buf;
+    if (buf && buf.length > 0) {
+      return buf;
+    }
   } catch {}
   return null;
 }
@@ -91,7 +108,7 @@ const EMBED_SIZE = 112; // ArcFace expects 112x112 input
 /**
  * Load ONNX models for detection and embedding.
  */
-async function initModels(modelsDir) {
+async function initModels(modelsDir, useGPU = false) {
   const { InferenceSession } = await loadOrt();
 
   const detModelPath = path.join(modelsDir, "face", "ultraface-320.onnx");
@@ -101,17 +118,61 @@ async function initModels(modelsDir) {
     throw new Error(`Detection model not found: ${detModelPath}`);
   }
 
-  detectionSession = await InferenceSession.create(detModelPath, {
-    executionProviders: ["cpu"],
-    logSeverityLevel: 3,
-  });
-  console.error(`[FaceWorker] Detection model loaded: ${detModelPath}`);
+  // Track whether DirectML is actually active — we can't query the session
+  // after creation, so we must remember the probe result.
+  let dmlActive = false;
 
-  if (fs.existsSync(embModelPath)) {
-    embeddingSession = await InferenceSession.create(embModelPath, {
+  if (useGPU) {
+    // --- Probe DML availability with a DML-only session ---
+    // The fallback list ["dml","cpu"] silently drops DML on failure, making
+    // it impossible to know whether GPU acceleration is actually in use.
+    // By trying DML-only first we get an explicit error when DML is broken.
+    try {
+      detectionSession = await InferenceSession.create(detModelPath, {
+        executionProviders: ["dml"],
+        logSeverityLevel: 3,
+      });
+      console.error("[FaceWorker] ✓ DirectML GPU ACTIVE");
+      dmlActive = true;
+    } catch (err) {
+      console.error(`[FaceWorker] ✗ DirectML unavailable: ${err.message}`);
+      console.error("[FaceWorker] Falling back to CPU");
+
+      detectionSession = await InferenceSession.create(detModelPath, {
+        executionProviders: ["cpu"],
+        logSeverityLevel: 3,
+      });
+    }
+  } else {
+    console.error("[FaceWorker] GPU disabled — using CPU");
+    detectionSession = await InferenceSession.create(detModelPath, {
       executionProviders: ["cpu"],
       logSeverityLevel: 3,
     });
+  }
+  console.error(`[FaceWorker] Detection model loaded: ${detModelPath}`);
+
+  if (fs.existsSync(embModelPath)) {
+    if (dmlActive) {
+      try {
+        embeddingSession = await InferenceSession.create(embModelPath, {
+          executionProviders: ["dml"],
+          logSeverityLevel: 3,
+        });
+        console.error("[FaceWorker] ✓ Embedding model DML ACTIVE");
+      } catch (err) {
+        console.error(`[FaceWorker] Embedding DML failed, CPU fallback: ${err.message}`);
+        embeddingSession = await InferenceSession.create(embModelPath, {
+          executionProviders: ["cpu"],
+          logSeverityLevel: 3,
+        });
+      }
+    } else {
+      embeddingSession = await InferenceSession.create(embModelPath, {
+        executionProviders: ["cpu"],
+        logSeverityLevel: 3,
+      });
+    }
     console.error(`[FaceWorker] Embedding model loaded: ${embModelPath}`);
   } else {
     console.error(
@@ -371,41 +432,64 @@ async function processPhoto(photo) {
   return { id: photo.id, faces: results };
 }
 
-// --- Wait for parent message ---
-const WORKER_TIMEOUT_MS = 300_000; // 5 minutes max for the entire batch
+// --- Persistent IPC handler ---
+// Model is loaded once per worker lifecycle via "init" message.
+// Multiple "detect" batches are processed without reloading models.
+// Worker stays alive until "shutdown" is received.
+const WORKER_TIMEOUT_MS = 300_000; // 5 minutes max per batch
+let modelsDir = null;
+let modelsReady = false;
 
 process.on("message", async (msg) => {
-  if (msg.type !== "detect") {
-    process.exit(1);
+  if (msg.type === "init") {
+    const { modelsDir: md, useGPU } = msg;
+    modelsDir = md || path.join(process.cwd(), "models");
+    try {
+      await initModels(modelsDir, useGPU);
+      modelsReady = true;
+      process.send?.({ type: "ready" });
+    } catch (err) {
+      console.error(`[FaceWorker] Model init failed: ${err.message}`);
+      process.send?.({ type: "ready", error: err.message });
+    }
+    return;
   }
 
-  const timeout = setTimeout(() => {
-    console.error("[FaceWorker] Timeout reached, exiting");
-    process.exit(1);
-  }, WORKER_TIMEOUT_MS);
-
-  const { photos, modelsDir } = msg;
-  if (!photos?.length) {
-    clearTimeout(timeout);
-    process.send?.({ type: "result", results: [] });
+  if (msg.type === "shutdown") {
+    console.error("[FaceWorker] Shutting down");
     process.exit(0);
   }
 
-  try {
-    // Determine models directory
-    const mDir = modelsDir || path.join(process.cwd(), "models");
-    await initModels(mDir);
-  } catch (err) {
-    console.error(`[FaceWorker] Model init failed: ${err.message}`);
-    clearTimeout(timeout);
+  if (msg.type !== "detect") {
+    return;
+  }
+
+  if (!modelsReady) {
+    process.send?.({
+      type: "result",
+      results: msg.photos.map((p) => ({ id: p.id, faces: [] })),
+      error: "Models not initialized",
+    });
+    return;
+  }
+
+  const { photos } = msg;
+  if (!photos?.length) {
+    process.send?.({ type: "result", results: [] });
+    return;
+  }
+
+  const batchTimeout = setTimeout(() => {
+    console.error("[FaceWorker] Batch timeout reached");
     process.send?.({
       type: "result",
       results: photos.map((p) => ({ id: p.id, faces: [] })),
+      error: "Batch timeout",
     });
-    process.exit(1);
-  }
+  }, WORKER_TIMEOUT_MS);
 
   console.error(`[FaceWorker] Processing ${photos.length} photos`);
+  const batchStartMs = Date.now();
 
   const PER_PHOTO_TIMEOUT_MS = 60_000;
   const results = [];
@@ -437,11 +521,11 @@ process.on("message", async (msg) => {
   }
 
   const totalFaces = results.reduce((s, r) => s + r.faces.length, 0);
+  const batchMs = Date.now() - batchStartMs;
   console.error(
-    `[FaceWorker] Done: ${totalFaces} faces found in ${results.length} photos`
+    `[FaceWorker] Done: ${totalFaces} faces in ${results.length} photos | ${batchMs}ms (${Math.round(batchMs / results.length)}ms/photo)`
   );
 
-  clearTimeout(timeout);
+  clearTimeout(batchTimeout);
   process.send?.({ type: "result", results });
-  process.exit(0);
 });

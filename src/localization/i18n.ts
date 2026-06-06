@@ -406,6 +406,13 @@ i18n.use(initReactI18next).init({
         saving: "保存中...",
         saveFailed: "保存失败",
 
+        // GPU acceleration
+        gpuAcceleration: "GPU 加速",
+        gpuEnableAcceleration: "启用 GPU 加速（DirectML）",
+        gpuAccelerationHint: "使用显卡加速人脸识别和图像索引，可提升 3-4 倍性能。支持 NVIDIA/AMD/Intel 显卡",
+        gpuRestartHint: "修改后需重新启动索引任务才能生效",
+        gpuSaved: "GPU 设置已保存",
+
         // Error boundary
         errorBoundaryTitle: "出现了一些问题",
         errorGeneric: "应用遇到了一个意外错误，请尝试重试",
@@ -1330,6 +1337,15 @@ i18n.use(initReactI18next).init({
           "Click check button to test connectivity and speed of each mirror",
         saving: "Saving...",
         saveFailed: "Save failed",
+
+        // GPU acceleration
+        gpuAcceleration: "GPU Acceleration",
+        gpuEnableAcceleration: "Enable GPU Acceleration (DirectML)",
+        gpuAccelerationHint:
+          "Use GPU to accelerate face recognition and image indexing, 3-4x faster. Supports NVIDIA/AMD/Intel GPUs",
+        gpuRestartHint:
+          "Restart indexing tasks to apply changes",
+        gpuSaved: "GPU settings saved",
 
         // Error boundary
         errorBoundaryTitle: "Something went wrong",
