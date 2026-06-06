@@ -32,6 +32,7 @@ interface WorkerSlot {
   pendingResolve: ((results: FaceDetectionResult[]) => void) | null;
   process: ChildProcess;
   status: WorkerStatus;
+  timeoutId?: ReturnType<typeof setTimeout> | null;
 }
 
 interface QueuedRequest {
@@ -107,6 +108,11 @@ function spawnWorker(index: number): WorkerSlot {
   });
 
   child.on("message", (msg: any) => {
+    // Clear any pending dispatch timeout when worker responds
+    if (slot.timeoutId) {
+      clearTimeout(slot.timeoutId);
+      slot.timeoutId = null;
+    }
     if (msg.type === "ready") {
       if (msg.error) {
         console.error(
@@ -225,7 +231,7 @@ function dispatchToSlot(
     `[FacePool] Dispatching ${photos.length} photos to Worker ${slot.index}`
   );
 
-  const timeout = setTimeout(() => {
+  slot.timeoutId = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
       const rej = slot.pendingReject;
       slot.pendingResolve = null;
@@ -236,10 +242,6 @@ function dispatchToSlot(
       handleWorkerDeath(slot);
     }
   }, WORKER_TIMEOUT);
-
-  slot.process.once("message", () => {
-    clearTimeout(timeout);
-  });
 
   slot.process.send({ type: "detect", photos });
 }
@@ -377,6 +379,32 @@ export function getFacePoolHealth(): {
 }
 
 /**
+ * Binary-split fallback when a batch fails — recursively splits the batch
+ * to isolate problematic photos instead of degrading to one-by-one processing.
+ */
+async function processResultsFallback(
+  batch: Array<{ id: number; path: string }>
+): Promise<FaceDetectionResult[]> {
+  if (batch.length === 0) {
+    return [];
+  }
+  try {
+    return await dispatchBatch(batch);
+  } catch (err: any) {
+    if (batch.length === 1) {
+      console.warn(
+        `[FacePool] Skipping corrupted photo ${batch[0].id}: ${err.message}`
+      );
+      return [{ id: batch[0].id, faces: [] }];
+    }
+    const mid = Math.floor(batch.length / 2);
+    const left = await processResultsFallback(batch.slice(0, mid));
+    const right = await processResultsFallback(batch.slice(mid));
+    return [...left, ...right];
+  }
+}
+
+/**
  * Run face detection + embedding on all given photos using the persistent
  * worker pool. Returns results for DB persistence.
  */
@@ -421,19 +449,8 @@ export async function detectFacesWithPool(
         allResults.push(...results);
       } catch (err: any) {
         console.warn(`[FacePool] Batch failed: ${err.message}`);
-        // Fallback: process one-by-one for corrupted images
-        if (batch.length > 1) {
-          for (const photo of batch) {
-            try {
-              const r = await dispatchBatch([photo]);
-              allResults.push(...r);
-            } catch (e2: any) {
-              allResults.push({ id: photo.id, faces: [] });
-            }
-          }
-        } else {
-          allResults.push({ id: batch[0].id, faces: [] });
-        }
+        const fallbackResults = await processResultsFallback(batch);
+        allResults.push(...fallbackResults);
       }
       processed += batch.length;
       onProgress?.(Math.min(processed, total), total);

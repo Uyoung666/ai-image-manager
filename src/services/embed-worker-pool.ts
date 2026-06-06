@@ -22,6 +22,7 @@ interface WorkerSlot {
   pendingResolve: ((results: EmbedResult[]) => void) | null;
   process: ChildProcess;
   status: WorkerStatus;
+  timeoutId?: ReturnType<typeof setTimeout> | null;
 }
 
 interface QueuedRequest {
@@ -113,6 +114,11 @@ function spawnWorker(index: number): WorkerSlot {
   });
 
   child.on("message", (msg: any) => {
+    // Clear any pending dispatch timeout when worker responds
+    if (slot.timeoutId) {
+      clearTimeout(slot.timeoutId);
+      slot.timeoutId = null;
+    }
     if (msg.type === "ready") {
       slot.status = "idle";
       drainQueue();
@@ -218,7 +224,7 @@ function dispatchToSlot(
     `[Pool] Dispatching ${photos.length} photos to Worker ${slot.index}`
   );
 
-  const timeout = setTimeout(() => {
+  slot.timeoutId = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
       const rej = slot.pendingReject;
       slot.pendingResolve = null;
@@ -229,10 +235,6 @@ function dispatchToSlot(
       handleWorkerDeath(slot);
     }
   }, WORKER_TIMEOUT);
-
-  slot.process.once("message", () => {
-    clearTimeout(timeout);
-  });
 
   slot.process.send({ type: "embed", modelPath, photos });
 }

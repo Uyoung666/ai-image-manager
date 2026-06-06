@@ -15,10 +15,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-import { toast } from "sonner";
 
 interface SearchResult {
   action: () => void;
@@ -48,9 +48,9 @@ interface AlbumResult {
 }
 
 interface PersonResult {
+  faceCount: number;
   id: number;
   name: string;
-  faceCount: number;
 }
 
 export function SpotlightSearch() {
@@ -65,6 +65,14 @@ export function SpotlightSearch() {
   const navigate = useNavigate();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Cache for relatively static data to avoid redundant IPC on every keystroke
+  const staticCacheRef = useRef<{
+    tags?: { data: TagResult[]; ts: number };
+    albums?: { data: AlbumResult[]; ts: number };
+    faces?: { data: PersonResult[]; ts: number };
+  }>({});
+  const CACHE_TTL = 30_000; // 30 seconds
 
   // Auto-focus search input when panel opens
   useEffect(() => {
@@ -99,14 +107,39 @@ export function SpotlightSearch() {
     setSearching(true);
     const qLower = q.toLowerCase();
     try {
+      const now = Date.now();
+      // Use cached data for relatively static resources
+      const cachedTags = staticCacheRef.current.tags;
+      const cachedAlbums = staticCacheRef.current.albums;
+      const cachedFaces = staticCacheRef.current.faces;
+
+      const tagsPromise = (cachedTags && now - cachedTags.ts < CACHE_TTL)
+        ? Promise.resolve(cachedTags.data)
+        : ipc.client.photos.getTags({}).then((data) => {
+            staticCacheRef.current.tags = { data: data as TagResult[], ts: Date.now() };
+            return data;
+          });
+      const albumsPromise = (cachedAlbums && now - cachedAlbums.ts < CACHE_TTL)
+        ? Promise.resolve(cachedAlbums.data)
+        : ipc.client.albums.listAlbums({}).then((data) => {
+            staticCacheRef.current.albums = { data: data as AlbumResult[], ts: Date.now() };
+            return data;
+          });
+      const facesPromise = (cachedFaces && now - cachedFaces.ts < CACHE_TTL)
+        ? Promise.resolve(cachedFaces.data)
+        : ipc.client.faces.listFaceIdentities({}).then((data) => {
+            staticCacheRef.current.faces = { data: data as PersonResult[], ts: Date.now() };
+            return data;
+          });
+
       const [photos, tags, albums, faces] = await Promise.allSettled([
         ipc.client.photos.searchCompound({
           query: q,
           limit: 5,
         }),
-        ipc.client.photos.getTags({}),
-        ipc.client.albums.listAlbums({}),
-        ipc.client.faces.listFaceIdentities({}),
+        tagsPromise,
+        albumsPromise,
+        facesPromise,
       ]);
       const failed = [photos, tags, albums, faces].filter(
         (r) => r.status === "rejected"
@@ -114,7 +147,10 @@ export function SpotlightSearch() {
 
       if (photos.status === "fulfilled") {
         setPhotoResults(
-          ((photos.value as { results?: PhotoResult[] }).results || []).slice(0, 5)
+          ((photos.value as { results?: PhotoResult[] }).results || []).slice(
+            0,
+            5
+          )
         );
       }
       if (tags.status === "fulfilled") {
@@ -134,10 +170,7 @@ export function SpotlightSearch() {
       if (faces.status === "fulfilled") {
         setPersonResults(
           ((faces.value as PersonResult[]) || [])
-            .filter(
-              (p) =>
-                p.name && p.name.toLowerCase().includes(qLower)
-            )
+            .filter((p) => p.name && p.name.toLowerCase().includes(qLower))
             .slice(0, 5)
         );
       }
@@ -269,10 +302,10 @@ export function SpotlightSearch() {
           <div className="flex items-center border-border border-b px-4">
             <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <Command.Input
-              ref={inputRef}
               className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
               placeholder={t("spotlightSearchPlaceholder")}
+              ref={inputRef}
               value={query}
             />
             <kbd className="ml-2 flex h-5 shrink-0 items-center rounded-[4px] border border-border bg-card px-1.5 font-mono text-[10px] text-muted-foreground">

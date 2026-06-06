@@ -235,19 +235,26 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
       setLoading(false);
     }
   }, [
-    session.completedComparisons,
     session.id,
     session.status,
-    session.totalPhotos,
   ]);
 
   useEffect(() => {
     loadPairRef.current = loadPair;
   }, [loadPair]);
 
+  // Only call on first mount and when session.id/status changes (not on every comparison)
+  const initialLoadCalled = useRef(false);
   useEffect(() => {
-    loadPair();
+    if (!initialLoadCalled.current) {
+      initialLoadCalled.current = true;
+      loadPair();
+    }
   }, [loadPair]);
+  // Reset when switching sessions so the next session loads its first pair
+  useEffect(() => {
+    initialLoadCalled.current = false;
+  }, [session.id]);
 
   async function handlePick(winnerIdx: 0 | 1) {
     if (!pair || isSessionCompleted || submittingRef.current) {
@@ -597,7 +604,7 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left photo */}
         <div
-          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden border-border border-r p-4 transition-colors focus:outline-none hover:bg-primary/5"
+          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden border-border border-r p-4 transition-colors hover:bg-primary/5 focus:outline-none"
           onClick={(e) => {
             if (e.detail !== 1) {
               return;
@@ -669,7 +676,7 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
 
         {/* Right photo */}
         <div
-          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden p-4 transition-colors focus:outline-none hover:bg-primary/5"
+          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden p-4 transition-colors hover:bg-primary/5 focus:outline-none"
           onClick={(e) => {
             if (e.detail !== 1) {
               return;
@@ -755,7 +762,6 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
           </span>
         )}
       </div>
-
 
       {/* Finish confirm dialog */}
       {finishConfirmOpen && (

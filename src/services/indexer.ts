@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import exifr from "exifr";
 import PQueue from "p-queue";
 import sharp from "sharp";
@@ -9,13 +9,13 @@ import { getDatabase } from "@/db";
 import { exifData, folders, photos } from "@/db/schema";
 import { createLogger } from "@/utils/logger";
 import { deletePhotoVectors } from "./ai-embedder";
+import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
-import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
-import { extractDominantColors } from "./color-extractor";
 import { extractRawPreview, isRawFile } from "./raw-preview";
+import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
-const log = createLogger('indexer');
+const log = createLogger("indexer");
 
 const SUPPORTED_EXTENSIONS = new Set([
   // Common image formats
@@ -225,7 +225,7 @@ async function readBasicMeta(filePath: string): Promise<{
     // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
     const format = raw
       ? path.extname(filePath).toLowerCase().replace(".", "")
-      : (meta.format || "");
+      : meta.format || "";
     return {
       width: meta.width || 0,
       height: meta.height || 0,
@@ -275,32 +275,36 @@ async function readExif(
 }
 
 interface PhotoRecord {
-  path: string;
-  folderId: number | null;
+  colorSpace: string;
+  dominantColors: string | null;
+  fileDate: number;
   filename: string;
   fileSize: number;
-  fileDate: number;
-  width: number;
-  height: number;
+  folderId: number | null;
   format: string;
-  colorSpace: string;
   hasAlpha: boolean;
+  height: number;
+  isIndexed: boolean;
+  path: string;
+  phash: string | null;
   thumbnailPath: string | null;
   thumbnailSize: string;
-  isIndexed: boolean;
-  phash: string | null;
-  dominantColors: string | null;
+  width: number;
 }
 
 // Parse shutter speed text (e.g. "0.001", "1/1000") to numeric seconds
 function parseShutterSpeedToNum(value: string | undefined): number | null {
-  if (value === undefined || value === "") return null;
+  if (value === undefined || value === "") {
+    return null;
+  }
   // Fraction format: "1/1000", "1/60" etc.
   const fracMatch = value.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
   if (fracMatch) {
     const num = Number.parseFloat(fracMatch[1]);
     const den = Number.parseFloat(fracMatch[2]);
-    if (den !== 0) return num / den;
+    if (den !== 0) {
+      return num / den;
+    }
     return null;
   }
   // Decimal string: "0.001", "0.5" etc.
@@ -310,43 +314,50 @@ function parseShutterSpeedToNum(value: string | undefined): number | null {
 
 // Parse focal length text (e.g. "85", "24-70") to numeric value (first number)
 function parseFocalLengthToNum(value: string | undefined): number | null {
-  if (value === undefined || value === "") return null;
+  if (value === undefined || value === "") {
+    return null;
+  }
   const num = Number.parseFloat(value);
   return Number.isFinite(num) && num > 0 ? num : null;
 }
 
 interface ExifRecord {
-  photoId: number;
+  aperture?: number;
+  artist?: string;
   cameraMake?: string;
   cameraModel?: string;
-  lensMake?: string;
-  lensModel?: string;
+  copyright?: string;
+  dateDigitized?: number | null;
+  dateTaken?: number | null;
+  exposureCompensation?: number;
+  flash?: boolean;
   focalLength?: string;
   focalLength35mm?: string;
   focalLengthNum?: number | null;
-  aperture?: number;
-  shutterSpeed?: string;
-  shutterSpeedNum?: number | null;
-  iso?: number;
-  exposureCompensation?: number;
-  dateTaken?: number | null;
-  dateDigitized?: number | null;
-  flash?: boolean;
-  orientation?: number;
+  gpsAltitude?: number;
   gpsLatitude?: number;
   gpsLongitude?: number;
-  gpsAltitude?: number;
-  software?: string;
   imageDescription?: string;
-  artist?: string;
-  copyright?: string;
+  iso?: number;
+  lensMake?: string;
+  lensModel?: string;
+  orientation?: number;
+  photoId: number;
   rawJson: string;
+  shutterSpeed?: string;
+  shutterSpeedNum?: number | null;
+  software?: string;
 }
 
 async function preparePhotoRecord(
   filePath: string,
   folderId: number | null
-): Promise<{ photoRecord: PhotoRecord; exifRecord: ExifRecord | null; stat: fs.Stats; phash: string | null } | null> {
+): Promise<{
+  photoRecord: PhotoRecord;
+  exifRecord: ExifRecord | null;
+  stat: fs.Stats;
+  phash: string | null;
+} | null> {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(filePath);
@@ -473,7 +484,8 @@ async function indexSingleFile(
         .get();
       if (
         newFolder &&
-        (!existingFolder || getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
+        (!existingFolder ||
+          getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
       ) {
         db.update(photos)
           .set({ folderId })
@@ -724,7 +736,9 @@ export async function scanFolder(
               .get();
             if (
               newFolder &&
-              (!existingFolder || getFolderDepth(newFolder.path) > getFolderDepth(existingFolder.path))
+              (!existingFolder ||
+                getFolderDepth(newFolder.path) >
+                  getFolderDepth(existingFolder.path))
             ) {
               db.update(photos)
                 .set({ folderId: fileFolderId })
@@ -820,7 +834,10 @@ export async function scanFolder(
       }
     } catch (err: any) {
       // Fallback to individual inserts if batch fails
-      log.warn({ err }, "Batch insert failed, falling back to individual inserts");
+      log.warn(
+        { err },
+        "Batch insert failed, falling back to individual inserts"
+      );
       for (const record of batch) {
         try {
           const result = db
@@ -887,16 +904,14 @@ export async function scanFolder(
   }
 
   for (const [dirPath, fid] of dirToFolderId) {
-    const count = photoIds.filter(
-      (pid) => {
-        const photo = db
-          .select({ folderId: photos.folderId })
-          .from(photos)
-          .where(eq(photos.id, pid))
-          .get();
-        return photo && photo.folderId === fid;
-      }
-    ).length;
+    const count = photoIds.filter((pid) => {
+      const photo = db
+        .select({ folderId: photos.folderId })
+        .from(photos)
+        .where(eq(photos.id, pid))
+        .get();
+      return photo && photo.folderId === fid;
+    }).length;
     db.update(folders)
       .set({ photoCount: count, lastScannedAt: Date.now() })
       .where(eq(folders.id, fid))
@@ -919,7 +934,13 @@ export async function scanFolder(
   // vectors are available in LanceDB. This avoids expensive per-photo worker
   // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
 
-  return { folderId, photoIds, skipped, cancelled: wasCancelled, folderExisted };
+  return {
+    folderId,
+    photoIds,
+    skipped,
+    cancelled: wasCancelled,
+    folderExisted,
+  };
 }
 
 export function startWatching(
@@ -995,7 +1016,10 @@ export function startWatching(
             db.delete(photos).where(eq(photos.id, photo.id)).run();
             deletePhotoThumbnails(filePath);
             deletePhotoVectors([photo.id]).catch((err) =>
-              log.error({ err, photoId: photo.id }, "Watcher: vector cleanup failed on unlink")
+              log.error(
+                { err, photoId: photo.id },
+                "Watcher: vector cleanup failed on unlink"
+              )
             );
 
             if (photo.folderId) {
@@ -1013,7 +1037,10 @@ export function startWatching(
           }
         } catch (err) {
           watcherStats.errors++;
-          log.error({ filePath, err }, "Watcher: Error processing unlink event");
+          log.error(
+            { filePath, err },
+            "Watcher: Error processing unlink event"
+          );
         }
       });
     });
@@ -1030,7 +1057,10 @@ export function startWatching(
     watchers.push(watcher);
   }
 
-  log.info({ count: indexedFolders.length }, "Watcher: Started watching folders");
+  log.info(
+    { count: indexedFolders.length },
+    "Watcher: Started watching folders"
+  );
 }
 
 export function watchFolder(
@@ -1101,7 +1131,10 @@ export function watchFolder(
           db.delete(photos).where(eq(photos.id, photo.id)).run();
           deletePhotoThumbnails(filePath);
           deletePhotoVectors([photo.id]).catch((err) =>
-            log.error({ err, photoId: photo.id }, "Watcher: vector cleanup failed on unlink")
+            log.error(
+              { err, photoId: photo.id },
+              "Watcher: vector cleanup failed on unlink"
+            )
           );
 
           if (photo.folderId) {
@@ -1179,6 +1212,54 @@ export async function cleanupOrphanedRecords(): Promise<{
 
       removed++;
     }
+  }
+
+  for (const [folderId, count] of folderUpdates) {
+    db.update(folders)
+      .set({ photoCount: sql`photo_count - ${count}` })
+      .where(eq(folders.id, folderId))
+      .run();
+  }
+
+  return { checked: allPhotos.length, removed };
+}
+
+/**
+ * Async variant of cleanupOrphanedRecords — yields the event loop every
+ * BATCH_SIZE photos so the UI stays responsive during startup cleanup.
+ */
+export async function cleanupOrphanedRecordsAsync(
+  onProgress?: (checked: number, removed: number, total: number) => void
+): Promise<{ checked: number; removed: number }> {
+  const db = getDatabase();
+  const allPhotos = db
+    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
+    .from(photos)
+    .all();
+
+  let removed = 0;
+  const folderUpdates = new Map<number, number>();
+  const BATCH_SIZE = 200;
+
+  for (let i = 0; i < allPhotos.length; i += BATCH_SIZE) {
+    const batch = allPhotos.slice(i, i + BATCH_SIZE);
+    for (const photo of batch) {
+      if (!fs.existsSync(photo.path)) {
+        db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
+        db.delete(photos).where(eq(photos.id, photo.id)).run();
+
+        if (photo.folderId) {
+          folderUpdates.set(
+            photo.folderId,
+            (folderUpdates.get(photo.folderId) || 0) + 1
+          );
+        }
+        removed++;
+      }
+    }
+    // Yield the event loop every batch to keep UI responsive
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    onProgress?.(Math.min(i + BATCH_SIZE, allPhotos.length), removed, allPhotos.length);
   }
 
   for (const [folderId, count] of folderUpdates) {

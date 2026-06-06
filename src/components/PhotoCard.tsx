@@ -27,7 +27,9 @@ function setImageLoadState(key: string, value: "loaded" | "error") {
   imageLoadState.set(key, value);
   if (imageLoadState.size > MAX_IMAGE_LOAD_CACHE) {
     const oldest = imageLoadState.keys().next().value;
-    if (oldest) imageLoadState.delete(oldest);
+    if (oldest) {
+      imageLoadState.delete(oldest);
+    }
   }
 }
 
@@ -73,10 +75,13 @@ export const PhotoCard = memo(function PhotoCard({
 }: PhotoCardProps) {
   const { t } = useTranslation();
   const url = useMemo(
-    () => (thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path)),
+    () =>
+      thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path),
     [thumbnailPath, path]
   );
-  const [loaded, setLoaded] = useState(() => imageLoadState.get(url) === "loaded");
+  const [loaded, setLoaded] = useState(
+    () => imageLoadState.get(url) === "loaded"
+  );
   const [error, setError] = useState(() => imageLoadState.get(url) === "error");
   const starRef = useRef<HTMLButtonElement>(null);
 
@@ -105,6 +110,31 @@ export const PhotoCard = memo(function PhotoCard({
       }
     },
     [id, path, getDragIds, t]
+  );
+
+  // Stable callbacks to avoid breaking React.memo on PhotoCard
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      onClick(id, e);
+    },
+    [id, onClick]
+  );
+
+  const handleDoubleClick = useCallback(() => {
+    onDoubleClick(id);
+  }, [id, onDoubleClick]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onDoubleClick(id);
+      } else if (e.key === " ") {
+        e.preventDefault();
+        onClick(id, e as unknown as React.MouseEvent);
+      }
+    },
+    [id, onClick, onDoubleClick]
   );
 
   // Clamp extreme aspect ratios for visual consistency (P1-1)
@@ -164,19 +194,11 @@ export const PhotoCard = memo(function PhotoCard({
       data-photo-id={id}
       data-photo-path={path}
       draggable
-      onClick={(e) => onClick(id, e)}
+      onClick={handleClick}
       onContextMenu={undefined}
-      onDoubleClick={() => onDoubleClick(id)}
+      onDoubleClick={handleDoubleClick}
       onDragStart={handleDragStart}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onDoubleClick(id);
-        } else if (e.key === " ") {
-          e.preventDefault();
-          onClick(id, e as unknown as React.MouseEvent);
-        }
-      }}
+      onKeyDown={handleKeyDown}
       role="option"
       style={{ aspectRatio }}
       tabIndex={0}
@@ -195,8 +217,14 @@ export const PhotoCard = memo(function PhotoCard({
         }`}
         decoding="async"
         loading="lazy"
-        onError={() => { setImageLoadState(url, "error"); setError(true); }}
-        onLoad={() => { setImageLoadState(url, "loaded"); setLoaded(true); }}
+        onError={() => {
+          setImageLoadState(url, "error");
+          setError(true);
+        }}
+        onLoad={() => {
+          setImageLoadState(url, "loaded");
+          setLoaded(true);
+        }}
         src={url}
       />
 
