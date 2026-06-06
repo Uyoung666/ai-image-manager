@@ -4,6 +4,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { openExternalLink } from "@/actions/shell";
+import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
+import { CloudConfigPanel } from "@/components/CloudConfigPanel";
+import LangToggle from "@/components/lang-toggle";
+import ToggleTheme from "@/components/toggle-theme";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,11 +20,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { openExternalLink } from "@/actions/shell";
-import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
-import { CloudConfigPanel } from "@/components/CloudConfigPanel";
-import LangToggle from "@/components/lang-toggle";
-import ToggleTheme from "@/components/toggle-theme";
 import {
   WatermarkPreview,
   type WatermarkPreviewSettings,
@@ -58,11 +58,20 @@ const DEFAULT_WM: WatermarkSettings = {
   imageScale: 15,
 };
 
+interface MirrorHealthResult {
+  error?: string;
+  name: string;
+  responseTime?: number;
+  status: "success" | "failed" | "checking";
+}
+
 function MirrorSettingsSection() {
   const { t } = useTranslation();
   const [mirror, setMirror] = useState<string>("auto");
   const [customMirror, setCustomMirror] = useState<string>("");
   const [saveStatus, setSaveStatus] = useState<string>("");
+  const [checking, setChecking] = useState(false);
+  const [healthResults, setHealthResults] = useState<MirrorHealthResult[]>([]);
 
   useEffect(() => {
     ipc.client.settings.getMirrorSettings({}).then((r: any) => {
@@ -91,6 +100,21 @@ function MirrorSettingsSection() {
     { value: "custom", label: t("aiMirrorCustom"), url: customMirror },
   ];
 
+  async function handleCheckHealth() {
+    setChecking(true);
+    setHealthResults([]);
+    try {
+      const result = await ipc.client.settings.checkMirrorHealth({});
+      setHealthResults(result.results);
+    } catch (err) {
+      console.error("Mirror health check failed:", err);
+      setSaveStatus(t("aiMirrorCheckFailed"));
+      setTimeout(() => setSaveStatus(""), 3000);
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function handleSave() {
     setSaveStatus(t("saving"));
     try {
@@ -104,6 +128,35 @@ function MirrorSettingsSection() {
       setSaveStatus(t("saveFailed"));
       setTimeout(() => setSaveStatus(""), 3000);
     }
+  }
+
+  function getMirrorHealthBadge(name: string) {
+    const result = healthResults.find((r) => r.name === name);
+    if (!result) {
+      return null;
+    }
+
+    const isRecommended =
+      healthResults.length > 0 &&
+      result.status === "success" &&
+      result === healthResults.find((r) => r.status === "success");
+
+    if (result.status === "success") {
+      return (
+        <span className="ml-2 text-[11px] text-green-600 dark:text-green-400">
+          ✓ {result.responseTime}ms
+          {isRecommended && ` · ${t("aiMirrorHealthRecommended")}`}
+        </span>
+      );
+    }
+    if (result.status === "failed") {
+      return (
+        <span className="ml-2 text-[11px] text-red-600 dark:text-red-400">
+          ✗ {result.error || t("aiMirrorHealthFailed")}
+        </span>
+      );
+    }
+    return null;
   }
 
   return (
@@ -124,10 +177,27 @@ function MirrorSettingsSection() {
             {mirrorOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
+                {opt.value !== "auto" &&
+                  opt.value !== "custom" &&
+                  getMirrorHealthBadge(opt.value)?.props.children}
               </option>
             ))}
           </select>
-          <p className="mt-1 text-[11px] text-muted-foreground/70">
+          <div className="mt-2 space-y-1">
+            {mirrorOptions
+              .filter((opt) => opt.value !== "auto" && opt.value !== "custom")
+              .map((opt) => {
+                const badge = getMirrorHealthBadge(opt.value);
+                if (!badge) { return null; }
+                return (
+                  <div className="text-[11px]"key={opt.value} >
+                    <span className="text-muted-foreground">{opt.label}:</span>
+                    {badge}
+                  </div>
+                );
+              })}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/70">
             {t("aiMirrorSourceHint")}
           </p>
         </div>
@@ -147,17 +217,27 @@ function MirrorSettingsSection() {
           </div>
         )}
 
-        <div className="border-border border-t pt-3">
+        <div className="flex gap-2 border-border border-t pt-3">
           <button
-            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             onClick={handleSave}
           >
             {saveStatus || t("save")}
           </button>
-          <p className="mt-2 text-[11px] text-muted-foreground/70">
-            {t("aiMirrorRestartHint")}
-          </p>
+          <button
+            className="rounded-[6px] border border-input bg-background px-3 py-1.5 text-[12px] transition-colors hover:bg-accent disabled:opacity-50"
+            disabled={checking}
+            onClick={handleCheckHealth}
+          >
+            {checking ? t("aiMirrorChecking") : t("aiMirrorCheckHealth")}
+          </button>
         </div>
+        <p className="text-[11px] text-muted-foreground/70">
+          {t("aiMirrorHealthHint")}
+        </p>
+        <p className="text-[11px] text-muted-foreground/70">
+          {t("aiMirrorRestartHint")}
+        </p>
       </div>
     </section>
   );
@@ -624,9 +704,13 @@ function SettingsPage() {
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopyPath = useCallback((path: string) => {
-    if (!path) return;
+    if (!path) {
+      return;
+    }
     navigator.clipboard.writeText(path).catch(() => {});
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current);
+    }
     setCopiedPath(path);
     copyTimerRef.current = setTimeout(() => setCopiedPath(null), 2000);
   }, []);
@@ -754,7 +838,7 @@ function SettingsPage() {
       <div className="flex min-h-0 flex-1">
         {/* ── Left column: General settings ── */}
         <div
-          className="flex-1 min-w-0 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
           style={{ maxWidth: 440 }}
         >
           <section className="space-y-3">
@@ -807,12 +891,18 @@ function SettingsPage() {
                         </span>
                         <span
                           className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
-                            copiedPath === indexStats.thumbnailCacheDir ? "text-green-600" : "text-muted-foreground/80"
+                            copiedPath === indexStats.thumbnailCacheDir
+                              ? "text-green-600"
+                              : "text-muted-foreground/80"
                           }`}
+                          onClick={() =>
+                            handleCopyPath(indexStats.thumbnailCacheDir)
+                          }
                           title={indexStats.thumbnailCacheDir || ""}
-                          onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
                         >
-                          {copiedPath === indexStats.thumbnailCacheDir ? t("copied") : (indexStats.thumbnailCacheDir || "-")}
+                          {copiedPath === indexStats.thumbnailCacheDir
+                            ? t("copied")
+                            : indexStats.thumbnailCacheDir || "-"}
                         </span>
                       </div>
                       <div className="flex items-baseline gap-2">
@@ -829,10 +919,13 @@ function SettingsPage() {
                     </div>
                   )}
                 </div>
-                <AlertDialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+                <AlertDialog
+                  onOpenChange={setClearDialogOpen}
+                  open={clearDialogOpen}
+                >
                   <AlertDialogTrigger asChild>
                     <button
-                      className="shrink-0 max-w-[140px] truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                      className="max-w-[140px] shrink-0 truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
                       title={clearCacheStatus || t("settingsClear")}
                     >
                       {clearCacheStatus || t("settingsClear")}
@@ -899,24 +992,32 @@ function SettingsPage() {
                         </span>
                         <span
                           className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
-                            copiedPath === indexStats.databasePath ? "text-green-600" : "text-muted-foreground/80"
+                            copiedPath === indexStats.databasePath
+                              ? "text-green-600"
+                              : "text-muted-foreground/80"
                           }`}
+                          onClick={() =>
+                            handleCopyPath(indexStats.databasePath)
+                          }
                           title={indexStats.databasePath || ""}
-                          onClick={() => handleCopyPath(indexStats.databasePath)}
                         >
-                          {copiedPath === indexStats.databasePath ? t("copied") : (indexStats.databasePath || "-")}
+                          {copiedPath === indexStats.databasePath
+                            ? t("copied")
+                            : indexStats.databasePath || "-"}
                         </span>
                       </div>
                     </div>
                   )}
                 </div>
                 <button
-                  className="flex shrink-0 items-center gap-1.5 max-w-[140px] rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                  className="flex max-w-[140px] shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
                   onClick={handleCleanupOrphans}
                   title={cleanupStatus || t("cleanupInvalidRecords")}
                 >
                   <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{cleanupStatus || t("cleanupInvalidRecords")}</span>
+                  <span className="truncate">
+                    {cleanupStatus || t("cleanupInvalidRecords")}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1146,7 +1247,7 @@ function SettingsPage() {
 
         {/* ── Right column: Update & About ── */}
         <div
-          className="flex-1 min-w-0 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
           style={{ maxWidth: 380 }}
         >
           <UpdateSection />

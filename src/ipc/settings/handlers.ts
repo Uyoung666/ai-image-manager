@@ -324,3 +324,9 @@ export const setMirrorSettings = os
     }
     return { ok: true };
   });
+
+export const checkMirrorHealth = os.handler(async () => {
+  const { checkAllMirrors } = await import("@/services/ai/mirror-health");
+  const results = await checkAllMirrors();
+  return { results };
+});

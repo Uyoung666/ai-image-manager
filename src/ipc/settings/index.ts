@@ -1,4 +1,5 @@
 import {
+  checkMirrorHealth,
   getAllAppSettings,
   getAppSetting,
   getDataPathInfo,
@@ -16,4 +17,5 @@ export const settings = {
   setDataPath,
   getMirrorSettings,
   setMirrorSettings,
+  checkMirrorHealth,
 };
