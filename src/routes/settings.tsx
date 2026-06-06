@@ -189,9 +189,11 @@ function MirrorSettingsSection() {
               .filter((opt) => opt.value !== "auto" && opt.value !== "custom")
               .map((opt) => {
                 const badge = getMirrorHealthBadge(opt.value);
-                if (!badge) { return null; }
+                if (!badge) {
+                  return null;
+                }
                 return (
-                  <div className="text-[11px]"key={opt.value} >
+                  <div className="text-[11px]" key={opt.value}>
                     <span className="text-muted-foreground">{opt.label}:</span>
                     {badge}
                   </div>
@@ -1027,14 +1029,6 @@ function SettingsPage() {
           <DataDirSection />
 
           <MirrorSettingsSection />
-          <GpuSettingsCard />
-
-          <section className="space-y-3">
-            <h2 className="font-[590] text-[14px] text-foreground">
-              {t("cloudSync")}
-            </h2>
-            <CloudConfigPanel />
-          </section>
         </div>
 
         {/* ── Divider ── */}
@@ -1247,11 +1241,20 @@ function SettingsPage() {
         {/* ── Divider ── */}
         <div className="w-px self-stretch border-border border-l" />
 
-        {/* ── Right column: Update & About ── */}
+        {/* ── Right column: GPU, Cloud, Update & About ── */}
         <div
           className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
           style={{ maxWidth: 380 }}
         >
+          <GpuSettingsCard />
+
+          <section className="space-y-3">
+            <h2 className="font-[590] text-[14px] text-foreground">
+              {t("cloudSync")}
+            </h2>
+            <CloudConfigPanel />
+          </section>
+
           <UpdateSection />
 
           <section className="space-y-3">
