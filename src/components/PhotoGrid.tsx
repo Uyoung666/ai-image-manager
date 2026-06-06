@@ -27,6 +27,7 @@ interface PhotoGridProps {
   emptyState?: React.ReactNode;
   error?: string;
   loading: boolean;
+  onBackgroundClick?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onEndReached?: () => void;
@@ -83,6 +84,7 @@ export function PhotoGrid({
   onToggleFavorite,
   onKeyboardSelect,
   onMarqueeSelect,
+  onBackgroundClick,
 }: PhotoGridProps) {
   const { t, i18n } = useTranslation();
   const [targetColWidth, setTargetColWidth] = useState(loadColWidth);
@@ -319,11 +321,11 @@ export function PhotoGrid({
               <p className="text-[13px] text-muted-foreground/70">{error}</p>
             </div>
           ) : (
-            emptyState ?? (
+            (emptyState ?? (
               <span className="text-[13px] text-muted-foreground/70">
                 {t("noPhotos")}
               </span>
-            )
+            ))
           )}
         </div>
       </div>
@@ -331,7 +333,18 @@ export function PhotoGrid({
   }
 
   return (
-    <div className="flex flex-1 flex-col">
+    <div
+      className="flex flex-1 flex-col"
+      onClick={(e) => {
+        if (onBackgroundClick) {
+          const target = e.target as HTMLElement;
+          // 只有点击非照片卡片区域才触发背景点击
+          if (!target.closest("[data-photo-id]")) {
+            onBackgroundClick();
+          }
+        }
+      }}
+    >
       {/* Toolbar */}
       <div className="flex items-center justify-between border-border border-b px-4 py-2">
         <span className="truncate text-[12px] text-muted-foreground">

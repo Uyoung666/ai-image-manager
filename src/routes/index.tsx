@@ -8,15 +8,19 @@ import { CloudUploadDialog } from "@/components/CloudUploadDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
+import { clearImageLoadCache } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoGrid } from "@/components/PhotoGrid";
-import { clearImageLoadCache } from "@/components/PhotoCard";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
-import { SearchBar, type ExifFilters, type SearchBarHandle } from "@/components/SearchBar";
+import {
+  type ExifFilters,
+  SearchBar,
+  type SearchBarHandle,
+} from "@/components/SearchBar";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { ShareDialog } from "@/components/ShareDialog";
 import { Sidebar } from "@/components/Sidebar";
@@ -263,8 +267,7 @@ function HomePage() {
       }
       if (event.data?.channel === "ai-progress") {
         const { processed, total, phase } = event.data;
-        aiIndexingRef.current =
-          phase === "loading" || phase === "embedding";
+        aiIndexingRef.current = phase === "loading" || phase === "embedding";
         if (aiIndexingRef.current) {
           setScanProgress(
             phase === "loading"
@@ -372,17 +375,18 @@ function HomePage() {
     }
   }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleToggleFavorite = useCallback(
-    async (id: number) => {
-      const photo = photosRef.current.find((p) => p.id === id);
-      if (!photo) {
-        return;
-      }
-      const prevVal = !!photo.isFavorite;
-      const newVal = !prevVal;
-      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
-      toast.success(newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"), {
+  const handleToggleFavorite = useCallback(async (id: number) => {
+    const photo = photosRef.current.find((p) => p.id === id);
+    if (!photo) {
+      return;
+    }
+    const prevVal = !!photo.isFavorite;
+    const newVal = !prevVal;
+    await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    toast.success(
+      newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
+      {
         action: {
           label: t("toastUndo"),
           onClick: async () => {
@@ -393,10 +397,9 @@ function HomePage() {
             queryClient.invalidateQueries({ queryKey: ["photos"] });
           },
         },
-      });
-    },
-    []
-  );
+      }
+    );
+  }, []);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -458,7 +461,8 @@ function HomePage() {
   }
 
   async function handleAddFolder(externalPath?: string) {
-    let folderPath = typeof externalPath === "string" ? externalPath : undefined;
+    let folderPath =
+      typeof externalPath === "string" ? externalPath : undefined;
     if (!folderPath) {
       const result = await ipc.client.shell.openFolderDialog({});
       folderPath = result?.path ?? undefined;
@@ -562,26 +566,26 @@ function HomePage() {
     [lastClickedIdx]
   );
 
-  const handleDoubleClick = useCallback(
-    (id: number) => {
-      const idx = photosRef.current.findIndex((p) => p.id === id);
-      if (idx >= 0) {
-        setLightboxIndex(idx);
-      }
-    },
-    []
-  );
+  const handleDoubleClick = useCallback((id: number) => {
+    const idx = photosRef.current.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      setLightboxIndex(idx);
+    }
+  }, []);
   async function handleSearch(
     query: string,
     filters?: ExifFilters,
-    paramColorHex?: string,
+    paramColorHex?: string
   ) {
-	    // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
-	    const effectiveColorHex = paramColorHex !== undefined ? paramColorHex : colorHex;
-	    setSearchQuery(query);
-	    if (paramColorHex !== undefined) setColorHex(paramColorHex);
-	    const hasFilters = filters && Object.values(filters).some((v) => v);
-	    const hasColorHex = !!effectiveColorHex;
+    // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
+    const effectiveColorHex =
+      paramColorHex === undefined ? colorHex : paramColorHex;
+    setSearchQuery(query);
+    if (paramColorHex !== undefined) {
+      setColorHex(paramColorHex);
+    }
+    const hasFilters = filters && Object.values(filters).some((v) => v);
+    const hasColorHex = !!effectiveColorHex;
 
     if (!(query.trim() || hasFilters || hasColorHex)) {
       setSearchMode(null);
@@ -971,18 +975,23 @@ function HomePage() {
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
           queryClient.invalidateQueries({ queryKey: ["photos"] });
-          toast.success(newVal ? t("toastFavoriteAddedCount", { count: ids.length }) : t("toastFavoriteRemoved"), {
-            action: {
-              label: t("toastUndo"),
-              onClick: async () => {
-                await ipc.client.photos.toggleFavorite({
-                  ids,
-                  favorite: allFav,
-                });
-                queryClient.invalidateQueries({ queryKey: ["photos"] });
+          toast.success(
+            newVal
+              ? t("toastFavoriteAddedCount", { count: ids.length })
+              : t("toastFavoriteRemoved"),
+            {
+              action: {
+                label: t("toastUndo"),
+                onClick: async () => {
+                  await ipc.client.photos.toggleFavorite({
+                    ids,
+                    favorite: allFav,
+                  });
+                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                },
               },
-            },
-          });
+            }
+          );
         });
         return;
       }
@@ -1021,39 +1030,33 @@ function HomePage() {
     toggleSidebar,
   ]);
 
-  const handleKeyboardSelect = useCallback(
-    (id: number) => {
-      setSelectedIds(new Set([id]));
-      const idx = photosRef.current.findIndex((p) => p.id === id);
-      if (idx >= 0) {
-        setLastClickedIdx(idx);
-      }
-    },
-    []
-  );
+  const handleKeyboardSelect = useCallback((id: number) => {
+    setSelectedIds(new Set([id]));
+    const idx = photosRef.current.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      setLastClickedIdx(idx);
+    }
+  }, []);
 
-  const handleMarqueeSelect = useCallback(
-    (ids: Set<number>) => {
-      if (ids.size > 0) {
-        setSelectedIds(ids);
-      }
-    },
-    []
-  );
+  const marqueeJustCompleted = useRef(false);
 
-  const handleSortChange = useCallback(
-    (s: SortField, o: SortOrder) => {
-      setSortField(s);
-      setSortOrder(o);
-      try {
-        localStorage.setItem(GRID_SORT_FIELD_KEY, s);
-        localStorage.setItem(GRID_SORT_ORDER_KEY, o);
-      } catch {
-        /* ignore */
-      }
-    },
-    []
-  );
+  const handleMarqueeSelect = useCallback((ids: Set<number>) => {
+    if (ids.size > 0) {
+      setSelectedIds(ids);
+      marqueeJustCompleted.current = true;
+    }
+  }, []);
+
+  const handleSortChange = useCallback((s: SortField, o: SortOrder) => {
+    setSortField(s);
+    setSortOrder(o);
+    try {
+      localStorage.setItem(GRID_SORT_FIELD_KEY, s);
+      localStorage.setItem(GRID_SORT_ORDER_KEY, o);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const hasPhotos =
     photos.length > 0 ||
@@ -1069,6 +1072,7 @@ function HomePage() {
         favoriteActive={favoriteOnly}
         folders={folders}
         onAddFolder={handleAddFolder}
+        onCancelScan={handleCancelScan}
         onDeleteFolder={handleDeleteFolder}
         onSelectFavorites={() => {
           setSearchMode(null);
@@ -1086,7 +1090,6 @@ function HomePage() {
           setFavoriteOnly(false);
         }}
         onSelectTag={handleSelectTag}
-        onCancelScan={handleCancelScan}
         onToggleCollapse={toggleSidebar}
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}
@@ -1094,8 +1097,8 @@ function HomePage() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
-          ref={searchBarRef}
           aiStatus={aiStatus ?? null}
+          colorHex={colorHex ?? undefined}
           imageSearchActive={searchMode === "image"}
           onClear={() => {
             setSearchQuery("");
@@ -1106,10 +1109,10 @@ function HomePage() {
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
+          ref={searchBarRef}
           resultCount={searchQuery ? photos.length : undefined}
           searchMode={searchMode}
           searchTime={searchTime}
-          colorHex={colorHex ?? undefined}
         />
         {/* Drill-down banner */}
         {showDrillBanner && (
@@ -1147,6 +1150,13 @@ function HomePage() {
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
                 loading={loading}
+                onBackgroundClick={() => {
+                  if (marqueeJustCompleted.current) {
+                    marqueeJustCompleted.current = false;
+                    return;
+                  }
+                  setSelectedIds(new Set());
+                }}
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
                 onEndReached={handleEndReached}
@@ -1178,6 +1188,26 @@ function HomePage() {
                 onExport={handleExportSelected}
                 onRename={() => setRenameDialogOpen(true)}
                 onShare={handleShareSelected}
+                onStartCull={async () => {
+                  const ids = Array.from(selectedIds);
+                  if (ids.length < 2) {
+                    return;
+                  }
+                  try {
+                    const session = (await ipc.client.cull.createSession({
+                      name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
+                      mode: "duel",
+                      photoIds: ids,
+                    })) as { id: number };
+                    setSelectedIds(new Set());
+                    navigate({
+                      to: "/cull/$sessionId",
+                      params: { sessionId: String(session.id) },
+                    });
+                  } catch {
+                    toast.error("Failed to create cull session");
+                  }
+                }}
                 onToggleFavorite={() => {
                   const ids = [...selectedIds];
                   const allFav = ids.every(
@@ -1210,26 +1240,6 @@ function HomePage() {
                     });
                 }}
                 onUploadToCloud={handleUploadSelectedToCloud}
-                onStartCull={async () => {
-                  const ids = Array.from(selectedIds);
-                  if (ids.length < 2) {
-                    return;
-                  }
-                  try {
-                    const session = (await ipc.client.cull.createSession({
-                      name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
-                      mode: "duel",
-                      photoIds: ids,
-                    })) as { id: number };
-                    setSelectedIds(new Set());
-                    navigate({
-                      to: "/cull/$sessionId",
-                      params: { sessionId: String(session.id) },
-                    });
-                  } catch {
-                    toast.error("Failed to create cull session");
-                  }
-                }}
                 selectedCount={selectedIds.size}
               />
             </div>
@@ -1386,13 +1396,16 @@ export const Route = createFileRoute("/")({
     lensModel: search.lensModel as string | undefined,
     dateFrom: search.dateFrom as string | undefined,
     dateTo: search.dateTo as string | undefined,
-    favoriteOnly: search.favoriteOnly === true || search.favoriteOnly === "true" ? true : undefined,
+    favoriteOnly:
+      search.favoriteOnly === true || search.favoriteOnly === "true"
+        ? true
+        : undefined,
     focalMax: search.focalMax as string | undefined,
     focalMin: search.focalMin as string | undefined,
     isoMax: search.isoMax as string | undefined,
     isoMin: search.isoMin as string | undefined,
     shutterMax: search.shutterMax as string | undefined,
     shutterMin: search.shutterMin as string | undefined,
-    tagId: search.tagId != null ? Number(search.tagId) : undefined,
+    tagId: search.tagId == null ? undefined : Number(search.tagId),
   }),
 });

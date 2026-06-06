@@ -51,16 +51,24 @@ const GRID_SORT_ORDER_KEY = "album_grid_sort_order";
 function loadSortField(): SortField {
   try {
     const raw = localStorage.getItem(GRID_SORT_FIELD_KEY);
-    if (raw === "date" || raw === "name" || raw === "size") return raw;
-  } catch { /* ignore */ }
+    if (raw === "date" || raw === "name" || raw === "size") {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
   return "date";
 }
 
 function loadSortOrder(): SortOrder {
   try {
     const raw = localStorage.getItem(GRID_SORT_ORDER_KEY);
-    if (raw === "asc" || raw === "desc") return raw;
-  } catch { /* ignore */ }
+    if (raw === "asc" || raw === "desc") {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
   return "desc";
 }
 
@@ -81,7 +89,11 @@ function AlbumDetailPage() {
   const [detailDismissed, setDetailDismissed] = useState(false);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
-    open: false, x: 0, y: 0, photoId: null, photoPath: null,
+    open: false,
+    x: 0,
+    y: 0,
+    photoId: null,
+    photoPath: null,
   });
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
@@ -125,7 +137,9 @@ function AlbumDetailPage() {
       } else if (sortField === "size") {
         cmp = a.fileSize - b.fileSize;
       }
-      if (cmp === 0) cmp = (a.id || 0) - (b.id || 0);
+      if (cmp === 0) {
+        cmp = (a.id || 0) - (b.id || 0);
+      }
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
@@ -136,34 +150,50 @@ function AlbumDetailPage() {
 
   // Sync detailPhoto when single photo selected
   useEffect(() => {
-    if (detailDismissed) return;
+    if (detailDismissed) {
+      return;
+    }
     if (selectedIds.size === 1) {
       const id = selectedIds.values().next().value as number;
       const p = photos.find((ph) => ph.id === id);
-      if (p) setDetailPhoto(p as unknown as Photo);
+      if (p) {
+        setDetailPhoto(p as unknown as Photo);
+      }
     } else if (selectedIds.size === 0 && detailPhoto) {
       setDetailPhoto(null);
     }
   }, [selectedIds, photos, detailDismissed, detailPhoto]);
 
-  const handleSelect = useCallback((id: number, event: React.MouseEvent) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      const idx = photosRef.current.findIndex((p) => p.id === id);
-      if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
-        const [from, to] = lastClickedIdx < idx ? [lastClickedIdx, idx] : [idx, lastClickedIdx];
-        for (let i = from; i <= to; i++) next.add(photosRef.current[i].id);
-      } else if (event.ctrlKey || event.metaKey) {
-        next.has(id) ? next.delete(id) : next.add(id);
-        if (idx >= 0) setLastClickedIdx(idx);
-      } else {
-        next.clear();
-        next.add(id);
-        if (idx >= 0) setLastClickedIdx(idx);
-      }
-      return next;
-    });
-  }, [lastClickedIdx]);
+  const handleSelect = useCallback(
+    (id: number, event: React.MouseEvent) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const idx = photosRef.current.findIndex((p) => p.id === id);
+        if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
+          const [from, to] =
+            lastClickedIdx < idx
+              ? [lastClickedIdx, idx]
+              : [idx, lastClickedIdx];
+          for (let i = from; i <= to; i++) {
+            next.add(photosRef.current[i].id);
+          }
+        } else if (event.ctrlKey || event.metaKey) {
+          next.has(id) ? next.delete(id) : next.add(id);
+          if (idx >= 0) {
+            setLastClickedIdx(idx);
+          }
+        } else {
+          next.clear();
+          next.add(id);
+          if (idx >= 0) {
+            setLastClickedIdx(idx);
+          }
+        }
+        return next;
+      });
+    },
+    [lastClickedIdx]
+  );
 
   const [allFavorite, setAllFavorite] = useState(false);
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<number[]>([]);
@@ -182,39 +212,53 @@ function AlbumDetailPage() {
 
   const handleToggleFavorite = useCallback((id: number) => {
     const photo = photosRef.current.find((p) => p.id === id);
-    if (!photo) return;
+    if (!photo) {
+      return;
+    }
     const prevVal = !!photo.isFavorite;
     const newVal = !prevVal;
-    ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal }).then(() => {
-      setAlbum((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          photos: prev.photos.map((p) =>
-            p.id === id ? { ...p, isFavorite: newVal } : p
-          ),
-        };
+    ipc.client.photos
+      .toggleFavorite({ ids: [id], favorite: newVal })
+      .then(() => {
+        setAlbum((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          return {
+            ...prev,
+            photos: prev.photos.map((p) =>
+              p.id === id ? { ...p, isFavorite: newVal } : p
+            ),
+          };
+        });
+        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        toast.success(
+          newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
+          {
+            action: {
+              label: t("toastUndo"),
+              onClick: async () => {
+                await ipc.client.photos.toggleFavorite({
+                  ids: [id],
+                  favorite: prevVal,
+                });
+                setAlbum((prev) => {
+                  if (!prev) {
+                    return prev;
+                  }
+                  return {
+                    ...prev,
+                    photos: prev.photos.map((p) =>
+                      p.id === id ? { ...p, isFavorite: prevVal } : p
+                    ),
+                  };
+                });
+                queryClient.invalidateQueries({ queryKey: ["photos"] });
+              },
+            },
+          }
+        );
       });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
-      toast.success(newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"), {
-        action: {
-          label: t("toastUndo"),
-          onClick: async () => {
-            await ipc.client.photos.toggleFavorite({ ids: [id], favorite: prevVal });
-            setAlbum((prev) => {
-              if (!prev) return prev;
-              return {
-                ...prev,
-                photos: prev.photos.map((p) =>
-                  p.id === id ? { ...p, isFavorite: prevVal } : p
-                ),
-              };
-            });
-            queryClient.invalidateQueries({ queryKey: ["photos"] });
-          },
-        },
-      });
-    });
   }, []);
 
   async function handleDeleteSelected() {
@@ -224,10 +268,17 @@ function AlbumDetailPage() {
   async function performDelete() {
     try {
       await ipc.client.photos.deletePhotos({ ids: confirmDeleteIds });
-      toast.success(t("deletedPhotosCount", { count: confirmDeleteIds.length }));
+      toast.success(
+        t("deletedPhotosCount", { count: confirmDeleteIds.length })
+      );
       setAlbum((prev) =>
         prev
-          ? { ...prev, photos: prev.photos.filter((p) => !confirmDeleteIds.includes(p.id)) }
+          ? {
+              ...prev,
+              photos: prev.photos.filter(
+                (p) => !confirmDeleteIds.includes(p.id)
+              ),
+            }
           : prev
       );
       setSelectedIds(new Set());
@@ -252,11 +303,15 @@ function AlbumDetailPage() {
     try {
       await ipc.client.photos.deletePhotos({ ids });
       setAlbum((prev) =>
-        prev ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) } : prev
+        prev
+          ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
+          : prev
       );
       setSelectedIds((prev) => {
         const n = new Set(prev);
-        for (const id of ids) n.delete(id);
+        for (const id of ids) {
+          n.delete(id);
+        }
         return n;
       });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
@@ -267,21 +322,29 @@ function AlbumDetailPage() {
   }
 
   async function handleRemoveSelected() {
-    if (!album) return;
+    if (!album) {
+      return;
+    }
     const ids = Array.from(selectedIds);
     await ipc.client.albums.removePhotosFromAlbum({
-      albumId: album.id, photoIds: ids,
+      albumId: album.id,
+      photoIds: ids,
     });
     setAlbum((prev) =>
-      prev ? { ...prev, photos: prev.photos.filter((p) => !selectedIds.has(p.id)) } : prev
+      prev
+        ? { ...prev, photos: prev.photos.filter((p) => !selectedIds.has(p.id)) }
+        : prev
     );
     setSelectedIds(new Set());
   }
 
   async function handleRemoveFromAlbum(id: number) {
-    if (!album) return;
+    if (!album) {
+      return;
+    }
     await ipc.client.albums.removePhotosFromAlbum({
-      albumId: album.id, photoIds: [id],
+      albumId: album.id,
+      photoIds: [id],
     });
     setAlbum((prev) =>
       prev ? { ...prev, photos: prev.photos.filter((p) => p.id !== id) } : prev
@@ -295,15 +358,22 @@ function AlbumDetailPage() {
   }
 
   async function handleDeleteAlbum() {
-    if (!album) return;
+    if (!album) {
+      return;
+    }
     await ipc.client.albums.deleteAlbum({ id: album.id });
     navigate({ to: "/albums" as const });
   }
 
   async function handleSaveName() {
-    if (!(album && nameInput.trim())) return;
+    if (!(album && nameInput.trim())) {
+      return;
+    }
     try {
-      await ipc.client.albums.updateAlbum({ id: album.id, name: nameInput.trim() });
+      await ipc.client.albums.updateAlbum({
+        id: album.id,
+        name: nameInput.trim(),
+      });
       setAlbum((prev) => (prev ? { ...prev, name: nameInput.trim() } : prev));
       setEditingName(false);
     } catch {
@@ -313,17 +383,31 @@ function AlbumDetailPage() {
 
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) setLightboxIndex(idx);
+    if (idx >= 0) {
+      setLightboxIndex(idx);
+    }
   }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    const card = (e.target as HTMLElement).closest("[data-photo-id]") as HTMLElement | null;
-    if (!card) return;
+    const card = (e.target as HTMLElement).closest(
+      "[data-photo-id]"
+    ) as HTMLElement | null;
+    if (!card) {
+      return;
+    }
     const id = Number.parseInt(card.dataset.photoId || "", 10);
     const path = card.dataset.photoPath || null;
-    if (!id) return;
+    if (!id) {
+      return;
+    }
     e.preventDefault();
-    setCtxMenu({ open: true, x: e.clientX, y: e.clientY, photoId: id, photoPath: path });
+    setCtxMenu({
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      photoId: id,
+      photoPath: path,
+    });
   }, []);
 
   async function handleOpenExplorer(filePath: string) {
@@ -331,11 +415,17 @@ function AlbumDetailPage() {
   }
 
   function handleDetailNavigate(direction: "prev" | "next") {
-    if (!detailPhoto) return;
+    if (!detailPhoto) {
+      return;
+    }
     const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
-    if (currentIdx < 0) return;
+    if (currentIdx < 0) {
+      return;
+    }
     const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= photos.length) return;
+    if (nextIdx < 0 || nextIdx >= photos.length) {
+      return;
+    }
     const nextPhoto = photos[nextIdx];
     setSelectedIds(new Set([nextPhoto.id]));
     setLastClickedIdx(nextIdx);
@@ -383,8 +473,21 @@ function AlbumDetailPage() {
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
-      const r = result as { renamed: number; errors: number; results: Array<{ id: number; oldName: string; newName: string; error?: string }> };
-      toast.success(r.errors > 0 ? t("toastRenamePartial", { count: r.renamed, errors: r.errors }) : t("toastRenameCount", { count: r.renamed }));
+      const r = result as {
+        renamed: number;
+        errors: number;
+        results: Array<{
+          id: number;
+          oldName: string;
+          newName: string;
+          error?: string;
+        }>;
+      };
+      toast.success(
+        r.errors > 0
+          ? t("toastRenamePartial", { count: r.renamed, errors: r.errors })
+          : t("toastRenameCount", { count: r.renamed })
+      );
       loadAlbum();
       return r;
     } catch {
@@ -393,10 +496,21 @@ function AlbumDetailPage() {
     }
   }
 
-  async function handleConvertSelected(options: { format: "jpg" | "png" | "webp" | "avif"; quality: number; maxWidth: number; outputDir: string }) {
+  async function handleConvertSelected(options: {
+    format: "jpg" | "png" | "webp" | "avif";
+    quality: number;
+    maxWidth: number;
+    outputDir: string;
+  }) {
     const ids = Array.from(selectedIds);
     try {
-      const result = await ipc.client.photos.convertPhotos({ ids, format: options.format, quality: options.quality, maxWidth: options.maxWidth || undefined, outputDir: options.outputDir });
+      const result = await ipc.client.photos.convertPhotos({
+        ids,
+        format: options.format,
+        quality: options.quality,
+        maxWidth: options.maxWidth || undefined,
+        outputDir: options.outputDir,
+      });
       const r = result as { converted: number; outputDir: string };
       toast.success(t("toastConvertedCount", { count: r.converted }));
       return r;
@@ -411,7 +525,9 @@ function AlbumDetailPage() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
@@ -433,39 +549,61 @@ function AlbumDetailPage() {
 
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "E") {
         e.preventDefault();
-        if (selectedIds.size > 0) handleExportSelected();
+        if (selectedIds.size > 0) {
+          handleExportSelected();
+        }
         return;
       }
 
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "C") {
         e.preventDefault();
-        if (selectedIds.size > 0) setConvertDialogOpen(true);
+        if (selectedIds.size > 0) {
+          setConvertDialogOpen(true);
+        }
         return;
       }
 
       if (e.key === "Escape") {
-        if (quickPreviewIndex >= 0) { setQuickPreviewIndex(-1); return; }
-        if (renameDialogOpen) { setRenameDialogOpen(false); return; }
-        if (convertDialogOpen) { setConvertDialogOpen(false); return; }
-        if (selectedIds.size > 0) { setSelectedIds(new Set()); return; }
+        if (quickPreviewIndex >= 0) {
+          setQuickPreviewIndex(-1);
+          return;
+        }
+        if (renameDialogOpen) {
+          setRenameDialogOpen(false);
+          return;
+        }
+        if (convertDialogOpen) {
+          setConvertDialogOpen(false);
+          return;
+        }
+        if (selectedIds.size > 0) {
+          setSelectedIds(new Set());
+          return;
+        }
       }
 
       if (e.key === " " && selectedIds.size > 0 && quickPreviewIndex < 0) {
         e.preventDefault();
         const firstId = selectedIds.values().next().value as number;
         const idx = photos.findIndex((p) => p.id === firstId);
-        if (idx >= 0) setQuickPreviewIndex(idx);
+        if (idx >= 0) {
+          setQuickPreviewIndex(idx);
+        }
         return;
       }
 
       if (e.key === "f" && selectedIds.size > 0 && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         const ids = [...selectedIds];
-        const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
+        const allFav = ids.every(
+          (id) => photos.find((p) => p.id === id)?.isFavorite
+        );
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
           setAlbum((prev) => {
-            if (!prev) return prev;
+            if (!prev) {
+              return prev;
+            }
             const idSet = new Set(ids);
             return {
               ...prev,
@@ -475,9 +613,23 @@ function AlbumDetailPage() {
             };
           });
           queryClient.invalidateQueries({ queryKey: ["photos"] });
-          toast.success(newVal ? t("toastFavoriteAddedCount", { count: ids.length }) : t("toastFavoriteRemoved"), {
-            action: { label: t("toastUndo"), onClick: async () => { await ipc.client.photos.toggleFavorite({ ids, favorite: allFav }); queryClient.invalidateQueries({ queryKey: ["photos"] }); } },
-          });
+          toast.success(
+            newVal
+              ? t("toastFavoriteAddedCount", { count: ids.length })
+              : t("toastFavoriteRemoved"),
+            {
+              action: {
+                label: t("toastUndo"),
+                onClick: async () => {
+                  await ipc.client.photos.toggleFavorite({
+                    ids,
+                    favorite: allFav,
+                  });
+                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                },
+              },
+            }
+          );
         });
         return;
       }
@@ -492,43 +644,50 @@ function AlbumDetailPage() {
           setDetailDismissed(false);
           const id = selectedIds.values().next().value as number;
           const p = photos.find((ph) => ph.id === id);
-          if (p) setDetailPhoto(p as unknown as Photo);
+          if (p) {
+            setDetailPhoto(p as unknown as Photo);
+          }
         }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [photos, selectedIds, renameDialogOpen, convertDialogOpen, quickPreviewIndex, detailPhoto]);
+  }, [
+    photos,
+    selectedIds,
+    renameDialogOpen,
+    convertDialogOpen,
+    quickPreviewIndex,
+    detailPhoto,
+  ]);
 
-  const handleKeyboardSelect = useCallback(
-    (id: number) => {
-      setSelectedIds(new Set([id]));
-      const idx = photosRef.current.findIndex((p) => p.id === id);
-      if (idx >= 0) setLastClickedIdx(idx);
-    },
-    []
-  );
+  const handleKeyboardSelect = useCallback((id: number) => {
+    setSelectedIds(new Set([id]));
+    const idx = photosRef.current.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      setLastClickedIdx(idx);
+    }
+  }, []);
 
   const marqueeJustCompleted = useRef(false);
 
-  const handleMarqueeSelect = useCallback(
-    (ids: Set<number>) => {
-      if (ids.size > 0) {
-        setSelectedIds(ids);
-        marqueeJustCompleted.current = true;
-      }
-    },
-    []
-  );
+  const handleMarqueeSelect = useCallback((ids: Set<number>) => {
+    if (ids.size > 0) {
+      setSelectedIds(ids);
+      marqueeJustCompleted.current = true;
+    }
+  }, []);
 
-  const handleSortChange = useCallback(
-    (s: SortField, o: SortOrder) => {
-      setSortField(s);
-      setSortOrder(o);
-      try { localStorage.setItem(GRID_SORT_FIELD_KEY, s); localStorage.setItem(GRID_SORT_ORDER_KEY, o); } catch { /* ignore */ }
-    },
-    []
-  );
+  const handleSortChange = useCallback((s: SortField, o: SortOrder) => {
+    setSortField(s);
+    setSortOrder(o);
+    try {
+      localStorage.setItem(GRID_SORT_FIELD_KEY, s);
+      localStorage.setItem(GRID_SORT_ORDER_KEY, o);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -548,23 +707,41 @@ function AlbumDetailPage() {
                     autoFocus
                     className="h-8 rounded-[6px] border border-input bg-card px-3 font-[590] text-[16px] text-foreground outline-none focus:border-primary"
                     onChange={(e) => setNameInput(e.target.value)}
-                    onCompositionEnd={(e) => { composingRef.current = false; setNameInput((e.target as HTMLInputElement).value); }}
-                    onCompositionStart={() => { composingRef.current = true; }}
+                    onCompositionEnd={(e) => {
+                      composingRef.current = false;
+                      setNameInput((e.target as HTMLInputElement).value);
+                    }}
+                    onCompositionStart={() => {
+                      composingRef.current = true;
+                    }}
                     onKeyDown={(e) => {
-                      if (composingRef.current) return;
-                      if (e.key === "Enter") handleSaveName();
-                      if (e.key === "Escape") setEditingName(false);
+                      if (composingRef.current) {
+                        return;
+                      }
+                      if (e.key === "Enter") {
+                        handleSaveName();
+                      }
+                      if (e.key === "Escape") {
+                        setEditingName(false);
+                      }
                     }}
                     value={nameInput}
                   />
-                  <button className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10" onClick={handleSaveName} type="button">
+                  <button
+                    className="rounded-[4px] px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10"
+                    onClick={handleSaveName}
+                    type="button"
+                  >
                     {t("save")}
                   </button>
                 </div>
               ) : (
                 <h1
                   className="cursor-pointer font-[590] text-[24px] text-foreground tracking-tight hover:text-primary"
-                  onClick={() => { setNameInput(album?.name || ""); setEditingName(true); }}
+                  onClick={() => {
+                    setNameInput(album?.name || "");
+                    setEditingName(true);
+                  }}
                 >
                   {album?.name || t("loading")}
                 </h1>
@@ -577,11 +754,15 @@ function AlbumDetailPage() {
               )}
             </div>
             {album?.description && (
-              <p className="mt-0.5 text-[12px] text-muted-foreground/70">{album.description}</p>
+              <p className="mt-0.5 text-[12px] text-muted-foreground/70">
+                {album.description}
+              </p>
             )}
             <p className="mt-0.5 text-[11px] text-muted-foreground/70">
               {album?.isSmart
-                ? t("smartMatchedPhotos", { count: album?.matchCount ?? photos.length })
+                ? t("smartMatchedPhotos", {
+                    count: album?.matchCount ?? photos.length,
+                  })
                 : t("photosCount", { count: photos.length })}
             </p>
           </div>
@@ -606,11 +787,19 @@ function AlbumDetailPage() {
           )}
           {confirmDelete && (
             <div className="flex items-center gap-2">
-              <span className="text-[12px] text-destructive">{t("confirmDeleteQuestion")}</span>
-              <button className="rounded-[6px] bg-destructive px-3 py-1 text-[12px] text-white hover:opacity-90" onClick={handleDeleteAlbum}>
+              <span className="text-[12px] text-destructive">
+                {t("confirmDeleteQuestion")}
+              </span>
+              <button
+                className="rounded-[6px] bg-destructive px-3 py-1 text-[12px] text-white hover:opacity-90"
+                onClick={handleDeleteAlbum}
+              >
                 {t("confirm")}
               </button>
-              <button className="rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground" onClick={() => setConfirmDelete(false)}>
+              <button
+                className="rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground"
+                onClick={() => setConfirmDelete(false)}
+              >
                 {t("cancel")}
               </button>
             </div>
@@ -619,21 +808,16 @@ function AlbumDetailPage() {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div
-          className="relative flex min-w-0 flex-1"
-          onClick={(e) => {
-            const target = e.target as HTMLElement;
-            if (target.closest("[data-masonry-scroll]") && !target.closest("[data-photo-id]")) {
+        <div className="relative flex min-w-0 flex-1">
+          <PhotoGrid
+            loading={loading}
+            onBackgroundClick={() => {
               if (marqueeJustCompleted.current) {
                 marqueeJustCompleted.current = false;
                 return;
               }
               setSelectedIds(new Set());
-            }
-          }}
-        >
-          <PhotoGrid
-            loading={loading}
+            }}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardSelect}
@@ -648,54 +832,94 @@ function AlbumDetailPage() {
           />
           <SelectionActionBar
             allFavorite={
-              selectedIds.size > 0 && [...selectedIds].every((id) => (photos as any[]).find((p) => p.id === id)?.isFavorite)
+              selectedIds.size > 0 &&
+              [...selectedIds].every(
+                (id) => (photos as any[]).find((p) => p.id === id)?.isFavorite
+              )
             }
-            onAddToAlbum={() => { setAddToAlbumIds(Array.from(selectedIds)); setAddToAlbumOpen(true); }}
+            onAddToAlbum={() => {
+              setAddToAlbumIds(Array.from(selectedIds));
+              setAddToAlbumOpen(true);
+            }}
             onClearSelection={() => setSelectedIds(new Set())}
             onConvert={() => setConvertDialogOpen(true)}
             onDelete={handleDeleteSelected}
             onExport={handleExportSelected}
             onRename={() => setRenameDialogOpen(true)}
             onShare={handleShareSelected}
-            onToggleFavorite={() => {
-              const ids = [...selectedIds];
-              const allFav = ids.every((id) => photos.find((p) => p.id === id)?.isFavorite);
-              const newVal = !allFav;
-              ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
-                setAlbum((prev) => {
-                  if (!prev) return prev;
-                  const idSet = new Set(ids);
-                  return {
-                    ...prev,
-                    photos: prev.photos.map((p) =>
-                      idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
-                    ),
-                  };
-                });
-                queryClient.invalidateQueries({ queryKey: ["photos"] });
-                toast.success(newVal ? t("toastFavoriteAddedCount", { count: ids.length }) : t("toastFavoriteRemoved"), {
-                  action: { label: t("toastUndo"), onClick: async () => { await ipc.client.photos.toggleFavorite({ ids, favorite: allFav }); queryClient.invalidateQueries({ queryKey: ["photos"] }); } },
-                });
-              });
-            }}
-            onUploadToCloud={handleUploadSelectedToCloud}
             onStartCull={async () => {
               const ids = Array.from(selectedIds);
-              if (ids.length < 2) return;
+              if (ids.length < 2) {
+                return;
+              }
               try {
                 const session = (await ipc.client.cull.createSession({
                   name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
-                  mode: "duel", photoIds: ids,
+                  mode: "duel",
+                  photoIds: ids,
                 })) as { id: number };
                 setSelectedIds(new Set());
-                navigate({ to: "/cull/$sessionId", params: { sessionId: String(session.id) } });
-              } catch { toast.error("Failed to create cull session"); }
+                navigate({
+                  to: "/cull/$sessionId",
+                  params: { sessionId: String(session.id) },
+                });
+              } catch {
+                toast.error("Failed to create cull session");
+              }
             }}
+            onToggleFavorite={() => {
+              const ids = [...selectedIds];
+              const allFav = ids.every(
+                (id) => photos.find((p) => p.id === id)?.isFavorite
+              );
+              const newVal = !allFav;
+              ipc.client.photos
+                .toggleFavorite({ ids, favorite: newVal })
+                .then(() => {
+                  setAlbum((prev) => {
+                    if (!prev) {
+                      return prev;
+                    }
+                    const idSet = new Set(ids);
+                    return {
+                      ...prev,
+                      photos: prev.photos.map((p) =>
+                        idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                      ),
+                    };
+                  });
+                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  toast.success(
+                    newVal
+                      ? t("toastFavoriteAddedCount", { count: ids.length })
+                      : t("toastFavoriteRemoved"),
+                    {
+                      action: {
+                        label: t("toastUndo"),
+                        onClick: async () => {
+                          await ipc.client.photos.toggleFavorite({
+                            ids,
+                            favorite: allFav,
+                          });
+                          queryClient.invalidateQueries({
+                            queryKey: ["photos"],
+                          });
+                        },
+                      },
+                    }
+                  );
+                });
+            }}
+            onUploadToCloud={handleUploadSelectedToCloud}
             selectedCount={selectedIds.size}
           />
         </div>
         <PhotoDetailPanel
-          onClose={() => { setDetailDismissed(true); setDetailPhoto(null); setSelectedIds(new Set()); }}
+          onClose={() => {
+            setDetailDismissed(true);
+            setDetailPhoto(null);
+            setSelectedIds(new Set());
+          }}
           onNavigate={handleDetailNavigate}
           onOpenExplorer={handleOpenExplorer}
           photo={detailPhoto}
@@ -717,7 +941,9 @@ function AlbumDetailPage() {
           onNavigate={(dir) => {
             setQuickPreviewIndex((prev) => {
               const next = prev + dir;
-              if (next < 0 || next >= photos.length) return prev;
+              if (next < 0 || next >= photos.length) {
+                return prev;
+              }
               setSelectedIds(new Set([photos[next].id]));
               return next;
             });
@@ -740,47 +966,64 @@ function AlbumDetailPage() {
       />
 
       <AddToAlbumDialog
+        onClose={() => {
+          setAddToAlbumOpen(false);
+          setAddToAlbumIds([]);
+        }}
         open={addToAlbumOpen}
-        onClose={() => { setAddToAlbumOpen(false); setAddToAlbumIds([]); }}
         photoIds={addToAlbumIds}
       />
 
       <ExportDialog
+        onClose={() => {
+          setExportDialogOpen(false);
+          setExportIds([]);
+        }}
         open={exportDialogOpen}
-        onClose={() => { setExportDialogOpen(false); setExportIds([]); }}
         photoIds={exportIds}
       />
 
       <BatchRenameDialog
-        open={renameDialogOpen}
-        onClose={() => { setRenameDialogOpen(false); setSelectedIds(new Set()); }}
+        onClose={() => {
+          setRenameDialogOpen(false);
+          setSelectedIds(new Set());
+        }}
         onRename={handleRenameSelected}
+        open={renameDialogOpen}
         photoCount={selectedIds.size}
         sampleFilename={photos[0]?.filename || ""}
       />
 
       <FormatConvertDialog
-        open={convertDialogOpen}
         onClose={() => setConvertDialogOpen(false)}
         onConvert={handleConvertSelected}
+        open={convertDialogOpen}
         photoCount={selectedIds.size}
       />
 
       <CloudUploadDialog
+        onClose={() => {
+          setCloudUploadOpen(false);
+          setCloudUploadIds([]);
+        }}
         open={cloudUploadOpen}
-        onClose={() => { setCloudUploadOpen(false); setCloudUploadIds([]); }}
         photoIds={cloudUploadIds}
       />
 
       <ShareDialog
+        onClose={() => {
+          setShareDialogOpen(false);
+          setShareIds([]);
+        }}
         open={shareDialogOpen}
-        onClose={() => { setShareDialogOpen(false); setShareIds([]); }}
         photoIds={shareIds}
       />
 
       <ConfirmDialog
         confirmText={t("delete")}
-        description={t("confirmDeleteDescription", { count: confirmDeleteIds.length })}
+        description={t("confirmDeleteDescription", {
+          count: confirmDeleteIds.length,
+        })}
         destructive
         onCancel={() => setConfirmDeleteIds([])}
         onConfirm={performDelete}
@@ -789,10 +1032,13 @@ function AlbumDetailPage() {
       />
 
       <ConfirmDeleteDialog
-        open={deleteConfirmOpen}
-        onCancel={() => { setDeleteConfirmOpen(false); setPendingDeleteIds([]); }}
-        onConfirm={executeDelete}
         count={pendingDeleteIds.length}
+        onCancel={() => {
+          setDeleteConfirmOpen(false);
+          setPendingDeleteIds([]);
+        }}
+        onConfirm={executeDelete}
+        open={deleteConfirmOpen}
       />
     </div>
   );
