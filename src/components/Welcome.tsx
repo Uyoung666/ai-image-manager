@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 
 interface WelcomeProps {
   onAddFolder: () => void;
+  disabled?: boolean;
 }
 
-export function Welcome({ onAddFolder }: WelcomeProps) {
+export function Welcome({ onAddFolder, disabled }: WelcomeProps) {
   const { t } = useTranslation();
 
   return (
@@ -45,7 +46,8 @@ export function Welcome({ onAddFolder }: WelcomeProps) {
 
         {/* CTA */}
         <button
-          className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-5 py-2.5 font-[510] text-[14px] text-primary-foreground transition-opacity hover:opacity-90"
+          className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-5 py-2.5 font-[510] text-[14px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          disabled={disabled}
           onClick={onAddFolder}
         >
           <FolderOpen className="h-4 w-4" />

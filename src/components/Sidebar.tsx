@@ -43,6 +43,8 @@ import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import { AiProgressBar } from "./AiProgressBar";
 
+export type ImportPhase = "idle" | "scanning" | "embedding";
+
 interface FolderInfo {
   displayName: string;
   id: number;
@@ -78,6 +80,7 @@ interface SidebarProps {
   scanningFolder: string | null;
   scanProgress: string;
   totalPhotos: number;
+  importPhase: ImportPhase;
 }
 
 interface FolderTreeNode {
@@ -317,6 +320,7 @@ export function Sidebar({
   scanningFolder,
   scanProgress,
   totalPhotos,
+  importPhase,
 }: SidebarProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -374,6 +378,9 @@ export function Sidebar({
     // External folder drop → import
     if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
+      if (importPhase !== "idle") {
+        return;
+      }
       const items = Array.from(e.dataTransfer.items);
       const folders: string[] = [];
       for (const item of items) {
@@ -843,11 +850,11 @@ export function Sidebar({
           <div className="flex flex-col items-center gap-1 px-1.5">
             <button
               className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-              disabled={scanningFolder !== null}
+              disabled={importPhase !== "idle"}
               onClick={() => onAddFolder()}
               title={t("sidebarAddFolder")}
             >
-              {scanningFolder ? (
+              {importPhase !== "idle" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Plus className="h-4 w-4" />
@@ -1018,7 +1025,7 @@ export function Sidebar({
                   <p className="text-[11px] text-muted-foreground">
                     {scanProgress}
                   </p>
-                  {scanningFolder && onCancelScan && (
+                  {importPhase === "scanning" && onCancelScan && (
                     <button
                       className="shrink-0 rounded-[4px] px-2 py-0.5 font-[510] text-[10px] text-danger transition-colors hover:bg-danger/10"
                       onClick={onCancelScan}
@@ -1094,14 +1101,14 @@ export function Sidebar({
                 </button>
                 <button
                   className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
-                  disabled={scanningFolder !== null}
+                  disabled={importPhase !== "idle"}
                   onClick={(e) => {
                     e.stopPropagation();
                     onAddFolder();
                   }}
                   title={t("sidebarAddFolder")}
                 >
-                  {scanningFolder ? (
+                  {importPhase !== "idle" ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
                     <Plus className="h-3 w-3" />

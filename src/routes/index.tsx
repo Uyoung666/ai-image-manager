@@ -23,6 +23,7 @@ import {
 } from "@/components/SearchBar";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { ShareDialog } from "@/components/ShareDialog";
+import type { ImportPhase } from "@/components/Sidebar";
 import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
@@ -78,6 +79,8 @@ function HomePage() {
   const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [scanningFolder, setScanningFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState("");
+  const [importPhase, setImportPhase] = useState<ImportPhase>("idle");
+  const importPhaseRef = useRef<ImportPhase>("idle");
   const aiIndexingRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<
@@ -258,6 +261,9 @@ function HomePage() {
         clearImageLoadCache();
       }
       if (event.data?.channel === "scan-progress") {
+        if (importPhaseRef.current !== "scanning") {
+          return;
+        }
         const { scanned, total, phase } = event.data;
         if (phase === "indexing") {
           setScanProgress(t("scanningIndexing", { scanned, total }));
@@ -278,6 +284,7 @@ function HomePage() {
       }
       if (event.data?.channel === "ai-embedding-done") {
         aiIndexingRef.current = false;
+        setImportPhase("idle");
         setScanProgress("");
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
@@ -285,6 +292,11 @@ function HomePage() {
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
   }, [t]);
+
+  // Keep importPhaseRef in sync with state for use in effect callbacks
+  useEffect(() => {
+    importPhaseRef.current = importPhase;
+  }, [importPhase]);
 
   const {
     data: photosData,
@@ -461,6 +473,11 @@ function HomePage() {
   }
 
   async function handleAddFolder(externalPath?: string) {
+    if (importPhase !== "idle") {
+      toast.error("请等待当前导入完成");
+      return;
+    }
+
     let folderPath =
       typeof externalPath === "string" ? externalPath : undefined;
     if (!folderPath) {
@@ -471,14 +488,20 @@ function HomePage() {
       return;
     }
 
+    setImportPhase("scanning");
     setScanningFolder(folderPath);
     setScanProgress(t("scanningProgress", { scanned: 0, total: "?" }));
+    let scanResult: {
+      photoIds?: number[];
+      skipped?: number;
+      cancelled?: boolean;
+    } | null = null;
     try {
-      const scanResult = await ipc.client.photos.scanFolder({
+      scanResult = await ipc.client.photos.scanFolder({
         path: folderPath,
       });
       // User cancelled — backend already cleaned up, just clear progress
-      if ((scanResult as Record<string, unknown>).cancelled) {
+      if (scanResult.cancelled) {
         setScanProgress("");
       } else {
         const skipped = scanResult.skipped || 0;
@@ -504,14 +527,15 @@ function HomePage() {
       toast.error(`${t("toastScanFolderFailed")}: ${detail}`);
     } finally {
       setScanningFolder(null);
-      // Don't clear progress while AI is still indexing — the
-      // ai-embedding-done message handler will clear it when done.
-      const clearIfIdle = () => {
-        if (!aiIndexingRef.current) {
-          setScanProgress("");
-        }
-      };
-      setTimeout(clearIfIdle, 3000);
+      if (
+        scanResult &&
+        !scanResult.cancelled &&
+        (scanResult.photoIds?.length || 0) > 0
+      ) {
+        setImportPhase("embedding");
+      } else {
+        setImportPhase("idle");
+      }
     }
   }
   async function handleCancelScan() {
@@ -1094,6 +1118,7 @@ function HomePage() {
         scanningFolder={scanningFolder}
         scanProgress={scanProgress}
         totalPhotos={totalPhotos}
+        importPhase={importPhase}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <SearchBar
@@ -1255,7 +1280,7 @@ function HomePage() {
             />
           </div>
         ) : (
-          <Welcome onAddFolder={handleAddFolder} />
+          <Welcome onAddFolder={handleAddFolder} disabled={importPhase !== "idle"} />
         )}
         <StatusBar
           aiStatus={aiStatus ?? null}

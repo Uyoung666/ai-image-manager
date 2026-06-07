@@ -53,8 +53,8 @@ export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
     if (result.cancelled) {
       const db = getDatabase();
 
-      if (result.photoIds.length > 0) {
-        const ids = result.photoIds;
+      if (result.newPhotoIds.length > 0) {
+        const ids = result.newPhotoIds;
 
         // Collect photo paths for thumbnail cleanup
         const records = db

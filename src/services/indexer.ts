@@ -78,12 +78,11 @@ interface IndexProgress {
 }
 
 type ProgressCallback = (progress: IndexProgress) => void;
-let isScanning = false;
-let wasCancelled = false;
+let activeScanToken: { cancelled: boolean } | null = null;
 let watchers: FSWatcher[] = [];
 
 export function isIndexing(): boolean {
-  return isScanning;
+  return activeScanToken !== null;
 }
 
 export function getSupportedExtensions(): string[] {
@@ -537,13 +536,17 @@ export async function scanFolder(
 ): Promise<{
   folderId: number;
   photoIds: number[];
+  newPhotoIds: number[];
   skipped: number;
   cancelled: boolean;
   folderExisted: boolean;
 }> {
   const db = getDatabase();
-  isScanning = true;
-  wasCancelled = false;
+  if (activeScanToken !== null) {
+    throw new Error("A folder scan is already in progress");
+  }
+  const scanToken = { cancelled: false };
+  activeScanToken = scanToken;
 
   const resolvedPath = path.resolve(folderPath);
   if (!fs.existsSync(resolvedPath)) {
@@ -668,6 +671,7 @@ export async function scanFolder(
   const CONCURRENCY = 4;
   const BATCH_SIZE = 50;
   const photoIds: number[] = [];
+  const newPhotoIds: number[] = [];
   let scanned = 0;
   let skipped = 0;
 
@@ -680,7 +684,7 @@ export async function scanFolder(
     let cursor = 0;
 
     async function worker(): Promise<void> {
-      while (cursor < items.length && isScanning) {
+      while (cursor < items.length && !scanToken.cancelled) {
         const idx = cursor++;
         const item = items[idx];
         results[idx] = await fn(item);
@@ -698,7 +702,7 @@ export async function scanFolder(
   const preparedRecords = await runWithConcurrency(
     files,
     async (file) => {
-      if (!isScanning) {
+      if (scanToken.cancelled) {
         return null;
       }
 
@@ -789,7 +793,7 @@ export async function scanFolder(
 
   // Batch insert new photos
   for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
-    if (!isScanning) {
+    if (scanToken.cancelled) {
       break;
     }
 
@@ -810,6 +814,7 @@ export async function scanFolder(
         const record = batch[j];
 
         photoIds.push(photoId);
+        newPhotoIds.push(photoId);
 
         // Incremental duplicate detection
         checkNewPhotoDuplicates(
@@ -849,6 +854,7 @@ export async function scanFolder(
           if (result) {
             const photoId = result.insertedId;
             photoIds.push(photoId);
+            newPhotoIds.push(photoId);
 
             checkNewPhotoDuplicates(
               photoId,
@@ -898,6 +904,10 @@ export async function scanFolder(
         if (idx >= 0) {
           photoIds.splice(idx, 1);
         }
+        const newIdx = newPhotoIds.indexOf(p.id);
+        if (newIdx >= 0) {
+          newPhotoIds.splice(newIdx, 1);
+        }
         log.info({ path: p.path }, "Removed stale record");
       }
     }
@@ -928,7 +938,7 @@ export async function scanFolder(
     currentFile: "",
   });
 
-  isScanning = false;
+  activeScanToken = null;
 
   // Auto-tagging now runs after embedAllPhotos() completes, when all CLIP
   // vectors are available in LanceDB. This avoids expensive per-photo worker
@@ -937,8 +947,9 @@ export async function scanFolder(
   return {
     folderId,
     photoIds,
+    newPhotoIds,
     skipped,
-    cancelled: wasCancelled,
+    cancelled: scanToken.cancelled,
     folderExisted,
   };
 }
@@ -1273,6 +1284,7 @@ export async function cleanupOrphanedRecordsAsync(
 }
 
 export function stopScanning(): void {
-  isScanning = false;
-  wasCancelled = true;
+  if (activeScanToken) {
+    activeScanToken.cancelled = true;
+  }
 }
