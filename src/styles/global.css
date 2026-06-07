@@ -194,7 +194,7 @@
     @apply font-sans;
   }
 
-  /* Themed scrollbar */
+  /* Themed scrollbar — slim, subtle, non-intrusive */
   * {
     scrollbar-color: var(--foreground-tertiary) transparent;
   }
@@ -206,16 +206,22 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--foreground-tertiary);
+    background: color-mix(in srgb, var(--foreground-tertiary) 55%, transparent);
     border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    transition: background 200ms ease;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--foreground-secondary);
+    background: color-mix(in srgb, var(--foreground-tertiary) 80%, transparent);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   [data-masonry-scroll] {
-    will-change: scroll-position;
     transform: translateZ(0);
+    will-change: scroll-position;
   }
 
   /* Theme transition — smooth color shift on theme switch */

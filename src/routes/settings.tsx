@@ -842,7 +842,7 @@ function SettingsPage() {
         {/* ── Left column: General settings ── */}
         <div
           className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
-          style={{ maxWidth: 440 }}
+          style={{ maxWidth: 446, scrollbarGutter: "stable" }}
         >
           <section className="space-y-3">
             <h2 className="font-[590] text-[14px] text-foreground">
@@ -1037,7 +1037,7 @@ function SettingsPage() {
         {/* ── Right column: Watermark ── */}
         <div
           className="min-w-0 flex-1 space-y-4 overflow-y-auto p-6"
-          style={{ maxWidth: 560 }}
+          style={{ maxWidth: 566, scrollbarGutter: "stable" }}
         >
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -1244,7 +1244,7 @@ function SettingsPage() {
         {/* ── Right column: GPU, Cloud, Update & About ── */}
         <div
           className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
-          style={{ maxWidth: 380 }}
+          style={{ maxWidth: 386, scrollbarGutter: "stable" }}
         >
           <GpuSettingsCard />
 

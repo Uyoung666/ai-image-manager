@@ -97,7 +97,9 @@ export function CloudConfigPanel() {
   }
 
   async function confirmDelete() {
-    if (deleteConfirmId === null) return;
+    if (deleteConfirmId === null) {
+      return;
+    }
     try {
       await ipc.client.cloud.deleteCloudConfig({ id: deleteConfirmId });
       setDeleteConfirmId(null);
@@ -131,7 +133,9 @@ export function CloudConfigPanel() {
         setTestStates((prev) => ({
           ...prev,
           [id]: {
-            result: t("cloudConnectionFailed", { error: result.error || t("cloudUnknownError") }),
+            result: t("cloudConnectionFailed", {
+              error: result.error || t("cloudUnknownError"),
+            }),
             success: false,
           },
         }));
@@ -154,13 +158,15 @@ export function CloudConfigPanel() {
 
   return (
     <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Cloud className="h-4 w-4 text-muted-foreground" />
-          <span className="text-[13px] text-muted-foreground">{t("cloudConfigTitle")}</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-[13px] text-muted-foreground">
+            {t("cloudConfigTitle")}
+          </span>
         </div>
         <button
-          className="rounded-[6px] border border-input px-3 py-1 text-[11px] text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground"
+          className="shrink-0 rounded-[6px] border border-input px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
           onClick={() => {
             resetForm();
             setShowAdd(true);
@@ -172,10 +178,11 @@ export function CloudConfigPanel() {
 
       {/* Add form */}
       {showAdd && (
-        <div className="space-y-2 border-border border-t pt-3">
+        <div className="space-y-2.5 border-border border-t pt-3">
+          {/* Row 1: Provider + Name */}
           <div className="flex gap-2">
             <select
-              className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground"
+              className="h-8 shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none focus:border-primary"
               onChange={(e) => setProvider(e.target.value as "webdav" | "s3")}
               value={provider}
             >
@@ -183,7 +190,7 @@ export function CloudConfigPanel() {
               <option value="s3">Amazon S3</option>
             </select>
             <input
-              className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+              className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setName(e.target.value)}
               placeholder={t("cloudConfigNamePlaceholder")}
               value={name}
@@ -192,65 +199,67 @@ export function CloudConfigPanel() {
 
           {provider === "webdav" ? (
             <>
+              {/* WebDAV URL */}
               <input
-                className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="WebDAV URL"
                 value={url}
               />
-              <div className="flex gap-2">
-                <input
-                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={t("username")}
-                  value={username}
-                />
-                <input
-                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t("password")}
-                  type="password"
-                  value={password}
-                />
-              </div>
+              {/* Username */}
+              <input
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={t("username")}
+                value={username}
+              />
+              {/* Password */}
+              <input
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t("password")}
+                type="password"
+                value={password}
+              />
             </>
           ) : (
             <>
               <input
-                className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setEndpoint(e.target.value)}
                 placeholder="Endpoint URL"
                 value={endpoint}
               />
               <input
-                className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setAccessKey(e.target.value)}
                 placeholder="Access Key"
                 value={accessKey}
               />
               <input
-                className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setSecretKey(e.target.value)}
                 placeholder="Secret Key"
                 type="password"
                 value={secretKey}
               />
+              {/* Bucket + Region side by side — short values, won't overflow */}
               <div className="flex gap-2">
                 <input
-                  className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                   onChange={(e) => setBucket(e.target.value)}
                   placeholder="Bucket"
                   value={bucket}
                 />
                 <input
-                  className="h-7 w-24 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  className="h-8 w-[45%] shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                   onChange={(e) => setRegion(e.target.value)}
                   placeholder="Region"
                   value={region}
                 />
               </div>
               <input
-                className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setPublicBase(e.target.value)}
                 placeholder="Public Base URL (e.g. https://img.example.cn)"
                 value={publicBase}
@@ -258,16 +267,17 @@ export function CloudConfigPanel() {
             </>
           )}
 
-          <div className="flex gap-2">
+          {/* Action buttons */}
+          <div className="flex gap-2 pt-0.5">
             <button
-              className="rounded-[4px] bg-primary px-3 py-1 text-[11px] text-white hover:opacity-90 disabled:opacity-40"
+              className="rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
               disabled={!name.trim() || saving}
               onClick={handleSave}
             >
               {t("save")}
             </button>
             <button
-              className="rounded-[4px] border border-input px-3 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+              className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => setShowAdd(false)}
             >
               {t("cancel")}
@@ -278,36 +288,36 @@ export function CloudConfigPanel() {
 
       {/* Existing configs */}
       {!loading && configs.length > 0 && (
-        <div className="space-y-1.5 border-border border-t pt-3">
+        <div className="space-y-1 border-border border-t pt-3">
           {configs.map((cfg) => (
             <div
-              className="flex items-center justify-between rounded-[4px] py-1"
+              className="flex items-center justify-between gap-2 rounded-[4px] py-1"
               key={cfg.id}
             >
-              <div className="flex items-center gap-2">
-                <Link2 className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[12px] text-foreground">{cfg.name}</span>
-                <span className="text-[10px] text-muted-foreground/70">
+              <div className="flex min-w-0 items-center gap-2">
+                <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="truncate text-[12px] text-foreground">{cfg.name}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground/70">
                   {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                 </span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 {testStates[cfg.id] && (
                   <span
-                    className={`text-[10px] ${testStates[cfg.id].success ? "text-[#46a758]" : "text-[#e5484d]"}`}
+                    className={`shrink-0 text-[10px] ${testStates[cfg.id].success ? "text-[#46a758]" : "text-[#e5484d]"}`}
                   >
                     {testStates[cfg.id].result}
                   </span>
                 )}
                 <button
-                  className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                   disabled={testingId !== null}
                   onClick={() => handleTestConnection(cfg.id)}
                 >
                   {t("test")}
                 </button>
                 <button
-                  className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-[#e5484d]"
+                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-[#e5484d]"
                   onClick={() => handleDelete(cfg.id)}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -319,7 +329,9 @@ export function CloudConfigPanel() {
       )}
 
       {!loading && configs.length === 0 && !showAdd && (
-        <p className="text-[11px] text-muted-foreground/70">{t("cloudNoConfigShort")}</p>
+        <p className="text-[11px] text-muted-foreground/70">
+          {t("cloudNoConfigShort")}
+        </p>
       )}
 
       <ConfirmDialog
@@ -336,4 +348,3 @@ export function CloudConfigPanel() {
     </div>
   );
 }
-
