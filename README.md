@@ -63,7 +63,7 @@
 
 ### 人脸识别
 
-ONNX 人脸检测 + 特征提取，自动聚类身份，支持合并/拆分/重命名。RAW 文件通过内嵌 JPEG 预览支持。
+ONNX 人脸检测 + 特征提取，自动聚类身份，支持合并/拆分/重命名。**DirectML GPU 加速，人脸检测提速 6.6 倍**，无 GPU 自动回退 CPU。RAW 文件通过内嵌 JPEG 预览支持。
 
 | ![人脸检测](screenshots/06-face-detection.png) | ![智能相册](screenshots/08-smart-album.png) |
 |:---:|:---:|
@@ -119,7 +119,7 @@ ONNX 人脸检测 + 特征提取，自动聚类身份，支持合并/拆分/重�
 | IPC | oRPC（类型安全） |
 | 数据库 | better-sqlite3 + Drizzle ORM |
 | 图片处理 | sharp |
-| AI 推理 | Transformers.js (ONNX) + LanceDB |
+| AI 推理 | Transformers.js + onnxruntime-node (DirectML GPU) + LanceDB |
 | 测试 | Vitest + Playwright |
 
 ---

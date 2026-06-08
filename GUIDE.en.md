@@ -172,6 +172,8 @@ In the detail panel, click "Analyze Suggested Tags" — the AI analyzes the phot
 
 ## Face Recognition
 
+> **GPU Acceleration**: DirectML GPU acceleration delivers **6.6x faster** face detection. The app automatically detects your GPU on first launch and shows an onboarding dialog. Falls back to CPU if no compatible GPU is found.
+
 ### Starting Detection
 
 1. Open the **People** page (sidebar navigation)
@@ -388,6 +390,13 @@ Deleted photos go to the trash and are kept for **30 days** before automatic per
 - Auto-detect / hf-mirror.com / modelscope.cn / Official / Custom
 - Users in China should switch to hf-mirror.com
 
+### GPU Acceleration
+
+- **Auto-Detection**: GPU is automatically checked for DirectML support on first launch
+- **Onboarding Dialog**: A one-click setup dialog appears when a compatible GPU is detected
+- **Manual Toggle**: Settings → GPU Acceleration, toggle on/off anytime
+- **Face Recognition Only**: GPU acceleration currently applies to face detection; CLIP embeddings and other AI tasks still use CPU
+
 ### Watermark
 - Text or image watermark
 - 9 anchor positions + drag to position
@@ -468,6 +477,10 @@ In the app data directory (default location). You can view and change this in **
 ### Face detection isn't accurate enough?
 
 Try "Recluster" to improve grouping, or manually merge/split identities. The detection threshold is fixed at 0.55, balancing precision and recall.
+
+### Face detection is too slow?
+
+Enable GPU acceleration for up to **6.6x faster** face detection. Go to **Settings → GPU Acceleration → Enable**. Falls back to CPU automatically if your GPU doesn't support DirectML.
 
 ### Duplicate detection found nothing?
 

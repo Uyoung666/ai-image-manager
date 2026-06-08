@@ -63,7 +63,7 @@ Camera/lens usage stats, focal/aperture/shutter/ISO distributions, capture time 
 
 ### Face Recognition
 
-ONNX-based detection and feature extraction. Automatic identity clustering, merge/split, rename. Works with RAW files via embedded JPEG preview.
+ONNX-based detection and feature extraction. Automatic identity clustering, merge/split, rename. **DirectML GPU acceleration delivers 6.6x faster face detection**, with automatic CPU fallback. Works with RAW files via embedded JPEG preview.
 
 | ![Face Detection](screenshots/06-face-detection.png) | ![Smart Album](screenshots/08-smart-album.png) |
 |:---:|:---:|
@@ -119,7 +119,7 @@ Phase 1: pHash + EXIF + thumbnails (4 concurrent). Phase 2: CLIP embeddings (2-w
 | IPC | oRPC (type-safe) |
 | DB | better-sqlite3 + Drizzle ORM |
 | Images | sharp |
-| AI | Transformers.js (ONNX) + LanceDB |
+| AI | Transformers.js + onnxruntime-node (DirectML GPU) + LanceDB |
 | Test | Vitest + Playwright |
 
 ---
