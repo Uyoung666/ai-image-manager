@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ORPCError, os } from "@orpc/server";
 import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
-import { app, BrowserWindow } from "electron";
+import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
   exifData,
@@ -13,16 +13,16 @@ import {
   photoTags,
   tags,
 } from "@/db/schema";
-import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
+import { deletePhotoVectors } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
-import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import {
-  scanFolder as scanFolderService,
-  stopScanning as stopScanningService,
-  watchFolder,
-} from "@/services/indexer";
+  cancelAllImports,
+  cancelQueuedImports,
+  enqueueImport,
+  getImportQueueStatus,
+} from "@/services/import-queue";
+import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import { FolderSchema, IdSchema, ListSchema } from "./shared";
-import { invalidateStatsCache } from "./stats";
 
 function logIpcError(handlerName: string, err: unknown): void {
   try {
@@ -40,121 +40,56 @@ function logIpcError(handlerName: string, err: unknown): void {
   }
 }
 
-// Folder management
-export const scanFolder = os.input(FolderSchema).handler(async ({ input }) => {
+// ── Import Queue — sequential folder import ───────────────────────
+
+/**
+ * Enqueue a folder for import. Returns immediately so the frontend
+ * is not blocked while scanning and AI embedding run in the background.
+ */
+export const scanFolder = os.input(FolderSchema).handler(({ input }) => {
   try {
-    const result = await scanFolderService(input.path, (progress) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("scan-progress", progress);
-      }
-    });
-
-    // If the user cancelled the scan, clean up partially imported data
-    if (result.cancelled) {
-      const db = getDatabase();
-
-      if (result.newPhotoIds.length > 0) {
-        const ids = result.newPhotoIds;
-
-        // Collect photo paths for thumbnail cleanup
-        const records = db
-          .select({ id: photos.id, path: photos.path })
-          .from(photos)
-          .where(inArray(photos.id, ids))
-          .all();
-
-        db.transaction(() => {
-          db.delete(exifData).where(inArray(exifData.photoId, ids)).run();
-          db.delete(photoTags).where(inArray(photoTags.photoId, ids)).run();
-          db.delete(photos).where(inArray(photos.id, ids)).run();
-        });
-
-        for (const r of records) {
-          deletePhotoThumbnails(r.path);
-        }
-        deletePhotoVectors(ids).catch(() => {
-          /* best-effort */
-        });
-      }
-
-      // If the folder was newly created in this scan, remove it and all descendants
-      if (!result.folderExisted) {
-        // Recursively collect all descendant folder IDs via BFS
-        const descendantIds: number[] = [];
-        const visited = new Set<number>([result.folderId]);
-        const queue = [result.folderId];
-        while (queue.length > 0) {
-          const currentId = queue.shift()!;
-          const children = db
-            .select({ id: folders.id })
-            .from(folders)
-            .where(eq(folders.parentId, currentId))
-            .all();
-          for (const child of children) {
-            if (visited.has(child.id)) continue;
-            visited.add(child.id);
-            descendantIds.push(child.id);
-            queue.push(child.id);
-          }
-        }
-        // Delete descendants first, then root
-        for (const fid of descendantIds) {
-          db.delete(folders).where(eq(folders.id, fid)).run();
-        }
-        db.delete(folders).where(eq(folders.id, result.folderId)).run();
-        reloadFolderMatcher();
-      }
-
-      invalidateStatsCache();
-      return {
-        cancelled: true,
-        photoIds: [],
-        skipped: 0,
-        folderId: result.folderId,
-      };
+    const resolved = path.resolve(input.path);
+    if (!fs.existsSync(resolved)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Folder does not exist: ${resolved}`,
+      });
     }
 
-    watchFolder(input.path, (photoId, event) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("file-change", { type: event, photoId });
-      }
-    });
-
-    if (result.photoIds.length > 0) {
-      embedAllPhotos((aiProgress) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send("ai-progress", aiProgress);
-        }
-      })
-        .then((count) => {
-          if (count > 0) {
-            console.log(
-              `[AI] Auto-embedding after scan: ${count} photos processed`
-            );
-          }
-        })
-        .catch((err) => {
-          console.warn("[AI] Auto-embedding after scan failed:", err?.message);
-        });
-    }
-
-    invalidateStatsCache();
-    return result;
+    const task = enqueueImport(resolved);
+    return { status: task.status, position: task.position, id: task.id };
   } catch (err) {
     logIpcError("scanFolder", err);
     const message = (err as Error)?.message ?? String(err);
+    if (err instanceof ORPCError) {
+      throw err;
+    }
     throw new ORPCError("INTERNAL_SERVER_ERROR", { message });
   }
 });
 
 export const stopScanning = os.handler(() => {
-  stopScanningService();
+  cancelAllImports();
   return { stopped: true };
+});
+
+/** Get current import queue status (pending, running, history). */
+export const getImportQueueStatus_h = os.handler(() => {
+  return getImportQueueStatus();
+});
+
+/** Cancel all queued (not-yet-started) imports without affecting the running one. */
+export const cancelQueuedImports_h = os.handler(() => {
+  const cancelled = cancelQueuedImports();
+  return { cancelled: cancelled.length };
 });
 
 export const getFolders = os.handler(() => {
   const db = getDatabase();
-  const allFolders = db.select().from(folders).orderBy(desc(folders.lastScannedAt)).all();
+  const allFolders = db
+    .select()
+    .from(folders)
+    .orderBy(desc(folders.lastScannedAt))
+    .all();
 
   // Build children map for recursive count computation
   const childrenMap = new Map<number, number[]>();
@@ -173,10 +108,14 @@ export const getFolders = os.handler(() => {
   const recursiveCache = new Map<number, number>();
   function computeRecursive(folderId: number): number {
     const cached = recursiveCache.get(folderId);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      return cached;
+    }
 
     const folder = allFolders.find((f) => f.id === folderId);
-    if (!folder) return 0;
+    if (!folder) {
+      return 0;
+    }
 
     let total = folder.photoCount;
     const children = childrenMap.get(folderId);
@@ -218,7 +157,9 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
       .where(eq(folders.parentId, currentId))
       .all();
     for (const child of children) {
-      if (visited.has(child.id)) continue; // cycle guard
+      if (visited.has(child.id)) {
+        continue; // cycle guard
+      }
       visited.add(child.id);
       descendantIds.push(child.id);
       queue.push(child.id);
@@ -227,7 +168,10 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 
   const allFolderIds = [input.id, ...descendantIds];
 
-  // 2) Collect all photos belonging to any of these folders
+  // 2) Collect all photos belonging to any of these folders.
+  //    This includes both active and soft-deleted photos — when the original
+  //    folder is removed, trashed photos have nothing to restore, so they are
+  //    hard-deleted together with active ones.
   const folderPhotos = db
     .select({ id: photos.id, path: photos.path })
     .from(photos)
@@ -244,7 +188,7 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     .where(
       sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
         SELECT id FROM folders
-      )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${normalizedPath + "/%"}`
+      )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${`${normalizedPath}/%`}`
     )
     .all();
   const orphanPhotoIds = orphanPhotos.map((p) => p.id);
@@ -282,7 +226,9 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
       .all()
       .map((r) => r.id);
     if (emptyIds.length > 0) {
-      db.delete(faceIdentities).where(inArray(faceIdentities.id, emptyIds)).run();
+      db.delete(faceIdentities)
+        .where(inArray(faceIdentities.id, emptyIds))
+        .run();
     }
     // Recalculate faceCount for identities that still have members
     db.run(
@@ -306,16 +252,62 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
   // 6) Reload folder matcher so watchers pick up the change
   reloadFolderMatcher();
 
+  // 7) Flush COUNT cache so the frontend sees the updated total immediately
+  invalidateCountCache();
+
   return { success: true };
 });
+
+// ── Total COUNT cache ───────────────────────────────────────────────
+// 避免每次翻页在数十万行表上执行 COUNT(*)，TTL 10 秒内复用上次结果。
+// 大规模导入完成后应调用 invalidateCountCache() 立即刷新。
+const COUNT_CACHE_TTL = 10_000;
+const MAX_COUNT_CACHE = 50;
+
+/** 清空 COUNT 缓存，在导入/删除大批量照片后调用以确保计数即时准确。 */
+export function invalidateCountCache(): void {
+  totalCache.clear();
+}
+const totalCache = new Map<string, { value: number; timestamp: number }>();
 
 // Photo listing
 export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const db = getDatabase();
-  const { folderId, tagId, search, favoriteOnly, sort, order, offset, limit } =
-    input;
+  const {
+    folderId,
+    tagId,
+    tagIds,
+    tagMode,
+    search,
+    favoriteOnly,
+    sort,
+    order,
+    offset,
+    limit,
+  } = input;
 
-  let query = db.select().from(photos).$dynamic();
+  // 显式字段选择：排除 phash / contentHash / vectorId 等瀑布流不用的重型字段，
+  // 每条照片节省约 116+ bytes 的结构化克隆传输
+  let query = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+      folderId: photos.folderId,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      fileDate: photos.fileDate,
+      width: photos.width,
+      height: photos.height,
+      format: photos.format,
+      thumbnailPath: photos.thumbnailPath,
+      dominantColors: photos.dominantColors,
+      isFavorite: photos.isFavorite,
+      isIndexed: photos.isIndexed,
+      isAiProcessed: photos.isAiProcessed,
+      isFaceProcessed: photos.isFaceProcessed,
+    })
+    .from(photos)
+    .$dynamic();
 
   // Always exclude soft-deleted photos
   const conditions: ReturnType<typeof isNull>[] = [isNull(photos.deletedAt)];
@@ -323,8 +315,16 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   if (folderId) {
     conditions.push(eq(photos.folderId, folderId) as any);
   }
-  if (tagId) {
-    // Collect all descendant tag IDs (self + children recursively)
+
+  // Multi-tag filtering with AND/OR support
+  // Backward compat: if tagId is provided without tagIds, treat as single-tag OR
+  const effectiveTagIds =
+    tagIds && tagIds.length > 0 ? tagIds : tagId == null ? null : [tagId];
+  const effectiveTagMode =
+    tagIds && tagIds.length > 0 ? (tagMode ?? "or") : "or";
+
+  if (effectiveTagIds && effectiveTagIds.length > 0) {
+    // Collect all descendant tag IDs for each root tag
     const allTags = db.select().from(tags).all();
     const childrenMap = new Map<number, number[]>();
     for (const t of allTags) {
@@ -337,26 +337,49 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
         }
       }
     }
-    const descendantIds: number[] = [];
-    const visited = new Set<number>();
-    (function collect(pid: number) {
-      if (visited.has(pid)) {
-        return;
-      }
-      visited.add(pid);
-      descendantIds.push(pid);
-      const kids = childrenMap.get(pid);
-      if (kids) {
-        for (const kid of kids) {
-          collect(kid);
+
+    // Collect descendants for each root tag ID
+    const rootDescendantSets: Set<number>[] = [];
+    for (const rootId of effectiveTagIds) {
+      const descendantIds = new Set<number>();
+      const visited = new Set<number>();
+      (function collect(pid: number) {
+        if (visited.has(pid)) {
+          return;
+        }
+        visited.add(pid);
+        descendantIds.add(pid);
+        const kids = childrenMap.get(pid);
+        if (kids) {
+          for (const kid of kids) {
+            collect(kid);
+          }
+        }
+      })(rootId);
+      rootDescendantSets.push(descendantIds);
+    }
+
+    if (effectiveTagMode === "or") {
+      // OR mode: photo must have at least one tag from the merged descendant set
+      const allDescendantIds = new Set<number>();
+      for (const set of rootDescendantSets) {
+        for (const id of set) {
+          allDescendantIds.add(id);
         }
       }
-    })(tagId);
-
-    const idList = descendantIds.join(",");
-    conditions.push(
-      sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${sql.raw(idList)}))` as any
-    );
+      const idList = [...allDescendantIds].join(",");
+      conditions.push(
+        sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${sql.raw(idList)}))` as any
+      );
+    } else {
+      // AND mode: photo must have at least one tag from each root tag's descendant set
+      for (const descendantSet of rootDescendantSets) {
+        const idList = [...descendantSet].join(",");
+        conditions.push(
+          sql`EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = ${photos.id} AND pt.tag_id IN (${sql.raw(idList)}))` as any
+        );
+      }
+    }
   }
   if (search) {
     conditions.push(like(photos.filename, `%${search}%`) as any);
@@ -375,13 +398,38 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
         : photos.fileDate;
   query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
 
-  // Build filtered count query with same conditions
-  let countQuery = db
-    .select({ count: sql<number>`count(*)` })
-    .from(photos)
-    .$dynamic();
-  countQuery = countQuery.where(and(...conditions));
-  const total = countQuery.get()?.count || 0;
+  // Build cache key from filter-relevant params (excluding sort/order/offset/limit)
+  const countCacheKey = JSON.stringify({
+    folderId: folderId ?? null,
+    tagId: tagId ?? null,
+    tagIds: effectiveTagIds ?? null,
+    tagMode: effectiveTagMode,
+    search: search ?? null,
+    favoriteOnly: favoriteOnly ?? null,
+  });
+
+  let total: number;
+  const cachedTotal = totalCache.get(countCacheKey);
+  if (cachedTotal && Date.now() - cachedTotal.timestamp < COUNT_CACHE_TTL) {
+    total = cachedTotal.value;
+  } else {
+    // Build filtered count query with same conditions
+    let countQuery = db
+      .select({ count: sql<number>`count(*)` })
+      .from(photos)
+      .$dynamic();
+    countQuery = countQuery.where(and(...conditions));
+    total = countQuery.get()?.count || 0;
+
+    // Evict oldest entry if at capacity, then store
+    if (totalCache.size >= MAX_COUNT_CACHE) {
+      const lru = totalCache.keys().next().value;
+      if (lru !== undefined) {
+        totalCache.delete(lru);
+      }
+    }
+    totalCache.set(countCacheKey, { value: total, timestamp: Date.now() });
+  }
   const items = query.limit(limit).offset(offset).all();
 
   return { items, total, offset, limit };

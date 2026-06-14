@@ -154,6 +154,7 @@ async function computePHash(filePath: string): Promise<string | null> {
   try {
     const SIZE = 32;
     const { data } = await sharp(filePath)
+      .rotate()
       .resize(SIZE, SIZE, { fit: "fill" })
       .grayscale()
       .raw()
@@ -221,13 +222,25 @@ async function readBasicMeta(filePath: string): Promise<{
       }
     }
     const meta = await sharp(input).metadata();
+    // Read EXIF orientation to correct width/height for rotated photos
+    // Use exifr.orientation() — the dedicated API — instead of parse() with pick
+    let orientation = 1;
+    try {
+      orientation = (await exifr.orientation(filePath)) ?? 1;
+    } catch {
+      // If EXIF read fails, assume no rotation
+    }
+    // Swap width/height when orientation is 5, 6, 7, 8 (90° or 270° rotation)
+    const swapDimensions = orientation >= 5 && orientation <= 8;
+    const width = swapDimensions ? meta.height || 0 : meta.width || 0;
+    const height = swapDimensions ? meta.width || 0 : meta.height || 0;
     // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
     const format = raw
       ? path.extname(filePath).toLowerCase().replace(".", "")
       : meta.format || "";
     return {
-      width: meta.width || 0,
-      height: meta.height || 0,
+      width,
+      height,
       format,
       colorSpace: meta.space || "",
       hasAlpha: meta.hasAlpha,
@@ -380,7 +393,20 @@ async function preparePhotoRecord(
     thumb = { thumbnailPath: null, width: 0, height: 0 };
   }
 
-  const phash = await computePHash(filePath);
+  let phash: string | null = null;
+  try {
+    phash = await computePHash(filePath);
+  } catch (err) {
+    // pHash computation failed — clean up thumbnail we just generated
+    log.warn(
+      { filePath, err },
+      "pHash computation failed, cleaning up thumbnail"
+    );
+    if (thumb.thumbnailPath) {
+      deletePhotoThumbnails(filePath);
+    }
+    return null;
+  }
 
   // 提取主色调（使用缩略图，3-8ms/张）
   let dominantColors: string | null = null;
@@ -794,6 +820,13 @@ export async function scanFolder(
   // Batch insert new photos
   for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
     if (scanToken.cancelled) {
+      // Clean up thumbnails for prepared-but-uninserted records.
+      // These files were processed by preparePhotoRecord (thumbnails
+      // already on disk) but were never committed to the database, so
+      // the IPC-level cancel cleanup won't find them.
+      for (let k = i; k < newRecords.length; k++) {
+        deletePhotoThumbnails(newRecords[k].photoRecord.path);
+      }
       break;
     }
 
@@ -1211,6 +1244,9 @@ export async function cleanupOrphanedRecords(): Promise<{
 
   for (const photo of allPhotos) {
     if (!fs.existsSync(photo.path)) {
+      // Clean up orphaned thumbnail files before removing DB records
+      deletePhotoThumbnails(photo.path);
+
       db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
       db.delete(photos).where(eq(photos.id, photo.id)).run();
 
@@ -1256,6 +1292,9 @@ export async function cleanupOrphanedRecordsAsync(
     const batch = allPhotos.slice(i, i + BATCH_SIZE);
     for (const photo of batch) {
       if (!fs.existsSync(photo.path)) {
+        // Clean up orphaned thumbnail files before removing DB records
+        deletePhotoThumbnails(photo.path);
+
         db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
         db.delete(photos).where(eq(photos.id, photo.id)).run();
 
@@ -1270,7 +1309,11 @@ export async function cleanupOrphanedRecordsAsync(
     }
     // Yield the event loop every batch to keep UI responsive
     await new Promise<void>((resolve) => setImmediate(resolve));
-    onProgress?.(Math.min(i + BATCH_SIZE, allPhotos.length), removed, allPhotos.length);
+    onProgress?.(
+      Math.min(i + BATCH_SIZE, allPhotos.length),
+      removed,
+      allPhotos.length
+    );
   }
 
   for (const [folderId, count] of folderUpdates) {

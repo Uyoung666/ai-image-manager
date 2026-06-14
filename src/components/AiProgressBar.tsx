@@ -9,12 +9,13 @@ interface AiProgress {
   isActive: boolean;
   isModelLoaded: boolean;
   loadingStartedAt?: number | null;
-  phase: "idle" | "loading" | "embedding" | "complete" | "error";
+  phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
   processed: number;
+  repairReason?: string;
   total: number;
 }
 
-export function AiProgressBar() {
+export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<AiProgress | null>(null);
   const [paused, setPaused] = useState(false);
@@ -108,6 +109,9 @@ export function AiProgressBar() {
   }, [progress]);
 
   async function handleStart() {
+    if (disabled) {
+      return;
+    }
     setLastError(null);
     await ipc.client.photos.startAiIndexing({});
     setPaused(false);
@@ -119,7 +123,7 @@ export function AiProgressBar() {
   }
 
   async function handlePause() {
-    await ipc.client.photos.stopAiIndexing({});
+    await ipc.client.photos.pauseAiIndexing({});
     setPaused(true);
     const p = await fetchProgress();
     if (p) {
@@ -129,7 +133,7 @@ export function AiProgressBar() {
 
   async function handleResume() {
     setLastError(null);
-    await ipc.client.photos.startAiIndexing({});
+    await ipc.client.photos.resumeAiIndexing({});
     setPaused(false);
     const p = await fetchProgress();
     if (p) {
@@ -138,7 +142,7 @@ export function AiProgressBar() {
   }
 
   async function handleCancel() {
-    await ipc.client.photos.stopAiIndexing({});
+    await ipc.client.photos.cancelAiIndexing({});
     setPaused(false);
     setProgress(null);
   }
@@ -153,7 +157,7 @@ export function AiProgressBar() {
 
     return (
       <div className="mt-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
-        <p className="text-[11px] font-[510] text-danger">{lastError}</p>
+        <p className="font-[510] text-[11px] text-danger">{lastError}</p>
 
         {isNetworkError ? (
           <div className="mt-2 space-y-2">
@@ -206,7 +210,8 @@ export function AiProgressBar() {
   ) {
     return (
       <button
-        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/15"
+        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-40"
+        disabled={disabled}
         onClick={handleStart}
       >
         {t("aiStartIndex")}
@@ -249,19 +254,26 @@ export function AiProgressBar() {
         : 0;
   const phaseLabel = paused
     ? t("aiPaused")
-    : progress.phase === "loading"
-      ? progress.downloadPercent == null
-        ? t("aiLoadingClip")
-        : t("aiLoadingClip", { percent: progress.downloadPercent })
-      : progress.phase === "complete"
-        ? t("aiComplete")
-        : t("aiIndexingProgress", {
-            processed: progress.processed,
-            total: progress.total,
-          });
+    : progress.phase === "repairing"
+      ? t("aiRepairingIndex")
+      : progress.phase === "loading"
+        ? progress.downloadPercent == null
+          ? t("aiLoadingClip")
+          : t("aiLoadingClip", { percent: progress.downloadPercent })
+        : progress.phase === "complete"
+          ? t("aiComplete")
+          : t("aiIndexingProgress", {
+              processed: progress.processed,
+              total: progress.total,
+            });
 
   return (
     <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
+      {progress.repairReason && (
+        <p className="mb-1.5 rounded-[4px] bg-primary/10 px-2 py-1 text-[10px] text-primary leading-relaxed">
+          {progress.repairReason}
+        </p>
+      )}
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">{phaseLabel}</span>
         <span className="font-[510] text-[11px] text-primary">{pct}%</span>
