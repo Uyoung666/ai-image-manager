@@ -1,19 +1,20 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, BarChart3, Eye, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { CullCurate } from "@/components/CullCurate";
 import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
 import { ipc } from "@/ipc/manager";
 
-export type CullDelta =
-  | { type: "keep"; sessionPhotoId: number }
-  | { type: "reject"; sessionPhotoId: number }
-  | { type: "comparison" }
-  | { type: "undo" }
-  | { type: "finish" }
-  | { type: "full" };
+// ── Shared types ──
+
+/** Lightweight delta sent by child components after mutation success.
+ *  The parent invalidates its session query in response — no manual
+ *  state patching needed because TanStack Query refetches atomically. */
+export type CullDelta = { type: "mutation" | "finish" };
 
 interface SessionPhoto {
   comparisons: number;
@@ -37,7 +38,7 @@ interface SessionPhoto {
   wins: number;
 }
 
-interface Session {
+export interface Session {
   completedAt: number | null;
   completedComparisons: number;
   createdAt: number;
@@ -46,6 +47,7 @@ interface Session {
   mode: "duel" | "curate";
   name: string;
   pkMode?: string;
+  sortStrategy?: string;
   status: "active" | "completed";
   totalPhotos: number;
 }
@@ -54,90 +56,83 @@ function CullSessionPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { sessionId } = Route.useParams();
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [showResults, setShowResults] = useState(false);
 
-  const loadSession = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = (await ipc.client.cull.getSession({
+  // Session data via TanStack Query — single source of truth
+  const sessionQuery = useQuery({
+    queryKey: ["cull", "session", sessionId],
+    queryFn: async () => {
+      const result = await ipc.client.cull.getSession({
         sessionId: Number(sessionId),
-      })) as Session;
-      setSession(result);
-    } catch (err) {
-      console.error("[loadSession] failed:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [sessionId]);
-
-  const refreshSession = useCallback(async () => {
-    try {
-      const result = (await ipc.client.cull.getSession({
-        sessionId: Number(sessionId),
-      })) as Session;
-      setSession(result);
-    } catch (err) {
-      console.error("[refreshSession] failed:", err);
-    }
-  }, [sessionId]);
-
-  const handleDelta = useCallback(
-    (delta: CullDelta) => {
-      switch (delta.type) {
-        case "keep":
-          setSession((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              completedComparisons: prev.completedComparisons + 1,
-              items: prev.items.map((item) =>
-                item.id === delta.sessionPhotoId
-                  ? { ...item, status: "kept" as const }
-                  : item
-              ),
-            };
-          });
-          break;
-        case "reject":
-          setSession((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              completedComparisons: prev.completedComparisons + 1,
-              items: prev.items.map((item) =>
-                item.id === delta.sessionPhotoId
-                  ? { ...item, status: "rejected" as const }
-                  : item
-              ),
-            };
-          });
-          break;
-        case "comparison":
-          setSession((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              completedComparisons: prev.completedComparisons + 1,
-            };
-          });
-          break;
-        case "undo":
-        case "finish":
-        case "full":
-          refreshSession();
-          break;
-      }
+      });
+      return result as Session;
     },
-    [refreshSession]
-  );
+    staleTime: 10_000,
+  });
 
+  const session = sessionQuery.data ?? null;
+  const isLoading = sessionQuery.isLoading && !sessionQuery.data;
+
+  // File-change listener: invalidates both session AND pair queries
+  // so header stats refresh AND CullDuel/CullCurate immediately refetch.
   useEffect(() => {
-    loadSession();
-  }, [loadSession]);
+    const handler = (event: MessageEvent) => {
+      if (event.data?.channel !== "file-change") {
+        return;
+      }
+      const { type, photoId } = event.data as {
+        type: string;
+        photoId?: number;
+      };
+      if (!photoId) {
+        return;
+      }
 
-  if (loading && !session) {
+      // Read latest session from TanStack Query cache (no ref needed)
+      const current = queryClient.getQueryData<Session>([
+        "cull",
+        "session",
+        sessionId,
+      ]);
+      if (!current?.items) {
+        return;
+      }
+
+      const affected = current.items.some((item) => item.photo.id === photoId);
+      if (!affected) {
+        return;
+      }
+
+      // Invalidate session query — header stats refresh
+      queryClient.invalidateQueries({
+        queryKey: ["cull", "session", sessionId],
+      });
+      // Also invalidate the active pair query so CullDuel/CullCurate
+      // immediately refetch instead of waiting on stale pair data.
+      // Without this, the child component sits frozen with the old
+      // pair because its query key hasn't changed.
+      queryClient.invalidateQueries({
+        queryKey: ["cull", "pair", Number(sessionId)],
+      });
+
+      if (type === "remove") {
+        toast.warning(t("cullPhotoDeletedExternally"));
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [sessionId, queryClient, t]);
+
+  // Called by child components after every mutation
+  const onMutationSuccess = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: ["cull", "session", sessionId],
+    });
+  }, [sessionId, queryClient]);
+
+  // Loading state
+  if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -145,6 +140,7 @@ function CullSessionPage() {
     );
   }
 
+  // Not-found
   if (!session) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -153,6 +149,7 @@ function CullSessionPage() {
     );
   }
 
+  // ── Derived data ──
   const isDuel = session.mode !== "curate";
   const keepCount = session.items.filter((i) => i.status === "kept").length;
   const rejectCount = session.items.filter(
@@ -177,25 +174,29 @@ function CullSessionPage() {
           {!showResults && (
             <span className="text-[12px] text-muted-foreground/70">
               {isDuel
-                ? `${session.completedComparisons} / ~${(() => {
-                    const m =
-                      session.pkMode === "quick"
-                        ? 5
-                        : session.pkMode === "fine"
-                          ? 12
-                          : 8;
-                    const f =
-                      session.pkMode === "quick"
-                        ? 0
-                        : session.pkMode === "fine"
-                          ? 0.3
-                          : 0.15;
-                    const rb = Math.ceil(pending.length * f);
-                    return Math.max(
-                      1,
-                      Math.ceil((pending.length * m) / 2) + rb
-                    );
-                  })()} PKs`
+                ? session.status === "completed"
+                  ? `${session.completedComparisons} PKs · ✓`
+                  : pending.length === 0
+                    ? `${session.completedComparisons} PKs`
+                    : `${session.completedComparisons} / ~${(() => {
+                        const m =
+                          session.pkMode === "quick"
+                            ? 5
+                            : session.pkMode === "fine"
+                              ? 12
+                              : 8;
+                        const f =
+                          session.pkMode === "quick"
+                            ? 0
+                            : session.pkMode === "fine"
+                              ? 0.3
+                              : 0.15;
+                        const rb = Math.ceil(pending.length * f);
+                        return Math.max(
+                          1,
+                          Math.ceil((pending.length * m) / 2) + rb
+                        );
+                      })()} PKs`
                 : `${keepCount + rejectCount}/${session.totalPhotos} reviewed`}
             </span>
           )}
@@ -241,7 +242,13 @@ function CullSessionPage() {
               ? "bg-primary/10 font-[510] text-primary"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          onClick={() => { setShowResults(true); refreshSession(); }}
+          onClick={() => {
+            setShowResults(true);
+            // Invalidate to ensure Result view has fresh data
+            queryClient.invalidateQueries({
+              queryKey: ["cull", "session", sessionId],
+            });
+          }}
         >
           <BarChart3 className="h-3.5 w-3.5" />
           {t("cullResult")}
@@ -251,11 +258,18 @@ function CullSessionPage() {
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {showResults ? (
-          <CullResult onUpdate={refreshSession} session={session} />
+          <CullResult
+            onUpdate={() =>
+              queryClient.invalidateQueries({
+                queryKey: ["cull", "session", sessionId],
+              })
+            }
+            session={session}
+          />
         ) : isDuel ? (
-          <CullDuel onUpdate={handleDelta} session={session} />
+          <CullDuel onMutationSuccess={onMutationSuccess} session={session} />
         ) : (
-          <CullCurate onUpdate={handleDelta} session={session} />
+          <CullCurate onMutationSuccess={onMutationSuccess} session={session} />
         )}
       </div>
     </div>

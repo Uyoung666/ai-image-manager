@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
 interface CullSession {
@@ -55,6 +56,8 @@ function CullListPage() {
   const [creating, setCreating] = useState(false);
   const composingRef = useRef(false);
   const [noFolderHint, setNoFolderHint] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "cull-list" });
 
   const loadSessions = useCallback(async () => {
     setLoading(true);
@@ -179,7 +182,7 @@ function CullListPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-[320px] text-center">

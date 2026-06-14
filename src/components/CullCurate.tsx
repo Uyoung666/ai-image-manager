@@ -1,4 +1,10 @@
 import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
   CheckCircle,
   Eye,
   Heart,
@@ -7,7 +13,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -17,9 +23,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ZoomableImage } from "@/components/ZoomableImage";
+import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
-import type { CullDelta } from "@/routes/cull.$sessionId";
+import type { Session } from "@/routes/cull.$sessionId";
 import { preloadImage } from "@/utils/local-media-url";
+
+// ── Types ──
 
 interface PhotoInfo {
   fileDate: number | null;
@@ -55,15 +64,19 @@ interface ExifData {
   shutterSpeed: string | null;
 }
 
+interface CurateResult {
+  done: boolean;
+  similarCount?: number;
+  single?: SingleItem;
+  stats: { total: number; completed: number; remaining: number };
+}
+
 interface CullCurateProps {
-  onUpdate: (delta: CullDelta) => void;
-  session: {
-    id: number;
-    mode: string;
-    totalPhotos: number;
-    completedComparisons: number;
-    items?: { status: string }[];
-  };
+  onMutationSuccess: () => void;
+  session: Pick<
+    Session,
+    "id" | "mode" | "totalPhotos" | "completedComparisons" | "items" | "status"
+  >;
 }
 
 function formatExifDate(ts: number | null): string {
@@ -78,197 +91,208 @@ function formatExifDate(ts: number | null): string {
   });
 }
 
-export function CullCurate({ session, onUpdate }: CullCurateProps) {
+// ── Component ──
+
+export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const { t } = useTranslation();
-  const [item, setItem] = useState<SingleItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [done, setDone] = useState(false);
-  const [stats, setStats] = useState<{
-    total: number;
-    completed: number;
-    remaining: number;
-  } | null>(null);
-  const [exif, setExif] = useState<ExifData | null>(null);
-  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [similarCount, setSimilarCount] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
-  const shortcutsOpenRef = useRef(false);
-  const finishConfirmOpenRef = useRef(false);
-  finishConfirmOpenRef.current = finishConfirmOpen;
-  shortcutsOpenRef.current = shortcutsOpen;
-  const initialLoadRef = useRef(true);
-  const loadNextRef = useRef<(() => Promise<void>) | null>(null);
+  const queryClient = useQueryClient();
 
-  async function loadExif(photoId: number): Promise<ExifData | null> {
-    try {
-      const result = await ipc.client.photos.getPhotoExif({ id: photoId });
-      return result as ExifData | null;
-    } catch {
-      return null;
-    }
-  }
+  // React 19: mark photo-switch state as non-urgent transition
+  const [isTransitioning, startTransition] = useTransition();
 
-  const loadNext = useCallback(async () => {
-    setLoading(initialLoadRef.current);
-    try {
-      const result = (await ipc.client.cull.getNextPair({
-        sessionId: session.id,
-      })) as {
-        done: boolean;
-        single?: SingleItem;
-        similarCount?: number;
-        stats: { total: number; completed: number; remaining: number };
-      };
-      if (result.done || !result.single) {
-        setDone(true);
-        setStats(result.stats);
-      } else {
-        preloadImage(result.single.photo.thumbnailPath ?? result.single.photo.path);
-        setItem(result.single);
-        setStats(result.stats);
-        setSimilarCount((result as any).similarCount ?? 0);
-        setDone(false);
-        const exifData = await loadExif(result.single.photo.id);
-        setExif(exifData);
-      }
-    } catch (err) {
-      console.error("[loadNext] failed:", err);
-    } finally {
-      initialLoadRef.current = false;
-      setLoading(false);
-    }
+  // Increment to trigger a fresh getNextPair IPC call
+  const [photoFetchId, setPhotoFetchId] = useState(0);
+
+  // Accumulates broken-photo IDs across the session; sent as excludeIds to
+  // prevent backend from re-pairing them (infinite retry loop prevention).
+  const erroredPhotosRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    erroredPhotosRef.current.clear();
   }, [session.id]);
 
-  useEffect(() => {
-    loadNextRef.current = loadNext;
-  }, [loadNext]);
+  const photoQuery = useQuery({
+    queryKey: ["cull", "pair", session.id, photoFetchId],
+    queryFn: async () => {
+      const excludeIds = Array.from(erroredPhotosRef.current);
+      const result = (await ipc.client.cull.getNextPair({
+        sessionId: session.id,
+        excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+      })) as CurateResult;
+      return result;
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 0,
+  });
 
-  useEffect(() => {
-    loadNext();
-  }, [loadNext]);
+  const data = photoQuery.data;
+  const done = data?.done ?? false;
+  const item = data?.single ?? null;
+  const stats = data?.stats ?? null;
+  const similarCount = (data as { similarCount?: number })?.similarCount ?? 0;
 
-  async function handleAction(status: "kept" | "rejected") {
-    if (!item || submittingRef.current) {
+  // 主动预加载：提前获取下一张照片数据并将图片推入浏览器缓存
+  useEffect(() => {
+    if (!item || done) {
       return;
     }
-    const currentItem = item;
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      if (status === "kept") {
-        await Promise.all([
-          ipc.client.photos.toggleFavorite({
-            ids: [currentItem.photo.id],
-            favorite: true,
-          }),
-          ipc.client.cull.updatePhotoStatus({
+    const nextKey = photoFetchId + 1;
+    const excludeIds = Array.from(erroredPhotosRef.current);
+
+    queryClient
+      .fetchQuery<CurateResult>({
+        queryKey: ["cull", "pair", session.id, nextKey],
+        queryFn: async () => {
+          const result = (await ipc.client.cull.getNextPair({
             sessionId: session.id,
-            photoId: currentItem.sessionPhotoId,
-            status,
-          }),
-        ]);
-        toast.success(t("toastFavoriteAdded"));
-      } else {
-        await ipc.client.cull.updatePhotoStatus({
-          sessionId: session.id,
-          photoId: currentItem.sessionPhotoId,
-          status,
-        });
-      }
-      onUpdate(
-        status === "kept"
-          ? { type: "keep", sessionPhotoId: currentItem.sessionPhotoId }
-          : { type: "reject", sessionPhotoId: currentItem.sessionPhotoId }
-      );
-      await loadNextRef.current?.();
-    } catch (err) {
-      console.error("[handleAction] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
+            excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+          })) as CurateResult;
+          return result;
+        },
+        staleTime: 0,
+      })
+      .then((result) => {
+        if (result?.single) {
+          preloadImage(
+            result.single.photo.thumbnailPath ?? result.single.photo.path
+          );
+        }
+      })
+      .catch(() => {
+        // 静默失败 — useQuery 在激活时会自动 refetch
+      });
+  }, [item, done, photoFetchId, session.id, queryClient]);
 
-  async function handleUndo() {
-    if (submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      const result = (await ipc.client.cull.undoLastAction({
+  // useMutation.isPending drives button locking — no manual submittingRef
+
+  const keepMutation = useMutation({
+    mutationFn: async (current: SingleItem) => {
+      await Promise.all([
+        ipc.client.photos.toggleFavorite({
+          ids: [current.photo.id],
+          favorite: true,
+        }),
+        ipc.client.cull.updatePhotoStatus({
+          sessionId: session.id,
+          photoId: current.sessionPhotoId,
+          status: "kept",
+        }),
+      ]);
+    },
+    onSuccess: () => {
+      toast.success(t("toastFavoriteAdded"));
+      onMutationSuccess();
+      startTransition(() => setPhotoFetchId((n) => n + 1));
+    },
+    onError: (err) => console.error("[keep] failed:", err),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async (current: SingleItem) => {
+      await ipc.client.cull.updatePhotoStatus({
+        sessionId: session.id,
+        photoId: current.sessionPhotoId,
+        status: "rejected",
+      });
+    },
+    onSuccess: () => {
+      onMutationSuccess();
+      startTransition(() => setPhotoFetchId((n) => n + 1));
+    },
+    onError: (err) => console.error("[reject] failed:", err),
+  });
+
+  const undoMutation = useMutation({
+    mutationFn: async () => {
+      return (await ipc.client.cull.undoLastAction({
         sessionId: session.id,
       })) as { success: boolean };
+    },
+    onSuccess: (result) => {
       if (result.success) {
-        onUpdate({ type: "undo" });
-        await loadNextRef.current?.();
+        onMutationSuccess();
+        startTransition(() => setPhotoFetchId((n) => n + 1));
       }
-    } catch (err) {
-      console.error("[handleUndo] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
+    },
+    onError: (err) => console.error("[undo] failed:", err),
+  });
 
-  async function handleFinish() {
-    if (submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.completeSession({ sessionId: session.id });
-      onUpdate({ type: "finish" });
-      setDone(true);
-      setFinishConfirmOpen(false);
-    } catch (err) {
-      console.error("[handleFinish] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  // Keyboard shortcuts
-  const handleActionRef = useRef(handleAction);
-  handleActionRef.current = handleAction;
-  const handleUndoRef = useRef(handleUndo);
-  handleUndoRef.current = handleUndo;
-  const itemRef = useRef(item);
-  itemRef.current = item;
-
-  async function handleSkipSimilar() {
-    if (submittingRef.current) {
-      return;
-    }
-    const currentItem = itemRef.current;
-    if (!currentItem) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
+  const skipSimilarMutation = useMutation({
+    mutationFn: async (current: SingleItem) => {
       const result = (await ipc.client.cull.skipSimilarPhotos({
         sessionId: session.id,
-        photoId: currentItem.sessionPhotoId,
+        photoId: current.sessionPhotoId,
       })) as { skippedCount: number };
+      return result;
+    },
+    onSuccess: (result) => {
       if (result.skippedCount > 0) {
         toast.success(t("cullSkippedSimilar", { count: result.skippedCount }));
       }
-      onUpdate({ type: "undo" });
-      await loadNextRef.current?.();
-    } catch (err) {
-      console.error("[skipSimilarPhotos] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      onMutationSuccess();
+      startTransition(() => setPhotoFetchId((n) => n + 1));
+    },
+    onError: (err) => console.error("[skipSimilar] failed:", err),
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      await ipc.client.cull.completeSession({ sessionId: session.id });
+    },
+    onSuccess: () => onMutationSuccess(),
+    onError: (err) => console.error("[complete] failed:", err),
+  });
+
+  const isSubmitting =
+    keepMutation.isPending ||
+    rejectMutation.isPending ||
+    undoMutation.isPending ||
+    skipSimilarMutation.isPending ||
+    completeMutation.isPending;
+
+  // Track broken photo in erroredPhotosRef, then skip to next
+  const handleImageError = useCallback(() => {
+    const currentItem = photoQuery.data?.single;
+    if (currentItem) {
+      erroredPhotosRef.current.add(currentItem.sessionPhotoId);
     }
-  }
-  const handleSkipRef = useRef(handleSkipSimilar);
-  handleSkipRef.current = handleSkipSimilar;
+    toast.warning(t("cullPhotoUnavailable"), { duration: 2500 });
+    startTransition(() => setPhotoFetchId((n) => n + 1));
+  }, [photoQuery.data?.single, t]);
+
+  // EXIF — loaded on every photo change
+  const [exif, setExif] = useState<ExifData | null>(null);
+
+  useEffect(() => {
+    if (!item) {
+      setExif(null);
+      return;
+    }
+    let cancelled = false;
+    ipc.client.photos
+      .getPhotoExif({ id: item.photo.id })
+      .then((r) => {
+        if (!cancelled) {
+          setExif(r as ExifData | null);
+        }
+      })
+      .catch(() => {
+        /* EXIF is non-critical */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [photoQuery.dataUpdatedAt, item]);
+
+  // Keyboard shortcuts — item data via ref to avoid stale closures
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
+  const shortcutsOpenRef = useRef(false);
+  shortcutsOpenRef.current = shortcutsOpen;
+  const finishConfirmOpenRef = useRef(false);
+  finishConfirmOpenRef.current = finishConfirmOpen;
+
+  const itemRef = useRef(item);
+  itemRef.current = item;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -281,33 +305,54 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
       ) {
         return;
       }
+
+      const current = itemRef.current;
+
       if (e.key === "?") {
         e.preventDefault();
         e.stopPropagation();
         shortcutsOpenRef.current = true;
         setShortcutsOpen(true);
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight" && current && !isSubmitting) {
         e.preventDefault();
-        handleActionRef.current("kept");
+        keepMutation.mutate(current);
       } else if (
-        e.key === "ArrowLeft" ||
-        e.key === "ArrowDown" ||
-        e.key === " "
+        (e.key === "ArrowLeft" || e.key === "ArrowDown" || e.key === " ") &&
+        current &&
+        !isSubmitting
       ) {
         e.preventDefault();
-        handleActionRef.current("rejected");
-      } else if (e.key === "z" && e.ctrlKey) {
+        rejectMutation.mutate(current);
+      } else if (e.key === "z" && e.ctrlKey && !isSubmitting) {
         e.preventDefault();
-        handleUndoRef.current();
-      } else if (e.key === "s" && !e.ctrlKey && !e.metaKey) {
+        undoMutation.mutate();
+      } else if (
+        e.key === "s" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        current &&
+        !isSubmitting
+      ) {
         e.preventDefault();
-        handleSkipRef.current();
+        skipSimilarMutation.mutate(current);
       }
     }
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, []);
+  }, [
+    isSubmitting,
+    keepMutation,
+    rejectMutation,
+    undoMutation,
+    skipSimilarMutation,
+  ]);
 
+  // showTransition 即时拦截交互，showSpinner 经 150ms 防抖避免频闪
+  const isFetchingNext = photoQuery.isFetching && !photoQuery.isLoading;
+  const showTransition = isTransitioning || isFetchingNext;
+  const showSpinner = useDebouncedFlag(showTransition, 150);
+
+  // Done state
   if (done) {
     const kc = session.items?.filter((i) => i.status === "kept").length ?? 0;
     const rc =
@@ -328,14 +373,16 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
     );
   }
 
+  // Loading (first fetch only)
+  if (photoQuery.isLoading && !photoQuery.data) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
   if (!item) {
-    if (loading) {
-      return (
-        <div className="flex h-full items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      );
-    }
     return null;
   }
 
@@ -351,8 +398,8 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
   }
 
   return (
-    <div className="relative flex h-full flex-col">
-      {/* Top bar: progress + actions */}
+    <div className="relative flex h-full flex-col select-none">
+      {/* Top bar */}
       <div className="flex items-center justify-between border-border border-b px-6 py-2">
         <span className="text-[11px] text-muted-foreground/70">
           {t("cullCurateProgress", {
@@ -371,15 +418,17 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
             <HelpCircle className="h-3 w-3" />
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={isSubmitting}
             onClick={() => setFinishConfirmOpen(true)}
           >
             <CheckCircle className="h-3 w-3" />
             {t("cullFinish")}
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={handleUndo}
+            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={isSubmitting}
+            onClick={() => undoMutation.mutate()}
           >
             <Undo2 className="h-3 w-3" />
             {t("cullUndo")} (Ctrl+Z)
@@ -387,8 +436,13 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
         </div>
       </div>
 
-      {/* Photo */}
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+      {/* Photo — 0ms 硬切 */}
+      <div
+        className={`flex min-h-0 flex-1 items-center justify-center p-4 ${
+          showTransition ? "pointer-events-none" : ""
+        }`}
+        key={photoFetchId}
+      >
         <div
           className="flex h-full w-full items-center justify-center"
           data-zoom
@@ -397,6 +451,7 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
             alt={item.photo.filename}
             filePath={item.photo.path}
             key={item.photo.id}
+            onError={handleImageError}
             thumbnailPath={item.photo.thumbnailPath}
           />
         </div>
@@ -443,33 +498,42 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
         </div>
       </div>
 
+      {/* 防抖 Spinner — 操作栏内部，图像区域之外 */}
+      <div className="flex items-center justify-center border-border border-t px-6 py-1.5">
+        {showSpinner && (
+          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        )}
+      </div>
+
       {/* Action bar */}
       <div className="flex items-center justify-center gap-6 border-border border-t px-6 py-3">
         <button
-          className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5"
-          onClick={handleSkipSimilar}
+          className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 disabled:opacity-40"
+          disabled={isSubmitting}
+          onClick={() => skipSimilarMutation.mutate(item)}
         >
           <SkipForward className="h-4 w-4" />
           {t("cullSkipSimilar")} (S)
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-[13px] text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/5 hover:text-destructive"
-          onClick={() => handleAction("rejected")}
+          className="flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-[13px] text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/5 hover:text-destructive disabled:opacity-40"
+          disabled={isSubmitting}
+          onClick={() => rejectMutation.mutate(item)}
         >
           <Trash2 className="h-4 w-4" />
           {t("cullReject")} ← ↓
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-success/30 bg-success/5 px-6 py-3 font-[510] text-[14px] text-success transition-all hover:bg-success/10 hover:shadow-md"
-          onClick={() => handleAction("kept")}
+          className="flex items-center gap-2 rounded-full border border-success/30 bg-success/5 px-6 py-3 font-[510] text-[14px] text-success transition-all hover:bg-success/10 hover:shadow-md disabled:opacity-40"
+          disabled={isSubmitting}
+          onClick={() => keepMutation.mutate(item)}
         >
           <Heart className="h-4 w-4" />
           {t("cullKeep")} →
         </button>
       </div>
 
-
-      {/* Finish confirm dialog */}
+      {/* Dialogs */}
       {finishConfirmOpen && (
         <Dialog onOpenChange={setFinishConfirmOpen} open={finishConfirmOpen}>
           <DialogContent>
@@ -485,15 +549,15 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                disabled={submitting}
+                disabled={isSubmitting}
                 onClick={() => setFinishConfirmOpen(false)}
               >
                 {t("cancel")}
               </button>
               <button
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                disabled={submitting}
-                onClick={handleFinish}
+                disabled={isSubmitting}
+                onClick={() => completeMutation.mutate()}
               >
                 {t("cullFinishAndViewResults")}
               </button>
@@ -502,7 +566,6 @@ export function CullCurate({ session, onUpdate }: CullCurateProps) {
         </Dialog>
       )}
 
-      {/* Keyboard shortcuts dialog */}
       {shortcutsOpen && (
         <Dialog
           onOpenChange={(open) => {

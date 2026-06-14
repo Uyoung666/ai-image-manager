@@ -1,4 +1,10 @@
 import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import {
   CheckCircle2,
   HelpCircle,
   Link,
@@ -6,8 +12,9 @@ import {
   Undo2,
   Unlink,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -17,9 +24,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ZoomableImage, type ZoomState } from "@/components/ZoomableImage";
+import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
-import type { CullDelta } from "@/routes/cull.$sessionId";
+import type { Session } from "@/routes/cull.$sessionId";
 import { preloadImage } from "@/utils/local-media-url";
+
+// ── Types ──
 
 interface PhotoInfo {
   fileDate: number | null;
@@ -55,16 +65,26 @@ interface ExifData {
   shutterSpeed: string | null;
 }
 
-interface CullDuelProps {
-  onUpdate: (delta: CullDelta) => void;
-  session: {
-    id: number;
-    mode: string;
-    pkMode?: string;
-    totalPhotos: number;
-    completedComparisons: number;
-    status?: "active" | "completed";
+interface PairResult {
+  done: boolean;
+  pair?: PairItem[];
+  phase?: string;
+  reason?: string;
+  stats: {
+    total: number;
+    completed: number;
+    remaining: number;
+    ready?: number;
   };
+}
+
+interface CullDuelProps {
+  /** Called after every mutation so the parent can invalidate its session query */
+  onMutationSuccess: () => void;
+  session: Pick<
+    Session,
+    "id" | "mode" | "pkMode" | "totalPhotos" | "completedComparisons" | "status"
+  >;
 }
 
 const FATIGUE_THRESHOLD = 100;
@@ -92,35 +112,183 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function CullDuel({ session, onUpdate }: CullDuelProps) {
+// ── Component ──
+
+export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const { t } = useTranslation();
-  const [pair, setPair] = useState<[PairItem, PairItem] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [stats, setStats] = useState<{
-    total: number;
-    completed: number;
-    remaining: number;
-    ready?: number;
-  } | null>(null);
-  const submittingRef = useRef(false);
-  const loadPairRef = useRef<(() => Promise<void>) | null>(null);
-  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
-  const [lastReason, setLastReason] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // React 19: mark pair-switch state as non-urgent transition
+  const [isTransitioning, startTransition] = useTransition();
+
+  // Increment to trigger a fresh getNextPair IPC call
+  const [pairFetchId, setPairFetchId] = useState(0);
+
+  // Accumulates broken-photo IDs across the session; never cleared on
+  // successful mutations because a broken photo stays broken. Sent to
+  // backend as excludeIds to prevent infinite retry loops.
+  const erroredPhotosRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    erroredPhotosRef.current.clear();
+  }, [session.id]);
+
+  // keepPreviousData holds old pair visible while next pair fetches
+  const pairQuery = useQuery({
+    queryKey: ["cull", "pair", session.id, pairFetchId],
+    queryFn: async () => {
+      const excludeIds = Array.from(erroredPhotosRef.current);
+      const result = (await ipc.client.cull.getNextPair({
+        sessionId: session.id,
+        excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+      })) as PairResult;
+      return result;
+    },
+    placeholderData: keepPreviousData,
+    // pairFetchId changes force a fresh fetch each time
+    staleTime: 0,
+  });
+
+  const pairData = pairQuery.data;
+  const done = pairData?.done ?? false;
+  const pair = pairData?.pair;
+  const stats = pairData?.stats ?? null;
   const isSessionCompleted = done || session.status === "completed";
 
-  // Phase 3: EXIF
-  const [exifLeft, setExifLeft] = useState<ExifData | null>(null);
-  const [exifRight, setExifRight] = useState<ExifData | null>(null);
+  // 主动预加载：提前获取下一组 pair 数据并将图片推入浏览器缓存
+  useEffect(() => {
+    if (!pairData?.pair || pairData.done) {
+      return;
+    }
+    const nextKey = pairFetchId + 1;
+    const excludeIds = Array.from(erroredPhotosRef.current);
 
-  // Phase 3: Sync zoom — share full ZoomState (scale + translate)
-  // Only enable by default when both photos have the same aspect ratio
+    queryClient
+      .fetchQuery<PairResult>({
+        queryKey: ["cull", "pair", session.id, nextKey],
+        queryFn: async () => {
+          const result = (await ipc.client.cull.getNextPair({
+            sessionId: session.id,
+            excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+          })) as PairResult;
+          return result;
+        },
+        staleTime: 0,
+      })
+      .then((result) => {
+        if (result?.pair) {
+          preloadImage(
+            result.pair[0].photo.thumbnailPath ?? result.pair[0].photo.path
+          );
+          preloadImage(
+            result.pair[1].photo.thumbnailPath ?? result.pair[1].photo.path
+          );
+        }
+      })
+      .catch(() => {
+        // 静默失败 — useQuery 在激活时会自动 refetch
+      });
+  }, [pairData?.pair, pairData?.done, pairFetchId, session.id, queryClient]);
+
+  // useMutation.isPending drives button locking — no manual submittingRef
+
+  const submitMutation = useMutation({
+    mutationFn: async (params: {
+      winnerId: number;
+      loserId: number;
+      isDraw?: boolean;
+    }) => {
+      return (await ipc.client.cull.submitComparison({
+        sessionId: session.id,
+        ...params,
+      })) as unknown;
+    },
+    onSuccess: () => {
+      onMutationSuccess();
+      startTransition(() => setPairFetchId((n) => n + 1));
+    },
+    onError: (err) => {
+      console.error("[submitComparison] failed:", err);
+    },
+  });
+
+  const skipMutation = useMutation({
+    mutationFn: async (params: { photoAId: number; photoBId: number }) => {
+      return (await ipc.client.cull.recordSkip({
+        sessionId: session.id,
+        ...params,
+      })) as unknown;
+    },
+    onSuccess: () => {
+      onMutationSuccess();
+      startTransition(() => setPairFetchId((n) => n + 1));
+    },
+    onError: (err) => {
+      console.error("[recordSkip] failed:", err);
+    },
+  });
+
+  const undoMutation = useMutation({
+    mutationFn: async () => {
+      return (await ipc.client.cull.undoLastAction({
+        sessionId: session.id,
+      })) as unknown;
+    },
+    onSuccess: () => {
+      onMutationSuccess();
+      startTransition(() => setPairFetchId((n) => n + 1));
+    },
+    onError: (err) => {
+      console.error("[undoLastAction] failed:", err);
+    },
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      return (await ipc.client.cull.completeSession({
+        sessionId: session.id,
+      })) as unknown;
+    },
+    onSuccess: () => {
+      onMutationSuccess();
+    },
+    onError: (err) => {
+      console.error("[completeSession] failed:", err);
+    },
+  });
+
+  // Unified "is submitting" gate — disables all action buttons
+  const isSubmitting =
+    submitMutation.isPending ||
+    skipMutation.isPending ||
+    undoMutation.isPending ||
+    completeMutation.isPending;
+
+  // On image load failure: track the broken ID in erroredPhotosRef,
+  // then skip to next pair without submitting a comparison.
+  const handleImageError = useCallback(
+    (side: "left" | "right") => {
+      const current = pairQuery.data?.pair;
+      if (!current) {
+        return;
+      }
+
+      const errored = side === "left" ? current[0] : current[1];
+      erroredPhotosRef.current.add(errored.photo.id);
+
+      toast.warning(t("cullPhotoUnavailable"), { duration: 2500 });
+
+      // Skip without submitting — server-side progress stays correct
+      startTransition(() => setPairFetchId((n) => n + 1));
+    },
+    [pairQuery.data?.pair, t]
+  );
+
+  // Zoom sync between left/right images
   const [syncZoom, setSyncZoom] = useState(true);
   const [syncState, setSyncState] = useState<ZoomState | null>(null);
   const syncStateRef = useRef<ZoomState | null>(null);
 
-  // Detect if left/right photos have the same aspect ratio
   const sameRatio = pair
     ? Math.abs(
         pair[0].photo.width / pair[0].photo.height -
@@ -128,96 +296,53 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
       ) < 0.02
     : false;
 
-  // If ratios differ, force sync off
   const effectiveSync = syncZoom && sameRatio;
 
-  // Phase 3: Shortcuts dialog (guarded via ref to avoid stale closures)
-  const shortcutsOpenRef = useRef(false);
+  // Dialogs, fatigue, EXIF
+  const [exifLeft, setExifLeft] = useState<ExifData | null>(null);
+  const [exifRight, setExifRight] = useState<ExifData | null>(null);
+  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [fatigueOpen, setFatigueOpen] = useState(false);
+  const [lastReason, setLastReason] = useState<string | null>(null);
+
+  const shortcutsOpenRef = useRef(false);
   const finishConfirmOpenRef = useRef(false);
   finishConfirmOpenRef.current = finishConfirmOpen;
   const fatigueOpenRef = useRef(false);
 
-  // Phase 3: Fatigue
-  const [fatigueOpen, setFatigueOpen] = useState(false);
   const comparisonCountRef = useRef(0);
   const fatigueRemindersRef = useRef(0);
 
-  // Reset fatigue counters when switching sessions
   useEffect(() => {
     comparisonCountRef.current = 0;
     fatigueRemindersRef.current = 0;
   }, [session.id]);
 
-  // Phase 3: Pair index — used as key to force ZoomableImage remount on every new pair
-  const pairIndexRef = useRef(0);
-
-  async function loadExif(photoId: number): Promise<ExifData | null> {
-    try {
-      const result = await ipc.client.photos.getPhotoExif({ id: photoId });
-      return result as ExifData | null;
-    } catch {
-      return null;
-    }
-  }
-
-  const initialLoadRef = useRef(true);
-
-  const loadPair = useCallback(async () => {
-    if (session.status === "completed") {
-      setDone(true);
-      setLoading(false);
-      setStats(
-        (current) =>
-          current ?? {
-            total: session.totalPhotos,
-            completed: session.completedComparisons,
-            remaining: 0,
-          }
-      );
+  // Load EXIF when pair changes
+  useEffect(() => {
+    if (!pair) {
+      setExifLeft(null);
+      setExifRight(null);
       return;
     }
-    // Only show spinner on first load; transitions keep old pair visible
-    if (initialLoadRef.current) {
-      setLoading(true);
-    }
-    try {
-      const result = (await ipc.client.cull.getNextPair({
-        sessionId: session.id,
-      })) as {
-        done: boolean;
-        pair?: PairItem[];
-        stats: {
-          total: number;
-          completed: number;
-          remaining: number;
-          ready?: number;
-        };
-        reason?: string;
-      };
-      if (result.done || !result.pair || result.pair.length < 2) {
-        setDone(true);
-        setStats(result.stats);
-      } else {
-        const [a, b] = result.pair;
-        pairIndexRef.current++;
-        preloadImage(a.photo.thumbnailPath ?? a.photo.path);
-        preloadImage(b.photo.thumbnailPath ?? b.photo.path);
-        setPair([a, b]);
-        setStats(result.stats);
-        setDone(false);
-        setSyncState(null);
-        if (result.reason) {
-          setLastReason(result.reason);
-        }
+    const [a, b] = pair;
+    let cancelled = false;
 
-        const [exifA, exifB] = await Promise.all([
-          loadExif(a.photo.id),
-          loadExif(b.photo.id),
+    async function load() {
+      try {
+        const [ea, eb] = await Promise.all([
+          ipc.client.photos.getPhotoExif({ id: a.photo.id }).catch(() => null),
+          ipc.client.photos.getPhotoExif({ id: b.photo.id }).catch(() => null),
         ]);
-        setExifLeft(exifA);
-        setExifRight(exifB);
+        if (cancelled) {
+          return;
+        }
+        setExifLeft(ea as ExifData | null);
+        setExifRight(eb as ExifData | null);
+        setLastReason(pairData?.reason ?? null);
 
+        // Fatigue check
         comparisonCountRef.current++;
         if (
           fatigueRemindersRef.current < MAX_FATIGUE_REMINDERS &&
@@ -227,156 +352,30 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
           fatigueRemindersRef.current++;
           setFatigueOpen(true);
         }
+      } catch {
+        /* EXIF is non-critical */
       }
-    } catch (err) {
-      console.error("[loadPair] failed:", err);
-    } finally {
-      initialLoadRef.current = false;
-      setLoading(false);
     }
-  }, [
-    session.id,
-    session.status,
-  ]);
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [pairQuery.dataUpdatedAt, pair, pairData?.reason]);
+
+  // Keyboard shortcuts — pair data via ref to avoid stale closures.
+  // Mutation functions are stable references from useMutation.
+  const pairRef = useRef(pair);
+  pairRef.current = pair;
 
   useEffect(() => {
-    loadPairRef.current = loadPair;
-  }, [loadPair]);
-
-  // Only call on first mount and when session.id/status changes (not on every comparison)
-  const initialLoadCalled = useRef(false);
+    shortcutsOpenRef.current = shortcutsOpen;
+  }, [shortcutsOpen]);
   useEffect(() => {
-    if (!initialLoadCalled.current) {
-      initialLoadCalled.current = true;
-      loadPair();
-    }
-  }, [loadPair]);
-  // Reset when switching sessions so the next session loads its first pair
-  useEffect(() => {
-    initialLoadCalled.current = false;
-  }, [session.id]);
-
-  async function handlePick(winnerIdx: 0 | 1) {
-    if (!pair || isSessionCompleted || submittingRef.current) {
-      return;
-    }
-    const winner = pair[winnerIdx];
-    const loser = pair[1 - winnerIdx];
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.submitComparison({
-        sessionId: session.id,
-        winnerId: winner.sessionPhotoId,
-        loserId: loser.sessionPhotoId,
-      });
-      onUpdate({ type: "comparison" });
-      await loadPairRef.current?.();
-    } catch (err) {
-      console.error("[handlePick] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSkip() {
-    if (!pair || isSessionCompleted || submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.recordSkip({
-        sessionId: session.id,
-        photoAId: pair[0].sessionPhotoId,
-        photoBId: pair[1].sessionPhotoId,
-      });
-      onUpdate({ type: "comparison" });
-      await loadPairRef.current?.();
-    } catch (err) {
-      console.error("[handleSkip] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  async function handleUndo() {
-    if (isSessionCompleted || submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.undoLastAction({ sessionId: session.id });
-      onUpdate({ type: "undo" });
-      await loadPairRef.current?.();
-    } catch {
-      // ignore
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  async function handleFinish() {
-    if (submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.completeSession({ sessionId: session.id });
-      onUpdate({ type: "finish" });
-      setDone(true);
-      setFinishConfirmOpen(false);
-      setFatigueOpen(false);
-    } catch (err) {
-      console.error("[handleFinish] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  async function handleDraw() {
-    if (!pair || isSessionCompleted || submittingRef.current) {
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
-      await ipc.client.cull.submitComparison({
-        sessionId: session.id,
-        winnerId: pair[0].sessionPhotoId,
-        loserId: pair[1].sessionPhotoId,
-        isDraw: true,
-      });
-      onUpdate({ type: "comparison" });
-      await loadPairRef.current?.();
-    } catch (err) {
-      console.error("[handleDraw] failed:", err);
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  // Keyboard shortcuts — use refs to avoid stale closure issues
-  const handlePickRef = useRef(handlePick);
-  handlePickRef.current = handlePick;
-  const handleSkipRef = useRef(handleSkip);
-  handleSkipRef.current = handleSkip;
-  const handleUndoRef = useRef(handleUndo);
-  handleUndoRef.current = handleUndo;
-  const handleDrawRef = useRef(handleDraw);
-  handleDrawRef.current = handleDraw;
+    fatigueOpenRef.current = fatigueOpen;
+  }, [fatigueOpen]);
 
   useEffect(() => {
-    // Use capture phase so "?" is consumed before base-layout's bubble handler fires
     function onKey(e: KeyboardEvent) {
-      // Block all shortcuts when any dialog is open
       if (
         shortcutsOpenRef.current ||
         fatigueOpenRef.current ||
@@ -387,7 +386,6 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
       if (isSessionCompleted) {
         return;
       }
-      // Don't fire when typing in input fields
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
@@ -395,43 +393,75 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
         return;
       }
 
+      const current = pairRef.current;
+
       if (e.key === "?") {
         e.preventDefault();
         e.stopPropagation();
         shortcutsOpenRef.current = true;
         setShortcutsOpen(true);
-      } else if (e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowLeft" && current) {
         e.preventDefault();
-        handlePickRef.current(0);
-      } else if (e.key === "ArrowRight") {
+        if (isSubmitting) {
+          return;
+        }
+        submitMutation.mutate({
+          winnerId: current[0].sessionPhotoId,
+          loserId: current[1].sessionPhotoId,
+        });
+      } else if (e.key === "ArrowRight" && current) {
         e.preventDefault();
-        handlePickRef.current(1);
-      } else if (e.key === " " || e.key === "ArrowDown") {
+        if (isSubmitting) {
+          return;
+        }
+        submitMutation.mutate({
+          winnerId: current[1].sessionPhotoId,
+          loserId: current[0].sessionPhotoId,
+        });
+      } else if ((e.key === " " || e.key === "ArrowDown") && current) {
         e.preventDefault();
-        handleSkipRef.current();
+        if (isSubmitting) {
+          return;
+        }
+        skipMutation.mutate({
+          photoAId: current[0].sessionPhotoId,
+          photoBId: current[1].sessionPhotoId,
+        });
       } else if (e.key === "z" && e.ctrlKey) {
         e.preventDefault();
-        handleUndoRef.current();
-      } else if (e.key === "d" && !e.ctrlKey && !e.metaKey) {
+        if (isSubmitting) {
+          return;
+        }
+        undoMutation.mutate();
+      } else if (e.key === "d" && !e.ctrlKey && !e.metaKey && current) {
         e.preventDefault();
-        handleDrawRef.current();
+        if (isSubmitting) {
+          return;
+        }
+        submitMutation.mutate({
+          winnerId: current[0].sessionPhotoId,
+          loserId: current[1].sessionPhotoId,
+          isDraw: true,
+        });
       }
     }
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [isSessionCompleted]);
+  }, [
+    isSessionCompleted,
+    isSubmitting,
+    submitMutation,
+    skipMutation,
+    undoMutation,
+  ]);
 
-  // Sync shortcutsOpen state to ref
-  useEffect(() => {
-    shortcutsOpenRef.current = shortcutsOpen;
-  }, [shortcutsOpen]);
+  // showTransition 即时拦截交互，showSpinner 经 150ms 防抖避免频闪
+  const isFetchingNext = pairQuery.isFetching && !pairQuery.isLoading;
+  const showTransition = isTransitioning || isFetchingNext;
+  const showSpinner = useDebouncedFlag(showTransition, 150);
 
-  // Sync fatigueOpen state to ref
-  useEffect(() => {
-    fatigueOpenRef.current = fatigueOpen;
-  }, [fatigueOpen]);
-
-  if (done) {
+  // Done state
+  if (isSessionCompleted && !pairQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
@@ -449,19 +479,20 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
     );
   }
 
+  // Loading (first fetch only)
+  if (pairQuery.isLoading && !pairQuery.data) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
   if (!pair) {
-    if (loading) {
-      return (
-        <div className="flex h-full items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        </div>
-      );
-    }
     return null;
   }
 
   const [left, right] = pair;
-  const pairKey = pairIndexRef.current;
 
   function renderExifRow(label: string, value: string | null) {
     if (!value) {
@@ -510,13 +541,30 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
   }
 
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="relative flex h-full flex-col select-none">
       {/* Top bar */}
       <div className="flex items-center justify-between border-border border-b px-6 py-2">
         <span className="text-[11px] text-muted-foreground/70">
           {(() => {
             const pkCount = stats?.completed ?? session.completedComparisons;
             const totalPhotos = stats?.total ?? session.totalPhotos;
+            // Force 100% when completed; bail if all photos cascade-deleted
+            if (isSessionCompleted) {
+              return t("cullProgressDetail", {
+                pkCount,
+                totalWork: pkCount,
+                pct: 100,
+                count: 0,
+              });
+            }
+            if (totalPhotos <= 0) {
+              return t("cullProgressDetail", {
+                pkCount,
+                totalWork: 0,
+                pct: 0,
+                count: 0,
+              });
+            }
             const minC =
               session.pkMode === "quick"
                 ? 5
@@ -533,7 +581,8 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
               1,
               Math.ceil((totalPhotos * minC) / 2) + recompareBudget
             );
-            const pct = Math.min(100, Math.round((pkCount / totalWork) * 100));
+            // Cap at 99 while active — only the completed guard pushes to 100
+            const pct = Math.min(99, Math.round((pkCount / totalWork) * 100));
             const remainingPks = Math.max(0, totalWork - pkCount);
             return t("cullProgressDetail", {
               pkCount,
@@ -583,16 +632,17 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             <HelpCircle className="h-3 w-3" />
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={isSubmitting}
             onClick={() => setFinishConfirmOpen(true)}
           >
             <CheckCircle2 className="h-3 w-3" />
             {t("cullFinish")}
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            disabled={submitting}
-            onClick={handleUndo}
+            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={isSubmitting}
+            onClick={() => undoMutation.mutate()}
           >
             <Undo2 className="h-3 w-3" />
             {t("cullUndo")} (Ctrl+Z)
@@ -600,12 +650,20 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
         </div>
       </div>
 
-      {/* Comparison area */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* 0ms 硬切，key 驱除 ZoomableImage 重新挂载 */}
+      <div
+        className={`flex flex-1 overflow-hidden ${
+          showTransition ? "pointer-events-none" : ""
+        }`}
+        key={pairFetchId}
+      >
         {/* Left photo */}
         <div
           className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden border-border border-r p-4 transition-colors hover:bg-primary/5 focus:outline-none"
           onClick={(e) => {
+            if (isSubmitting) {
+              return;
+            }
             if (e.detail !== 1) {
               return;
             }
@@ -615,11 +673,17 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             ) {
               return;
             }
-            handlePick(0);
+            submitMutation.mutate({
+              winnerId: left.sessionPhotoId,
+              loserId: right.sessionPhotoId,
+            });
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              handlePick(0);
+            if (e.key === "Enter" && !isSubmitting) {
+              submitMutation.mutate({
+                winnerId: left.sessionPhotoId,
+                loserId: right.sessionPhotoId,
+              });
             }
           }}
           role="button"
@@ -629,7 +693,8 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             <ZoomableImage
               alt={left.photo.filename}
               filePath={left.photo.path}
-              key={`L-${pairKey}`}
+              key={`L-${pairFetchId}`}
+              onError={() => handleImageError("left")}
               onSync={(s) => {
                 if (!effectiveSync) {
                   return;
@@ -664,7 +729,11 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
               </span>
             </div>
           </div>
-          <div className="mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-colors hover:bg-primary/20">
+          <div
+            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-all ${
+              isSubmitting ? "opacity-30" : "hover:bg-primary/20"
+            }`}
+          >
             {t("cullPickLeft")} ←
           </div>
         </div>
@@ -678,6 +747,9 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
         <div
           className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden p-4 transition-colors hover:bg-primary/5 focus:outline-none"
           onClick={(e) => {
+            if (isSubmitting) {
+              return;
+            }
             if (e.detail !== 1) {
               return;
             }
@@ -687,11 +759,17 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             ) {
               return;
             }
-            handlePick(1);
+            submitMutation.mutate({
+              winnerId: right.sessionPhotoId,
+              loserId: left.sessionPhotoId,
+            });
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              handlePick(1);
+            if (e.key === "Enter" && !isSubmitting) {
+              submitMutation.mutate({
+                winnerId: right.sessionPhotoId,
+                loserId: left.sessionPhotoId,
+              });
             }
           }}
           role="button"
@@ -701,7 +779,8 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             <ZoomableImage
               alt={right.photo.filename}
               filePath={right.photo.path}
-              key={`R-${pairKey}`}
+              key={`R-${pairFetchId}`}
+              onError={() => handleImageError("right")}
               onSync={(s) => {
                 if (!effectiveSync) {
                   return;
@@ -736,23 +815,47 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
               </span>
             </div>
           </div>
-          <div className="mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-colors hover:bg-primary/20">
+          <div
+            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-all ${
+              isSubmitting ? "opacity-30" : "hover:bg-primary/20"
+            }`}
+          >
             → {t("cullPickRight")}
           </div>
         </div>
       </div>
 
+      {/* 防抖 Spinner — 仅过渡持续 > 150ms 时挂载 */}
+      {showSpinner && (
+        <div className="absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        </div>
+      )}
+
       {/* Bottom bar */}
       <div className="flex items-center justify-center gap-4 border-border border-t px-6 py-3">
         <button
-          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-          onClick={handleSkip}
+          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          disabled={isSubmitting}
+          onClick={() =>
+            skipMutation.mutate({
+              photoAId: left.sessionPhotoId,
+              photoBId: right.sessionPhotoId,
+            })
+          }
         >
           {t("cullSkip")} (Space)
         </button>
         <button
-          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-          onClick={handleDraw}
+          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          disabled={isSubmitting}
+          onClick={() =>
+            submitMutation.mutate({
+              winnerId: left.sessionPhotoId,
+              loserId: right.sessionPhotoId,
+              isDraw: true,
+            })
+          }
         >
           {t("cullDraw")} (D)
         </button>
@@ -781,15 +884,15 @@ export function CullDuel({ session, onUpdate }: CullDuelProps) {
             <DialogFooter>
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                disabled={submitting}
+                disabled={isSubmitting}
                 onClick={() => setFinishConfirmOpen(false)}
               >
                 {t("cancel")}
               </button>
               <button
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                disabled={submitting}
-                onClick={handleFinish}
+                disabled={isSubmitting}
+                onClick={() => completeMutation.mutate()}
               >
                 {t("cullFinishAndViewResults")}
               </button>

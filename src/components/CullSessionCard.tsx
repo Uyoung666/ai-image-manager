@@ -27,6 +27,7 @@ export function CullSessionCard({
   session,
 }: CullSessionCardProps) {
   const isCurate = session.mode === "curate";
+  const isCompleted = session.status === "completed";
   const minC =
     session.pkMode === "quick" ? 5 : session.pkMode === "fine" ? 12 : 8;
   const recompareBudget =
@@ -42,21 +43,31 @@ export function CullSessionCard({
           Math.ceil((session.totalPhotos * minC) / 2) + recompareBudget
         )
       : 1;
-  const duelProgress = Math.min(
-    100,
-    Math.round((session.completedComparisons / totalWork) * 100)
-  );
+  const duelProgress =
+    session.totalPhotos > 0
+      ? Math.min(
+          99,
+          Math.round((session.completedComparisons / totalWork) * 100)
+        )
+      : 0;
   const curateProgress =
     session.totalPhotos > 0
       ? Math.min(
-          100,
+          99,
           Math.round((session.completedComparisons / session.totalPhotos) * 100)
         )
       : 0;
-  const displayProgress = isCurate ? curateProgress : duelProgress;
+  // ── 100% guard: when the session is completed, force the bar to
+  //     full regardless of formula output.  Prevents the "stuck at
+  //     97%" bug when cascade-deleted photos shrink the denominator.
+  const displayProgress = isCompleted
+    ? 100
+    : isCurate
+      ? curateProgress
+      : duelProgress;
   const progressTooltip = isCurate
     ? `${session.completedComparisons}/${session.totalPhotos}`
-    : `${duelProgress}%`;
+    : `${displayProgress}%`;
 
   return (
     <button

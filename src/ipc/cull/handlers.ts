@@ -13,25 +13,29 @@ import { BKTree, hammingDistance } from "@/services/bk-tree";
 // ── Per-session caches to avoid redundant work on every getNextPair call ──
 
 interface ComparedPairCache {
-  set: Set<string>;
   latestKey: string | null;
   maxLogId: number;
+  set: Set<string>;
 }
 const comparedPairCaches = new Map<number, ComparedPairCache>();
 
 interface BkTreeCache {
-  tree: BKTree;
-  photoMap: Map<number, PendingRow>;
   idsHash: string;
+  photoMap: Map<number, PendingRow>;
+  tree: BKTree;
 }
 const bkTreeCaches = new Map<number, BkTreeCache>();
 
 // Pre-computed similarity pair cache — avoids BK-tree query on every getNextPair.
 // Built once when the pending phash set is stable, scanned O(candidates) thereafter.
-interface SimPair { aId: number; bId: number; distance: number }
+interface SimPair {
+  aId: number;
+  bId: number;
+  distance: number;
+}
 interface SimilarityCache {
-  pairs: SimPair[];
   idsHash: string;
+  pairs: SimPair[];
 }
 const similarityCaches = new Map<number, SimilarityCache>();
 
@@ -42,6 +46,12 @@ function clearCullCaches(sessionId: number) {
 }
 
 const SessionIdSchema = z.object({ sessionId: z.number() });
+const GetNextPairSchema = z.object({
+  sessionId: z.number(),
+  /** Photo IDs that the frontend reports as unloadable (corrupt / externally deleted).
+   *  These are excluded from pairing to prevent infinite retry loops. */
+  excludeIds: z.array(z.number()).optional().default([]),
+});
 const CreateSessionSchema = z.object({
   name: z.string().min(1).max(200),
   mode: z.enum(["duel", "curate"]).default("duel"),
@@ -333,11 +343,25 @@ export const recordSkip = os
 
 export const listSessions = os.handler(async () => {
   const db = getDatabase();
-  return db
+  const sessions = db
     .select()
     .from(cullSessions)
     .orderBy(desc(cullSessions.createdAt))
     .all();
+
+  // Replace static cullSessions.totalPhotos with live COUNT from
+  // cullSessionPhotos. The static column drifts when photos are
+  // cascade-deleted externally — causing stale card counts and
+  // progress bars that can never reach 100%.
+  // N+1 queries, but session count is typically < 50 — acceptable.
+  return sessions.map((s) => {
+    const countResult = db
+      .select({ count: sql<number>`count(*)` })
+      .from(cullSessionPhotos)
+      .where(eq(cullSessionPhotos.sessionId, s.id))
+      .get();
+    return { ...s, totalPhotos: countResult?.count ?? 0 };
+  });
 });
 
 export const getSession = os
@@ -369,7 +393,15 @@ export const getSession = os
       .orderBy(desc(cullSessionPhotos.rating))
       .all();
 
-    return { ...session, items };
+    // Dynamic COUNT — the static cullSessions.totalPhotos drifts when
+    // photos are cascade-deleted externally (e.g. file-system removal).
+    const actualCount = db
+      .select({ count: sql<number>`count(*)` })
+      .from(cullSessionPhotos)
+      .where(eq(cullSessionPhotos.sessionId, input.sessionId))
+      .get();
+
+    return { ...session, totalPhotos: actualCount?.count ?? 0, items };
   });
 
 export const deleteSession = os
@@ -427,7 +459,7 @@ function sortBySimilarityGroups(pending: PendingRow[]): PendingRow[] {
 }
 
 export const getNextPair = os
-  .input(SessionIdSchema)
+  .input(GetNextPairSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
     const session = db
@@ -442,7 +474,20 @@ export const getNextPair = os
     const pkMode = session.pkMode ?? "standard";
     const config = PK_MODE_CONFIG[pkMode] ?? PK_MODE_CONFIG.standard;
 
-    const pending = loadPendingWithMetadata(input.sessionId);
+    let pending = loadPendingWithMetadata(input.sessionId);
+
+    // Filter out photos the frontend can't load (prevents infinite retry loop)
+    const excludeIds = input.excludeIds ?? [];
+    if (excludeIds.length > 0) {
+      const excludeSet = new Set(excludeIds);
+      const before = pending.length;
+      pending = pending.filter((p) => !excludeSet.has(p.id));
+      if (pending.length < before) {
+        console.log(
+          `[Cull] getNextPair: excluded ${before - pending.length} unloadable photo(s), ${pending.length} remaining`
+        );
+      }
+    }
 
     const stats = {
       total: pending.length,
@@ -532,7 +577,10 @@ export const getNextPair = os
     let pairCache = comparedPairCaches.get(input.sessionId);
     const minLogId = pairCache ? pairCache.maxLogId : 0;
 
-    interface LogRow { id: number; payload: string }
+    interface LogRow {
+      id: number;
+      payload: string;
+    }
     const newComparedLogs = db
       .select({ id: cullActionLogs.id, payload: cullActionLogs.payload })
       .from(cullActionLogs)
@@ -553,12 +601,16 @@ export const getNextPair = os
           const p = JSON.parse(log.payload);
           const idA = p.winnerId;
           const idB = p.loserId;
-          if (!(idA && idB)) continue;
+          if (!(idA && idB)) {
+            continue;
+          }
           pairCache.set.add(`${idA}-${idB}`);
           pairCache.set.add(`${idB}-${idA}`);
           pairCache.latestKey = `${idA}-${idB}`;
           pairCache.maxLogId = Math.max(pairCache.maxLogId, log.id);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     } else {
       // First call: load all existing logs
@@ -582,12 +634,16 @@ export const getNextPair = os
           const p = JSON.parse(log.payload);
           const idA = p.winnerId;
           const idB = p.loserId;
-          if (!(idA && idB)) continue;
+          if (!(idA && idB)) {
+            continue;
+          }
           latestKey = `${idA}-${idB}`;
           set.add(latestKey);
           set.add(`${idB}-${idA}`);
           maxId = Math.max(maxId, log.id);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
       pairCache = { set, latestKey, maxLogId: maxId };
       comparedPairCaches.set(input.sessionId, pairCache);
@@ -659,7 +715,10 @@ export const getNextPair = os
     // the ~38,000 hammingDistance calls that dominated getNextPair latency.
     const withPHash = pending.filter((p) => p.phash != null);
     if (withPHash.length >= 2) {
-      const idsHash = withPHash.map((p) => p.id).sort((a, b) => a - b).join(",");
+      const idsHash = withPHash
+        .map((p) => p.id)
+        .sort((a, b) => a - b)
+        .join(",");
 
       let simCache = similarityCaches.get(input.sessionId);
 
@@ -690,9 +749,13 @@ export const getNextPair = os
         const seen = new Set<string>();
         for (const photo of withPHash) {
           for (const n of bkTree.query(photo.phash!, 8)) {
-            if (n.photoId <= photo.id) continue;
+            if (n.photoId <= photo.id) {
+              continue;
+            }
             const key = `${photo.id}-${n.photoId}`;
-            if (seen.has(key)) continue;
+            if (seen.has(key)) {
+              continue;
+            }
             seen.add(key);
             pairs.push({ aId: photo.id, bId: n.photoId, distance: n.distance });
           }
@@ -711,18 +774,26 @@ export const getNextPair = os
       const candidates: SimCandidate[] = [];
       // Build id→row map for fast lookup (only for photos in the pending set)
       const idToRow = new Map<number, PendingRow>();
-      for (const p of withPHash) idToRow.set(p.id, p);
+      for (const p of withPHash) {
+        idToRow.set(p.id, p);
+      }
 
       for (const pair of simCache.pairs) {
         const a = idToRow.get(pair.aId);
         const b = idToRow.get(pair.bId);
-        if (!a || !b) continue; // photo may have dropped out of pending
+        if (!(a && b)) {
+          continue; // photo may have dropped out of pending
+        }
 
-        if (isPairUnavailable(pair.aId, pair.bId)) continue;
+        if (isPairUnavailable(pair.aId, pair.bId)) {
+          continue;
+        }
         if (
           a.comparisons >= config.minComparisons &&
           b.comparisons >= config.minComparisons
-        ) continue;
+        ) {
+          continue;
+        }
 
         const sameBurst =
           burstGroup.has(pair.aId) &&
@@ -1282,7 +1353,9 @@ export const batchUpdatePhotoStatus = os
         // Only count photos that were actually pending -> kept/rejected
         // We use a rough estimate: all updated photos count
         db.update(cullSessions)
-          .set({ completedComparisons: sql`completed_comparisons + ${input.photoIds.length}` })
+          .set({
+            completedComparisons: sql`completed_comparisons + ${input.photoIds.length}`,
+          })
           .where(eq(cullSessions.id, input.sessionId))
           .run();
       }

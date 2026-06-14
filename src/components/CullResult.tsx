@@ -1,3 +1,4 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
   Download,
@@ -10,7 +11,9 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
+import { ExportDialog } from "@/components/ExportDialog";
+import { PhotoLightbox } from "@/components/PhotoLightbox";
 import {
   Dialog,
   DialogContent,
@@ -19,9 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
-import { ExportDialog } from "@/components/ExportDialog";
-import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -79,7 +79,10 @@ const CullResultRow = memo(
     isSelected: boolean;
     isDuel: boolean;
     onToggle: (id: number) => void;
-    onStatusChange: (id: number, status: "kept" | "rejected" | "pending") => void;
+    onStatusChange: (
+      id: number,
+      status: "kept" | "rejected" | "pending"
+    ) => void;
     onPreview: (index: number) => void;
     updating: Set<number>;
   }) {
@@ -110,7 +113,7 @@ const CullResultRow = memo(
 
     return (
       <div
-        className={`flex items-center gap-3 rounded-[8px] border p-3 transition-colors cursor-pointer ${
+        className={`flex cursor-pointer items-center gap-3 rounded-[8px] border p-3 transition-colors ${
           isSelected
             ? "border-primary/30 bg-primary/[0.04]"
             : item.status === "kept"
@@ -145,7 +148,10 @@ const CullResultRow = memo(
             decoding="async"
             fetchPriority="low"
             loading="lazy"
-            onClick={(e) => { e.stopPropagation(); onPreview(index); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreview(index);
+            }}
             src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
           />
         </div>
@@ -156,7 +162,9 @@ const CullResultRow = memo(
             {item.photo.filename}
           </p>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground/60">
-            <span>{item.photo.width}×{item.photo.height}</span>
+            <span>
+              {item.photo.width}×{item.photo.height}
+            </span>
             {item.photo.isFavorite && (
               <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
             )}
@@ -170,7 +178,9 @@ const CullResultRow = memo(
               <span className="font-[590] text-[14px] text-foreground">
                 {item.rating}
               </span>
-              <span className="ml-1 text-[10px] text-muted-foreground/50">Elo</span>
+              <span className="ml-1 text-[10px] text-muted-foreground/50">
+                Elo
+              </span>
             </div>
             <div className="text-[10px] text-muted-foreground/50">
               <span className="text-success">{item.wins}W</span>{" "}
@@ -187,14 +197,20 @@ const CullResultRow = memo(
               <button
                 className="rounded-[4px] bg-success/10 px-2 py-1 text-[10px] text-success transition-colors hover:bg-success/20"
                 disabled={isUpdating}
-                onClick={(e) => { e.stopPropagation(); onStatusChange(item.id, "kept"); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStatusChange(item.id, "kept");
+                }}
               >
                 <Heart className="inline h-3 w-3" /> {t("cullKeep")}
               </button>
               <button
                 className="rounded-[4px] bg-destructive/10 px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
                 disabled={isUpdating}
-                onClick={(e) => { e.stopPropagation(); onStatusChange(item.id, "rejected"); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStatusChange(item.id, "rejected");
+                }}
               >
                 <Trash2 className="inline h-3 w-3" /> {t("cullReject")}
               </button>
@@ -204,7 +220,10 @@ const CullResultRow = memo(
             <button
               className="rounded-[4px] bg-muted px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
               disabled={isUpdating}
-              onClick={(e) => { e.stopPropagation(); onStatusChange(item.id, "pending"); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(item.id, "pending");
+              }}
             >
               ↺
             </button>
@@ -220,7 +239,7 @@ const CullResultRow = memo(
     prev.item.status === next.item.status &&
     prev.item.rating === next.item.rating &&
     prev.item.comparisons === next.item.comparisons &&
-    prev.updating.has(prev.item.id) === next.updating.has(next.item.id),
+    prev.updating.has(prev.item.id) === next.updating.has(next.item.id)
 );
 
 // ──────────────────────────────────────────────────────────────
@@ -260,15 +279,15 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   const kept = useMemo(
     () => session.items.filter((i) => i.status === "kept"),
-    [session.items],
+    [session.items]
   );
   const rejected = useMemo(
     () => session.items.filter((i) => i.status === "rejected"),
-    [session.items],
+    [session.items]
   );
   const pending = useMemo(
     () => session.items.filter((i) => i.status === "pending"),
-    [session.items],
+    [session.items]
   );
   const total = session.items.length;
 
@@ -277,25 +296,28 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     () =>
       [...session.items].sort((a, b) => {
         if (!isDuel) {
-          const order: Record<string, number> = { kept: 0, pending: 1, rejected: 2 };
+          const order: Record<string, number> = {
+            kept: 0,
+            pending: 1,
+            rejected: 2,
+          };
           const statusDiff = (order[a.status] ?? 1) - (order[b.status] ?? 1);
-          if (statusDiff !== 0) return statusDiff;
+          if (statusDiff !== 0) {
+            return statusDiff;
+          }
           return (a.photo.fileDate ?? 0) - (b.photo.fileDate ?? 0);
         }
         return b.rating - a.rating;
       }),
-    [session.items, isDuel],
+    [session.items, isDuel]
   );
 
   const selectedIds = useMemo(
     () => sorted.filter((i) => selected.has(i.id)).map((i) => i.photo.id),
-    [sorted, selected],
+    [sorted, selected]
   );
 
-  const lightboxPhotos = useMemo(
-    () => sorted.map((i) => i.photo),
-    [sorted],
-  );
+  const lightboxPhotos = useMemo(() => sorted.map((i) => i.photo), [sorted]);
 
   // ── useVirtualizer ──
 
@@ -311,8 +333,11 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   const toggleSelect = useCallback((itemId: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
       return next;
     });
   }, []);
@@ -337,7 +362,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         if (status === "kept") {
           const item = session.items.find((i) => i.id === itemId);
           if (item) {
-            await ipc.client.photos.toggleFavorite({ ids: [item.photo.id], favorite: true });
+            await ipc.client.photos.toggleFavorite({
+              ids: [item.photo.id],
+              favorite: true,
+            });
           }
         }
         onUpdate?.();
@@ -351,7 +379,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         });
       }
     },
-    [session.id, session.items, onUpdate],
+    [session.id, session.items, onUpdate]
   );
 
   // Stable callback wrapper for CullResultRow — avoids stale closures when
@@ -365,13 +393,15 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     (itemId: number, status: "kept" | "rejected" | "pending") => {
       handleStatusChangeRef.current(itemId, status);
     },
-    [],
+    []
   );
 
   const handleBatchStatusChange = useCallback(
     async (status: "kept" | "rejected" | "pending") => {
       const items = sorted.filter((i) => selected.has(i.id));
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        return;
+      }
       setUpdating((s) => new Set([...s, ...items.map((i) => i.id)]));
       try {
         await ipc.client.cull.batchUpdatePhotoStatus({
@@ -381,7 +411,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         });
         if (status === "kept") {
           const favIds = items.map((i) => i.photo.id);
-          await ipc.client.photos.toggleFavorite({ ids: favIds, favorite: true });
+          await ipc.client.photos.toggleFavorite({
+            ids: favIds,
+            favorite: true,
+          });
         }
         setSelected(new Set());
         onUpdate?.();
@@ -391,12 +424,14 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         setUpdating(new Set());
       }
     },
-    [session.id, sorted, selected, onUpdate],
+    [session.id, sorted, selected, onUpdate]
   );
 
   const handleTopNApply = useCallback(async () => {
-    const n = parseInt(topN, 10);
-    if (isNaN(n) || n < 1 || n > sorted.length) return;
+    const n = Number.parseInt(topN, 10);
+    if (isNaN(n) || n < 1 || n > sorted.length) {
+      return;
+    }
     // In duel mode, pick from top of sorted list; in curate mode, pick pending first then rejected
     const pool = isDuel
       ? sorted.slice(0, n).filter((i) => i.status !== "kept")
@@ -405,7 +440,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           ...sorted.filter((i) => i.status === "rejected"),
         ].slice(0, n);
     const topItems = pool;
-    if (topItems.length === 0) return;
+    if (topItems.length === 0) {
+      return;
+    }
     setUpdating((s) => new Set([...s, ...topItems.map((i) => i.id)]));
     try {
       await ipc.client.cull.batchUpdatePhotoStatus({
@@ -426,7 +463,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   }, [session.id, sorted, topN, isDuel, onUpdate]);
 
   const handleCreateAlbumFromKept = useCallback(async () => {
-    if (kept.length === 0) return;
+    if (kept.length === 0) {
+      return;
+    }
     setCreatingAlbum(true);
     try {
       const album = (await ipc.client.albums.createAlbum({
@@ -445,11 +484,15 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   }, [session.name, kept, t]);
 
   const handleTrashRejected = useCallback(async () => {
-    if (rejected.length === 0) return;
+    if (rejected.length === 0) {
+      return;
+    }
     setTrashConfirmOpen(false);
     setDeleting(true);
     try {
-      await ipc.client.photos.deletePhotos({ ids: rejected.map((i) => i.photo.id) });
+      await ipc.client.photos.deletePhotos({
+        ids: rejected.map((i) => i.photo.id),
+      });
       toast.success(t("cullRejectedToTrash"));
       onUpdate?.();
     } catch (err) {
@@ -466,20 +509,29 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       {/* Summary bar */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-border border-b px-6 py-2">
         <span className="text-[12px] text-muted-foreground">
-          {t("cullResultsSummary", { total, kept: kept.length, rejected: rejected.length, pending: pending.length })}
+          {t("cullResultsSummary", {
+            total,
+            kept: kept.length,
+            rejected: rejected.length,
+            pending: pending.length,
+          })}
         </span>
         <span className="h-4 w-px bg-border" />
 
         {/* Top N */}
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground/60">{t("cullTopN")}</span>
+          <span className="text-[11px] text-muted-foreground/60">
+            {t("cullTopN")}
+          </span>
           <input
             className="w-14 rounded-[4px] border border-input bg-transparent px-2 py-0.5 text-center text-[12px] text-foreground outline-none focus:border-primary"
             onChange={(e) => setTopN(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                const n = parseInt(topN, 10);
-                if (!isNaN(n) && n >= 1 && n <= total) setTopNConfirmOpen(true);
+                const n = Number.parseInt(topN, 10);
+                if (!isNaN(n) && n >= 1 && n <= total) {
+                  setTopNConfirmOpen(true);
+                }
               }
             }}
             placeholder={t("cullTopNPlaceholder")}
@@ -487,10 +539,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           />
           <button
             className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
-            disabled={!topN || isNaN(parseInt(topN, 10))}
+            disabled={!topN || isNaN(Number.parseInt(topN, 10))}
             onClick={() => setTopNConfirmOpen(true)}
           >
-            {t("cullTopNApply", { n: parseInt(topN, 10) || 0 })}
+            {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
           </button>
         </div>
 
@@ -500,7 +552,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         <button
           className="flex items-center gap-1 rounded-[4px] px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
           disabled={kept.length === 0}
-          onClick={() => { setExportIds(kept.map((i) => i.photo.id)); setExportOpen(true); }}
+          onClick={() => {
+            setExportIds(kept.map((i) => i.photo.id));
+            setExportOpen(true);
+          }}
         >
           <Download className="h-3 w-3" />
           {t("cullExportKept")} ({kept.length})
@@ -531,7 +586,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           className="ml-auto rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
           onClick={toggleSelectAll}
         >
-          {selected.size === sorted.length ? t("cullDeselectAll") : t("cullSelectAll")}
+          {selected.size === sorted.length
+            ? t("cullDeselectAll")
+            : t("cullSelectAll")}
         </button>
       </div>
 
@@ -564,14 +621,20 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           <span className="h-3 w-px bg-border" />
           <button
             className="rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => { setExportIds(selectedIds); setExportOpen(true); }}
+            onClick={() => {
+              setExportIds(selectedIds);
+              setExportOpen(true);
+            }}
           >
             <Download className="mr-1 inline h-3 w-3" />
             {t("cullExportSelected")}
           </button>
           <button
             className="rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => { setAlbumIds(selectedIds); setAlbumOpen(true); }}
+            onClick={() => {
+              setAlbumIds(selectedIds);
+              setAlbumOpen(true);
+            }}
           >
             <FolderPlus className="mr-1 inline h-3 w-3" />
             {t("cullAddToAlbumSelected")}
@@ -580,19 +643,21 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       )}
 
       {/* Virtual-scrolled list */}
-      <div ref={containerRef} className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6" ref={containerRef}>
         {sorted.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
             {t("cullNoPhotosInSession")}
           </div>
         ) : (
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          <div
+            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+          >
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const item = sorted[virtualRow.index];
               return (
                 <div
-                  key={virtualRow.key}
                   data-index={virtualRow.index}
+                  key={virtualRow.key}
                   ref={virtualizer.measureElement}
                   style={{
                     position: "absolute",
@@ -628,7 +693,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             <DialogHeader>
               <DialogTitle>{t("cullTopN")}</DialogTitle>
               <DialogDescription>
-                {t("cullTopNConfirm", { n: parseInt(topN, 10) || 0 })}
+                {t("cullTopNConfirm", { n: Number.parseInt(topN, 10) || 0 })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -642,7 +707,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
                 onClick={handleTopNApply}
               >
-                {t("cullTopNApply", { n: parseInt(topN, 10) || 0 })}
+                {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
               </button>
             </DialogFooter>
           </DialogContent>

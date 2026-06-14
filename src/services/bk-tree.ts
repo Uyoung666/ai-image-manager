@@ -1,9 +1,9 @@
 // Popcount for 32-bit unsigned integers (SWAR algorithm)
 function popcount32(n: number): number {
-  n = n - ((n >>> 1) & 0x55555555);
-  n = (n & 0x33333333) + ((n >>> 2) & 0x33333333);
-  n = (n + (n >>> 4)) & 0x0f0f0f0f;
-  return (n * 0x01010101) >>> 24;
+  n = n - ((n >>> 1) & 0x55_55_55_55);
+  n = (n & 0x33_33_33_33) + ((n >>> 2) & 0x33_33_33_33);
+  n = (n + (n >>> 4)) & 0x0f_0f_0f_0f;
+  return (n * 0x01_01_01_01) >>> 24;
 }
 
 export function hammingDistance(a: string, b: string): number {
