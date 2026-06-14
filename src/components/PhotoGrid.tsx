@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { GroupHeader } from "./MasonryGrid";
+import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
 import { SortDropdown } from "./SortDropdown";
 import { Skeleton } from "./ui/skeleton";
 
 interface Photo {
+  dominantColors?: string | null;
   fileDate?: number | null;
   filename: string;
   fileSize: number;
@@ -26,6 +27,18 @@ interface PhotoGridProps {
   deletingIds?: Set<number>;
   emptyState?: React.ReactNode;
   error?: string;
+  /** MasonryGrid 命令式 ref，用于原子化滚动定位 */
+  gridRef?: React.RefObject<MasonryGridHandle | null>;
+  /** 是否还有更多数据可加载（对应 infinite scroll 的 hasNextPage） */
+  hasMore?: boolean;
+  /** 正在加载更多数据（useInfiniteQuery 的 isFetchingNextPage） */
+  isLoadingMore?: boolean;
+  /**
+   * 是否为占位数据（keepPreviousData 期间的旧缓存）。
+   * 为 true 时 MasonryGrid 会锁死滚动恢复和锚点调整，
+   * 避免基于假数据做错误定位。
+   */
+  isPlaceholderData?: boolean;
   loading: boolean;
   onBackgroundClick?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -37,6 +50,11 @@ interface PhotoGridProps {
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
   photos: Photo[];
+  /**
+   * 路由唯一标识，用于区分不同页面的滚动位置
+   * 例如: "home" | "album-123" | "person-456"
+   */
+  routeKey: string;
   searchQuery?: string;
   selectedIds: Set<number>;
   sort?: SortField;
@@ -69,17 +87,22 @@ function loadColWidth(): number {
 export function PhotoGrid({
   photos,
   loading,
+  isLoadingMore = false,
   selectedIds,
   deletingIds,
+  gridRef,
+  routeKey,
   searchQuery,
   sort = "date",
   sortOrder = "desc",
   emptyState,
   error,
+  isPlaceholderData = false,
   onSelect,
   onDoubleClick,
   onContextMenu,
   onEndReached,
+  hasMore = false,
   onSortChange,
   onToggleFavorite,
   onKeyboardSelect,
@@ -95,8 +118,12 @@ export function PhotoGrid({
   const observerRef = useRef<ResizeObserver | null>(null);
   const targetColWidthRef = useRef(targetColWidth);
   targetColWidthRef.current = targetColWidth;
+  // selectedIds/deletingIds 通过 ref 传递，稳定 renderItem 引用。
+  // 移除 deps 中的 Set 依赖 → 选中操作仅触发实际变化卡片的 memo 比较。
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  const deletingIdsRef = useRef(deletingIds);
+  deletingIdsRef.current = deletingIds;
 
   const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
     if (observerRef.current) {
@@ -107,6 +134,16 @@ export function PhotoGrid({
     if (!node) {
       return;
     }
+    // Set initial width synchronously so MasonryGrid never renders with
+    // containerWidth=0 (avoids a blank first frame while waiting for the
+    // async ResizeObserver callback).
+    const w = node.clientWidth;
+    setContainerWidth(w);
+    setColumnCount(
+      Math.max(MIN_COLUMNS, Math.floor(w / targetColWidthRef.current))
+    );
+    setCompact(w < 500);
+    // ResizeObserver for subsequent size changes.
     const observer = new ResizeObserver(([entry]) => {
       const width = entry.contentRect.width;
       setContainerWidth(width);
@@ -199,13 +236,14 @@ export function PhotoGrid({
   const renderItem = useCallback(
     (photo: Photo) => (
       <PhotoCard
-        deleting={deletingIds?.has(photo.id)}
+        deleting={deletingIdsRef.current?.has(photo.id)}
+        dominantColors={photo.dominantColors}
         filename={photo.filename}
         getDragIds={getDragIds}
         height={photo.height}
         id={photo.id}
         isFavorite={photo.isFavorite}
-        isSelected={selectedIds.has(photo.id)}
+        isSelected={selectedIdsRef.current.has(photo.id)}
         onClick={onSelect}
         onDoubleClick={onDoubleClick}
         onToggleFavorite={onToggleFavorite}
@@ -216,15 +254,7 @@ export function PhotoGrid({
         width={photo.width}
       />
     ),
-    [
-      selectedIds,
-      deletingIds,
-      onSelect,
-      onDoubleClick,
-      onToggleFavorite,
-      searchQuery,
-      getDragIds,
-    ]
+    [onSelect, onDoubleClick, onToggleFavorite, searchQuery, getDragIds]
   );
 
   const groupHeaders = useMemo((): GroupHeader[] => {
@@ -399,10 +429,15 @@ export function PhotoGrid({
           containerWidth={containerWidth - 16}
           gap={GAP}
           groupHeaders={groupHeaders}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          isPlaceholderData={isPlaceholderData}
           items={photos}
           onEndReached={onEndReached}
           onMarqueeSelect={onMarqueeSelect}
+          ref={gridRef}
           renderItem={renderItem}
+          routeKey={routeKey}
           scrollToId={scrollToId}
           selectionActive={selectedIds.size > 0}
         />

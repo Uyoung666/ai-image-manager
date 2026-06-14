@@ -60,8 +60,13 @@ export function SelectionActionBar({
     }
   }, [selectedCount]);
 
-  function wrapAction(key: string, handler?: () => void): (() => void) | undefined {
-    if (!handler) return undefined;
+  function wrapAction(
+    key: string,
+    handler?: () => void
+  ): (() => void) | undefined {
+    if (!handler) {
+      return undefined;
+    }
     return async () => {
       setExecuting(key);
       try {
@@ -98,7 +103,10 @@ export function SelectionActionBar({
             <div className="mx-1 h-4 w-px bg-border" />
             <ActionButton
               icon={
-                <Heart className={allFavorite ? "fill-current" : ""} size={15} />
+                <Heart
+                  className={allFavorite ? "fill-current" : ""}
+                  size={15}
+                />
               }
               label={allFavorite ? t("unfavorite") : t("favorite")}
               onClick={onToggleFavorite}

@@ -1,8 +1,24 @@
+import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import DragWindowRegion from "@/components/drag-window-region";
+import { GlobalProgressBar } from "@/components/global-progress-bar";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import {
+  OnboardingOverlay,
+} from "@/components/onboarding/OnboardingOverlay";
+import {
+  OnboardingProvider,
+} from "@/components/onboarding/OnboardingProvider";
 import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
+import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
+import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
+import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
+import {
+  SidebarFilterProvider,
+  useSidebarFilter,
+} from "@/contexts/SidebarFilterContext";
+import { useFolders } from "@/hooks/useFolders";
 
 function isPerfMonitorEnabled() {
   try {
@@ -10,6 +26,41 @@ function isPerfMonitorEnabled() {
   } catch {
     return false;
   }
+}
+
+// SidebarSlot stays mounted across route changes so internal state
+// (tags, expanded nodes, etc.) is preserved. Hidden via CSS on non-homepage routes.
+
+function SidebarSlot() {
+  const location = useLocation();
+  const isHomePage = location.pathname === "/";
+  const filter = useSidebarFilter();
+  const { data: folders = [] } = useFolders();
+
+  return (
+    <div className={isHomePage ? "" : "hidden"}>
+      <Sidebar
+        activeFolderId={filter.activeFolderId}
+        activeTagIds={filter.activeTagIds}
+        collapsed={filter.collapsed}
+        favoriteActive={filter.favoriteOnly}
+        folders={folders}
+        importPhase={filter.importPhase}
+        onAddFolder={filter.handleAddFolder}
+        onCancelScan={filter.handleCancelScan}
+        onDeleteFolder={filter.handleDeleteFolder}
+        onSelectFavorites={filter.toggleFavoritesAndNotify}
+        onSelectFolder={filter.selectFolderAndNotify}
+        onToggleCollapse={filter.toggleCollapsed}
+        onToggleTag={filter.toggleTag}
+        onToggleTagMode={filter.toggleTagMode}
+        scanningFolder={filter.scanningFolder}
+        scanProgress={filter.scanProgress}
+        tagMode={filter.tagMode}
+        totalPhotos={filter.totalPhotos}
+      />
+    </div>
+  );
 }
 
 export default function BaseLayout({ children }: { children: ReactNode }) {
@@ -46,15 +97,28 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
   }, [handleKeyDown]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      <DragWindowRegion title="AI Image Manager" />
-      <main className="flex-1 overflow-hidden">{children}</main>
-      <SpotlightSearch />
-      <KeyboardShortcuts
-        onClose={() => setShortcutsOpen(false)}
-        open={shortcutsOpen}
-      />
-      {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
-    </div>
+    <ScrollPositionProvider>
+      <OnboardingProvider>
+        <OnboardingOverlay />
+        <BrowseSessionProvider>
+          <SidebarFilterProvider>
+            <div className="flex h-screen flex-col overflow-hidden">
+              <DragWindowRegion title="AI Image Manager" />
+              <GlobalProgressBar />
+              <div className="flex flex-1 overflow-hidden">
+                <SidebarSlot />
+                <main className="flex-1 overflow-hidden">{children}</main>
+              </div>
+              <SpotlightSearch />
+              <KeyboardShortcuts
+                onClose={() => setShortcutsOpen(false)}
+                open={shortcutsOpen}
+              />
+              {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
+            </div>
+          </SidebarFilterProvider>
+        </BrowseSessionProvider>
+      </OnboardingProvider>
+    </ScrollPositionProvider>
   );
 }

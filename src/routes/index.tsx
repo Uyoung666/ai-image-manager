@@ -8,6 +8,7 @@ import { CloudUploadDialog } from "@/components/CloudUploadDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
+import type { MasonryGridHandle } from "@/components/MasonryGrid";
 import { clearImageLoadCache } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
@@ -21,28 +22,25 @@ import {
   SearchBar,
   type SearchBarHandle,
 } from "@/components/SearchBar";
+import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { ShareDialog } from "@/components/ShareDialog";
-import type { ImportPhase } from "@/components/Sidebar";
-import { Sidebar } from "@/components/Sidebar";
 import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
+import { useBrowseSession } from "@/contexts/BrowseSessionContext";
+import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useAiStatus } from "@/hooks/useAiStatus";
-import { useFolders } from "@/hooks/useFolders";
+import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
+import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
+import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
+import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
-
-const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
-
-function loadSidebarState(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
+import { preloadImagesWithConcurrency } from "@/utils/image-preloader";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 const GRID_SORT_FIELD_KEY = "grid_sort_field";
 const GRID_SORT_ORDER_KEY = "grid_sort_order";
@@ -74,31 +72,31 @@ function loadSortOrder(): SortOrder {
 function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
-  const [activeTagId, setActiveTagId] = useState<number | null>(null);
-  const [scanningFolder, setScanningFolder] = useState<string | null>(null);
-  const [scanProgress, setScanProgress] = useState("");
-  const [importPhase, setImportPhase] = useState<ImportPhase>("idle");
-  const importPhaseRef = useRef<ImportPhase>("idle");
+  const filter = useSidebarFilter();
+  const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
   const aiIndexingRef = useRef(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  // 搜索状态：从 BrowseSessionContext 恢复，导航回来时保留搜索上下文
+  const { getSession: getBrowseSession, saveSession: saveBrowseSession } =
+    useBrowseSession();
+  const savedSearch = getBrowseSession("home-search");
+  const [searchQuery, setSearchQuery] = useState(savedSearch.searchQuery);
   const [searchMode, setSearchMode] = useState<
     "text" | "image" | "exif" | "color" | null
-  >(null);
+  >(savedSearch.searchMode as "text" | "image" | "exif" | "color" | null);
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
+  const [colorHex, setColorHex] = useState<string | null>(
+    savedSearch.colorHex ?? null
+  );
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
-  const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
-  const [detailDismissed, setDetailDismissed] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarState);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
     y: 0,
     photoId: null,
     photoPath: null,
+    isBatch: false,
+    selectionCount: 0,
   });
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
@@ -113,13 +111,18 @@ function HomePage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
-  const [colorHex, setColorHex] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
-  const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showDrillBanner, setShowDrillBanner] = useState(false);
+  const [showAiIndexHint, setShowAiIndexHint] = useState(false);
+  const [searchResultFade, setSearchResultFade] = useState(false);
+  const [parsedTimeFilter, setParsedTimeFilter] = useState<{
+    dateFrom: string;
+    dateTo: string;
+    keyword: string;
+  } | null>(null);
 
   // --- TanStack Query hooks ---
   const isSearching = searchMode !== null;
@@ -151,9 +154,7 @@ function HomePage() {
       setSearchTime(undefined);
       setSearchResults(null);
       setColorHex(null);
-      setFavoriteOnly(false);
-      setActiveFolderId(null);
-      setActiveTagId(null);
+      filter.setActiveFolderId(null); // also clears favoriteOnly + activeTagIds
       return;
     }
 
@@ -165,9 +166,11 @@ function HomePage() {
       setSearchQuery("");
       setSearchTime(undefined);
       setSearchResults(null);
-      setFavoriteOnly(false);
-      setActiveFolderId(null);
-      setActiveTagId(tagId);
+      filter.setFavoriteOnly(false);
+      filter.setActiveFolderId(null);
+      // Set tag filter via Context — need to set activeTagIds directly
+      // No direct setter exposed; use toggleTag for single tag
+      filter.toggleTag(tagId);
       return;
     }
 
@@ -178,9 +181,7 @@ function HomePage() {
       setSearchQuery("");
       setSearchTime(undefined);
       setSearchResults(null);
-      setFavoriteOnly(true);
-      setActiveFolderId(null);
-      setActiveTagId(null);
+      filter.setFavoriteOnly(true); // also clears activeFolderId + activeTagIds
       return;
     }
 
@@ -252,51 +253,78 @@ function HomePage() {
     return () => window.removeEventListener("photo-drop:album", handler);
   }, []);
 
+  // Listen for sidebar-triggered clear-search events
+  useEffect(() => {
+    function handler() {
+      setSearchMode(null);
+      setSearchQuery("");
+      setSearchTime(undefined);
+      setSearchResults(null);
+    }
+    window.addEventListener("sidebar:clear-search", handler);
+    return () => window.removeEventListener("sidebar:clear-search", handler);
+  }, []);
+
   // Listen for file-change events from main process (chokidar watcher)
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (event.data?.channel === "file-change") {
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        // refetchType: "active" — 仅重取当前视口活跃的页面，
+        // 杜绝 chokidar 事件触发所有已加载页（如 50 页）同时 IPC 请求的雪崩
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
         clearImageLoadCache();
       }
       if (event.data?.channel === "scan-progress") {
-        if (importPhaseRef.current !== "scanning") {
+        if (filter.importPhaseRef.current !== "scanning") {
           return;
         }
         const { scanned, total, phase } = event.data;
         if (phase === "indexing") {
-          setScanProgress(t("scanningIndexing", { scanned, total }));
+          filter.setScanProgress(t("scanningIndexing", { scanned, total }));
         } else if (phase === "complete") {
-          setScanProgress(t("scanningCompleteShort", { total }));
+          filter.setScanProgress(t("scanningCompleteShort", { total }));
         }
       }
       if (event.data?.channel === "ai-progress") {
         const { processed, total, phase } = event.data;
         aiIndexingRef.current = phase === "loading" || phase === "embedding";
-        if (aiIndexingRef.current) {
-          setScanProgress(
+        if (
+          aiIndexingRef.current &&
+          filter.importPhaseRef.current === "scanning"
+        ) {
+          filter.setScanProgress(
             phase === "loading"
               ? t("aiIndexingStarted")
               : t("aiIndexingProgress", { processed, total })
           );
         }
       }
+      if (event.data?.channel === "ai-auto-repair-started") {
+        toast.info(
+          "检测到向量数据库损坏，已自动重建。索引进度可在侧边栏查看。"
+        );
+      }
       if (event.data?.channel === "ai-embedding-done") {
         aiIndexingRef.current = false;
-        setImportPhase("idle");
-        setScanProgress("");
+        filter.setImportPhase("idle");
+        if (event.data?.error) {
+          filter.setScanProgress(`AI 索引失败: ${event.data.error}`);
+        } else {
+          filter.setScanProgress("");
+        }
+        queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+      }
+      if (event.data?.channel === "ai-status-changed") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [t]);
-
-  // Keep importPhaseRef in sync with state for use in effect callbacks
-  useEffect(() => {
-    importPhaseRef.current = importPhase;
-  }, [importPhase]);
+  }, [t, filter.importPhaseRef, filter.setImportPhase, filter.setScanProgress]);
 
   const {
     data: photosData,
@@ -304,16 +332,17 @@ function HomePage() {
     hasNextPage,
     isLoading: photosLoading,
     isFetchingNextPage,
+    isPlaceholderData: photosIsPlaceholder,
   } = usePhotos({
-    folderId: activeFolderId,
-    tagId: activeTagId,
-    favoriteOnly: favoriteOnly || undefined,
+    folderId: filter.activeFolderId,
+    tagIds: filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
+    tagMode: filter.tagMode,
+    favoriteOnly: filter.favoriteOnly || undefined,
     sort: sortField,
     order: sortOrder,
     enabled: !isSearching,
   });
 
-  const { data: folders = [] } = useFolders();
   const { data: aiStatus } = useAiStatus();
 
   // Flatten paginated photos
@@ -323,37 +352,211 @@ function HomePage() {
   );
   const totalFromQuery = photosData?.pages[0]?.total ?? 0;
 
+  // ── 缩略图预加载（视口优先级排序 + 并发限流 + 追踪上限防内存泄露）───
+  // 问题：FIFO 顺序导致可见区域图片被排到队尾，快速滚动时首屏白屏。
+  // 方案：获取当前视口锚点索引，按距离视口的远近升序排列 newUrls，
+  // 确保离用户最近的图片优先进入 12 个并发加载槽。
+  const MAX_PRELOAD_TRACKED = 500;
+  const preloadedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const newEntries: Array<{ url: string; idx: number }> = [];
+    for (let i = 0; i < pagedPhotos.length; i++) {
+      const photo = pagedPhotos[i];
+      const filePath = photo.thumbnailPath ?? photo.path;
+      if (!preloadedRef.current.has(filePath)) {
+        if (preloadedRef.current.size >= MAX_PRELOAD_TRACKED) {
+          const oldest = preloadedRef.current.values().next().value;
+          if (oldest) {
+            preloadedRef.current.delete(oldest);
+          }
+        }
+        preloadedRef.current.add(filePath);
+        newEntries.push({ url: toLocalMediaUrl(filePath), idx: i });
+      }
+    }
+    if (newEntries.length > 0) {
+      // ── 视口优先级排序 ──────────────────────────────────
+      // 获取当前可见区域的第一个 item 索引，作为距离计算锚点。
+      // gridRef 未挂载时降级为 FIFO（保持原有行为）。
+      const anchor = gridRef.current?.getCurrentAnchor();
+      const visibleStartIdx = anchor?.estimatedGlobalIndex ?? -1;
+
+      if (visibleStartIdx >= 0 && newEntries.length > 1) {
+        // 按距离视口的远近升序排列
+        newEntries.sort(
+          (a, b) =>
+            Math.abs(a.idx - visibleStartIdx) -
+            Math.abs(b.idx - visibleStartIdx)
+        );
+      }
+      preloadImagesWithConcurrency(
+        newEntries.map((e) => e.url),
+        12
+      );
+    }
+  }, [pagedPhotos]);
+
   // Active photo list: search results or paginated query
   const photos = isSearching ? (searchResults ?? []) : pagedPhotos;
   const photosRef = useRef(photos);
   photosRef.current = photos;
+
+  // 持久化搜索状态 + 挂载时自动重新搜索
+  const searchStateRef = useRef({ searchQuery, searchMode, colorHex });
+  searchStateRef.current = { searchQuery, searchMode, colorHex };
+  useEffect(() => {
+    return () => {
+      saveBrowseSession("home-search", {
+        searchQuery: searchStateRef.current.searchQuery,
+        searchMode: searchStateRef.current.searchMode,
+        colorHex: searchStateRef.current.colorHex,
+      });
+    };
+  }, [saveBrowseSession]);
+
+  // 挂载时如果有保存的搜索，等 AI 模型就绪后自动重新搜索
+  const aiStatusRef = useRef(aiStatus);
+  aiStatusRef.current = aiStatus;
+  const restoredSearchRef = useRef(false);
+  useEffect(() => {
+    if (restoredSearchRef.current) {
+      return;
+    }
+    const saved = getBrowseSession("home-search");
+    if (saved.searchQuery || saved.searchMode === "color" || saved.colorHex) {
+      restoredSearchRef.current = true;
+      const q = saved.searchQuery;
+      setSearchQuery(q);
+      if (saved.searchMode) {
+        setSearchMode(saved.searchMode);
+      }
+      if (saved.colorHex) {
+        setColorHex(saved.colorHex);
+      }
+      // 等 AI 模型就绪后自动触发搜索（轮询检测，最多等 10s）
+      let attempts = 0;
+      const trySearch = () => {
+        attempts++;
+        if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
+          handleSearch(q, undefined, saved.colorHex ?? undefined);
+        } else {
+          setTimeout(trySearch, 100);
+        }
+      };
+      setTimeout(trySearch, 300);
+    }
+  }, []); // 仅首次挂载
+
+  // 动态 routeKey：区分搜索/筛选/排序状态
+  // ⚠️ 所有 filter 字段必须做 ?? fallback，防止卸载期 SidebarFilterContext
+  // 重置导致 "undefined" 字符串窜入 Key（如 home-all-undefined vs home-all）
+  const { markRouteDirty } = useScrollPosition();
+  const routeKey = useMemo(() => {
+    const filterPart = [
+      filter.activeFolderId ?? "all",
+      (filter.activeTagIds ?? []).join(","),
+      (filter.favoriteOnly ?? false) ? "fav" : "",
+      sortField ?? "date",
+      sortOrder ?? "desc",
+    ]
+      .filter(Boolean)
+      .join("-");
+    const searchPart = isSearching ? `search-${searchMode}-${searchQuery}` : "";
+    return `home-${filterPart}${searchPart}`;
+  }, [
+    isSearching,
+    searchMode,
+    searchQuery,
+    filter.activeFolderId,
+    filter.activeTagIds,
+    filter.favoriteOnly,
+    sortField,
+    sortOrder,
+  ]);
+
+  // ── 网格 ref（用于原子化滚动定位）─────────────────────────────
+  const gridRef = useRef<MasonryGridHandle>(null);
+
+  // ── 原子化预加载：数据未就位时不渲染 MasonryGrid ──────────────
+  const { preloadState } = useScrollRestorePreloader({
+    routeKey,
+    pageSize: 100,
+    currentItemCount: pagedPhotos.length,
+    hasMore: hasNextPage ?? false,
+    isFetchingNextPage,
+    onTimeout: () => {
+      toast.info(t("scrollPositionReset", "视图位置已重置"), {
+        duration: 2500,
+      });
+    },
+  });
+
+  // 预加载期间自动推进分页加载（顺序拉取，避免并发乱序）
+  useEffect(() => {
+    if (
+      preloadState === "preloading" &&
+      hasNextPage &&
+      !isFetchingNextPage &&
+      !isSearching
+    ) {
+      fetchNextPage();
+    }
+  }, [
+    preloadState,
+    hasNextPage,
+    isFetchingNextPage,
+    isSearching,
+    fetchNextPage,
+  ]);
+
+  // 共享 Hooks：选中状态、详情面板
+  const {
+    selectedIds,
+    lastClickedIdx,
+    handleSelect,
+    handleKeyboardSelect,
+    handleMarqueeSelect,
+    clearSelection,
+    removeFromSelection,
+    selectAll: selectAllPhotos,
+  } = usePhotoSelection(routeKey, photos);
+  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
+    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
 
+  // Keep Sidebar's totalPhotos display in sync
+  useEffect(() => {
+    filter.setTotalPhotos(totalPhotos);
+  }, [totalPhotos, filter.setTotalPhotos]);
+
+  const hasActiveExifFilters = searchMode === "exif";
   const emptyStateContent = useMemo(() => {
     if (isSearching) {
       return (
-        <div className="flex flex-col items-center gap-3 text-center">
-          <svg
-            className="h-10 w-10 text-muted-foreground/40"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            viewBox="0 0 24 24"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" strokeLinecap="round" />
-          </svg>
-          <p className="font-[510] text-[14px] text-foreground">
-            {t("emptySearchTitle")}
-          </p>
-          <p className="max-w-[280px] text-[12px] text-muted-foreground/70">
-            {t("emptySearchDescription")}
-          </p>
-        </div>
+        <SearchEmptyState
+          hasActiveFilters={hasActiveExifFilters}
+          hasAiVectors={aiStatus?.hasVectors ?? false}
+          onClearFilters={() => searchBarRef.current?.clearFilters()}
+          onClearSearch={() => {
+            setSearchQuery("");
+            setColorHex(null);
+            setSearchMode(null);
+            setSearchTime(undefined);
+            setSearchResults(null);
+            setParsedTimeFilter(null);
+            setShowAiIndexHint(false);
+            filter.setActiveFolderId(null);
+            searchBarRef.current?.clearFilters();
+          }}
+          onGoToAiSettings={() => navigate({ to: "/settings" })}
+          parsedTimeFilter={parsedTimeFilter}
+          query={searchQuery}
+          searchMode={searchMode}
+        />
       );
     }
-    if (favoriteOnly) {
+    if (filter.favoriteOnly) {
       return (
         <div className="flex flex-col items-center gap-3 text-center">
           <svg
@@ -379,7 +582,17 @@ function HomePage() {
       );
     }
     return undefined;
-  }, [isSearching, favoriteOnly]);
+  }, [
+    isSearching,
+    filter.favoriteOnly,
+    t,
+    searchMode,
+    searchQuery,
+    parsedTimeFilter,
+    hasActiveExifFilters,
+    aiStatus?.hasVectors,
+    navigate,
+  ]);
 
   const handleEndReached = useCallback(() => {
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
@@ -412,183 +625,6 @@ function HomePage() {
       }
     );
   }, []);
-
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
-
-  // Auto-collapse sidebar when window is narrow
-  const autoCollapsedRef = useRef(false);
-  useEffect(() => {
-    function handleResize() {
-      const narrow = window.innerWidth < 900;
-      if (narrow && !sidebarCollapsed) {
-        autoCollapsedRef.current = true;
-        setSidebarCollapsed(true);
-      } else if (!narrow && autoCollapsedRef.current) {
-        autoCollapsedRef.current = false;
-        setSidebarCollapsed(loadSidebarState());
-      }
-    }
-    window.addEventListener("resize", handleResize);
-    handleResize();
-    return () => window.removeEventListener("resize", handleResize);
-  }, [sidebarCollapsed]);
-
-  // Sync detail panel with selection
-  const prevSelectedIdRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (selectedIds.size === 1) {
-      const id = selectedIds.values().next().value as number;
-      if (id !== prevSelectedIdRef.current) {
-        setDetailDismissed(false);
-        prevSelectedIdRef.current = id;
-      }
-      if (!detailDismissed) {
-        const photo = photos.find((p) => p.id === id);
-        setDetailPhoto(photo || null);
-      }
-    } else {
-      setDetailPhoto(null);
-      prevSelectedIdRef.current = null;
-    }
-  }, [selectedIds, photos, detailDismissed]);
-
-  function handleSelectTag(tagId: number | null) {
-    setSearchMode(null);
-    setSearchQuery("");
-    setSearchTime(undefined);
-    setActiveTagId(tagId);
-    if (tagId !== null) {
-      setFavoriteOnly(false);
-    }
-  }
-
-  async function handleAddFolder(externalPath?: string) {
-    if (importPhase !== "idle") {
-      toast.error("请等待当前导入完成");
-      return;
-    }
-
-    let folderPath =
-      typeof externalPath === "string" ? externalPath : undefined;
-    if (!folderPath) {
-      const result = await ipc.client.shell.openFolderDialog({});
-      folderPath = result?.path ?? undefined;
-    }
-    if (!folderPath) {
-      return;
-    }
-
-    setImportPhase("scanning");
-    setScanningFolder(folderPath);
-    setScanProgress(t("scanningProgress", { scanned: 0, total: "?" }));
-    let scanResult: {
-      photoIds?: number[];
-      skipped?: number;
-      cancelled?: boolean;
-    } | null = null;
-    try {
-      scanResult = await ipc.client.photos.scanFolder({
-        path: folderPath,
-      });
-      // User cancelled — backend already cleaned up, just clear progress
-      if (scanResult.cancelled) {
-        setScanProgress("");
-      } else {
-        const skipped = scanResult.skipped || 0;
-        const count = scanResult.photoIds?.length || 0;
-        setScanProgress(
-          skipped > 0
-            ? t("scanningSkipped", { count, skipped })
-            : t("scanningComplete", { count })
-        );
-        toast.success(
-          skipped > 0
-            ? t("toastPhotosIndexedSkipped", { count, skipped })
-            : t("toastPhotosIndexed", { count })
-        );
-      }
-      // Always refresh UI — cancelled imports need stale folders/photos cleared
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
-    } catch (err: any) {
-      setScanProgress("");
-      console.error("[scanFolder] failed:", err);
-      const detail = err?.message || err?.cause?.message || String(err);
-      toast.error(`${t("toastScanFolderFailed")}: ${detail}`);
-    } finally {
-      setScanningFolder(null);
-      if (
-        scanResult &&
-        !scanResult.cancelled &&
-        (scanResult.photoIds?.length || 0) > 0
-      ) {
-        setImportPhase("embedding");
-      } else {
-        setImportPhase("idle");
-      }
-    }
-  }
-  async function handleCancelScan() {
-    try {
-      await ipc.client.photos.stopScanning({});
-    } catch (err) {
-      console.error("[cancelScan] failed:", err);
-    }
-  }
-  async function handleDeleteFolder(id: number) {
-    try {
-      await ipc.client.photos.deleteFolder({ id });
-      if (activeFolderId === id) {
-        setActiveFolderId(null);
-      }
-      queryClient.invalidateQueries({ queryKey: ["folders"] });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
-      toast.success(t("toastFolderRemoved"));
-    } catch {
-      toast.error(t("toastDeleteFolderFailed"));
-    }
-  }
-
-  const handleSelect = useCallback(
-    (id: number, event: React.MouseEvent) => {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        const idx = photosRef.current.findIndex((p) => p.id === id);
-        if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
-          const [from, to] =
-            lastClickedIdx < idx
-              ? [lastClickedIdx, idx]
-              : [idx, lastClickedIdx];
-          for (let i = from; i <= to; i++) {
-            next.add(photosRef.current[i].id);
-          }
-        } else if (event.ctrlKey || event.metaKey) {
-          next.has(id) ? next.delete(id) : next.add(id);
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
-        } else {
-          next.clear();
-          next.add(id);
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
-        }
-        return next;
-      });
-    },
-    [lastClickedIdx]
-  );
 
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photosRef.current.findIndex((p) => p.id === id);
@@ -685,9 +721,51 @@ function HomePage() {
         searchParams.shutterMax = Number(filters.shutterMax);
       }
 
-      const result = await ipc.client.photos.searchCompound(searchParams);
-      setSearchResults((result as any).results || []);
+      const result = (await ipc.client.photos.searchCompound(
+        searchParams
+      )) as any;
+      const results = result.results || [];
+
+      if (result.timeFilter) {
+        const tf = result.timeFilter as { dateFrom: string; dateTo: string };
+        const TIME_KEYWORDS = [
+          "今天",
+          "昨天",
+          "前天",
+          "上周",
+          "上个月",
+          "本月",
+          "这个月",
+          "今年",
+          "去年",
+          "本周",
+          "这个星期",
+          "上星期",
+        ];
+        const matched = TIME_KEYWORDS.find((kw) => query.includes(kw));
+        setParsedTimeFilter({
+          dateFrom: tf.dateFrom,
+          dateTo: tf.dateTo,
+          keyword: matched || "",
+        });
+      } else {
+        setParsedTimeFilter(null);
+      }
+
+      if (
+        results.length === 0 &&
+        aiStatus &&
+        !aiStatus.hasVectors &&
+        query.trim()
+      ) {
+        setShowAiIndexHint(true);
+      } else {
+        setShowAiIndexHint(false);
+      }
+
+      setSearchResults(results);
       setSearchTime(Math.round(performance.now() - startTime));
+      setSearchResultFade(true);
     } catch {
       // 颜色搜索失败不降级到全量查询
       if (effectiveColorHex) {
@@ -713,49 +791,37 @@ function HomePage() {
       setSearchLoading(false);
     }
   }
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    const card = (e.target as HTMLElement).closest(
-      "[data-photo-id]"
-    ) as HTMLElement | null;
-    if (!card) {
-      return;
-    }
-    const id = Number.parseInt(card.dataset.photoId || "", 10);
-    const path = card.dataset.photoPath || null;
-    if (!id) {
-      return;
-    }
-    e.preventDefault();
-    setCtxMenu({
-      open: true,
-      x: e.clientX,
-      y: e.clientY,
-      photoId: id,
-      photoPath: path,
-    });
-  }, []);
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const card = (e.target as HTMLElement).closest(
+        "[data-photo-id]"
+      ) as HTMLElement | null;
+      if (!card) {
+        return;
+      }
+      const id = Number.parseInt(card.dataset.photoId || "", 10);
+      const path = card.dataset.photoPath || null;
+      if (!id) {
+        return;
+      }
+      e.preventDefault();
+      const inSelection = selectedIds.has(id);
+      const isBatch = selectedIds.size > 1 && inSelection;
+      setCtxMenu({
+        open: true,
+        x: e.clientX,
+        y: e.clientY,
+        photoId: id,
+        photoPath: path,
+        isBatch,
+        selectionCount: isBatch ? selectedIds.size : 1,
+      });
+    },
+    [selectedIds]
+  );
 
   async function handleOpenExplorer(filePath: string) {
     await ipc.client.shell.openInExplorer({ path: filePath });
-  }
-
-  function handleDetailNavigate(direction: "prev" | "next") {
-    if (!detailPhoto) {
-      return;
-    }
-    const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
-    if (currentIdx < 0) {
-      return;
-    }
-    const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= photos.length) {
-      return;
-    }
-    const nextPhoto = photos[nextIdx];
-    setSelectedIds(new Set([nextPhoto.id]));
-    setLastClickedIdx(nextIdx);
-    setDetailDismissed(false);
-    setDetailPhoto(nextPhoto);
   }
 
   function handleDeletePhoto(id: number) {
@@ -822,13 +888,10 @@ function HomePage() {
       } else {
         await ipc.client.photos.deletePhotos({ ids });
       }
-      setSelectedIds((prev) => {
-        const n = new Set(prev);
-        for (const id of ids) {
-          n.delete(id);
-        }
-        return n;
-      });
+      // 标记滚动位置为脏：已删除照片的锚点已失效
+      markRouteDirty(routeKey);
+      // 从选中集合中移除已删除的照片
+      removeFromSelection(ids);
       if (isSearching) {
         setSearchResults(
           (prev) => prev?.filter((p) => !ids.includes(p.id)) ?? null
@@ -929,7 +992,7 @@ function HomePage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        setSelectedIds(new Set(photos.map((p) => p.id)));
+        selectAllPhotos();
         return;
       }
 
@@ -975,7 +1038,7 @@ function HomePage() {
           return;
         }
         if (selectedIds.size > 0) {
-          setSelectedIds(new Set());
+          clearSelection();
           return;
         }
       }
@@ -1023,23 +1086,12 @@ function HomePage() {
       if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (detailPhoto) {
-          setDetailDismissed(true);
-          setDetailPhoto(null);
-          setSelectedIds(new Set());
+          dismissDetail();
+          clearSelection();
         } else if (selectedIds.size === 1) {
-          setDetailDismissed(false);
           const id = selectedIds.values().next().value as number;
-          const p = photos.find((ph) => ph.id === id);
-          if (p) {
-            setDetailPhoto(p);
-          }
+          handleKeyboardSelect(id);
         }
-        return;
-      }
-
-      if (e.key === "[" && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        toggleSidebar();
         return;
       }
     }
@@ -1051,25 +1103,19 @@ function HomePage() {
     renameDialogOpen,
     convertDialogOpen,
     quickPreviewIndex,
-    toggleSidebar,
   ]);
-
-  const handleKeyboardSelect = useCallback((id: number) => {
-    setSelectedIds(new Set([id]));
-    const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      setLastClickedIdx(idx);
-    }
-  }, []);
 
   const marqueeJustCompleted = useRef(false);
 
-  const handleMarqueeSelect = useCallback((ids: Set<number>) => {
-    if (ids.size > 0) {
-      setSelectedIds(ids);
-      marqueeJustCompleted.current = true;
-    }
-  }, []);
+  const wrappedMarqueeSelect = useCallback(
+    (ids: Set<number>) => {
+      handleMarqueeSelect(ids);
+      if (ids.size > 0) {
+        marqueeJustCompleted.current = true;
+      }
+    },
+    [handleMarqueeSelect]
+  );
 
   const handleSortChange = useCallback((s: SortField, o: SortOrder) => {
     setSortField(s);
@@ -1086,41 +1132,15 @@ function HomePage() {
     photos.length > 0 ||
     (loading && photos.length === 0) ||
     isSearching ||
-    favoriteOnly;
+    filter.favoriteOnly;
 
   return (
-    <div className="flex h-full">
-      <Sidebar
-        activeFolderId={activeFolderId}
-        collapsed={sidebarCollapsed}
-        favoriteActive={favoriteOnly}
-        folders={folders}
-        onAddFolder={handleAddFolder}
-        onCancelScan={handleCancelScan}
-        onDeleteFolder={handleDeleteFolder}
-        onSelectFavorites={() => {
-          setSearchMode(null);
-          setSearchQuery("");
-          setSearchTime(undefined);
-          setFavoriteOnly((v) => !v);
-          setActiveFolderId(null);
-          setActiveTagId(null);
-        }}
-        onSelectFolder={(id) => {
-          setSearchMode(null);
-          setSearchQuery("");
-          setSearchTime(undefined);
-          setActiveFolderId(id);
-          setFavoriteOnly(false);
-        }}
-        onSelectTag={handleSelectTag}
-        onToggleCollapse={toggleSidebar}
-        scanningFolder={scanningFolder}
-        scanProgress={scanProgress}
-        totalPhotos={totalPhotos}
-        importPhase={importPhase}
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
+    <>
+      <div
+        className="flex h-full min-w-0 flex-col"
+        onDragOver={handleGlobalDragOver}
+        onDrop={handleGlobalDrop}
+      >
         <SearchBar
           aiStatus={aiStatus ?? null}
           colorHex={colorHex ?? undefined}
@@ -1131,6 +1151,8 @@ function HomePage() {
             setSearchMode(null);
             setSearchTime(undefined);
             setSearchResults(null);
+            setParsedTimeFilter(null);
+            setShowAiIndexHint(false);
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
@@ -1170,27 +1192,49 @@ function HomePage() {
         )}
         {hasPhotos ? (
           <div className="flex min-h-0 flex-1">
-            <div className="relative flex min-w-0 flex-1">
+            <div
+              className={`relative flex min-w-0 flex-1 ${
+                searchResultFade ? "search-results-enter" : ""
+              }`}
+              onAnimationEnd={() => setSearchResultFade(false)}
+            >
+              {/* 预加载进度条：顶部极细扫描线，不遮挡底层 UI */}
+              {preloadState === "preloading" && (
+                <div className="absolute top-0 right-0 left-0 z-30 h-[2px] overflow-hidden bg-transparent">
+                  <div
+                    className="h-full rounded-full bg-primary/70"
+                    style={{
+                      width: "35%",
+                      animation: "indeterminate 1.4s ease-in-out infinite",
+                    }}
+                  />
+                </div>
+              )}
               <PhotoGrid
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
+                gridRef={gridRef}
+                hasMore={hasNextPage}
+                isLoadingMore={isFetchingNextPage}
+                isPlaceholderData={photosIsPlaceholder}
                 loading={loading}
                 onBackgroundClick={() => {
                   if (marqueeJustCompleted.current) {
                     marqueeJustCompleted.current = false;
                     return;
                   }
-                  setSelectedIds(new Set());
+                  clearSelection();
                 }}
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
                 onEndReached={handleEndReached}
                 onKeyboardSelect={handleKeyboardSelect}
-                onMarqueeSelect={handleMarqueeSelect}
+                onMarqueeSelect={wrappedMarqueeSelect}
                 onSelect={handleSelect}
                 onSortChange={handleSortChange}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
+                routeKey={routeKey}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
                 sort={sortField}
@@ -1207,7 +1251,7 @@ function HomePage() {
                   setAddToAlbumIds(Array.from(selectedIds));
                   setAddToAlbumOpen(true);
                 }}
-                onClearSelection={() => setSelectedIds(new Set())}
+                onClearSelection={clearSelection}
                 onConvert={() => setConvertDialogOpen(true)}
                 onDelete={handleDeleteSelected}
                 onExport={handleExportSelected}
@@ -1224,7 +1268,7 @@ function HomePage() {
                       mode: "duel",
                       photoIds: ids,
                     })) as { id: number };
-                    setSelectedIds(new Set());
+                    clearSelection();
                     navigate({
                       to: "/cull/$sessionId",
                       params: { sessionId: String(session.id) },
@@ -1270,17 +1314,19 @@ function HomePage() {
             </div>
             <PhotoDetailPanel
               onClose={() => {
-                setDetailDismissed(true);
-                setDetailPhoto(null);
-                setSelectedIds(new Set());
+                dismissDetail();
+                clearSelection();
               }}
-              onNavigate={handleDetailNavigate}
+              onNavigate={navigateDetail}
               onOpenExplorer={handleOpenExplorer}
               photo={detailPhoto}
             />
           </div>
         ) : (
-          <Welcome onAddFolder={handleAddFolder} disabled={importPhase !== "idle"} />
+          <Welcome
+            disabled={filter.importPhase !== "idle"}
+            onAddFolder={filter.handleAddFolder}
+          />
         )}
         <StatusBar
           aiStatus={aiStatus ?? null}
@@ -1295,8 +1341,7 @@ function HomePage() {
             setLightboxIndex(-1);
             if (currentIndex >= 0 && currentIndex < photos.length) {
               const photo = photos[currentIndex];
-              setSelectedIds(new Set([photo.id]));
-              setLastClickedIdx(currentIndex);
+              handleKeyboardSelect(photo.id);
             }
           }}
           open={lightboxIndex >= 0}
@@ -1312,7 +1357,7 @@ function HomePage() {
               if (next < 0 || next >= photos.length) {
                 return prev;
               }
-              setSelectedIds(new Set([photos[next].id]));
+              handleKeyboardSelect(photos[next].id);
               return next;
             });
           }}
@@ -1322,6 +1367,44 @@ function HomePage() {
       <PhotoContextMenu
         menu={ctxMenu}
         onAddToAlbum={handleAddToAlbum}
+        onBatchAddToAlbum={() => {
+          setAddToAlbumIds(Array.from(selectedIds));
+          setAddToAlbumOpen(true);
+          setCtxMenu((prev) => ({ ...prev, open: false }));
+        }}
+        onBatchDelete={handleDeleteSelected}
+        onBatchExport={handleExportSelected}
+        onBatchShare={handleShareSelected}
+        onBatchToggleFavorite={() => {
+          const ids = [...selectedIds];
+          const allFav = ids.every(
+            (id) => photos.find((p) => p.id === id)?.isFavorite
+          );
+          const newVal = !allFav;
+          ipc.client.photos
+            .toggleFavorite({ ids, favorite: newVal })
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ["photos"] });
+              toast.success(
+                newVal
+                  ? t("toastFavoriteAddedCount", { count: ids.length })
+                  : t("toastFavoriteRemoved"),
+                {
+                  action: {
+                    label: t("toastUndo"),
+                    onClick: async () => {
+                      await ipc.client.photos.toggleFavorite({
+                        ids,
+                        favorite: allFav,
+                      });
+                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                    },
+                  },
+                }
+              );
+            });
+        }}
+        onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
@@ -1333,7 +1416,7 @@ function HomePage() {
       <BatchRenameDialog
         onClose={() => {
           setRenameDialogOpen(false);
-          setSelectedIds(new Set());
+          clearSelection();
         }}
         onRename={handleRenameSelected}
         open={renameDialogOpen}
@@ -1350,7 +1433,7 @@ function HomePage() {
       <FormatConvertDialog
         onClose={() => {
           setConvertDialogOpen(false);
-          setSelectedIds(new Set());
+          clearSelection();
         }}
         onConvert={handleConvertSelected}
         open={convertDialogOpen}
@@ -1385,7 +1468,7 @@ function HomePage() {
         onConfirm={executeDelete}
         open={deleteConfirmOpen}
       />
-    </div>
+    </>
   );
 }
 
