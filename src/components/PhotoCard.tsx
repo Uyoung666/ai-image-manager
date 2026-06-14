@@ -4,6 +4,7 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoCardProps {
   deleting?: boolean;
+  dominantColors?: string | null;
   filename: string;
   getDragIds?: (id: number) => number[];
   height: number;
@@ -20,21 +21,16 @@ interface PhotoCardProps {
   width: number;
 }
 
-const MAX_IMAGE_LOAD_CACHE = 500;
-const imageLoadState = new Map<string, "loaded" | "error">();
-
-function setImageLoadState(key: string, value: "loaded" | "error") {
-  imageLoadState.set(key, value);
-  if (imageLoadState.size > MAX_IMAGE_LOAD_CACHE) {
-    const oldest = imageLoadState.keys().next().value;
-    if (oldest) {
-      imageLoadState.delete(oldest);
-    }
-  }
-}
-
-export function clearImageLoadCache() {
-  imageLoadState.clear();
+/**
+ * 向后兼容的无操作函数。
+ *
+ * 旧版 PhotoCard 使用自定义 imageLoadState 缓存来控制图片加载状态；
+ * 重构后完全依赖浏览器原生 HTTP 缓存和 <img> 生命周期。
+ * 保留此导出以避免现有 import 语句编译报错。
+ * 缓存刷新由 HTTP Cache-Control 头和 TanStack Query 的数据失效机制接管。
+ */
+export function clearImageLoadCache(): void {
+  // no-op：缓存由浏览器原生层和 QueryClient 管理
 }
 
 function HighlightText({ text, query }: { text: string; query?: string }) {
@@ -60,6 +56,7 @@ export const PhotoCard = memo(function PhotoCard({
   id,
   path,
   thumbnailPath,
+  dominantColors,
   filename,
   width,
   height,
@@ -74,15 +71,40 @@ export const PhotoCard = memo(function PhotoCard({
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
+
+  // ── URL 计算 ──────────────────────────────────────────────────────
+  // toLocalMediaUrl 现在是同步函数（端口由 preload 在窗口创建时注入），
+  // URL 在组件生命周期内稳定不变。
   const url = useMemo(
     () =>
       thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path),
     [thumbnailPath, path]
   );
-  const [loaded, setLoaded] = useState(
-    () => imageLoadState.get(url) === "loaded"
-  );
-  const [error, setError] = useState(() => imageLoadState.get(url) === "error");
+
+  // ── 原生图片加载状态 ──────────────────────────────────────────────
+  // 完全依赖浏览器 <img> 的 onLoad / onError 回调，
+  // 不再维护自定义 LRU 缓存、Blob URL 池或预加载状态机。
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  // ── 主色提取 ──────────────────────────────────────────────────────
+  const bgColor = useMemo(() => {
+    if (!dominantColors) {
+      return undefined;
+    }
+    try {
+      const colors: { hex: string; weight: number }[] =
+        JSON.parse(dominantColors);
+      if (colors.length > 0) {
+        return colors[0].hex;
+      }
+    } catch {
+      /* corrupt JSON — fall back */
+    }
+    return undefined;
+  }, [dominantColors]);
+
+  // ── 事件处理 ──────────────────────────────────────────────────────
   const starRef = useRef<HTMLButtonElement>(null);
 
   const handleDragStart = useCallback(
@@ -93,7 +115,6 @@ export const PhotoCard = memo(function PhotoCard({
         (window as any).electronAPI?.startDrag?.(path);
         return;
       }
-      // Use stable callback (reads selectedIds via ref) to avoid breaking memo
       const ids = getDragIds?.(id) ?? [id];
       e.dataTransfer.setData("application/x-photo-ids", JSON.stringify(ids));
       e.dataTransfer.effectAllowed = "move";
@@ -112,7 +133,6 @@ export const PhotoCard = memo(function PhotoCard({
     [id, path, getDragIds, t]
   );
 
-  // Stable callbacks to avoid breaking React.memo on PhotoCard
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       onClick(id, e);
@@ -137,11 +157,12 @@ export const PhotoCard = memo(function PhotoCard({
     [id, onClick, onDoubleClick]
   );
 
-  // Clamp extreme aspect ratios for visual consistency (P1-1)
+  // Clamp extreme aspect ratios for visual consistency
   const rawAspect = width && height ? width / height : 4 / 3;
   const aspectRatio = Math.max(0.6, Math.min(rawAspect, 3.0));
 
-  if (error) {
+  // ── 错误状态 ──────────────────────────────────────────────────────
+  if (imgError) {
     return (
       <div
         className="relative flex w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted"
@@ -168,9 +189,8 @@ export const PhotoCard = memo(function PhotoCard({
           className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20"
           onClick={(e) => {
             e.stopPropagation();
-            imageLoadState.delete(url);
-            setError(false);
-            setLoaded(false);
+            setImgError(false);
+            setImgLoaded(false);
           }}
           type="button"
         >
@@ -180,6 +200,7 @@ export const PhotoCard = memo(function PhotoCard({
     );
   }
 
+  // ── 正常渲染 ──────────────────────────────────────────────────────
   return (
     <div
       aria-selected={isSelected}
@@ -200,30 +221,39 @@ export const PhotoCard = memo(function PhotoCard({
       onDragStart={handleDragStart}
       onKeyDown={handleKeyDown}
       role="option"
-      style={{ aspectRatio }}
+      style={{
+        aspectRatio,
+        ...(bgColor ? { backgroundColor: bgColor } : {}),
+      }}
       tabIndex={0}
     >
-      {!loaded && (
+      {/* 骨架屏：图片未加载完成前显示 shimmer 动画 */}
+      {!imgLoaded && (
         <div className="absolute inset-0 animate-shimmer bg-muted">
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent" />
         </div>
       )}
+
+      {/*
+        原生 <img> — 浏览器内核全面接管：
+        - loading="lazy"：视口感知的延迟加载
+        - decoding="async"：异步解码，不阻塞主线程
+        - 纹理上传、GPU 解码、内存释放全部由 Chromium 管理
+      */}
       <img
         alt={filename}
-        className={`h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105 ${
-          loaded
+        className={`h-full w-full object-cover transition-all duration-300 ease-out group-hover:scale-105 ${
+          imgLoaded
             ? "scale-100 opacity-100 blur-0"
             : "scale-[1.02] opacity-0 blur-[6px]"
         }`}
         decoding="async"
         loading="lazy"
         onError={() => {
-          setImageLoadState(url, "error");
-          setError(true);
+          setImgError(true);
         }}
         onLoad={() => {
-          setImageLoadState(url, "loaded");
-          setLoaded(true);
+          setImgLoaded(true);
         }}
         src={url}
       />
@@ -260,7 +290,6 @@ export const PhotoCard = memo(function PhotoCard({
             }
             onToggleFavorite(id);
           }}
-          ref={starRef}
         >
           <svg
             className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
