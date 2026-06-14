@@ -96,7 +96,7 @@ ONNX-based detection and feature extraction. Automatic identity clustering, merg
 2. **GPU Setup** — one-click DirectML detection; enable for 6.6× faster face detection
 3. **Complete** — language auto-detected from your system (Chinese/English), AI models pre-bundled in the installer
 
-To re-detect GPU or change settings later: **Settings → GPU Acceleration**. To switch model mirror: **Settings → AI Model Mirror** (use `hf-mirror.com` in China).
+To re-detect GPU or change settings later: **Settings → GPU Acceleration**.
 
 ---
 

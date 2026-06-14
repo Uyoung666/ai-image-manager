@@ -50,7 +50,7 @@ Imports run through a background queue — drag in a folder and continue browsin
 
 AI vector embedding starts automatically after import. For manual control, use the sidebar AI indexing controls.
 
-**Note**: AI models are pre-bundled in the installer — no download needed on first launch. To update models or switch mirrors, go to **Settings → AI Model Mirror** (use hf-mirror.com in China).
+**Note**: AI models are pre-bundled in the installer — no download needed on first launch.
 
 ---
 
@@ -150,12 +150,9 @@ AI indexing uses a CLIP model to convert photos into vector embeddings, enabling
 | **In Progress** | Shows progress bar with pause/resume controls |
 | **Complete** | Shows "Index New Photos" button for incremental indexing |
 
-### Mirror Settings
+### Bundled Models
 
-AI models are pre-bundled in the installer (no download needed on first launch). To update models or resolve download issues:
-1. Go to **Settings → AI Model Mirror Settings**
-2. Switch to `hf-mirror.com (Recommended)` or `modelscope.cn`
-3. Save
+AI models are pre-bundled in the installer — no download or network access required on first launch.
 
 ---
 
@@ -394,10 +391,6 @@ Deleted photos go to the trash and are kept for **30 days** before automatic per
 - Change where app data is stored (database, thumbnails, AI models)
 - Migration progress is displayed; do not close the app during migration
 
-### AI Model Mirror
-- Auto-detect / hf-mirror.com / modelscope.cn / Official / Custom
-- Users in China should switch to hf-mirror.com
-
 ### GPU Acceleration
 
 - **Onboarding Wizard**: Step 2 of the first-run wizard — one-click DirectML detection and enable
@@ -472,7 +465,7 @@ AI indexing may not be complete. Check the sidebar AI progress bar — semantic 
 
 ### AI model download failed?
 
-AI models are pre-bundled in the installer — no download needed on first launch. If you need to update models or downloads fail, go to **Settings → AI Model Mirror** and switch to `hf-mirror.com (Recommended)`. If that also fails, try a custom mirror URL.
+AI models are pre-bundled in the installer — no download needed on first launch. If model files are corrupted or accidentally deleted, reinstall the application to restore them.
 
 ### What happens when I move photo files?
 
