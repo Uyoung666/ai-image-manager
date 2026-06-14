@@ -6,8 +6,10 @@ export interface EmbedProgress {
   downloadPercent?: number;
   error?: string;
   loadingStartedAt?: number | null;
-  phase: "idle" | "loading" | "embedding" | "complete" | "error";
+  phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
   processed: number;
+  /** 非空时表示这是一次自动修复引起的重新索引，值为修复原因 */
+  repairReason?: string;
   total: number;
 }
 
@@ -25,6 +27,13 @@ export let isVectorDBReady = false;
 export let embeddingModel: EmbeddingModel | null = null;
 export let isEmbedding = false;
 export let poolCancelled = false;
+export let isPaused = false;
+/** 本次嵌入会话中已成功写入的 photo_id 集合，用于取消时精确回滚 */
+export let writtenPhotoIds: Set<number> = new Set();
+/** 全局 AbortController，用于跨模块传递取消信号 */
+export let abortController: AbortController | null = null;
+/** 向量数据库是否在本次启动中由自动修复流程重建过 */
+export let wasAutoRepaired = false;
 export let currentProgress: EmbedProgress = {
   processed: 0,
   total: 0,
@@ -53,6 +62,32 @@ export function setIsEmbedding(v: boolean): void {
 }
 export function setPoolCancelled(v: boolean): void {
   poolCancelled = v;
+}
+export function setIsPaused(v: boolean): void {
+  isPaused = v;
+}
+export function setWrittenPhotoIds(ids: Set<number>): void {
+  writtenPhotoIds = ids;
+}
+export function addWrittenPhotoId(id: number): void {
+  writtenPhotoIds.add(id);
+}
+export function addWrittenPhotoIds(ids: number[]): void {
+  for (const id of ids) {
+    writtenPhotoIds.add(id);
+  }
+}
+export function getWrittenPhotoIds(): Set<number> {
+  return writtenPhotoIds;
+}
+export function setAbortController(c: AbortController | null): void {
+  abortController = c;
+}
+export function getAbortController(): AbortController | null {
+  return abortController;
+}
+export function setWasAutoRepaired(v: boolean): void {
+  wasAutoRepaired = v;
 }
 export function setCurrentProgress(p: EmbedProgress): void {
   currentProgress = p;

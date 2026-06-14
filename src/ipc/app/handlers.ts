@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { os } from "@orpc/server";
 import { app, autoUpdater } from "electron";
+import { getHttpServerPort } from "@/services/http-server";
 import { getUpdateState } from "@/services/update-state";
 
 export const currentPlatform = os.handler(() => {
@@ -45,4 +46,13 @@ export const checkForUpdates = os.handler(() => {
 
 export const getUpdateStatus = os.handler(() => {
   return getUpdateState();
+});
+
+/**
+ * 返回本地 HTTP 服务器当前监听的端口号。
+ * 前端可通过此接口获取动态分配的端口，用于构建 HTTP 图片 URL。
+ * 如果 HTTP 服务器尚未启动，返回 null。
+ */
+export const getHttpPort = os.handler(() => {
+  return getHttpServerPort();
 });

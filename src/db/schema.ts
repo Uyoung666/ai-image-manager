@@ -220,44 +220,58 @@ export const appSettings = sqliteTable("app_settings", {
     .$defaultFn(() => Date.now()),
 });
 
-export const faceVectors = sqliteTable("face_vectors", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  photoId: integer("photo_id")
-    .references(() => photos.id, { onDelete: "cascade" })
-    .notNull(),
-  faceIndex: integer("face_index").notNull().default(0),
-  bboxX: real("bbox_x").notNull(),
-  bboxY: real("bbox_y").notNull(),
-  bboxWidth: real("bbox_width").notNull(),
-  bboxHeight: real("bbox_height").notNull(),
-  confidence: real("confidence"),
-  embedding: text("embedding"),
-  vectorId: text("vector_id"),
-  isRejected: integer("is_rejected", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  createdAt: integer("created_at")
-    .notNull()
-    .$defaultFn(() => Date.now()),
-});
+export const faceVectors = sqliteTable(
+  "face_vectors",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    photoId: integer("photo_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    faceIndex: integer("face_index").notNull().default(0),
+    bboxX: real("bbox_x").notNull(),
+    bboxY: real("bbox_y").notNull(),
+    bboxWidth: real("bbox_width").notNull(),
+    bboxHeight: real("bbox_height").notNull(),
+    confidence: real("confidence"),
+    embedding: text("embedding"),
+    vectorId: text("vector_id"),
+    isRejected: integer("is_rejected", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    photoIdIdx: index("idx_face_vectors_photo_id").on(table.photoId),
+  })
+);
 
-export const faceIdentities = sqliteTable("face_identities", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name"),
-  representativePhotoId: integer("representative_photo_id").references(
-    () => photos.id,
-    { onDelete: "set null" }
-  ),
-  representativeVectorId: text("representative_vector_id"),
-  centroidEmbedding: text("centroid_embedding"),
-  faceCount: integer("face_count").notNull().default(0),
-  isConfirmed: integer("is_confirmed", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  createdAt: integer("created_at")
-    .notNull()
-    .$defaultFn(() => Date.now()),
-});
+export const faceIdentities = sqliteTable(
+  "face_identities",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name"),
+    representativePhotoId: integer("representative_photo_id").references(
+      () => photos.id,
+      { onDelete: "set null" }
+    ),
+    representativeVectorId: text("representative_vector_id"),
+    centroidEmbedding: text("centroid_embedding"),
+    faceCount: integer("face_count").notNull().default(0),
+    isConfirmed: integer("is_confirmed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    repPhotoIdIdx: index("idx_face_identities_rep_photo").on(
+      table.representativePhotoId
+    ),
+  })
+);
 
 export const faceIdentityMembers = sqliteTable(
   "face_identity_members",
@@ -275,6 +289,7 @@ export const faceIdentityMembers = sqliteTable(
       table.identityId,
       table.faceVectorId
     ),
+    faceVectorIdIdx: index("idx_face_id_member_fv_id").on(table.faceVectorId),
   })
 );
 

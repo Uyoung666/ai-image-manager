@@ -40,9 +40,7 @@ export const getTags = os
     const pairs = (
       folderId
         ? baseQuery
-            .where(
-              and(isNull(photos.deletedAt), eq(photos.folderId, folderId))
-            )
+            .where(and(isNull(photos.deletedAt), eq(photos.folderId, folderId)))
             .all()
         : baseQuery.where(isNull(photos.deletedAt)).all()
     ) as TagPhotoRow[];

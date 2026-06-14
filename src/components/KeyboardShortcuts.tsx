@@ -1,10 +1,10 @@
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useTranslation } from "react-i18next";
 
 interface Shortcut {
   keyLabels: string[];
@@ -13,30 +13,126 @@ interface Shortcut {
 }
 
 const SHORTCUTS: Shortcut[] = [
-  { sectionKey: "shortcutBrowse", keyLabels: ["Space"], labelKey: "shortcutQuickPreview" },
-  { sectionKey: "shortcutBrowse", keyLabels: ["←", "→"], labelKey: "shortcutPreviewNavigate" },
-  { sectionKey: "shortcutBrowse", keyLabels: ["Esc"], labelKey: "shortcutClosePanels" },
-  { sectionKey: "shortcutBrowse", keyLabels: ["doubleClick"], labelKey: "shortcutOpenLightbox" },
-  { sectionKey: "shortcutSelect", keyLabels: ["click"], labelKey: "shortcutSelectPhoto" },
-  { sectionKey: "shortcutSelect", keyLabels: ["Ctrl", "click"], labelKey: "shortcutMultiSelect" },
-  { sectionKey: "shortcutSelect", keyLabels: ["Shift", "click"], labelKey: "shortcutRangeSelect" },
-  { sectionKey: "shortcutSelect", keyLabels: ["Ctrl", "A"], labelKey: "shortcutSelectAll" },
-  { sectionKey: "shortcutActions", keyLabels: ["Delete"], labelKey: "shortcutDeleteSelected" },
-  { sectionKey: "shortcutActions", keyLabels: ["F2"], labelKey: "shortcutRename" },
-  { sectionKey: "shortcutActions", keyLabels: ["Ctrl", "Shift", "E"], labelKey: "shortcutExport" },
-  { sectionKey: "shortcutActions", keyLabels: ["Ctrl", "Shift", "C"], labelKey: "shortcutConvert" },
-  { sectionKey: "shortcutActions", keyLabels: ["F"], labelKey: "shortcutToggleFavorite" },
-  { sectionKey: "shortcutActions", keyLabels: ["I"], labelKey: "shortcutToggleDetail" },
-  { sectionKey: "shortcutActions", keyLabels: ["rightClick"], labelKey: "shortcutContextMenu" },
-  { sectionKey: "shortcutInterface", keyLabels: ["["], labelKey: "shortcutToggleSidebar" },
-  { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "K"], labelKey: "shortcutGlobalSearch" },
-  { sectionKey: "shortcutInterface", keyLabels: ["?"], labelKey: "shortcutHelp" },
-  { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "Shift", "F"], labelKey: "shortcutGlobalFocusSearch" },
-  { sectionKey: "shortcutInterface", keyLabels: ["Ctrl", "Shift", "H"], labelKey: "shortcutGlobalHideWindow" },
-  { sectionKey: "shortcutLightbox", keyLabels: ["←", "→"], labelKey: "shortcutLightboxNavigate" },
-  { sectionKey: "shortcutLightbox", keyLabels: ["Space"], labelKey: "shortcutSlideshow" },
-  { sectionKey: "shortcutLightbox", keyLabels: ["I"], labelKey: "shortcutLightboxInfo" },
-  { sectionKey: "shortcutLightbox", keyLabels: ["Esc"], labelKey: "shortcutExitLightbox" },
+  {
+    sectionKey: "shortcutBrowse",
+    keyLabels: ["Space"],
+    labelKey: "shortcutQuickPreview",
+  },
+  {
+    sectionKey: "shortcutBrowse",
+    keyLabels: ["←", "→"],
+    labelKey: "shortcutPreviewNavigate",
+  },
+  {
+    sectionKey: "shortcutBrowse",
+    keyLabels: ["Esc"],
+    labelKey: "shortcutClosePanels",
+  },
+  {
+    sectionKey: "shortcutBrowse",
+    keyLabels: ["doubleClick"],
+    labelKey: "shortcutOpenLightbox",
+  },
+  {
+    sectionKey: "shortcutSelect",
+    keyLabels: ["click"],
+    labelKey: "shortcutSelectPhoto",
+  },
+  {
+    sectionKey: "shortcutSelect",
+    keyLabels: ["Ctrl", "click"],
+    labelKey: "shortcutMultiSelect",
+  },
+  {
+    sectionKey: "shortcutSelect",
+    keyLabels: ["Shift", "click"],
+    labelKey: "shortcutRangeSelect",
+  },
+  {
+    sectionKey: "shortcutSelect",
+    keyLabels: ["Ctrl", "A"],
+    labelKey: "shortcutSelectAll",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["Delete"],
+    labelKey: "shortcutDeleteSelected",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["F2"],
+    labelKey: "shortcutRename",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["Ctrl", "Shift", "E"],
+    labelKey: "shortcutExport",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["Ctrl", "Shift", "C"],
+    labelKey: "shortcutConvert",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["F"],
+    labelKey: "shortcutToggleFavorite",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["I"],
+    labelKey: "shortcutToggleDetail",
+  },
+  {
+    sectionKey: "shortcutActions",
+    keyLabels: ["rightClick"],
+    labelKey: "shortcutContextMenu",
+  },
+  {
+    sectionKey: "shortcutInterface",
+    keyLabels: ["["],
+    labelKey: "shortcutToggleSidebar",
+  },
+  {
+    sectionKey: "shortcutInterface",
+    keyLabels: ["Ctrl", "K"],
+    labelKey: "shortcutGlobalSearch",
+  },
+  {
+    sectionKey: "shortcutInterface",
+    keyLabels: ["?"],
+    labelKey: "shortcutHelp",
+  },
+  {
+    sectionKey: "shortcutInterface",
+    keyLabels: ["Ctrl", "Shift", "F"],
+    labelKey: "shortcutGlobalFocusSearch",
+  },
+  {
+    sectionKey: "shortcutInterface",
+    keyLabels: ["Ctrl", "Shift", "H"],
+    labelKey: "shortcutGlobalHideWindow",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["←", "→"],
+    labelKey: "shortcutLightboxNavigate",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["Space"],
+    labelKey: "shortcutSlideshow",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["I"],
+    labelKey: "shortcutLightboxInfo",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["Esc"],
+    labelKey: "shortcutExitLightbox",
+  },
 ];
 
 interface KeyboardShortcutsProps {
@@ -63,10 +159,7 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
       }}
       open={open}
     >
-      <DialogContent
-        className="max-h-[80vh] overflow-y-auto"
-        size="lg"
-      >
+      <DialogContent className="max-h-[80vh] overflow-y-auto" size="lg">
         <DialogHeader>
           <DialogTitle>{t("keyboardShortcutsTitle")}</DialogTitle>
         </DialogHeader>

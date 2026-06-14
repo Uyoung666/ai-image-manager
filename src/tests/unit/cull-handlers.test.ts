@@ -20,7 +20,10 @@ function computeElo(
   return { newRatingA, newRatingB };
 }
 
-const PK_MODE_CONFIG: Record<string, { minComparisons: number; allowRecompare: boolean; similarityWeight: number }> = {
+const PK_MODE_CONFIG: Record<
+  string,
+  { minComparisons: number; allowRecompare: boolean; similarityWeight: number }
+> = {
   quick: { minComparisons: 5, allowRecompare: false, similarityWeight: 0.3 },
   standard: { minComparisons: 8, allowRecompare: true, similarityWeight: 0.5 },
   fine: { minComparisons: 12, allowRecompare: true, similarityWeight: 0.7 },
@@ -70,8 +73,12 @@ describe("PK_MODE_CONFIG", () => {
   });
 
   it("quick has lowest minComparisons", () => {
-    expect(PK_MODE_CONFIG.quick.minComparisons).toBeLessThan(PK_MODE_CONFIG.standard.minComparisons);
-    expect(PK_MODE_CONFIG.standard.minComparisons).toBeLessThan(PK_MODE_CONFIG.fine.minComparisons);
+    expect(PK_MODE_CONFIG.quick.minComparisons).toBeLessThan(
+      PK_MODE_CONFIG.standard.minComparisons
+    );
+    expect(PK_MODE_CONFIG.standard.minComparisons).toBeLessThan(
+      PK_MODE_CONFIG.fine.minComparisons
+    );
   });
 
   it("quick disallows recompare", () => {

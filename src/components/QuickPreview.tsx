@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  PreviewContextMenu,
+  type PreviewMenuState,
+} from "@/components/PreviewContextMenu";
+import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -30,6 +35,12 @@ export function QuickPreview({
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
+  const [previewMenu, setPreviewMenu] = useState<PreviewMenuState>({
+    open: false,
+    photoPath: null,
+    x: 0,
+    y: 0,
+  });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const scaleRef = useRef(1);
@@ -124,11 +135,14 @@ export function QuickPreview({
   }, []);
 
   const dateStr = photo.fileDate
-    ? new Date(photo.fileDate).toLocaleDateString(getDateLocale(i18n.language), {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+    ? new Date(photo.fileDate).toLocaleDateString(
+        getDateLocale(i18n.language),
+        {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }
+      )
     : null;
 
   // 当旋转90度或270度时，宽高需要交换，调整最大尺寸以适应屏幕
@@ -148,7 +162,9 @@ export function QuickPreview({
       >
         {imgError ? (
           <div className="flex flex-col items-center gap-3 rounded-[8px] bg-muted/20 p-12">
-            <span className="text-[14px] text-white/60">{t("cullImageLoadError")}</span>
+            <span className="text-[14px] text-white/60">
+              {t("cullImageLoadError")}
+            </span>
             <button
               className="rounded-[6px] bg-white/10 px-3 py-1.5 text-[12px] text-white/80 hover:bg-white/20"
               onClick={() => {
@@ -164,9 +180,22 @@ export function QuickPreview({
           <img
             alt={photo.filename}
             className={`rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"} ${scale > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-            draggable={false}
+            draggable
             key={srcKey}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setPreviewMenu({
+                open: true,
+                photoPath: photo.path,
+                x: e.clientX,
+                y: e.clientY,
+              });
+            }}
             onDoubleClick={handleDoubleClick}
+            onDragStart={(e) => {
+              e.preventDefault();
+              (window as any).electronAPI?.startDrag?.(photo.path);
+            }}
             onError={() => setImgError(true)}
             onLoad={() => setLoaded(true)}
             onMouseDown={handleMouseDown}
@@ -178,7 +207,7 @@ export function QuickPreview({
             }}
           />
         )}
-        {!loaded && !imgError && (
+        {!(loaded || imgError) && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           </div>
@@ -220,6 +249,13 @@ export function QuickPreview({
           {t("quickPreviewHelp")}
         </div>
       </div>
+      <PreviewContextMenu
+        menu={previewMenu}
+        onClose={() => setPreviewMenu((prev) => ({ ...prev, open: false }))}
+        onOpenExplorer={async (path) => {
+          await ipc.client.shell.openInExplorer({ path });
+        }}
+      />
     </div>
   );
 }

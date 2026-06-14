@@ -18,14 +18,17 @@ function benchmarkDoubleCall() {
   // Simulate: each "comparison" triggers loadPair twice (old) vs once (new)
   function simulateOldBehavior() {
     let callCount = 0;
-    const loadPair = () => { callCount++; return Promise.resolve(); };
-    let loadPairRef = loadPair;
+    const loadPair = () => {
+      callCount++;
+      return Promise.resolve();
+    };
+    const loadPairRef = loadPair;
 
     // Old code: useEffect(() => { loadPair(); }, [loadPair])  ← auto fires
     // + handlePick → loadPairRef.current()  ← manual fires
     for (let i = 0; i < ITERATIONS; i++) {
-      loadPair();           // Auto-trigger from effect
-      loadPairRef();        // Manual trigger from handlePick
+      loadPair(); // Auto-trigger from effect
+      loadPairRef(); // Manual trigger from handlePick
     }
     return callCount;
   }
@@ -33,13 +36,19 @@ function benchmarkDoubleCall() {
   function simulateNewBehavior() {
     let callCount = 0;
     let called = false;
-    const loadPair = () => { callCount++; return Promise.resolve(); };
-    let loadPairRef = loadPair;
+    const loadPair = () => {
+      callCount++;
+      return Promise.resolve();
+    };
+    const loadPairRef = loadPair;
 
     // New code: only call once (effect guarded by initialLoadCalled ref)
     for (let i = 0; i < ITERATIONS; i++) {
-      if (!called) { loadPair(); called = true; }  // Auto only first time
-      loadPairRef();        // Manual trigger from handlePick
+      if (!called) {
+        loadPair();
+        called = true;
+      } // Auto only first time
+      loadPairRef(); // Manual trigger from handlePick
     }
     return callCount;
   }
@@ -47,14 +56,22 @@ function benchmarkDoubleCall() {
   const oldCalls = simulateOldBehavior();
   const newCalls = simulateNewBehavior();
 
-  console.log(`  旧行为: ${ITERATIONS}次比较 → ${oldCalls}次 IPC (${oldCalls / ITERATIONS}x/次)`);
-  console.log(`  新行为: ${ITERATIONS}次比较 → ${newCalls}次 IPC (${newCalls / ITERATIONS}x/次)`);
-  console.log(`  减少:   ${oldCalls - newCalls}次冗余调用 (${((1 - newCalls / oldCalls) * 100).toFixed(0)}%)`);
+  console.log(
+    `  旧行为: ${ITERATIONS}次比较 → ${oldCalls}次 IPC (${oldCalls / ITERATIONS}x/次)`
+  );
+  console.log(
+    `  新行为: ${ITERATIONS}次比较 → ${newCalls}次 IPC (${newCalls / ITERATIONS}x/次)`
+  );
+  console.log(
+    `  减少:   ${oldCalls - newCalls}次冗余调用 (${((1 - newCalls / oldCalls) * 100).toFixed(0)}%)`
+  );
 
   // Estimate real-world time savings (each IPC ~50-100ms round-trip)
   const savedCalls = oldCalls - newCalls;
   const savedMs = savedCalls * 75;
-  console.log(`  ⏱ 预计节省: ~${(savedMs / 1000).toFixed(1)}秒 (以75ms/IPC估算)`);
+  console.log(
+    `  ⏱ 预计节省: ~${(savedMs / 1000).toFixed(1)}秒 (以75ms/IPC估算)`
+  );
   console.log(`  👤 用户感知: PK 筛选时每次按键响应对手切换，不再有"闪一下"`);
 
   return { oldCalls, newCalls, savedCalls };
@@ -68,22 +85,26 @@ function benchmarkOrphanCleanup() {
   console.log("\n📊 测试2: cleanupOrphanedRecords 同步 vs 异步");
   console.log("═".repeat(60));
 
-  const PHOTO_COUNTS = [1000, 5000, 10000, 50000, 100000];
+  const PHOTO_COUNTS = [1000, 5000, 10_000, 50_000, 100_000];
 
   // Simulate fs.existsSync cost (typically ~0.02ms per call on SSD, ~0.5ms on HDD)
-  const COST_PER_CHECK_SSD = 0.02;  // ms
-  const COST_PER_CHECK_HDD = 0.5;   // ms
+  const COST_PER_CHECK_SSD = 0.02; // ms
+  const COST_PER_CHECK_HDD = 0.5; // ms
 
   console.log("  照片数量  │  SSD阻塞时间  │  HDD阻塞时间  │  修复后(异步)");
   console.log("  " + "─".repeat(56));
 
   for (const count of PHOTO_COUNTS) {
     const ssdTime = (count * COST_PER_CHECK_SSD).toFixed(0);
-    const hddTime = (count * COST_PER_CHECK_HDD / 1000).toFixed(1);
-    console.log(`  ${String(count).padStart(8)}  │  ${ssdTime}ms        │  ${hddTime}s          │  0ms (后台执行)`);
+    const hddTime = ((count * COST_PER_CHECK_HDD) / 1000).toFixed(1);
+    console.log(
+      `  ${String(count).padStart(8)}  │  ${ssdTime}ms        │  ${hddTime}s          │  0ms (后台执行)`
+    );
   }
 
-  console.log("\n  👤 用户感知: 10万照片的库，启动白屏从 ~5秒(SSD) / ~50秒(HDD) 降到 0秒");
+  console.log(
+    "\n  👤 用户感知: 10万照片的库，启动白屏从 ~5秒(SSD) / ~50秒(HDD) 降到 0秒"
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -112,14 +133,22 @@ function benchmarkFallbackStrategy() {
     // Simulate binary split until isolated bad photos
     let calls = 1; // initial batch
     function split(n, bad) {
-      if (n <= 1 || bad === 0) return;
+      if (n <= 1 || bad === 0) {
+        return;
+      }
       calls++;
       const left = Math.ceil(n / 2);
       const right = Math.floor(n / 2);
       const badLeft = Math.min(bad, left);
       const badRight = bad - badLeft;
-      if (badLeft > 0) { calls++; split(left, badLeft); }
-      if (badRight > 0) { calls++; split(right, badRight); }
+      if (badLeft > 0) {
+        calls++;
+        split(left, badLeft);
+      }
+      if (badRight > 0) {
+        calls++;
+        split(right, badRight);
+      }
     }
     split(batchSize, badCount);
     return calls;
@@ -138,9 +167,15 @@ function benchmarkFallbackStrategy() {
     const newIPC = simulateNewIPC(BATCH_SIZE, bad);
     const saved = oldIPC - newIPC;
     console.log(`  ${desc}:`);
-    console.log(`    旧(逐张降级): ${oldIPC}次IPC × ${IPC_COST_MS}ms = ${oldIPC * IPC_COST_MS}ms`);
-    console.log(`    新(二分拆分): ${newIPC}次IPC × ${IPC_COST_MS}ms = ${newIPC * IPC_COST_MS}ms`);
-    console.log(`    节省: ${saved}次调用 = ${saved * IPC_COST_MS}ms (${((saved / oldIPC) * 100).toFixed(0)}%)`);
+    console.log(
+      `    旧(逐张降级): ${oldIPC}次IPC × ${IPC_COST_MS}ms = ${oldIPC * IPC_COST_MS}ms`
+    );
+    console.log(
+      `    新(二分拆分): ${newIPC}次IPC × ${IPC_COST_MS}ms = ${newIPC * IPC_COST_MS}ms`
+    );
+    console.log(
+      `    节省: ${saved}次调用 = ${saved * IPC_COST_MS}ms (${((saved / oldIPC) * 100).toFixed(0)}%)`
+    );
   }
 
   console.log(`\n  👤 用户感知: 索引进度条不再"假死"数秒，始终保持匀速`);
@@ -166,7 +201,9 @@ function benchmarkSpotlightCache() {
   console.log(`  输入${KEYSTROKES}个字符:`);
   console.log(`  旧行为: ${oldIPC}次 IPC 调用`);
   console.log(`  新行为: ${newIPC}次 IPC 调用`);
-  console.log(`  减少:   ${oldIPC - newIPC}次 (${((1 - newIPC / oldIPC) * 100).toFixed(0)}%)`);
+  console.log(
+    `  减少:   ${oldIPC - newIPC}次 (${((1 - newIPC / oldIPC) * 100).toFixed(0)}%)`
+  );
 
   const IPC_COST = 50; // ms per IPC round-trip
   console.log(`  ⏱ 预计节省: ~${(oldIPC - newIPC) * IPC_COST}ms 总延迟`);
@@ -192,20 +229,24 @@ function benchmarkMemoStability() {
 
   console.log(`  可见卡片:  ${VISIBLE_CARDS}张`);
   console.log(`  选择操作:  ${SELECTIONS}次点击`);
-  console.log(`  旧行为: 每次选择 → 所有${VISIBLE_CARDS}张卡片的 onClick 都是新引用`);
+  console.log(
+    `  旧行为: 每次选择 → 所有${VISIBLE_CARDS}张卡片的 onClick 都是新引用`
+  );
   console.log(`          → React.memo 比较失败 → ${VISIBLE_CARDS}张全部重渲染`);
-  console.log(`  新行为: 每次选择 → 只有被选中的那张卡片的 onClick 是新引用`);
-  console.log(`          → React.memo 比较成功 → 49张跳过，1张重渲染`);
+  console.log("  新行为: 每次选择 → 只有被选中的那张卡片的 onClick 是新引用");
+  console.log("          → React.memo 比较成功 → 49张跳过，1张重渲染");
 
   const oldRerenders = VISIBLE_CARDS * SELECTIONS;
   const newRerenders = 1 * SELECTIONS; // only the changed card
   const saved = oldRerenders - newRerenders;
 
-  console.log(`\n  总重渲染次数:`);
+  console.log("\n  总重渲染次数:");
   console.log(`  旧: ${oldRerenders}次 (${VISIBLE_CARDS}张 × ${SELECTIONS}次)`);
   console.log(`  新: ${newRerenders}次 (只有变化的卡片)`);
-  console.log(`  减少: ${saved}次无意义渲染 (${((1 - newRerenders / oldRerenders) * 100).toFixed(0)}%)`);
-  console.log(`  👤 用户感知: 多选/切换选择时更跟手，低配机器上差异明显`);
+  console.log(
+    `  减少: ${saved}次无意义渲染 (${((1 - newRerenders / oldRerenders) * 100).toFixed(0)}%)`
+  );
+  console.log("  👤 用户感知: 多选/切换选择时更跟手，低配机器上差异明显");
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -230,11 +271,17 @@ function runAll() {
   console.log("");
   console.log("  优化项                          │  节省的调用/时间");
   console.log("  " + "─".repeat(55));
-  console.log(`  PK筛选: 消除双次IPC             │  ${r1.savedCalls}次调用 / ${(r1.savedCalls * 75 / 1000).toFixed(1)}秒`);
-  console.log(`  启动清理: 同步→异步             │  0ms阻塞 (原5-50秒)`);
-  console.log(`  人脸降级: 逐张→二分             │  ${r3.oldIPC - r3.newIPC}次IPC / 失败批次`);
-  console.log(`  Spotlight: 缓存静态数据         │  ${r4.oldIPC - r4.newIPC}次IPC / 每10次输入`);
-  console.log(`  PhotoCard: useCallback稳定化    │  减少98%无意义重渲染`);
+  console.log(
+    `  PK筛选: 消除双次IPC             │  ${r1.savedCalls}次调用 / ${((r1.savedCalls * 75) / 1000).toFixed(1)}秒`
+  );
+  console.log("  启动清理: 同步→异步             │  0ms阻塞 (原5-50秒)");
+  console.log(
+    `  人脸降级: 逐张→二分             │  ${r3.oldIPC - r3.newIPC}次IPC / 失败批次`
+  );
+  console.log(
+    `  Spotlight: 缓存静态数据         │  ${r4.oldIPC - r4.newIPC}次IPC / 每10次输入`
+  );
+  console.log("  PhotoCard: useCallback稳定化    │  减少98%无意义重渲染");
   console.log("");
   console.log("  💡 如果想在真实场景验证，可以：");
   console.log("     1. 打开 DevTools (Ctrl+Shift+I) → Performance 标签");

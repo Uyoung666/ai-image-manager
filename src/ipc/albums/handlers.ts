@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { albumPhotos, albums, photos } from "@/db/schema";
@@ -40,6 +40,53 @@ const ListAlbumsSchema = z.object({
   isSmart: z.boolean().optional(),
 });
 
+/**
+ * 刷新智能相册封面：评估规则 → 取匹配的第一张照片（按 fileDate DESC）
+ * 仅在封面需要变更时才写入数据库（当前封面不再匹配规则 或 当前封面为 null）
+ */
+function refreshSmartAlbumCover(albumId: number): void {
+  const db = getDatabase();
+  const album = db
+    .select({
+      coverPhotoId: albums.coverPhotoId,
+      smartRules: albums.smartRules,
+    })
+    .from(albums)
+    .where(and(eq(albums.id, albumId), eq(albums.isSmart, true)))
+    .get();
+
+  if (!album?.smartRules) {
+    return;
+  }
+
+  try {
+    const rules = JSON.parse(album.smartRules);
+    const photoIds = evaluateSmartAlbum(rules);
+
+    let newCoverId: number | null = null;
+    if (photoIds.length > 0) {
+      const firstPhoto = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
+        .orderBy(desc(photos.fileDate))
+        .limit(1)
+        .get();
+      newCoverId = firstPhoto?.id ?? null;
+    }
+
+    // 仅在封面需要变更时写入
+    if (newCoverId !== (album.coverPhotoId ?? null)) {
+      db.update(albums)
+        .set({ coverPhotoId: newCoverId })
+        .where(eq(albums.id, albumId))
+        .run();
+    }
+  } catch {
+    // 规则解析失败，跳过
+  }
+}
+
 export const listAlbums = os
   .input(ListAlbumsSchema)
   .handler(async ({ input }) => {
@@ -54,35 +101,51 @@ export const listAlbums = os
     }
     const list = query.all();
 
-    // Auto-assign covers for smart albums that have no cover yet
+    // 始终刷新智能相册封面（refreshSmartAlbumCover 内部做"仅变更时写入"短路）
     for (const album of list) {
-      if (album.isSmart && !album.coverPhotoId && album.smartRules) {
+      if (album.isSmart && album.smartRules) {
         try {
-          const rules = JSON.parse(album.smartRules);
-          const photoIds = evaluateSmartAlbum(rules);
-          if (photoIds.length > 0) {
-            const firstPhoto = db
-              .select({ id: photos.id })
-              .from(photos)
-              .where(inArray(photos.id, photoIds))
-              .orderBy(desc(photos.fileDate))
-              .limit(1)
-              .get();
-            if (firstPhoto) {
-              db.update(albums)
-                .set({ coverPhotoId: firstPhoto.id })
-                .where(eq(albums.id, album.id))
-                .run();
-              album.coverPhotoId = firstPhoto.id;
-            }
-          }
+          refreshSmartAlbumCover(album.id);
+          // 重新读取更新后的 coverPhotoId
+          const refreshed = db
+            .select({ coverPhotoId: albums.coverPhotoId })
+            .from(albums)
+            .where(eq(albums.id, album.id))
+            .get();
+          album.coverPhotoId = refreshed?.coverPhotoId ?? null;
         } catch {
           /* skip */
         }
       }
     }
 
-    return list;
+    // 批量查询封面缩略图路径，避免前端 N+1 查询
+    const coverIds = list
+      .filter((a) => a.coverPhotoId !== null)
+      .map((a) => a.coverPhotoId as number);
+
+    const coverThumbnailMap = new Map<number, string>();
+    if (coverIds.length > 0) {
+      const coverRows = db
+        .select({
+          id: photos.id,
+          thumbnailPath: photos.thumbnailPath,
+          path: photos.path,
+        })
+        .from(photos)
+        .where(inArray(photos.id, coverIds))
+        .all();
+      for (const row of coverRows) {
+        coverThumbnailMap.set(row.id, row.thumbnailPath || row.path);
+      }
+    }
+
+    return list.map((album) => ({
+      ...album,
+      coverThumbnailPath: album.coverPhotoId
+        ? (coverThumbnailMap.get(album.coverPhotoId) ?? null)
+        : null,
+    }));
   });
 
 export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
@@ -96,6 +159,14 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
   // Smart album: evaluate rules dynamically
   if (album.isSmart && album.smartRules) {
     try {
+      refreshSmartAlbumCover(album.id);
+      const refreshed = db
+        .select({ coverPhotoId: albums.coverPhotoId })
+        .from(albums)
+        .where(eq(albums.id, album.id))
+        .get();
+      album.coverPhotoId = refreshed?.coverPhotoId ?? null;
+
       const rules = JSON.parse(album.smartRules);
       const photoIds = evaluateSmartAlbum(rules);
       if (photoIds.length > 0) {
@@ -113,22 +184,12 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
             isIndexed: photos.isIndexed,
           })
           .from(photos)
-          .where(inArray(photos.id, photoIds))
+          .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
           .orderBy(desc(photos.fileDate))
           .all();
 
-        let coverPhotoId = album.coverPhotoId;
-        if (!coverPhotoId && photoRows.length > 0) {
-          coverPhotoId = photoRows[0].id;
-          db.update(albums)
-            .set({ coverPhotoId })
-            .where(eq(albums.id, input.id))
-            .run();
-        }
-
         return {
           ...album,
-          coverPhotoId,
           photos: photoRows,
           matchCount: photoIds.length,
         };
@@ -216,6 +277,11 @@ export const updateAlbum = os
       db.update(albums).set(updates).where(eq(albums.id, id)).run();
     }
 
+    // 智能相册规则变更后刷新封面
+    if (fields.smartRules !== undefined && existing.isSmart) {
+      refreshSmartAlbumCover(id);
+    }
+
     return db.select().from(albums).where(eq(albums.id, id)).get();
   });
 
@@ -279,10 +345,20 @@ export const addPhotosToAlbum = os
     }
 
     if (!album.coverPhotoId && addedCount > 0) {
-      db.update(albums)
-        .set({ coverPhotoId: photoIds[0] })
-        .where(eq(albums.id, albumId))
-        .run();
+      // 选择最新添加的照片作为封面
+      const bestCover = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
+        .orderBy(desc(photos.fileDate))
+        .limit(1)
+        .get();
+      if (bestCover) {
+        db.update(albums)
+          .set({ coverPhotoId: bestCover.id })
+          .where(eq(albums.id, albumId))
+          .run();
+      }
     }
 
     return { success: true, addedCount };
@@ -298,11 +374,13 @@ export const removePhotosFromAlbum = os
       return { success: true, removedCount: 0 };
     }
 
-    const idList = photoIds.join(", ");
     const result = db
       .delete(albumPhotos)
       .where(
-        sql`${albumPhotos.albumId} = ${albumId} AND ${albumPhotos.photoId} IN (${idList})`
+        and(
+          eq(albumPhotos.albumId, albumId),
+          inArray(albumPhotos.photoId, photoIds)
+        )
       )
       .run();
 
@@ -312,7 +390,8 @@ export const removePhotosFromAlbum = os
       const nextCover = db
         .select({ photoId: albumPhotos.photoId })
         .from(albumPhotos)
-        .where(eq(albumPhotos.albumId, albumId))
+        .innerJoin(photos, eq(albumPhotos.photoId, photos.id))
+        .where(and(eq(albumPhotos.albumId, albumId), isNull(photos.deletedAt)))
         .orderBy(asc(albumPhotos.sortOrder))
         .get();
       db.update(albums)
@@ -384,7 +463,7 @@ export const evaluateSmartAlbumHandler = os
         fileDate: photos.fileDate,
       })
       .from(photos)
-      .where(inArray(photos.id, photoIds))
+      .where(and(inArray(photos.id, photoIds), isNull(photos.deletedAt)))
       .orderBy(desc(photos.fileDate))
       .all();
 

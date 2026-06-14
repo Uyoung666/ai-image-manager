@@ -19,6 +19,12 @@ export function StatusBar({
   if (!aiStatus) {
     aiLabel = t("aiNotReady");
     aiColor = "text-foreground-tertiary";
+  } else if (aiStatus.lastError) {
+    aiLabel =
+      aiStatus.lastError.length > 40
+        ? `AI 索引失败: ${aiStatus.lastError.slice(0, 40)}…`
+        : `AI 索引失败: ${aiStatus.lastError}`;
+    aiColor = "text-red-500";
   } else if (aiStatus.isEmbedding) {
     const { processed, total } = aiStatus.embeddingProgress;
     const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
@@ -35,7 +41,9 @@ export function StatusBar({
   return (
     <div className="flex h-7 shrink-0 items-center justify-between border-border-subtle border-t bg-secondary px-4 text-[11px]">
       <div className="flex items-center gap-3 text-muted-foreground">
-        <span>{t("totalPhotosStatus", { count: totalPhotos.toLocaleString() })}</span>
+        <span>
+          {t("totalPhotosStatus", { count: totalPhotos.toLocaleString() })}
+        </span>
         {selectedCount > 0 && (
           <span className="text-foreground">
             {t("selectedPhotos", { count: selectedCount })}

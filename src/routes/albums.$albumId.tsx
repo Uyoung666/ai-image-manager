@@ -19,9 +19,12 @@ import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { ShareDialog } from "@/components/ShareDialog";
+import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
+import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
+import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-import type { Photo } from "@/types/photo";
 
 interface PhotoInfo {
   filename: string;
@@ -78,15 +81,14 @@ function AlbumDetailPage() {
   const navigate = useNavigate();
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const { markRouteDirty } = useScrollPosition();
+  const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
+  const routeKey = `album-${albumId}`;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const composingRef = useRef(false);
-  const [lastClickedIdx, setLastClickedIdx] = useState(-1);
-  const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
-  const [detailDismissed, setDetailDismissed] = useState(false);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
@@ -94,6 +96,8 @@ function AlbumDetailPage() {
     y: 0,
     photoId: null,
     photoPath: null,
+    isBatch: false,
+    selectionCount: 0,
   });
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
@@ -110,21 +114,32 @@ function AlbumDetailPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
 
+  const cancelledRef = useRef(false);
+
   const loadAlbum = useCallback(async () => {
     try {
       const result = await ipc.client.albums.getAlbum({
         id: Number(albumId),
       });
-      setAlbum(result as unknown as AlbumDetail);
+      if (!cancelledRef.current) {
+        setAlbum(result as unknown as AlbumDetail);
+        setLoading(false);
+      }
     } catch (err) {
-      console.error("[loadAlbum] failed:", err);
-    } finally {
-      setLoading(false);
+      if (!cancelledRef.current) {
+        console.error("[loadAlbum] failed:", err);
+        setLoading(false);
+      }
     }
   }, [albumId]);
 
   useEffect(() => {
+    cancelledRef.current = false;
+    setLoading(true);
     loadAlbum();
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [loadAlbum]);
 
   const photos = useMemo(() => {
@@ -148,51 +163,29 @@ function AlbumDetailPage() {
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
-  // Sync detailPhoto when single photo selected
-  useEffect(() => {
-    if (detailDismissed) {
-      return;
-    }
-    if (selectedIds.size === 1) {
-      const id = selectedIds.values().next().value as number;
-      const p = photos.find((ph) => ph.id === id);
-      if (p) {
-        setDetailPhoto(p as unknown as Photo);
-      }
-    } else if (selectedIds.size === 0 && detailPhoto) {
-      setDetailPhoto(null);
-    }
-  }, [selectedIds, photos, detailDismissed, detailPhoto]);
+  // 共享 Hooks：选中状态、详情面板
+  const {
+    selectedIds,
+    handleSelect,
+    handleKeyboardSelect,
+    handleMarqueeSelect,
+    clearSelection,
+    removeFromSelection,
+    selectAll: selectAllPhotos,
+  } = usePhotoSelection(routeKey, photos);
+  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
+    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
 
-  const handleSelect = useCallback(
-    (id: number, event: React.MouseEvent) => {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        const idx = photosRef.current.findIndex((p) => p.id === id);
-        if (event.shiftKey && lastClickedIdx >= 0 && idx >= 0) {
-          const [from, to] =
-            lastClickedIdx < idx
-              ? [lastClickedIdx, idx]
-              : [idx, lastClickedIdx];
-          for (let i = from; i <= to; i++) {
-            next.add(photosRef.current[i].id);
-          }
-        } else if (event.ctrlKey || event.metaKey) {
-          next.has(id) ? next.delete(id) : next.add(id);
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
-        } else {
-          next.clear();
-          next.add(id);
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
-        }
-        return next;
-      });
+  // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
+  const marqueeJustCompleted = useRef(false);
+  const wrappedMarqueeSelect = useCallback(
+    (ids: Set<number>) => {
+      handleMarqueeSelect(ids);
+      if (ids.size > 0) {
+        marqueeJustCompleted.current = true;
+      }
     },
-    [lastClickedIdx]
+    [handleMarqueeSelect]
   );
 
   const [allFavorite, setAllFavorite] = useState(false);
@@ -268,6 +261,8 @@ function AlbumDetailPage() {
   async function performDelete() {
     try {
       await ipc.client.photos.deletePhotos({ ids: confirmDeleteIds });
+      markRouteDirty(routeKey);
+      removeFromSelection(confirmDeleteIds);
       toast.success(
         t("deletedPhotosCount", { count: confirmDeleteIds.length })
       );
@@ -281,7 +276,7 @@ function AlbumDetailPage() {
             }
           : prev
       );
-      setSelectedIds(new Set());
+      clearSelection();
       queryClient.invalidateQueries({ queryKey: ["photos"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
@@ -302,18 +297,13 @@ function AlbumDetailPage() {
     setPendingDeleteIds([]);
     try {
       await ipc.client.photos.deletePhotos({ ids });
+      markRouteDirty(routeKey);
+      removeFromSelection(ids);
       setAlbum((prev) =>
         prev
           ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
           : prev
       );
-      setSelectedIds((prev) => {
-        const n = new Set(prev);
-        for (const id of ids) {
-          n.delete(id);
-        }
-        return n;
-      });
       queryClient.invalidateQueries({ queryKey: ["photos"] });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
@@ -332,10 +322,10 @@ function AlbumDetailPage() {
     });
     setAlbum((prev) =>
       prev
-        ? { ...prev, photos: prev.photos.filter((p) => !selectedIds.has(p.id)) }
+        ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
         : prev
     );
-    setSelectedIds(new Set());
+    clearSelection();
   }
 
   async function handleRemoveFromAlbum(id: number) {
@@ -349,11 +339,7 @@ function AlbumDetailPage() {
     setAlbum((prev) =>
       prev ? { ...prev, photos: prev.photos.filter((p) => p.id !== id) } : prev
     );
-    setSelectedIds((prev) => {
-      const n = new Set(prev);
-      n.delete(id);
-      return n;
-    });
+    removeFromSelection([id]);
     toast.success(t("toastRemovedFromAlbum"));
   }
 
@@ -388,50 +374,40 @@ function AlbumDetailPage() {
     }
   }, []);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    const card = (e.target as HTMLElement).closest(
-      "[data-photo-id]"
-    ) as HTMLElement | null;
-    if (!card) {
-      return;
-    }
-    const id = Number.parseInt(card.dataset.photoId || "", 10);
-    const path = card.dataset.photoPath || null;
-    if (!id) {
-      return;
-    }
-    e.preventDefault();
-    setCtxMenu({
-      open: true,
-      x: e.clientX,
-      y: e.clientY,
-      photoId: id,
-      photoPath: path,
-    });
-  }, []);
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const card = (e.target as HTMLElement).closest(
+        "[data-photo-id]"
+      ) as HTMLElement | null;
+      if (!card) {
+        return;
+      }
+      const id = Number.parseInt(card.dataset.photoId || "", 10);
+      const path = card.dataset.photoPath || null;
+      if (!id) {
+        return;
+      }
+      e.preventDefault();
+      const inSelection = selectedIds.has(id);
+      const isBatch = selectedIds.size > 1 && inSelection;
+      setCtxMenu({
+        open: true,
+        x: e.clientX,
+        y: e.clientY,
+        photoId: id,
+        photoPath: path,
+        isBatch,
+        selectionCount: isBatch ? selectedIds.size : 1,
+      });
+    },
+    [selectedIds]
+  );
 
   async function handleOpenExplorer(filePath: string) {
     await ipc.client.shell.openInExplorer({ path: filePath });
   }
 
-  function handleDetailNavigate(direction: "prev" | "next") {
-    if (!detailPhoto) {
-      return;
-    }
-    const currentIdx = photos.findIndex((p) => p.id === detailPhoto.id);
-    if (currentIdx < 0) {
-      return;
-    }
-    const nextIdx = direction === "prev" ? currentIdx - 1 : currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= photos.length) {
-      return;
-    }
-    const nextPhoto = photos[nextIdx];
-    setSelectedIds(new Set([nextPhoto.id]));
-    setLastClickedIdx(nextIdx);
-    setDetailDismissed(false);
-    setDetailPhoto(nextPhoto as unknown as Photo);
-  }
+  // handleDetailNavigate 由 usePhotoDetailPanel.navigateDetail 提供
 
   function handleAddToAlbum(id: number) {
     setAddToAlbumIds([id]);
@@ -531,7 +507,7 @@ function AlbumDetailPage() {
 
       if ((e.ctrlKey || e.metaKey) && e.key === "a") {
         e.preventDefault();
-        setSelectedIds(new Set(photos.map((p) => p.id)));
+        selectAllPhotos();
         return;
       }
 
@@ -577,7 +553,7 @@ function AlbumDetailPage() {
           return;
         }
         if (selectedIds.size > 0) {
-          setSelectedIds(new Set());
+          clearSelection();
           return;
         }
       }
@@ -637,16 +613,11 @@ function AlbumDetailPage() {
       if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (detailPhoto) {
-          setDetailDismissed(true);
-          setDetailPhoto(null);
-          setSelectedIds(new Set());
+          dismissDetail();
+          clearSelection();
         } else if (selectedIds.size === 1) {
-          setDetailDismissed(false);
           const id = selectedIds.values().next().value as number;
-          const p = photos.find((ph) => ph.id === id);
-          if (p) {
-            setDetailPhoto(p as unknown as Photo);
-          }
+          handleKeyboardSelect(id);
         }
       }
     }
@@ -661,22 +632,7 @@ function AlbumDetailPage() {
     detailPhoto,
   ]);
 
-  const handleKeyboardSelect = useCallback((id: number) => {
-    setSelectedIds(new Set([id]));
-    const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      setLastClickedIdx(idx);
-    }
-  }, []);
-
-  const marqueeJustCompleted = useRef(false);
-
-  const handleMarqueeSelect = useCallback((ids: Set<number>) => {
-    if (ids.size > 0) {
-      setSelectedIds(ids);
-      marqueeJustCompleted.current = true;
-    }
-  }, []);
+  // handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
 
   const handleSortChange = useCallback((s: SortField, o: SortOrder) => {
     setSortField(s);
@@ -690,7 +646,11 @@ function AlbumDetailPage() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div
+      className="flex h-full flex-col bg-background"
+      onDragOver={handleGlobalDragOver}
+      onDrop={handleGlobalDrop}
+    >
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
           <button
@@ -810,22 +770,24 @@ function AlbumDetailPage() {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-w-0 flex-1">
           <PhotoGrid
+            isPlaceholderData={loading}
             loading={loading}
             onBackgroundClick={() => {
               if (marqueeJustCompleted.current) {
                 marqueeJustCompleted.current = false;
                 return;
               }
-              setSelectedIds(new Set());
+              clearSelection();
             }}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardSelect}
-            onMarqueeSelect={handleMarqueeSelect}
+            onMarqueeSelect={wrappedMarqueeSelect}
             onSelect={handleSelect}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             photos={photos as any}
+            routeKey={routeKey}
             selectedIds={selectedIds}
             sort={sortField}
             sortOrder={sortOrder}
@@ -841,7 +803,7 @@ function AlbumDetailPage() {
               setAddToAlbumIds(Array.from(selectedIds));
               setAddToAlbumOpen(true);
             }}
-            onClearSelection={() => setSelectedIds(new Set())}
+            onClearSelection={clearSelection}
             onConvert={() => setConvertDialogOpen(true)}
             onDelete={handleDeleteSelected}
             onExport={handleExportSelected}
@@ -858,7 +820,7 @@ function AlbumDetailPage() {
                   mode: "duel",
                   photoIds: ids,
                 })) as { id: number };
-                setSelectedIds(new Set());
+                clearSelection();
                 navigate({
                   to: "/cull/$sessionId",
                   params: { sessionId: String(session.id) },
@@ -916,11 +878,10 @@ function AlbumDetailPage() {
         </div>
         <PhotoDetailPanel
           onClose={() => {
-            setDetailDismissed(true);
-            setDetailPhoto(null);
-            setSelectedIds(new Set());
+            dismissDetail();
+            clearSelection();
           }}
-          onNavigate={handleDetailNavigate}
+          onNavigate={navigateDetail}
           onOpenExplorer={handleOpenExplorer}
           photo={detailPhoto}
         />
@@ -944,7 +905,7 @@ function AlbumDetailPage() {
               if (next < 0 || next >= photos.length) {
                 return prev;
               }
-              setSelectedIds(new Set([photos[next].id]));
+              handleKeyboardSelect(photos[next].id);
               return next;
             });
           }}
@@ -955,6 +916,47 @@ function AlbumDetailPage() {
       <PhotoContextMenu
         menu={ctxMenu}
         onAddToAlbum={handleAddToAlbum}
+        onBatchAddToAlbum={() => {
+          setAddToAlbumIds(Array.from(selectedIds));
+          setAddToAlbumOpen(true);
+          setCtxMenu((prev) => ({ ...prev, open: false }));
+        }}
+        onBatchDelete={handleDeleteSelected}
+        onBatchExport={handleExportSelected}
+        onBatchRemoveFromAlbum={
+          album?.isSmart ? undefined : () => handleRemoveSelected()
+        }
+        onBatchShare={handleShareSelected}
+        onBatchToggleFavorite={() => {
+          const ids = [...selectedIds];
+          const allFav = ids.every(
+            (id) => (photos as any[]).find((p) => p.id === id)?.isFavorite
+          );
+          const newVal = !allFav;
+          ipc.client.photos
+            .toggleFavorite({ ids, favorite: newVal })
+            .then(() => {
+              queryClient.invalidateQueries({ queryKey: ["photos"] });
+              toast.success(
+                newVal
+                  ? t("toastFavoriteAddedCount", { count: ids.length })
+                  : t("toastFavoriteRemoved"),
+                {
+                  action: {
+                    label: t("toastUndo"),
+                    onClick: async () => {
+                      await ipc.client.photos.toggleFavorite({
+                        ids,
+                        favorite: allFav,
+                      });
+                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                    },
+                  },
+                }
+              );
+            });
+        }}
+        onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
@@ -986,7 +988,7 @@ function AlbumDetailPage() {
       <BatchRenameDialog
         onClose={() => {
           setRenameDialogOpen(false);
-          setSelectedIds(new Set());
+          clearSelection();
         }}
         onRename={handleRenameSelected}
         open={renameDialogOpen}

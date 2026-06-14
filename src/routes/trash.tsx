@@ -1,9 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { usePhotoSelection } from "@/hooks/usePhotoSelection";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -12,6 +14,8 @@ interface DeletedPhoto {
   deletedAt: number | null;
   filename: string;
   fileSize: number | null;
+  folderId: number | null;
+  folderName: string | null;
   height: number | null;
   id: number;
   path: string;
@@ -22,13 +26,43 @@ interface DeletedPhoto {
 function TrashPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const routeKey = "trash";
   const [photos, setPhotos] = useState<DeletedPhoto[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const {
+    selectedIds,
+    handleSelect,
+    handleMarqueeSelect,
+    clearSelection,
+    handleKeyboardSelect,
+  } = usePhotoSelection(routeKey, photos);
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmPermanent, setConfirmPermanent] = useState(false);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const [marquee, setMarquee] = useState<{
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const marqueeJustCompleted = useRef(false);
+  const [ctxMenu, setCtxMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    photoId: number | null;
+    isBatch: boolean;
+    selectionCount: number;
+  }>({
+    open: false,
+    x: 0,
+    y: 0,
+    photoId: null,
+    isBatch: false,
+    selectionCount: 0,
+  });
 
   const loadPhotos = useCallback(async () => {
     try {
@@ -45,38 +79,59 @@ function TrashPage() {
     loadPhotos();
   }, [loadPhotos]);
 
-  function toggleSelect(id: number, e: React.MouseEvent) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (e.shiftKey && prev.size > 0) {
-        const ids = photos.map((p) => p.id);
-        const lastSelected = [...prev].pop()!;
-        const lastIdx = ids.indexOf(lastSelected);
-        const curIdx = ids.indexOf(id);
-        const [start, end] =
-          lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
-        for (let i = start; i <= end; i++) {
-          next.add(ids[i]);
-        }
-      } else if (e.ctrlKey || e.metaKey) {
-        if (next.has(id)) {
-          next.delete(id);
-        } else {
-          next.add(id);
-        }
-      } else {
-        next.clear();
-        next.add(id);
+  // 集成路由滚动位置管理（使用 elementFromPoint O(1) 锚点，比 querySelectorAll 更高效）
+  useRouteScrollRestoration(scrollRef, {
+    getRouteKey: () => routeKey,
+    getCurrentAnchor: () => {
+      const el = scrollRef.current;
+      if (!el || photos.length === 0) {
+        return null;
       }
-      return next;
-    });
+      // 用 elementFromPoint O(1) 替代 querySelectorAll O(n)，避免每帧全量 DOM 遍历
+      const containerRect = el.getBoundingClientRect();
+      const sampleY = containerRect.top + 40; // 从视口顶部向下 40px 取样（跳过 padding）
+      const sampleX = containerRect.left + containerRect.width / 2;
+      const element = document.elementFromPoint(sampleX, sampleY);
+      const card = element?.closest("[data-photo-id]") as HTMLElement | null;
+      if (!card) {
+        return null;
+      }
+      const id = Number(card.dataset.photoId);
+      if (!id) {
+        return null;
+      }
+      const cardRect = card.getBoundingClientRect();
+      const cardTopInContainer =
+        cardRect.top - containerRect.top + el.scrollTop;
+      return {
+        itemId: id,
+        offsetFromTop: el.scrollTop - cardTopInContainer,
+      };
+    },
+    restoreFromAnchor: (anchorItemId: number) => {
+      const el = scrollRef.current;
+      if (!el) {
+        return null;
+      }
+      const card = el.querySelector(`[data-photo-id="${anchorItemId}"]`);
+      if (!card) {
+        return null;
+      }
+      const cardRect = card.getBoundingClientRect();
+      const containerRect = el.getBoundingClientRect();
+      return cardRect.top - containerRect.top + el.scrollTop;
+    },
+  });
+
+  function toggleSelect(id: number, e: React.MouseEvent) {
+    handleSelect(id, e);
   }
 
   function selectAll() {
     if (selectedIds.size === photos.length) {
-      setSelectedIds(new Set());
+      clearSelection();
     } else {
-      setSelectedIds(new Set(photos.map((p) => p.id)));
+      handleMarqueeSelect(new Set(photos.map((p) => p.id)));
     }
   }
 
@@ -86,9 +141,26 @@ function TrashPage() {
     }
     setRestoring(true);
     try {
-      await ipc.client.photos.restorePhotos({ ids: [...selectedIds] });
-      toast.success(t("restoredPhotosCount", { count: selectedIds.size }));
-      setSelectedIds(new Set());
+      const result = (await ipc.client.photos.restorePhotos({
+        ids: [...selectedIds],
+      })) as { restored: number; restoredWithoutFolder: number };
+      if (result.restoredWithoutFolder > 0 && result.restored > 0) {
+        toast.success(t("restoredPhotosCount", { count: result.restored }));
+        toast.warning(
+          t("restoredWithoutFolderWarning", {
+            count: result.restoredWithoutFolder,
+          })
+        );
+      } else if (result.restoredWithoutFolder > 0) {
+        toast.warning(
+          t("restoredWithoutFolderWarning", {
+            count: result.restoredWithoutFolder,
+          })
+        );
+      } else {
+        toast.success(t("restoredPhotosCount", { count: result.restored }));
+      }
+      clearSelection();
       queryClient.invalidateQueries({ queryKey: ["photos"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
@@ -107,7 +179,7 @@ function TrashPage() {
         ids: [...selectedIds],
       });
       toast.success(t("permanentlyDeletedCount", { count: selectedIds.size }));
-      setSelectedIds(new Set());
+      clearSelection();
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
     } catch {
@@ -123,7 +195,7 @@ function TrashPage() {
     try {
       await ipc.client.photos.emptyTrash();
       toast.success(t("trashEmptied"));
-      setSelectedIds(new Set());
+      clearSelection();
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       setPhotos([]);
     } catch {
@@ -145,6 +217,214 @@ function TrashPage() {
       return;
     }
     setConfirmEmpty(true);
+  }
+
+  // --- Marquee selection ---
+  function handleMarqueeStart(e: React.MouseEvent) {
+    if (e.button !== 0) {
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-photo-id]")) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    setMarquee({
+      startX: e.clientX - rect.left + el.scrollLeft,
+      startY: e.clientY - rect.top + el.scrollTop,
+      x: e.clientX - rect.left + el.scrollLeft,
+      y: e.clientY - rect.top + el.scrollTop,
+    });
+  }
+
+  useEffect(() => {
+    if (!marquee) {
+      return;
+    }
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+
+    function handleMouseMove(e: MouseEvent) {
+      if (!el) {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      setMarquee((prev) =>
+        prev
+          ? {
+              ...prev,
+              x: e.clientX - rect.left + el.scrollLeft,
+              y: e.clientY - rect.top + el.scrollTop,
+            }
+          : null
+      );
+    }
+
+    function handleMouseUp() {
+      const scrollEl = el;
+      setMarquee((prev) => {
+        if (!(prev && scrollEl)) {
+          return null;
+        }
+        const minX = Math.min(prev.startX, prev.x);
+        const maxX = Math.max(prev.startX, prev.x);
+        const minY = Math.min(prev.startY, prev.y);
+        const maxY = Math.max(prev.startY, prev.y);
+
+        if (maxX - minX > 5 || maxY - minY > 5) {
+          const cards = scrollEl.querySelectorAll("[data-photo-id]");
+          const selected = new Set<number>();
+          const containerRect = scrollEl.getBoundingClientRect();
+          for (const card of cards) {
+            const r = card.getBoundingClientRect();
+            const cardLeft = r.left - containerRect.left + scrollEl.scrollLeft;
+            const cardTop = r.top - containerRect.top + scrollEl.scrollTop;
+            if (
+              cardLeft < maxX &&
+              cardLeft + r.width > minX &&
+              cardTop < maxY &&
+              cardTop + r.height > minY
+            ) {
+              const id = Number((card as HTMLElement).dataset.photoId);
+              if (id) {
+                selected.add(id);
+              }
+            }
+          }
+          if (selected.size > 0) {
+            handleMarqueeSelect(selected);
+            marqueeJustCompleted.current = true;
+          }
+        }
+        return null;
+      });
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [marquee]);
+
+  // --- Context menu ---
+  function handleContextMenu(e: React.MouseEvent) {
+    const card = (e.target as HTMLElement).closest(
+      "[data-photo-id]"
+    ) as HTMLElement | null;
+    if (!card) {
+      return;
+    }
+    const id = Number(card.dataset.photoId || "0");
+    if (!id) {
+      return;
+    }
+    e.preventDefault();
+    const inSelection = selectedIds.has(id);
+    const isBatch = selectedIds.size > 1 && inSelection;
+    setCtxMenu({
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      photoId: id,
+      isBatch,
+      selectionCount: isBatch ? selectedIds.size : 1,
+    });
+  }
+
+  function closeCtxMenu() {
+    setCtxMenu((prev) => ({ ...prev, open: false }));
+  }
+
+  useEffect(() => {
+    if (!ctxMenu.open) {
+      return;
+    }
+    function dismiss(e: MouseEvent) {
+      const menuEl = document.getElementById("trash-context-menu");
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        closeCtxMenu();
+      }
+    }
+    function keyHandler(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        closeCtxMenu();
+      }
+    }
+    setTimeout(() => {
+      document.addEventListener("mousedown", dismiss, true);
+      document.addEventListener("contextmenu", dismiss, true);
+    }, 0);
+    document.addEventListener("keydown", keyHandler);
+    return () => {
+      document.removeEventListener("mousedown", dismiss, true);
+      document.removeEventListener("contextmenu", dismiss, true);
+      document.removeEventListener("keydown", keyHandler);
+    };
+  }, [ctxMenu.open]);
+
+  async function handleCtxRestore() {
+    closeCtxMenu();
+    if (ctxMenu.isBatch) {
+      // 右键目标已在选中集合中，直接使用 selectedIds
+      await handleRestore();
+      return;
+    }
+    // 单张模式：只恢复右键那张
+    if (ctxMenu.photoId === null) {
+      return;
+    }
+    setRestoring(true);
+    try {
+      const result = (await ipc.client.photos.restorePhotos({
+        ids: [ctxMenu.photoId],
+      })) as { restored: number; restoredWithoutFolder: number };
+      if (result.restoredWithoutFolder > 0 && result.restored > 0) {
+        toast.success(t("restoredPhotosCount", { count: result.restored }));
+        toast.warning(
+          t("restoredWithoutFolderWarning", {
+            count: result.restoredWithoutFolder,
+          })
+        );
+      } else if (result.restoredWithoutFolder > 0) {
+        toast.warning(
+          t("restoredWithoutFolderWarning", {
+            count: result.restoredWithoutFolder,
+          })
+        );
+      } else {
+        toast.success(t("restoredPhotosCount", { count: result.restored }));
+      }
+      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      loadPhotos();
+    } catch {
+      toast.error(t("restoreFailed"));
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  function handleCtxDelete() {
+    closeCtxMenu();
+    if (ctxMenu.isBatch) {
+      // 批量模式：使用 selectedIds
+      handlePermanentDelete();
+      return;
+    }
+    // 单张模式：先选中再删除
+    if (ctxMenu.photoId === null) {
+      return;
+    }
+    handleKeyboardSelect(ctxMenu.photoId);
+    setConfirmPermanent(true);
   }
 
   function formatTimeAgo(ts: number | null): string {
@@ -240,7 +520,9 @@ function TrashPage() {
             className="text-[12px] text-muted-foreground hover:text-foreground"
             onClick={selectAll}
           >
-            {selectedIds.size === photos.length ? t("deselectAll") : t("selectAll")}
+            {selectedIds.size === photos.length
+              ? t("deselectAll")
+              : t("selectAll")}
           </button>
           {selectedIds.size > 0 && (
             <span className="text-[12px] text-muted-foreground">
@@ -251,7 +533,34 @@ function TrashPage() {
       )}
 
       {/* Photo grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div
+        className="relative flex-1 overflow-y-auto p-6"
+        onClick={(e) => {
+          if (marqueeJustCompleted.current) {
+            marqueeJustCompleted.current = false;
+            return;
+          }
+          const target = e.target as HTMLElement;
+          if (!target.closest("[data-photo-id]")) {
+            clearSelection();
+          }
+        }}
+        onMouseDown={handleMarqueeStart}
+        ref={scrollRef}
+        style={{ userSelect: "none" }}
+      >
+        {/* Marquee selection overlay */}
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-10 rounded-[4px] bg-primary/20 ring-1 ring-primary/40"
+            style={{
+              left: Math.min(marquee.startX, marquee.x),
+              top: Math.min(marquee.startY, marquee.y),
+              width: Math.abs(marquee.x - marquee.startX),
+              height: Math.abs(marquee.y - marquee.startY),
+            }}
+          />
+        )}
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-[14px] text-muted-foreground">{t("loading")}</p>
@@ -267,7 +576,11 @@ function TrashPage() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+          <div
+            className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3"
+            onContextMenu={handleContextMenu}
+            role="grid"
+          >
             {photos.map((photo) => (
               <div
                 className={`group relative cursor-pointer overflow-hidden rounded-[8px] border transition-all ${
@@ -275,8 +588,12 @@ function TrashPage() {
                     ? "border-primary ring-2 ring-primary/30"
                     : "border-border hover:border-foreground/20"
                 }`}
+                data-photo-id={photo.id}
+                data-photo-path={photo.path}
                 key={photo.id}
                 onClick={(e) => toggleSelect(photo.id, e)}
+                role="gridcell"
+                tabIndex={0}
               >
                 <div className="aspect-square bg-card">
                   {photo.thumbnailPath ? (
@@ -296,6 +613,15 @@ function TrashPage() {
                   <p className="truncate text-[11px] text-foreground">
                     {photo.filename}
                   </p>
+                  {photo.folderName ? (
+                    <p className="truncate text-[10px] text-muted-foreground/70">
+                      {photo.folderName}
+                    </p>
+                  ) : (
+                    <p className="truncate text-[10px] text-orange-500/80">
+                      {t("originalFolderRemoved")}
+                    </p>
+                  )}
                   <div className="mt-0.5 flex items-center justify-between">
                     <span className="text-[10px] text-muted-foreground">
                       {formatTimeAgo(photo.deletedAt)}
@@ -336,6 +662,40 @@ function TrashPage() {
           </div>
         )}
       </div>
+
+      {/* Context menu */}
+      {ctxMenu.open && (
+        <div
+          className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+          id="trash-context-menu"
+          style={{
+            left: Math.min(ctxMenu.x, window.innerWidth - 190),
+            top: Math.min(ctxMenu.y, window.innerHeight - 100),
+          }}
+        >
+          <button
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
+            disabled={ctxMenu.photoId === null && !ctxMenu.isBatch}
+            onClick={handleCtxRestore}
+          >
+            <RotateCcw className="h-3.5 w-3.5 flex-shrink-0" />
+            {ctxMenu.isBatch
+              ? `${t("restoreCount", { count: ctxMenu.selectionCount })}`
+              : t("restoreCount", { count: 1 })}
+          </button>
+          <div className="my-1 h-px bg-border" />
+          <button
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10"
+            disabled={ctxMenu.photoId === null && !ctxMenu.isBatch}
+            onClick={handleCtxDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
+            {ctxMenu.isBatch
+              ? `${t("permanentlyDelete")} (${ctxMenu.selectionCount})`
+              : t("permanentlyDelete")}
+          </button>
+        </div>
+      )}
 
       <ConfirmDialog
         confirmText={t("permanentlyDelete")}

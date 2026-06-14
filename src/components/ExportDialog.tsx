@@ -7,8 +7,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getDateLocale } from "@/utils/date-locale";
 import { ipc } from "@/ipc/manager";
+import { getDateLocale } from "@/utils/date-locale";
 
 interface ExportDialogProps {
   onClose: () => void;
@@ -88,7 +88,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
   return (
     <Dialog
       onOpenChange={(next) => {
-        if (!next && !exporting) {
+        if (!(next || exporting)) {
           onClose();
         }
       }}
@@ -109,7 +109,9 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         size="lg"
       >
         <DialogHeader>
-          <DialogTitle>{t("exportPhotosTitle", { count: photoIds.length })}</DialogTitle>
+          <DialogTitle>
+            {t("exportPhotosTitle", { count: photoIds.length })}
+          </DialogTitle>
         </DialogHeader>
 
         <div>

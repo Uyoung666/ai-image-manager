@@ -1,6 +1,6 @@
+import { inArray } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
-import { inArray, sql } from "drizzle-orm";
 import { embeddingModel } from "./ai/state";
 
 // 计算余弦相似度
@@ -75,7 +75,9 @@ async function getPhotoVectors(
           .map((vectorId) => vectorIdMap.get(vectorId))
           .filter((id): id is number => id !== undefined);
 
-        if (photoIdsBatch.length === 0) continue;
+        if (photoIdsBatch.length === 0) {
+          continue;
+        }
 
         const rows = await photoTable
           .query()
@@ -84,7 +86,9 @@ async function getPhotoVectors(
 
         for (const row of rows as Array<Record<string, unknown>>) {
           const photoId = row.photo_id as number;
-          if (!photoId) continue;
+          if (!photoId) {
+            continue;
+          }
 
           const rawVec = row.vector;
           let vec: number[];
@@ -132,7 +136,13 @@ export async function rerankWithCLIPScore(
     }
 
     // 1. 获取查询向量
-    const queryVector = await embeddingModel.embedText(query.trim());
+    let queryVector: number[];
+    try {
+      queryVector = await embeddingModel.embedText(query.trim());
+    } catch (err: any) {
+      console.error("[Rerank] embedText failed:", err?.message);
+      return candidates.slice(0, topK);
+    }
 
     // 2. 批量获取候选照片的向量
     const photoIds = candidates.map((c) => c.photoId);

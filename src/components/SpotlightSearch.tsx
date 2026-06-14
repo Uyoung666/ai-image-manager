@@ -113,24 +113,36 @@ export function SpotlightSearch() {
       const cachedAlbums = staticCacheRef.current.albums;
       const cachedFaces = staticCacheRef.current.faces;
 
-      const tagsPromise = (cachedTags && now - cachedTags.ts < CACHE_TTL)
-        ? Promise.resolve(cachedTags.data)
-        : ipc.client.photos.getTags({}).then((data) => {
-            staticCacheRef.current.tags = { data: data as TagResult[], ts: Date.now() };
-            return data;
-          });
-      const albumsPromise = (cachedAlbums && now - cachedAlbums.ts < CACHE_TTL)
-        ? Promise.resolve(cachedAlbums.data)
-        : ipc.client.albums.listAlbums({}).then((data) => {
-            staticCacheRef.current.albums = { data: data as AlbumResult[], ts: Date.now() };
-            return data;
-          });
-      const facesPromise = (cachedFaces && now - cachedFaces.ts < CACHE_TTL)
-        ? Promise.resolve(cachedFaces.data)
-        : ipc.client.faces.listFaceIdentities({}).then((data) => {
-            staticCacheRef.current.faces = { data: data as PersonResult[], ts: Date.now() };
-            return data;
-          });
+      const tagsPromise =
+        cachedTags && now - cachedTags.ts < CACHE_TTL
+          ? Promise.resolve(cachedTags.data)
+          : ipc.client.photos.getTags({}).then((data) => {
+              staticCacheRef.current.tags = {
+                data: data as TagResult[],
+                ts: Date.now(),
+              };
+              return data;
+            });
+      const albumsPromise =
+        cachedAlbums && now - cachedAlbums.ts < CACHE_TTL
+          ? Promise.resolve(cachedAlbums.data)
+          : ipc.client.albums.listAlbums({}).then((data) => {
+              staticCacheRef.current.albums = {
+                data: data as AlbumResult[],
+                ts: Date.now(),
+              };
+              return data;
+            });
+      const facesPromise =
+        cachedFaces && now - cachedFaces.ts < CACHE_TTL
+          ? Promise.resolve(cachedFaces.data)
+          : ipc.client.faces.listFaceIdentities({}).then((data) => {
+              staticCacheRef.current.faces = {
+                data: data as PersonResult[],
+                ts: Date.now(),
+              };
+              return data;
+            });
 
       const [photos, tags, albums, faces] = await Promise.allSettled([
         ipc.client.photos.searchCompound({
@@ -312,7 +324,15 @@ export function SpotlightSearch() {
               ESC
             </kbd>
           </div>
-          <Command.List className="max-h-[360px] overflow-y-auto p-2">
+          <Command.List className="relative max-h-[360px] overflow-y-auto p-2">
+            {searching && (
+              <div className="spotlight-loading-shield z-10 flex items-center justify-center bg-popover/50">
+                <div className="flex items-center gap-2 rounded-[6px] bg-popover px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  {t("searching")}
+                </div>
+              </div>
+            )}
             <Command.Empty className="py-6 text-center text-[13px] text-muted-foreground">
               {searching ? t("searching") : t("noResultsFound")}
             </Command.Empty>
@@ -441,28 +461,30 @@ export function SpotlightSearch() {
               </Command.Group>
             )}
 
-            {/* Navigation */}
-            <Command.Group
-              className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
-              heading={t("spotlightNavigationGroup")}
-            >
-              {navigationItems.map((item) => (
-                <Command.Item
-                  className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
-                  key={item.id}
-                  onSelect={() => handleSelect(item.action)}
-                  value={`${item.title} ${item.subtitle || ""}`}
-                >
-                  <span className="text-muted-foreground">{item.icon}</span>
-                  <span>{item.title}</span>
-                  {item.subtitle && (
-                    <span className="ml-auto text-[11px] text-muted-foreground">
-                      {item.subtitle}
-                    </span>
-                  )}
-                </Command.Item>
-              ))}
-            </Command.Group>
+            {/* Navigation — 仅空输入时显示，输入后收起以让焦点直达搜索结果 */}
+            {!query.trim() && (
+              <Command.Group
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                heading={t("spotlightNavigationGroup")}
+              >
+                {navigationItems.map((item) => (
+                  <Command.Item
+                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    key={item.id}
+                    onSelect={() => handleSelect(item.action)}
+                    value={`${item.title} ${item.subtitle || ""}`}
+                  >
+                    <span className="text-muted-foreground">{item.icon}</span>
+                    <span>{item.title}</span>
+                    {item.subtitle && (
+                      <span className="ml-auto text-[11px] text-muted-foreground">
+                        {item.subtitle}
+                      </span>
+                    )}
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
           </Command.List>
 
           {/* Footer */}

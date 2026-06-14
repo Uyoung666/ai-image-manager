@@ -296,7 +296,9 @@ export function CloudConfigPanel() {
             >
               <div className="flex min-w-0 items-center gap-2">
                 <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="truncate text-[12px] text-foreground">{cfg.name}</span>
+                <span className="truncate text-[12px] text-foreground">
+                  {cfg.name}
+                </span>
                 <span className="shrink-0 text-[10px] text-muted-foreground/70">
                   {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                 </span>

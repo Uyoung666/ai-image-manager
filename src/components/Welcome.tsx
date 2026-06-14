@@ -2,8 +2,8 @@ import { FolderOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface WelcomeProps {
-  onAddFolder: () => void;
   disabled?: boolean;
+  onAddFolder: () => void;
 }
 
 export function Welcome({ onAddFolder, disabled }: WelcomeProps) {

@@ -169,6 +169,20 @@
       "when": 1785900000000,
       "tag": "0023_fix_shutter_speed_num",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1786000000000,
+      "tag": "0024_fix_orientation_dimensions",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1786100000000,
+      "tag": "0025_add_face_perf_indexes",
+      "breakpoints": true
     }
   ]
 }

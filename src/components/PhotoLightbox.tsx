@@ -13,9 +13,13 @@ import "yet-another-react-lightbox/styles.css";
 import "yet-another-react-lightbox/plugins/captions.css";
 import "yet-another-react-lightbox/plugins/counter.css";
 import "yet-another-react-lightbox/plugins/thumbnails.css";
-import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
+import {
+  PreviewContextMenu,
+  type PreviewMenuState,
+} from "@/components/PreviewContextMenu";
 import { ipc } from "@/ipc/manager";
+import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface Photo {
   filename: string;
@@ -61,11 +65,58 @@ export function PhotoLightbox({
   const [delay, setDelay] = useState(5000);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const programmaticRef = useRef(false);
+  const photoIndexRef = useRef(photoIndex);
+  photoIndexRef.current = photoIndex;
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
   const [overlayVisible, setOverlayVisible] = useState(true);
   const [infoPanelVisible, setInfoPanelVisible] = useState(false);
   const [rotation, setRotation] = useState(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelAnchor, setPanelAnchor] = useState<HTMLDivElement | null>(null);
+  const [previewMenu, setPreviewMenu] = useState<PreviewMenuState>({
+    open: false,
+    photoPath: null,
+    x: 0,
+    y: 0,
+  });
+
+  // 灯箱关闭时确保右键菜单也关闭
+  useEffect(() => {
+    if (!open) {
+      setPreviewMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
+    }
+  }, [open]);
+
+  // 右键菜单 — 原生 capture 阶段绕过 Lightbox 库的 React 事件拦截
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function handleContextMenu(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".yarl__fullscreen")) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = photoIndexRef.current;
+      const p = photosRef.current[idx];
+      if (p) {
+        setPreviewMenu({
+          open: true,
+          photoPath: p.path,
+          x: e.clientX,
+          y: e.clientY,
+        });
+      }
+    }
+
+    document.addEventListener("contextmenu", handleContextMenu, true);
+    return () =>
+      document.removeEventListener("contextmenu", handleContextMenu, true);
+  }, [open]);
 
   useEffect(() => {
     setPhotoIndex(index);
@@ -148,7 +199,9 @@ export function PhotoLightbox({
   const handleInfoNavigate = useCallback(
     (direction: "prev" | "next") => {
       setPhotoIndex((prev) => {
-        if (direction === "prev") return prev > 0 ? prev - 1 : photos.length - 1;
+        if (direction === "prev") {
+          return prev > 0 ? prev - 1 : photos.length - 1;
+        }
         return (prev + 1) % photos.length;
       });
     },
@@ -162,7 +215,9 @@ export function PhotoLightbox({
   }, [delay]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === " ") {
         e.preventDefault();
@@ -217,9 +272,14 @@ export function PhotoLightbox({
     let observer: MutationObserver | null = null;
 
     function ensureAnchor(): HTMLDivElement | null {
-      const portal = document.querySelector<HTMLDivElement>(".yarl__fullscreen");
-      if (!portal) return null;
-      let anchor = portal.querySelector<HTMLDivElement>(".photo-detail-panel-anchor");
+      const portal =
+        document.querySelector<HTMLDivElement>(".yarl__fullscreen");
+      if (!portal) {
+        return null;
+      }
+      let anchor = portal.querySelector<HTMLDivElement>(
+        ".photo-detail-panel-anchor"
+      );
       if (!anchor) {
         anchor = document.createElement("div");
         anchor.className = "photo-detail-panel-anchor";
@@ -235,9 +295,14 @@ export function PhotoLightbox({
       const obs = new MutationObserver((mutations) => {
         for (const m of mutations) {
           for (const node of m.removedNodes) {
-            if (node instanceof HTMLElement && node.classList.contains("photo-detail-panel-anchor")) {
+            if (
+              node instanceof HTMLElement &&
+              node.classList.contains("photo-detail-panel-anchor")
+            ) {
               const newAnchor = ensureAnchor();
-              if (newAnchor && !cancelled) setPanelAnchor(newAnchor);
+              if (newAnchor && !cancelled) {
+                setPanelAnchor(newAnchor);
+              }
               return;
             }
           }
@@ -248,12 +313,17 @@ export function PhotoLightbox({
     }
 
     function attach() {
-      if (cancelled) return;
-      const portal = document.querySelector<HTMLDivElement>(".yarl__fullscreen");
+      if (cancelled) {
+        return;
+      }
+      const portal =
+        document.querySelector<HTMLDivElement>(".yarl__fullscreen");
       if (portal) {
         const anchor = ensureAnchor();
         if (anchor) {
-          if (!cancelled) setPanelAnchor(anchor);
+          if (!cancelled) {
+            setPanelAnchor(anchor);
+          }
           observer = watchPortal(portal);
         }
       } else {
@@ -296,8 +366,16 @@ export function PhotoLightbox({
   const isRotated90or270 = rotation % 180 !== 0;
 
   const lightboxStyles = useMemo(() => {
-    const fadeIn = { opacity: 1, pointerEvents: "auto" as const, transition: "opacity 150ms ease-in" };
-    const fadeOut = { opacity: 0, pointerEvents: "none" as const, transition: "opacity 300ms ease-out" };
+    const fadeIn = {
+      opacity: 1,
+      pointerEvents: "auto" as const,
+      transition: "opacity 150ms ease-in",
+    };
+    const fadeOut = {
+      opacity: 0,
+      pointerEvents: "none" as const,
+      transition: "opacity 300ms ease-out",
+    };
     const overlayStyle = overlayVisible ? fadeIn : fadeOut;
 
     return {
@@ -306,20 +384,22 @@ export function PhotoLightbox({
       slide: {
         padding: "0 60px",
         // 旋转90/270度时增加额外空间以防止溢出
-        ...(isRotated90or270 ? { padding: "60px 0" } : {})
+        ...(isRotated90or270 ? { padding: "60px 0" } : {}),
       },
       captionsTitleContainer: {
-        background: "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
+        background:
+          "linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
         padding: "10px 16px 10px 120px",
         ...overlayStyle,
       },
       captionsDescriptionContainer: {
-        background: "linear-gradient(to top, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
+        background:
+          "linear-gradient(to top, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 75%, transparent 100%)",
         padding: "10px 16px",
         ...overlayStyle,
       },
       thumbnail: { border: "2px solid transparent", borderRadius: 4 },
-      thumbnailsTrack: { padding: "6px 0" }
+      thumbnailsTrack: { padding: "6px 0" },
     };
   }, [overlayVisible, isRotated90or270]);
 
@@ -327,9 +407,19 @@ export function PhotoLightbox({
     <>
       <Lightbox
         animation={{ navigation: 0 }}
+        captions={{ showToggle: true }}
         carousel={{
           finite: false,
           imageProps: {
+            draggable: true,
+            onDragStart: (e: React.DragEvent) => {
+              e.preventDefault();
+              const idx = photoIndexRef.current;
+              const p = photosRef.current[idx];
+              if (p) {
+                (window as any).electronAPI?.startDrag?.(p.path);
+              }
+            },
             style: {
               transition: "none",
               transform: `rotate(${rotation}deg)`,
@@ -337,151 +427,165 @@ export function PhotoLightbox({
               maxWidth: isRotated90or270 ? "90vh" : "100%",
               maxHeight: isRotated90or270 ? "90vw" : "100%",
               objectFit: "contain",
-            }
+            },
           },
         }}
         close={() => onClose(photoIndex)}
         index={photoIndex}
         on={{ view: handleViewChange }}
         open={open}
-        captions={{ showToggle: true }}
-      plugins={[Captions, Counter, Fullscreen, Thumbnails, Zoom]}
-      slides={slides}
-      styles={lightboxStyles}
-      thumbnails={{
-        width: 60,
-        height: 40,
-        gap: 4,
-        borderRadius: 4,
-        border: 0,
-        showToggle: true,
-      }}
-      toolbar={{
-        buttons: [
-          <button
-            aria-label={t("photoDetail")}
-            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            key="info-panel"
-            onClick={() => setInfoPanelVisible((v) => !v)}
-            title={t("photoDetail")}
-            type="button"
-          >
-            <svg
-              fill="none"
-              height="20"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="20"
+        plugins={[Captions, Counter, Fullscreen, Thumbnails, Zoom]}
+        slides={slides}
+        styles={lightboxStyles}
+        thumbnails={{
+          width: 60,
+          height: 40,
+          gap: 4,
+          borderRadius: 4,
+          border: 0,
+          showToggle: true,
+        }}
+        toolbar={{
+          buttons: [
+            <button
+              aria-label={t("photoDetail")}
+              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              key="info-panel"
+              onClick={() => setInfoPanelVisible((v) => !v)}
+              title={t("photoDetail")}
+              type="button"
             >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 16v-4" strokeLinecap="round" />
-              <circle cx="12" cy="8" r="1" fill="currentColor" stroke="none" />
-            </svg>
-          </button>,
-          <button
-            aria-label={t("rotateLeft")}
-            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            key="rotate-left"
-            onClick={() => setRotation((prev) => (prev - 90) % 360)}
-            title={t("rotateLeft")}
-            type="button"
-          >
-            <svg
-              fill="none"
-              height="20"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="20"
-            >
-              <path d="M2.5 2v6h6M2.66 15.57a10 10 0 1 0 .57-8.38" />
-            </svg>
-          </button>,
-          <button
-            aria-label={t("rotateRight")}
-            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            key="rotate-right"
-            onClick={() => setRotation((prev) => (prev + 90) % 360)}
-            title={t("rotateRight")}
-            type="button"
-          >
-            <svg
-              fill="none"
-              height="20"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="20"
-            >
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38" />
-            </svg>
-          </button>,
-          <button
-            aria-label={playing ? t("pause") : t("play")}
-            className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            key="slideshow-play"
-            onClick={togglePlay}
-            title={playing ? t("pauseSlideshow") : t("playSlideshow")}
-            type="button"
-          >
-            {playing ? (
               <svg
-                fill="currentColor"
+                fill="none"
                 height="20"
+                stroke="currentColor"
+                strokeWidth="2"
                 viewBox="0 0 24 24"
                 width="20"
               >
-                <rect height="16" rx="1" width="6" x="5" y="4" />
-                <rect height="16" rx="1" width="6" x="13" y="4" />
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" strokeLinecap="round" />
+                <circle
+                  cx="12"
+                  cy="8"
+                  fill="currentColor"
+                  r="1"
+                  stroke="none"
+                />
               </svg>
-            ) : (
+            </button>,
+            <button
+              aria-label={t("rotateLeft")}
+              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              key="rotate-left"
+              onClick={() => setRotation((prev) => (prev - 90) % 360)}
+              title={t("rotateLeft")}
+              type="button"
+            >
               <svg
-                fill="currentColor"
+                fill="none"
                 height="20"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
                 viewBox="0 0 24 24"
                 width="20"
               >
-                <polygon points="5,3 19,12 5,21" />
+                <path d="M2.5 2v6h6M2.66 15.57a10 10 0 1 0 .57-8.38" />
               </svg>
-            )}
-          </button>,
-          <button
-            aria-label={t("slideshowInterval", { value: currentDelayLabel })}
-            className="flex items-center justify-center rounded-[6px] px-2 py-2 font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-            key="slideshow-delay"
-            onClick={cycleDelay}
-            title={t("switchInterval")}
-            type="button"
-          >
-            {currentDelayLabel}
-          </button>,
-          "fullscreen",
-          "close",
-        ],
-      }}
-      zoom={{
-        maxZoomPixelRatio: 5,
-        scrollToZoom: true,
-      }}
-    />
-      {infoPanelVisible && panelAnchor && createPortal(
-        <div className="fixed top-0 right-0 z-[10000] h-full">
-          <PhotoDetailPanel
-            photo={photos[photoIndex]}
-            onClose={() => setInfoPanelVisible(false)}
-            onNavigate={handleInfoNavigate}
-            onOpenExplorer={async (path) => {
-              await ipc.client.shell.openInExplorer({ path });
-            }}
-          />
-        </div>,
-        panelAnchor
-      )}
+            </button>,
+            <button
+              aria-label={t("rotateRight")}
+              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              key="rotate-right"
+              onClick={() => setRotation((prev) => (prev + 90) % 360)}
+              title={t("rotateRight")}
+              type="button"
+            >
+              <svg
+                fill="none"
+                height="20"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+                width="20"
+              >
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38" />
+              </svg>
+            </button>,
+            <button
+              aria-label={playing ? t("pause") : t("play")}
+              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              key="slideshow-play"
+              onClick={togglePlay}
+              title={playing ? t("pauseSlideshow") : t("playSlideshow")}
+              type="button"
+            >
+              {playing ? (
+                <svg
+                  fill="currentColor"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  width="20"
+                >
+                  <rect height="16" rx="1" width="6" x="5" y="4" />
+                  <rect height="16" rx="1" width="6" x="13" y="4" />
+                </svg>
+              ) : (
+                <svg
+                  fill="currentColor"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  width="20"
+                >
+                  <polygon points="5,3 19,12 5,21" />
+                </svg>
+              )}
+            </button>,
+            <button
+              aria-label={t("slideshowInterval", { value: currentDelayLabel })}
+              className="flex items-center justify-center rounded-[6px] px-2 py-2 font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              key="slideshow-delay"
+              onClick={cycleDelay}
+              title={t("switchInterval")}
+              type="button"
+            >
+              {currentDelayLabel}
+            </button>,
+            "fullscreen",
+            "close",
+          ],
+        }}
+        zoom={{
+          maxZoomPixelRatio: 5,
+          scrollToZoom: true,
+        }}
+      />
+      {infoPanelVisible &&
+        panelAnchor &&
+        createPortal(
+          <div className="fixed top-0 right-0 z-[10000] h-full">
+            <PhotoDetailPanel
+              onClose={() => setInfoPanelVisible(false)}
+              onNavigate={handleInfoNavigate}
+              onOpenExplorer={async (path) => {
+                await ipc.client.shell.openInExplorer({ path });
+              }}
+              photo={photos[photoIndex]}
+            />
+          </div>,
+          panelAnchor
+        )}
+      <PreviewContextMenu
+        menu={previewMenu}
+        onClose={() => setPreviewMenu((prev) => ({ ...prev, open: false }))}
+        onOpenExplorer={async (path) => {
+          await ipc.client.shell.openInExplorer({ path });
+        }}
+      />
     </>
   );
 }

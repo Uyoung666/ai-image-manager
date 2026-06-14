@@ -8,11 +8,23 @@ window.addEventListener("message", (event) => {
   }
 });
 
+// 从 additionalArguments 读取主进程传入的 HTTP 端口号
+// 这使得渲染进程可以同步获取端口，无需等待异步 IPC
+const httpPortArg = process.argv.find((a) => a.startsWith("--http-port="));
+const httpPort = httpPortArg
+  ? Number.parseInt(httpPortArg.split("=")[1], 10)
+  : 0;
+
 contextBridge.exposeInMainWorld("electronAPI", {
   getFilePath: (file: File): string => webUtils.getPathForFile(file),
   preloadReady: true,
+  // HTTP 服务器端口（由主进程在 createWindow 时通过 additionalArguments 注入）
+  httpPort,
   startDrag: (filePath: string): void => {
     ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath);
+  },
+  copyImageToClipboard: (filePath: string): Promise<boolean> => {
+    return ipcRenderer.invoke("clipboard:copy-image", filePath);
   },
   restartApp: (): void => {
     ipcRenderer.send("app:restart");
@@ -22,6 +34,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   openExternal: (url: string): void => {
     ipcRenderer.send("shell:open-external", url);
+  },
+  // 应用级 IPC 接口
+  app: {
+    getHttpPort: (): Promise<number | null> => {
+      return ipcRenderer.invoke("app:get-http-port");
+    },
   },
 });
 
@@ -45,6 +63,18 @@ ipcRenderer.on("ai-progress", (_event, payload) => {
   window.postMessage({ channel: "ai-progress", ...payload }, "*");
 });
 
+ipcRenderer.on("ai-auto-repair-started", (_event, payload) => {
+  window.postMessage({ channel: "ai-auto-repair-started", ...payload }, "*");
+});
+
+ipcRenderer.on("ai-status-changed", (_event, payload) => {
+  window.postMessage({ channel: "ai-status-changed", ...payload }, "*");
+});
+
+ipcRenderer.on("import-queue-status", (_event, payload) => {
+  window.postMessage({ channel: "import-queue-status", ...payload }, "*");
+});
+
 ipcRenderer.on("theme:system-changed", (_event, resolved) => {
   window.postMessage({ channel: "theme:system-changed", resolved }, "*");
 });
@@ -64,10 +94,17 @@ ipcRenderer.on("update:status", (_event, payload) => {
   window.postMessage({ channel: "update:status", ...payload }, "*");
 });
 
-ipcRenderer.on("gpu:prompt-user", (_event, payload) => {
-  window.postMessage({ channel: "gpu:prompt-user", ...payload }, "*");
+// GPU prompt events removed — GPU detection is now integrated into
+// the Onboarding overlay flow (step 2), not a standalone popup.
+
+ipcRenderer.on("face-detection-progress", (_event, payload) => {
+  window.postMessage({ channel: "face-detection-progress", ...payload }, "*");
 });
 
-ipcRenderer.on("gpu:detection-done", (_event, payload) => {
-  window.postMessage({ channel: "gpu:detection-done", ...payload }, "*");
+ipcRenderer.on("face-detection-done", (_event, payload) => {
+  window.postMessage({ channel: "face-detection-done", ...payload }, "*");
+});
+
+ipcRenderer.on("window:maximize-change", (_event, isMaximized: boolean) => {
+  window.postMessage({ channel: "window:maximize-change", isMaximized }, "*");
 });

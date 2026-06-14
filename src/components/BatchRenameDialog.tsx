@@ -29,7 +29,11 @@ interface BatchRenameDialogProps {
   samplePhotoId?: number;
 }
 
-const TOKENS: Array<{ token: string; descriptionKey: string; example: string }> = [
+const TOKENS: Array<{
+  token: string;
+  descriptionKey: string;
+  example: string;
+}> = [
   { token: "{yyyy}", descriptionKey: "tokenYear", example: "2026" },
   { token: "{mm}", descriptionKey: "tokenMonth", example: "05" },
   { token: "{dd}", descriptionKey: "tokenDay", example: "11" },
@@ -37,13 +41,20 @@ const TOKENS: Array<{ token: string; descriptionKey: string; example: string }> 
   { token: "{iso}", descriptionKey: "tokenIso", example: "100" },
   { token: "{focal}", descriptionKey: "tokenFocal", example: "85mm" },
   { token: "{index}", descriptionKey: "tokenIndex", example: "1" },
-  { token: "{index:N}", descriptionKey: "tokenIndexPadded", example: "{index:3} → 001" },
+  {
+    token: "{index:N}",
+    descriptionKey: "tokenIndexPadded",
+    example: "{index:3} → 001",
+  },
   { token: "{orig}", descriptionKey: "tokenOriginalName", example: "DSC0001" },
   { token: "{ext}", descriptionKey: "tokenExtension", example: ".JPG" },
 ];
 
 const TEMPLATES = [
-  { labelKey: "templateDateCameraIndex", value: "{yyyy}{mm}{dd}_{camera}_{index:3}" },
+  {
+    labelKey: "templateDateCameraIndex",
+    value: "{yyyy}{mm}{dd}_{camera}_{index:3}",
+  },
   { labelKey: "templateDateIndex", value: "{yyyy}{mm}{dd}_{index:4}" },
   { labelKey: "templateOriginalDate", value: "{orig}_{yyyy}{mm}{dd}" },
   { labelKey: "templateDateOriginal", value: "{yyyy}{mm}{dd}_{orig}" },
@@ -169,7 +180,9 @@ export function BatchRenameDialog({
         size="xl"
       >
         <DialogHeader>
-          <DialogTitle>{t("batchRenameTitle", { count: photoCount })}</DialogTitle>
+          <DialogTitle>
+            {t("batchRenameTitle", { count: photoCount })}
+          </DialogTitle>
         </DialogHeader>
 
         {hasResult ? (
@@ -195,9 +208,7 @@ export function BatchRenameDialog({
                     {" → "}
                     {r.newName}
                     {r.error && (
-                      <span className="ml-2 text-destructive">
-                        ({r.error})
-                      </span>
+                      <span className="ml-2 text-destructive">({r.error})</span>
                     )}
                   </div>
                 ))}
@@ -247,7 +258,7 @@ export function BatchRenameDialog({
 
             <div>
               <span className="text-[11px] text-muted-foreground/70">
-                {t("preview")} {" "}
+                {t("preview")}{" "}
               </span>
               <span className="font-mono text-[13px] text-muted-foreground">
                 {serverPreview || previewName()}
@@ -303,7 +314,9 @@ export function BatchRenameDialog({
                   onClick={handleRename}
                   type="button"
                 >
-                  {executing ? t("executing") : t("batchRenameAction", { count: photoCount })}
+                  {executing
+                    ? t("executing")
+                    : t("batchRenameAction", { count: photoCount })}
                 </button>
               </div>
             </DialogFooter>
@@ -313,4 +326,3 @@ export function BatchRenameDialog({
     </Dialog>
   );
 }
-

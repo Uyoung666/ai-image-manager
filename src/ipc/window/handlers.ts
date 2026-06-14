@@ -28,3 +28,11 @@ export const closeWindow = os
 
     window.close();
   });
+
+export const isWindowMaximized = os
+  .use(ipcContext.mainWindowContext)
+  .handler(({ context }) => {
+    const { window } = context;
+
+    return window.isMaximized();
+  });

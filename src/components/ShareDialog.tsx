@@ -2,6 +2,7 @@ import { Cloud, Copy, ExternalLink, Share2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { openExternalLink } from "@/actions/shell";
 import {
   Dialog,
   DialogContent,
@@ -9,9 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { openExternalLink } from "@/actions/shell";
-import { getDateLocale } from "@/utils/date-locale";
 import { ipc } from "@/ipc/manager";
+import { getDateLocale } from "@/utils/date-locale";
 
 interface CloudConfig {
   id: number;
@@ -106,7 +106,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
   return (
     <Dialog
       onOpenChange={(next) => {
-        if (!next && !loading) {
+        if (!(next || loading)) {
           onClose();
         }
       }}

@@ -144,8 +144,21 @@ export function initDatabase(): ReturnType<typeof drizzle> {
 
   // Repair RAW format: legacy data stored as "jpeg" from embedded preview
   const rawFormats = [
-    "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng",
-    "orf", "rw2", "raf", "pef", "rwl", "3fr", "raw",
+    "cr2",
+    "cr3",
+    "nef",
+    "nrw",
+    "arw",
+    "srf",
+    "sr2",
+    "dng",
+    "orf",
+    "rw2",
+    "raf",
+    "pef",
+    "rwl",
+    "3fr",
+    "raw",
   ];
   let rawFixed = 0;
   for (const rf of rawFormats) {

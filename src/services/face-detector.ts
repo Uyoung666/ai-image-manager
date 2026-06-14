@@ -1,8 +1,6 @@
 import fs from "node:fs";
-import https from "node:https";
 import path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
   faceIdentities,
@@ -11,121 +9,59 @@ import {
   photos,
 } from "@/db/schema";
 import {
+  abortAllFaceWorkers,
   detectFacesWithPool,
+  getFacePoolInitProgress,
   initFaceWorkerPool,
   shutdownFacePool,
 } from "@/services/face-worker-pool";
+import { getDataPath } from "@/utils/data-path";
 import { getSetting } from "@/services/settings-manager";
 
 const BATCH_SIZE = 40;
 const CLUSTERING_THRESHOLD = 0.55;
 let detectionRunning = false;
 
-function findModelsDir(): string {
-  if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, "models");
-    if (fs.existsSync(bundled)) {
-      return bundled;
-    }
-  }
-  const cwd = process.cwd();
-  const candidate = path.join(cwd, "models");
-  if (fs.existsSync(candidate)) {
-    return candidate;
-  }
-  const alt = path.join(app.getAppPath(), "models");
-  if (fs.existsSync(alt)) {
-    return alt;
-  }
-  return path.join(cwd, "models");
+/** Cancel a running face detection operation and abort all workers. */
+export function cancelFaceDetection(): void {
+  detectionRunning = false;
+  abortAllFaceWorkers();
 }
 
-const FACE_MODELS = [
-  {
-    filename: "ultraface-320.onnx",
-    url: "https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB/raw/master/models/onnx/version-RFB-320.onnx",
-  },
-  {
-    filename: "w600k_r50.onnx",
-    url: "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
-  },
+/** Check whether face detection is currently running. */
+export function isFaceDetectionRunning(): boolean {
+  return detectionRunning;
+}
+
+function findModelsDir(): string {
+  // Models are copied from bundled resources to user data directory
+  // by ensureModelAvailable() at startup.
+  return path.join(getDataPath(), "models");
+}
+
+const FACE_MODEL_FILES = [
+  "ultraface-320.onnx",
+  "w600k_r50.onnx",
 ];
 
-function downloadFile(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    const request = (reqUrl: string) => {
-      https
-        .get(reqUrl, (response) => {
-          if (response.statusCode === 301 || response.statusCode === 302) {
-            const redirectUrl = response.headers.location;
-            if (redirectUrl) {
-              request(redirectUrl);
-              return;
-            }
-          }
-          if (response.statusCode !== 200) {
-            file.close();
-            fs.unlinkSync(dest);
-            reject(new Error(`Download failed: HTTP ${response.statusCode}`));
-            return;
-          }
-          response.pipe(file);
-          file.on("finish", () => {
-            file.close();
-            resolve();
-          });
-        })
-        .on("error", (err) => {
-          file.close();
-          if (fs.existsSync(dest)) {
-            fs.unlinkSync(dest);
-          }
-          reject(err);
-        });
-    };
-    request(url);
-  });
-}
-
 async function ensureFaceModels(): Promise<boolean> {
-  const modelsDir = findModelsDir();
-  const faceDir = path.join(modelsDir, "face");
+  const faceDir = path.join(findModelsDir(), "face");
   if (!fs.existsSync(faceDir)) {
     fs.mkdirSync(faceDir, { recursive: true });
   }
 
-  let needsDownload = false;
-  for (const model of FACE_MODELS) {
-    if (!fs.existsSync(path.join(faceDir, model.filename))) {
-      needsDownload = true;
+  let allPresent = true;
+  for (const filename of FACE_MODEL_FILES) {
+    if (!fs.existsSync(path.join(faceDir, filename))) {
+      allPresent = false;
       break;
     }
   }
-  if (!needsDownload) {
-    return true;
-  }
 
-  console.log("[FaceDetector] Downloading face models...");
-  for (const model of FACE_MODELS) {
-    const dest = path.join(faceDir, model.filename);
-    if (fs.existsSync(dest)) {
-      continue;
-    }
-    try {
-      console.log(`[FaceDetector] Downloading ${model.filename}...`);
-      await downloadFile(model.url, dest);
-      console.log(`[FaceDetector] Downloaded ${model.filename}`);
-    } catch (err: any) {
-      console.error(
-        `[FaceDetector] Failed to download ${model.filename}: ${err.message}`
-      );
-      if (model.filename === "ultraface-320.onnx") {
-        return false;
-      }
-    }
+  if (!allPresent) {
+    console.log("[FaceDetector] Face models not found");
   }
-  return true;
+  return allPresent;
 }
 
 interface FaceResult {
@@ -154,10 +90,6 @@ let currentProgress: DetectionProgress = {
 
 export function getFaceDetectionProgress(): DetectionProgress {
   return { ...currentProgress };
-}
-
-export function isFaceDetectionRunning(): boolean {
-  return detectionRunning;
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -211,15 +143,24 @@ function assignToIdentity(
   return null;
 }
 
-export async function detectFaces(photoIds: number[]): Promise<number> {
+export async function detectFaces(
+  photoIds: number[],
+  onProgress?: (progress: DetectionProgress) => void
+): Promise<number> {
   if (detectionRunning) {
     return 0;
   }
   detectionRunning = true;
 
+  const pushProgress = (p: DetectionProgress) => {
+    currentProgress = p;
+    onProgress?.(p);
+  };
+
   const modelsReady = await ensureFaceModels();
   if (!modelsReady) {
     console.error("[FaceDetector] Models not available, aborting");
+    pushProgress({ processed: 0, total: 0, phase: "idle" });
     detectionRunning = false;
     return 0;
   }
@@ -244,28 +185,45 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
     if (!photoRows.length) {
       // Still need to cluster any unassigned faces
       await clusterUnassignedFaces();
-      currentProgress.phase = "complete";
+      pushProgress({ processed: 0, total: 0, phase: "complete" });
       detectionRunning = false;
       return 0;
     }
 
-    currentProgress = {
+    pushProgress({
       processed: 0,
       total: photoRows.length,
       phase: "running",
-    };
+    });
 
     // Start persistent face-worker pool (GPU context reused across batches)
     const modelsDir = findModelsDir();
     const useGPU = getSetting("gpu.enabled") === "true";
-    await initFaceWorkerPool(modelsDir, useGPU);
+
+    // Poll pool init progress during worker startup so UI knows the model
+    // is loading (DirectML GPU warm-up can take 5-30s on first run).
+    const poolInitInterval = setInterval(() => {
+      const pct = getFacePoolInitProgress();
+      if (pct > 0 && pct < 100) {
+        pushProgress({
+          processed: 0,
+          total: photoRows.length,
+          phase: "running",
+        });
+      }
+    }, 500);
+    try {
+      await initFaceWorkerPool(modelsDir, useGPU);
+    } finally {
+      clearInterval(poolInitInterval);
+    }
 
     try {
       const poolResults = await detectFacesWithPool(
         photoRows,
         BATCH_SIZE,
         (processed, total) => {
-          currentProgress.processed = processed;
+          pushProgress({ processed, total, phase: "running" });
         },
         () => !detectionRunning
       );
@@ -315,10 +273,14 @@ export async function detectFaces(photoIds: number[]): Promise<number> {
     // --- Clustering: assign faces to identities ---
     await clusterUnassignedFaces();
 
-    currentProgress.phase = "complete";
+    pushProgress({
+      processed: totalFaces,
+      total: photoRows.length,
+      phase: "complete",
+    });
   } catch (err: any) {
     console.error(`[FaceDetector] Fatal error: ${err.message}`);
-    currentProgress.phase = "idle";
+    pushProgress({ processed: 0, total: 0, phase: "idle" });
   } finally {
     detectionRunning = false;
   }

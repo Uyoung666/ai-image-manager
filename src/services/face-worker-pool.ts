@@ -8,19 +8,19 @@ import { createLogger } from "@/utils/logger";
 const log = createLogger("face-worker-pool");
 
 export interface FaceDetectionResult {
-  id: number;
   faces: Array<{
     faceIndex: number;
     bbox: { x: number; y: number; width: number; height: number };
     confidence: number;
     embedding?: number[] | null;
   }>;
+  id: number;
 }
 
 interface FaceBatchError {
   error?: string;
-  id: number;
   faces: never[];
+  id: number;
 }
 
 type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
@@ -51,6 +51,9 @@ let poolModelsDir: string | null = null;
 let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
+
+/** Per-worker init progress: Map<workerIndex, percent 0-100> */
+const workerInitProgress = new Map<number, number>();
 
 function findWorkerScript(): string {
   if (app.isPackaged) {
@@ -113,14 +116,18 @@ function spawnWorker(index: number): WorkerSlot {
       clearTimeout(slot.timeoutId);
       slot.timeoutId = null;
     }
+    if (msg.type === "init-progress") {
+      const pct = Number(msg.percent ?? 0);
+      workerInitProgress.set(index, pct);
+      return;
+    }
     if (msg.type === "ready") {
       if (msg.error) {
-        console.error(
-          `[FacePool] Worker ${index} init failed: ${msg.error}`
-        );
+        console.error(`[FacePool] Worker ${index} init failed: ${msg.error}`);
         slot.status = "dead";
         handleWorkerDeath(slot);
       } else {
+        workerInitProgress.set(index, 100);
         slot.status = "idle";
         drainQueue();
       }
@@ -178,10 +185,7 @@ function handleWorkerDeath(slot: WorkerSlot): void {
     return;
   }
 
-  if (
-    slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES &&
-    poolModelsDir
-  ) {
+  if (slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES && poolModelsDir) {
     setTimeout(() => {
       if (slot.status !== "dead") {
         return;
@@ -259,6 +263,7 @@ export async function initFaceWorkerPool(
   poolUseGPU = useGPU;
   slots = [];
   requestQueue = [];
+  workerInitProgress.clear();
 
   const cpuCount = os.cpus().length;
   // Face models are lighter than CLIP (~200MB per worker including DML context)
@@ -336,29 +341,59 @@ function dispatchBatch(
   });
 }
 
-/** Shut down all workers gracefully. */
-export function shutdownFacePool(): void {
+/** Send abort signal to all running face workers (best-effort mid-batch interrupt). */
+export function abortAllFaceWorkers(): void {
   for (const slot of slots) {
     try {
-      slot.process.send({ type: "shutdown" });
-    } catch {
-      /* ignore */
-    }
-    try {
-      slot.process.kill();
+      slot.process.send({ type: "abort" });
     } catch {
       /* ignore */
     }
   }
-  slots = [];
-  requestQueue = [];
-  initialized = false;
+}
+
+/** Shut down all workers gracefully. */
+export function shutdownFacePool(): void {
+  // Send abort first so workers can stop mid-batch if idle enough
+  // to receive the message, then send shutdown + kill.
+  for (const slot of slots) {
+    try {
+      slot.process.send({ type: "abort" });
+    } catch {
+      /* ignore */
+    }
+  }
+  // Small grace period for abort messages to be processed
+  const killAll = () => {
+    for (const slot of slots) {
+      try {
+        slot.process.kill();
+      } catch {
+        /* ignore */
+      }
+    }
+    slots = [];
+    requestQueue = [];
+    initialized = false;
+  };
+  setTimeout(killAll, 500);
+}
+
+/** Aggregate init progress across all face workers (0-100). Returns 0 if no workers have reported yet. */
+export function getFacePoolInitProgress(): number {
+  if (slots.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (const slot of slots) {
+    sum += workerInitProgress.get(slot.index) ?? 0;
+  }
+  return Math.round(sum / slots.length);
 }
 
 export function isFacePoolReady(): boolean {
   return (
-    initialized &&
-    slots.some((s) => s.status === "idle" || s.status === "busy")
+    initialized && slots.some((s) => s.status === "idle" || s.status === "busy")
   );
 }
 
@@ -449,8 +484,15 @@ export async function detectFacesWithPool(
         allResults.push(...results);
       } catch (err: any) {
         console.warn(`[FacePool] Batch failed: ${err.message}`);
-        const fallbackResults = await processResultsFallback(batch);
-        allResults.push(...fallbackResults);
+        // If cancelled, don't retry — just mark failed and move on
+        if (shouldCancel?.()) {
+          allResults.push(
+            ...batch.map((p) => ({ id: p.id, faces: [] as never[] }))
+          );
+        } else {
+          const fallbackResults = await processResultsFallback(batch);
+          allResults.push(...fallbackResults);
+        }
       }
       processed += batch.length;
       onProgress?.(Math.min(processed, total), total);

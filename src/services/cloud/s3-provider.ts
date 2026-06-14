@@ -15,7 +15,7 @@ function ossSign(
   contentType: string,
   date: string,
   resource: string,
-  secretKey: string,
+  secretKey: string
 ): string {
   // VERB\nContent-MD5\nContent-Type\nDate\nCanonicalizedOSSHeaders + CanonicalizedResource
   const stringToSign =
@@ -37,7 +37,7 @@ function buildRequest(
   endpoint: string,
   bucket: string,
   objectPath?: string,
-  query?: string,
+  query?: string
 ) {
   const host = endpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
   // CanonicalizedResource ALWAYS starts with /{bucket} for OSS
@@ -151,7 +151,7 @@ export const s3Provider: CloudProvider = {
       endpoint,
       bucket,
       undefined,
-      `prefix=${encodeURIComponent(prefix)}`,
+      `prefix=${encodeURIComponent(prefix)}`
     );
     const date = getDate();
     const authPfx = isOss(endpoint) ? "OSS" : "AWS";

@@ -110,7 +110,7 @@ export function CloudUploadDialog({
   return (
     <Dialog
       onOpenChange={(next) => {
-        if (!next && !uploading) {
+        if (!(next || uploading)) {
           onClose();
         }
       }}
@@ -138,9 +138,7 @@ export function CloudUploadDialog({
           <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
             <Cloud className="h-10 w-10 opacity-40" />
             <p className="text-[13px]">{t("cloudNoConfig")}</p>
-            <p className="text-[11px] opacity-70">
-              {t("cloudNoConfigHint")}
-            </p>
+            <p className="text-[11px] opacity-70">{t("cloudNoConfigHint")}</p>
           </div>
         ) : (
           <>
@@ -188,8 +186,14 @@ export function CloudUploadDialog({
                   {done
                     ? progress.fail === 0
                       ? t("cloudUploadDone", { count: progress.done })
-                      : t("cloudUploadDonePartial", { done: progress.done, fail: progress.fail })
-                    : t("cloudUploadingProgress", { done: progress.done + progress.fail, total: progress.total })}
+                      : t("cloudUploadDonePartial", {
+                          done: progress.done,
+                          fail: progress.fail,
+                        })
+                    : t("cloudUploadingProgress", {
+                        done: progress.done + progress.fail,
+                        total: progress.total,
+                      })}
                 </p>
               </div>
             )}
@@ -228,4 +232,3 @@ export function CloudUploadDialog({
     </Dialog>
   );
 }
-

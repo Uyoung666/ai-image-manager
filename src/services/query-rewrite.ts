@@ -2,12 +2,27 @@
 
 // 口语化词组 — 按长度降序，前部放更具体的组合（先匹配更长的模式）
 const COLLOQUIAL_PHRASES = [
-  "帮我找", "找一下", "有没有", "查一下",
+  "帮我找",
+  "找一下",
+  "有没有",
+  "查一下",
   // 摄影动作+照片组合 — 必须排在 "的照片" 前面，先吃掉 "拍"
-  "拍的照片", "拍的图片", "照的照片", "拍的相片",
-  "照的图片", "拍照", "拍", "照",
-  "的照片", "的图片", "的相片",
-  "搜索", "看看", "帮我", "找找", "找",
+  "拍的照片",
+  "拍的图片",
+  "照的照片",
+  "拍的相片",
+  "照的图片",
+  "拍照",
+  "拍",
+  "照",
+  "的照片",
+  "的图片",
+  "的相片",
+  "搜索",
+  "看看",
+  "帮我",
+  "找找",
+  "找",
 ];
 
 // 独立的虚词／停用词：在去除词组后再逐字移除
@@ -112,8 +127,8 @@ const TIME_EXPRESSIONS: Record<
 export interface RewrittenQuery {
   cleanQuery: string; // 清理后的查询
   originalQuery: string; // 原始查询
-  timeFilter?: { from: number; to: number }; // 解析出的时间筛选
   removedTerms: string[]; // 移除的口语化词汇
+  timeFilter?: { from: number; to: number }; // 解析出的时间筛选
 }
 
 // 去除口语化表达（单次扫描，避免顺序依赖）
@@ -129,7 +144,8 @@ function removeColloquialisms(query: string): {
     let idx = cleaned.indexOf(phrase);
     while (idx !== -1) {
       removed.push(phrase);
-      cleaned = cleaned.slice(0, idx) + " " + cleaned.slice(idx + phrase.length);
+      cleaned =
+        cleaned.slice(0, idx) + " " + cleaned.slice(idx + phrase.length);
       idx = cleaned.indexOf(phrase);
     }
   }
@@ -174,7 +190,9 @@ export function rewriteQuery(query: string): RewrittenQuery {
   let cleanQuery = afterColloquial.replace(/\s+/g, " ").trim();
 
   if (cleanQuery && timeFilter) {
-    let isPureTime = Object.keys(TIME_EXPRESSIONS).some((e) => cleanQuery === e);
+    let isPureTime = Object.keys(TIME_EXPRESSIONS).some(
+      (e) => cleanQuery === e
+    );
     if (!isPureTime) {
       let testQuery = cleanQuery;
       for (const expr of Object.keys(TIME_EXPRESSIONS)) {
@@ -182,7 +200,9 @@ export function rewriteQuery(query: string): RewrittenQuery {
       }
       isPureTime = !testQuery;
     }
-    if (isPureTime) cleanQuery = "";
+    if (isPureTime) {
+      cleanQuery = "";
+    }
   }
 
   return { cleanQuery, originalQuery, timeFilter, removedTerms };

@@ -2,17 +2,27 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { shell } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { exifData, folders, photos, photoTags } from "@/db/schema";
+import {
+  albumPhotos,
+  albums,
+  exifData,
+  folders,
+  photos,
+  photoTags,
+} from "@/db/schema";
+import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { deletePhotoVectors } from "@/services/ai-embedder";
 import {
+  cleanOrphanThumbnails as cleanOrphanThumbnailsService,
   clearThumbnailDiskCache,
   deletePhotoThumbnails,
   generateThumbnail,
   getThumbnailPath,
+  scanOrphanThumbnails as scanOrphanThumbnailsService,
 } from "@/services/thumbnailer";
 import { IdSchema } from "./shared";
 import { invalidateStatsCache } from "./stats";
@@ -54,6 +64,40 @@ function performHardDelete(photoIds: number[]): void {
   }
 
   db.transaction(() => {
+    // 清理引用被删照片的相册封面（必须在 delete photos 之前，albumPhotos 有 FK cascade）
+    const affectedAlbums = db
+      .select({ id: albums.id, isSmart: albums.isSmart })
+      .from(albums)
+      .where(inArray(albums.coverPhotoId, photoIds))
+      .all();
+
+    for (const album of affectedAlbums) {
+      if (album.isSmart) {
+        // 智能相册：置 null，下次读取时自动重算
+        db.update(albums)
+          .set({ coverPhotoId: null })
+          .where(eq(albums.id, album.id))
+          .run();
+      } else {
+        // 普通相册：尝试找下一张照片作为封面（排除即将被删的照片）
+        const nextCover = db
+          .select({ photoId: albumPhotos.photoId })
+          .from(albumPhotos)
+          .where(
+            and(
+              eq(albumPhotos.albumId, album.id),
+              sql`${albumPhotos.photoId} NOT IN (${photoIds.join(",")})`
+            )
+          )
+          .orderBy(asc(albumPhotos.sortOrder))
+          .get();
+        db.update(albums)
+          .set({ coverPhotoId: nextCover?.photoId ?? null })
+          .where(eq(albums.id, album.id))
+          .run();
+      }
+    }
+
     db.delete(exifData).where(inArray(exifData.photoId, photoIds)).run();
     db.delete(photoTags).where(inArray(photoTags.photoId, photoIds)).run();
     db.delete(photos).where(inArray(photos.id, photoIds)).run();
@@ -97,6 +141,7 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
     }
   }
   invalidateStatsCache();
+  invalidateCountCache();
   return { success: true };
 });
 
@@ -128,15 +173,21 @@ export const deletePhotos = os
         .where(eq(folders.id, fid))
         .run();
     }
+    invalidateCountCache();
     return { deleted: input.ids.length };
   });
 
-// Clean up orphan photos: photos with folderId=NULL or folderId pointing
-// to a deleted folder. Also recalculates folder photoCounts.
-export const cleanupOrphanPhotos = os.handler(async () => {
-  const db = getDatabase();
-
-  const orphanIds = db
+/**
+ * Shared utility: returns photo IDs for orphan records — photos whose folderId
+ * is NULL or points to a deleted folder. Includes both active and soft-deleted
+ * photos — when the original folder is gone, there is nothing to restore, so
+ * even trashed orphans should be cleaned up immediately.
+ * Used by both startup cleanup in main.ts and the cleanupOrphanPhotos handler.
+ */
+export function getOrphanPhotoIds(
+  db: ReturnType<typeof getDatabase>
+): number[] {
+  return db
     .select({ id: photos.id })
     .from(photos)
     .where(
@@ -144,8 +195,31 @@ export const cleanupOrphanPhotos = os.handler(async () => {
     )
     .all()
     .map((p) => p.id);
+}
+
+// Clean up orphan photos (both active and soft-deleted): photos whose folderId
+// is NULL or points to a deleted folder. When the original folder is gone there
+// is nothing to restore, so trashed orphans are cleaned up together with active ones.
+// Also recalculates folder photoCounts.
+export const cleanupOrphanPhotos = os.handler(async () => {
+  const db = getDatabase();
+
+  const orphanIds = getOrphanPhotoIds(db);
+  const orphanRecords =
+    orphanIds.length > 0
+      ? db
+          .select({ id: photos.id, path: photos.path })
+          .from(photos)
+          .where(inArray(photos.id, orphanIds))
+          .all()
+      : [];
 
   if (orphanIds.length > 0) {
+    // Clean up orphaned thumbnail files before removing DB records
+    for (const r of orphanRecords) {
+      deletePhotoThumbnails(r.path);
+    }
+
     db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
     db.delete(photoTags).where(inArray(photoTags.photoId, orphanIds)).run();
     db.delete(photos).where(inArray(photos.id, orphanIds)).run();
@@ -167,7 +241,7 @@ export const cleanupOrphanPhotos = os.handler(async () => {
       .run();
   }
 
-  return { removed: orphanIds.length };
+  return { removed: orphanRecords.length };
 });
 
 // Move photos to a different folder (drag-and-drop in sidebar)
@@ -205,12 +279,14 @@ export const movePhotos = os
 
         fs.renameSync(photo.path, newPath);
 
-        // Move thumbnail too
-        const oldThumb = getThumbnailPath(photo.path, "md");
-        if (fs.existsSync(oldThumb)) {
-          const newThumb = getThumbnailPath(newPath, "md");
-          fs.mkdirSync(path.dirname(newThumb), { recursive: true });
-          fs.renameSync(oldThumb, newThumb);
+        // Move thumbnails (all sizes)
+        for (const size of ["sm", "md", "lg"] as const) {
+          const oldThumb = getThumbnailPath(photo.path, size);
+          if (fs.existsSync(oldThumb)) {
+            const newThumb = getThumbnailPath(newPath, size);
+            fs.mkdirSync(path.dirname(newThumb), { recursive: true });
+            fs.renameSync(oldThumb, newThumb);
+          }
         }
 
         db.update(photos)
@@ -346,18 +422,26 @@ export const renamePhotos = os
           });
           continue;
         }
-        const oldThumbPath = photo.thumbnailPath;
         fs.renameSync(photo.path, newPath);
         const newThumbPath = getThumbnailPath(newPath, "md");
 
-        // Migrate thumbnail: try renaming old thumbnail file first
-        let thumbMigrated = false;
-        if (oldThumbPath && fs.existsSync(oldThumbPath)) {
-          try {
-            fs.renameSync(oldThumbPath, newThumbPath);
-            thumbMigrated = true;
-          } catch {
-            // Cross-device or permission error — generate fresh instead
+        // Migrate thumbnails (all sizes): try renaming old thumbnail files first
+        let thumbMigrated = true;
+        for (const size of ["sm", "md", "lg"] as const) {
+          const oldThumb = getThumbnailPath(photo.path, size);
+          if (fs.existsSync(oldThumb)) {
+            try {
+              const newThumb = getThumbnailPath(newPath, size);
+              fs.renameSync(oldThumb, newThumb);
+            } catch {
+              // Cross-device or permission error — delete old, generate new
+              thumbMigrated = false;
+              try {
+                fs.unlinkSync(oldThumb);
+              } catch {
+                /* best-effort */
+              }
+            }
           }
         }
         if (!thumbMigrated) {
@@ -421,7 +505,7 @@ export const convertPhotos = os
         continue;
       }
       try {
-        let pipeline = sharp(photo.path);
+        let pipeline = sharp(photo.path).rotate();
         const meta = await pipeline.metadata();
 
         if (input.maxWidth && meta.width && meta.width > input.maxWidth) {
@@ -455,6 +539,14 @@ export const clearThumbCache = os.handler(() => {
   return clearThumbnailDiskCache();
 });
 
+export const scanOrphanThumbnails = os.handler(() => {
+  return scanOrphanThumbnailsService();
+});
+
+export const cleanOrphanThumbnails = os.handler(() => {
+  return cleanOrphanThumbnailsService();
+});
+
 export const toggleFavorite = os
   .input(z.object({ ids: z.array(z.number()), favorite: z.boolean() }))
   .handler(async ({ input }) => {
@@ -477,8 +569,20 @@ export const listDeletedPhotos = os.handler(() => {
   );
 
   return db
-    .select()
+    .select({
+      id: photos.id,
+      path: photos.path,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      width: photos.width,
+      height: photos.height,
+      thumbnailPath: photos.thumbnailPath,
+      deletedAt: photos.deletedAt,
+      folderId: photos.folderId,
+      folderName: folders.displayName,
+    })
     .from(photos)
+    .leftJoin(folders, eq(folders.id, photos.folderId))
     .where(
       sql`${photos.deletedAt} IS NOT NULL AND ${photos.deletedAt} > ${thirtyDaysAgo}`
     )
@@ -495,27 +599,59 @@ export const restorePhotos = os
       .from(photos)
       .where(inArray(photos.id, input.ids))
       .all();
-    db.update(photos)
-      .set({ deletedAt: null })
-      .where(inArray(photos.id, input.ids))
-      .run();
-    // Restore folder photoCounts
+
+    // Collect all valid folder IDs currently in the folders table
+    const validFolderIds = new Set(
+      db
+        .select({ id: folders.id })
+        .from(folders)
+        .all()
+        .map((f) => f.id)
+    );
+
+    // Separate photos with valid vs invalid/missing original folders
+    const idsWithValidFolder: number[] = [];
+    const idsWithoutFolder: number[] = [];
     const countsByFolder = new Map<number, number>();
+
     for (const p of targetPhotos) {
-      if (p.folderId) {
+      if (p.folderId && validFolderIds.has(p.folderId)) {
+        idsWithValidFolder.push(p.id);
         countsByFolder.set(
           p.folderId,
           (countsByFolder.get(p.folderId) || 0) + 1
         );
+      } else {
+        idsWithoutFolder.push(p.id);
       }
     }
-    for (const [fid, count] of countsByFolder) {
-      db.update(folders)
-        .set({ photoCount: sql`photo_count + ${count}` })
-        .where(eq(folders.id, fid))
+
+    // Restore photos with valid folders
+    if (idsWithValidFolder.length > 0) {
+      db.update(photos)
+        .set({ deletedAt: null })
+        .where(inArray(photos.id, idsWithValidFolder))
+        .run();
+      for (const [fid, count] of countsByFolder) {
+        db.update(folders)
+          .set({ photoCount: sql`photo_count + ${count}` })
+          .where(eq(folders.id, fid))
+          .run();
+      }
+    }
+
+    // Restore photos whose original folder no longer exists — set folderId to NULL
+    if (idsWithoutFolder.length > 0) {
+      db.update(photos)
+        .set({ deletedAt: null, folderId: null })
+        .where(inArray(photos.id, idsWithoutFolder))
         .run();
     }
-    return { restored: input.ids.length };
+
+    return {
+      restored: idsWithValidFolder.length,
+      restoredWithoutFolder: idsWithoutFolder.length,
+    };
   });
 
 export const permanentlyDeletePhotos = os
@@ -528,11 +664,19 @@ export const permanentlyDeletePhotos = os
       .where(inArray(photos.id, input.ids))
       .all();
     for (const p of targetPhotos) {
-      if (fs.existsSync(p.path)) {
-        await shell.trashItem(p.path);
+      try {
+        if (fs.existsSync(p.path)) {
+          await shell.trashItem(p.path);
+        }
+      } catch (err) {
+        console.warn(
+          `[Trash] Failed to trash file: ${p.path}`,
+          (err as Error)?.message
+        );
       }
     }
     performHardDelete(input.ids);
+    invalidateCountCache();
     return { deleted: input.ids.length };
   });
 
@@ -549,11 +693,19 @@ export const emptyTrash = os.handler(async () => {
     return { deleted: 0 };
   }
   for (const p of deletedPhotos) {
-    if (fs.existsSync(p.path)) {
-      await shell.trashItem(p.path);
+    try {
+      if (fs.existsSync(p.path)) {
+        await shell.trashItem(p.path);
+      }
+    } catch (err) {
+      console.warn(
+        `[Trash] Failed to trash file: ${p.path}`,
+        (err as Error)?.message
+      );
     }
   }
   performHardDelete(ids);
+  invalidateCountCache();
   return { deleted: ids.length };
 });
 

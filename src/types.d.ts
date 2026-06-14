@@ -6,12 +6,21 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 
 declare module "*.css";
 
+declare module "*.png";
+
 interface Window {
   electronAPI: {
     getFilePath: (file: File) => string;
     preloadReady: boolean;
+    /** HTTP 服务器端口（由主进程在 createWindow 时通过 --http-port 参数同步注入） */
+    httpPort: number;
     startDrag: (filePath: string) => void;
+    copyImageToClipboard: (filePath: string) => Promise<boolean>;
     restartApp: () => void;
     setLanguage: (lang: string) => void;
+    openExternal: (url: string) => void;
+    app: {
+      getHttpPort: () => Promise<number | null>;
+    };
   };
 }

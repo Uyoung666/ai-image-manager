@@ -8,6 +8,9 @@ import {
   Int32,
   Schema,
 } from "apache-arrow";
+import { sql } from "drizzle-orm";
+import { getDatabase } from "@/db";
+import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import {
@@ -16,49 +19,191 @@ import {
   setIsVectorDBReady,
   setPhotoTable,
   setVectordb,
+  setWasAutoRepaired,
   vectordb,
 } from "./state";
+
+// ── 向量数据库定期维护 ──────────────────────────────────────────────
+// 数据追加后 LanceDB 产生碎片和旧版本文件，定期压缩清理释放磁盘空间。
+// 首次延迟 30s 避开启动 I/O 高峰，后续每 24h 静默执行一次。
+
+let maintenanceTimer: ReturnType<typeof setTimeout> | null = null;
+let maintenanceRunning = false;
+
+async function runVectorMaintenance(): Promise<void> {
+  if (!photoTable || maintenanceRunning) {
+    return;
+  }
+  maintenanceRunning = true;
+  try {
+    // Phase 1: compact files — merges fragmented data shards
+    try {
+      if (typeof (photoTable as any).compactFiles === "function") {
+        await (photoTable as any).compactFiles();
+        console.log("[AI] Maintenance: compactFiles OK");
+      }
+    } catch (err: any) {
+      console.warn("[AI] Maintenance: compactFiles skipped:", err?.message);
+    }
+
+    // Phase 2: cleanup old versions — removes stale version history
+    try {
+      if (typeof (photoTable as any).cleanupOldVersions === "function") {
+        await (photoTable as any).cleanupOldVersions();
+        console.log("[AI] Maintenance: cleanupOldVersions OK");
+      }
+    } catch (err: any) {
+      console.warn(
+        "[AI] Maintenance: cleanupOldVersions skipped:",
+        err?.message
+      );
+    }
+  } finally {
+    maintenanceRunning = false;
+  }
+}
+
+function scheduleVectorMaintenance(): void {
+  if (maintenanceTimer) {
+    return;
+  }
+  maintenanceTimer = setTimeout(() => {
+    runVectorMaintenance();
+    // 首次完成后切换为每日定时（24h）
+    maintenanceTimer = setInterval(runVectorMaintenance, 24 * 60 * 60 * 1000);
+  }, 30_000);
+}
+
+function clearVectorMaintenance(): void {
+  if (maintenanceTimer) {
+    clearInterval(maintenanceTimer);
+    maintenanceTimer = null;
+  }
+}
 
 export async function initVectorDB(): Promise<void> {
   if (isVectorDBReady && vectordb && photoTable) {
     return;
   }
 
+  // 清理上次重建残留的 .bak 目录
+  await cleanupStaleBackups();
+
   const vectorPath = path.join(getDataPath(), "vectors");
 
   console.log(`[AI] Initializing vector DB at: ${vectorPath}`);
   const lancedb = await import("@lancedb/lancedb");
 
-  const db = await lancedb.connect(vectorPath);
+  let db: any;
+  try {
+    db = await lancedb.connect(vectorPath);
+  } catch (err: any) {
+    console.error("[AI] LanceDB connect failed:", err?.message);
+    throw new Error(`Failed to connect to vector database: ${err?.message}`);
+  }
   setVectordb(db);
   const VECTOR_DIM = 512;
 
   const tableNames = await db.tableNames();
 
   if (tableNames.includes("photo_embeddings")) {
-    const table = await db.openTable("photo_embeddings");
-    setPhotoTable(table);
-
-    // Validate schema: vector column must be FixedSizeList<Float32>[512]
-    const schema = await table.schema();
-    const vectorField = schema.fields.find((f: any) => f.name === "vector");
-    const schemaValid =
-      vectorField &&
-      vectorField.type !== null &&
-      typeof vectorField.type === "object" &&
-      (vectorField.type as any).listSize === VECTOR_DIM;
-
-    if (schemaValid) {
-      console.log("[AI] Opened existing photo_embeddings table (schema OK)");
-      await ensureVectorIndex();
-      setIsVectorDBReady(true);
-      return;
+    let table: any;
+    try {
+      table = await db.openTable("photo_embeddings");
+    } catch (err: any) {
+      console.error("[AI] LanceDB openTable failed:", err?.message);
+      // Table exists but can't be opened — likely corrupted. Drop and recreate.
+      try {
+        await db.dropTable("photo_embeddings");
+      } catch {
+        // best-effort cleanup
+      }
+      setPhotoTable(null as any);
+      // Fall through to create fresh table below
     }
-    console.log(
-      "[AI] Schema mismatch — vector column not FixedSizeList<512>. Recreating..."
-    );
-    await db.dropTable("photo_embeddings");
-    setPhotoTable(null as any);
+
+    if (table) {
+      setPhotoTable(table);
+
+      // Validate schema: vector column must be FixedSizeList<Float32>[512]
+      const schema = await table.schema();
+      const vectorField = schema.fields.find((f: any) => f.name === "vector");
+      const schemaValid =
+        vectorField &&
+        vectorField.type !== null &&
+        typeof vectorField.type === "object" &&
+        (vectorField.type as any).listSize === VECTOR_DIM;
+
+      if (schemaValid) {
+        console.log("[AI] Opened existing photo_embeddings table (schema OK)");
+
+        // Run deep validation BEFORE checking the crash-safety marker.
+        // If the data is actually healthy (e.g. dev server restart where
+        // closeVectorDB never ran), we should NOT drop it — just write the
+        // marker and proceed. Only rebuild if validation genuinely fails.
+        const validation = await validateVectorDB();
+
+        if (validation.healthy) {
+          // Data is intact. If the marker is missing, it was a clean dev
+          // restart or similar — just write it now and continue.
+          if (!isIndexCleanShutdown()) {
+            console.log(
+              "[AI] Marker missing but data healthy — writing marker (clean restart)"
+            );
+            markIndexReady();
+          }
+
+          const indexOk = await ensureVectorIndex();
+          if (!indexOk) {
+            console.warn(
+              "[AI] Proceeding without vector index — search may be slower"
+            );
+          }
+
+          setIsVectorDBReady(true);
+          scheduleVectorMaintenance();
+          return;
+        }
+
+        // Validation failed — genuine corruption detected. Auto-rebuild.
+        console.error(
+          `[AI] Vector DB validation failed: ${validation.reason}. Auto-rebuilding...`
+        );
+        diagLog(
+          `initVectorDB: validation failed — ${validation.reason}, auto-rebuilding`
+        );
+
+        if (vectordb) {
+          try {
+            await vectordb.close();
+          } catch {
+            /* best-effort */
+          }
+          setVectordb(null);
+          setPhotoTable(null);
+          setIsVectorDBReady(false);
+        }
+
+        const rebuildResult = await rebuildVectorDB();
+        if (rebuildResult.success) {
+          console.log("[AI] Auto-repair: vector DB rebuilt successfully");
+          const resetCount = resetAllAiProcessedFlags();
+          console.log(
+            `[AI] Auto-repair: ${resetCount} photos marked for re-index`
+          );
+          setWasAutoRepaired(true);
+          return;
+        }
+        console.error(
+          `[AI] Auto-repair failed: ${rebuildResult.error}, proceeding degraded`
+        );
+      }
+      console.log(
+        "[AI] Schema mismatch — vector column not FixedSizeList<512>. Recreating..."
+      );
+      await db.dropTable("photo_embeddings");
+      setPhotoTable(null as any);
+    }
   }
 
   // Create fresh table with explicit FixedSizeList<Float32>[512] schema
@@ -76,8 +221,10 @@ export async function initVectorDB(): Promise<void> {
   console.log(
     "[AI] Created photo_embeddings table (explicit FixedSizeList<Float32>[512] schema)"
   );
+  markIndexDirty(); // New table has no data — will be set to ready after index build completes
 
   setIsVectorDBReady(true);
+  scheduleVectorMaintenance();
 }
 
 export function buildPhotoIdFilter(ids: number[]): string {
@@ -99,9 +246,10 @@ export async function cleanupOrphanVectors(
   }
   let deleted = 0;
   try {
-    const allRows = (await photoTable.query().toArray()) as Array<
-      Record<string, unknown>
-    >;
+    const allRows = (await photoTable.query().toArray()) as Record<
+      string,
+      unknown
+    >[];
     const orphanIds = new Set(softDeletedIds);
     const toDelete: number[] = [];
     for (const row of allRows) {
@@ -144,9 +292,10 @@ export async function getPhotoVectors(
   }
   try {
     const filter = buildPhotoIdFilter(photoIds);
-    const rows = (await photoTable.query().where(filter).toArray()) as Array<
-      Record<string, unknown>
-    >;
+    const rows = (await photoTable.query().where(filter).toArray()) as Record<
+      string,
+      unknown
+    >[];
     for (const row of rows) {
       const pid = row.photo_id as number;
       const rawVec = row.vector;
@@ -205,6 +354,9 @@ export async function ensureVectorIndex(force = false): Promise<boolean> {
     console.log(
       `[AI] ${force ? "Rebuilding" : "Creating"} vector index on ${rowCount} rows...`
     );
+    // Crash-safety: mark dirty before the potentially-long index build,
+    // so unclean shutdown during ANY index creation is detected on next startup.
+    markIndexDirty();
     await photoTable.createIndex("vector", {
       config: LIdx.ivfPq({
         numPartitions: Math.max(2, Math.floor(Math.sqrt(rowCount))),
@@ -212,6 +364,7 @@ export async function ensureVectorIndex(force = false): Promise<boolean> {
       }),
     });
     console.log("[AI] Vector index ready");
+    markIndexReady();
     return true;
   } catch (err: any) {
     console.error("[AI] Index creation failed:", err?.message);
@@ -223,12 +376,191 @@ export function isVectorDBInitialized(): boolean {
   return isVectorDBReady && vectordb !== null && photoTable !== null;
 }
 
+/**
+ * 对已初始化的向量数据库进行快速健康检查。
+ * 在不触发重量操作的前提下验证底层数据文件可读性。
+ * 返回 { healthy: true } 表示通过；{ healthy: false, reason } 表示需要自动修复。
+ */
+export async function validateVectorDB(): Promise<{
+  healthy: boolean;
+  reason?: string;
+}> {
+  // 直接检查 photoTable 实例是否存在（不依赖 isVectorDBReady，
+  // 因为本函数可能在 initVectorDB 还未标记 ready 时被调用）。
+  if (!photoTable) {
+    return { healthy: false, reason: "vector DB not initialized" };
+  }
+
+  // Phase 1: countRows — 验证数据文件可读
+  let rowCount = 0;
+  try {
+    rowCount = await photoTable.countRows();
+  } catch (err: any) {
+    return {
+      healthy: false,
+      reason: `countRows failed (data file corruption): ${err?.message ?? "unknown"}`,
+    };
+  }
+
+  // Phase 2: query 1 row — 验证向量列结构可序列化
+  if (rowCount > 0) {
+    try {
+      await photoTable.query().limit(1).toArray();
+    } catch (err: any) {
+      return {
+        healthy: false,
+        reason: `query failed (vector data corruption): ${err?.message ?? "unknown"}`,
+      };
+    }
+  }
+
+  // Phase 3: listIndices — 验证索引元数据可读
+  try {
+    await photoTable.listIndices();
+  } catch (err: any) {
+    return {
+      healthy: false,
+      reason: `listIndices failed (IVF_PQ index corruption): ${err?.message ?? "unknown"}`,
+    };
+  }
+
+  return { healthy: true };
+}
+
+/**
+ * 将所有照片的 isAiProcessed 标志重置为 false。
+ * 在向量数据库重建后调用，使系统重新索引导入所有图片。
+ */
+export function resetAllAiProcessedFlags(): number {
+  try {
+    const db = getDatabase();
+    const result = db
+      .update(photos)
+      .set({ isAiProcessed: false })
+      .where(sql`${photos.deletedAt} IS NULL`)
+      .run();
+    console.log(
+      `[AI] Reset isAiProcessed flags: ${result.changes} photos marked for re-index`
+    );
+    return result.changes;
+  } catch (err: any) {
+    console.error("[AI] Failed to reset isAiProcessed flags:", err?.message);
+    return 0;
+  }
+}
+
+/**
+ * 重建整个向量数据库：关闭连接 → 删除磁盘文件 → 重新初始化空表。
+ * 用于修复 LanceDB 索引损坏导致的搜索闪退问题。
+ * 调用方需要额外重置 isAiProcessed 标志并重新触发索引。
+ *
+ * 注意：Windows 上 LanceDB 可能持有 mmap 文件句柄，close() 后不会立即释放。
+ * 优先使用 LanceDB 的 dropTable API 清理，失败时用 rename 绕过文件锁。
+ */
+export async function rebuildVectorDB(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    // 1. 优先通过 LanceDB API 清理（正确处理内部文件锁）
+    if (vectordb) {
+      const tableNames = await vectordb.tableNames();
+      if (tableNames.includes("photo_embeddings")) {
+        try {
+          await vectordb.dropTable("photo_embeddings");
+          console.log("[AI] rebuildVectorDB: dropped via LanceDB API");
+        } catch (dropErr: any) {
+          console.warn(
+            "[AI] rebuildVectorDB: dropTable failed, will use filesystem fallback:",
+            dropErr?.message
+          );
+        }
+      }
+    }
+
+    // 2. 关闭连接
+    if (vectordb) {
+      try {
+        await vectordb.close();
+      } catch (err: any) {
+        console.warn("[AI] rebuildVectorDB: close failed:", err?.message);
+      }
+      setVectordb(null);
+      setPhotoTable(null);
+      setIsVectorDBReady(false);
+    }
+
+    // 3. 清理残留文件（处理 dropTable 失败或 close 未释放句柄的情况）
+    const vectorPath = path.join(getDataPath(), "vectors");
+    if (fs.existsSync(vectorPath)) {
+      try {
+        await fs.promises.rm(vectorPath, { recursive: true, force: true });
+        console.log(`[AI] rebuildVectorDB: removed ${vectorPath}`);
+      } catch (rmErr: any) {
+        // Windows mmap 锁：重命名绕过，下次启动时清理
+        if (rmErr.code === "EPERM" || rmErr.code === "EBUSY") {
+          const bakPath = path.join(getDataPath(), `vectors.bak.${Date.now()}`);
+          await fs.promises.rename(vectorPath, bakPath);
+          console.log(
+            `[AI] rebuildVectorDB: renamed to ${bakPath} (mmap lock bypass)`
+          );
+          // 异步清理备份（延迟 10s 等系统释放句柄）
+          setTimeout(() => {
+            try {
+              fs.promises.rm(bakPath, { recursive: true, force: true });
+            } catch {
+              // 残留文件不阻塞，下次 initVectorDB 时会跳过（目录名已不同）
+            }
+          }, 10_000);
+        } else {
+          throw rmErr;
+        }
+      }
+    }
+
+    // 4. 重新初始化
+    await initVectorDB();
+
+    return { success: true };
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    console.error("[AI] rebuildVectorDB failed:", message);
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * 清理上一次重建遗留的 .bak 目录（在 initVectorDB 之前调用）。
+ * 这些目录是 rebuildVectorDB 在 Windows 上因 mmap 锁无法删除时残留的。
+ */
+export async function cleanupStaleBackups(): Promise<void> {
+  const dataPath = getDataPath();
+  try {
+    const entries = await fs.promises.readdir(dataPath);
+    for (const entry of entries) {
+      if (entry.startsWith("vectors.bak.")) {
+        const fullPath = path.join(dataPath, entry);
+        try {
+          await fs.promises.rm(fullPath, { recursive: true, force: true });
+          console.log(`[AI] Cleaned up stale backup: ${entry}`);
+        } catch {
+          // best-effort, will try again next startup
+        }
+      }
+    }
+  } catch {
+    // best-effort
+  }
+}
+
 export async function closeVectorDB(): Promise<void> {
+  clearVectorMaintenance();
   if (vectordb) {
     try {
       diagLog("closeVectorDB: calling vectordb.close()");
       await vectordb.close();
       diagLog("closeVectorDB: OK");
+      markIndexReady();
     } catch (err: any) {
       diagLog(`closeVectorDB: ERROR ${err?.message ?? err}`);
     }
@@ -237,6 +569,47 @@ export async function closeVectorDB(): Promise<void> {
     setIsVectorDBReady(false);
   } else {
     diagLog("closeVectorDB: vectordb already null, skip");
+  }
+}
+
+// ── Crash-safety marker ─────────────────────────────────────────────────
+// Writes a .index_ready marker after clean shutdown / index completion.
+// If the marker is missing on startup, the previous session did not exit
+// cleanly — auto-rebuild to avoid corruption from partial index builds.
+
+function indexReadyPath(): string {
+  return path.join(getDataPath(), "vectors", ".index_ready");
+}
+
+function markIndexReady(): void {
+  try {
+    const markerPath = indexReadyPath();
+    const dir = path.dirname(markerPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(markerPath, Date.now().toString(), "utf-8");
+  } catch {
+    // best-effort
+  }
+}
+
+function markIndexDirty(): void {
+  try {
+    const markerPath = indexReadyPath();
+    if (fs.existsSync(markerPath)) {
+      fs.unlinkSync(markerPath);
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+function isIndexCleanShutdown(): boolean {
+  try {
+    return fs.existsSync(indexReadyPath());
+  } catch {
+    return false;
   }
 }
 
@@ -254,5 +627,7 @@ function diagLog(msg: string) {
       `${new Date().toISOString()} ${msg}\n`,
       { flag: "a" }
     );
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }

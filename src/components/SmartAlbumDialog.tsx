@@ -1,7 +1,6 @@
 import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import i18n from "@/localization/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Dialog,
@@ -11,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ipc } from "@/ipc/manager";
+import i18n from "@/localization/i18n";
 import { getTagDisplayName } from "@/localization/tag-display";
 
 interface TagInfo {
@@ -113,7 +113,9 @@ function toSmartPresetValue(preset: DatePreset): string {
 }
 
 function toStringOperatorValue(operator: StringOp): string {
-  return operator === "operatorEquals" ? i18n.t("operatorEquals") : i18n.t("operatorContains");
+  return operator === "operatorEquals"
+    ? i18n.t("operatorEquals")
+    : i18n.t("operatorContains");
 }
 
 function toNumberOperatorValue(operator: NumberOp): string {
@@ -124,7 +126,9 @@ function toNumberOperatorValue(operator: NumberOp): string {
 }
 
 function toTagsOperatorValue(operator: TagsOp): string {
-  return operator === "operatorContainsAll" ? i18n.t("operatorContainsAll") : i18n.t("operatorContainsAny");
+  return operator === "operatorContainsAll"
+    ? i18n.t("operatorContainsAll")
+    : i18n.t("operatorContainsAny");
 }
 
 function AutocompleteInput({
@@ -284,7 +288,14 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
     formats: string[];
     isos: number[];
     lensModels: string[];
-  }>({ cameraModels: [], lensModels: [], focalLengths: [], apertures: [], isos: [], formats: [] });
+  }>({
+    cameraModels: [],
+    lensModels: [],
+    focalLengths: [],
+    apertures: [],
+    isos: [],
+    formats: [],
+  });
 
   useEffect(() => {
     if (open) {
@@ -337,9 +348,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
           }
           return {
             ...base,
-            ...(r.dateFrom
-              ? { dateFrom: new Date(r.dateFrom).getTime() }
-              : {}),
+            ...(r.dateFrom ? { dateFrom: new Date(r.dateFrom).getTime() } : {}),
             ...(r.dateTo
               ? { dateTo: new Date(r.dateTo).setHours(23, 59, 59, 999) }
               : {}),
@@ -563,8 +572,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     ))}
                   </select>
                 )}
-                {(rule.type === "cameraModel" ||
-                  rule.type === "lensModel") && (
+                {(rule.type === "cameraModel" || rule.type === "lensModel") && (
                   <select
                     className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
                     onChange={(e) =>
@@ -577,7 +585,9 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     <option value="operatorContains">
                       {t("operatorContains")}
                     </option>
-                    <option value="operatorEquals">{t("operatorEquals")}</option>
+                    <option value="operatorEquals">
+                      {t("operatorEquals")}
+                    </option>
                   </select>
                 )}
                 {(rule.type === "focalLength" ||
@@ -615,7 +625,8 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                 )}
 
                 {rule.type === "dateRange" &&
-                (rule.datePreset === "smartPresetCustom" || !rule.datePreset) ? (
+                (rule.datePreset === "smartPresetCustom" ||
+                  !rule.datePreset) ? (
                   <div className="flex flex-1 items-center gap-1">
                     <input
                       className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
@@ -640,9 +651,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                 ) : rule.type === "fileFormat" ? (
                   <select
                     className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) =>
-                      updateRule(idx, { value: e.target.value })
-                    }
+                    onChange={(e) => updateRule(idx, { value: e.target.value })}
                     value={rule.value}
                   >
                     <option value="">{t("chooseFormat")}</option>

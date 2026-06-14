@@ -305,7 +305,9 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       if (dictSuggestionsEnabled && q.length >= 1) {
         const dictSuggestions = getSearchSuggestions(q, 4);
         for (const s of dictSuggestions) {
-          if (seen.has(s.word.toLowerCase())) continue;
+          if (seen.has(s.word.toLowerCase())) {
+            continue;
+          }
           all.push({
             type: "dictionary",
             text: s.word,
@@ -345,10 +347,12 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const suggestionListRef = useRef<HTMLDivElement>(null);
     const cameraDropdownRef = useRef<HTMLDivElement>(null);
     const lensDropdownRef = useRef<HTMLDivElement>(null);
     const [locallyDragging, setLocallyDragging] = useState(false);
     const queryRef = useRef(query);
+    const [suggestionIndex, setSuggestionIndex] = useState(-1);
     useEffect(() => {
       queryRef.current = query;
     }, [query]);
@@ -404,10 +408,83 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       };
     }, []);
 
-    // Close suggestions on blur (delay to allow click on suggestion items)
-    function handleInputBlur() {
-      setTimeout(() => setShowSuggestions(false), 150);
+    function handleInputBlur(e: React.FocusEvent<HTMLInputElement>) {
+      const related = e.relatedTarget as Node | null;
+      if (related && suggestionListRef.current?.contains(related)) {
+        return;
+      }
+      setTimeout(() => {
+        setShowSuggestions(false);
+        setSuggestionIndex(-1);
+      }, 150);
     }
+
+    function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+      if (e.key === "ArrowDown" && showSuggestions && suggestions.length > 0) {
+        e.preventDefault();
+        setSuggestionIndex(0);
+        suggestionListRef.current?.focus();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showSuggestions) {
+          e.preventDefault();
+          setShowSuggestions(false);
+          setSuggestionIndex(-1);
+          return;
+        }
+        if (query.trim()) {
+          e.preventDefault();
+          handleClear();
+        }
+      }
+    }
+
+    function handleSuggestionKeyDown(e: React.KeyboardEvent) {
+      const len = suggestions.length;
+      if (len === 0) {
+        return;
+      }
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setSuggestionIndex((prev) => (prev + 1) % len);
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setSuggestionIndex((prev) => (prev - 1 + len) % len);
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (suggestionIndex >= 0 && suggestionIndex < len) {
+            handleSuggestionClick(suggestions[suggestionIndex]);
+          }
+          break;
+        case "Escape":
+          e.preventDefault();
+          setShowSuggestions(false);
+          setSuggestionIndex(-1);
+          inputRef.current?.focus();
+          break;
+        case "Tab":
+          e.preventDefault();
+          setSuggestionIndex((prev) => (prev + 1) % len);
+          break;
+      }
+    }
+
+    useEffect(() => {
+      if (suggestionIndex < 0 || !suggestionListRef.current) {
+        return;
+      }
+      const activeEl = suggestionListRef.current.querySelector(
+        `[data-suggestion-index="${suggestionIndex}"]`
+      );
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: "nearest" });
+      }
+    }, [suggestionIndex]);
 
     function handleCameraBlur() {
       setTimeout(() => setShowCameraSuggestions(false), 150);
@@ -583,6 +660,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       if (e.key === "Enter") {
         e.preventDefault();
         onSearch(query.trim(), hasActiveFilters ? filters : undefined);
+        setShowFilters(false);
       }
     }
 
@@ -665,8 +743,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 onChange={(e) => {
                   setQuery(e.target.value);
                   setShowSuggestions(true);
+                  setSuggestionIndex(-1); // 输入变化时重置高亮
                 }}
                 onFocus={() => setShowSuggestions(suggestions.length > 0)}
+                onKeyDown={handleInputKeyDown}
                 placeholder={getPlaceholder()}
                 ref={inputRef}
                 type="text"
@@ -1348,8 +1428,30 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         {/* Search suggestions dropdown */}
         {showSuggestions && suggestions.length > 0 && (
           <div
-            className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover ring-1 ring-foreground/5"
-            ref={dropdownRef}
+            className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
+            onBlur={(e) => {
+              // 焦点离开建议列表且没有回到 input 时关闭
+              const related = e.relatedTarget as Node | null;
+              if (
+                related &&
+                (suggestionListRef.current?.contains(related) ||
+                  related === inputRef.current)
+              ) {
+                return;
+              }
+              setShowSuggestions(false);
+              setSuggestionIndex(-1);
+            }}
+            onKeyDown={handleSuggestionKeyDown}
+            ref={(node) => {
+              (
+                dropdownRef as React.MutableRefObject<HTMLDivElement | null>
+              ).current = node;
+              (
+                suggestionListRef as React.MutableRefObject<HTMLDivElement | null>
+              ).current = node;
+            }}
+            tabIndex={0}
           >
             <div className="flex items-center justify-between px-3 py-1.5">
               <span className="font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
@@ -1359,6 +1461,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 <button
                   className="text-[10px] text-muted-foreground/70 hover:text-foreground"
                   onClick={clearHistory}
+                  tabIndex={-1}
                   type="button"
                 >
                   {t("clearAll")}
@@ -1367,10 +1470,17 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             </div>
             {suggestions.map((s, i) => (
               <button
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
+                  i === suggestionIndex
+                    ? "bg-foreground/8 text-foreground"
+                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                }`}
+                data-suggestion-index={i}
                 key={`${s.type}-${i}`}
                 onClick={() => handleSuggestionClick(s)}
                 onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setSuggestionIndex(i)}
+                tabIndex={-1}
               >
                 {s.type === "person" ? (
                   <>

@@ -43,6 +43,9 @@ let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
 
+/** Per-worker init progress: Map<workerIndex, percent 0-100> */
+const workerInitProgress = new Map<number, number>();
+
 function findWorkerScript(): string {
   if (app.isPackaged) {
     // Preferred: app.asar.unpacked/scripts/embed-worker.mjs — sibling of
@@ -119,7 +122,13 @@ function spawnWorker(index: number): WorkerSlot {
       clearTimeout(slot.timeoutId);
       slot.timeoutId = null;
     }
+    if (msg.type === "init-progress") {
+      const pct = Number(msg.percent ?? 0);
+      workerInitProgress.set(index, pct);
+      return;
+    }
     if (msg.type === "ready") {
+      workerInitProgress.set(index, 100);
       slot.status = "idle";
       drainQueue();
       return;
@@ -240,7 +249,10 @@ function dispatchToSlot(
 }
 
 /** Start worker pool. Workers load the CLIP model once and stay alive. */
-export async function initWorkerPool(mp: string, useGPU = false): Promise<void> {
+export async function initWorkerPool(
+  mp: string,
+  useGPU = false
+): Promise<void> {
   if (initialized && slots.some((s) => s.status !== "dead")) {
     return;
   }
@@ -249,6 +261,7 @@ export async function initWorkerPool(mp: string, useGPU = false): Promise<void> 
   poolUseGPU = useGPU;
   slots = [];
   requestQueue = [];
+  workerInitProgress.clear();
 
   const cpuCount = os.cpus().length;
   // 每个 worker ~200MB，2 个 = 400MB，4 核以上可以 3 个
@@ -329,23 +342,55 @@ function dispatchBatch(
   });
 }
 
-/** Shut down all workers gracefully. */
-export function shutdownPool(): void {
+/** Send abort signal to all running workers (best-effort mid-batch interrupt). */
+export function abortAllWorkers(): void {
   for (const slot of slots) {
     try {
-      slot.process.send({ type: "shutdown" });
-    } catch {
-      /* ignore */
-    }
-    try {
-      slot.process.kill();
+      slot.process.send({ type: "abort" });
     } catch {
       /* ignore */
     }
   }
-  slots = [];
-  requestQueue = [];
-  initialized = false;
+}
+
+/** Shut down all workers gracefully. */
+export function shutdownPool(): void {
+  // Send abort first so workers can stop mid-batch if idle enough
+  // to receive the message, then send shutdown + kill.
+  for (const slot of slots) {
+    try {
+      slot.process.send({ type: "abort" });
+    } catch {
+      /* ignore */
+    }
+  }
+  // Small grace period for abort messages to be processed
+  const killAll = () => {
+    for (const slot of slots) {
+      try {
+        slot.process.kill();
+      } catch {
+        /* ignore */
+      }
+    }
+    slots = [];
+    requestQueue = [];
+    initialized = false;
+  };
+  // Give workers a brief chance to process abort, then kill
+  setTimeout(killAll, 500);
+}
+
+/** Aggregate init progress across all workers (0-100). Returns 0 if no workers have reported yet. */
+export function getPoolInitProgress(): number {
+  if (slots.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (const slot of slots) {
+    sum += workerInitProgress.get(slot.index) ?? 0;
+  }
+  return Math.round(sum / slots.length);
 }
 
 export function isPoolReady(): boolean {
@@ -430,7 +475,12 @@ export async function embedWithPool(
         allResults.push(...results);
       } catch (err: any) {
         console.warn(`[Pool] Batch failed: ${err.message}`);
-        if (batch.length > 1) {
+        // If cancelled, don't retry — just mark failed and move on
+        if (shouldCancel?.()) {
+          allResults.push(
+            ...batch.map((p) => ({ id: p.id, error: "cancelled" }))
+          );
+        } else if (batch.length > 1) {
           const left = await processResultsFallback(
             batch.slice(0, Math.floor(batch.length / 2))
           );

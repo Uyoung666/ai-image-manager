@@ -6,9 +6,11 @@ import {
   app,
   autoUpdater,
   BrowserWindow,
+  clipboard,
   dialog,
   globalShortcut,
   Menu,
+  Notification,
   nativeImage,
   nativeTheme,
   protocol,
@@ -24,8 +26,15 @@ import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
 import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
-import { cleanupExpiredTrash } from "@/ipc/photos/handlers/mutations";
+import {
+  cleanupExpiredTrash,
+  getOrphanPhotoIds,
+} from "@/ipc/photos/handlers/mutations";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
+import {
+  getHttpServerPort,
+  startHttpServerEarly,
+} from "@/services/http-server";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
@@ -34,6 +43,7 @@ import {
 } from "@/services/sendto-integration";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import { getDataPath, initDataPath } from "@/utils/data-path";
+import { getFolderPaths } from "@/utils/folder-paths";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
@@ -223,6 +233,10 @@ let tray: Tray | null = null;
 // becomes a no-op, breaking app.relaunch() and similar flows.
 let isQuitting = false;
 
+// Periodic trash cleanup timer (runs every 6 hours to enforce 30-day retention)
+let trashCleanupTimer: ReturnType<typeof setInterval> | null = null;
+const TRASH_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 // ── Window state store (lazy init) ───────────────────────────────────
 let windowStore: Store<{
   x?: number;
@@ -230,6 +244,7 @@ let windowStore: Store<{
   width?: number;
   height?: number;
   isMaximized?: boolean;
+  trayMinimizeHinted: boolean;
 }>;
 
 function getWindowStore() {
@@ -240,9 +255,10 @@ function getWindowStore() {
       width?: number;
       height?: number;
       isMaximized?: boolean;
+      trayMinimizeHinted: boolean;
     }>({
       name: "window-state",
-      defaults: { width: 1280, height: 800 },
+      defaults: { width: 1280, height: 800, trayMinimizeHinted: false },
     });
   }
   return windowStore;
@@ -417,89 +433,125 @@ function getMimeType(ext: string): string {
   return mimeTypes[ext] ?? "image/jpeg";
 }
 
-// ── AI model availability (copy from resources or dev paths) ─────────
-async function ensureModelAvailable(): Promise<void> {
-  const dataPath = getDataPath();
-  const modelMarker = path.join(
-    dataPath,
-    "models",
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
-    "model_quantized.onnx"
-  );
+// ── I/O 信号量：限制 local-media:// 协议的并发文件操作 ──────────
+// 防止快速滚动时数十个并发 readFile + sharp 打爆磁盘 I/O。
+// 信号量在模块顶层创建，生命周期 = 应用生命周期。
+class IoSemaphore {
+  private running = 0;
+  private readonly pending: Array<() => void> = [];
+  private max: number;
 
-  if (fs.existsSync(modelMarker)) {
-    log.info("AI model already cached");
-    return;
+  constructor(max: number) {
+    this.max = max;
   }
 
-  const resourceRoots = new Set<string>([
-    process.resourcesPath,
-    path.dirname(fileURLToPath(import.meta.url)),
-  ]);
-
-  for (const resourceRoot of resourceRoots) {
-    const resourcesModel = path.join(
-      resourceRoot,
-      "models",
-      "Xenova",
-      "clip-vit-base-patch32",
-      "onnx",
-      "model_quantized.onnx"
-    );
-
-    if (!fs.existsSync(resourcesModel)) {
-      continue;
+  acquire(): Promise<void> {
+    if (this.running < this.max) {
+      this.running++;
+      return Promise.resolve();
     }
-
-    log.info(
-      { source: path.join(resourceRoot, "models") },
-      "Copying model from resources"
-    );
-    await fs.promises.cp(
-      path.join(resourceRoot, "models"),
-      path.join(dataPath, "models"),
-      {
-        recursive: true,
-      }
-    );
-    log.info("Model copied");
-    return;
+    return new Promise<void>((resolve) => {
+      this.pending.push(resolve);
+    });
   }
 
-  if (!app.isPackaged) {
-    const devCandidates = [
-      path.join(process.cwd(), "models"),
-      path.join(app.getAppPath(), "models"),
-      path.join(app.getAppPath(), "..", "models"),
-      path.join(app.getAppPath(), "..", "..", "models"),
-    ];
-
-    for (const candidate of devCandidates) {
-      const marker = path.join(
-        candidate,
-        "Xenova",
-        "clip-vit-base-patch32",
-        "onnx",
-        "model_quantized.onnx"
-      );
-      log.debug({ marker }, "Checking for model");
-      if (fs.existsSync(marker)) {
-        log.info({ source: candidate }, "Copying model from dev path");
-        await fs.promises.cp(candidate, path.join(dataPath, "models"), {
-          recursive: true,
-        });
-        log.info("Model copied");
-        return;
-      }
+  release(): void {
+    this.running--;
+    const next = this.pending.shift();
+    if (next) {
+      this.running++;
+      next();
     }
-    log.warn("Model not found in dev paths, will rely on download");
   }
 }
 
+const mediaSemaphore = new IoSemaphore(16);
+
+// ── 文件夹列表缓存 ── 由 @/utils/folder-paths 集中管理，供 local-media 协议、
+// HTTP 服务器的路径安全校验和索引模块共用。
+// 缓存 TTL 10 秒；索引变更（新建/删除文件夹）通过 invalidateFoldersCache() 主动失效。
+//
+// getFolderPaths / invalidateFoldersCache 从 @/utils/folder-paths 导入。
+// 此处保留 invalidateFoldersCache 的重导出以维持外部兼容。
+export { invalidateFoldersCache } from "@/utils/folder-paths";
+
+// ── AI model availability (copy from resources or dev paths) ─────────
+async function ensureModelAvailable(): Promise<void> {
+  const dataPath = getDataPath();
+  const modelsDir = path.join(dataPath, "models");
+  const visionMarker = path.join(
+    modelsDir,
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
+    "vision_model_quantized.onnx",
+  );
+
+  if (fs.existsSync(visionMarker)) {
+    log.info("AI models already cached");
+    return;
+  }
+
+  // ── Production: copy from bundled resources ──────────────────
+  if (app.isPackaged) {
+    const bundledModels = path.join(process.resourcesPath, "models");
+    const bundledMarker = path.join(
+      bundledModels,
+      "Xenova",
+      "clip-vit-base-patch32",
+      "onnx",
+      "vision_model_quantized.onnx",
+    );
+
+    if (fs.existsSync(bundledMarker)) {
+      log.info("Copying AI models from bundled resources...");
+      try {
+        await fs.promises.cp(bundledModels, modelsDir, { recursive: true });
+        log.info("AI models copied to data directory");
+        return;
+      } catch (err) {
+        log.error({ err }, "Failed to copy AI models from resources");
+      }
+    } else {
+      log.warn("Bundled models not found at %s", bundledModels);
+      return;
+    }
+  }
+
+  // ── Dev mode: search/copy models from project directory ──────
+  const devCandidates = [
+    path.join(process.cwd(), "models"),
+    path.join(app.getAppPath(), "models"),
+    path.join(app.getAppPath(), "..", "models"),
+    path.join(app.getAppPath(), "..", "..", "models"),
+  ];
+
+  for (const candidate of devCandidates) {
+    const marker = path.join(
+      candidate,
+      "Xenova",
+      "clip-vit-base-patch32",
+      "onnx",
+      "vision_model_quantized.onnx",
+    );
+    log.debug({ marker }, "Checking for AI model");
+    if (fs.existsSync(marker)) {
+      log.info({ source: candidate }, "Copying AI models from dev path");
+      try {
+        await fs.promises.cp(candidate, modelsDir, { recursive: true });
+        log.info("AI models copied");
+        return;
+      } catch (err) {
+        log.warn({ err, source: candidate }, "Failed to copy from dev path");
+      }
+    }
+  }
+
+  log.warn("AI models not found in any dev path");
+}
+
 // ── Create main window ───────────────────────────────────────────────
-function createWindow() {
+function createWindow(httpPort: number) {
   const basePath = getBasePath();
   const preload = path.join(basePath, "preload.js");
 
@@ -522,6 +574,7 @@ function createWindow() {
       ? path.join(process.resourcesPath, "icon.png")
       : path.join(app.getAppPath(), "assets", "icon.png"),
     webPreferences: {
+      additionalArguments: [`--http-port=${httpPort}`],
       devTools: inDevelopment,
       contextIsolation: true,
       nodeIntegration: false,
@@ -529,7 +582,7 @@ function createWindow() {
     },
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     trafficLightPosition:
-      process.platform === "darwin" ? { x: 5, y: 5 } : undefined,
+      process.platform === "darwin" ? { x: 12, y: 9 } : undefined,
   });
 
   if (store.get("isMaximized", false)) {
@@ -542,6 +595,17 @@ function createWindow() {
     // swallowed and app.quit()/app.relaunch() become no-ops.
     if (!isQuitting && tray && process.platform === "win32") {
       event.preventDefault();
+      const store = getWindowStore();
+      if (!store.get("trayMinimizeHinted", false)) {
+        store.set("trayMinimizeHinted", true);
+        if (Notification.isSupported()) {
+          new Notification({
+            title: "AI Image Manager",
+            body: "应用已最小化至系统托盘，双击托盘图标可重新打开",
+            silent: false,
+          }).show();
+        }
+      }
       mainWindow?.hide();
     }
   });
@@ -565,8 +629,14 @@ function createWindow() {
 
   mainWindow.on("resize", saveBounds);
   mainWindow.on("move", saveBounds);
-  mainWindow.on("maximize", () => store.set("isMaximized", true));
-  mainWindow.on("unmaximize", () => store.set("isMaximized", false));
+  mainWindow.on("maximize", () => {
+    store.set("isMaximized", true);
+    mainWindow?.webContents.send("window:maximize-change", true);
+  });
+  mainWindow.on("unmaximize", () => {
+    store.set("isMaximized", false);
+    mainWindow?.webContents.send("window:maximize-change", false);
+  });
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
     mainWindow?.focus();
@@ -701,6 +771,34 @@ ipcMain.on("shell:open-external", (_event, url: string) => {
   }
 });
 
+ipcMain.handle("app:get-http-port", () => {
+  return getHttpServerPort();
+});
+
+ipcMain.handle("clipboard:copy-image", async (_event, filePath: string) => {
+  if (!filePath || typeof filePath !== "string") {
+    return false;
+  }
+  try {
+    await fs.promises.access(filePath, fs.constants.R_OK);
+  } catch {
+    log.warn({ filePath }, "clipboard:copy-image — file not accessible");
+    return false;
+  }
+  try {
+    const img = nativeImage.createFromPath(filePath);
+    if (img.isEmpty()) {
+      log.warn({ filePath }, "clipboard:copy-image — nativeImage is empty");
+      return false;
+    }
+    clipboard.writeImage(img);
+    return true;
+  } catch (err) {
+    log.error({ filePath, err }, "clipboard:copy-image — failed");
+    return false;
+  }
+});
+
 // ── IPC / oRPC setup ─────────────────────────────────────────────────
 async function setupORPC() {
   const { rpcHandler } = await import("./ipc/handler");
@@ -726,14 +824,7 @@ async function setupORPC() {
 async function runStartupCleanup() {
   try {
     const db = getDatabase();
-    const orphanIds = db
-      .select({ id: photos.id })
-      .from(photos)
-      .where(
-        sql`${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (SELECT id FROM folders)`
-      )
-      .all()
-      .map((p) => p.id);
+    const orphanIds = getOrphanPhotoIds(db);
 
     if (orphanIds.length > 0) {
       db.delete(exifData).where(inArray(exifData.photoId, orphanIds)).run();
@@ -806,6 +897,25 @@ async function startBackgroundServices() {
     await registry.startRemaining();
     log.info("All services started");
     logMain("[bg] startRemaining done");
+
+    // ── Periodic trash cleanup: enforce 30-day retention even when app runs for days ──
+    trashCleanupTimer = setInterval(() => {
+      cleanupExpiredTrash()
+        .then((count) => {
+          if (count > 0) {
+            log.info(
+              { count },
+              "Periodic cleanup: removed expired trash photos"
+            );
+          }
+        })
+        .catch((err) => {
+          log.warn({ err }, "Periodic trash cleanup failed");
+        });
+    }, TRASH_CLEANUP_INTERVAL_MS);
+    logMain(
+      `[bg] Periodic trash cleanup scheduled (every ${TRASH_CLEANUP_INTERVAL_MS / 3_600_000}h)`
+    );
   } catch (err) {
     const stack = (err as Error)?.stack || String(err);
     logMain(`[bg] FATAL ${stack}`);
@@ -834,6 +944,11 @@ fs.writeFileSync(path.join(logDir, "startup.log"), "BEFORE_WHENREADY\n", {
   flag: "a",
 });
 
+// Windows AUMID — 没有它 dev 模式下 Notification 会被系统静默丢弃
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.aiimagemanager.app");
+}
+
 app.whenReady().then(async () => {
   fs.writeFileSync(
     path.join(logDir, "whenReady.log"),
@@ -852,119 +967,122 @@ app.whenReady().then(async () => {
     // local-media:// URLs immediately.
     protocol.handle("local-media", async (request) => {
       try {
+        // ── Phase 1: 路径解析 + 安全验证（纯 CPU，无需信号量）───
         const encodedPath = request.url.slice("local-media://".length);
         const filePath = decodeURIComponent(encodedPath);
         const resolved = path.resolve(filePath);
 
-        const db = getDatabase();
-        const indexedFolders = db
-          .select({ path: folders.path })
-          .from(folders)
-          .all();
-        const allowedPaths = [
-          getDataPath(),
-          ...indexedFolders.map((f) => f.path),
-        ];
+        const cachedPaths = getFolderPaths();
+        const allowedPaths = [getDataPath(), ...cachedPaths];
 
-        // 使用路径安全验证函数
         if (!isSafePath(resolved, allowedPaths)) {
           log.warn({ filePath }, "Security: local-media blocked");
           return new Response(null, { status: 403 });
         }
 
-        if (!fs.existsSync(resolved)) {
-          const thumbDir = getThumbnailDir();
-          if (thumbDir && resolved.startsWith(thumbDir)) {
-            const photo = db
-              .select({ path: photos.path })
-              .from(photos)
-              .where(eq(photos.thumbnailPath, resolved))
-              .get();
-            if (photo) {
-              try {
-                await generateThumbnail(photo.path, "md");
-              } catch (e) {
-                log.warn(
-                  { filePath: resolved, err: e },
-                  "local-media: Thumbnail regeneration failed"
-                );
+        // ── Phase 2: I/O 操作（信号量保护，并发上限 16）───────
+        await mediaSemaphore.acquire();
+        try {
+          if (!fs.existsSync(resolved)) {
+            const thumbDir = getThumbnailDir();
+            if (thumbDir && resolved.startsWith(thumbDir)) {
+              const db = getDatabase();
+              const photo = db
+                .select({ path: photos.path })
+                .from(photos)
+                .where(eq(photos.thumbnailPath, resolved))
+                .get();
+              if (photo) {
+                try {
+                  await generateThumbnail(photo.path, "md");
+                } catch (e) {
+                  log.warn(
+                    { filePath: resolved, err: e },
+                    "local-media: Thumbnail regeneration failed"
+                  );
+                  return new Response(null, { status: 404 });
+                }
+              } else {
                 return new Response(null, { status: 404 });
               }
             } else {
               return new Response(null, { status: 404 });
             }
-          } else {
-            return new Response(null, { status: 404 });
           }
-        }
 
-        const ext = path.extname(resolved).toLowerCase();
-        const buffer = await fs.promises.readFile(resolved);
+          const ext = path.extname(resolved).toLowerCase();
+          const buffer = await fs.promises.readFile(resolved);
 
-        // Chromium natively supports these image formats. For everything else
-        // (TIFF, HEIC, RAW camera formats), convert to PNG on-the-fly via sharp.
-        const browserCompatible = new Set([
-          ".jpg",
-          ".jpeg",
-          ".png",
-          ".gif",
-          ".webp",
-          ".bmp",
-          ".ico",
-          ".avif",
-          ".svg",
-        ]);
+          // Chromium natively supports these image formats. For everything else
+          // (TIFF, HEIC, RAW camera formats), convert to PNG on-the-fly via sharp.
+          const browserCompatible = new Set([
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".ico",
+            ".avif",
+            ".svg",
+          ]);
 
-        if (browserCompatible.has(ext)) {
-          return new Response(buffer, {
-            headers: {
-              "content-type": getMimeType(ext),
-              "cache-control": "public, max-age=31536000, immutable",
-            },
-          });
-        }
-
-        // RAW camera formats: extract embedded JPEG preview
-        if (isRawFile(resolved)) {
-          const preview = await extractRawPreview(resolved);
-          if (preview) {
-            return new Response(new Uint8Array(preview), {
+          if (browserCompatible.has(ext)) {
+            return new Response(buffer, {
               headers: {
-                "content-type": "image/jpeg",
+                "content-type": getMimeType(ext),
                 "cache-control": "public, max-age=31536000, immutable",
               },
             });
           }
-        }
 
-        try {
-          const converted = await sharp(resolved).png().toBuffer();
-          return new Response(new Uint8Array(converted), {
-            headers: {
-              "content-type": "image/png",
-              "cache-control": "public, max-age=31536000, immutable",
-            },
-          });
-        } catch (e) {
-          log.warn(
-            { filePath: resolved, err: e },
-            "local-media: Conversion failed"
-          );
-          return new Response(buffer, {
-            headers: {
-              "content-type": getMimeType(ext),
-              "cache-control": "public, max-age=31536000, immutable",
-            },
-          });
+          // RAW camera formats: extract embedded JPEG preview
+          if (isRawFile(resolved)) {
+            const preview = await extractRawPreview(resolved);
+            if (preview) {
+              return new Response(new Uint8Array(preview), {
+                headers: {
+                  "content-type": "image/jpeg",
+                  "cache-control": "public, max-age=31536000, immutable",
+                },
+              });
+            }
+          }
+
+          try {
+            const converted = await sharp(resolved).rotate().png().toBuffer();
+            return new Response(new Uint8Array(converted), {
+              headers: {
+                "content-type": "image/png",
+                "cache-control": "public, max-age=31536000, immutable",
+              },
+            });
+          } catch (e) {
+            log.warn(
+              { filePath: resolved, err: e },
+              "local-media: Conversion failed"
+            );
+            return new Response(buffer, {
+              headers: {
+                "content-type": getMimeType(ext),
+                "cache-control": "public, max-age=31536000, immutable",
+              },
+            });
+          }
+        } finally {
+          mediaSemaphore.release();
         }
       } catch {
         return new Response(null, { status: 404 });
       }
     });
 
-    // ── Step 2: Show window immediately (user sees UI without delay) ──
+    // ── Step 2: Start HTTP server (must be ready before window loads) ──
+    const httpPort = await startHttpServerEarly();
+    log.info({ port: httpPort }, "HTTP server started");
+
     await setupORPC();
-    createWindow();
+    createWindow(httpPort);
     createTray();
     registerGlobalShortcuts();
     checkForUpdates();
@@ -973,23 +1091,12 @@ app.whenReady().then(async () => {
     log.info("Window ready — starting background services...");
 
     // ── Step 3: Non-blocking background initialization ───────────────
-    startBackgroundServices()
-      .then(() => {
-        // GPU detection runs after all services are up and models are
-        // available.  Defer a further 1 s so the renderer has time to
-        // mount its message listener before we send the prompt.
-        setTimeout(async () => {
-          try {
-            const { probeAndNotifyIfNeeded } = await import(
-              "@/services/gpu-detector"
-            );
-            await probeAndNotifyIfNeeded();
-          } catch (err) {
-            log.warn({ err }, "GPU detection skipped");
-          }
-        }, 1000);
-      })
-      .catch((err) => log.warn({ err }, "Non-critical services degraded"));
+    // GPU detection is now handled on-demand by the Onboarding overlay
+    // (step 2) and the Settings page's GpuSettingsCard — no automatic
+    // startup popup needed.
+    startBackgroundServices().catch((err) =>
+      log.warn({ err }, "Non-critical services degraded"),
+    );
 
     // ── Background color data backfill (non-blocking, deferred 5s) ─────
     setTimeout(async () => {
@@ -1065,7 +1172,7 @@ app.on("activate", () => {
     mainWindow.show();
     mainWindow.focus();
   } else {
-    createWindow();
+    createWindow(getHttpServerPort() ?? 0);
   }
 });
 
@@ -1085,6 +1192,11 @@ app.on("will-quit", async () => {
     );
   } catch {
     /* best-effort */
+  }
+  // Clear periodic trash cleanup timer
+  if (trashCleanupTimer) {
+    clearInterval(trashCleanupTimer);
+    trashCleanupTimer = null;
   }
   globalShortcut.unregisterAll();
   if (tray) {

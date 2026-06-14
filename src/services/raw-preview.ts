@@ -30,7 +30,9 @@ export function isRawFile(filePath: string): boolean {
  * Tries JpgFromRaw (full-size) first, then PreviewImage fallback.
  * Returns the JPEG buffer, or null if extraction fails.
  */
-export async function extractRawPreview(filePath: string): Promise<Buffer | null> {
+export async function extractRawPreview(
+  filePath: string
+): Promise<Buffer | null> {
   // Try full-size JPEG embedded in the RAW (JpgFromRaw tag)
   try {
     const buf = await exiftool.extractBinaryTagToBuffer(filePath, "JpgFromRaw");
@@ -43,7 +45,10 @@ export async function extractRawPreview(filePath: string): Promise<Buffer | null
 
   // Fallback: PreviewImage (smaller, but available on more formats)
   try {
-    const buf = await exiftool.extractBinaryTagToBuffer(filePath, "PreviewImage");
+    const buf = await exiftool.extractBinaryTagToBuffer(
+      filePath,
+      "PreviewImage"
+    );
     if (buf && buf.length > 0) {
       return buf;
     }
@@ -72,7 +77,9 @@ export async function extractRawPreview(filePath: string): Promise<Buffer | null
   }
 
   try {
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    if (fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
     await exiftool.extractPreview(filePath, tmpFile);
     if (fs.existsSync(tmpFile) && fs.statSync(tmpFile).size > 0) {
       const buf = fs.readFileSync(tmpFile);
@@ -88,7 +95,9 @@ export async function extractRawPreview(filePath: string): Promise<Buffer | null
   }
 
   try {
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    if (fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
   } catch {
     /* ignore */
   }

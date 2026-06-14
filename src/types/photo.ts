@@ -1,4 +1,5 @@
 export interface Photo {
+  dominantColors?: string | null;
   fileDate?: number | null;
   filename: string;
   fileSize: number;
@@ -16,8 +17,8 @@ export interface Photo {
 export interface Folder {
   displayName: string;
   id: number;
-  path: string;
   parentId: number | null;
+  path: string;
   photoCount: number;
   totalPhotoCount?: number;
 }
@@ -41,6 +42,7 @@ export interface AiStatus {
   hasVectors: boolean;
   indexReady: boolean;
   isEmbedding: boolean;
+  lastError?: string;
   model: string;
   vectorCount: number;
   vectorDB: string;

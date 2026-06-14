@@ -207,9 +207,9 @@
   }
   ::-webkit-scrollbar-thumb {
     background: color-mix(in srgb, var(--foreground-tertiary) 55%, transparent);
-    border-radius: 9999px;
-    border: 1px solid transparent;
     background-clip: padding-box;
+    border: 1px solid transparent;
+    border-radius: 9999px;
     transition: background 200ms ease;
   }
   ::-webkit-scrollbar-thumb:hover {
@@ -220,6 +220,7 @@
   }
 
   [data-masonry-scroll] {
+    scrollbar-gutter: stable;
     transform: translateZ(0);
     will-change: scroll-position;
   }
@@ -237,6 +238,10 @@
 
   .draglayer {
     -webkit-app-region: drag;
+  }
+  .draglayer .no-drag,
+  .window-buttons {
+    -webkit-app-region: no-drag;
   }
 }
 
@@ -330,16 +335,42 @@
 @keyframes card-enter {
   from {
     opacity: 0;
-    transform: scale(0.97);
   }
   to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 
 .animate-card-enter {
-  animation: card-enter 250ms ease-out both;
+  animation: card-enter 150ms ease-out both;
+}
+
+/* View Transition: old page slides left + fades, new page slides right + fades */
+::view-transition-old(root) {
+  animation: vt-slide-out 220ms ease-out both;
+}
+::view-transition-new(root) {
+  animation: vt-slide-in 220ms ease-out both;
+}
+@keyframes vt-slide-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+@keyframes vt-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* Leaflet dark theme overrides */
@@ -414,4 +445,32 @@
 
 .marker-dot:hover {
   transform: scale(1.35);
+}
+
+/* ── 搜索结果淡入 ──────────────────────────────────── */
+@keyframes search-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.search-results-enter {
+  animation: search-fade-in 200ms ease-out both;
+}
+
+/* Spotlight loading 遮罩 */
+.spotlight-loading-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  background: transparent;
 }

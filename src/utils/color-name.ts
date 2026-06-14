@@ -1,5 +1,9 @@
 // HSL type
-interface HSL { h: number; s: number; l: number }
+interface HSL {
+  h: number;
+  l: number;
+  s: number;
+}
 
 // Hue → [zhName, enName] mapping table (sorted by hue midpoint)
 const HUE_MAP: [number, string, string][] = [
@@ -22,30 +26,58 @@ const HUE_MAP: [number, string, string][] = [
 // Saturation descriptors
 function describeSaturation(s: number, lang: "zh" | "en"): string {
   if (lang === "zh") {
-    if (s < 20) return "灰淡的";
-    if (s < 50) return "柔和的";
-    if (s < 80) return "鲜艳的";
+    if (s < 20) {
+      return "灰淡的";
+    }
+    if (s < 50) {
+      return "柔和的";
+    }
+    if (s < 80) {
+      return "鲜艳的";
+    }
     return "浓烈的";
   }
-  if (s < 20) return "muted grayish";
-  if (s < 50) return "soft";
-  if (s < 80) return "vivid";
+  if (s < 20) {
+    return "muted grayish";
+  }
+  if (s < 50) {
+    return "soft";
+  }
+  if (s < 80) {
+    return "vivid";
+  }
   return "intense";
 }
 
 // Lightness descriptors
 function describeLightness(l: number, lang: "zh" | "en"): string {
   if (lang === "zh") {
-    if (l < 20) return "深暗的";
-    if (l < 45) return "暗色调";
-    if (l < 65) return "";
-    if (l < 85) return "明亮的";
+    if (l < 20) {
+      return "深暗的";
+    }
+    if (l < 45) {
+      return "暗色调";
+    }
+    if (l < 65) {
+      return "";
+    }
+    if (l < 85) {
+      return "明亮的";
+    }
     return "非常明亮的";
   }
-  if (l < 20) return "very dark";
-  if (l < 45) return "dark";
-  if (l < 65) return "";
-  if (l < 85) return "bright";
+  if (l < 20) {
+    return "very dark";
+  }
+  if (l < 45) {
+    return "dark";
+  }
+  if (l < 65) {
+    return "";
+  }
+  if (l < 85) {
+    return "bright";
+  }
   return "very bright";
 }
 
@@ -58,13 +90,13 @@ function hexToHsl(hex: string): HSL {
   let b: number;
 
   if (cleaned.length === 3) {
-    r = parseInt(cleaned[0] + cleaned[0], 16);
-    g = parseInt(cleaned[1] + cleaned[1], 16);
-    b = parseInt(cleaned[2] + cleaned[2], 16);
+    r = Number.parseInt(cleaned[0] + cleaned[0], 16);
+    g = Number.parseInt(cleaned[1] + cleaned[1], 16);
+    b = Number.parseInt(cleaned[2] + cleaned[2], 16);
   } else if (cleaned.length === 6) {
-    r = parseInt(cleaned.slice(0, 2), 16);
-    g = parseInt(cleaned.slice(2, 4), 16);
-    b = parseInt(cleaned.slice(4, 6), 16);
+    r = Number.parseInt(cleaned.slice(0, 2), 16);
+    g = Number.parseInt(cleaned.slice(2, 4), 16);
+    b = Number.parseInt(cleaned.slice(4, 6), 16);
   } else {
     return { h: 0, s: 0, l: 0 };
   }
@@ -124,8 +156,12 @@ export function hexToSearchPrompt(hex: string): string {
   const lightDesc = describeLightness(hsl.l, "en");
 
   const parts = ["a photo with dominant"];
-  if (satDesc) parts.push(satDesc);
-  if (lightDesc) parts.push(lightDesc);
+  if (satDesc) {
+    parts.push(satDesc);
+  }
+  if (lightDesc) {
+    parts.push(lightDesc);
+  }
   parts.push(enHue.toLowerCase());
   parts.push("colors");
   return parts.filter(Boolean).join(" ");
@@ -150,7 +186,14 @@ export function normalizeHex(input: string): string | null {
     return null;
   }
   if (cleaned.length === 3) {
-    return cleaned[0] + cleaned[0] + cleaned[1] + cleaned[1] + cleaned[2] + cleaned[2];
+    return (
+      cleaned[0] +
+      cleaned[0] +
+      cleaned[1] +
+      cleaned[1] +
+      cleaned[2] +
+      cleaned[2]
+    );
   }
   return cleaned;
 }

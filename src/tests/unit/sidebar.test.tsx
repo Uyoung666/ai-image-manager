@@ -16,6 +16,8 @@ vi.mock("@/components/AiProgressBar", () => ({
 describe("Sidebar", () => {
   const baseProps = {
     activeFolderId: null as number | null,
+    activeTagIds: [] as number[],
+    tagMode: "or" as "and" | "or",
     collapsed: false,
     folders: [] as Array<{
       id: number;
@@ -24,6 +26,7 @@ describe("Sidebar", () => {
       displayName: string;
       photoCount: number;
     }>,
+    importPhase: "idle" as "idle" | "scanning" | "embedding",
     onAddFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
     onSelectFolder: vi.fn(),
@@ -57,8 +60,20 @@ describe("Sidebar", () => {
     const folderProps = {
       ...baseProps,
       folders: [
-        { id: 1, parentId: null, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
-        { id: 2, parentId: null, path: "C:/Travel", displayName: "Travel", photoCount: 200 },
+        {
+          id: 1,
+          parentId: null,
+          path: "C:/Photos",
+          displayName: "Photos",
+          photoCount: 500,
+        },
+        {
+          id: 2,
+          parentId: null,
+          path: "C:/Travel",
+          displayName: "Travel",
+          photoCount: 200,
+        },
       ],
     };
     render(<Sidebar {...folderProps} />);
@@ -71,7 +86,13 @@ describe("Sidebar", () => {
       ...baseProps,
       activeFolderId: 1,
       folders: [
-        { id: 1, parentId: null, path: "C:/Photos", displayName: "Photos", photoCount: 500 },
+        {
+          id: 1,
+          parentId: null,
+          path: "C:/Photos",
+          displayName: "Photos",
+          photoCount: 500,
+        },
       ],
     };
     render(<Sidebar {...activeProps} />);

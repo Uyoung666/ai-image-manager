@@ -7,11 +7,11 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getDateLocale } from "@/utils/date-locale";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
+import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoDetail {
@@ -63,7 +63,10 @@ const DEFAULT_PANEL_WIDTH = 300;
 const SUGGESTION_CACHE_MAX = 20;
 
 // Module-level cache so AI suggestions survive panel close/reopen and lightbox navigation
-const suggestionCache = new Map<number, Array<{ tag: string; confidence: number }>>();
+const suggestionCache = new Map<
+  number,
+  Array<{ tag: string; confidence: number }>
+>();
 
 function loadPanelWidth(): number {
   try {
@@ -338,7 +341,9 @@ export function PhotoDetailPanel({
         // Limit cache size to 20
         if (suggestionCache.size > 20) {
           const firstKey = suggestionCache.keys().next().value;
-          if (firstKey !== undefined) suggestionCache.delete(firstKey);
+          if (firstKey !== undefined) {
+            suggestionCache.delete(firstKey);
+          }
         }
       }
     } catch {
@@ -403,11 +408,14 @@ export function PhotoDetailPanel({
   }
 
   const dateStr = exif?.dateTaken
-    ? new Date(exif.dateTaken).toLocaleDateString(getDateLocale(i18n.language), {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+    ? new Date(exif.dateTaken).toLocaleDateString(
+        getDateLocale(i18n.language),
+        {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }
+      )
     : null;
 
   const dirPath = displayPhoto.path.replace(/[/\\][^/\\]+$/, "");

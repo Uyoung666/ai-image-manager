@@ -1,6 +1,12 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { getPlatform } from "@/actions/app";
-import { closeWindow, maximizeWindow, minimizeWindow } from "@/actions/window";
+import {
+  closeWindow,
+  getIsMaximized,
+  maximizeWindow,
+  minimizeWindow,
+} from "@/actions/window";
+import icon from "../../assets/icon.png";
 
 interface DragWindowRegionProps {
   title?: ReactNode;
@@ -8,6 +14,8 @@ interface DragWindowRegionProps {
 
 export default function DragWindowRegion({ title }: DragWindowRegionProps) {
   const [platform, setPlatform] = useState<string | null>(null);
+
+  const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -29,31 +37,47 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
     };
   }, []);
 
+  useEffect(() => {
+    getIsMaximized()
+      .then(setIsMaximized)
+      .catch(() => {
+        /* window may not be available yet */
+      });
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.channel === "window:maximize-change") {
+        setIsMaximized(e.data.isMaximized);
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   const isMacOS = platform === "darwin";
 
   return (
     <div className="flex w-full items-stretch justify-between">
-      <div
-        className="draglayer w-full"
-        onDoubleClick={maximizeWindow}
-      >
+      <div className="draglayer w-full" onDoubleClick={maximizeWindow}>
         {title && !isMacOS && (
-          <div className="flex flex-1 select-none whitespace-nowrap p-2 text-muted-foreground text-xs">
+          <div className="flex flex-1 select-none items-center gap-1.5 whitespace-nowrap p-2 text-muted-foreground text-xs">
+            <img alt="" className="h-3.5 w-3.5" src={icon} />
             {title}
           </div>
         )}
-        {isMacOS && (
-          <div className="flex flex-1 p-2">
-            {/* Maintain the same height but do not display content */}
-          </div>
-        )}
+        {isMacOS && <div className="flex flex-1" style={{ height: 28 }} />}
       </div>
-      {!isMacOS && <WindowButtons />}
+      {!isMacOS && (
+        <div className="window-buttons">
+          <WindowButtons isMaximized={isMaximized} />
+        </div>
+      )}
     </div>
   );
 }
 
-function WindowButtons() {
+function WindowButtons({ isMaximized }: { isMaximized: boolean }) {
   return (
     <div className="flex">
       <button
@@ -74,10 +98,10 @@ function WindowButtons() {
         </svg>
       </button>
       <button
-        aria-label="Maximize"
+        aria-label={isMaximized ? "Restore" : "Maximize"}
         className="p-2 hover:bg-muted"
         onClick={maximizeWindow}
-        title="Maximize"
+        title={isMaximized ? "Restore" : "Maximize"}
         type="button"
       >
         <svg
@@ -87,14 +111,28 @@ function WindowButtons() {
           viewBox="0 0 12 12"
           width="12"
         >
-          <rect
-            fill="none"
-            height="9"
-            stroke="currentColor"
-            width="9"
-            x="1.5"
-            y="1.5"
-          />
+          {isMaximized ? (
+            <>
+              <rect
+                fill="none"
+                height="7"
+                stroke="currentColor"
+                width="7"
+                x="3.5"
+                y="1.5"
+              />
+              <rect fill="currentColor" height="7" width="7" x="1.5" y="3.5" />
+            </>
+          ) : (
+            <rect
+              fill="none"
+              height="9"
+              stroke="currentColor"
+              width="9"
+              x="1.5"
+              y="1.5"
+            />
+          )}
         </svg>
       </button>
       <button

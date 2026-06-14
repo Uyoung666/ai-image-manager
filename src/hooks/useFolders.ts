@@ -9,6 +9,6 @@ export function useFolders() {
       const result = await ipc.client.photos.getFolders({});
       return result as Folder[];
     },
-    staleTime: 60_000,
+    staleTime: 30_000,
   });
 }

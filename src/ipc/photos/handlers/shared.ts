@@ -13,6 +13,8 @@ export const ImageSearchSchema = z.object({
 export const ListSchema = z.object({
   folderId: z.number().optional(),
   tagId: z.number().optional(),
+  tagIds: z.number().array().optional(),
+  tagMode: z.enum(["and", "or"]).optional().default("or"),
   search: z.string().optional(),
   favoriteOnly: z.boolean().optional(),
   sort: z.enum(["date", "name", "size"]).optional().default("date"),

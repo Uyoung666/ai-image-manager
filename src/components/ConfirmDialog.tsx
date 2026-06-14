@@ -15,10 +15,10 @@ import {
  * destructive=true 时操作按钮使用红色 variant。
  */
 interface ConfirmDialogProps {
-  /** 操作按钮文案，必填，使用动词。例：删除、永久删除、创建 */
-  confirmText: string;
   /** 取消按钮文案，默认"取消" */
   cancelText?: string;
+  /** 操作按钮文案，必填，使用动词。例：删除、永久删除、创建 */
+  confirmText: string;
   /** 描述文本（可选），支持 ReactNode */
   description?: React.ReactNode;
   /** 是否为危险操作 — 操作按钮显示为红色 */

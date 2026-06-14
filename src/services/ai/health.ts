@@ -146,6 +146,7 @@ export interface AiReadiness {
   hasVectors: boolean;
   indexReady: boolean;
   isEmbedding: boolean;
+  lastError?: string;
   model: "loading" | "ready" | "error";
   vectorCount: number;
   vectorDB: "loading" | "ready" | "error";
@@ -159,6 +160,8 @@ export async function getAiReadiness(): Promise<AiReadiness> {
     vectorCount: 0,
     indexReady: false,
     isEmbedding,
+    lastError:
+      currentProgress.phase === "error" ? currentProgress.error : undefined,
     embeddingProgress: {
       processed: currentProgress.processed,
       total: currentProgress.total,

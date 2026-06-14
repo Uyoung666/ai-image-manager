@@ -2,6 +2,7 @@ import {
   appVersion,
   checkForUpdates,
   currentPlatform,
+  getHttpPort,
   getUpdateStatus,
   restartApp,
 } from "./handlers";
@@ -12,4 +13,5 @@ export const app = {
   restartApp,
   checkForUpdates,
   getUpdateStatus,
+  getHttpPort,
 };

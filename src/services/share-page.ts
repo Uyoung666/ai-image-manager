@@ -192,7 +192,10 @@ render(filteredData);
 </html>`;
 }
 
-export async function generateSharePage(photoIds: number[], locale = "zh-CN"): Promise<string> {
+export async function generateSharePage(
+  photoIds: number[],
+  locale = "zh-CN"
+): Promise<string> {
   const db = getDatabase();
 
   const photoList = db
@@ -226,6 +229,7 @@ export async function generateSharePage(photoIds: number[], locale = "zh-CN"): P
         if (fs.existsSync(photo.path)) {
           const sharp = (await import("sharp")).default;
           const buf = await sharp(photo.path)
+            .rotate()
             .resize(600, 450, { fit: "inside", withoutEnlargement: true })
             .jpeg({ quality: 80 })
             .toBuffer();

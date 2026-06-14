@@ -94,6 +94,9 @@ async function loadOrt() {
 let detectionSession = null;
 let embeddingSession = null;
 
+// --- Abort flag for mid-batch cancellation ---
+let aborted = false;
+
 // --- UltraFace constants ---
 const DET_INPUT_W = 320;
 const DET_INPUT_H = 240;
@@ -107,6 +110,7 @@ const EMBED_SIZE = 112; // ArcFace expects 112x112 input
 
 /**
  * Load ONNX models for detection and embedding.
+ * Reports init-progress messages so the UI can show real loading progress.
  */
 async function initModels(modelsDir, useGPU = false) {
   const { InferenceSession } = await loadOrt();
@@ -117,6 +121,13 @@ async function initModels(modelsDir, useGPU = false) {
   if (!fs.existsSync(detModelPath)) {
     throw new Error(`Detection model not found: ${detModelPath}`);
   }
+
+  // Phase 1: loading runtime + detection model (~10%)
+  process.send?.({
+    type: "init-progress",
+    percent: 5,
+    stage: "loading-runtime",
+  });
 
   // Track whether DirectML is actually active — we can't query the session
   // after creation, so we must remember the probe result.
@@ -152,6 +163,13 @@ async function initModels(modelsDir, useGPU = false) {
   }
   console.error(`[FaceWorker] Detection model loaded: ${detModelPath}`);
 
+  // Phase 2: detection model ready, now load embedding model (~45%)
+  process.send?.({
+    type: "init-progress",
+    percent: 45,
+    stage: "loading-embedding",
+  });
+
   if (fs.existsSync(embModelPath)) {
     if (dmlActive) {
       try {
@@ -161,7 +179,9 @@ async function initModels(modelsDir, useGPU = false) {
         });
         console.error("[FaceWorker] ✓ Embedding model DML ACTIVE");
       } catch (err) {
-        console.error(`[FaceWorker] Embedding DML failed, CPU fallback: ${err.message}`);
+        console.error(
+          `[FaceWorker] Embedding DML failed, CPU fallback: ${err.message}`
+        );
         embeddingSession = await InferenceSession.create(embModelPath, {
           executionProviders: ["cpu"],
           logSeverityLevel: 3,
@@ -179,6 +199,8 @@ async function initModels(modelsDir, useGPU = false) {
       `[FaceWorker] Embedding model not found, skipping: ${embModelPath}`
     );
   }
+
+  process.send?.({ type: "init-progress", percent: 100, stage: "ready" });
 }
 
 /**
@@ -187,6 +209,7 @@ async function initModels(modelsDir, useGPU = false) {
  */
 async function preprocessForDetection(input) {
   const { data, info } = await sharp(input, { failOn: "none" })
+    .rotate()
     .resize(DET_INPUT_W, DET_INPUT_H, { fit: "fill" })
     .removeAlpha()
     .raw()
@@ -256,7 +279,7 @@ function computeIoU(a, b) {
 async function detectFacesInImage(input) {
   const { Tensor } = await loadOrt();
 
-  const meta = await sharp(input, { failOn: "none" }).metadata();
+  const meta = await sharp(input, { failOn: "none" }).rotate().metadata();
   const imgW = meta.width || 0;
   const imgH = meta.height || 0;
   if (imgW < 32 || imgH < 32) {
@@ -341,7 +364,7 @@ async function generateEmbedding(input, bbox) {
 
   // Expand bbox by 20% for better face coverage
   const expand = 0.2;
-  const meta = await sharp(input, { failOn: "none" }).metadata();
+  const meta = await sharp(input, { failOn: "none" }).rotate().metadata();
   const imgW = meta.width || 0;
   const imgH = meta.height || 0;
 
@@ -357,6 +380,7 @@ async function generateEmbedding(input, bbox) {
   }
 
   const { data } = await sharp(input, { failOn: "none" })
+    .rotate()
     .extract({ left, top, width, height })
     .resize(EMBED_SIZE, EMBED_SIZE, { fit: "fill" })
     .removeAlpha()
@@ -441,91 +465,121 @@ let modelsDir = null;
 let modelsReady = false;
 
 process.on("message", async (msg) => {
-  if (msg.type === "init") {
-    const { modelsDir: md, useGPU } = msg;
-    modelsDir = md || path.join(process.cwd(), "models");
-    try {
-      await initModels(modelsDir, useGPU);
-      modelsReady = true;
-      process.send?.({ type: "ready" });
-    } catch (err) {
-      console.error(`[FaceWorker] Model init failed: ${err.message}`);
+  try {
+    if (msg.type === "init") {
+      const { modelsDir: md, useGPU } = msg;
+      modelsDir = md || path.join(process.cwd(), "models");
+      try {
+        await initModels(modelsDir, useGPU);
+        modelsReady = true;
+        process.send?.({ type: "ready" });
+      } catch (err) {
+        console.error(`[FaceWorker] Model init failed: ${err.message}`);
+        process.send?.({ type: "ready", error: err.message });
+      }
+      return;
+    }
+
+    if (msg.type === "abort") {
+      aborted = true;
+      console.error("[FaceWorker] Abort signal received");
+      return;
+    }
+
+    if (msg.type === "shutdown") {
+      console.error("[FaceWorker] Shutting down");
+      process.exit(0);
+    }
+
+    if (msg.type !== "detect") {
+      return;
+    }
+
+    if (!modelsReady) {
+      process.send?.({
+        type: "result",
+        results: msg.photos.map((p) => ({ id: p.id, faces: [] })),
+        error: "Models not initialized",
+      });
+      return;
+    }
+
+    const { photos } = msg;
+    if (!photos?.length) {
+      process.send?.({ type: "result", results: [] });
+      return;
+    }
+
+    const batchTimeout = setTimeout(() => {
+      console.error("[FaceWorker] Batch timeout reached");
+      process.send?.({
+        type: "result",
+        results: photos.map((p) => ({ id: p.id, faces: [] })),
+        error: "Batch timeout",
+      });
+    }, WORKER_TIMEOUT_MS);
+
+    console.error(`[FaceWorker] Processing ${photos.length} photos`);
+    const batchStartMs = Date.now();
+
+    const PER_PHOTO_TIMEOUT_MS = 60_000;
+    const results = [];
+
+    // Reset abort flag for new batch
+    aborted = false;
+
+    for (let i = 0; i < photos.length; i++) {
+      // Check for abort signal before processing each photo
+      if (aborted) {
+        console.error(`[FaceWorker] Aborted at photo ${i}/${photos.length}`);
+        break;
+      }
+      const photo = photos[i];
+      try {
+        const result = await Promise.race([
+          processPhoto(photo),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("per-photo timeout")),
+              PER_PHOTO_TIMEOUT_MS
+            )
+          ),
+        ]);
+        results.push(result);
+        if (result.faces.length > 0) {
+          console.error(
+            `[FaceWorker] ${i + 1}/${photos.length}: ${path.basename(photo.path)} — ${result.faces.length} face(s)`
+          );
+        }
+      } catch (err) {
+        console.error(
+          `[FaceWorker] ${i + 1}/${photos.length} FAIL: ${photo.path} — ${err.message}`
+        );
+        results.push({ id: photo.id, faces: [] });
+      }
+    }
+
+    const totalFaces = results.reduce((s, r) => s + r.faces.length, 0);
+    const batchMs = Date.now() - batchStartMs;
+    console.error(
+      `[FaceWorker] Done: ${totalFaces} faces in ${results.length} photos | ${batchMs}ms (${Math.round(batchMs / results.length)}ms/photo)`
+    );
+
+    clearTimeout(batchTimeout);
+    process.send?.({ type: "result", results });
+  } catch (err) {
+    console.error(
+      `[FaceWorker] Fatal error handling "${msg.type}":`,
+      err.message
+    );
+    if (msg.type === "detect") {
+      process.send?.({
+        type: "result",
+        results: (msg.photos || []).map((p) => ({ id: p.id, faces: [] })),
+        error: err.message,
+      });
+    } else if (msg.type === "init") {
       process.send?.({ type: "ready", error: err.message });
     }
-    return;
   }
-
-  if (msg.type === "shutdown") {
-    console.error("[FaceWorker] Shutting down");
-    process.exit(0);
-  }
-
-  if (msg.type !== "detect") {
-    return;
-  }
-
-  if (!modelsReady) {
-    process.send?.({
-      type: "result",
-      results: msg.photos.map((p) => ({ id: p.id, faces: [] })),
-      error: "Models not initialized",
-    });
-    return;
-  }
-
-  const { photos } = msg;
-  if (!photos?.length) {
-    process.send?.({ type: "result", results: [] });
-    return;
-  }
-
-  const batchTimeout = setTimeout(() => {
-    console.error("[FaceWorker] Batch timeout reached");
-    process.send?.({
-      type: "result",
-      results: photos.map((p) => ({ id: p.id, faces: [] })),
-      error: "Batch timeout",
-    });
-  }, WORKER_TIMEOUT_MS);
-
-  console.error(`[FaceWorker] Processing ${photos.length} photos`);
-  const batchStartMs = Date.now();
-
-  const PER_PHOTO_TIMEOUT_MS = 60_000;
-  const results = [];
-
-  for (let i = 0; i < photos.length; i++) {
-    const photo = photos[i];
-    try {
-      const result = await Promise.race([
-        processPhoto(photo),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("per-photo timeout")),
-            PER_PHOTO_TIMEOUT_MS
-          )
-        ),
-      ]);
-      results.push(result);
-      if (result.faces.length > 0) {
-        console.error(
-          `[FaceWorker] ${i + 1}/${photos.length}: ${path.basename(photo.path)} — ${result.faces.length} face(s)`
-        );
-      }
-    } catch (err) {
-      console.error(
-        `[FaceWorker] ${i + 1}/${photos.length} FAIL: ${photo.path} — ${err.message}`
-      );
-      results.push({ id: photo.id, faces: [] });
-    }
-  }
-
-  const totalFaces = results.reduce((s, r) => s + r.faces.length, 0);
-  const batchMs = Date.now() - batchStartMs;
-  console.error(
-    `[FaceWorker] Done: ${totalFaces} faces in ${results.length} photos | ${batchMs}ms (${Math.round(batchMs / results.length)}ms/photo)`
-  );
-
-  clearTimeout(batchTimeout);
-  process.send?.({ type: "result", results });
 });

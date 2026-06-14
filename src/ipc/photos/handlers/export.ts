@@ -154,30 +154,57 @@ export const exportPhotos = os
       imgW: number,
       imgH: number,
       wmW: number,
-      wmH: number,
+      wmH: number
     ): { left: number; top: number } {
       const mp = Math.round((margin / 100) * Math.min(imgW, imgH));
       let h: "left" | "center" | "right";
       let v: "top" | "center" | "bottom";
-      if (anchor === "topLeft") { h = "left"; v = "top"; }
-      else if (anchor === "topCenter") { h = "center"; v = "top"; }
-      else if (anchor === "topRight") { h = "right"; v = "top"; }
-      else if (anchor === "centerLeft") { h = "left"; v = "center"; }
-      else if (anchor === "center") { h = "center"; v = "center"; }
-      else if (anchor === "centerRight") { h = "right"; v = "center"; }
-      else if (anchor === "bottomLeft") { h = "left"; v = "bottom"; }
-      else if (anchor === "bottomCenter") { h = "center"; v = "bottom"; }
-      else { h = "right"; v = "bottom"; }
+      if (anchor === "topLeft") {
+        h = "left";
+        v = "top";
+      } else if (anchor === "topCenter") {
+        h = "center";
+        v = "top";
+      } else if (anchor === "topRight") {
+        h = "right";
+        v = "top";
+      } else if (anchor === "centerLeft") {
+        h = "left";
+        v = "center";
+      } else if (anchor === "center") {
+        h = "center";
+        v = "center";
+      } else if (anchor === "centerRight") {
+        h = "right";
+        v = "center";
+      } else if (anchor === "bottomLeft") {
+        h = "left";
+        v = "bottom";
+      } else if (anchor === "bottomCenter") {
+        h = "center";
+        v = "bottom";
+      } else {
+        h = "right";
+        v = "bottom";
+      }
 
       let left: number;
-      if (h === "left") left = mp;
-      else if (h === "right") left = imgW - wmW - mp;
-      else left = Math.round((imgW - wmW) / 2);
+      if (h === "left") {
+        left = mp;
+      } else if (h === "right") {
+        left = imgW - wmW - mp;
+      } else {
+        left = Math.round((imgW - wmW) / 2);
+      }
 
       let top: number;
-      if (v === "top") top = mp;
-      else if (v === "bottom") top = imgH - wmH - mp;
-      else top = Math.round((imgH - wmH) / 2);
+      if (v === "top") {
+        top = mp;
+      } else if (v === "bottom") {
+        top = imgH - wmH - mp;
+      } else {
+        top = Math.round((imgH - wmH) / 2);
+      }
 
       return { left: Math.max(0, left), top: Math.max(0, top) };
     }
@@ -188,7 +215,9 @@ export const exportPhotos = os
       imgWidth: number,
       imgHeight: number
     ): Buffer | null {
-      if (!(wm.enabled && wm.text.trim())) return null;
+      if (!(wm.enabled && wm.text.trim())) {
+        return null;
+      }
 
       const opacity = wm.opacity / 100;
       const fontSize = wm.fontSize;
@@ -199,21 +228,52 @@ export const exportPhotos = os
       // Resolve anchor to pixel point + text alignment
       let h: "left" | "center" | "right";
       let v: "top" | "center" | "bottom";
-      if (anchor === "topLeft") { h = "left"; v = "top"; }
-      else if (anchor === "topCenter") { h = "center"; v = "top"; }
-      else if (anchor === "topRight") { h = "right"; v = "top"; }
-      else if (anchor === "centerLeft") { h = "left"; v = "center"; }
-      else if (anchor === "center") { h = "center"; v = "center"; }
-      else if (anchor === "centerRight") { h = "right"; v = "center"; }
-      else if (anchor === "bottomLeft") { h = "left"; v = "bottom"; }
-      else if (anchor === "bottomCenter") { h = "center"; v = "bottom"; }
-      else { h = "right"; v = "bottom"; }
+      if (anchor === "topLeft") {
+        h = "left";
+        v = "top";
+      } else if (anchor === "topCenter") {
+        h = "center";
+        v = "top";
+      } else if (anchor === "topRight") {
+        h = "right";
+        v = "top";
+      } else if (anchor === "centerLeft") {
+        h = "left";
+        v = "center";
+      } else if (anchor === "center") {
+        h = "center";
+        v = "center";
+      } else if (anchor === "centerRight") {
+        h = "right";
+        v = "center";
+      } else if (anchor === "bottomLeft") {
+        h = "left";
+        v = "bottom";
+      } else if (anchor === "bottomCenter") {
+        h = "center";
+        v = "bottom";
+      } else {
+        h = "right";
+        v = "bottom";
+      }
 
-      const x = h === "left" ? mp : h === "right" ? imgWidth - mp : Math.round(imgWidth / 2);
-      const y = v === "top" ? mp + fontSize : v === "bottom" ? imgHeight - mp : Math.round(imgHeight / 2);
+      const x =
+        h === "left"
+          ? mp
+          : h === "right"
+            ? imgWidth - mp
+            : Math.round(imgWidth / 2);
+      const y =
+        v === "top"
+          ? mp + fontSize
+          : v === "bottom"
+            ? imgHeight - mp
+            : Math.round(imgHeight / 2);
 
-      const textAnchor = h === "left" ? "start" : h === "right" ? "end" : "middle";
-      const baseline = v === "top" ? "hanging" : v === "bottom" ? "baseline" : "middle";
+      const textAnchor =
+        h === "left" ? "start" : h === "right" ? "end" : "middle";
+      const baseline =
+        v === "top" ? "hanging" : v === "bottom" ? "baseline" : "middle";
 
       const escaped = wm.text
         .replace(/&/g, "&amp;")
@@ -247,7 +307,7 @@ export const exportPhotos = os
 
         if (sharp && (format === "compressed" || wm.enabled)) {
           try {
-            let pipeline = sharp(photo.path);
+            let pipeline = sharp(photo.path).rotate();
             const meta = await pipeline.metadata();
             const imgWidth = meta.width || photo.width || 0;
             const imgHeight = meta.height || photo.height || 0;
@@ -264,7 +324,13 @@ export const exportPhotos = os
             }
 
             // Apply image watermark (takes priority over text)
-            if (wm.enabled && wm.imagePath && fs.existsSync(wm.imagePath) && outWidth > 0 && outHeight > 0) {
+            if (
+              wm.enabled &&
+              wm.imagePath &&
+              fs.existsSync(wm.imagePath) &&
+              outWidth > 0 &&
+              outHeight > 0
+            ) {
               const maxDim = Math.round(
                 Math.min(outWidth, outHeight) * (wm.imageScale / 100)
               );
@@ -281,12 +347,15 @@ export const exportPhotos = os
                 outWidth,
                 outHeight,
                 wmW,
-                wmH,
+                wmH
               );
-              pipeline = pipeline.composite([
-                { input: wmBuffer, top, left },
-              ]);
-            } else if (wm.enabled && wm.text.trim() && outWidth > 0 && outHeight > 0) {
+              pipeline = pipeline.composite([{ input: wmBuffer, top, left }]);
+            } else if (
+              wm.enabled &&
+              wm.text.trim() &&
+              outWidth > 0 &&
+              outHeight > 0
+            ) {
               // Text watermark SVG
               const wmSvg = buildWatermarkSvg(outWidth, outHeight);
               if (wmSvg) {

@@ -169,7 +169,9 @@ export function FormatConvertDialog({
 
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[12px] text-muted-foreground">{t("quality")}</label>
+                <label className="text-[12px] text-muted-foreground">
+                  {t("quality")}
+                </label>
                 <span className="font-mono text-[13px] text-foreground">
                   {quality}%
                 </span>

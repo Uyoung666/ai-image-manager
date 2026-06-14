@@ -43,7 +43,9 @@ export function FilterPresets({
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
-  const [deleteConfirmName, setDeleteConfirmName] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     setPresets(loadPresets());
@@ -73,7 +75,9 @@ export function FilterPresets({
   }
 
   function confirmDelete() {
-    if (!deleteConfirmName) return;
+    if (!deleteConfirmName) {
+      return;
+    }
     const updated = presets.filter((p) => p.name !== deleteConfirmName);
     setPresets(updated);
     savePresets(updated);
@@ -173,7 +177,9 @@ export function FilterPresets({
 
       <ConfirmDialog
         confirmText={t("delete")}
-        description={t("filterDeletePresetDesc", { name: deleteConfirmName ?? "" })}
+        description={t("filterDeletePresetDesc", {
+          name: deleteConfirmName ?? "",
+        })}
         destructive
         onCancel={() => setDeleteConfirmName(null)}
         onConfirm={confirmDelete}

@@ -3,8 +3,21 @@ import { getDatabase } from "@/db";
 import { exifData, photos, photoTags, tags } from "@/db/schema";
 
 const RAW_EXTENSIONS = [
-  "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "dng",
-  "orf", "rw2", "raf", "pef", "rwl", "3fr", "raw",
+  "cr2",
+  "cr3",
+  "nef",
+  "nrw",
+  "arw",
+  "srf",
+  "sr2",
+  "dng",
+  "orf",
+  "rw2",
+  "raf",
+  "pef",
+  "rwl",
+  "3fr",
+  "raw",
 ];
 
 // --- Rule type definitions ---
@@ -277,9 +290,7 @@ function evaluateRule(rule: SmartRule): number[] {
           .where(
             or(
               inArray(photos.format, RAW_EXTENSIONS),
-              ...patterns.map((p) =>
-                sql`LOWER(${photos.filename}) LIKE ${p}`
-              )
+              ...patterns.map((p) => sql`LOWER(${photos.filename}) LIKE ${p}`)
             )
           )
           .all();

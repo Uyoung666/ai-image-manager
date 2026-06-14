@@ -6,27 +6,23 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { ArrowLeft, Sparkles, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getDateLocale } from "@/utils/date-locale";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
+import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface AlbumInfo {
   coverPhotoId: number | null;
+  coverThumbnailPath?: string | null;
   createdAt: number;
   description: string | null;
   id: number;
   isSmart: boolean;
   name: string;
-}
-
-interface PhotoInfo {
-  filename: string;
-  id: number;
-  thumbnailPath: string | null;
 }
 
 function AlbumsPage() {
@@ -40,6 +36,8 @@ function AlbumsPage() {
   const [creating, setCreating] = useState(false);
   const [showSmartDialog, setShowSmartDialog] = useState(false);
   const navigate = useNavigate();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "albums-list" });
 
   const loadAlbums = useCallback(async () => {
     try {
@@ -47,25 +45,13 @@ function AlbumsPage() {
       const list = result as AlbumInfo[];
       setAlbums(list);
 
-      // Load cover thumbnails
-      const coverPhotoIds = list
-        .filter((a) => a.coverPhotoId)
-        .map((a) => a.coverPhotoId!);
-      if (coverPhotoIds.length > 0) {
-        const photoResults = await Promise.all(
-          coverPhotoIds.map((id) =>
-            ipc.client.photos.getPhotoDetail({ id }).catch(() => null)
-          )
-        );
-        const coverMap = new Map<number, string>();
-        photoResults.forEach((p: any) => {
-          if (p?.id) {
-            // Fall back to original path when thumbnail is not yet generated
-            coverMap.set(p.id, p.thumbnailPath || p.path);
-          }
-        });
-        setCovers(coverMap);
+      const coverMap = new Map<number, string>();
+      for (const album of list) {
+        if (album.coverPhotoId && album.coverThumbnailPath) {
+          coverMap.set(album.coverPhotoId, album.coverThumbnailPath);
+        }
       }
+      setCovers(coverMap);
     } catch (err) {
       console.error("[loadAlbums] failed:", err);
     } finally {
@@ -97,7 +83,6 @@ function AlbumsPage() {
     }
     setCreating(false);
   }
-
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -187,7 +172,7 @@ function AlbumsPage() {
       )}
 
       {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
         {loading ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -292,7 +277,9 @@ function AlbumsPage() {
                   <p className="mt-1 text-[10px] text-muted-foreground/70">
                     {album.isSmart
                       ? t("smartAlbum")
-                      : new Date(album.createdAt).toLocaleDateString(getDateLocale(i18n.language))}
+                      : new Date(album.createdAt).toLocaleDateString(
+                          getDateLocale(i18n.language)
+                        )}
                   </p>
                 </div>
               </Link>

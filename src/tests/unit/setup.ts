@@ -63,7 +63,10 @@ vi.mock("react-i18next", () => ({
         toastFavoriteRemoved: "已取消收藏",
         toastFavoriteAddedCount: "已收藏 {{count}} 张",
         toastPhotosIndexed: "已索引 {{count}} 张照片",
-        toastPhotosIndexedSkipped: "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
+        toastPhotosIndexedSkipped:
+          "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
+        toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
+        toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
         toastScanFolderFailed: "扫描文件夹失败",
         toastFolderRemoved: "已移除文件夹",
         toastDeleteFolderFailed: "删除文件夹失败",
@@ -81,7 +84,8 @@ vi.mock("react-i18next", () => ({
         emptySearchTitle: "未找到匹配的照片",
         emptySearchDescription: "试试换个关键词，或使用 EXIF 筛选器缩小范围",
         emptyFavoritesTitle: "还没有收藏的照片",
-        emptyFavoritesDescription: "浏览照片时点击星标即可收藏，收藏的照片会出现在这里",
+        emptyFavoritesDescription:
+          "浏览照片时点击星标即可收藏，收藏的照片会出现在这里",
         albumAddTitle: "添加到相册",
         albumNoAlbumsCreate: "还没有相册，创建一个吧",
         albumNamePlaceholder: "相册名称...",
@@ -89,13 +93,15 @@ vi.mock("react-i18next", () => ({
         albumNew: "新建相册",
         confirmDeleteTitle: "确认删除",
         confirmDeleteAction: "删除",
-        confirmDeleteDescription: "将{{target}}移到系统回收站，可从回收站恢复。",
+        confirmDeleteDescription:
+          "将{{target}}移到系统回收站，可从回收站恢复。",
         confirmDeleteTargetPhoto: "该照片",
         confirmDeleteTargetPhotos: " {{count}} 张照片",
         done: "完成",
         close: "关闭",
         save: "保存",
-        test: "测试",        loading: "加载中…",
+        test: "测试",
+        loading: "加载中…",
         backToHome: "返回主页",
       };
       const translated = translations[key];
@@ -118,4 +124,3 @@ vi.mock("react-i18next", () => ({
   }),
   Trans: ({ children }: { children: React.ReactNode }) => children,
 }));
-

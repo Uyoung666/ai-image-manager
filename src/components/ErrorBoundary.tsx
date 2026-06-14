@@ -56,9 +56,7 @@ function ErrorBoundaryInner({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <ErrorBoundaryMessage error={error} />
-      <p className="text-[12px] text-muted-foreground">
-        {t("errorGeneric")}
-      </p>
+      <p className="text-[12px] text-muted-foreground">{t("errorGeneric")}</p>
       <details
         className="max-h-[120px] max-w-[500px] overflow-auto rounded-[6px] bg-muted/50 p-2 text-left"
         onToggle={(e) => setShowDetails(e.currentTarget.open)}
@@ -127,7 +125,12 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
-      return <ErrorBoundaryInner error={this.state.error} onReset={this.handleReset} />;
+      return (
+        <ErrorBoundaryInner
+          error={this.state.error}
+          onReset={this.handleReset}
+        />
+      );
     }
 
     return this.props.children;

@@ -1,8 +1,12 @@
 import {
   batchGenerateTags,
+  cancelAiIndexing,
   getAiHealth,
   getAiProgress,
   getAiStatus,
+  pauseAiIndexing,
+  resetAiIndex,
+  resumeAiIndexing,
   startAiIndexing,
   stopAiIndexing,
 } from "./handlers/ai";
@@ -12,8 +16,10 @@ import {
   setWatermarkSettings,
 } from "./handlers/export";
 import {
+  cancelQueuedImports_h,
   deleteFolder,
   getFolders,
+  getImportQueueStatus_h,
   getPhotoDetail,
   getPhotoExif,
   listPhotos,
@@ -21,6 +27,7 @@ import {
   stopScanning,
 } from "./handlers/listing";
 import {
+  cleanOrphanThumbnails,
   cleanupOrphanPhotos,
   clearThumbCache,
   convertPhotos,
@@ -33,6 +40,7 @@ import {
   previewRename,
   renamePhotos,
   restorePhotos,
+  scanOrphanThumbnails,
   toggleFavorite,
 } from "./handlers/mutations";
 import { searchByImage, searchByText, searchCompound } from "./handlers/search";
@@ -61,7 +69,10 @@ import {
 export const photos = {
   addTag,
   batchGenerateTags,
+  cancelAiIndexing,
+  cancelQueuedImports: cancelQueuedImports_h,
   cleanupOrphanPhotos,
+  cleanOrphanThumbnails,
   clearThumbCache,
   confirmPhotoTag,
   convertPhotos,
@@ -80,6 +91,7 @@ export const photos = {
   getDuplicateStats,
   getExifCandidates,
   getFolders,
+  getImportQueueStatus: getImportQueueStatus_h,
   getIndexStats,
   getPhotoDetail,
   getPhotoExif,
@@ -91,12 +103,16 @@ export const photos = {
   listPhotos,
   migrateColors,
   movePhotos,
+  pauseAiIndexing,
   permanentlyDeletePhotos,
   previewRename,
   removePhotoTag,
   renamePhotos,
+  resetAiIndex,
   restorePhotos,
+  resumeAiIndexing,
   scanFolder,
+  scanOrphanThumbnails,
   searchByImage,
   searchByText,
   searchCompound,

@@ -1,23 +1,28 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { getDataPath } from '@/utils/data-path';
-import { createLogger } from '@/utils/logger';
-import { ZH_TO_EN_SEARCH, CHAR_DECOMPOSE, type DictEntry, type DictCategory } from './ai/zh-en-dict';
+import fs from "node:fs";
+import path from "node:path";
+import { getDataPath } from "@/utils/data-path";
+import { createLogger } from "@/utils/logger";
+import {
+  CHAR_DECOMPOSE,
+  type DictCategory,
+  type DictEntry,
+  ZH_TO_EN_SEARCH,
+} from "./ai/zh-en-dict";
 
-const log = createLogger('dictionary-manager');
+const log = createLogger("dictionary-manager");
 
 export interface CustomDictEntry extends DictEntry {
-  priority?: number;
-  note?: string;
   createdAt?: number;
+  note?: string;
+  priority?: number;
   updatedAt?: number;
 }
 
 export interface CustomDictionaryData {
-  version: string;
+  disabled?: string[];
   entries: Record<string, CustomDictEntry>;
   overrides?: Record<string, CustomDictEntry>;
-  disabled?: string[];
+  version: string;
 }
 
 /**
@@ -31,7 +36,11 @@ export class DictionaryManager {
   private customDictPath: string;
 
   constructor() {
-    this.customDictPath = path.join(getDataPath(), 'dictionaries', 'user-custom.json');
+    this.customDictPath = path.join(
+      getDataPath(),
+      "dictionaries",
+      "user-custom.json"
+    );
     this.loadCustomDict();
     this.rebuildCache();
   }
@@ -42,16 +51,19 @@ export class DictionaryManager {
   private loadCustomDict(): void {
     try {
       if (fs.existsSync(this.customDictPath)) {
-        const content = fs.readFileSync(this.customDictPath, 'utf-8');
+        const content = fs.readFileSync(this.customDictPath, "utf-8");
         this.customDict = JSON.parse(content);
-        log.info({
-          custom: Object.keys(this.customDict?.entries || {}).length,
-          overrides: Object.keys(this.customDict?.overrides || {}).length,
-          disabled: this.customDict?.disabled?.length || 0
-        }, 'Custom dictionary loaded');
+        log.info(
+          {
+            custom: Object.keys(this.customDict?.entries || {}).length,
+            overrides: Object.keys(this.customDict?.overrides || {}).length,
+            disabled: this.customDict?.disabled?.length || 0,
+          },
+          "Custom dictionary loaded"
+        );
       }
     } catch (err: any) {
-      log.error({ err }, 'Failed to load custom dictionary');
+      log.error({ err }, "Failed to load custom dictionary");
     }
   }
 
@@ -87,7 +99,7 @@ export class DictionaryManager {
       }
     }
 
-    log.info({ total: this.mergedCache.size }, 'Dictionary cache rebuilt');
+    log.info({ total: this.mergedCache.size }, "Dictionary cache rebuilt");
   }
 
   /**
@@ -109,7 +121,7 @@ export class DictionaryManager {
    */
   async addCustomEntry(zh: string, entry: CustomDictEntry): Promise<void> {
     if (!this.customDict) {
-      this.customDict = { version: '1.0.0', entries: {} };
+      this.customDict = { version: "1.0.0", entries: {} };
     }
 
     this.customDict.entries[zh] = {
@@ -121,13 +133,16 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh, entry }, 'Custom entry added');
+    log.info({ zh, entry }, "Custom entry added");
   }
 
   /**
    * 更新自定义词条
    */
-  async updateCustomEntry(zh: string, entry: Partial<CustomDictEntry>): Promise<void> {
+  async updateCustomEntry(
+    zh: string,
+    entry: Partial<CustomDictEntry>
+  ): Promise<void> {
     if (!this.customDict?.entries[zh]) {
       throw new Error(`Entry "${zh}" not found in custom dictionary`);
     }
@@ -141,7 +156,7 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh }, 'Custom entry updated');
+    log.info({ zh }, "Custom entry updated");
   }
 
   /**
@@ -157,15 +172,18 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh }, 'Custom entry deleted');
+    log.info({ zh }, "Custom entry deleted");
   }
 
   /**
    * 覆盖内置词条
    */
-  async overrideBuiltinEntry(zh: string, entry: CustomDictEntry): Promise<void> {
+  async overrideBuiltinEntry(
+    zh: string,
+    entry: CustomDictEntry
+  ): Promise<void> {
     if (!this.customDict) {
-      this.customDict = { version: '1.0.0', entries: {}, overrides: {} };
+      this.customDict = { version: "1.0.0", entries: {}, overrides: {} };
     }
 
     if (!this.customDict.overrides) {
@@ -180,7 +198,7 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh }, 'Builtin entry overridden');
+    log.info({ zh }, "Builtin entry overridden");
   }
 
   /**
@@ -188,7 +206,7 @@ export class DictionaryManager {
    */
   async disableBuiltinEntry(zh: string): Promise<void> {
     if (!this.customDict) {
-      this.customDict = { version: '1.0.0', entries: {}, disabled: [] };
+      this.customDict = { version: "1.0.0", entries: {}, disabled: [] };
     }
 
     if (!this.customDict.disabled) {
@@ -202,21 +220,25 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh }, 'Builtin entry disabled');
+    log.info({ zh }, "Builtin entry disabled");
   }
 
   /**
    * 启用内置词条
    */
   async enableBuiltinEntry(zh: string): Promise<void> {
-    if (!this.customDict?.disabled) return;
+    if (!this.customDict?.disabled) {
+      return;
+    }
 
-    this.customDict.disabled = this.customDict.disabled.filter(item => item !== zh);
+    this.customDict.disabled = this.customDict.disabled.filter(
+      (item) => item !== zh
+    );
 
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info({ zh }, 'Builtin entry enabled');
+    log.info({ zh }, "Builtin entry enabled");
   }
 
   /**
@@ -229,8 +251,12 @@ export class DictionaryManager {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    fs.writeFileSync(this.customDictPath, JSON.stringify(this.customDict, null, 2), 'utf-8');
-    log.info({ path: this.customDictPath }, 'Custom dictionary saved');
+    fs.writeFileSync(
+      this.customDictPath,
+      JSON.stringify(this.customDict, null, 2),
+      "utf-8"
+    );
+    log.info({ path: this.customDictPath }, "Custom dictionary saved");
   }
 
   /**
@@ -243,12 +269,14 @@ export class DictionaryManager {
   /**
    * 导入自定义词典
    */
-  async importCustomDict(jsonData: string): Promise<{ added: number; updated: number; errors: string[] }> {
+  async importCustomDict(
+    jsonData: string
+  ): Promise<{ added: number; updated: number; errors: string[] }> {
     const imported = JSON.parse(jsonData) as CustomDictionaryData;
     const result = { added: 0, updated: 0, errors: [] as string[] };
 
     if (!this.customDict) {
-      this.customDict = { version: '1.0.0', entries: {} };
+      this.customDict = { version: "1.0.0", entries: {} };
     }
 
     for (const [zh, entry] of Object.entries(imported.entries || {})) {
@@ -257,7 +285,11 @@ export class DictionaryManager {
           this.customDict.entries[zh] = { ...entry, updatedAt: Date.now() };
           result.updated++;
         } else {
-          this.customDict.entries[zh] = { ...entry, createdAt: Date.now(), updatedAt: Date.now() };
+          this.customDict.entries[zh] = {
+            ...entry,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
           result.added++;
         }
       } catch (err: any) {
@@ -268,7 +300,7 @@ export class DictionaryManager {
     await this.saveCustomDict();
     this.rebuildCache();
 
-    log.info(result, 'Custom dictionary imported');
+    log.info(result, "Custom dictionary imported");
 
     return result;
   }
@@ -276,22 +308,35 @@ export class DictionaryManager {
   /**
    * 搜索词条
    */
-  searchEntries(query: string, limit = 50): Array<{ zh: string; entry: DictEntry; source: 'builtin' | 'custom' | 'override' }> {
-    const results: Array<{ zh: string; entry: DictEntry; source: 'builtin' | 'custom' | 'override' }> = [];
+  searchEntries(
+    query: string,
+    limit = 50
+  ): Array<{
+    zh: string;
+    entry: DictEntry;
+    source: "builtin" | "custom" | "override";
+  }> {
+    const results: Array<{
+      zh: string;
+      entry: DictEntry;
+      source: "builtin" | "custom" | "override";
+    }> = [];
     const lowerQuery = query.toLowerCase();
 
     for (const [zh, entry] of this.mergedCache) {
       if (zh.includes(query) || entry.en.toLowerCase().includes(lowerQuery)) {
-        let source: 'builtin' | 'custom' | 'override' = 'builtin';
+        let source: "builtin" | "custom" | "override" = "builtin";
 
         if (this.customDict?.entries[zh]) {
-          source = 'custom';
+          source = "custom";
         } else if (this.customDict?.overrides?.[zh]) {
-          source = 'override';
+          source = "override";
         }
 
         results.push({ zh, entry, source });
-        if (results.length >= limit) break;
+        if (results.length >= limit) {
+          break;
+        }
       }
     }
 
@@ -301,11 +346,19 @@ export class DictionaryManager {
   /**
    * 获取统计信息
    */
-  getStats(): { builtin: number; custom: number; overrides: number; disabled: number; total: number } {
+  getStats(): {
+    builtin: number;
+    custom: number;
+    overrides: number;
+    disabled: number;
+    total: number;
+  } {
     return {
       builtin: Object.keys(ZH_TO_EN_SEARCH).length,
       custom: this.customDict ? Object.keys(this.customDict.entries).length : 0,
-      overrides: this.customDict?.overrides ? Object.keys(this.customDict.overrides).length : 0,
+      overrides: this.customDict?.overrides
+        ? Object.keys(this.customDict.overrides).length
+        : 0,
       disabled: this.customDict?.disabled ? this.customDict.disabled.length : 0,
       total: this.mergedCache.size,
     };

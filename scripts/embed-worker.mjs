@@ -70,12 +70,17 @@ const CLIP_SIZE = 224;
 const CLIP_MEAN = [0.481_454_66, 0.457_827_5, 0.408_210_73];
 const CLIP_STD = [0.268_629_54, 0.261_302_58, 0.275_777_11];
 
+// --- Abort flag for mid-batch cancellation ---
+let aborted = false;
+
 // --- Module-level model cache ---
 let ortSession = null;
 // onnxruntime-node lazy-loaded singleton
 let _ort = null;
 async function loadOrt() {
-  if (_ort) return _ort;
+  if (_ort) {
+    return _ort;
+  }
   // Use the module-level `require` (line 24) — it already resolves from
   // the script's location and is more reliable than creating a new one.
   try {
@@ -93,6 +98,7 @@ async function loadOrt() {
  */
 async function preprocessCLIP(filePath) {
   const { data, info } = await sharp(filePath, { failOn: "none" })
+    .rotate()
     .resize(CLIP_SIZE, CLIP_SIZE, { fit: "cover", position: "center" })
     .removeAlpha()
     .raw()
@@ -124,11 +130,20 @@ async function preprocessCLIP(filePath) {
 async function handleInit(msg) {
   const { modelPath, useGPU } = msg;
   const onnxPath = path.join(
-    modelPath, "Xenova", "clip-vit-base-patch32", "onnx",
+    modelPath,
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
     "vision_model_quantized.onnx"
   );
   console.error(`[Worker] Loading CLIP vision ONNX: ${onnxPath}`);
 
+  // Phase 1: load onnxruntime binding (~10%)
+  process.send?.({
+    type: "init-progress",
+    percent: 5,
+    stage: "loading-runtime",
+  });
   const { InferenceSession } = await loadOrt();
 
   // NOTE: DML crashes on ViT-B/32 (0xFFFF0003) in both onnxruntime 1.26.0
@@ -137,6 +152,12 @@ async function handleInit(msg) {
   const executionProviders = ["cpu"];
   console.error("[Worker] Creating session with: [cpu]");
 
+  // Phase 2: creating ONNX session — the heavy part (~20% → ~95%)
+  process.send?.({
+    type: "init-progress",
+    percent: 20,
+    stage: "creating-session",
+  });
   ortSession = await InferenceSession.create(onnxPath, {
     executionProviders,
     logSeverityLevel: 3,
@@ -145,6 +166,7 @@ async function handleInit(msg) {
   });
   console.error("[Worker] CLIP model loaded, ready for batches");
 
+  process.send?.({ type: "init-progress", percent: 100, stage: "ready" });
   process.send?.({ type: "ready" });
 }
 
@@ -172,6 +194,11 @@ async function handleEmbed(msg) {
   const results = [];
 
   for (let i = 0; i < photos.length; i++) {
+    // Check for abort signal before processing each photo
+    if (aborted) {
+      console.error(`[Worker] Aborted at photo ${i}/${photos.length}`);
+      break;
+    }
     const photo = photos[i];
     try {
       // Resolve input: for RAW files, extract embedded JPEG preview
@@ -186,7 +213,10 @@ async function handleEmbed(msg) {
       // Preprocess + run ONNX inference directly (no transformers overhead)
       const floatData = await preprocessCLIP(imageInput);
       const pixelValues = new ort.Tensor("float32", floatData, [
-        1, 3, CLIP_SIZE, CLIP_SIZE,
+        1,
+        3,
+        CLIP_SIZE,
+        CLIP_SIZE,
       ]);
       const output = await ortSession.run({ pixel_values: pixelValues });
 
@@ -228,7 +258,11 @@ process.on("message", async (msg) => {
     if (msg.type === "init") {
       await handleInit(msg);
     } else if (msg.type === "embed") {
+      aborted = false; // Reset abort flag for new batch
       await handleEmbed(msg);
+    } else if (msg.type === "abort") {
+      aborted = true;
+      console.error("[Worker] Abort signal received");
     } else if (msg.type === "shutdown") {
       console.error("[Worker] Shutting down");
       process.exit(0);

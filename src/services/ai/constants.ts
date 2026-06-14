@@ -3,7 +3,7 @@
 // Minimum vectors required before creating an IVF_PQ index.
 // LanceDB IVF_PQ needs enough data for meaningful partitions; below this
 // threshold brute-force flat search is both faster and more accurate.
-export const MIN_VECTORS_FOR_INDEX = 256;
+export const MIN_VECTORS_FOR_INDEX = 10_000;
 
 export const BATCH_SIZE = 20; // Photos per worker process
 export const WORKER_TIMEOUT = 300_000; // 5 minutes per batch
