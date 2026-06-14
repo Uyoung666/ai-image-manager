@@ -13,7 +13,9 @@ const packageTempSuffix = process.env.AIM_PACKAGE_TEMP_SUFFIX;
 
 // 递归删除 node_modules 中指定后缀的开发文件
 function removeFilesByExt(dir: string, ext: string, label: string) {
-  if (!fs.existsSync(dir)) return;
+  if (!fs.existsSync(dir)) {
+    return;
+  }
   const files: string[] = [];
   function walk(d: string) {
     let entries: fs.Dirent[];
@@ -33,7 +35,11 @@ function removeFilesByExt(dir: string, ext: string, label: string) {
   }
   walk(dir);
   for (const f of files) {
-    try { fs.rmSync(f); } catch { /* ignore */ }
+    try {
+      fs.rmSync(f);
+    } catch {
+      /* ignore */
+    }
   }
   if (files.length > 0) {
     console.log(`[cleanup] removed ${files.length} ${label} files`);
@@ -45,15 +51,27 @@ function removeFilesByExt(dir: string, ext: string, label: string) {
 // 因为 Electron Packager 的 prune 步骤会重新恢复被删文件
 function cleanBuildNodeModules(buildPath: string) {
   const nmPath = path.join(buildPath, "node_modules");
-  if (!fs.existsSync(nmPath)) return;
+  if (!fs.existsSync(nmPath)) {
+    return;
+  }
 
   // 删除 onnxruntime 非 Windows 平台二进制
   const onnxPlatforms = [
     path.join(nmPath, "onnxruntime-node", "bin", "napi-v6"),
-    path.join(nmPath, "@xenova", "transformers", "node_modules", "onnxruntime-node", "bin", "napi-v3"),
+    path.join(
+      nmPath,
+      "@xenova",
+      "transformers",
+      "node_modules",
+      "onnxruntime-node",
+      "bin",
+      "napi-v3"
+    ),
   ];
   for (const onnxDir of onnxPlatforms) {
-    if (!fs.existsSync(onnxDir)) continue;
+    if (!fs.existsSync(onnxDir)) {
+      continue;
+    }
     for (const platform of ["darwin", "linux"]) {
       const pd = path.join(onnxDir, platform);
       if (fs.existsSync(pd)) {
@@ -74,7 +92,14 @@ function cleanBuildNodeModules(buildPath: string) {
   }
 
   // 删除嵌套 sharp 的非 Windows vendor 二进制
-  const nestedSharpVendor = path.join(nmPath, "@xenova", "transformers", "node_modules", "sharp", "vendor");
+  const nestedSharpVendor = path.join(
+    nmPath,
+    "@xenova",
+    "transformers",
+    "node_modules",
+    "sharp",
+    "vendor"
+  );
   if (fs.existsSync(nestedSharpVendor)) {
     const entries = fs.readdirSync(nestedSharpVendor, { withFileTypes: true });
     for (const entry of entries) {
@@ -110,7 +135,9 @@ const config: ForgeConfig = {
 
           // 逐个复制模块，避免 cpSync 在深层原生模块树上触发 EIO 错误
           function copyDir(src: string, dst: string) {
-            if (!fs.existsSync(src)) return;
+            if (!fs.existsSync(src)) {
+              return;
+            }
             fs.mkdirSync(dst, { recursive: true });
             const entries = fs.readdirSync(src, { withFileTypes: true });
             for (const entry of entries) {
@@ -164,7 +191,9 @@ const config: ForgeConfig = {
           for (const mod of modules) {
             const src = path.join(cwd, "node_modules", mod);
             const dst = path.join(nmDest, mod);
-            if (!fs.existsSync(src)) continue;
+            if (!fs.existsSync(src)) {
+              continue;
+            }
             if (fs.existsSync(dst)) {
               fs.rmSync(dst, { recursive: true, force: true });
             }
@@ -225,12 +254,18 @@ const config: ForgeConfig = {
   plugins: [
     new VitePlugin({
       build: [
-        { entry: "src/main.ts", config: "vite.main.config.mts", target: "main" },
-        { entry: "src/preload.ts", config: "vite.preload.config.mts", target: "preload" },
+        {
+          entry: "src/main.ts",
+          config: "vite.main.config.mts",
+          target: "main",
+        },
+        {
+          entry: "src/preload.ts",
+          config: "vite.preload.config.mts",
+          target: "preload",
+        },
       ],
-      renderer: [
-        { name: "main_window", config: "vite.renderer.config.mts" },
-      ],
+      renderer: [{ name: "main_window", config: "vite.renderer.config.mts" }],
     }),
 
     new FusesPlugin({
@@ -248,7 +283,9 @@ const config: ForgeConfig = {
   hooks: {
     postPackage: async (_forgeConfig, packageResult) => {
       for (const outputPath of packageResult.outputPaths) {
-        cleanBuildNodeModules(path.join(outputPath, "resources", "app.asar.unpacked"));
+        cleanBuildNodeModules(
+          path.join(outputPath, "resources", "app.asar.unpacked")
+        );
         cleanBuildNodeModules(path.join(outputPath, "resources", "app"));
       }
     },

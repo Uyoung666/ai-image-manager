@@ -1,6 +1,14 @@
 import type { i18n } from "i18next";
 import { LOCAL_STORAGE_KEYS } from "@/constants";
 
+function detectSystemLanguage(): string {
+  // navigator.language returns e.g. "zh-CN", "en-US", "ja-JP"
+  const nav =
+    navigator.language || (navigator as any).userLanguage || "";
+  if (nav.toLowerCase().startsWith("zh")) return "zh";
+  return "en";
+}
+
 export function setAppLanguage(lang: string, i18n: i18n) {
   localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, lang);
   i18n.changeLanguage(lang);
@@ -10,13 +18,10 @@ export function setAppLanguage(lang: string, i18n: i18n) {
 }
 
 export function updateAppLanguage(i18n: i18n) {
-  const localLang = localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE);
-  if (!localLang) {
-    return;
-  }
-
-  i18n.changeLanguage(localLang);
-  document.documentElement.lang = localLang;
+  const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE);
+  const lang = saved || detectSystemLanguage();
+  i18n.changeLanguage(lang);
+  document.documentElement.lang = lang;
   // Sync initial language to main process on app startup
-  window.electronAPI?.setLanguage?.(localLang);
+  window.electronAPI?.setLanguage?.(lang);
 }

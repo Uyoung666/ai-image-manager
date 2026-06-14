@@ -1,0 +1,945 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import http from "node:http";
+import https from "node:https";
+import path from "node:path";
+import { Transform, pipeline } from "node:stream";
+
+// ── Types ───────────────────────────────────────────────────────────────
+
+export interface ModelManifestEntry {
+  name: string;
+  fileName: string;
+  subPath: string;
+  urls: string[];
+  sha256: string;
+  sizeBytes: number;
+  required: boolean;
+}
+
+export interface DownloadProgress {
+  phase: "idle" | "downloading" | "verifying" | "retrying" | "done" | "error";
+  totalFiles: number;
+  completedFiles: number;
+  currentFileName: string;
+  /** 0–100 for in-progress / 100 for file-complete / -1 for file-error */
+  currentFilePercent: number;
+  bytesPerSecond: number;
+  remainingSeconds: number;
+  mirrorLabel: string;
+  warnings: string[];
+  /** Total byte count across ALL files in the current download batch */
+  totalBytes: number;
+  /** Bytes already written to disk (completed files + partial current). */
+  downloadedBytes: number;
+}
+
+// ── Model Manifest ──────────────────────────────────────────────────────
+
+export const MODEL_MANIFEST: ModelManifestEntry[] = [
+  {
+    name: "CLIP 视觉编码器",
+    fileName: "vision_model_quantized.onnx",
+    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+    ],
+    sha256: "",
+    // Exact byte count from actual model file — using approximation
+    // (e.g. 85 * 1024 * 1024 = 89128960) differs from the true size
+    // by a few KB, which causes isFileValid's strict === comparison
+    // to delete correctly-downloaded models.
+    sizeBytes: 89104085,
+    required: true,
+  },
+  {
+    name: "CLIP 文本编码器",
+    fileName: "text_model_quantized.onnx",
+    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
+    ],
+    sha256: "",
+    sizeBytes: 64893708,
+    required: true,
+  },
+  {
+    name: "人脸识别模型",
+    fileName: "w600k_r50.onnx",
+    subPath: "face",
+    urls: [
+      "{mirror}/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
+      "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
+    ],
+    sha256: "",
+    sizeBytes: 173873425,
+    required: false,
+  },
+  // ultraface-320.onnx (~1.2 MB) is now bundled inside models-tokenizer
+  // and copied by ensureModelAvailable() on every startup — no need to
+  // include it in the download manifest.  The face/ directory will
+  // already contain it after the tokenizer copy step.
+];
+
+// ── Constants ───────────────────────────────────────────────────────────
+
+const MAX_RETRIES_PER_FILE = 3;
+const REQUEST_TIMEOUT_MS = 30_000; // 30 s per connection attempt
+const TMP_EXT = ".tmp";
+
+/**
+ * File path used for mirror speed probing.
+ * Uses the CLIP vision model — it exists on all HuggingFace mirrors
+ * and is a real download target, giving accurate TTFB measurements.
+ */
+export const PROBE_FILE_PATH =
+  "Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx";
+
+// ── Transform: Pass-through hash computation ────────────────────────────
+
+class HashTransform extends Transform {
+  private hash = createHash("sha256");
+
+  _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.hash.update(chunk);
+    this.push(chunk);
+    callback();
+  }
+
+  digest(): string {
+    return this.hash.digest("hex");
+  }
+
+  reset(): void {
+    this.hash = createHash("sha256");
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function substituteMirror(url: string, mirrorBaseUrl: string): string {
+  return url.replace(/{mirror}/g, mirrorBaseUrl);
+}
+
+function resolveDestPath(modelsDir: string, entry: ModelManifestEntry): string {
+  return path.join(modelsDir, entry.subPath, entry.fileName);
+}
+
+function resolveTmpPath(modelsDir: string, entry: ModelManifestEntry): string {
+  return path.join(modelsDir, entry.subPath, `${entry.fileName}${TMP_EXT}`);
+}
+
+function resolveMirrorLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.hostname;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Check whether a file exists on disk and its content passes SHA256
+ * verification. If there is no sha256 check available (empty string),
+ * we only check existence and file size.
+ */
+async function isFileValid(
+  filePath: string,
+  expectedSha256: string,
+  expectedSizeBytes: number,
+): Promise<boolean> {
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.stat(filePath);
+  } catch {
+    return false;
+  }
+  if (stat.size !== expectedSizeBytes) {
+    return false;
+  }
+  // Skip SHA256 if not configured (placeholder)
+  if (!expectedSha256) {
+    return true;
+  }
+  // Stream SHA256 verification — never fs.readFileSync
+  try {
+    const actual = await sha256FileStream(filePath);
+    return actual === expectedSha256;
+  } catch {
+    return false;
+  }
+}
+
+function sha256FileStream(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk: Buffer) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
+  });
+}
+
+// ── Core: Download a single file ────────────────────────────────────────
+
+interface DownloadFileOptions {
+  destPath: string;
+  entry: ModelManifestEntry;
+  mirrorBaseUrl: string;
+  modelsDir: string;
+  maxRetries: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: DownloadProgress) => void;
+}
+
+interface DownloadFileResult {
+  warnings: string[];
+}
+
+/**
+ * Download a single model file with streaming, SHA256 verification,
+ * .tmp atomic rename, mirror fallback, and retries.
+ */
+async function downloadOneFile(
+  opts: DownloadFileOptions,
+): Promise<DownloadFileResult> {
+  const {
+    destPath,
+    entry,
+    mirrorBaseUrl,
+    modelsDir,
+    maxRetries,
+    signal,
+    onProgress,
+  } = opts;
+  const warnings: string[] = [];
+  const tmpPath = resolveTmpPath(modelsDir, entry);
+
+  // Already valid on disk → skip
+  if (await isFileValid(destPath, entry.sha256, entry.sizeBytes)) {
+    return { warnings };
+  }
+
+  // Ensure target directory exists
+  const destDir = path.dirname(destPath);
+  await fsp.mkdir(destDir, { recursive: true });
+
+  // Clean any stale .tmp from a previous crashed download
+  try {
+    await fsp.unlink(tmpPath);
+  } catch {
+    // file doesn't exist, fine
+  }
+
+  const resolvedUrls = entry.urls.map((url) =>
+    substituteMirror(url, mirrorBaseUrl),
+  );
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new Error("Download cancelled");
+    }
+
+    // Try each mirror in order
+    for (const url of resolvedUrls) {
+      if (signal?.aborted) {
+        throw new Error("Download cancelled");
+      }
+
+      const mirrorLabel = resolveMirrorLabel(url);
+
+      if (attempt > 0) {
+        onProgress?.({
+          phase: "retrying",
+          totalFiles: 0,
+          completedFiles: 0,
+          currentFileName: entry.name,
+          currentFilePercent: 0,
+          bytesPerSecond: 0,
+          remainingSeconds: 0,
+          mirrorLabel,
+          warnings: [
+            ...warnings,
+            `Retrying ${entry.name} (attempt ${attempt + 1}/${maxRetries})`,
+          ],
+          totalBytes: 0,
+          downloadedBytes: 0,
+        });
+      }
+
+      try {
+        const actualHash = await attemptDownload({
+          url,
+          tmpPath,
+          entry,
+          mirrorLabel,
+          signal,
+          onProgress,
+        });
+
+        // Verify SHA256 if configured — uses in-stream hash from attemptDownload,
+        // no redundant disk read
+        if (entry.sha256) {
+          onProgress?.({
+            phase: "verifying",
+            totalFiles: 0,
+            completedFiles: 0,
+            currentFileName: entry.name,
+            currentFilePercent: 100,
+            bytesPerSecond: 0,
+            remainingSeconds: 0,
+            mirrorLabel,
+            warnings,
+            totalBytes: 0,
+            downloadedBytes: 0,
+          });
+
+          if (actualHash !== entry.sha256) {
+            throw new Error(
+              `SHA256 mismatch: expected ${entry.sha256}, got ${actualHash}`,
+            );
+          }
+        }
+
+        // Atomic rename: .tmp → final filename
+        await fsp.rename(tmpPath, destPath);
+        return { warnings };
+      } catch (err: any) {
+        // If the operation was aborted (by an external AbortController or
+        // by our internal concurrent-error abort), re-throw immediately
+        // instead of retrying — retries are pointless when the user or
+        // the pool controller wants to stop.
+        if (signal?.aborted || err?.name === "AbortError") {
+          throw err;
+        }
+
+        lastError = err;
+        warnings.push(`Mirror ${mirrorLabel}: ${err.message}`);
+        // Clean up failed .tmp so next attempt starts fresh
+        try {
+          await fsp.unlink(tmpPath);
+        } catch {
+          // ignore
+        }
+        // Continue to next mirror
+      }
+    }
+
+    // All mirrors failed this attempt, will retry if attempts remain
+  }
+
+  // All retries exhausted
+  throw new Error(
+    `Failed to download ${entry.name} after ${maxRetries} attempts: ${lastError?.message ?? "unknown error"}`,
+  );
+}
+
+// ── Single attempt (one mirror) ─────────────────────────────────────────
+
+interface AttemptDownloadOptions {
+  url: string;
+  tmpPath: string;
+  entry: ModelManifestEntry;
+  mirrorLabel: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: DownloadProgress) => void;
+}
+
+/**
+ * Download a file from a single URL.
+ *
+ * Uses a `settled` guard to prevent double-resolve/reject from
+ * overlapping req error / timeout / pipeline callback events.
+ *
+ * Sets `timeout: 30_000` on the HTTP request so a hung TCP connection
+ * (e.g. firewall silently dropping packets) is detected and fails fast
+ * instead of freezing the download pool indefinitely.
+ */
+function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
+  const { url, tmpPath, entry, mirrorLabel, signal, onProgress } = opts;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    // Guard: if already settled, silently ignore any subsequent
+    // resolve/reject calls (prevents unhandled rejection noise).
+    const onceSettle = (
+      fn: () => void,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    // Support both http and https
+    const proto = (url.startsWith("https://") ? https : http) as typeof https;
+
+    const req = proto.get(
+      url,
+      { signal, timeout: REQUEST_TIMEOUT_MS },
+      (response) => {
+        // Follow redirects
+        if (
+          response.statusCode === 301 ||
+          response.statusCode === 302 ||
+          response.statusCode === 307 ||
+          response.statusCode === 308
+        ) {
+          const redirectUrl = response.headers.location;
+          if (redirectUrl) {
+            // Consume response to free socket
+            response.resume();
+            attemptDownload({
+              url: redirectUrl,
+              tmpPath,
+              entry,
+              mirrorLabel,
+              signal,
+              onProgress,
+            })
+              .then((h) => onceSettle(() => resolve(h)))
+              .catch((e) => onceSettle(() => reject(e)));
+            return;
+          }
+        }
+
+        if (response.statusCode !== 200) {
+          response.resume();
+          onceSettle(() =>
+            reject(new Error(`HTTP ${response.statusCode}`)),
+          );
+          return;
+        }
+
+        const contentLengthHeader = response.headers["content-length"];
+        const totalBytes = contentLengthHeader
+          ? Number.parseInt(contentLengthHeader, 10)
+          : entry.sizeBytes;
+        let downloadedBytes = 0;
+        const startTime = Date.now();
+        let lastProgressTime = startTime;
+
+        const hashTransform = new HashTransform();
+        const writeStream = fs.createWriteStream(tmpPath);
+
+        // Progress tracking
+        const onData = (chunk: Buffer): void => {
+          downloadedBytes += chunk.length;
+          const now = Date.now();
+          // Throttle progress updates to ~100ms
+          if (now - lastProgressTime >= 100) {
+            lastProgressTime = now;
+            const elapsed = (now - startTime) / 1000; // seconds
+            const bytesPerSecond =
+              elapsed > 0 ? downloadedBytes / elapsed : 0;
+            const remainingBytes = totalBytes - downloadedBytes;
+            const remainingSeconds =
+              bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : 0;
+            const percent =
+              totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0;
+
+            onProgress?.({
+              phase: "downloading",
+              totalFiles: 0,
+              completedFiles: 0,
+              currentFileName: entry.name,
+              currentFilePercent: percent,
+              bytesPerSecond,
+              remainingSeconds,
+              mirrorLabel,
+              warnings: [],
+              totalBytes: 0,
+              downloadedBytes: 0,
+            });
+          }
+        };
+
+        hashTransform.on("data", onData);
+
+        // Use pipeline for proper backpressure and error propagation
+        pipeline(response, hashTransform, writeStream, (err) => {
+          if (err) {
+            // Cleanup write stream on error
+            writeStream.destroy();
+            onceSettle(() => reject(err));
+            return;
+          }
+          // Return SHA256 computed in-stream — avoids re-reading the file from disk
+          onceSettle(() => resolve(hashTransform.digest()));
+        });
+      },
+    );
+
+    req.on("error", (err) => {
+      onceSettle(() => reject(err));
+    });
+
+    req.on("timeout", () => {
+      onceSettle(() => {
+        req.destroy();
+        reject(
+          new Error(
+            `Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`,
+          ),
+        );
+      });
+    });
+
+    req.end();
+  });
+}
+
+// ── Mirror Probe ────────────────────────────────────────────────────────
+
+/**
+ * Probe a single mirror by sending a HEAD request to a real model file
+ * (not the root domain — avoids WAF/CDN false negatives).
+ *
+ * If HEAD is blocked (403/405/Method Not Allowed), falls back to a GET
+ * with `Range: bytes=0-0` which downloads only 1 byte while still
+ * proving the file is reachable.
+ *
+ * Non-retriable errors (DNS failure, connection refused, non-403/405
+ * HTTP errors such as 404) are propagated immediately — they will
+ * exclude this mirror from the speed ranking.
+ *
+ * @returns TTFB in milliseconds, or rejects if the mirror is unreachable.
+ */
+async function probeSingleMirror(
+  mirrorBaseUrl: string,
+  signal: AbortSignal,
+): Promise<{ url: string; ttfb: number }> {
+  // Strip trailing slash, then append the real model file path
+  const base = mirrorBaseUrl.replace(/\/+$/, "");
+  const probeUrl = `${base}/${PROBE_FILE_PATH}`;
+
+  const startTime = Date.now();
+
+  // Strategy 1: HEAD request (cheapest — no body transferred)
+  try {
+    await headRequest(probeUrl, signal);
+    return { url: mirrorBaseUrl, ttfb: Date.now() - startTime };
+  } catch (headErr: any) {
+    // Only fall through to Range GET when HEAD was blocked by a
+    // WAF/CDN policy (403 Forbidden, 405 Method Not Allowed).
+    // Any other error (DNS, connection refused, 404, timeout)
+    // means the mirror is genuinely unreachable — propagate it.
+    const statusCode = extractStatusCode(headErr?.message);
+    const isHeadBlocked = statusCode === 403 || statusCode === 405;
+    const isTimeout =
+      headErr?.message?.includes("timeout") ||
+      headErr?.message?.includes("TIMEOUT");
+
+    if (!isHeadBlocked && !isTimeout) {
+      throw headErr; // Fatal: mirror unreachable
+    }
+  }
+
+  // Strategy 2: GET with Range header (downloads only 1 byte)
+  const rangeTtfb = await rangeGetRequest(probeUrl, signal);
+  return { url: mirrorBaseUrl, ttfb: rangeTtfb };
+}
+
+function extractStatusCode(message: string): number | null {
+  const m = message?.match(/HTTP\s*(\d{3})/i);
+  return m ? Number.parseInt(m[1], 10) : null;
+}
+
+/**
+ * Probe all mirror hosts with HEAD (or Range GET fallback) against a
+ * real model file and return the fastest-responding one.
+ *
+ * Timeout per probe: 5 s.
+ * Falls back to the first mirror if all probes fail.
+ */
+export async function probeFastestMirror(
+  mirrorBaseUrls: string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  if (mirrorBaseUrls.length === 0) {
+    throw new Error("No mirror URLs provided");
+  }
+  if (mirrorBaseUrls.length === 1) {
+    return mirrorBaseUrls[0];
+  }
+
+  // Probe all mirrors in parallel, each with its own 5 s timeout
+  const results = await Promise.allSettled(
+    mirrorBaseUrls.map(async (url) => {
+      const probeController = new AbortController();
+      const timeoutId = setTimeout(() => probeController.abort(), 5000);
+
+      // If the parent signal fires, also abort this probe
+      const onParentAbort = (): void => probeController.abort();
+      signal?.addEventListener("abort", onParentAbort, { once: true });
+
+      try {
+        return await probeSingleMirror(url, probeController.signal);
+      } finally {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", onParentAbort);
+      }
+    }),
+  );
+
+  // Return the mirror with the lowest TTFB
+  let fastest: { url: string; ttfb: number } | null = null;
+  for (const result of results) {
+    if (
+      result.status === "fulfilled" &&
+      (!fastest || result.value.ttfb < fastest.ttfb)
+    ) {
+      fastest = result.value;
+    }
+  }
+
+  return fastest?.url ?? mirrorBaseUrls[0];
+}
+
+/**
+ * HEAD request to a real model file URL.
+ *
+ * ONLY resolves on 200 or 206 — 3xx redirects, 4xx client errors,
+ * and 5xx server errors are all rejected.  This prevents probe
+ * false-positives where a mirror returns a fast 302/404 that
+ * would be mistaken for high bandwidth.
+ */
+function headRequest(url: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proto: typeof https | typeof http = url.startsWith("https://")
+      ? https
+      : http;
+    const req = proto.request(
+      url,
+      { method: "HEAD", signal, timeout: 5000 },
+      (res) => {
+        res.resume(); // consume response
+        if (res.statusCode === 200 || res.statusCode === 206) {
+          resolve();
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}`));
+        }
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("HEAD request timed out"));
+    });
+    req.end();
+  });
+}
+
+/**
+ * GET request with `Range: bytes=0-0` header — downloads only the first
+ * byte of the file.  Used as a fallback when HEAD is blocked by WAF/CDN.
+ *
+ * ONLY resolves on 200 or 206.  3xx redirects are NOT followed and are
+ * rejected — a redirect proves nothing about the actual file availability.
+ *
+ * @returns TTFB in milliseconds
+ */
+function rangeGetRequest(url: string, signal: AbortSignal): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const proto: typeof https | typeof http = url.startsWith("https://")
+      ? https
+      : http;
+    const startTime = Date.now();
+    const req = proto.get(
+      url,
+      {
+        headers: { Range: "bytes=0-0" },
+        signal,
+        timeout: 5000,
+      },
+      (res) => {
+        // Consume the single byte and close
+        res.resume();
+        if (res.statusCode === 200 || res.statusCode === 206) {
+          resolve(Date.now() - startTime);
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}`));
+        }
+      },
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Range GET request timed out"));
+    });
+    req.end();
+  });
+}
+
+// ── Public API ──────────────────────────────────────────────────────────
+
+/**
+ * Scan the models directory and return the list of models that are
+ * missing or corrupted (wrong size / wrong hash).
+ */
+export function getMissingModels(modelsDir: string): ModelManifestEntry[] {
+  const missing: ModelManifestEntry[] = [];
+
+  for (const entry of MODEL_MANIFEST) {
+    const destPath = resolveDestPath(modelsDir, entry);
+
+    let valid = false;
+    try {
+      // Synchronous size check (fast, no I/O storm)
+      const stat = fs.statSync(destPath);
+      if (stat.size === entry.sizeBytes) {
+        if (!entry.sha256) {
+          valid = true; // no hash to check, size matches = assume OK
+        }
+        // If sha256 is set, we cannot fully verify synchronously;
+        // treat as missing so downloadAllModels validates async.
+      }
+    } catch {
+      // File doesn't exist
+    }
+
+    if (!valid) {
+      missing.push(entry);
+    }
+  }
+
+  return missing;
+}
+
+/**
+ * Clean up any stale .tmp files in the models directory from
+ * previous interrupted downloads.
+ */
+async function cleanupTempFiles(modelsDir: string): Promise<void> {
+  async function cleanDir(dir: string): Promise<void> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const dent of entries) {
+      const fullPath = path.join(dir, dent.name);
+      if (dent.isDirectory()) {
+        await cleanDir(fullPath);
+      } else if (dent.isFile() && dent.name.endsWith(TMP_EXT)) {
+        try {
+          await fsp.unlink(fullPath);
+          console.log(`[ModelDownloader] Cleaned stale tmp: ${fullPath}`);
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  }
+  await cleanDir(modelsDir);
+}
+
+/**
+ * Download all missing models from the manifest.
+ *
+ * Strategy:
+ *  - Files download in parallel with a concurrency limit (MAX_CONCURRENCY).
+ *  - An internal AbortController is created so that a fatal error on any
+ *    one file immediately cancels all other parallel downloads (avoids
+ *    wasting bandwidth on doomed transfers).
+ *  - Each file gets up to 3 retries, trying all configured mirrors.
+ *  - .tmp atomic rename + SHA256 verification (if configured).
+ *  - Per-file completion events (currentFilePercent: 100) are emitted so
+ *    the UI can track parallel progress accurately without guessing.
+ *
+ * @param modelsDir    Path to the models directory (e.g. <data>/models)
+ * @param mirrorBaseUrl  Base URL for the primary mirror (replaces {mirror})
+ * @param onProgress   Callback for real-time progress updates
+ * @param signal       External AbortSignal to cancel the entire download
+ */
+export async function downloadAllModels(
+  modelsDir: string,
+  mirrorBaseUrl: string,
+  onProgress?: (progress: DownloadProgress) => void,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; downloaded: number; warnings: string[] }> {
+  // Ensure models directory exists
+  await fsp.mkdir(modelsDir, { recursive: true });
+
+  // Clean stale .tmp files from previous runs
+  await cleanupTempFiles(modelsDir);
+
+  // Filter to actually missing files
+  const missing = getMissingModels(modelsDir);
+
+  if (missing.length === 0) {
+    onProgress?.({
+      phase: "done",
+      totalFiles: 0,
+      completedFiles: 0,
+      currentFileName: "",
+      currentFilePercent: 100,
+      bytesPerSecond: 0,
+      remainingSeconds: 0,
+      mirrorLabel: "",
+      warnings: [],
+      totalBytes: 0,
+      downloadedBytes: 0,
+    });
+    return { success: true, downloaded: 0, warnings: [] };
+  }
+
+  const totalFiles = missing.length;
+  const allWarnings: string[] = [];
+  let completedFiles = 0;
+
+  // ── Byte-level progress tracking (问题 1: stable percentage) ─────
+  const totalBytes = missing.reduce((s, e) => s + e.sizeBytes, 0);
+  let completedBytes = 0;
+
+  // ── External abort only (问题 3: 不因单文件失败中止整个队列) ──
+  const MAX_CONCURRENCY = 4;
+
+  // Tracks which files failed so we can signal per-file errors to the UI
+  const failedFileNames = new Set<string>();
+
+  // Emit a progress snapshot that reflects the current global state.
+  const emitGlobal = (): void => {
+    onProgress?.({
+      phase: "downloading",
+      totalFiles,
+      completedFiles,
+      currentFileName: "",
+      currentFilePercent: 0,
+      bytesPerSecond: 0,
+      remainingSeconds: 0,
+      mirrorLabel: "",
+      warnings: [...allWarnings],
+      totalBytes,
+      downloadedBytes: completedBytes, // only completed — no partial in global emit
+    });
+  };
+
+  const downloadOne = async (entry: ModelManifestEntry): Promise<void> => {
+    const destPath = resolveDestPath(modelsDir, entry);
+
+    // Per-file progress forwarder: adds global byte counters to
+    // each per-file event so the UI can compute overallPercent
+    // from (downloadedBytes / totalBytes) without flickering.
+    const forwardProgress = (p: DownloadProgress): void => {
+      // Partial bytes for the file currently being downloaded
+      const currentPartial =
+        (p.currentFilePercent / 100) * entry.sizeBytes;
+      onProgress?.({
+        ...p,
+        totalFiles,
+        completedFiles,
+        totalBytes,
+        downloadedBytes: completedBytes + currentPartial,
+      });
+    };
+
+    try {
+      const result = await downloadOneFile({
+        destPath,
+        entry,
+        mirrorBaseUrl,
+        modelsDir,
+        maxRetries: MAX_RETRIES_PER_FILE,
+        signal, // external signal only — individual failures don't abort siblings
+        onProgress: forwardProgress,
+      });
+
+      // ── Success ────────────────────────────────────────────────
+      allWarnings.push(...result.warnings);
+      completedBytes += entry.sizeBytes;
+      completedFiles++;
+
+      // Per-file completion signal (护栏 1: 精确的单文件完成标记)
+      onProgress?.({
+        phase: "downloading",
+        totalFiles,
+        completedFiles,
+        currentFileName: entry.name,
+        currentFilePercent: 100,
+        bytesPerSecond: 0,
+        remainingSeconds: 0,
+        mirrorLabel: "",
+        warnings: [...allWarnings],
+        totalBytes,
+        downloadedBytes: completedBytes,
+      });
+    } catch (err: any) {
+      // ── Per-file failure — do NOT abort siblings (问题 3) ─────
+      if (signal?.aborted) throw err; // external cancellation
+
+      failedFileNames.add(entry.name);
+      allWarnings.push(
+        `${entry.name}: ${err?.message ?? String(err)}`,
+      );
+
+      // Per-file error signal so the UI can mark this card red
+      onProgress?.({
+        phase: "downloading",
+        totalFiles,
+        completedFiles,
+        currentFileName: entry.name,
+        currentFilePercent: -1, // ← signal: this file errored
+        bytesPerSecond: 0,
+        remainingSeconds: 0,
+        mirrorLabel: "",
+        warnings: [...allWarnings],
+        totalBytes,
+        downloadedBytes: completedBytes,
+      });
+      // Worker continues to next queue item — other files are unaffected
+    }
+  };
+
+  // ── Concurrent worker pool (问题 3: sorted by size ascending) ─────
+  // Smallest files first → 1 MB ultraface finishes immediately
+  // instead of waiting behind 166 MB face recognition model.
+  const queue = [...missing].sort((a, b) => a.sizeBytes - b.sizeBytes);
+
+  async function worker(): Promise<void> {
+    while (queue.length > 0) {
+      if (signal?.aborted) return;
+      const entry = queue.shift();
+      if (!entry) break;
+
+      await downloadOne(entry);
+    }
+  }
+
+  // Launch the worker pool
+  const workerCount = Math.min(MAX_CONCURRENCY, queue.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+
+  // ── Determine final phase ────────────────────────────────────────
+  const hasError = failedFileNames.size > 0;
+  const phase: DownloadProgress["phase"] = hasError ? "error" : "done";
+
+  onProgress?.({
+    phase,
+    totalFiles,
+    completedFiles,
+    currentFileName: "",
+    currentFilePercent: hasError ? 0 : 100,
+    bytesPerSecond: 0,
+    remainingSeconds: 0,
+    mirrorLabel: "",
+    warnings: allWarnings,
+    totalBytes,
+    downloadedBytes: completedBytes,
+  });
+
+  return {
+    success: !hasError,
+    downloaded: completedFiles,
+    warnings: allWarnings,
+  };
+}

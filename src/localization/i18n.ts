@@ -1,9 +1,25 @@
 ﻿import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
+// Detect system language early so the first render uses the correct locale.
+// If the user has previously chosen a language (stored in localStorage),
+// that takes precedence.
+function detectInitialLang(): string {
+  try {
+    const saved = localStorage.getItem("ai-image-manager-language");
+    if (saved === "zh" || saved === "en") return saved;
+  } catch {
+    // localStorage not available
+  }
+  const nav =
+    (typeof navigator !== "undefined" ? navigator.language : "") || "";
+  if (nav.toLowerCase().startsWith("zh")) return "zh";
+  return "en";
+}
+
 i18n.use(initReactI18next).init({
   fallbackLng: "zh",
-  lng: "zh",
+  lng: detectInitialLang(),
   resources: {
     zh: {
       translation: {
@@ -183,6 +199,16 @@ i18n.use(initReactI18next).init({
         cleanupOrphansRunning: "正在清理...",
         cleanupOrphansDone: "已清除 {{count}} 条无效记录",
         cleanupOrphansFailed: "清理失败，请重试",
+        orphanThumbnailsDetected:
+          "检测到 {{count}} 个孤立缓存文件，占用约 {{size}} MB",
+        orphanThumbnailsClean: "一键清理",
+        orphanThumbnailsCleaning: "正在清理...",
+        orphanThumbnailsCleaned:
+          "已清理 {{count}} 个孤立缓存文件，释放 {{size}} MB",
+        orphanThumbnailsNone: "无孤立缓存",
+        cleanOrphanThumbConfirmTitle: "确认清理孤立缩略图",
+        cleanOrphanThumbConfirmDesc:
+          "将删除 {{count}} 个无对应照片的缩略图缓存，释放约 {{size}} MB。正常缓存不受影响。确定清理吗？",
         watermarkSettings: "水印设置",
         enableWatermark: "启用水印",
         watermarkText: "水印文字",
@@ -249,6 +275,8 @@ i18n.use(initReactI18next).init({
         tagDeleteTitle: "删除标签",
         tagDeleteDescription: "确定要删除标签「{{name}}」吗？该操作不可撤销。",
         tagCreateChild: "创建子标签",
+        tagFilterMode: "筛选模式",
+        andMore: "等 {{count}} 个",
 
         // Toasts / status
         toastUndo: "撤销",
@@ -259,6 +287,10 @@ i18n.use(initReactI18next).init({
         toastPhotosIndexedSkipped:
           "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
         toastScanFolderFailed: "扫描文件夹失败",
+        toastImportBusy: "请等待当前导入完成",
+        toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
+        toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
+        toastNoNewPhotos: "未发现新照片",
         toastDropFolderOnly: "请拖入文件夹（不支持单个文件）",
         toastFolderRemoved: "已移除文件夹",
         toastDeleteFolderFailed: "删除文件夹失败",
@@ -282,10 +314,37 @@ i18n.use(initReactI18next).init({
         albumCreateFailed: "创建相册失败",
         albumRenameFailed: "重命名相册失败",
         duplicateDeleteFailed: "删除重复照片失败",
+        imageLoadFailed: "图片加载失败",
 
         // Empty states
         emptySearchTitle: "未找到匹配的照片",
         emptySearchDescription: "试试换个关键词，或使用 EXIF 筛选器缩小范围",
+        emptySearchDescWithFilters:
+          "当前过滤条件下无匹配结果。试试清除 EXIF 过滤条件，或换个关键词。",
+        emptyAiNotIndexedTitle: "尚未启用 AI 智能索引",
+        emptyAiNotIndexedDesc:
+          "当前只能匹配文件名和标签。启用 AI 索引后可使用语义搜索和自然语言查询。",
+        emptyGoToAiSettings: "前往 AI 设置",
+        emptyBrowseAll: "浏览全部照片",
+        emptyTimeFilterTitle: "「{{keyword}}」内未找到匹配照片",
+        emptyTimeFilterDesc:
+          "系统已识别时间范围：{{from}} – {{to}}。试试扩大时间范围或修改关键词。",
+        emptyTimeRangeFallback: "该时间范围",
+        emptyClearTimeFilter: "清除时间过滤",
+        emptyExpandTimeRange: "扩大日期范围",
+        emptyFilterAndQueryTitle: "当前过滤条件下无匹配结果",
+        emptyFilterAndQueryDesc:
+          '关键字 "{{query}}" 在活跃的 EXIF 过滤条件下无匹配照片。',
+        emptyClearAllFilters: "清除所有过滤条件",
+        emptyKeepQueryOnly: "仅保留关键字搜索",
+        emptyExifTooStrictTitle: "EXIF 过滤条件过于严格",
+        emptyExifTooStrictDesc:
+          "当前 EXIF 条件组合无匹配照片。试试放宽某个参数范围。",
+        emptyImageSearchTitle: "未找到相似图片",
+        emptyImageSearchDesc:
+          "试试使用更清晰或特征更明显的图片进行搜索，或使用文字搜索。",
+        emptyColorSearchTitle: "未找到匹配颜色的照片",
+        emptyColorSearchDesc: "试试相近的颜色，或换一个更常见的主色调。",
         emptyFavoritesTitle: "还没有收藏的照片",
         emptyFavoritesDescription:
           "浏览照片时点击星标即可收藏，收藏的照片会出现在这里",
@@ -377,6 +436,7 @@ i18n.use(initReactI18next).init({
         aiLoadingClip: "加载 CLIP 模型中... {{percent}}%",
         aiPaused: "已暂停",
         aiComplete: "完成!",
+        aiRepairingIndex: "正在重建索引...",
         aiIndexingProgress: "正在索引 {{processed}}/{{total}}",
         aiResume: "继续",
         aiPause: "暂停",
@@ -664,6 +724,8 @@ i18n.use(initReactI18next).init({
         gridSize: "网格",
         photoCountLabel: "{{count}} 张照片",
         copyPath: "复制路径",
+        copyImage: "复制图片",
+        imageCopiedToClipboard: "图片已复制到剪贴板",
         exportPhoto: "导出照片",
         generateSharePage: "生成分享页",
         aiSuggestionTitle: "AI 建议标签",
@@ -753,6 +815,9 @@ i18n.use(initReactI18next).init({
         refresh: "刷新",
         trashLoadFailed: "加载已删除照片失败",
         restoredPhotosCount: "已恢复 {{count}} 张照片",
+        restoredWithoutFolderWarning:
+          "{{count}} 张照片的原文件夹已不存在，已恢复到无归属状态",
+        originalFolderRemoved: "原文件夹已移除",
         restoreFailed: "恢复失败",
         permanentlyDeletedCount: "已永久删除 {{count}} 张照片",
         deleteFailed: "删除失败",
@@ -889,6 +954,8 @@ i18n.use(initReactI18next).init({
         cullCreateAlbumFromKept: "保留照片新建相册",
         cullTrashRejected: "淘汰照片丢入回收站",
         cullSessionDeleted: "会话已删除",
+        cullPhotoDeletedExternally: "某张图片已被外部删除，会话数据已刷新",
+        cullPhotoUnavailable: "图片无法加载，自动跳过",
         cullKeptToAlbum: "保留照片已添加到相册",
         cullRejectedToTrash: "淘汰照片已移到回收站",
         // PK sub-modes
@@ -937,6 +1004,17 @@ i18n.use(initReactI18next).init({
         cullProgressDetail:
           "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · 剩余 ~{{count}} 次",
         cullTrashConfirmBtn: "移入回收站",
+        // Onboarding
+        onboardingStep1Title: "选择数据目录",
+        onboardingStep1Desc: "缩略图、向量索引和 AI 模型将存储在此目录",
+        onboardingStep1CurrentPath: "当前路径",
+        onboardingStep1Change: "更改目录",
+        onboardingStep1Migrating: "正在迁移数据...",
+        onboardingStep3Title: "一切就绪！",
+        onboardingStep3Desc: "AI 图片管理器已准备就绪",
+        onboardingStep3Start: "开始使用",
+        onboardingErrorMigration: "数据迁移失败：{{error}}",
+
         // Common
         loading: "加载中…",
         error: "出错了",
@@ -1134,6 +1212,16 @@ i18n.use(initReactI18next).init({
         cleanupOrphansRunning: "Cleaning...",
         cleanupOrphansDone: "Removed {{count}} invalid records",
         cleanupOrphansFailed: "Cleanup failed. Please try again.",
+        orphanThumbnailsDetected:
+          "Found {{count}} orphan cache files (~{{size}} MB)",
+        orphanThumbnailsClean: "Clean Orphans",
+        orphanThumbnailsCleaning: "Cleaning...",
+        orphanThumbnailsCleaned:
+          "Cleaned {{count}} orphan cache files, freed {{size}} MB",
+        orphanThumbnailsNone: "No orphan cache",
+        cleanOrphanThumbConfirmTitle: "Clean Orphan Thumbnails",
+        cleanOrphanThumbConfirmDesc:
+          "This will delete {{count}} thumbnail cache files with no matching photos, freeing ~{{size}} MB. Active thumbnails will not be affected. Continue?",
         watermarkSettings: "Watermark Settings",
         enableWatermark: "Enable Watermark",
         watermarkText: "Watermark Text",
@@ -1201,6 +1289,8 @@ i18n.use(initReactI18next).init({
         tagDeleteDescription:
           'Are you sure you want to delete tag "{{name}}"? This action cannot be undone.',
         tagCreateChild: "Create Child Tag",
+        tagFilterMode: "Filter Mode",
+        andMore: "and {{count}} more",
 
         // Toasts / status
         toastUndo: "Undo",
@@ -1211,6 +1301,12 @@ i18n.use(initReactI18next).init({
         toastPhotosIndexedSkipped:
           "Indexed {{count}} photos, skipped {{skipped}}",
         toastScanFolderFailed: "Failed to scan folder",
+        toastImportBusy: "Please wait for current import to finish",
+        toastImportQueued:
+          "Added to background import queue — check the status bar",
+        toastImportQueuedMultiple:
+          "Added {{count}} folders to background queue",
+        toastNoNewPhotos: "No new photos found",
         toastDropFolderOnly:
           "Please drop a folder (single files are not supported)",
         toastFolderRemoved: "Folder removed",
@@ -1235,11 +1331,39 @@ i18n.use(initReactI18next).init({
         albumCreateFailed: "Failed to create album",
         albumRenameFailed: "Failed to rename album",
         duplicateDeleteFailed: "Failed to delete duplicate photo",
+        imageLoadFailed: "Failed to load image",
 
         // Empty states
         emptySearchTitle: "No matching photos",
         emptySearchDescription:
           "Try another keyword, or narrow the range with EXIF filters",
+        emptySearchDescWithFilters:
+          "No results for current filters. Try clearing EXIF filters or changing keywords.",
+        emptyAiNotIndexedTitle: "AI Smart Indexing not enabled",
+        emptyAiNotIndexedDesc:
+          "Currently only filename and tag matching is available. Enable AI indexing for semantic and natural language search.",
+        emptyGoToAiSettings: "Go to AI Settings",
+        emptyBrowseAll: "Browse All Photos",
+        emptyTimeFilterTitle: 'No photos found in "{{keyword}}"',
+        emptyTimeFilterDesc:
+          "System detected time range: {{from}} – {{to}}. Try expanding the range or changing keywords.",
+        emptyTimeRangeFallback: "this time range",
+        emptyClearTimeFilter: "Clear Time Filter",
+        emptyExpandTimeRange: "Expand Date Range",
+        emptyFilterAndQueryTitle: "No results under current filters",
+        emptyFilterAndQueryDesc:
+          'Keyword "{{query}}" has no matches under active EXIF filters.',
+        emptyClearAllFilters: "Clear All Filters",
+        emptyKeepQueryOnly: "Keep Keyword Only",
+        emptyExifTooStrictTitle: "EXIF filters too strict",
+        emptyExifTooStrictDesc:
+          "No photos match this combination. Try relaxing a parameter.",
+        emptyImageSearchTitle: "No similar images found",
+        emptyImageSearchDesc:
+          "Try a clearer or more distinctive image, or use text search instead.",
+        emptyColorSearchTitle: "No photos with matching color",
+        emptyColorSearchDesc:
+          "Try a similar shade, or pick a more common dominant color.",
         emptyFavoritesTitle: "No favorite photos yet",
         emptyFavoritesDescription:
           "Click the star while browsing to add favorites. They will appear here.",
@@ -1333,6 +1457,7 @@ i18n.use(initReactI18next).init({
         aiLoadingClip: "Loading CLIP model... {{percent}}%",
         aiPaused: "Paused",
         aiComplete: "Complete!",
+        aiRepairingIndex: "Rebuilding index...",
         aiIndexingProgress: "Indexing {{processed}}/{{total}}",
         aiResume: "Resume",
         aiPause: "Pause",
@@ -1632,6 +1757,8 @@ i18n.use(initReactI18next).init({
         gridSize: "Grid",
         photoCountLabel: "{{count}} photos",
         copyPath: "Copy Path",
+        copyImage: "Copy Image",
+        imageCopiedToClipboard: "Image copied to clipboard",
         exportPhoto: "Export Photo",
         generateSharePage: "Generate Share Page",
         aiSuggestionTitle: "AI Suggested Tags",
@@ -1726,6 +1853,9 @@ i18n.use(initReactI18next).init({
         refresh: "Refresh",
         trashLoadFailed: "Failed to load deleted photos",
         restoredPhotosCount: "Restored {{count}} photos",
+        restoredWithoutFolderWarning:
+          "Original folder not found for {{count}} photos, restored without folder",
+        originalFolderRemoved: "Original folder removed",
         restoreFailed: "Restore failed",
         permanentlyDeletedCount: "Permanently deleted {{count}} photos",
         deleteFailed: "Delete failed",
@@ -1869,6 +1999,9 @@ i18n.use(initReactI18next).init({
         cullCreateAlbumFromKept: "Create album from kept",
         cullTrashRejected: "Move rejected to trash",
         cullSessionDeleted: "Session deleted",
+        cullPhotoDeletedExternally:
+          "A photo was deleted externally, session data refreshed",
+        cullPhotoUnavailable: "Image unavailable, skipping",
         cullKeptToAlbum: "Kept photos added to album",
         cullRejectedToTrash: "Rejected photos moved to trash",
 
@@ -1922,6 +2055,18 @@ i18n.use(initReactI18next).init({
         cullProgressDetail:
           "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · ~{{count}} remaining",
         cullTrashConfirmBtn: "Move to Trash",
+        // Onboarding
+        onboardingStep1Title: "Choose Data Directory",
+        onboardingStep1Desc:
+          "Thumbnails, vector index, and AI models will be stored here",
+        onboardingStep1CurrentPath: "Current Path",
+        onboardingStep1Change: "Change Directory",
+        onboardingStep1Migrating: "Migrating data...",
+        onboardingStep3Title: "All Set!",
+        onboardingStep3Desc: "AI Image Manager is ready to use",
+        onboardingStep3Start: "Get Started",
+        onboardingErrorMigration: "Data migration failed: {{error}}",
+
         // Common
         loading: "Loading...",
         error: "Error",

@@ -1,11 +1,13 @@
 import { closeDatabase, getDatabase, initDatabase } from "@/db";
 import {
   closeVectorDB,
+  embedAllPhotos,
   initVectorDB,
   isAiModelLoaded,
   isVectorDBInitialized,
   loadModel,
   stopEmbedding,
+  wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
 import {
@@ -300,6 +302,30 @@ registry.register({
   level: ServiceLevel.Optional,
   start: async () => {
     await initVectorDB();
+    // If the vector DB was auto-repaired during init (corruption detected and
+    // rebuilt), auto-trigger re-embedding so the user doesn't need to click
+    // "AI Smart Index" manually. The embedAllPhotos progress is broadcast via
+    // IPC so the sidebar AiProgressBar stays up-to-date.
+    if (wasAutoRepaired) {
+      console.log("[Registry] Auto-repair detected — starting auto re-index");
+      const { BrowserWindow } = await import("electron");
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("ai-auto-repair-started");
+      }
+      embedAllPhotos((aiProgress) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send("ai-progress", aiProgress);
+        }
+      })
+        .then((count) => {
+          if (count > 0) {
+            console.log(`[Registry] Auto re-index complete: ${count} photos`);
+          }
+        })
+        .catch((err) => {
+          console.warn("[Registry] Auto re-index failed:", err?.message);
+        });
+    }
   },
   stop: async () => {
     await closeVectorDB();
@@ -336,6 +362,35 @@ registry.register({
     return {
       status: "degraded" as const,
       detail: "CLIP model not loaded",
+    };
+  },
+});
+
+registry.register({
+  name: "httpServer",
+  level: ServiceLevel.Critical,
+  dependencies: ["database"],
+  start: async () => {
+    const { startHttpServerEarly, isHttpServerRunning } = await import(
+      "@/services/http-server"
+    );
+    // 如果已经在 createWindow() 之前通过 startHttpServerEarly() 启动，则跳过。
+    if (!isHttpServerRunning()) {
+      await startHttpServerEarly();
+    }
+  },
+  stop: async () => {
+    const { stopHttpServer } = await import("@/services/http-server");
+    await stopHttpServer();
+  },
+  health: async () => {
+    const { isHttpServerRunning } = await import("@/services/http-server");
+    if (isHttpServerRunning()) {
+      return { status: "ok" as const };
+    }
+    return {
+      status: "error" as const,
+      detail: "HTTP server is not running",
     };
   },
 });
