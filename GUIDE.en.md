@@ -28,21 +28,29 @@
 
 ## Quick Start
 
-### 1. Add a Photo Folder
+### 1. First-Run Onboarding
 
-When you first open the app, click the **"Add Folder"** button and select the directory where your photos are stored.
+When you first open the app, a **three-step setup wizard** will guide you:
 
-The app will scan the folder for images (supporting 30+ formats including JPG, PNG, RAW, HEIC, WebP, AVIF), generate thumbnails, and extract EXIF metadata.
+- **Data Directory** — choose where thumbnails, vectors, and AI models are stored; supports migration from existing locations
+- **GPU Acceleration** — one-click DirectML detection; enable for 6.6× faster face detection
+- **Complete** — language auto-detected from your system (Chinese/English), AI models pre-bundled in the installer
 
-### 2. Wait for Scanning to Complete
+### 2. Add a Photo Folder
 
-Scanning progress is displayed in the sidebar and the status bar. You can continue using the app during scanning. Once complete, photos will appear in the main grid.
+After the wizard, click **"Add Folder"** on the home screen (or drag a folder directly into the app window) to select your photo directory.
 
-### 3. Enable AI Indexing
+The app scans for images (supporting 30+ formats including JPG, PNG, RAW, HEIC, WebP, AVIF), generates thumbnails, and extracts EXIF metadata.
 
-To enable natural language search (e.g., "autumn leaves at sunset"), you need to complete AI indexing. Click **"Start AI Indexing"** in the sidebar. The first run will download the AI model automatically.
+### 3. Import Progress
 
-**Note**: If you're in China and HuggingFace downloads are slow, switch the mirror source to hf-mirror.com or modelscope.cn in Settings.
+Imports run through a background queue — drag in a folder and continue browsing immediately. The global progress bar (top of the page) shows current import and AI processing status.
+
+### 4. AI Indexing
+
+AI vector embedding starts automatically after import. For manual control, use the sidebar AI indexing controls.
+
+**Note**: AI models are pre-bundled in the installer — no download needed on first launch. To update models or switch mirrors, go to **Settings → AI Model Mirror** (use hf-mirror.com in China).
 
 ---
 
@@ -96,7 +104,7 @@ Double-click a photo or press `Enter` to open the fullscreen lightbox:
 
 ## Search
 
-The search bar at the top supports three search modes:
+The search bar at the top supports three search modes. Press **`Ctrl+K`** to open the Spotlight search panel for global search across photos, tags, albums, people, and navigation — with pinyin initial matching.
 
 ### 1. Semantic Search
 
@@ -105,7 +113,7 @@ Type natural language descriptions into the search box, e.g.:
 - "autumn red leaves"
 - "cat close-up"
 
-The AI understands the semantic meaning and returns matching photos sorted by similarity.
+The AI understands the semantic meaning and returns matching photos sorted by similarity. An empty-state guide appears when there are no results.
 
 ### 2. Image Search
 
@@ -144,7 +152,7 @@ AI indexing uses a CLIP model to convert photos into vector embeddings, enabling
 
 ### Mirror Settings
 
-If HuggingFace downloads are slow or failing:
+AI models are pre-bundled in the installer (no download needed on first launch). To update models or resolve download issues:
 1. Go to **Settings → AI Model Mirror Settings**
 2. Switch to `hf-mirror.com (Recommended)` or `modelscope.cn`
 3. Save
@@ -172,7 +180,7 @@ In the detail panel, click "Analyze Suggested Tags" — the AI analyzes the phot
 
 ## Face Recognition
 
-> **GPU Acceleration**: DirectML GPU acceleration delivers **6.6x faster** face detection. The app automatically detects your GPU on first launch and shows an onboarding dialog. Falls back to CPU if no compatible GPU is found.
+> **GPU Acceleration**: DirectML GPU acceleration delivers **6.6x faster** face detection. The first-run onboarding wizard (step 2) offers one-click GPU detection and enable; also configurable anytime in Settings. Falls back to CPU if no compatible GPU is found.
 
 ### Starting Detection
 
@@ -392,8 +400,8 @@ Deleted photos go to the trash and are kept for **30 days** before automatic per
 
 ### GPU Acceleration
 
-- **Auto-Detection**: GPU is automatically checked for DirectML support on first launch
-- **Onboarding Dialog**: A one-click setup dialog appears when a compatible GPU is detected
+- **Onboarding Wizard**: Step 2 of the first-run wizard — one-click DirectML detection and enable
+- **On-Demand Detection**: Re-detect or toggle GPU in Settings → GPU Acceleration card at any time
 - **Manual Toggle**: Settings → GPU Acceleration, toggle on/off anytime
 - **Face Recognition Only**: GPU acceleration currently applies to face detection; CLIP embeddings and other AI tasks still use CPU
 
@@ -464,7 +472,7 @@ AI indexing may not be complete. Check the sidebar AI progress bar — semantic 
 
 ### AI model download failed?
 
-Go to **Settings → AI Model Mirror** and switch to `hf-mirror.com (Recommended)`. If that also fails, try a custom mirror URL.
+AI models are pre-bundled in the installer — no download needed on first launch. If you need to update models or downloads fail, go to **Settings → AI Model Mirror** and switch to `hf-mirror.com (Recommended)`. If that also fails, try a custom mirror URL.
 
 ### What happens when I move photo files?
 
@@ -480,7 +488,7 @@ Try "Recluster" to improve grouping, or manually merge/split identities. The det
 
 ### Face detection is too slow?
 
-Enable GPU acceleration for up to **6.6x faster** face detection. Go to **Settings → GPU Acceleration → Enable**. Falls back to CPU automatically if your GPU doesn't support DirectML.
+Enable GPU acceleration for up to **6.6x faster** face detection. One-click enable in the first-run onboarding wizard (step 2), or go to **Settings → GPU Acceleration → Enable**. Falls back to CPU automatically if your GPU doesn't support DirectML.
 
 ### Duplicate detection found nothing?
 

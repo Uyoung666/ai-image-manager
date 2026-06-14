@@ -39,7 +39,9 @@ Virtual-scrolled masonry layout, 60fps with 100K+ photos. Timeline grouping, fol
 
 Natural language queries in Chinese or English — *"sunset at the beach last autumn"*. Reverse image search. Compound filtering with keywords, time range, and EXIF conditions.
 
-### Photo Culling (New)
+**`Ctrl+K` Spotlight Search** — command-palette overlay for global search across photos, tags, albums, people, and navigation. Pinyin initial matching, full keyboard navigation.
+
+### Photo Culling
 
 Rate, compare, and narrow down large batches. Three modes:
 
@@ -76,6 +78,8 @@ ONNX-based detection and feature extraction. Automatic identity clustering, merg
 - **AI Auto-Tagging** — 136 tags across 9 categories (scene, people, animals, objects, style, weather...)
 - **Batch Operations** — rename, format-convert, resize, watermark
 - **Cloud Sharing** — WebDAV / S3 upload, standalone HTML share pages
+- **Native Interactions** — drag-drop import, right-click context menus, marquee selection, clipboard copy
+- **Scroll Restoration** — precise scroll position remembered across navigation (back/forward)
 - **System Tray** — global shortcuts, auto-start, Send-To integration, soft-delete with 30-day trash
 
 | ![Duplicates](screenshots/03-duplicate-detection.png) | ![Settings](screenshots/09-settings.png) |
@@ -86,11 +90,13 @@ ONNX-based detection and feature extraction. Automatic identity clustering, merg
 
 ## First-Time Setup
 
-**The installer bundles AI models** — no network download is usually needed. If models are corrupted or deleted:
+**Three-step onboarding wizard** — guided setup on first launch:
 
-1. Settings → AI Model Mirror → switch to `hf-mirror.com` (recommended for China)
-2. Or run: `.\scripts\download-model.ps1`
-3. Or manually place files from [hf-mirror.com](https://hf-mirror.com/Xenova/clip-vit-base-patch32/tree/main) into `%APPDATA%\AI Image Manager\models\`
+1. **Data Directory** — choose where thumbnails, vectors, and models are stored; supports migration from existing locations
+2. **GPU Setup** — one-click DirectML detection; enable for 6.6× faster face detection
+3. **Complete** — language auto-detected from your system (Chinese/English), AI models pre-bundled in the installer
+
+To re-detect GPU or change settings later: **Settings → GPU Acceleration**. To switch model mirror: **Settings → AI Model Mirror** (use `hf-mirror.com` in China).
 
 ---
 
