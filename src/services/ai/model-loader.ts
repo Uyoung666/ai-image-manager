@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
+import { abortAllWorkers } from "@/services/embed-worker-pool";
+import { getSetting } from "@/services/settings-manager";
 import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
 import { disposeTensors } from "./constants";
@@ -15,6 +17,7 @@ import {
   setEmbeddingModel,
   setIsEmbedding,
   setIsModelLoaded,
+  setIsPaused,
   setLocalModelPath,
   setPoolCancelled,
 } from "./state";
@@ -39,7 +42,6 @@ function resolveMirrorUrl(): string | null {
 
   // 2. 读取用户保存的设置
   try {
-    const { getSetting } = require("@/services/settings-manager");
     const savedMirror = getSetting("ai.mirror") || "auto";
 
     if (savedMirror === "official") {
@@ -140,15 +142,6 @@ function hasBundledClipModel(): boolean {
   return fs.existsSync(bundledMarker);
 }
 
-function getClipProgressPercent(): number {
-  const startedAt = currentProgress.loadingStartedAt;
-  if (!startedAt) {
-    return 1;
-  }
-  const elapsed = Date.now() - startedAt;
-  return Math.max(1, Math.min(95, 1 + Math.floor(elapsed / 1500)));
-}
-
 export async function ensureLocalModel(): Promise<string> {
   const localModelPath = path.join(getDataPath(), "models");
 
@@ -170,15 +163,15 @@ export async function ensureLocalModel(): Promise<string> {
     return localModelPath;
   }
 
-  try {
-    const resourcesPath = process.resourcesPath;
-    const bundledModelPath = path.join(resourcesPath, "models");
+  // ── Production: copy from bundled resources ────────────────
+  if (app.isPackaged) {
+    const bundledModelPath = path.join(process.resourcesPath, "models");
     const bundledVisionMarker = path.join(
       bundledModelPath,
       "Xenova",
       "clip-vit-base-patch32",
       "onnx",
-      "vision_model_quantized.onnx"
+      "vision_model_quantized.onnx",
     );
 
     if (fs.existsSync(bundledVisionMarker)) {
@@ -187,47 +180,42 @@ export async function ensureLocalModel(): Promise<string> {
       console.log("[AI] Models copied from resources");
       return localModelPath;
     }
-  } catch {
-    // Not packaged
+
+    const error =
+      "安装包未包含模型文件，请重新打包";
+    setCurrentProgress({
+      ...currentProgress,
+      phase: "error",
+      currentFile: "",
+      downloadPercent: undefined,
+      error,
+    });
+    throw new Error(error);
   }
 
-  if (!app.isPackaged) {
-    const devCandidates = [
-      path.join(process.cwd(), "models"),
-      path.join(app.getAppPath(), "models"),
-      path.join(app.getAppPath(), "..", "models"),
-      path.join(app.getAppPath(), "..", "..", "models"),
-    ];
+  // ── Dev mode: search project directories ──────────────────
+  const devCandidates = [
+    path.join(process.cwd(), "models"),
+    path.join(app.getAppPath(), "models"),
+    path.join(app.getAppPath(), "..", "models"),
+    path.join(app.getAppPath(), "..", "..", "models"),
+  ];
 
-    console.log("[AI] Dev mode - searching for models...");
-    for (const candidate of devCandidates) {
-      const marker = path.join(
-        candidate,
-        "Xenova",
-        "clip-vit-base-patch32",
-        "onnx",
-        "vision_model_quantized.onnx"
-      );
-      console.log(`[AI]   check: ${marker}`);
-      if (fs.existsSync(marker)) {
-        console.log(`[AI] Found model at: ${candidate}`);
-        return candidate;
-      }
+  for (const candidate of devCandidates) {
+    const marker = path.join(
+      candidate,
+      "Xenova",
+      "clip-vit-base-patch32",
+      "onnx",
+      "vision_model_quantized.onnx",
+    );
+    if (fs.existsSync(marker)) {
+      console.log(`[AI] Found model at: ${candidate}`);
+      return candidate;
     }
-    console.log("[AI] Model not found in dev paths, will attempt download");
-    return localModelPath;
   }
 
-  const error =
-    "安装包未包含 CLIP 模型文件，请重新打包并确认 resources/models/Xenova/clip-vit-base-patch32/onnx/model_quantized.onnx 存在";
-  setCurrentProgress({
-    ...currentProgress,
-    phase: "error",
-    currentFile: "",
-    downloadPercent: undefined,
-    error,
-  });
-  throw new Error(error);
+  throw new Error("Model not found in dev paths");
 }
 
 export async function loadModel(): Promise<void> {
@@ -321,6 +309,39 @@ export function isAiModelLoaded(): boolean {
 export function stopEmbedding(): void {
   setIsEmbedding(false);
   setPoolCancelled(true);
+}
+
+/** Pause embedding: stop consuming new batches but preserve already-written data. */
+export function pauseEmbedding(): void {
+  setIsEmbedding(false);
+  setPoolCancelled(true);
+  setIsPaused(true);
+  // Signal worker processes to abort their current batch (best-effort)
+  try {
+    abortAllWorkers();
+  } catch {
+    /* pool may not be running */
+  }
+}
+
+/** Cancel embedding: stop and clean up all data written in this session. */
+export function cancelEmbedding(): void {
+  setIsEmbedding(false);
+  setPoolCancelled(true);
+  setIsPaused(false);
+  // Signal worker processes to abort their current batch (best-effort)
+  try {
+    abortAllWorkers();
+  } catch {
+    /* pool may not be running */
+  }
+}
+
+/** Resume embedding after pause: restart from where we left off.
+ *  NOTE: isEmbedding must stay false here so embedAllPhotos's entry guard passes. */
+export function resumeEmbedding(): void {
+  setIsPaused(false);
+  setPoolCancelled(false);
 }
 
 export function getEmbeddingProgress(): EmbedProgress & {

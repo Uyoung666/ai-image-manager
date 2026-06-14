@@ -22,9 +22,13 @@ function rgbToHsl(r: number, g: number, b: number) {
 
   let h = 0;
   if (delta > 0) {
-    if (max === rn) h = ((gn - bn) / delta + 6) % 6;
-    else if (max === gn) h = (bn - rn) / delta + 2;
-    else h = (rn - gn) / delta + 4;
+    if (max === rn) {
+      h = ((gn - bn) / delta + 6) % 6;
+    } else if (max === gn) {
+      h = (bn - rn) / delta + 2;
+    } else {
+      h = (rn - gn) / delta + 4;
+    }
   }
 
   const l = (max + min) / 2;
@@ -40,19 +44,38 @@ export function hexFromHue(hueDeg: number): string {
 }
 
 /** Same HSL→RGB as hexFromHue but returns integer channel values (0–255). */
-export function rgbFromHue(hueDeg: number): { r: number; g: number; b: number } {
+export function rgbFromHue(hueDeg: number): {
+  r: number;
+  g: number;
+  b: number;
+} {
   const sn = 0.7;
   const ln = 0.5;
   const c = (1 - Math.abs(2 * ln - 1)) * sn;
   const x = c * (1 - Math.abs(((hueDeg / 60) % 2) - 1));
   const m = ln - c / 2;
-  let rn = 0, gn = 0, bn = 0;
-  if (hueDeg < 60) { rn = c; gn = x; }
-  else if (hueDeg < 120) { rn = x; gn = c; }
-  else if (hueDeg < 180) { gn = c; bn = x; }
-  else if (hueDeg < 240) { gn = x; bn = c; }
-  else if (hueDeg < 300) { rn = x; bn = c; }
-  else { rn = c; bn = x; }
+  let rn = 0,
+    gn = 0,
+    bn = 0;
+  if (hueDeg < 60) {
+    rn = c;
+    gn = x;
+  } else if (hueDeg < 120) {
+    rn = x;
+    gn = c;
+  } else if (hueDeg < 180) {
+    gn = c;
+    bn = x;
+  } else if (hueDeg < 240) {
+    gn = x;
+    bn = c;
+  } else if (hueDeg < 300) {
+    rn = x;
+    bn = c;
+  } else {
+    rn = c;
+    bn = x;
+  }
   return {
     r: Math.round((rn + m) * 255),
     g: Math.round((gn + m) * 255),
@@ -72,7 +95,7 @@ function isNearGray(r: number, g: number, b: number) {
   return Math.max(r, g, b) - Math.min(r, g, b) < 15;
 }
 function isValidPixel(r: number, g: number, b: number) {
-  return !isNearBlack(r, g, b) && !isNearWhite(r, g, b) && !isNearGray(r, g, b);
+  return !(isNearBlack(r, g, b) || isNearWhite(r, g, b) || isNearGray(r, g, b));
 }
 
 // ── Histogram binning ─────────────────────────────────────────────────
@@ -91,13 +114,13 @@ function binToRgb(idx: number): [number, number, number] {
 // ── Types ─────────────────────────────────────────────────────────────
 
 export interface PaletteColor {
-  hex: string;
-  r: number;
-  g: number;
   b: number;
+  g: number;
+  hex: string;
   hue: number;
-  saturation: number;
   lightness: number;
+  r: number;
+  saturation: number;
   weight: number;
 }
 
@@ -108,39 +131,42 @@ export interface PerPhotoPalette {
 }
 
 interface GlobalPaletteColor {
-  hex: string;
-  r: number;
-  g: number;
   b: number;
+  g: number;
+  hex: string;
   hue: number;
-  saturation: number;
   lightness: number;
+  r: number;
+  saturation: number;
   weight: number;
 }
 
 interface HueBucket {
-  hueRange: [number, number];
   count: number;
   hex: string;
+  hueRange: [number, number];
 }
 
 interface SaturationBucket {
-  level: "vivid" | "moderate" | "muted";
   count: number;
+  level: "vivid" | "moderate" | "muted";
 }
 
 export interface ColorDistributionResult {
   globalPalette: GlobalPaletteColor[];
   hueDistribution: HueBucket[];
-  saturationDistribution: SaturationBucket[];
   sampled: number;
+  saturationDistribution: SaturationBucket[];
   totalPhotos: number;
 }
 
 // ── Per-photo palette extraction ──────────────────────────────────────
 
-export async function extractPerPhotoPalette(imagePath: string): Promise<PerPhotoPalette | null> {
+export async function extractPerPhotoPalette(
+  imagePath: string
+): Promise<PerPhotoPalette | null> {
   const { data, info } = await sharp(imagePath)
+    .rotate()
     .resize(SAMPLE_SIZE, SAMPLE_SIZE, { fit: "fill" })
     .ensureAlpha()
     .raw()
@@ -154,45 +180,65 @@ export async function extractPerPhotoPalette(imagePath: string): Promise<PerPhot
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    if (!isValidPixel(r, g, b)) continue;
+    if (!isValidPixel(r, g, b)) {
+      continue;
+    }
     const idx = binIndex(r, g, b);
     histogram[idx]++;
     validPixels++;
   }
 
-  if (validPixels < 10) return null;
+  if (validPixels < 10) {
+    return null;
+  }
 
   // Sort bins by count descending, take top N
   const bins: { idx: number; count: number }[] = [];
   for (let i = 0; i < histogram.length; i++) {
-    if (histogram[i] > 0) bins.push({ idx: i, count: histogram[i] });
+    if (histogram[i] > 0) {
+      bins.push({ idx: i, count: histogram[i] });
+    }
   }
   bins.sort((a, b) => b.count - a.count);
   const top = bins.slice(0, TOP_PER_PHOTO);
 
   // Merge near-identical colors (Euclidean distance < 40 in RGB)
-  interface MergedBin { idx: number; count: number; r: number; g: number; b: number }
+  interface MergedBin {
+    b: number;
+    count: number;
+    g: number;
+    idx: number;
+    r: number;
+  }
   const merged: MergedBin[] = [];
   for (const bin of top) {
     const [br, bg, bb] = binToRgb(bin.idx);
     let found = false;
     for (const m of merged) {
-      const dr = m.r - br, dg = m.g - bg, db = m.b - bb;
+      const dr = m.r - br,
+        dg = m.g - bg,
+        db = m.b - bb;
       if (dr * dr + dg * dg + db * db < 1600) {
         m.count += bin.count;
         found = true;
         break;
       }
     }
-    if (!found) merged.push({ idx: bin.idx, count: bin.count, r: br, g: bg, b: bb });
+    if (!found) {
+      merged.push({ idx: bin.idx, count: bin.count, r: br, g: bg, b: bb });
+    }
   }
 
   const colors: PaletteColor[] = merged.map((m) => {
     const { h, s, l } = rgbToHsl(m.r, m.g, m.b);
     return {
       hex: rgbToHex(m.r, m.g, m.b),
-      r: m.r, g: m.g, b: m.b,
-      hue: h, saturation: s, lightness: l,
+      r: m.r,
+      g: m.g,
+      b: m.b,
+      hue: h,
+      saturation: s,
+      lightness: l,
       weight: m.count / validPixels,
     };
   });
@@ -200,9 +246,13 @@ export async function extractPerPhotoPalette(imagePath: string): Promise<PerPhot
   return { colors, histogram, validPixels };
 }
 
-export async function extractDominantColors(imagePath: string): Promise<string | null> {
+export async function extractDominantColors(
+  imagePath: string
+): Promise<string | null> {
   const palette = await extractPerPhotoPalette(imagePath);
-  if (!palette || !palette.colors || palette.colors.length === 0) return null;
+  if (!(palette && palette.colors) || palette.colors.length === 0) {
+    return null;
+  }
   return JSON.stringify(palette.colors);
 }
 
@@ -214,7 +264,7 @@ function rgbToHex(r: number, g: number, b: number) {
 
 function aggregateDistribution(
   palettes: PerPhotoPalette[],
-  totalPhotos: number,
+  totalPhotos: number
 ): ColorDistributionResult {
   // Merge all per-photo histograms into global
   const globalHist = new Uint32Array(BINS * BINS * BINS);
@@ -227,44 +277,62 @@ function aggregateDistribution(
   // Extract top global colors
   const globalBins: { idx: number; count: number }[] = [];
   for (let i = 0; i < globalHist.length; i++) {
-    if (globalHist[i] > 0) globalBins.push({ idx: i, count: globalHist[i] });
+    if (globalHist[i] > 0) {
+      globalBins.push({ idx: i, count: globalHist[i] });
+    }
   }
   globalBins.sort((a, b) => b.count - a.count);
 
   let totalValid = 0;
-  const mergedBins: { idx: number; count: number; r: number; g: number; b: number }[] = [];
+  const mergedBins: {
+    idx: number;
+    count: number;
+    r: number;
+    g: number;
+    b: number;
+  }[] = [];
   for (const bin of globalBins) {
     totalValid += bin.count;
     const [br, bg, bb] = binToRgb(bin.idx);
     let found = false;
     for (const m of mergedBins) {
-      const dr = m.r - br, dg = m.g - bg, db = m.b - bb;
+      const dr = m.r - br,
+        dg = m.g - bg,
+        db = m.b - bb;
       if (dr * dr + dg * dg + db * db < 1600) {
         m.count += bin.count;
         found = true;
         break;
       }
     }
-    if (!found) mergedBins.push({ idx: bin.idx, count: bin.count, r: br, g: bg, b: bb });
+    if (!found) {
+      mergedBins.push({ idx: bin.idx, count: bin.count, r: br, g: bg, b: bb });
+    }
   }
   const topGlobal = mergedBins.slice(0, TOP_GLOBAL);
 
-  const globalPalette: GlobalPaletteColor[] = topGlobal.map((m) => {
-    const { h, s, l } = rgbToHsl(m.r, m.g, m.b);
-    return {
-      hex: rgbToHex(m.r, m.g, m.b),
-      r: m.r, g: m.g, b: m.b,
-      hue: h, saturation: s, lightness: l,
-      weight: totalValid > 0 ? m.count / totalValid : 0,
-    };
-  }).sort((a, b) => a.hue - b.hue);
+  const globalPalette: GlobalPaletteColor[] = topGlobal
+    .map((m) => {
+      const { h, s, l } = rgbToHsl(m.r, m.g, m.b);
+      return {
+        hex: rgbToHex(m.r, m.g, m.b),
+        r: m.r,
+        g: m.g,
+        b: m.b,
+        hue: h,
+        saturation: s,
+        lightness: l,
+        weight: totalValid > 0 ? m.count / totalValid : 0,
+      };
+    })
+    .sort((a, b) => a.hue - b.hue);
 
   // Hue & saturation distribution.
   // Hue buckets use the same RGB distance matching as search
   // (closest_color_dist < 10000), ensuring dashboard counts
   // match drill-down search results exactly.
   const hueBuckets = new Array(12).fill(0);
-  const MAX_DIST = 10000;
+  const MAX_DIST = 10_000;
   let vividCount = 0;
   let moderateCount = 0;
   let mutedCount = 0;
@@ -278,20 +346,36 @@ function aggregateDistribution(
         const dg = c.g - target.g;
         const db = c.b - target.b;
         const dist = dr * dr + dg * dg + db * db;
-        if (dist < minDist) minDist = dist;
+        if (dist < minDist) {
+          minDist = dist;
+        }
       }
-      if (minDist < MAX_DIST) hueBuckets[b]++;
+      if (minDist < MAX_DIST) {
+        hueBuckets[b]++;
+      }
     }
 
-    let hasVivid = false, hasModerate = false, hasMuted = false;
+    let hasVivid = false,
+      hasModerate = false,
+      hasMuted = false;
     for (const c of p.colors) {
-      if (c.saturation >= 0.6) hasVivid = true;
-      else if (c.saturation >= 0.25) hasModerate = true;
-      else hasMuted = true;
+      if (c.saturation >= 0.6) {
+        hasVivid = true;
+      } else if (c.saturation >= 0.25) {
+        hasModerate = true;
+      } else {
+        hasMuted = true;
+      }
     }
-    if (hasVivid) vividCount++;
-    if (hasModerate) moderateCount++;
-    if (hasMuted) mutedCount++;
+    if (hasVivid) {
+      vividCount++;
+    }
+    if (hasModerate) {
+      moderateCount++;
+    }
+    if (hasMuted) {
+      mutedCount++;
+    }
   }
 
   const hueDistribution: HueBucket[] = hueBuckets.map((count, i) => ({
@@ -325,7 +409,11 @@ export function aggregateFromStoredColors(
   allColors: Array<Array<PaletteColor>>
 ): {
   palette: Array<PaletteColor>;
-  hueDistribution: Array<{ hueRange: [number, number]; count: number; hex: string }>;
+  hueDistribution: Array<{
+    hueRange: [number, number];
+    count: number;
+    hex: string;
+  }>;
   saturationCounts: { vivid: number; moderate: number; muted: number };
   totalPhotos: number;
 } {
@@ -344,10 +432,7 @@ export function aggregateFromStoredColors(
   for (const c of weightedColors) {
     freqMap.set(c.hex, (freqMap.get(c.hex) || 0) + 1);
   }
-  const uniqueColors = new Map<
-    string,
-    PaletteColor & { globalFreq: number }
-  >();
+  const uniqueColors = new Map<string, PaletteColor & { globalFreq: number }>();
   for (const c of weightedColors) {
     if (!uniqueColors.has(c.hex)) {
       uniqueColors.set(c.hex, {
@@ -365,7 +450,9 @@ export function aggregateFromStoredColors(
   const totalPhotos = allColors.length;
   for (const c of sorted) {
     const isNear = palette.some((p) => {
-      const dr = p.r - c.r, dg = p.g - c.g, db = p.b - c.b;
+      const dr = p.r - c.r,
+        dg = p.g - c.g,
+        db = p.b - c.b;
       return dr * dr + dg * dg + db * db < 625; // 25^2
     });
     if (!isNear) {
@@ -374,7 +461,9 @@ export function aggregateFromStoredColors(
         weight: totalPhotos > 0 ? c.globalFreq / totalPhotos : 0,
       });
     }
-    if (palette.length >= 25) break;
+    if (palette.length >= 25) {
+      break;
+    }
   }
 
   // 归一化权重使总和为 100%，让调色板显示正确的比例分布
@@ -389,7 +478,7 @@ export function aggregateFromStoredColors(
   // 对每个桶的中心色相生成代表色，计算每张照片 dominant_colors
   // 到该色的最小平方欧氏距离，阈值 10000（= SQL closest_color_dist 阈值）。
   const HUE_BUCKETS = 12;
-  const MAX_DIST = 10000;
+  const MAX_DIST = 10_000;
   const hueCounts = new Array(HUE_BUCKETS).fill(0);
 
   for (const palette of allColors) {
@@ -401,24 +490,42 @@ export function aggregateFromStoredColors(
         const dg = c.g - target.g;
         const db = c.b - target.b;
         const dist = dr * dr + dg * dg + db * db;
-        if (dist < minDist) minDist = dist;
+        if (dist < minDist) {
+          minDist = dist;
+        }
       }
-      if (minDist < MAX_DIST) hueCounts[b]++;
+      if (minDist < MAX_DIST) {
+        hueCounts[b]++;
+      }
     }
   }
 
   // 饱和度分布：按唯一照片计数
-  let vivid = 0, moderate = 0, muted = 0;
+  let vivid = 0,
+    moderate = 0,
+    muted = 0;
   for (const palette of allColors) {
-    let hasVivid = false, hasModerate = false, hasMuted = false;
+    let hasVivid = false,
+      hasModerate = false,
+      hasMuted = false;
     for (const c of palette) {
-      if (c.saturation >= 0.6) hasVivid = true;
-      else if (c.saturation >= 0.25) hasModerate = true;
-      else hasMuted = true;
+      if (c.saturation >= 0.6) {
+        hasVivid = true;
+      } else if (c.saturation >= 0.25) {
+        hasModerate = true;
+      } else {
+        hasMuted = true;
+      }
     }
-    if (hasVivid) vivid++;
-    if (hasModerate) moderate++;
-    if (hasMuted) muted++;
+    if (hasVivid) {
+      vivid++;
+    }
+    if (hasModerate) {
+      moderate++;
+    }
+    if (hasMuted) {
+      muted++;
+    }
   }
 
   return {
@@ -437,8 +544,8 @@ export function aggregateFromStoredColors(
 
 interface ColorCacheEntry {
   result: ColorDistributionResult;
-  totalPhotos: number;
   timestamp: number;
+  totalPhotos: number;
 }
 
 let colorCache: ColorCacheEntry | null = null;
@@ -453,7 +560,7 @@ const COLOR_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 export async function computeColorDistribution(
   samplePhotos: { path: string; thumbnailPath: string | null }[],
-  totalPhotos: number,
+  totalPhotos: number
 ): Promise<ColorDistributionResult> {
   // Return cached result if photo count hasn't changed significantly
   if (colorCache) {
@@ -470,9 +577,13 @@ export async function computeColorDistribution(
   for (const p of samplePhotos) {
     try {
       const imgPath = p.thumbnailPath || p.path;
-      if (!fs.existsSync(imgPath)) continue;
+      if (!fs.existsSync(imgPath)) {
+        continue;
+      }
       const palette = await extractPerPhotoPalette(imgPath);
-      if (palette) palettes.push(palette);
+      if (palette) {
+        palettes.push(palette);
+      }
     } catch {
       /* skip bad files */
     }

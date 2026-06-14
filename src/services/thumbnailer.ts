@@ -4,6 +4,8 @@ import path from "node:path";
 import { screen } from "electron";
 import { LRUCache } from "lru-cache";
 import sharp from "sharp";
+import { getDatabase } from "@/db";
+import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { extractRawPreview, isRawFile } from "./raw-preview";
 
@@ -17,23 +19,29 @@ const THUMBNAIL_BASE_SIZES = {
 type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
 
 interface ThumbnailCacheConfig {
-  maxMemoryMB: number;
-  maxDiskMB: number;
-  maxDiskFiles: number;
   cleanupThresholdMB: number;
+  maxDiskFiles: number;
+  maxDiskMB: number;
+  maxMemoryMB: number;
 }
 
 const CACHE_CONFIG: ThumbnailCacheConfig = {
   maxMemoryMB: 250,
   maxDiskMB: 2048, // 2GB
-  maxDiskFiles: 10000,
+  maxDiskFiles: 10_000,
   cleanupThresholdMB: 1800, // 1.8GB 触发清理
 };
 
 let thumbnailDir: string;
 let memoryCache: LRUCache<string, Buffer>;
+interface ThumbnailResult {
+  height: number;
+  thumbnailPath: string;
+  width: number;
+}
 let dprScale = 2; // default to 2x for HiDPI displays
 const diskAccessLog = new Map<string, number>();
+const inFlightRequests = new Map<string, Promise<ThumbnailResult>>();
 
 export function initThumbnailer(): void {
   thumbnailDir = path.join(getDataPath(), "thumbnails");
@@ -62,7 +70,7 @@ function getThumbnailSize(size: ThumbSize): number {
 export function getThumbnailPath(imagePath: string, size: ThumbSize): string {
   const hash = crypto
     .createHash("md5")
-    .update(`${imagePath}_${size}_v2_${dprScale}`)
+    .update(`${imagePath}_${size}_v3_${dprScale}`)
     .digest("hex");
   return path.join(thumbnailDir, `${hash}.webp`);
 }
@@ -113,7 +121,10 @@ export function checkAndCleanDiskCache(): {
   let freedBytes = 0;
 
   for (const file of files) {
-    if (currentMB <= targetMB && filesRemoved >= usage.fileCount - CACHE_CONFIG.maxDiskFiles) {
+    if (
+      currentMB <= targetMB &&
+      filesRemoved >= usage.fileCount - CACHE_CONFIG.maxDiskFiles
+    ) {
       break;
     }
 
@@ -142,7 +153,7 @@ export function checkAndCleanDiskCache(): {
 export async function generateThumbnail(
   imagePath: string,
   size: ThumbSize = "md"
-): Promise<{ thumbnailPath: string; width: number; height: number }> {
+): Promise<ThumbnailResult> {
   const cacheKey = `${imagePath}_${size}`;
 
   // L1: memory
@@ -153,8 +164,16 @@ export async function generateThumbnail(
   // Record access time
   diskAccessLog.set(thumbFilename, Date.now());
 
+  if (cached) {
+    return {
+      thumbnailPath: thumbPath,
+      width: getThumbnailSize(size),
+      height: getThumbnailSize(size),
+    };
+  }
+
   // L2: disk
-  if (!cached && fs.existsSync(thumbPath)) {
+  if (fs.existsSync(thumbPath)) {
     const diskData = fs.readFileSync(thumbPath);
     memoryCache?.set(cacheKey, diskData);
     const meta = await sharp(thumbPath).metadata();
@@ -165,15 +184,29 @@ export async function generateThumbnail(
     };
   }
 
-  if (cached) {
-    return {
-      thumbnailPath: thumbPath,
-      width: getThumbnailSize(size),
-      height: getThumbnailSize(size),
-    };
+  // ── 请求去重：正在生成中的缩略图直接 await 同一个 Promise ──
+  const existing = inFlightRequests.get(cacheKey);
+  if (existing) {
+    return existing;
   }
 
-  // L3: generate
+  // L3: generate（去重守护）
+  const promise = doGenerate(imagePath, size, thumbPath, cacheKey);
+  inFlightRequests.set(cacheKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    inFlightRequests.delete(cacheKey);
+  }
+}
+
+async function doGenerate(
+  imagePath: string,
+  size: ThumbSize,
+  thumbPath: string,
+  cacheKey: string
+): Promise<ThumbnailResult> {
   const targetSize = getThumbnailSize(size);
 
   // For RAW files, extract the embedded JPEG preview first
@@ -186,6 +219,7 @@ export async function generateThumbnail(
   }
 
   const pipeline = sharp(input, { failOn: "none" })
+    .rotate()
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80, effort: 1 });
   const { data: thumbBuffer, info } = await pipeline.toBuffer({
@@ -266,7 +300,9 @@ export function getThumbnailDiskUsage(): {
  * Safe to call even if the photo has no thumbnails — errors are silently caught.
  */
 export function deletePhotoThumbnails(imagePath: string): void {
-  if (!thumbnailDir) return;
+  if (!thumbnailDir) {
+    return;
+  }
 
   for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
     const thumbPath = getThumbnailPath(imagePath, size);
@@ -307,6 +343,124 @@ export function clearThumbnailDiskCache(): {
 
   return {
     fileCount,
+    freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
+  };
+}
+
+/**
+ * Build a Set of expected thumbnail filenames by combining two sources:
+ * (a) thumbnailPath column — the exact stored path (authoritative for "md")
+ * (b) getThumbnailPath() — computed for all 3 sizes from the image path
+ *
+ * The dual-source approach prevents false positives when dprScale changes
+ * between sessions (the Set deduplicates when both sources agree).
+ */
+function buildExpectedThumbnailSet(): Set<string> | null {
+  try {
+    const db = getDatabase();
+    const records = db
+      .select({ path: photos.path, thumbnailPath: photos.thumbnailPath })
+      .from(photos)
+      .all();
+
+    const expected = new Set<string>();
+    for (const r of records) {
+      if (r.thumbnailPath) {
+        expected.add(path.basename(r.thumbnailPath));
+      }
+      if (r.path) {
+        for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
+          expected.add(path.basename(getThumbnailPath(r.path, size)));
+        }
+      }
+    }
+    return expected;
+  } catch {
+    return null; // Database not ready
+  }
+}
+
+/**
+ * Scan the thumbnail cache directory for orphan files — thumbnails that
+ * exist on disk but have no corresponding photo record in the database.
+ */
+export function scanOrphanThumbnails(): {
+  orphanCount: number;
+  orphanSizeBytes: number;
+  totalFiles: number;
+} {
+  if (!(thumbnailDir && fs.existsSync(thumbnailDir))) {
+    return { orphanCount: 0, orphanSizeBytes: 0, totalFiles: 0 };
+  }
+
+  const expectedFiles = buildExpectedThumbnailSet();
+  if (!expectedFiles) {
+    return { orphanCount: 0, orphanSizeBytes: 0, totalFiles: 0 };
+  }
+
+  let totalFiles = 0;
+  let orphanCount = 0;
+  let orphanSizeBytes = 0;
+
+  const entries = fs.readdirSync(thumbnailDir);
+  for (const entry of entries) {
+    if (!entry.endsWith(".webp")) {
+      continue;
+    }
+    totalFiles++;
+    if (!expectedFiles.has(entry)) {
+      try {
+        orphanSizeBytes += fs.statSync(path.join(thumbnailDir, entry)).size;
+      } catch {
+        /* skip inaccessible */
+      }
+      orphanCount++;
+    }
+  }
+
+  return { orphanCount, orphanSizeBytes, totalFiles };
+}
+
+/**
+ * Delete orphan thumbnail files — those on disk with no corresponding
+ * photo record. Only touches confirmed orphans; active thumbnails are
+ * left untouched.
+ */
+export function cleanOrphanThumbnails(): {
+  removed: number;
+  freedMB: number;
+} {
+  if (!(thumbnailDir && fs.existsSync(thumbnailDir))) {
+    return { removed: 0, freedMB: 0 };
+  }
+
+  const expectedFiles = buildExpectedThumbnailSet();
+  if (!expectedFiles) {
+    return { removed: 0, freedMB: 0 };
+  }
+
+  let removed = 0;
+  let totalBytes = 0;
+
+  const entries = fs.readdirSync(thumbnailDir);
+  for (const entry of entries) {
+    if (!entry.endsWith(".webp")) {
+      continue;
+    }
+    if (!expectedFiles.has(entry)) {
+      const entryPath = path.join(thumbnailDir, entry);
+      try {
+        totalBytes += fs.statSync(entryPath).size;
+        fs.unlinkSync(entryPath);
+        removed++;
+      } catch {
+        /* skip locked / inaccessible files */
+      }
+    }
+  }
+
+  return {
+    removed,
     freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
   };
 }

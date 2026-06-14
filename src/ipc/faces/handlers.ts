@@ -9,6 +9,7 @@ import {
   photos,
 } from "@/db/schema";
 import {
+  cancelFaceDetection,
   detectFaces,
   getFaceDetectionProgress,
   isFaceDetectionRunning,
@@ -113,10 +114,28 @@ export const startFaceDetection = os
       return { started: false, message: "没有需要检测的照片" };
     }
 
-    // Fire and forget — detection runs async
-    detectFaces(ids).catch((err) =>
-      console.error("[Faces] Detection error:", err)
-    );
+    // Fire and forget — detection runs async with progress pushed to renderer
+    detectFaces(ids, (progress) => {
+      const { BrowserWindow } = require("electron");
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("face-detection-progress", progress);
+      }
+    })
+      .then((totalFaces) => {
+        const { BrowserWindow } = require("electron");
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send("face-detection-done", { totalFaces });
+        }
+      })
+      .catch((err) => {
+        console.error("[Faces] Detection error:", err);
+        const { BrowserWindow } = require("electron");
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send("face-detection-done", {
+            error: err?.message || "Unknown error",
+          });
+        }
+      });
 
     return { started: true, photoCount: ids.length };
   });
@@ -127,77 +146,97 @@ export const getDetectionProgress = os.handler(() => {
 
 export const listFaceIdentities = os.handler(() => {
   const db = getDatabase();
+
+  // 1. Fetch all identities ordered by faceCount DESC
   const identities = db
     .select()
     .from(faceIdentities)
     .orderBy(desc(faceIdentities.faceCount))
     .all();
 
-  const result = [];
-  for (const identity of identities) {
-    let coverPath: string | null = null;
-    let coverPhotoPath: string | null = null;
-    let coverBbox: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    } | null = null;
-    let coverPhotoWidth: number | null = null;
-    let coverPhotoHeight: number | null = null;
-
-    if (identity.representativePhotoId) {
-      const photo = db
-        .select({
-          thumbnailPath: photos.thumbnailPath,
-          path: photos.path,
-          width: photos.width,
-          height: photos.height,
-        })
-        .from(photos)
-        .where(eq(photos.id, identity.representativePhotoId))
-        .get();
-      coverPath = photo?.thumbnailPath || photo?.path || null;
-      coverPhotoPath = photo?.path ?? null;
-      coverPhotoWidth = photo?.width ?? null;
-      coverPhotoHeight = photo?.height ?? null;
-
-      const memberFace = db
-        .select({
-          bboxX: faceVectors.bboxX,
-          bboxY: faceVectors.bboxY,
-          bboxWidth: faceVectors.bboxWidth,
-          bboxHeight: faceVectors.bboxHeight,
-        })
-        .from(faceIdentityMembers)
-        .innerJoin(
-          faceVectors,
-          eq(faceIdentityMembers.faceVectorId, faceVectors.id)
-        )
-        .where(eq(faceIdentityMembers.identityId, identity.id))
-        .limit(1)
-        .get();
-
-      if (memberFace) {
-        coverBbox = {
-          x: memberFace.bboxX,
-          y: memberFace.bboxY,
-          width: memberFace.bboxWidth,
-          height: memberFace.bboxHeight,
-        };
-      }
-    }
-    result.push({
-      ...identity,
-      coverThumbnailPath: coverPath,
-      coverPhotoPath,
-      coverBbox,
-      coverPhotoWidth,
-      coverPhotoHeight,
-    });
+  if (identities.length === 0) {
+    return [];
   }
 
-  return result;
+  // 2. Batch-fetch cover photos (single IN query)
+  const photoIds = [
+    ...new Set(
+      identities
+        .map((i) => i.representativePhotoId)
+        .filter((id): id is number => id != null)
+    ),
+  ];
+  const photoMap = new Map<
+    number,
+    {
+      thumbnailPath: string | null;
+      path: string;
+      width: number | null;
+      height: number | null;
+    }
+  >();
+  if (photoIds.length > 0) {
+    const photoRows = db
+      .select({
+        id: photos.id,
+        thumbnailPath: photos.thumbnailPath,
+        path: photos.path,
+        width: photos.width,
+        height: photos.height,
+      })
+      .from(photos)
+      .where(inArray(photos.id, photoIds))
+      .all();
+    for (const p of photoRows) {
+      photoMap.set(p.id, p);
+    }
+  }
+
+  // 3. Batch-fetch first face bbox per identity (single JOIN, JS dedup)
+  const bboxMap = new Map<
+    number,
+    { x: number; y: number; width: number; height: number }
+  >();
+  const allMembers = db
+    .select({
+      identityId: faceIdentityMembers.identityId,
+      bboxX: faceVectors.bboxX,
+      bboxY: faceVectors.bboxY,
+      bboxWidth: faceVectors.bboxWidth,
+      bboxHeight: faceVectors.bboxHeight,
+    })
+    .from(faceIdentityMembers)
+    .innerJoin(
+      faceVectors,
+      eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+    )
+    .all();
+  // Keep only the first bbox per identity
+  for (const m of allMembers) {
+    if (!bboxMap.has(m.identityId)) {
+      bboxMap.set(m.identityId, {
+        x: m.bboxX,
+        y: m.bboxY,
+        width: m.bboxWidth,
+        height: m.bboxHeight,
+      });
+    }
+  }
+
+  // 4. Assemble results (pure in-memory)
+  return identities.map((identity) => {
+    const photo = identity.representativePhotoId
+      ? photoMap.get(identity.representativePhotoId)
+      : undefined;
+    return {
+      ...identity,
+      coverThumbnailPath: photo?.thumbnailPath || photo?.path || null,
+      coverPhotoPath: photo?.path ?? null,
+      coverPhotoWidth: photo?.width ?? null,
+      coverPhotoHeight: photo?.height ?? null,
+      coverBbox: bboxMap.get(identity.id) ?? null,
+    };
+  });
 });
 
 export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
@@ -400,6 +439,14 @@ export const removeFaceFromIdentity = os
 
     return { ok: true, remainingCount: count };
   });
+
+export const cancelFaceDetection_h = os.handler(() => {
+  if (!isFaceDetectionRunning()) {
+    return { cancelled: false, message: "没有正在运行的人脸检测" };
+  }
+  cancelFaceDetection();
+  return { cancelled: true };
+});
 
 export const recluster = os.handler(async () => {
   if (isFaceDetectionRunning()) {

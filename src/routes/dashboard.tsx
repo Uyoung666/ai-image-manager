@@ -1,6 +1,14 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Area,
@@ -13,7 +21,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-interface ChartClickState { activePayload?: { payload: Record<string, unknown> }[] }
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+
+interface ChartClickState {
+  activePayload?: { payload: Record<string, unknown> }[];
+}
+
 import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
 import { ipc } from "@/ipc/manager";
 
@@ -56,22 +69,31 @@ interface DashboardData {
 }
 
 interface ColorPaletteColor {
-  hex: string;
-  r: number;
-  g: number;
   b: number;
+  g: number;
+  hex: string;
   hue: number;
-  saturation: number;
   lightness: number;
+  r: number;
+  saturation: number;
   weight: number;
 }
-interface HueBucket { label: string; hueRange: [number, number]; count: number; hex: string }
-interface SaturationBucket { level: "vivid" | "moderate" | "muted"; label: string; count: number }
+interface HueBucket {
+  count: number;
+  hex: string;
+  hueRange: [number, number];
+  label: string;
+}
+interface SaturationBucket {
+  count: number;
+  label: string;
+  level: "vivid" | "moderate" | "muted";
+}
 interface ColorDistributionUI {
   globalPalette: ColorPaletteColor[];
   hueDistribution: HueBucket[];
-  saturationDistribution: SaturationBucket[];
   sampled: number;
+  saturationDistribution: SaturationBucket[];
   totalPhotos: number;
 }
 const CHART_1 = "var(--chart-1)";
@@ -109,6 +131,7 @@ function focalToRange(focalRaw: string): { min: number; max: number } | null {
 function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const HUE_LABEL_KEYS: Record<number, string> = {
     0: "hueRed",
@@ -128,41 +151,39 @@ function DashboardPage() {
     return t(HUE_LABEL_KEYS[hueStart] || "hueRed");
   }
 
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const prefersReducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
 
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "dashboard" });
+
+  // ── TanStack Query: single IPC call merges stats + colors ──────────
+  const {
+    data: rawData,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: async () => {
+      const result = (await ipc.client.photos.getStats({
+        includeColors: true,
+      })) as DashboardData & { colorDistribution?: ColorDistributionUI | null };
+      return result;
+    },
+    staleTime: 30_000,
+  });
+
+  // React 19: defer chart recalc to keep page responsive
+  const data = useDeferredValue(rawData ?? null);
+  const colorData = (rawData as any)?.colorDistribution ?? null;
+
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
-  const [colorLoading, setColorLoading] = useState(true);
-  const [colorData, setColorData] = useState<ColorDistributionUI | null>(null);
   const [colorVisible, setColorVisible] = useState(false);
   const colorRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const result = await ipc.client.photos.getStats({});
-        if (!cancelled) setData(result as DashboardData);
-      } catch {
-        if (!cancelled) setError(true);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    setColorLoading(true);
-    ipc.client.photos
-      .getColorDistribution()
-      .then((result) => { if (!cancelled) setColorData(result as ColorDistributionUI); })
-      .catch(() => { if (!cancelled) setError(true); })
-      .finally(() => { if (!cancelled) setColorLoading(false); });
-
-    return () => { cancelled = true; };
-  }, []);
-
+  // Map source setting (lightweight, loaded once)
   useEffect(() => {
     ipc.client.settings
       .getAppSetting({ key: "mapSource" })
@@ -174,18 +195,33 @@ function DashboardPage() {
       .catch(() => {});
   }, []);
 
-  // IntersectionObserver: only play entrance animation when color section is visible
+  // Auto-refresh dashboard when background import queue finishes
+  useEffect(() => {
+    function onMsg(e: MessageEvent) {
+      if (e.data?.type === "import-queue-status") {
+        const prev = (e.data as any).prevStatus;
+        const next = (e.data as any).status;
+        // Transition from running → done: invalidate to pick up new data
+        if (prev === "processing" && next === "done") {
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+        }
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [queryClient]);
+
+  // IntersectionObserver: entrance animation when color section scrolls into view
   useEffect(() => {
     const el = colorRef.current;
-    if (!el) return;
-
-    // Check if already visible (user scrolled during loading)
+    if (!(el && colorData)) {
+      return;
+    }
     const rect = el.getBoundingClientRect();
     if (rect.top < window.innerHeight && rect.bottom > 0) {
       setColorVisible(true);
       return;
     }
-
     const obs = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -197,7 +233,7 @@ function DashboardPage() {
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [colorLoading]);
+  }, [colorData]);
 
   const handleMapSourceChange = useCallback((source: "offline" | "online") => {
     setMapSource(source);
@@ -249,7 +285,9 @@ function DashboardPage() {
         .sort((a, b) => {
           const na = Number.parseFloat(a.name);
           const nb = Number.parseFloat(b.name);
-          if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+          if (!(Number.isNaN(na) || Number.isNaN(nb))) {
+            return na - nb;
+          }
           return 0;
         })
         .slice(0, 12),
@@ -363,15 +401,73 @@ function DashboardPage() {
     }));
   }, [data?.monthlyStats, i18n.language]);
 
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <div className="flex h-full flex-col bg-background">
+        <div className="flex items-center gap-4 border-border border-b px-6 py-4">
+          <div className="h-5 w-5 animate-pulse rounded-[4px] bg-muted" />
+          <div className="h-5 w-32 animate-pulse rounded-[4px] bg-muted" />
+        </div>
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+          {/* Stat cards skeleton */}
+          <div className="grid grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                className="rounded-[8px] border border-border bg-card p-4"
+                key={`stat-skel-${i}`}
+              >
+                <div className="mb-2 h-3 w-16 animate-pulse rounded-[3px] bg-muted" />
+                <div className="h-7 w-20 animate-pulse rounded-[3px] bg-muted" />
+              </div>
+            ))}
+          </div>
+          {/* Map skeleton */}
+          <div className="rounded-[8px] border border-border bg-card p-4">
+            <div className="mb-3 h-4 w-20 animate-pulse rounded-[3px] bg-muted" />
+            <div className="h-[300px] w-full animate-pulse rounded-[6px] bg-muted" />
+          </div>
+          {/* Color skeleton */}
+          <div className="rounded-[8px] border border-border bg-card p-4">
+            <div className="mb-3 h-4 w-24 animate-pulse rounded-[3px] bg-muted" />
+            <div className="mb-3 h-6 w-full animate-pulse rounded-[4px] bg-muted" />
+            <div className="mb-3 h-6 w-full animate-pulse rounded-[4px] bg-muted" />
+            <div className="space-y-1.5">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div className="flex items-center gap-2" key={`clr-skel-${i}`}>
+                  <div className="h-2 w-10 animate-pulse rounded-[2px] bg-muted" />
+                  <div className="h-2 flex-1 animate-pulse rounded-[2px] bg-muted" />
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Chart skeletons (6 charts) */}
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              className="rounded-[8px] border border-border bg-card p-4"
+              key={`chart-skel-${i}`}
+            >
+              <div className="mb-3 h-4 w-24 animate-pulse rounded-[3px] bg-muted" />
+              <div className="h-[200px] w-full animate-pulse rounded-[6px] bg-muted" />
+            </div>
+          ))}
+          {/* Yearly / Monthly skeleton */}
+          <div className="grid grid-cols-2 gap-4">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div
+                className="rounded-[8px] border border-border bg-card p-4"
+                key={`ym-skel-${i}`}
+              >
+                <div className="mb-3 h-4 w-20 animate-pulse rounded-[3px] bg-muted" />
+                <div className="h-[200px] w-full animate-pulse rounded-[6px] bg-muted" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
-  if (error && !data) {
+  if (isError && !data) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">
@@ -390,15 +486,15 @@ function DashboardPage() {
             />
           </svg>
         </div>
-        <p className="font-[510] text-[13px] text-foreground">{t("errorBoundaryTitle")}</p>
-        <p className="text-[12px] text-muted-foreground">{t("dashboardLoadFailed")}</p>
+        <p className="font-[510] text-[13px] text-foreground">
+          {t("errorBoundaryTitle")}
+        </p>
+        <p className="text-[12px] text-muted-foreground">
+          {t("dashboardLoadFailed")}
+        </p>
         <button
           className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
-          onClick={() => {
-            setError(false);
-            setLoading(true);
-            window.location.reload();
-          }}
+          onClick={() => refetch()}
         >
           {t("retry")}
         </button>
@@ -420,7 +516,7 @@ function DashboardPage() {
         </h1>
       </div>
 
-      <div className="flex-1 space-y-6 overflow-y-auto p-6">
+      <div className="flex-1 space-y-6 overflow-y-auto p-6" ref={scrollRef}>
         {/* Stat Cards */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard
@@ -455,10 +551,200 @@ function DashboardPage() {
         </ChartSection>
 
         {/* Color Distribution */}
-        <ChartSection hint={t("colorClickToSearch")} title={t("colorDistribution")}>
-          {colorLoading ? (
+        <ChartSection
+          hint={t("colorClickToSearch")}
+          title={t("colorDistribution")}
+        >
+          {colorData ? (
+            colorData && colorData.globalPalette.length > 0 ? (
+              <div
+                className={colorVisible ? "animate-card-enter" : "opacity-0"}
+                ref={colorRef}
+              >
+                {/* Insight text */}
+                {(() => {
+                  let warmT = 0,
+                    coolT = 0,
+                    greenT = 0;
+                  for (const h of colorData.hueDistribution) {
+                    const hue = h.hueRange[0];
+                    if (hue >= 0 && hue < 90) {
+                      warmT += h.count;
+                    } else if (hue >= 210 && hue < 330) {
+                      coolT += h.count;
+                    } else if (hue >= 90 && hue < 180) {
+                      greenT += h.count;
+                    }
+                  }
+                  const total = warmT + coolT + greenT;
+                  const max = Math.max(warmT, coolT, greenT);
+                  let insightKey = "colorInsightNeutral";
+                  if (total > 0 && max / total >= 0.35) {
+                    if (max === warmT) {
+                      insightKey = "colorInsightWarm";
+                    } else if (max === coolT) {
+                      insightKey = "colorInsightCool";
+                    } else {
+                      insightKey = "colorInsightGreen";
+                    }
+                  }
+                  return (
+                    <p className="mb-3 text-[12px] text-muted-foreground/80">
+                      {t(insightKey)}
+                    </p>
+                  );
+                })()}
+
+                {/* Palette Swatch Row — sorted by hue */}
+                <div className="mb-4">
+                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                    {t("colorPalette")}
+                  </h3>
+                  <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
+                    {colorData.globalPalette.map((c, i) => (
+                      <button
+                        className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                        key={i}
+                        onClick={() =>
+                          drillToHome({
+                            colorHex: c.hex.replace("#", ""),
+                          })
+                        }
+                        style={{
+                          width: `${Math.max(c.weight * 100, 1.5)}%`,
+                          backgroundColor: c.hex,
+                        }}
+                        title={`${c.hex} — ${Math.round(c.weight * 100)}%`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hue Distribution Bar — equal-width segments, opacity = relative count */}
+                <div className="mb-4">
+                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                    {t("colorHueDistribution")}
+                  </h3>
+                  {(() => {
+                    const maxHue = Math.max(
+                      ...colorData.hueDistribution.map((h) => h.count),
+                      1
+                    );
+                    return (
+                      <>
+                        <div className="flex h-6 w-full gap-[1px] overflow-hidden rounded-[4px]">
+                          {colorData.hueDistribution.map((h) => {
+                            const ratio = h.count / maxHue;
+                            const opacity = 0.12 + ratio * 0.88;
+                            return (
+                              <button
+                                className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                                key={h.hueRange[0]}
+                                onClick={() =>
+                                  drillToHome({
+                                    colorHex: h.hex.replace("#", ""),
+                                  })
+                                }
+                                style={{
+                                  backgroundColor: h.hex,
+                                  opacity,
+                                }}
+                                title={`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1.5 flex justify-between px-0">
+                          {colorData.hueDistribution.map((h) => (
+                            <span
+                              className="text-center text-[10px] text-muted-foreground/60 leading-tight"
+                              key={h.hueRange[0]}
+                            >
+                              {getHueLabel(h.hueRange[0])}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Saturation Distribution */}
+                <div>
+                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                    {t("colorSaturationDistribution")}
+                  </h3>
+                  {(() => {
+                    const maxSat = Math.max(
+                      ...colorData.saturationDistribution.map((s) => s.count),
+                      1
+                    );
+                    const barColors: Record<string, string> = {
+                      vivid: "hsl(237, 55%, 55%)",
+                      moderate: "hsl(237, 25%, 48%)",
+                      muted: "hsl(237, 8%, 40%)",
+                    };
+                    const satLabels: Record<string, string> = {
+                      vivid: t("colorVivid"),
+                      moderate: t("colorModerate"),
+                      muted: t("colorMuted"),
+                    };
+                    return (
+                      <div className="space-y-1.5">
+                        {colorData.saturationDistribution.map((s) => {
+                          const pct = Math.round((s.count / maxSat) * 100);
+                          return (
+                            <div
+                              className="flex items-center gap-2"
+                              key={s.level}
+                            >
+                              <span className="w-10 shrink-0 text-[11px] text-muted-foreground/70">
+                                {satLabels[s.level]}
+                              </span>
+                              <div className="h-2.5 flex-1 overflow-hidden rounded-[2px] bg-muted">
+                                <div
+                                  className="h-full rounded-[2px] transition-all"
+                                  style={{
+                                    width: `${Math.max(pct, 4)}%`,
+                                    backgroundColor: barColors[s.level],
+                                  }}
+                                />
+                              </div>
+                              <span className="w-8 text-right text-[11px] text-muted-foreground/50 tabular-nums">
+                                {s.count}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <p className="mt-3 text-right text-[10px] text-muted-foreground/50">
+                  {t("colorSampled", {
+                    count: colorData.sampled,
+                    total: colorData.totalPhotos,
+                  })}
+                </p>
+              </div>
+            ) : (
+              <div className="py-2 text-center">
+                <p className="text-[12px] text-muted-foreground/50">
+                  {t("noColorData")}
+                </p>
+                {colorData && colorData.sampled > 0 && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/30">
+                    {t("colorNotEnoughData", { count: colorData.sampled })}
+                  </p>
+                )}
+              </div>
+            )
+          ) : (
             <div className="space-y-3 py-2">
-              <p className="text-[11px] text-muted-foreground/50">{t("colorAnalyzing")}</p>
+              <p className="text-[11px] text-muted-foreground/50">
+                {t("colorAnalyzing")}
+              </p>
               <div className="flex h-5 w-full gap-[2px] overflow-hidden rounded-[4px]">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <div
@@ -487,167 +773,6 @@ function DashboardPage() {
                 ))}
               </div>
             </div>
-          ) : colorData && colorData.globalPalette.length > 0 ? (
-            <div
-              ref={colorRef}
-              className={colorVisible ? "animate-card-enter" : "opacity-0"}
-            >
-              {/* Insight text */}
-              {(() => {
-                let warmT = 0, coolT = 0, greenT = 0;
-                for (const h of colorData.hueDistribution) {
-                  const hue = h.hueRange[0];
-                  if (hue >= 0 && hue < 90) warmT += h.count;
-                  else if (hue >= 210 && hue < 330) coolT += h.count;
-                  else if (hue >= 90 && hue < 180) greenT += h.count;
-                }
-                const total = warmT + coolT + greenT;
-                const max = Math.max(warmT, coolT, greenT);
-                let insightKey = "colorInsightNeutral";
-                if (total > 0 && max / total >= 0.35) {
-                  if (max === warmT) insightKey = "colorInsightWarm";
-                  else if (max === coolT) insightKey = "colorInsightCool";
-                  else insightKey = "colorInsightGreen";
-                }
-                return (
-                  <p className="mb-3 text-[12px] text-muted-foreground/80">
-                    {t(insightKey)}
-                  </p>
-                );
-              })()}
-
-              {/* Palette Swatch Row — sorted by hue */}
-              <div className="mb-4">
-                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
-                  {t("colorPalette")}
-                </h3>
-                <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
-                  {colorData.globalPalette.map((c, i) => (
-                    <button
-                      className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
-                      key={i}
-                      style={{
-                        width: `${Math.max(c.weight * 100, 1.5)}%`,
-                        backgroundColor: c.hex,
-                      }}
-                      title={`${c.hex} — ${Math.round(c.weight * 100)}%`}
-                      onClick={() =>
-                        drillToHome({
-                          colorHex: c.hex.replace("#", ""),
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Hue Distribution Bar — equal-width segments, opacity = relative count */}
-              <div className="mb-4">
-                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
-                  {t("colorHueDistribution")}
-                </h3>
-                {(() => {
-                  const maxHue = Math.max(...colorData.hueDistribution.map((h) => h.count), 1);
-                  return (
-                    <>
-                      <div className="flex h-6 w-full gap-[1px] overflow-hidden rounded-[4px]">
-                        {colorData.hueDistribution.map((h) => {
-                          const ratio = h.count / maxHue;
-                          const opacity = 0.12 + ratio * 0.88;
-                          return (
-                            <button
-                              className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
-                              key={h.hueRange[0]}
-                              style={{
-                                backgroundColor: h.hex,
-                                opacity,
-                              }}
-                              title={`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}
-                              onClick={() =>
-                                drillToHome({
-                                  colorHex: h.hex.replace("#", ""),
-                                })
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                      <div className="mt-1.5 flex justify-between px-0">
-                        {colorData.hueDistribution.map((h) => (
-                          <span
-                            className="text-[10px] text-muted-foreground/60 text-center leading-tight"
-                            key={h.hueRange[0]}
-                          >
-                            {getHueLabel(h.hueRange[0])}
-                          </span>
-                        ))}
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Saturation Distribution */}
-              <div>
-                <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
-                  {t("colorSaturationDistribution")}
-                </h3>
-                {(() => {
-                  const maxSat = Math.max(...colorData.saturationDistribution.map((s) => s.count), 1);
-                  const barColors: Record<string, string> = {
-                    vivid: "hsl(237, 55%, 55%)",
-                    moderate: "hsl(237, 25%, 48%)",
-                    muted: "hsl(237, 8%, 40%)",
-                  };
-                  const satLabels: Record<string, string> = {
-                    vivid: t("colorVivid"),
-                    moderate: t("colorModerate"),
-                    muted: t("colorMuted"),
-                  };
-                  return (
-                    <div className="space-y-1.5">
-                      {colorData.saturationDistribution.map((s) => {
-                        const pct = Math.round((s.count / maxSat) * 100);
-                        return (
-                          <div className="flex items-center gap-2" key={s.level}>
-                            <span className="w-10 shrink-0 text-[11px] text-muted-foreground/70">
-                              {satLabels[s.level]}
-                            </span>
-                            <div className="h-2.5 flex-1 overflow-hidden rounded-[2px] bg-muted">
-                              <div
-                                className="h-full rounded-[2px] transition-all"
-                                style={{
-                                  width: `${Math.max(pct, 4)}%`,
-                                  backgroundColor: barColors[s.level],
-                                }}
-                              />
-                            </div>
-                            <span className="w-8 text-right text-[11px] text-muted-foreground/50 tabular-nums">
-                              {s.count}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <p className="mt-3 text-right text-[10px] text-muted-foreground/50">
-                {t("colorSampled", { count: colorData.sampled, total: colorData.totalPhotos })}
-              </p>
-            </div>
-          ) : (
-            <div className="py-2 text-center">
-              <p className="text-[12px] text-muted-foreground/50">
-                {t("noColorData")}
-              </p>
-              {colorData && colorData.sampled > 0 && (
-                <p className="mt-1 text-[11px] text-muted-foreground/30">
-                  {t("colorNotEnoughData", { count: colorData.sampled })}
-                </p>
-              )}
-            </div>
           )}
         </ChartSection>
 
@@ -655,11 +780,11 @@ function DashboardPage() {
         <ChartSection hint={t("clickToView")} title={t("cameraUsage")}>
           {cameraData.length > 0 ? (
             <DashboardBarChart
+              barRadius={[0, 4, 4, 0]}
               data={cameraData}
+              fillColor={CHART_1}
               horizontal
               leftMargin={140}
-              fillColor={CHART_1}
-              barRadius={[0, 4, 4, 0]}
               onBarClick={(entry) => {
                 if (entry.cameraModel) {
                   drillToHome({ cameraModel: entry.cameraModel });
@@ -675,12 +800,12 @@ function DashboardPage() {
         {lensData.length > 0 && (
           <ChartSection hint={t("clickToView")} title={t("lensUsage")}>
             <DashboardBarChart
-              data={lensData}
-              horizontal
-              leftMargin={160}
-              fillColor={CHART_5}
               barRadius={[0, 4, 4, 0]}
               cursor={true}
+              data={lensData}
+              fillColor={CHART_5}
+              horizontal
+              leftMargin={160}
               onBarClick={(entry) => {
                 if (entry.lensModel) {
                   drillToHome({ lensModel: entry.lensModel });
@@ -697,8 +822,6 @@ function DashboardPage() {
               <DashboardBarChart
                 data={focalData}
                 fillColor={CHART_2}
-                xAxisAngle={-45}
-                xAxisFontSize={10}
                 onBarClick={(entry) => {
                   if (entry.focalMin && entry.focalMax) {
                     drillToHome({
@@ -707,6 +830,8 @@ function DashboardPage() {
                     });
                   }
                 }}
+                xAxisAngle={-45}
+                xAxisFontSize={10}
               />
             ) : (
               <EmptyHint text={t("noFocalData")} />
@@ -718,8 +843,6 @@ function DashboardPage() {
               <DashboardBarChart
                 data={apertureData}
                 fillColor={CHART_3}
-                xAxisAngle={-45}
-                xAxisFontSize={10}
                 onBarClick={(entry) => {
                   if (entry.apertureMin && entry.apertureMax) {
                     drillToHome({
@@ -728,13 +851,18 @@ function DashboardPage() {
                     });
                   }
                 }}
+                xAxisAngle={-45}
+                xAxisFontSize={10}
               />
             ) : (
               <EmptyHint text={t("noApertureData")} />
             )}
           </ChartSection>
 
-          <ChartSection hint={t("clickToView")} title={t("isoDistributionTitle")}>
+          <ChartSection
+            hint={t("clickToView")}
+            title={t("isoDistributionTitle")}
+          >
             {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
               <DashboardBarChart
                 data={isoData}
@@ -761,9 +889,23 @@ function DashboardPage() {
                   margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
                 >
                   <defs>
-                    <linearGradient id="timeGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.5} />
-                      <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
+                    <linearGradient
+                      id="timeGradient"
+                      x1="0"
+                      x2="0"
+                      y1="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="var(--chart-1)"
+                        stopOpacity={0.5}
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="var(--chart-1)"
+                        stopOpacity={0.02}
+                      />
                     </linearGradient>
                   </defs>
                   <XAxis
@@ -801,8 +943,6 @@ function DashboardPage() {
             <DashboardBarChart
               data={shutterData}
               fillColor={CHART_5}
-              xAxisAngle={-45}
-              xAxisFontSize={10}
               onBarClick={(entry) => {
                 if (
                   entry.shutterMin !== undefined &&
@@ -814,6 +954,8 @@ function DashboardPage() {
                   });
                 }
               }}
+              xAxisAngle={-45}
+              xAxisFontSize={10}
             />
           ) : (
             <EmptyHint text={t("noShutterData")} />
@@ -822,7 +964,10 @@ function DashboardPage() {
 
         {/* Yearly & Monthly Distribution */}
         <div className="grid grid-cols-2 gap-4">
-          <ChartSection hint={t("clickYearToView")} title={t("yearlyDistribution")}>
+          <ChartSection
+            hint={t("clickYearToView")}
+            title={t("yearlyDistribution")}
+          >
             {yearlyData.length > 0 ? (
               <ResponsiveContainer height={200} width="100%">
                 <AreaChart
@@ -830,7 +975,10 @@ function DashboardPage() {
                   margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
                   onClick={(state: ChartClickState) => {
                     if (state?.activePayload?.[0]?.payload) {
-                      const p = state.activePayload[0].payload as { dateFrom?: string; dateTo?: string };
+                      const p = state.activePayload[0].payload as {
+                        dateFrom?: string;
+                        dateTo?: string;
+                      };
                       if (p.dateFrom && p.dateTo) {
                         drillToHome({ dateFrom: p.dateFrom, dateTo: p.dateTo });
                       }
@@ -838,9 +986,23 @@ function DashboardPage() {
                   }}
                 >
                   <defs>
-                    <linearGradient id="yearGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.5} />
-                      <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0.02} />
+                    <linearGradient
+                      id="yearGradient"
+                      x1="0"
+                      x2="0"
+                      y1="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="var(--chart-2)"
+                        stopOpacity={0.5}
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="var(--chart-2)"
+                        stopOpacity={0.02}
+                      />
                     </linearGradient>
                   </defs>
                   <XAxis
@@ -874,10 +1036,10 @@ function DashboardPage() {
           <ChartSection title={t("monthlyDistribution")}>
             {monthlyData.some((d) => d.count > 0) ? (
               <DashboardBarChart
+                cursor={false}
                 data={monthlyData}
                 fillColor={CHART_4}
                 height={200}
-                cursor={false}
               />
             ) : (
               <EmptyHint text={t("noMonthData")} />
@@ -890,19 +1052,19 @@ function DashboardPage() {
 }
 
 interface DashboardBarChartProps {
+  barRadius?: [number, number, number, number];
+  cursor?: boolean;
   data: any[];
   dataKey?: string;
   fillColor: string;
   height?: number;
   horizontal?: boolean;
   leftMargin?: number;
-  xAxisAngle?: number;
-  xAxisHeight?: number;
-  xAxisFontSize?: number;
-  xAxisInterval?: number;
-  barRadius?: [number, number, number, number];
-  cursor?: boolean;
   onBarClick?: (entry: any) => void;
+  xAxisAngle?: number;
+  xAxisFontSize?: number;
+  xAxisHeight?: number;
+  xAxisInterval?: number;
 }
 
 function DashboardBarChart({
@@ -963,19 +1125,16 @@ function DashboardBarChart({
 
   return (
     <ResponsiveContainer height={height} width="100%">
-      <BarChart
-        data={data}
-        margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-      >
+      <BarChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
         <XAxis
           angle={xAxisAngle}
           axisLine={false}
           dataKey="name"
           height={xAxisHeight}
-          textAnchor={xAxisAngle !== 0 ? "end" : undefined}
+          interval={xAxisInterval}
+          textAnchor={xAxisAngle === 0 ? undefined : "end"}
           tick={{ fill: TEXT_TERTIARY, fontSize: xAxisFontSize }}
           tickLine={false}
-          interval={xAxisInterval}
         />
         <YAxis
           axisLine={false}

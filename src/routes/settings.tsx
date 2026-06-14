@@ -25,6 +25,7 @@ import {
   WatermarkPreview,
   type WatermarkPreviewSettings,
 } from "@/components/WatermarkPreview";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
 function formatBytes(bytes: number): string {
@@ -59,192 +60,8 @@ const DEFAULT_WM: WatermarkSettings = {
   imageScale: 15,
 };
 
-interface MirrorHealthResult {
-  error?: string;
-  name: string;
-  responseTime?: number;
-  status: "success" | "failed" | "checking";
-}
-
-function MirrorSettingsSection() {
-  const { t } = useTranslation();
-  const [mirror, setMirror] = useState<string>("auto");
-  const [customMirror, setCustomMirror] = useState<string>("");
-  const [saveStatus, setSaveStatus] = useState<string>("");
-  const [checking, setChecking] = useState(false);
-  const [healthResults, setHealthResults] = useState<MirrorHealthResult[]>([]);
-
-  useEffect(() => {
-    ipc.client.settings.getMirrorSettings({}).then((r: any) => {
-      setMirror(r.mirror || "auto");
-      setCustomMirror(r.customUrl || "");
-    });
-  }, []);
-
-  const mirrorOptions = [
-    { value: "auto", label: t("aiMirrorAuto"), url: null },
-    {
-      value: "hf-mirror",
-      label: t("aiMirrorHfMirror"),
-      url: "https://hf-mirror.com",
-    },
-    {
-      value: "modelscope",
-      label: t("aiMirrorModelScope"),
-      url: "https://modelscope.cn",
-    },
-    {
-      value: "official",
-      label: t("aiMirrorOfficial"),
-      url: "https://huggingface.co",
-    },
-    { value: "custom", label: t("aiMirrorCustom"), url: customMirror },
-  ];
-
-  async function handleCheckHealth() {
-    setChecking(true);
-    setHealthResults([]);
-    try {
-      const result = await ipc.client.settings.checkMirrorHealth({});
-      setHealthResults(result.results);
-    } catch (err) {
-      console.error("Mirror health check failed:", err);
-      setSaveStatus(t("aiMirrorCheckFailed"));
-      setTimeout(() => setSaveStatus(""), 3000);
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  async function handleSave() {
-    setSaveStatus(t("saving"));
-    try {
-      await ipc.client.settings.setMirrorSettings({
-        mirror,
-        customUrl: customMirror,
-      });
-      setSaveStatus(t("aiMirrorSaved"));
-      setTimeout(() => setSaveStatus(""), 3000);
-    } catch {
-      setSaveStatus(t("saveFailed"));
-      setTimeout(() => setSaveStatus(""), 3000);
-    }
-  }
-
-  function getMirrorHealthBadge(name: string) {
-    const result = healthResults.find((r) => r.name === name);
-    if (!result) {
-      return null;
-    }
-
-    const isRecommended =
-      healthResults.length > 0 &&
-      result.status === "success" &&
-      result === healthResults.find((r) => r.status === "success");
-
-    if (result.status === "success") {
-      return (
-        <span className="ml-2 text-[11px] text-green-600 dark:text-green-400">
-          ✓ {result.responseTime}ms
-          {isRecommended && ` · ${t("aiMirrorHealthRecommended")}`}
-        </span>
-      );
-    }
-    if (result.status === "failed") {
-      return (
-        <span className="ml-2 text-[11px] text-red-600 dark:text-red-400">
-          ✗ {result.error || t("aiMirrorHealthFailed")}
-        </span>
-      );
-    }
-    return null;
-  }
-
-  return (
-    <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">
-        {t("aiMirrorSettings")}
-      </h2>
-      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
-        <div>
-          <label className="mb-1 block text-[13px] text-muted-foreground">
-            {t("aiMirrorSource")}
-          </label>
-          <select
-            className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
-            onChange={(e) => setMirror(e.target.value)}
-            value={mirror}
-          >
-            {mirrorOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-                {opt.value !== "auto" &&
-                  opt.value !== "custom" &&
-                  getMirrorHealthBadge(opt.value)?.props.children}
-              </option>
-            ))}
-          </select>
-          <div className="mt-2 space-y-1">
-            {mirrorOptions
-              .filter((opt) => opt.value !== "auto" && opt.value !== "custom")
-              .map((opt) => {
-                const badge = getMirrorHealthBadge(opt.value);
-                if (!badge) {
-                  return null;
-                }
-                return (
-                  <div className="text-[11px]" key={opt.value}>
-                    <span className="text-muted-foreground">{opt.label}:</span>
-                    {badge}
-                  </div>
-                );
-              })}
-          </div>
-          <p className="mt-2 text-[11px] text-muted-foreground/70">
-            {t("aiMirrorSourceHint")}
-          </p>
-        </div>
-
-        {mirror === "custom" && (
-          <div className="border-border border-t pt-3">
-            <label className="mb-1 block text-[11px] text-muted-foreground/70">
-              {t("aiMirrorCustomUrl")}
-            </label>
-            <input
-              className="w-full rounded-[6px] border border-input bg-background px-3 py-2 text-[12px] outline-none transition-colors focus:border-primary"
-              onChange={(e) => setCustomMirror(e.target.value)}
-              placeholder="https://your-mirror.com"
-              type="text"
-              value={customMirror}
-            />
-          </div>
-        )}
-
-        <div className="flex gap-2 border-border border-t pt-3">
-          <button
-            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            onClick={handleSave}
-          >
-            {saveStatus || t("save")}
-          </button>
-          <button
-            className="rounded-[6px] border border-input bg-background px-3 py-1.5 text-[12px] transition-colors hover:bg-accent disabled:opacity-50"
-            disabled={checking}
-            onClick={handleCheckHealth}
-          >
-            {checking ? t("aiMirrorChecking") : t("aiMirrorCheckHealth")}
-          </button>
-        </div>
-        <p className="text-[11px] text-muted-foreground/70">
-          {t("aiMirrorHealthHint")}
-        </p>
-        <p className="text-[11px] text-muted-foreground/70">
-          {t("aiMirrorRestartHint")}
-        </p>
-      </div>
-    </section>
-  );
-}
+// Module-level cache — survives page navigation so re-entry shows preview immediately
+let cachedSamplePhoto = "";
 
 function DataDirSection() {
   const { t } = useTranslation();
@@ -447,18 +264,12 @@ type UpdatePhase =
   | "downloaded"
   | "error";
 
-function UpdateSection() {
+function UpdateSection({ appVersion }: { appVersion: string }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<UpdatePhase>("idle");
   const [updateVersion, setUpdateVersion] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [lastCheckTime, setLastCheckTime] = useState<string>("");
-  const [appVersion, setAppVersion] = useState("");
-
-  // Load app version on mount
-  useEffect(() => {
-    ipc.client.app.appVersion({}).then((v) => setAppVersion(v as string));
-  }, []);
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
@@ -690,6 +501,29 @@ function UpdateSection() {
   );
 }
 
+function SkeletonBlock({
+  className,
+  lines = 3,
+}: {
+  className?: string;
+  lines?: number;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`animate-pulse space-y-2 ${className ?? ""}`}
+    >
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          className="h-3 rounded bg-muted-foreground/10"
+          key={i}
+          style={{ width: `${[90, 70, 50][i] ?? 40}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function SettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -698,13 +532,28 @@ function SettingsPage() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [cleanupStatus, setCleanupStatus] = useState("");
   const [cleanupCount, setCleanupCount] = useState(0);
+  const [orphanCleanStatus, setOrphanCleanStatus] = useState("");
+  const [orphanDialogOpen, setOrphanDialogOpen] = useState(false);
   const [wm, setWm] = useState<WatermarkSettings>(DEFAULT_WM);
   const [wmLoaded, setWmLoaded] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const [appVersion, setAppVersion] = useState("");
-  const [samplePhoto, setSamplePhoto] = useState("");
+  const [samplePhoto, setSamplePhoto] = useState(cachedSamplePhoto);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wmOriginalRef = useRef<WatermarkSettings | null>(null);
+  const wmSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wmLatestRef = useRef<WatermarkSettings>(DEFAULT_WM);
+  const scrollMainRef = useRef<HTMLDivElement>(null);
+  const scrollLogsRef = useRef<HTMLDivElement>(null);
+  const scrollAiRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollMainRef, {
+    getRouteKey: () => "settings-main",
+  });
+  useRouteScrollRestoration(scrollLogsRef, {
+    getRouteKey: () => "settings-logs",
+  });
+  useRouteScrollRestoration(scrollAiRef, { getRouteKey: () => "settings-ai" });
 
   const handleCopyPath = useCallback((path: string) => {
     if (!path) {
@@ -721,7 +570,19 @@ function SettingsPage() {
   const { data: indexStats } = useQuery({
     queryKey: ["indexStats"],
     queryFn: () => ipc.client.photos.getIndexStats({}),
-    staleTime: 0, // thumbnail/file counts change externally, always fetch fresh
+    staleTime: 60_000, // 60s cache — invalidated explicitly after clear/cleanup operations
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: orphanData, refetch: refetchOrphans } = useQuery({
+    queryKey: ["orphanThumbnails"],
+    queryFn: () =>
+      ipc.client.photos.scanOrphanThumbnails({}) as Promise<{
+        orphanCount: number;
+        orphanSizeBytes: number;
+        totalFiles: number;
+      }>,
+    staleTime: 300_000, // 5min cache — orphans only change after index mutations
     refetchOnWindowFocus: false,
   });
 
@@ -730,7 +591,7 @@ function SettingsPage() {
     ipc.client.app.appVersion({}).then((v) => setAppVersion(v as string));
   }, []);
 
-  // Load watermark settings + sample photo
+  // Load watermark settings + preload sample photo
   useEffect(() => {
     ipc.client.photos
       .getWatermarkSettings({})
@@ -758,35 +619,82 @@ function SettingsPage() {
             w.margin = 5;
           }
           setWm(w);
+          wmLatestRef.current = w;
+          // Snapshot original values so we can skip the initial no-op save
+          wmOriginalRef.current = { ...w };
+        } else {
+          // No saved settings yet — snapshot defaults to skip initial save
+          wmOriginalRef.current = { ...DEFAULT_WM };
         }
         setWmLoaded(true);
       })
-      .catch(() => setWmLoaded(true));
-
-    // Fetch a sample horizontal photo for watermark preview
-    ipc.client.photos
-      .listPhotos({ sort: "date", order: "desc", limit: 30 })
-      .then((r: any) => {
-        const photos = r?.pages?.[0]?.items || r?.items || [];
-        const horizontal = photos.find(
-          (p: any) => p.width && p.height && p.width >= p.height
-        );
-        if (horizontal?.path) {
-          setSamplePhoto(horizontal.path);
+      .catch(() => {
+        if (!wmOriginalRef.current) {
+          wmOriginalRef.current = { ...DEFAULT_WM };
         }
-      })
-      .catch(() => {});
+        setWmLoaded(true);
+      });
+
+    // Preload sample photo (cached at module level, fetched once per session)
+    if (cachedSamplePhoto) {
+      setSamplePhoto(cachedSamplePhoto);
+    } else {
+      ipc.client.photos
+        .listPhotos({ sort: "date", order: "desc", limit: 30 })
+        .then((r: any) => {
+          const photos = r?.pages?.[0]?.items || r?.items || [];
+          const horizontal = photos.find(
+            (p: any) => p.width && p.height && p.width >= p.height
+          );
+          if (horizontal?.path) {
+            cachedSamplePhoto = horizontal.path;
+            setSamplePhoto(horizontal.path);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
-  // Persist watermark settings to database via IPC on change
+  // Keep ref in sync for the unmount flush
+  wmLatestRef.current = wm;
+
+  // Persist watermark settings (debounced 300ms, skips unchanged values)
   useEffect(() => {
     if (!wmLoaded) {
       return;
     }
-    ipc.client.photos.setWatermarkSettings(wm).catch(() => {
-      /* ignore */
-    });
+    // Skip if unchanged from originally loaded values
+    const original = wmOriginalRef.current;
+    if (original && JSON.stringify(wm) === JSON.stringify(original)) {
+      return;
+    }
+    // Debounce slider drags into a single write
+    if (wmSaveTimerRef.current) {
+      clearTimeout(wmSaveTimerRef.current);
+    }
+    wmSaveTimerRef.current = setTimeout(() => {
+      ipc.client.photos.setWatermarkSettings(wmLatestRef.current).catch(() => {
+        /* ignore */
+      });
+    }, 300);
+    return () => {
+      if (wmSaveTimerRef.current) {
+        clearTimeout(wmSaveTimerRef.current);
+      }
+    };
   }, [wm, wmLoaded]);
+
+  // Flush pending debounced save on unmount so quick navigation doesn't lose changes
+  useEffect(() => {
+    return () => {
+      if (wmSaveTimerRef.current) {
+        clearTimeout(wmSaveTimerRef.current);
+        ipc.client.photos
+          .setWatermarkSettings(wmLatestRef.current)
+          .catch(() => {});
+      }
+    };
+  }, []);
 
   async function handleClearCache() {
     setClearDialogOpen(false);
@@ -808,6 +716,28 @@ function SettingsPage() {
       setClearCacheStatus(t("clearCacheFailed"));
     }
     setTimeout(() => setClearCacheStatus(""), 4000);
+  }
+
+  async function handleCleanOrphans() {
+    setOrphanDialogOpen(false);
+    setOrphanCleanStatus(t("orphanThumbnailsCleaning"));
+    try {
+      const result = (await ipc.client.photos.cleanOrphanThumbnails({})) as {
+        removed: number;
+        freedMB: number;
+      };
+      setOrphanCleanStatus(
+        t("orphanThumbnailsCleaned", {
+          count: result.removed,
+          size: result.freedMB,
+        })
+      );
+      refetchOrphans();
+      queryClient.invalidateQueries({ queryKey: ["indexStats"] });
+    } catch {
+      setOrphanCleanStatus(t("clearCacheFailed"));
+    }
+    setTimeout(() => setOrphanCleanStatus(""), 4000);
   }
 
   const handleCleanupOrphans = useCallback(async () => {
@@ -842,6 +772,7 @@ function SettingsPage() {
         {/* ── Left column: General settings ── */}
         <div
           className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          ref={scrollMainRef}
           style={{ maxWidth: 446, scrollbarGutter: "stable" }}
         >
           <section className="space-y-3">
@@ -886,41 +817,45 @@ function SettingsPage() {
                   <p className="mt-0.5 text-[11px] text-muted-foreground/70">
                     {t("settingsThumbnailCacheHint")}
                   </p>
-                  {indexStats && (
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-baseline gap-2">
-                        <span className="shrink-0 text-[11px] text-muted-foreground/60">
-                          {t("settingsThumbnailCacheLocation")}
-                        </span>
-                        <span
-                          className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
-                            copiedPath === indexStats.thumbnailCacheDir
-                              ? "text-green-600"
-                              : "text-muted-foreground/80"
-                          }`}
-                          onClick={() =>
-                            handleCopyPath(indexStats.thumbnailCacheDir)
-                          }
-                          title={indexStats.thumbnailCacheDir || ""}
-                        >
-                          {copiedPath === indexStats.thumbnailCacheDir
-                            ? t("copied")
-                            : indexStats.thumbnailCacheDir || "-"}
-                        </span>
+                  <div className="mt-2">
+                    {indexStats ? (
+                      <div className="space-y-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                            {t("settingsThumbnailCacheLocation")}
+                          </span>
+                          <span
+                            className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
+                              copiedPath === indexStats.thumbnailCacheDir
+                                ? "text-green-600"
+                                : "text-muted-foreground/80"
+                            }`}
+                            onClick={() =>
+                              handleCopyPath(indexStats.thumbnailCacheDir)
+                            }
+                            title={indexStats.thumbnailCacheDir || ""}
+                          >
+                            {copiedPath === indexStats.thumbnailCacheDir
+                              ? t("copied")
+                              : indexStats.thumbnailCacheDir || "-"}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                            {t("settingsThumbnailCacheSize")}
+                          </span>
+                          <span className="font-[590] text-[12px] text-foreground">
+                            {formatBytes(indexStats.thumbnailCacheBytes)}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground/60">
+                            ({indexStats.thumbnailCacheFileCount})
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="shrink-0 text-[11px] text-muted-foreground/60">
-                          {t("settingsThumbnailCacheSize")}
-                        </span>
-                        <span className="font-[590] text-[12px] text-foreground">
-                          {formatBytes(indexStats.thumbnailCacheBytes)}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground/60">
-                          ({indexStats.thumbnailCacheFileCount})
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                    ) : (
+                      <SkeletonBlock lines={3} />
+                    )}
+                  </div>
                 </div>
                 <AlertDialog
                   onOpenChange={setClearDialogOpen}
@@ -952,6 +887,57 @@ function SettingsPage() {
                   </AlertDialogContent>
                 </AlertDialog>
               </div>
+
+              {/* Orphan thumbnail warning + one-click cleanup */}
+              {orphanData && orphanData.orphanCount > 0 && (
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-[6px] border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[12px] text-amber-600 dark:text-amber-400">
+                      {orphanCleanStatus ||
+                        t("orphanThumbnailsDetected", {
+                          count: orphanData.orphanCount,
+                          size: (
+                            orphanData.orphanSizeBytes /
+                            (1024 * 1024)
+                          ).toFixed(1),
+                        })}
+                    </span>
+                  </div>
+                  <AlertDialog
+                    onOpenChange={setOrphanDialogOpen}
+                    open={orphanDialogOpen}
+                  >
+                    <AlertDialogTrigger asChild>
+                      <button className="shrink-0 rounded-[6px] border border-amber-500/50 px-3 py-1.5 text-[12px] text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400">
+                        {t("orphanThumbnailsClean")}
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent size="sm">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          {t("cleanOrphanThumbConfirmTitle")}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t("cleanOrphanThumbConfirmDesc", {
+                            count: orphanData.orphanCount,
+                            size: (
+                              orphanData.orphanSizeBytes /
+                              (1024 * 1024)
+                            ).toFixed(1),
+                          })}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleCleanOrphans}>
+                          {t("confirm")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              )}
+
               <div className="mt-3 flex items-start justify-between gap-3 border-border border-t pt-3">
                 <div className="min-w-0 flex-1">
                   <span className="text-[13px] text-muted-foreground">
@@ -963,54 +949,58 @@ function SettingsPage() {
                     {cleanupCount > 0 &&
                       t("lastCleanupCount", { count: cleanupCount })}
                   </p>
-                  {indexStats && (
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-baseline gap-3">
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-[11px] text-muted-foreground/60">
-                            {t("settingsValidIndexCount")}
-                          </span>
-                          <span className="font-[590] text-[12px] text-foreground">
-                            {indexStats.validPhotoCount.toLocaleString()}
-                          </span>
+                  <div className="mt-2">
+                    {indexStats ? (
+                      <div className="space-y-1">
+                        <div className="flex items-baseline gap-3">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-[11px] text-muted-foreground/60">
+                              {t("settingsValidIndexCount")}
+                            </span>
+                            <span className="font-[590] text-[12px] text-foreground">
+                              {indexStats.validPhotoCount.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-[11px] text-muted-foreground/60">
+                              {t("settingsInvalidIndexCount")}
+                            </span>
+                            <span
+                              className={`font-[590] text-[12px] ${
+                                indexStats.invalidPhotoCount > 0
+                                  ? "text-destructive"
+                                  : "text-foreground"
+                              }`}
+                            >
+                              {indexStats.invalidPhotoCount.toLocaleString()}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-[11px] text-muted-foreground/60">
-                            {t("settingsInvalidIndexCount")}
+                        <div className="flex items-baseline gap-2">
+                          <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                            {t("settingsIndexDbLocation")}
                           </span>
                           <span
-                            className={`font-[590] text-[12px] ${
-                              indexStats.invalidPhotoCount > 0
-                                ? "text-destructive"
-                                : "text-foreground"
+                            className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
+                              copiedPath === indexStats.databasePath
+                                ? "text-green-600"
+                                : "text-muted-foreground/80"
                             }`}
+                            onClick={() =>
+                              handleCopyPath(indexStats.databasePath)
+                            }
+                            title={indexStats.databasePath || ""}
                           >
-                            {indexStats.invalidPhotoCount.toLocaleString()}
+                            {copiedPath === indexStats.databasePath
+                              ? t("copied")
+                              : indexStats.databasePath || "-"}
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="shrink-0 text-[11px] text-muted-foreground/60">
-                          {t("settingsIndexDbLocation")}
-                        </span>
-                        <span
-                          className={`cursor-pointer truncate font-mono text-[11px] hover:text-foreground ${
-                            copiedPath === indexStats.databasePath
-                              ? "text-green-600"
-                              : "text-muted-foreground/80"
-                          }`}
-                          onClick={() =>
-                            handleCopyPath(indexStats.databasePath)
-                          }
-                          title={indexStats.databasePath || ""}
-                        >
-                          {copiedPath === indexStats.databasePath
-                            ? t("copied")
-                            : indexStats.databasePath || "-"}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                    ) : (
+                      <SkeletonBlock lines={3} />
+                    )}
+                  </div>
                 </div>
                 <button
                   className="flex max-w-[140px] shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
@@ -1028,7 +1018,6 @@ function SettingsPage() {
 
           <DataDirSection />
 
-          <MirrorSettingsSection />
         </div>
 
         {/* ── Divider ── */}
@@ -1037,6 +1026,7 @@ function SettingsPage() {
         {/* ── Right column: Watermark ── */}
         <div
           className="min-w-0 flex-1 space-y-4 overflow-y-auto p-6"
+          ref={scrollLogsRef}
           style={{ maxWidth: 566, scrollbarGutter: "stable" }}
         >
           <section className="space-y-3">
@@ -1244,6 +1234,7 @@ function SettingsPage() {
         {/* ── Right column: GPU, Cloud, Update & About ── */}
         <div
           className="min-w-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden p-6"
+          ref={scrollAiRef}
           style={{ maxWidth: 386, scrollbarGutter: "stable" }}
         >
           <GpuSettingsCard />
@@ -1255,7 +1246,7 @@ function SettingsPage() {
             <CloudConfigPanel />
           </section>
 
-          <UpdateSection />
+          <UpdateSection appVersion={appVersion} />
 
           <section className="space-y-3">
             <h2 className="font-[590] text-[14px] text-foreground">

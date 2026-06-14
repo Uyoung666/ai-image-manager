@@ -1,3 +1,4 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
@@ -15,10 +16,18 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -35,35 +44,290 @@ interface FaceIdentity {
   representativePhotoId: number | null;
 }
 
-function PeoplePage() {
+// Person cover image with intersection-observer lazy loading + fade-in + error fallback
+const PersonCoverImage = memo(function PersonCoverImage({
+  identity,
+}: {
+  identity: FaceIdentity;
+}) {
   const { t } = useTranslation();
-  const [identities, setIdentities] = useState<FaceIdentity[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [detecting, setDetecting] = useState(false);
-  const [progress, setProgress] = useState<string>("");
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [confirmDelete, setConfirmDelete] = useState<{
-    id: number;
-    name: string | null;
-  } | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [nameInput, setNameInput] = useState("");
-  const composingRef = useRef(false);
-  const navigate = useNavigate();
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+  const imgRef = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
 
-  const loadIdentities = useCallback(async () => {
-    try {
-      const result = await ipc.client.faces.listFaceIdentities({});
-      setIdentities(result as FaceIdentity[]);
-    } catch (err) {
-      console.error("[loadIdentities] failed:", err);
-    } finally {
-      setLoading(false);
+  // IntersectionObserver：卡片进入视口后才加载图片
+  useEffect(() => {
+    const el = imgRef.current;
+    if (!el) {
+      return;
     }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
+  const src = identity.coverThumbnailPath || identity.coverPhotoPath;
+  const bbox = identity.coverBbox;
+  const pw = identity.coverPhotoWidth;
+  const ph = identity.coverPhotoHeight;
+
+  if (!src) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-muted">
+        <User className="h-12 w-12 text-muted-foreground/30" />
+      </div>
+    );
+  }
+
+  const imgStyle: React.CSSProperties = {
+    objectFit: "cover" as const,
+  };
+
+  if (bbox && pw && ph) {
+    const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
+    const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
+    const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
+    const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
+    imgStyle.objectPosition = `${cx}% ${cy}%`;
+    imgStyle.transform = `scale(${zoom})`;
+    imgStyle.transformOrigin = `${cx}% ${cy}%`;
+  }
+
+  return (
+    <div className="h-full w-full bg-muted" ref={imgRef}>
+      {inView && !error && (
+        <img
+          alt={identity.name || t("unnamedPerson")}
+          className={`h-full w-full object-cover transition-opacity duration-500 ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
+          decoding="async"
+          loading="lazy"
+          onError={() => setError(true)}
+          onLoad={() => setLoaded(true)}
+          src={toLocalMediaUrl(src)}
+          style={imgStyle}
+        />
+      )}
+      {error && (
+        <div className="flex h-full w-full items-center justify-center">
+          <User className="h-12 w-12 text-muted-foreground/30" />
+        </div>
+      )}
+    </div>
+  );
+});
+
+// Person card (memo'd)
+const PersonCard = memo(function PersonCard({
+  identity,
+  isSelected,
+  selectMode,
+  editingId,
+  nameInput,
+  composingRef,
+  onToggleSelect,
+  onStartEdit,
+  onCancelEdit,
+  onRename,
+  onNameInputChange,
+  onNameInputCompositionEnd,
+  onNameInputCompositionStart,
+  onDelete,
+}: {
+  identity: FaceIdentity;
+  isSelected: boolean;
+  selectMode: boolean;
+  editingId: number | null;
+  nameInput: string;
+  composingRef: React.MutableRefObject<boolean>;
+  onToggleSelect: (id: number) => void;
+  onStartEdit: (id: number, currentName: string | null) => void;
+  onCancelEdit: () => void;
+  onRename: (id: number) => void;
+  onNameInputChange: (value: string) => void;
+  onNameInputCompositionEnd: (
+    e: React.CompositionEvent<HTMLInputElement>
+  ) => void;
+  onNameInputCompositionStart: () => void;
+  onDelete: (id: number, name: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const isEditing = editingId === identity.id;
+
+  return (
+    <div
+      className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors ${
+        isSelected
+          ? "border-primary ring-2 ring-primary/30"
+          : "border-border hover:border-primary/30"
+      } ${selectMode ? "cursor-pointer" : ""}`}
+      onClick={selectMode ? () => onToggleSelect(identity.id) : undefined}
+    >
+      {selectMode ? (
+        <div className="block">
+          <div className="aspect-square overflow-hidden">
+            <PersonCoverImage identity={identity} />
+          </div>
+          <div className="p-3">
+            <h3 className="truncate font-[510] text-[13px] text-foreground">
+              {identity.name || t("unnamedPerson")}
+            </h3>
+            <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+              {identity.faceCount} {t("photos")}
+            </p>
+          </div>
+          {isSelected && (
+            <div className="pointer-events-none absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white">
+              <Check className="h-3.5 w-3.5" />
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <Link
+            className="block"
+            params={{ identityId: identity.id.toString() }}
+            to="/people/$identityId"
+          >
+            <div className="aspect-square overflow-hidden">
+              <PersonCoverImage identity={identity} />
+            </div>
+            <div className="p-3">
+              {isEditing ? (
+                <input
+                  autoFocus
+                  className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
+                  onBlur={() => onRename(identity.id)}
+                  onChange={(e) => onNameInputChange(e.target.value)}
+                  onCompositionEnd={(e) => {
+                    onNameInputCompositionEnd(e);
+                  }}
+                  onCompositionStart={onNameInputCompositionStart}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (composingRef.current) {
+                      return;
+                    }
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onRename(identity.id);
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      onCancelEdit();
+                    }
+                  }}
+                  value={nameInput}
+                />
+              ) : (
+                <h3
+                  className="cursor-pointer truncate font-[510] text-[13px] text-foreground transition-colors hover:text-primary"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onStartEdit(identity.id, identity.name);
+                  }}
+                >
+                  {identity.name || t("unnamedPerson")}
+                </h3>
+              )}
+              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                {identity.faceCount} {t("photos")}
+              </p>
+            </div>
+          </Link>
+          <button
+            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete(identity.id, identity.name);
+            }}
+            title={t("deletePerson")}
+            type="button"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </>
+      )}
+    </div>
+  );
+});
+
+// Skeleton card placeholder
+function SkeletonCard() {
+  return (
+    <div className="overflow-hidden rounded-[8px] border border-border bg-card">
+      <div className="aspect-square animate-pulse bg-muted" />
+      <div className="space-y-1.5 p-3">
+        <div className="h-4 w-3/4 animate-pulse rounded-[3px] bg-muted" />
+        <div className="h-3 w-1/3 animate-pulse rounded-[3px] bg-muted" />
+      </div>
+    </div>
+  );
+}
+
+// Dynamic skeleton count to fill viewport
+function useSkeletonCount(): number {
+  const [count, setCount] = useState(12);
+  useEffect(() => {
+    function calc() {
+      // 160px 最小列宽 + 16px gap，估算填满视口所需数量
+      const colWidth = 160 + 16;
+      const cols = Math.max(2, Math.floor(window.innerWidth / colWidth));
+      const rows = Math.max(2, Math.ceil(window.innerHeight / 220));
+      setCount(cols * rows);
+    }
+    calc();
+    window.addEventListener("resize", calc);
+    return () => window.removeEventListener("resize", calc);
+  }, []);
+  return count;
+}
+
+// PeoplePage
+function PeoplePage() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "people-list" });
+
+  // TanStack Query data fetching
+  const {
+    data: identities = [],
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["faces", "identities"],
+    queryFn: async () => {
+      const result = await ipc.client.faces.listFaceIdentities({});
+      return result as FaceIdentity[];
+    },
+    staleTime: 30_000,
+  });
+
+  // React 19: 延迟列表渲染，保持页面响应
+  const deferredIdentities = useDeferredValue(identities);
+
+  // Face detection state
+  const [detecting, setDetecting] = useState(false);
+  const [progress, setProgress] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadIdentities = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
+  }, [queryClient]);
 
   const startPolling = useCallback(() => {
     if (pollRef.current) {
@@ -99,8 +363,7 @@ function PeoplePage() {
           setDetecting(false);
           setProgress("");
         }
-      } catch (err) {
-        console.error("[detectionPoll] failed:", err);
+      } catch {
         if (pollRef.current) {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -117,9 +380,8 @@ function PeoplePage() {
     }
   }, []);
 
-  // On mount: check if detection is already running in background
+  // 挂载时检查是否已有检测在运行
   useEffect(() => {
-    loadIdentities();
     ipc.client.faces
       .getDetectionProgress({})
       .then((p: unknown) => {
@@ -145,7 +407,7 @@ function PeoplePage() {
     return () => {
       stopPolling();
     };
-  }, [loadIdentities, startPolling, stopPolling, t]);
+  }, [startPolling, stopPolling, t]);
 
   async function handleStartDetection(rescan = false) {
     setDetecting(true);
@@ -193,46 +455,18 @@ function PeoplePage() {
     }
   }
 
-  function handleDeleteIdentity(id: number, name: string | null) {
-    setConfirmDelete({ id, name });
-  }
+  // Select / merge state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<{
+    id: number;
+    name: string | null;
+  } | null>(null);
 
-  async function performDeleteIdentity() {
-    if (!confirmDelete) {
-      return;
-    }
-    const { id } = confirmDelete;
-    setConfirmDelete(null);
-    try {
-      await ipc.client.faces.deleteFaceIdentity({ id });
-      loadIdentities();
-    } catch {
-      toast.error(t("deletePersonFailed"));
-    }
-  }
-
-  async function handleMerge() {
-    if (selected.size < 2) {
-      return;
-    }
-    const ids = [...selected];
-    // Pick the one with most faces as target
-    const sorted = ids
-      .map((id) => identities.find((i) => i.id === id)!)
-      .filter(Boolean)
-      .sort((a, b) => b.faceCount - a.faceCount);
-    const targetId = sorted[0].id;
-    const sourceIds = ids.filter((id) => id !== targetId);
-
-    try {
-      await ipc.client.faces.mergeIdentities({ targetId, sourceIds });
-      setSelectMode(false);
-      setSelected(new Set());
-      loadIdentities();
-    } catch {
-      toast.error(t("mergePeopleFailed"));
-    }
-  }
+  // Inline rename state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const composingRef = useRef(false);
 
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -251,6 +485,46 @@ function PeoplePage() {
     setSelected(new Set());
   }
 
+  async function handleMerge() {
+    if (selected.size < 2) {
+      return;
+    }
+    const ids = [...selected];
+    const sorted = ids
+      .map((id) => identities.find((i) => i.id === id)!)
+      .filter(Boolean)
+      .sort((a, b) => b.faceCount - a.faceCount);
+    const targetId = sorted[0].id;
+    const sourceIds = ids.filter((id) => id !== targetId);
+
+    try {
+      await ipc.client.faces.mergeIdentities({ targetId, sourceIds });
+      setSelectMode(false);
+      setSelected(new Set());
+      loadIdentities();
+    } catch {
+      toast.error(t("mergePeopleFailed"));
+    }
+  }
+
+  function handleDeleteIdentity(id: number, name: string | null) {
+    setConfirmDelete({ id, name });
+  }
+
+  async function performDeleteIdentity() {
+    if (!confirmDelete) {
+      return;
+    }
+    const { id } = confirmDelete;
+    setConfirmDelete(null);
+    try {
+      await ipc.client.faces.deleteFaceIdentity({ id });
+      loadIdentities();
+    } catch {
+      toast.error(t("deletePersonFailed"));
+    }
+  }
+
   function startEditing(id: number, currentName: string | null) {
     setEditingId(id);
     setNameInput(currentName || "");
@@ -264,8 +538,9 @@ function PeoplePage() {
     const newName = nameInput.trim();
     try {
       await ipc.client.faces.updateFaceIdentity({ id, name: newName });
-      setIdentities((prev) =>
-        prev.map((i) => (i.id === id ? { ...i, name: newName || null } : i))
+      // 乐观更新缓存
+      queryClient.setQueryData<FaceIdentity[]>(["faces", "identities"], (old) =>
+        old?.map((i) => (i.id === id ? { ...i, name: newName || null } : i))
       );
     } catch {
       toast.error(t("personRenameFailed"));
@@ -273,6 +548,12 @@ function PeoplePage() {
       setEditingId((current) => (current === id ? null : current));
     }
   }
+
+  // Skeleton count
+  const skeletonCount = useSkeletonCount();
+
+  // Render
+  const showContent = !(isLoading || isError);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -366,7 +647,7 @@ function PeoplePage() {
         </div>
       </div>
 
-      {/* Progress */}
+      {/* Progress bar */}
       {progress && (
         <div className="border-border border-b bg-primary/5 px-6 py-2 text-[12px] text-primary">
           {detecting && (
@@ -376,18 +657,37 @@ function PeoplePage() {
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
+      {/* Grid area */}
+      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
+        {/* 加载骨架屏：填满视口的卡片矩阵 */}
+        {isLoading && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div
-                className="aspect-[3/4] animate-pulse rounded-[8px] bg-card"
-                key={i}
-              />
+            {Array.from({ length: skeletonCount }).map((_, i) => (
+              <SkeletonCard key={`skel-${i}`} />
             ))}
           </div>
-        ) : identities.length === 0 ? (
+        )}
+
+        {/* 错误状态 */}
+        {isError && (
+          <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
+            <User className="h-12 w-12 opacity-20" />
+            <p className="text-[13px]">{t("loadFailedRetry")}</p>
+            <button
+              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+              onClick={() =>
+                queryClient.invalidateQueries({
+                  queryKey: ["faces", "identities"],
+                })
+              }
+            >
+              {t("retry")}
+            </button>
+          </div>
+        )}
+
+        {/* 空状态 */}
+        {showContent && deferredIdentities.length === 0 && (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
             <User className="h-12 w-12 opacity-20" />
             <p className="text-[13px]">{t("noPeopleTitle")}</p>
@@ -402,202 +702,34 @@ function PeoplePage() {
               {t("startFaceDetectionShort")}
             </button>
           </div>
-        ) : (
+        )}
+
+        {/* 人物卡片网格（使用 useDeferredValue 延迟渲染） */}
+        {showContent && deferredIdentities.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-            {identities.map((identity) => (
-              <div
-                className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors ${
-                  selected.has(identity.id)
-                    ? "border-primary ring-2 ring-primary/30"
-                    : "border-border hover:border-primary/30"
-                } ${selectMode ? "cursor-pointer" : ""}`}
+            {deferredIdentities.map((identity) => (
+              <PersonCard
+                composingRef={composingRef}
+                editingId={editingId}
+                identity={identity}
+                isSelected={selected.has(identity.id)}
                 key={identity.id}
-                onClick={
-                  selectMode ? () => toggleSelect(identity.id) : undefined
-                }
-              >
-                {selectMode ? (
-                  <div className="block">
-                    <div className="aspect-square overflow-hidden bg-muted">
-                      {identity.coverThumbnailPath ||
-                      identity.coverPhotoPath ? (
-                        (() => {
-                          const src = (identity.coverThumbnailPath ||
-                            identity.coverPhotoPath) as string;
-                          const bbox = identity.coverBbox;
-                          const pw = identity.coverPhotoWidth;
-                          const ph = identity.coverPhotoHeight;
-                          if (bbox && pw && ph) {
-                            const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
-                            const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
-                            const faceRatio = Math.max(
-                              bbox.width / pw,
-                              bbox.height / ph
-                            );
-                            const zoom = Math.min(
-                              Math.max(1 / (faceRatio * 2.2), 1.2),
-                              4
-                            );
-                            return (
-                              <img
-                                alt={identity.name || t("unnamedPerson")}
-                                className="h-full w-full object-cover"
-                                src={toLocalMediaUrl(src)}
-                                style={{
-                                  objectPosition: `${cx}% ${cy}%`,
-                                  transform: `scale(${zoom})`,
-                                  transformOrigin: `${cx}% ${cy}%`,
-                                }}
-                              />
-                            );
-                          }
-                          return (
-                            <img
-                              alt={identity.name || t("unnamedPerson")}
-                              className="h-full w-full object-cover"
-                              src={toLocalMediaUrl(src)}
-                            />
-                          );
-                        })()
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center">
-                          <User className="h-12 w-12 text-muted-foreground/30" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-3">
-                      <h3 className="truncate font-[510] text-[13px] text-foreground">
-                        {identity.name || t("unnamedPerson")}
-                      </h3>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                        {identity.faceCount} {t("photos")}
-                      </p>
-                    </div>
-                    {selected.has(identity.id) && (
-                      <div className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white">
-                        <Check className="h-3.5 w-3.5" />
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <Link
-                      className="block"
-                      params={{ identityId: identity.id.toString() }}
-                      to="/people/$identityId"
-                    >
-                      <div className="aspect-square overflow-hidden bg-muted">
-                        {identity.coverThumbnailPath ||
-                        identity.coverPhotoPath ? (
-                          (() => {
-                            const src = (identity.coverThumbnailPath ||
-                              identity.coverPhotoPath) as string;
-                            const bbox = identity.coverBbox;
-                            const pw = identity.coverPhotoWidth;
-                            const ph = identity.coverPhotoHeight;
-                            if (bbox && pw && ph) {
-                              const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
-                              const cy =
-                                ((bbox.y + bbox.height / 2) / ph) * 100;
-                              const faceRatio = Math.max(
-                                bbox.width / pw,
-                                bbox.height / ph
-                              );
-                              const zoom = Math.min(
-                                Math.max(1 / (faceRatio * 2.2), 1.2),
-                                4
-                              );
-                              return (
-                                <img
-                                  alt={identity.name || t("unnamedPerson")}
-                                  className="h-full w-full object-cover"
-                                  src={toLocalMediaUrl(src)}
-                                  style={{
-                                    objectPosition: `${cx}% ${cy}%`,
-                                    transform: `scale(${zoom})`,
-                                    transformOrigin: `${cx}% ${cy}%`,
-                                  }}
-                                />
-                              );
-                            }
-                            return (
-                              <img
-                                alt={identity.name || t("unnamedPerson")}
-                                className="h-full w-full object-cover"
-                                src={toLocalMediaUrl(src)}
-                              />
-                            );
-                          })()
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center">
-                            <User className="h-12 w-12 text-muted-foreground/30" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="p-3">
-                        {editingId === identity.id ? (
-                          <input
-                            autoFocus
-                            className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
-                            onBlur={() => handleRename(identity.id)}
-                            onChange={(e) => setNameInput(e.target.value)}
-                            onCompositionEnd={(e) => {
-                              composingRef.current = false;
-                              setNameInput(
-                                (e.target as HTMLInputElement).value
-                              );
-                            }}
-                            onCompositionStart={() => {
-                              composingRef.current = true;
-                            }}
-                            onFocus={(e) => e.target.select()}
-                            onKeyDown={(e) => {
-                              if (composingRef.current) {
-                                return;
-                              }
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                handleRename(identity.id);
-                              }
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                cancelEditing();
-                              }
-                            }}
-                            value={nameInput}
-                          />
-                        ) : (
-                          <h3
-                            className="cursor-pointer truncate font-[510] text-[13px] text-foreground transition-colors hover:text-primary"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              startEditing(identity.id, identity.name);
-                            }}
-                          >
-                            {identity.name || t("unnamedPerson")}
-                          </h3>
-                        )}
-                        <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                          {identity.faceCount} {t("photos")}
-                        </p>
-                      </div>
-                    </Link>
-                    <button
-                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleDeleteIdentity(identity.id, identity.name);
-                      }}
-                      title={t("deletePerson")}
-                      type="button"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </>
-                )}
-              </div>
+                nameInput={nameInput}
+                onCancelEdit={cancelEditing}
+                onDelete={handleDeleteIdentity}
+                onNameInputChange={setNameInput}
+                onNameInputCompositionEnd={(e) => {
+                  composingRef.current = false;
+                  setNameInput((e.target as HTMLInputElement).value);
+                }}
+                onNameInputCompositionStart={() => {
+                  composingRef.current = true;
+                }}
+                onRename={handleRename}
+                onStartEdit={startEditing}
+                onToggleSelect={toggleSelect}
+                selectMode={selectMode}
+              />
             ))}
           </div>
         )}

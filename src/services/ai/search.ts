@@ -139,21 +139,15 @@ async function fallbackSearch(
 
   const rowCount = await photoTable.countRows();
 
-  if (rowCount > 1000) {
-    console.log(
-      `[AI] No results from index search. Library too large (${rowCount}) for brute-force. Returning empty.`
-    );
-    return [];
-  }
-
   console.log(
-    `[AI] Small library (${rowCount} rows), attempting paginated brute-force`
+    `[AI] Library (${rowCount} rows), attempting paginated brute-force`
   );
-  const PAGE_SIZE = 200;
-  const MAX_PAGES = 5;
+  const PAGE_SIZE = 500;
+  const MAX_PAGES = Math.ceil(rowCount / PAGE_SIZE);
+  const MAX_SAFE_PAGES = 100; // 最多 50000 条，防止极端情况
   const allScored: Array<{ photoId: number; distance: number }> = [];
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < Math.min(MAX_PAGES, MAX_SAFE_PAGES); page++) {
     const rows = await photoTable
       .query()
       .limit(PAGE_SIZE)
@@ -164,32 +158,39 @@ async function fallbackSearch(
       break;
     }
 
-    for (const row of rows as Array<Record<string, unknown>>) {
+    for (const row of rows as Record<string, unknown>[]) {
       const rawVec = row.vector;
       if (!rawVec) {
         continue;
       }
-
-      // LanceDB returns Apache Arrow Vector — normalize
-      let vec: number[];
-      if (Array.isArray(rawVec)) {
-        vec = rawVec as number[];
+      let vec: Float32Array | null = null;
+      if (rawVec instanceof Float32Array) {
+        vec = rawVec;
+      } else if (Array.isArray(rawVec)) {
+        vec = new Float32Array(rawVec as number[]);
       } else if (typeof (rawVec as any).toArray === "function") {
-        vec = Array.from((rawVec as any).toArray());
+        vec = new Float32Array((rawVec as any).toArray());
       } else if (ArrayBuffer.isView(rawVec)) {
-        vec = Array.from(rawVec as Float32Array);
-      } else {
-        continue;
+        vec = new Float32Array(
+          (rawVec as any).buffer,
+          (rawVec as any).byteOffset,
+          (rawVec as any).length
+        );
       }
-
-      if (vec.length !== queryVector.length) {
-        continue;
+      if (vec && vec.length === 512) {
+        const photoId = row.photo_id as number;
+        let dot = 0;
+        let normQ = 0;
+        let normV = 0;
+        for (let i = 0; i < 512; i++) {
+          dot += queryVector[i] * vec[i];
+          normQ += queryVector[i] * queryVector[i];
+          normV += vec[i] * vec[i];
+        }
+        const norm = Math.sqrt(normQ) * Math.sqrt(normV);
+        const cosDist = norm > 0 ? 1 - dot / norm : 1;
+        allScored.push({ photoId, distance: cosDist });
       }
-      let dot = 0;
-      for (let i = 0; i < vec.length; i++) {
-        dot += vec[i] * queryVector[i];
-      }
-      allScored.push({ photoId: row.photo_id as number, distance: 1 - dot });
     }
   }
 
@@ -213,7 +214,13 @@ async function singleVectorSearch(
     return [];
   }
 
-  const queryVector = await embeddingModel.embedText(text);
+  let queryVector: number[];
+  try {
+    queryVector = await embeddingModel.embedText(text);
+  } catch (err: any) {
+    console.error("[AI] embedText failed:", err?.message);
+    return [];
+  }
 
   const rowCount = await photoTable.countRows();
   const adaptiveRefine = Math.min(
@@ -221,14 +228,14 @@ async function singleVectorSearch(
     Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
   );
 
-  let rawResults: Array<Record<string, unknown>> = [];
+  let rawResults: Record<string, unknown>[] = [];
   try {
     const vq = photoTable
       .vectorSearch(queryVector)
       .distanceType("cosine")
       .refineFactor(adaptiveRefine)
       .limit(limit);
-    rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+    rawResults = (await vq.toArray()) as Record<string, unknown>[];
   } catch (err: any) {
     console.error("[AI] vectorSearch failed:", err?.message);
   }
@@ -290,12 +297,61 @@ async function multiPromptSearch(
     }));
 }
 
+// ── AI 文本搜索 TTL 缓存 ────────────────────────────────────────────
+// 避免相同 query 短时间内反复触发 CLIP 文本推理（~50ms）+ LanceDB 搜索
+interface SearchCacheEntry {
+  result: Array<{ photoId: number; similarity: number }>;
+  timestamp: number;
+}
+const textSearchCache = new Map<string, SearchCacheEntry>();
+const SEARCH_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const MAX_SEARCH_CACHE = 30;
+
+function getCachedSearch(
+  cacheKey: string
+): Array<{ photoId: number; similarity: number }> | null {
+  const entry = textSearchCache.get(cacheKey);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.timestamp > SEARCH_CACHE_TTL) {
+    textSearchCache.delete(cacheKey);
+    return null;
+  }
+  // LRU: 命中时移到末尾
+  textSearchCache.delete(cacheKey);
+  textSearchCache.set(cacheKey, entry);
+  return entry.result;
+}
+
+function setCachedSearch(
+  cacheKey: string,
+  result: Array<{ photoId: number; similarity: number }>
+): void {
+  if (textSearchCache.size >= MAX_SEARCH_CACHE) {
+    const lru = textSearchCache.keys().next().value;
+    if (lru !== undefined) {
+      textSearchCache.delete(lru);
+    }
+  }
+  textSearchCache.delete(cacheKey);
+  textSearchCache.set(cacheKey, { result, timestamp: Date.now() });
+}
+
 export async function searchByText(
   query: string,
   limit = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!query.trim()) {
     return [];
+  }
+
+  // TTL cache check — avoids redundant CLIP inference + LanceDB search
+  const cacheKey = `${query.trim()}_${limit}`;
+  const cached = getCachedSearch(cacheKey);
+  if (cached) {
+    console.log(`[AI] searchByText CACHE HIT: "${query}" limit=${limit}`);
+    return cached;
   }
 
   try {
@@ -313,6 +369,7 @@ export async function searchByText(
   }
 
   const hasChinese = /[一-鿿]/.test(query);
+  let results: Array<{ photoId: number; similarity: number }>;
 
   if (hasChinese) {
     const parsed = parseChineseQuery(query);
@@ -324,7 +381,7 @@ export async function searchByText(
       `[AI] searchByText: "${query}" → coverage=${(coverage * 100).toFixed(0)}% threshold=${threshold.toFixed(2)} prompts=${prompts.length}: ${JSON.stringify(prompts)}`
     );
 
-    let results: Array<{ photoId: number; similarity: number }> = [];
+    results = [];
     if (prompts.length > 0) {
       results = await multiPromptSearch(prompts, limit, threshold);
     }
@@ -339,14 +396,15 @@ export async function searchByText(
         `[AI] Low coverage (${(coverage * 100).toFixed(0)}%), skipping raw Chinese fallback`
       );
     }
-
-    return results;
+  } else {
+    // English query: single prompt
+    const searchText = `a photo of ${query.trim()}`;
+    console.log(`[AI] searchByText: en query → "${searchText}"`);
+    results = await singleVectorSearch(searchText, limit);
   }
 
-  // English query: single prompt
-  const searchText = `a photo of ${query.trim()}`;
-  console.log(`[AI] searchByText: en query → "${searchText}"`);
-  return singleVectorSearch(searchText, limit);
+  setCachedSearch(cacheKey, results);
+  return results;
 }
 
 export async function searchByImage(
@@ -398,7 +456,7 @@ export async function searchByImage(
     10,
     Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
   );
-  let rawResults: Array<Record<string, unknown>> = [];
+  let rawResults: Record<string, unknown>[] = [];
 
   try {
     const vq = photoTable
@@ -406,7 +464,7 @@ export async function searchByImage(
       .distanceType("cosine")
       .refineFactor(adaptiveRefine)
       .limit(limit);
-    rawResults = (await vq.toArray()) as Array<Record<string, unknown>>;
+    rawResults = (await vq.toArray()) as Record<string, unknown>[];
   } catch (err: any) {
     console.error("[AI] searchByImage vectorSearch failed:", err?.message);
   }

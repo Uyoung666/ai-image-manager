@@ -5,25 +5,33 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel } from "./model-loader";
 import type { EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
+  addWrittenPhotoIds,
   currentProgress,
+  getWrittenPhotoIds,
   isEmbedding,
+  isPaused,
   photoTable,
   poolCancelled,
   setCurrentProgress,
   setIsEmbedding,
   setLocalModelPath,
   setPoolCancelled,
+  setWasAutoRepaired,
+  setWrittenPhotoIds,
+  wasAutoRepaired,
 } from "./state";
 import { batchSuggestTags } from "./tag-suggester";
 import {
   buildPhotoIdFilter,
   cleanupOrphanVectors,
+  deletePhotoVectors,
   ensureVectorIndex,
   initVectorDB,
 } from "./vector-db";
@@ -225,6 +233,44 @@ function runEmbedBatch(
   });
 }
 
+/**
+ * Clean up partially embedded data when user cancels AI indexing.
+ * Follows the same pattern as scan cancellation cleanup in listing.ts.
+ */
+export async function cleanupPartialEmbedding(): Promise<void> {
+  const ids = [...getWrittenPhotoIds()];
+  if (ids.length === 0) {
+    return;
+  }
+
+  const db = getDatabase();
+  console.log(`[AI] Cleaning up ${ids.length} partially embedded photos`);
+
+  // 1. Transaction: batch reset SQLite isAiProcessed flags
+  const CHUNK_SIZE = 500;
+  db.transaction(() => {
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      db.update(photos)
+        .set({ isAiProcessed: false })
+        .where(inArray(photos.id, chunk))
+        .run();
+    }
+  });
+
+  // 2. Delete LanceDB vectors
+  await deletePhotoVectors(ids).catch(() => {
+    /* best-effort */
+  });
+
+  // 3. Clear tracked IDs
+  // Note: Thumbnail files are preserved — they were generated during import,
+  // not during AI indexing. Deleting them would cause unnecessary regeneration.
+  setWrittenPhotoIds(new Set());
+
+  console.log(`[AI] Cleanup complete: ${ids.length} photos reverted`);
+}
+
 export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
@@ -237,9 +283,30 @@ export async function embedAllPhotos(
   }
   setIsEmbedding(true);
 
-  // Allow previous cancelled pool to fully settle before starting fresh
+  // Reset the per-session tracking set so cancellations only affect this run.
+  setWrittenPhotoIds(new Set());
+
+  // Allow previous cancelled pool to fully settle before starting fresh.
+  // Explicitly destroy the old pool so initWorkerPool doesn't short-circuit
+  // and reuse stale slots — which could cause duplicate embeddings or
+  // inconsistent state after a rapid stop→start cycle.
   if (poolCancelled) {
     await new Promise((resolve) => setTimeout(resolve, 100));
+    try {
+      shutdownPool();
+    } catch {
+      // pool may not have been started
+    }
+    // Reset the cancel flag so the fallback path is not blocked if pool init fails
+    setPoolCancelled(false);
+  }
+
+  // Detect if this embedding was triggered by auto-repair of corrupted vector DB
+  const isAutoRepair = wasAutoRepaired;
+  if (isAutoRepair) {
+    console.log("[AI] embedAllPhotos: running in auto-repair context");
+    // Clear the flag so subsequent calls don't show repair reason
+    setWasAutoRepaired(false);
   }
 
   try {
@@ -265,10 +332,13 @@ export async function embedAllPhotos(
     setCurrentProgress({
       processed: 0,
       total: 0,
-      phase: "loading",
+      phase: isAutoRepair ? "repairing" : "loading",
       currentFile: "",
       downloadPercent: 0,
       loadingStartedAt: Date.now(),
+      repairReason: isAutoRepair
+        ? "向量数据库损坏已自动修复，正在重新索引所有照片"
+        : undefined,
     });
     onProgress?.(currentProgress);
 
@@ -409,11 +479,40 @@ export async function embedAllPhotos(
     // Use persistent worker pool
     let poolReady = false;
     try {
-      const { initWorkerPool, embedWithPool } = await import(
-        "@/services/embed-worker-pool"
-      );
+      const { initWorkerPool, embedWithPool, getPoolInitProgress } =
+        await import("@/services/embed-worker-pool");
       const useGPU = getSetting("gpu.enabled") === "true";
-      await initWorkerPool(_localModelPath!, useGPU);
+
+      // Poll real pool init progress while workers load ONNX models.
+      // Replaces the old time-based getClipProgressPercent() fake progress.
+      const poolProgressInterval = setInterval(() => {
+        const pct = getPoolInitProgress();
+        if (pct > 0) {
+          setCurrentProgress({
+            ...currentProgress,
+            downloadPercent: pct,
+            loadingStartedAt: null, // real progress, no need for time estimate
+          });
+          if (isEmbedding) {
+            onProgress?.(currentProgress);
+          }
+        }
+      }, 300);
+
+      try {
+        await initWorkerPool(_localModelPath!, useGPU);
+      } finally {
+        clearInterval(poolProgressInterval);
+        // Mark init complete at 100%
+        setCurrentProgress({
+          ...currentProgress,
+          downloadPercent: 100,
+          loadingStartedAt: null,
+        });
+        if (isEmbedding) {
+          onProgress?.(currentProgress);
+        }
+      }
       poolReady = true;
 
       setPoolCancelled(false);
@@ -472,11 +571,55 @@ export async function embedAllPhotos(
         // 3. Batch update SQLite
         batchUpdatePhotoStatus(db, batchIds);
 
+        // Track written IDs for potential cancel cleanup
+        addWrittenPhotoIds(batchIds);
+
         processed = successResults.length;
         successfulIds.push(...batchIds);
       }
+
+      // After pool completes (or stops due to cancel): check for cancellation
+      if (poolCancelled && !isPaused) {
+        console.log("[AI] Embedding cancelled by user, cleaning up...");
+        await cleanupPartialEmbedding();
+        setCurrentProgress({
+          processed: 0,
+          total: 0,
+          phase: "idle",
+          currentFile: "",
+          downloadPercent: undefined,
+        });
+        onProgress?.(currentProgress);
+        setIsEmbedding(false);
+        shutdownPool();
+        return 0;
+      }
+
+      if (poolCancelled && isPaused) {
+        console.log(
+          `[AI] Embedding paused at ${processed}/${total}, preserving state`
+        );
+        setCurrentProgress({
+          processed,
+          total,
+          phase: "embedding",
+          currentFile: `paused at ${processed}/${total}`,
+          downloadPercent: undefined,
+          loadingStartedAt: null,
+        });
+        onProgress?.(currentProgress);
+        setIsEmbedding(false);
+        shutdownPool();
+        return processed;
+      }
     } catch (poolErr: any) {
       console.error("[AI] Worker pool failed:", poolErr?.message);
+    }
+
+    // If pool was cancelled or paused, don't proceed to fallback
+    if (poolCancelled) {
+      setIsEmbedding(false);
+      return processed;
     }
 
     // If pool is not available, fall back to legacy per-batch fork
@@ -520,6 +663,8 @@ export async function embedAllPhotos(
             }
 
             batchUpdatePhotoStatus(db, ids);
+            // Track written IDs for potential cancel cleanup
+            addWrittenPhotoIds(ids);
             successfulIds.push(...ids);
             return successBatch.length;
           }
@@ -558,6 +703,12 @@ export async function embedAllPhotos(
           console.warn(`[AI] Batch: ${batchCount}/${batch.length} succeeded`);
         }
       }
+    }
+
+    // If paused, skip the final phase reporting — already set in pool section
+    if (poolCancelled || isPaused) {
+      setIsEmbedding(false);
+      return processed;
     }
 
     // If there were no photos at all, stay in "idle" phase so the UI
@@ -635,7 +786,12 @@ export async function embedAllPhotos(
     try {
       const { BrowserWindow } = await import("electron");
       for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("ai-embedding-done");
+        win.webContents.send("ai-embedding-done", {
+          error:
+            currentProgress.phase === "error"
+              ? currentProgress.error
+              : undefined,
+        });
       }
     } catch {
       /* best-effort */

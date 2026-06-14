@@ -99,21 +99,15 @@ export const getExifCandidates = os.handler(() => {
   return { cameraModels, lensModels, focalLengths, apertures, isos, formats };
 });
 
-// Color distribution: aggregate from stored dominant_colors when available,
-// falling back to real-time histogram sampling for photos missing color data.
-export const getColorDistribution = os.handler(async () => {
+// Shared color-distribution helper — reused by getColorDistribution and getStats
+async function computeDashboardColors() {
   const db = getDatabase();
 
-  // ── Primary path: aggregate from pre-extracted dominant_colors ─────
+  // Primary path: aggregate from pre-extracted dominant_colors
   const rows = db
     .select({ dominantColors: photos.dominantColors })
     .from(photos)
-    .where(
-      and(
-        isNull(photos.deletedAt),
-        isNotNull(photos.dominantColors)
-      )
-    )
+    .where(and(isNull(photos.deletedAt), isNotNull(photos.dominantColors)))
     .all();
 
   const allColors = rows
@@ -142,7 +136,7 @@ export const getColorDistribution = os.handler(async () => {
     };
   }
 
-  // ── Fallback: real-time histogram sampling ─────────────────────────
+  // Fallback: real-time histogram sampling
   console.log(
     `[Stats] Not enough dominant_colors data (${allColors.length}), falling back to sampling`
   );
@@ -167,224 +161,247 @@ export const getColorDistribution = os.handler(async () => {
     .all();
 
   return computeColorDistribution(samplePhotos, totalCount);
+}
+
+// Color distribution (standalone — also available merged into getStats)
+export const getColorDistribution = os.handler(async () => {
+  return computeDashboardColors();
 });
 
-// Statistics for dashboard
-export const getStats = os.handler(() => {
-  // Return cached stats if fresh
-  if (statsCache && Date.now() - statsCache.timestamp < STATS_CACHE_TTL) {
-    return statsCache.data;
-  }
+// Statistics for dashboard (optionally includes color distribution)
+export const getStats = os
+  .input(z.object({ includeColors: z.boolean().optional().default(false) }))
+  .handler(async ({ input }) => {
+    // Return cached stats if fresh (and colors already included if requested)
+    if (
+      statsCache &&
+      Date.now() - statsCache.timestamp < STATS_CACHE_TTL &&
+      (!input.includeColors || statsCache.data.colorDistribution)
+    ) {
+      return statsCache.data;
+    }
 
-  const db = getDatabase();
+    const db = getDatabase();
 
-  const totalPhotos =
-    db.select({ count: sql<number>`count(*)` }).from(photos).get()?.count || 0;
-  const aiProcessed =
-    db
-      .select({ count: sql<number>`count(*)` })
+    // Single query for total + AI-processed counts
+    const photoCounts = db
+      .select({
+        total: sql<number>`count(*)`,
+        aiProcessed: sql<number>`sum(case when ${photos.isAiProcessed} = 1 then 1 else 0 end)`,
+      })
       .from(photos)
-      .where(eq(photos.isAiProcessed, true))
-      .get()?.count || 0;
+      .get();
+    const totalPhotos = photoCounts?.total ?? 0;
+    const aiProcessed = photoCounts?.aiProcessed ?? 0;
 
-  const cameraStats = db
-    .select({
-      model: exifData.cameraModel,
-      count: sql<number>`count(*)`,
-    })
-    .from(exifData)
-    .groupBy(exifData.cameraModel)
-    .orderBy(desc(sql`count(*)`))
-    .limit(5)
-    .all();
+    const cameraStats = db
+      .select({
+        model: exifData.cameraModel,
+        count: sql<number>`count(*)`,
+      })
+      .from(exifData)
+      .groupBy(exifData.cameraModel)
+      .orderBy(desc(sql`count(*)`))
+      .limit(5)
+      .all();
 
-  const focalStats = db
-    .select({
-      focalLength: exifData.focalLength,
-      count: sql<number>`count(*)`,
-    })
-    .from(exifData)
-    .where(sql`${exifData.focalLength} IS NOT NULL`)
-    .groupBy(exifData.focalLength)
-    .orderBy(exifData.focalLengthNum)
-    .limit(20)
-    .all();
+    const focalStats = db
+      .select({
+        focalLength: exifData.focalLength,
+        count: sql<number>`count(*)`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.focalLength} IS NOT NULL`)
+      .groupBy(exifData.focalLength)
+      .orderBy(exifData.focalLengthNum)
+      .limit(20)
+      .all();
 
-  const apertureStats = db
-    .select({
-      aperture: exifData.aperture,
-      count: sql<number>`count(*)`,
-    })
-    .from(exifData)
-    .where(sql`${exifData.aperture} IS NOT NULL`)
-    .groupBy(exifData.aperture)
-    .orderBy(exifData.aperture)
-    .all();
-  // ISO distribution by common ranges (SQL-level bucketing)
-  const isoBuckets = db
-    .select({
-      b1: sql<number>`COUNT(CASE WHEN ${exifData.iso} <= 200 THEN 1 END)`,
-      b2: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 200 AND ${exifData.iso} <= 400 THEN 1 END)`,
-      b3: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 400 AND ${exifData.iso} <= 800 THEN 1 END)`,
-      b4: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 800 AND ${exifData.iso} <= 1600 THEN 1 END)`,
-      b5: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 1600 THEN 1 END)`,
-    })
-    .from(exifData)
-    .where(sql`${exifData.iso} IS NOT NULL`)
-    .get();
-
-  const isoResult = [
-    { range: "50-200", count: isoBuckets?.b1 || 0 },
-    { range: "200-400", count: isoBuckets?.b2 || 0 },
-    { range: "400-800", count: isoBuckets?.b3 || 0 },
-    { range: "800-1600", count: isoBuckets?.b4 || 0 },
-    { range: "1600+", count: isoBuckets?.b5 || 0 },
-  ];
-
-  // Lens model distribution
-  const lensStats = db
-    .select({
-      model: exifData.lensModel,
-      count: sql<number>`count(*)`,
-    })
-    .from(exifData)
-    .where(
-      sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`
-    )
-    .groupBy(exifData.lensModel)
-    .orderBy(desc(sql`count(*)`))
-    .limit(8)
-    .all();
-
-  // Shutter speed distribution (SQL-level bucketing)
-  const shutterBuckets = db
-    .select({
-      b1: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} < 0.001 THEN 1 END)`,
-      b2: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.001 AND ${exifData.shutterSpeedNum} < 0.002 THEN 1 END)`,
-      b3: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.002 AND ${exifData.shutterSpeedNum} < 0.004 THEN 1 END)`,
-      b4: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.004 AND ${exifData.shutterSpeedNum} < 0.008 THEN 1 END)`,
-      b5: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.008 AND ${exifData.shutterSpeedNum} < 0.0167 THEN 1 END)`,
-      b6: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.0167 AND ${exifData.shutterSpeedNum} < 0.0333 THEN 1 END)`,
-      b7: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.0333 THEN 1 END)`,
-    })
-    .from(exifData)
-    .where(sql`${exifData.shutterSpeedNum} IS NOT NULL`)
-    .get();
-
-  const shutterResult = [
-    { range: ">1/1000s", count: shutterBuckets?.b1 || 0 },
-    { range: "1/1000s-1/500s", count: shutterBuckets?.b2 || 0 },
-    { range: "1/500s-1/250s", count: shutterBuckets?.b3 || 0 },
-    { range: "1/250s-1/125s", count: shutterBuckets?.b4 || 0 },
-    { range: "1/125s-1/60s", count: shutterBuckets?.b5 || 0 },
-    { range: "1/60s-1/30s", count: shutterBuckets?.b6 || 0 },
-    { range: "<1/30s", count: shutterBuckets?.b7 || 0 },
-  ];
-
-  // Single pass over dateTaken for hour buckets, yearly stats, monthly stats and date range
-  const allDates = db
-    .select({ dateTaken: exifData.dateTaken })
-    .from(exifData)
-    .where(sql`${exifData.dateTaken} IS NOT NULL`)
-    .all();
-
-  const hourBuckets24 = new Array(24).fill(0);
-  const yearCount = new Map<string, number>();
-  const monthCount = new Map<string, number>();
-  let earliest = Number.POSITIVE_INFINITY;
-  let latest = Number.NEGATIVE_INFINITY;
-
-  for (const row of allDates) {
-    const ts = row.dateTaken!;
-    const d = new Date(ts);
-    hourBuckets24[d.getHours()]++;
-
-    const yearStr = d.getFullYear().toString();
-    yearCount.set(yearStr, (yearCount.get(yearStr) || 0) + 1);
-
-    const monthStr = String(d.getMonth() + 1).padStart(2, "0");
-    monthCount.set(monthStr, (monthCount.get(monthStr) || 0) + 1);
-
-    if (ts < earliest) {
-      earliest = ts;
-    }
-    if (ts > latest) {
-      latest = ts;
-    }
-  }
-
-  const yearlyStats = Array.from(yearCount.entries())
-    .map(([year, count]) => ({ year, count }))
-    .sort((a, b) => a.year.localeCompare(b.year));
-
-  const monthlyStats = Array.from(monthCount.entries())
-    .map(([month, count]) => ({ month, count }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-
-  const dateRange =
-    earliest < Number.POSITIVE_INFINITY
-      ? { earliest, latest }
-      : {
-          earliest: null as unknown as number,
-          latest: null as unknown as number,
-        };
-
-  const avgIso =
-    db
-      .select({ avgIso: sql<number>`avg(${exifData.iso})` })
+    const apertureStats = db
+      .select({
+        aperture: exifData.aperture,
+        count: sql<number>`count(*)`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.aperture} IS NOT NULL`)
+      .groupBy(exifData.aperture)
+      .orderBy(exifData.aperture)
+      .all();
+    // ISO distribution by common ranges (SQL-level bucketing)
+    const isoBuckets = db
+      .select({
+        b1: sql<number>`COUNT(CASE WHEN ${exifData.iso} <= 200 THEN 1 END)`,
+        b2: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 200 AND ${exifData.iso} <= 400 THEN 1 END)`,
+        b3: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 400 AND ${exifData.iso} <= 800 THEN 1 END)`,
+        b4: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 800 AND ${exifData.iso} <= 1600 THEN 1 END)`,
+        b5: sql<number>`COUNT(CASE WHEN ${exifData.iso} > 1600 THEN 1 END)`,
+      })
       .from(exifData)
       .where(sql`${exifData.iso} IS NOT NULL`)
-      .get()?.avgIso || 0;
+      .get();
 
-  // GPS geo-locations for map display
-  const geoLocations = db
-    .select({
-      photoId: exifData.photoId,
-      latitude: exifData.gpsLatitude,
-      longitude: exifData.gpsLongitude,
-      filename: photos.filename,
-      path: photos.path,
-      width: photos.width,
-      height: photos.height,
-    })
-    .from(exifData)
-    .innerJoin(photos, eq(exifData.photoId, photos.id))
-    .where(
-      sql`${exifData.gpsLatitude} IS NOT NULL AND ${exifData.gpsLongitude} IS NOT NULL AND ${photos.deletedAt} IS NULL`
-    )
-    .all();
+    const isoResult = [
+      { range: "50-200", count: isoBuckets?.b1 || 0 },
+      { range: "200-400", count: isoBuckets?.b2 || 0 },
+      { range: "400-800", count: isoBuckets?.b3 || 0 },
+      { range: "800-1600", count: isoBuckets?.b4 || 0 },
+      { range: "1600+", count: isoBuckets?.b5 || 0 },
+    ];
 
-  const result = {
-    totalPhotos,
-    aiProcessed,
-    cameraStats: cameraStats.filter((c) => c.model),
-    lensStats: lensStats.filter((l) => l.model),
-    focalStats: focalStats.filter((f) => f.focalLength),
-    apertureStats: apertureStats.filter((a) => a.aperture),
-    isoDistribution: isoResult,
-    timeHeatmap: hourBuckets24.map((count, hour) => ({
-      period: `${hour.toString().padStart(2, "0")}:00`,
-      count,
-    })),
-    shutterSpeedDistribution: shutterResult,
-    yearlyStats,
-    monthlyStats,
-    dateRange,
-    avgIso,
-    geoLocations: geoLocations.map((g) => ({
-      photoId: g.photoId!,
-      latitude: g.latitude!,
-      longitude: g.longitude!,
-      filename: g.filename,
-      path: g.path,
-      width: g.width,
-      height: g.height,
-    })),
-  };
+    // Lens model distribution
+    const lensStats = db
+      .select({
+        model: exifData.lensModel,
+        count: sql<number>`count(*)`,
+      })
+      .from(exifData)
+      .where(
+        sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`
+      )
+      .groupBy(exifData.lensModel)
+      .orderBy(desc(sql`count(*)`))
+      .limit(8)
+      .all();
 
-  statsCache = { data: result, timestamp: Date.now() };
-  return result;
-});
+    // Shutter speed distribution (SQL-level bucketing)
+    const shutterBuckets = db
+      .select({
+        b1: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} < 0.001 THEN 1 END)`,
+        b2: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.001 AND ${exifData.shutterSpeedNum} < 0.002 THEN 1 END)`,
+        b3: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.002 AND ${exifData.shutterSpeedNum} < 0.004 THEN 1 END)`,
+        b4: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.004 AND ${exifData.shutterSpeedNum} < 0.008 THEN 1 END)`,
+        b5: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.008 AND ${exifData.shutterSpeedNum} < 0.0167 THEN 1 END)`,
+        b6: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.0167 AND ${exifData.shutterSpeedNum} < 0.0333 THEN 1 END)`,
+        b7: sql<number>`COUNT(CASE WHEN ${exifData.shutterSpeedNum} >= 0.0333 THEN 1 END)`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.shutterSpeedNum} IS NOT NULL`)
+      .get();
+
+    const shutterResult = [
+      { range: ">1/1000s", count: shutterBuckets?.b1 || 0 },
+      { range: "1/1000s-1/500s", count: shutterBuckets?.b2 || 0 },
+      { range: "1/500s-1/250s", count: shutterBuckets?.b3 || 0 },
+      { range: "1/250s-1/125s", count: shutterBuckets?.b4 || 0 },
+      { range: "1/125s-1/60s", count: shutterBuckets?.b5 || 0 },
+      { range: "1/60s-1/30s", count: shutterBuckets?.b6 || 0 },
+      { range: "<1/30s", count: shutterBuckets?.b7 || 0 },
+    ];
+
+    // Single pass over dateTaken for hour buckets, yearly stats, monthly stats and date range
+    const allDates = db
+      .select({ dateTaken: exifData.dateTaken })
+      .from(exifData)
+      .where(sql`${exifData.dateTaken} IS NOT NULL`)
+      .all();
+
+    const hourBuckets24 = new Array(24).fill(0);
+    const yearCount = new Map<string, number>();
+    const monthCount = new Map<string, number>();
+    let earliest = Number.POSITIVE_INFINITY;
+    let latest = Number.NEGATIVE_INFINITY;
+
+    for (const row of allDates) {
+      const ts = row.dateTaken!;
+      const d = new Date(ts);
+      hourBuckets24[d.getHours()]++;
+
+      const yearStr = d.getFullYear().toString();
+      yearCount.set(yearStr, (yearCount.get(yearStr) || 0) + 1);
+
+      const monthStr = String(d.getMonth() + 1).padStart(2, "0");
+      monthCount.set(monthStr, (monthCount.get(monthStr) || 0) + 1);
+
+      if (ts < earliest) {
+        earliest = ts;
+      }
+      if (ts > latest) {
+        latest = ts;
+      }
+    }
+
+    const yearlyStats = Array.from(yearCount.entries())
+      .map(([year, count]) => ({ year, count }))
+      .sort((a, b) => a.year.localeCompare(b.year));
+
+    const monthlyStats = Array.from(monthCount.entries())
+      .map(([month, count]) => ({ month, count }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+
+    const dateRange =
+      earliest < Number.POSITIVE_INFINITY
+        ? { earliest, latest }
+        : {
+            earliest: null as unknown as number,
+            latest: null as unknown as number,
+          };
+
+    const avgIso =
+      db
+        .select({ avgIso: sql<number>`avg(${exifData.iso})` })
+        .from(exifData)
+        .where(sql`${exifData.iso} IS NOT NULL`)
+        .get()?.avgIso || 0;
+
+    // GPS geo-locations for map display
+    const geoLocations = db
+      .select({
+        photoId: exifData.photoId,
+        latitude: exifData.gpsLatitude,
+        longitude: exifData.gpsLongitude,
+        filename: photos.filename,
+        path: photos.path,
+        width: photos.width,
+        height: photos.height,
+      })
+      .from(exifData)
+      .innerJoin(photos, eq(exifData.photoId, photos.id))
+      .where(
+        sql`${exifData.gpsLatitude} IS NOT NULL AND ${exifData.gpsLongitude} IS NOT NULL AND ${photos.deletedAt} IS NULL`
+      )
+      .all();
+
+    const result = {
+      totalPhotos,
+      aiProcessed,
+      cameraStats: cameraStats.filter((c) => c.model),
+      lensStats: lensStats.filter((l) => l.model),
+      focalStats: focalStats.filter((f) => f.focalLength),
+      apertureStats: apertureStats.filter((a) => a.aperture),
+      isoDistribution: isoResult,
+      timeHeatmap: hourBuckets24.map((count, hour) => ({
+        period: `${hour.toString().padStart(2, "0")}:00`,
+        count,
+      })),
+      shutterSpeedDistribution: shutterResult,
+      yearlyStats,
+      monthlyStats,
+      dateRange,
+      avgIso,
+      geoLocations: geoLocations.map((g) => ({
+        photoId: g.photoId!,
+        latitude: g.latitude!,
+        longitude: g.longitude!,
+        filename: g.filename,
+        path: g.path,
+        width: g.width,
+        height: g.height,
+      })),
+    };
+
+    // Optionally include color distribution in the same IPC call
+    if (input.includeColors) {
+      try {
+        (result as any).colorDistribution = await computeDashboardColors();
+      } catch (err) {
+        console.error("[getStats] colorDistribution failed:", err);
+        (result as any).colorDistribution = null;
+      }
+    }
+
+    statsCache = { data: result, timestamp: Date.now() };
+    return result;
+  });
 
 async function computeFileHash(filePath: string): Promise<string | null> {
   try {
@@ -466,6 +483,7 @@ export const findDuplicates = os
             width: number | null;
             height: number | null;
             createdAt: number;
+            thumbnailPath: string | null;
           }
         >();
         const photoRows = db
@@ -477,6 +495,7 @@ export const findDuplicates = os
             width: photos.width,
             height: photos.height,
             createdAt: photos.createdAt,
+            thumbnailPath: photos.thumbnailPath,
           })
           .from(photos)
           .where(inArray(photos.id, Array.from(photoIds)))
@@ -502,6 +521,7 @@ export const findDuplicates = os
                 width: a.width,
                 height: a.height,
                 createdAt: a.createdAt,
+                thumbnailPath: a.thumbnailPath,
               },
               photoB: {
                 id: b.id,
@@ -511,6 +531,7 @@ export const findDuplicates = os
                 width: b.width,
                 height: b.height,
                 createdAt: b.createdAt,
+                thumbnailPath: b.thumbnailPath,
               },
               matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
               distance: pair.phashDistance ?? 0,
@@ -536,6 +557,7 @@ export const findDuplicates = os
         width: photos.width,
         height: photos.height,
         createdAt: photos.createdAt,
+        thumbnailPath: photos.thumbnailPath,
       })
       .from(photos)
       .where(isNull(photos.deletedAt))
@@ -569,23 +591,44 @@ export const findDuplicates = os
     const candidates: CandidatePair[] = [];
     const seenPairs = new Set<string>();
 
+    // Collect all photos across all size-groups that are missing a content hash
+    const needsHash: (typeof allPhotos)[0][] = [];
     for (const group of sizeGroups.values()) {
       if (group.length < 2) {
         continue;
       }
-
-      // Compute content hash for photos in this group that don't have one yet
       for (const p of group) {
         if (!p.contentHash) {
-          const hash = await computeFileHash(p.path);
-          if (hash) {
-            p.contentHash = hash;
+          needsHash.push(p);
+        }
+      }
+    }
+
+    // Compute missing hashes (file I/O — the bottleneck, not DB writes)
+    for (const p of needsHash) {
+      const hash = await computeFileHash(p.path);
+      if (hash) {
+        p.contentHash = hash;
+      }
+    }
+
+    // Batch UPDATE in a single transaction
+    if (needsHash.length > 0) {
+      db.transaction(() => {
+        for (const p of needsHash) {
+          if (p.contentHash) {
             db.update(photos)
-              .set({ contentHash: hash })
+              .set({ contentHash: p.contentHash })
               .where(eq(photos.id, p.id))
               .run();
           }
         }
+      });
+    }
+
+    for (const group of sizeGroups.values()) {
+      if (group.length < 2) {
+        continue;
       }
 
       // Group by content hash
@@ -728,7 +771,8 @@ export const findDuplicates = os
               phashDistance: pair.phashDistance,
               clipSimilarity: pair.clipSimilarity,
               status:
-                pair.matchType === "exact" || pair.matchType === "clip_confirmed"
+                pair.matchType === "exact" ||
+                pair.matchType === "clip_confirmed"
                   ? "confirmed"
                   : "pending",
             })
@@ -771,6 +815,7 @@ export const findDuplicates = os
             width: a.width,
             height: a.height,
             createdAt: a.createdAt,
+            thumbnailPath: a.thumbnailPath,
           },
           photoB: {
             id: b.id,
@@ -780,6 +825,7 @@ export const findDuplicates = os
             width: b.width,
             height: b.height,
             createdAt: b.createdAt,
+            thumbnailPath: b.thumbnailPath,
           },
           matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
           distance: pair.phashDistance,
@@ -808,34 +854,29 @@ export const dismissDuplicate = os
 
 export const getDuplicateStats = os.handler(() => {
   const db = getDatabase();
-  const total =
-    db.select({ count: sql<number>`count(*)` }).from(duplicatePairs).get()
-      ?.count || 0;
-  const pending =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(duplicatePairs)
-      .where(eq(duplicatePairs.status, "pending"))
-      .get()?.count || 0;
-  const confirmed =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(duplicatePairs)
-      .where(eq(duplicatePairs.status, "confirmed"))
-      .get()?.count || 0;
-  const dismissed =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(duplicatePairs)
-      .where(eq(duplicatePairs.status, "dismissed"))
-      .get()?.count || 0;
+  // Single conditional-aggregation query instead of 4 separate COUNTs
+  const stats = db
+    .select({
+      total: sql<number>`count(*)`,
+      pending: sql<number>`sum(case when ${duplicatePairs.status} = 'pending' then 1 else 0 end)`,
+      confirmed: sql<number>`sum(case when ${duplicatePairs.status} = 'confirmed' then 1 else 0 end)`,
+      dismissed: sql<number>`sum(case when ${duplicatePairs.status} = 'dismissed' then 1 else 0 end)`,
+    })
+    .from(duplicatePairs)
+    .get();
   const lastRun = db
     .select()
     .from(detectionRuns)
     .orderBy(desc(detectionRuns.completedAt))
     .limit(1)
     .get();
-  return { total, pending, confirmed, dismissed, lastRun };
+  return {
+    total: stats?.total ?? 0,
+    pending: stats?.pending ?? 0,
+    confirmed: stats?.confirmed ?? 0,
+    dismissed: stats?.dismissed ?? 0,
+    lastRun,
+  };
 });
 
 // Index info for the settings page: thumbnail cache location/size,

@@ -358,21 +358,13 @@ export const searchCompound = os
             .from(photos)
             .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
             .innerJoin(tags, eq(tags.id, photoTags.tagId))
-            .where(
-              and(
-                isNull(photos.deletedAt),
-                like(tags.name, `%${q}%`)
-              )
-            )
+            .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
             .all(),
           db
             .select({ id: photos.id })
             .from(photos)
             .where(
-              and(
-                isNull(photos.deletedAt),
-                like(photos.filename, `%${q}%`)
-              )
+              and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
             )
             .all(),
           // Person name search: match face_identities.name
@@ -389,10 +381,7 @@ export const searchCompound = os
               eq(faceIdentities.id, faceIdentityMembers.identityId)
             )
             .where(
-              and(
-                isNull(photos.deletedAt),
-                like(faceIdentities.name, `%${q}%`)
-              )
+              and(isNull(photos.deletedAt), like(faceIdentities.name, `%${q}%`))
             )
             .all(),
         ]);
@@ -431,10 +420,12 @@ export const searchCompound = os
         // If time filter was parsed from query, skip AI and do plain date filter
         if (effectiveDateFrom || effectiveDateTo) {
           const dateConditions: SQL[] = [];
-          if (effectiveDateFrom)
+          if (effectiveDateFrom) {
             dateConditions.push(gte(exifData.dateTaken, effectiveDateFrom));
-          if (effectiveDateTo)
+          }
+          if (effectiveDateTo) {
             dateConditions.push(lte(exifData.dateTaken, effectiveDateTo));
+          }
           const dateFiltered = db
             .select({ photoId: exifData.photoId })
             .from(exifData)
@@ -448,7 +439,9 @@ export const searchCompound = os
             const datePhotos = db
               .select()
               .from(photos)
-              .where(and(isNull(photos.deletedAt), inArray(photos.id, datePhotoIds)))
+              .where(
+                and(isNull(photos.deletedAt), inArray(photos.id, datePhotoIds))
+              )
               .orderBy(desc(photos.fileDate))
               .limit(limit)
               .all();
@@ -469,11 +462,7 @@ export const searchCompound = os
       try {
         if (mergedList.length > 20 && q) {
           const rerankTopK = Math.max(limit, 200);
-          rerankedList = await rerankWithCLIPScore(
-            q,
-            mergedList,
-            rerankTopK
-          );
+          rerankedList = await rerankWithCLIPScore(q, mergedList, rerankTopK);
         }
       } catch {
         // Rerank failed, continue with merged results
@@ -668,14 +657,10 @@ export const searchCompound = os
     const exifConditions: SQL[] = [];
 
     if (effectiveDateFrom) {
-      exifConditions.push(
-        sql`${exifData.dateTaken} >= ${effectiveDateFrom}`
-      );
+      exifConditions.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
     }
     if (effectiveDateTo) {
-      exifConditions.push(
-        sql`${exifData.dateTaken} <= ${effectiveDateTo}`
-      );
+      exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
     }
     if (cameraModel) {
       exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));

@@ -401,7 +401,10 @@ export const ZH_TO_EN_SEARCH: Record<string, DictEntry> = {
   雨林: { en: "rainforest jungle tropical trees nature", category: "scene" },
   雪山: { en: "snow mountain peak winter cold white", category: "scene" },
   梯田: { en: "terrace rice field agriculture hillside", category: "scene" },
-  古镇: { en: "ancient town historic traditional architecture", category: "scene" },
+  古镇: {
+    en: "ancient town historic traditional architecture",
+    category: "scene",
+  },
   摩天轮: { en: "ferris wheel amusement park ride", category: "object" },
   游乐场: { en: "amusement park playground rides fun", category: "scene" },
   书店: { en: "bookstore book shop reading indoor", category: "scene" },
@@ -424,43 +427,154 @@ export const ZH_TO_EN_SEARCH: Record<string, DictEntry> = {
   日系: { en: "Japanese style clean minimal bright", category: "style" },
   森系: { en: "forest style natural green earthy", category: "style" },
   电影感: { en: "cinematic film movie dramatic moody", category: "style" },
-  小清新: { en: "fresh clean bright airy minimalist aesthetic", category: "style" },
-  国风: { en: "Chinese traditional style guofeng oriental ancient costume hanfu ink painting elegant", category: "style" },
-  水墨: { en: "ink wash painting sumi-e black white monochrome brush stroke traditional Chinese art", category: "style" },
-  水墨画: { en: "ink wash painting sumi-e black white monochrome brush stroke traditional Chinese art", category: "style" },
-  工笔画: { en: "gongbi fine brushwork detailed traditional Chinese painting meticulous", category: "style" },
-  写意: { en: "xieyi freehand brushwork expressive traditional Chinese painting spontaneous", category: "style" },
-  青花瓷: { en: "blue and white porcelain ceramic Chinese traditional pattern pottery", category: "object" },
-  古风: { en: "ancient Chinese style traditional classical antique historical elegant", category: "style" },
-  汉服: { en: "hanfu traditional Chinese clothing costume robe silk ancient dress", category: "object" },
-  唐装: { en: "Tang suit traditional Chinese clothing costume silk elegant", category: "object" },
-  中国风: { en: "Chinese style traditional oriental chinoiserie elegant red gold", category: "style" },
-  禅意: { en: "zen meditation tranquil peaceful minimal Japanese Chinese aesthetic simplicity", category: "style" },
-  留白: { en: "negative space minimalist empty blank simplicity composition aesthetic", category: "style" },
-  工笔: { en: "fine brushwork detailed meticulous traditional Chinese painting gongbi", category: "style" },
-  白描: { en: "line drawing outline sketch black white simple traditional Chinese", category: "style" },
-  淡彩: { en: "light color wash watercolor subtle soft pastel traditional painting", category: "style" },
-  重彩: { en: "heavy color rich saturated bold vibrant traditional Chinese painting", category: "style" },
-  仕女图: { en: "traditional Chinese painting of beautiful women ancient court ladies", category: "object" },
-  花鸟画: { en: "flower and bird painting traditional Chinese nature art", category: "object" },
-  山水画: { en: "landscape painting shanshui traditional Chinese mountain water art", category: "object" },
-  书法: { en: "calligraphy brush writing ink Chinese characters art handwrite", category: "object" },
-  篆刻: { en: "seal carving stamp chop Chinese traditional art calligraphy", category: "object" },
-  屏风: { en: "folding screen room divider traditional Chinese furniture decorative oriental", category: "object" },
-  折扇: { en: "folding fan Chinese traditional accessory paper bamboo elegant", category: "object" },
-  团扇: { en: "round fan silk traditional Chinese accessory elegant moon shaped", category: "object" },
-  灯笼: { en: "lantern red traditional Chinese decoration festive light", category: "object" },
-  对联: { en: "couplet red paper calligraphy Chinese new year decoration traditional", category: "object" },
-  窗花: { en: "papercut window decoration red traditional Chinese folk art", category: "object" },
-  剪纸: { en: "papercut traditional Chinese folk art red paper scissors handcraft", category: "object" },
-  刺绣: { en: "embroidery silk thread needle traditional Chinese textile art handcraft", category: "object" },
-  染布: { en: "dyed fabric textile indigo tie-dye traditional Chinese cloth craft", category: "object" },
-  瓦当: { en: "roof tile end eaves traditional Chinese architecture decorative pattern", category: "object" },
-  斗拱: { en: "dougong bracket set traditional Chinese architecture wooden structure temple", category: "object" },
-  园林: { en: "Chinese garden classical landscape pavilion pond rockery traditional architecture", category: "scene" },
-  庭院: { en: "courtyard traditional Chinese house garden peaceful classical architecture", category: "scene" },
-  四合院: { en: "siheyuan traditional Chinese courtyard house quadrangle architecture Beijing", category: "scene" },
-  胡同: { en: "hutong narrow alley traditional Beijing neighborhood old street China", category: "scene" },
+  小清新: {
+    en: "fresh clean bright airy minimalist aesthetic",
+    category: "style",
+  },
+  国风: {
+    en: "Chinese traditional style guofeng oriental ancient costume hanfu ink painting elegant",
+    category: "style",
+  },
+  水墨: {
+    en: "ink wash painting sumi-e black white monochrome brush stroke traditional Chinese art",
+    category: "style",
+  },
+  水墨画: {
+    en: "ink wash painting sumi-e black white monochrome brush stroke traditional Chinese art",
+    category: "style",
+  },
+  工笔画: {
+    en: "gongbi fine brushwork detailed traditional Chinese painting meticulous",
+    category: "style",
+  },
+  写意: {
+    en: "xieyi freehand brushwork expressive traditional Chinese painting spontaneous",
+    category: "style",
+  },
+  青花瓷: {
+    en: "blue and white porcelain ceramic Chinese traditional pattern pottery",
+    category: "object",
+  },
+  古风: {
+    en: "ancient Chinese style traditional classical antique historical elegant",
+    category: "style",
+  },
+  汉服: {
+    en: "hanfu traditional Chinese clothing costume robe silk ancient dress",
+    category: "object",
+  },
+  唐装: {
+    en: "Tang suit traditional Chinese clothing costume silk elegant",
+    category: "object",
+  },
+  中国风: {
+    en: "Chinese style traditional oriental chinoiserie elegant red gold",
+    category: "style",
+  },
+  禅意: {
+    en: "zen meditation tranquil peaceful minimal Japanese Chinese aesthetic simplicity",
+    category: "style",
+  },
+  留白: {
+    en: "negative space minimalist empty blank simplicity composition aesthetic",
+    category: "style",
+  },
+  工笔: {
+    en: "fine brushwork detailed meticulous traditional Chinese painting gongbi",
+    category: "style",
+  },
+  白描: {
+    en: "line drawing outline sketch black white simple traditional Chinese",
+    category: "style",
+  },
+  淡彩: {
+    en: "light color wash watercolor subtle soft pastel traditional painting",
+    category: "style",
+  },
+  重彩: {
+    en: "heavy color rich saturated bold vibrant traditional Chinese painting",
+    category: "style",
+  },
+  仕女图: {
+    en: "traditional Chinese painting of beautiful women ancient court ladies",
+    category: "object",
+  },
+  花鸟画: {
+    en: "flower and bird painting traditional Chinese nature art",
+    category: "object",
+  },
+  山水画: {
+    en: "landscape painting shanshui traditional Chinese mountain water art",
+    category: "object",
+  },
+  书法: {
+    en: "calligraphy brush writing ink Chinese characters art handwrite",
+    category: "object",
+  },
+  篆刻: {
+    en: "seal carving stamp chop Chinese traditional art calligraphy",
+    category: "object",
+  },
+  屏风: {
+    en: "folding screen room divider traditional Chinese furniture decorative oriental",
+    category: "object",
+  },
+  折扇: {
+    en: "folding fan Chinese traditional accessory paper bamboo elegant",
+    category: "object",
+  },
+  团扇: {
+    en: "round fan silk traditional Chinese accessory elegant moon shaped",
+    category: "object",
+  },
+  灯笼: {
+    en: "lantern red traditional Chinese decoration festive light",
+    category: "object",
+  },
+  对联: {
+    en: "couplet red paper calligraphy Chinese new year decoration traditional",
+    category: "object",
+  },
+  窗花: {
+    en: "papercut window decoration red traditional Chinese folk art",
+    category: "object",
+  },
+  剪纸: {
+    en: "papercut traditional Chinese folk art red paper scissors handcraft",
+    category: "object",
+  },
+  刺绣: {
+    en: "embroidery silk thread needle traditional Chinese textile art handcraft",
+    category: "object",
+  },
+  染布: {
+    en: "dyed fabric textile indigo tie-dye traditional Chinese cloth craft",
+    category: "object",
+  },
+  瓦当: {
+    en: "roof tile end eaves traditional Chinese architecture decorative pattern",
+    category: "object",
+  },
+  斗拱: {
+    en: "dougong bracket set traditional Chinese architecture wooden structure temple",
+    category: "object",
+  },
+  园林: {
+    en: "Chinese garden classical landscape pavilion pond rockery traditional architecture",
+    category: "scene",
+  },
+  庭院: {
+    en: "courtyard traditional Chinese house garden peaceful classical architecture",
+    category: "scene",
+  },
+  四合院: {
+    en: "siheyuan traditional Chinese courtyard house quadrangle architecture Beijing",
+    category: "scene",
+  },
+  胡同: {
+    en: "hutong narrow alley traditional Beijing neighborhood old street China",
+    category: "scene",
+  },
   // === ARCHITECTURE DETAILS ===
   屋顶: { en: "roof top building architecture", category: "scene" },
   阳台: { en: "balcony terrace outdoor building", category: "scene" },

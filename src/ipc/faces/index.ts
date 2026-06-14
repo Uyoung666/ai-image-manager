@@ -1,4 +1,5 @@
 import {
+  cancelFaceDetection_h,
   createFaceIdentity,
   deleteFaceIdentity,
   getDetectionProgress,
@@ -12,6 +13,7 @@ import {
 } from "./handlers";
 
 export const faces = {
+  cancelFaceDetection: cancelFaceDetection_h,
   createFaceIdentity,
   deleteFaceIdentity,
   getDetectionProgress,

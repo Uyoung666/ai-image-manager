@@ -18,6 +18,7 @@ import {
   Tag,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import type React from "react";
 import type { ReactNode } from "react";
@@ -41,18 +42,11 @@ import {
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
+import type { Folder as FolderType } from "@/types/photo";
 import { AiProgressBar } from "./AiProgressBar";
 
 export type ImportPhase = "idle" | "scanning" | "embedding";
 
-interface FolderInfo {
-  displayName: string;
-  id: number;
-  parentId: number | null;
-  path: string;
-  photoCount: number;
-  totalPhotoCount?: number;
-}
 interface TagInfo {
   color: string | null;
   id: number;
@@ -67,28 +61,31 @@ interface TagTreeNode {
 }
 interface SidebarProps {
   activeFolderId: number | null;
+  activeTagIds: number[];
   collapsed: boolean;
   favoriteActive?: boolean;
-  folders: FolderInfo[];
+  folders: FolderType[];
+  importPhase: ImportPhase;
   onAddFolder: (externalPath?: string) => void;
   onCancelScan?: () => void;
   onDeleteFolder: (id: number, displayName: string) => void;
   onSelectFavorites?: () => void;
   onSelectFolder: (id: number | null) => void;
-  onSelectTag?: (tagId: number | null) => void;
   onToggleCollapse: () => void;
+  onToggleTag?: (tagId: number | null) => void;
+  onToggleTagMode?: () => void;
   scanningFolder: string | null;
   scanProgress: string;
+  tagMode: "and" | "or";
   totalPhotos: number;
-  importPhase: ImportPhase;
 }
 
 interface FolderTreeNode {
   children: FolderTreeNode[];
-  folder: FolderInfo;
+  folder: FolderType;
 }
 
-function buildFolderTree(folders: FolderInfo[]): FolderTreeNode[] {
+function buildFolderTree(folders: FolderType[]): FolderTreeNode[] {
   const nodeMap = new Map<number, FolderTreeNode>();
   const roots: FolderTreeNode[] = [];
 
@@ -216,7 +213,7 @@ function renderTagTree(
   depth: number,
   expandedIds: Set<number>,
   onToggle: (id: number) => void,
-  activeId: number | null,
+  activeIds: number[],
   onSelect: (id: number | null) => void,
   onContextMenu: (e: React.MouseEvent, id: number, name: string) => void,
   onDragOver: (e: React.DragEvent) => void,
@@ -229,18 +226,29 @@ function renderTagTree(
   return nodes.flatMap((node) => {
     const hasChildren = node.children.length > 0;
     const isExpanded = expandedIds.has(node.tag.id);
-    const isActive = activeId === node.tag.id;
+    const isActive = activeIds.includes(node.tag.id);
     const isDragOver = dragOverId === node.tag.id;
 
     const row = (
-      <div className="flex items-center" key={node.tag.id}>
+      <div
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        aria-level={depth + 1}
+        aria-selected={isActive}
+        className="flex items-center"
+        data-tag-id={node.tag.id}
+        key={node.tag.id}
+        role="treeitem"
+        tabIndex={-1}
+      >
         <button
+          aria-hidden="true"
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
           onClick={(e) => {
             e.stopPropagation();
             onToggle(node.tag.id);
           }}
           style={{ marginLeft: depth * 14 }}
+          tabIndex={-1}
         >
           {hasChildren ? (
             <ChevronRight
@@ -259,8 +267,7 @@ function renderTagTree(
                 : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onClick={() => {
-            const nextId = activeId === node.tag.id ? null : node.tag.id;
-            onSelect(nextId);
+            onSelect(node.tag.id);
           }}
           onContextMenu={(e) => onContextMenu(e, node.tag.id, node.tag.name)}
           onDragEnter={() => onDragEnter(node.tag.id)}
@@ -290,7 +297,7 @@ function renderTagTree(
             depth + 1,
             expandedIds,
             onToggle,
-            activeId,
+            activeIds,
             onSelect,
             onContextMenu,
             onDragOver,
@@ -308,6 +315,8 @@ function renderTagTree(
 export function Sidebar({
   folders,
   activeFolderId,
+  activeTagIds,
+  tagMode,
   collapsed,
   favoriteActive,
   onSelectFolder,
@@ -315,7 +324,8 @@ export function Sidebar({
   onAddFolder,
   onCancelScan,
   onDeleteFolder,
-  onSelectTag,
+  onToggleTag,
+  onToggleTagMode,
   onToggleCollapse,
   scanningFolder,
   scanProgress,
@@ -332,8 +342,8 @@ export function Sidebar({
     y: number;
   } | null>(null);
   const [tags, setTags] = useState<TagInfo[]>([]);
-  const [activeTagId, setActiveTagId] = useState<number | null>(null);
   const [tagSearch, setTagSearch] = useState("");
+  const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
   const ctxRef = useRef<HTMLDivElement>(null);
   const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
@@ -362,6 +372,58 @@ export function Sidebar({
   const childInputRef = useRef<HTMLInputElement>(null);
   const childComposingRef = useRef(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+
+  // Debounce tag search to avoid rebuilding the tree on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedTagSearch(tagSearch), 150);
+    return () => clearTimeout(timer);
+  }, [tagSearch]);
+
+  // Auto-expand parent nodes during tag search so matching children are visible
+  const preSearchExpandedRef = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    if (debouncedTagSearch) {
+      // Save current expand state before modifying it (only on first keystroke)
+      if (preSearchExpandedRef.current === null) {
+        preSearchExpandedRef.current = new Set(expandedTagIds);
+      }
+      // Find all ancestors of matching tags and auto-expand them
+      const matchingIds = new Set(
+        tags
+          .filter((t) =>
+            t.name.toLowerCase().includes(debouncedTagSearch.toLowerCase())
+          )
+          .map((t) => t.id)
+      );
+      const tagMap = new Map(tags.map((t) => [t.id, t]));
+      const ancestorsToExpand = new Set<number>();
+      for (const id of matchingIds) {
+        let cur = tagMap.get(id)?.parentId ?? null;
+        while (cur) {
+          if (ancestorsToExpand.has(cur)) {
+            break;
+          }
+          ancestorsToExpand.add(cur);
+          cur = tagMap.get(cur)?.parentId ?? null;
+        }
+      }
+      if (ancestorsToExpand.size > 0) {
+        setExpandedTagIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ancestorsToExpand) {
+            next.add(id);
+          }
+          return next;
+        });
+      }
+    } else {
+      // Search cleared — restore previous expand state
+      if (preSearchExpandedRef.current !== null) {
+        setExpandedTagIds(preSearchExpandedRef.current);
+        preSearchExpandedRef.current = null;
+      }
+    }
+  }, [debouncedTagSearch, tags]);
 
   // Drag-and-drop: album/tag/folder drop targets + external folder import
   function handleSidebarDragOver(e: React.DragEvent) {
@@ -520,10 +582,16 @@ export function Sidebar({
         }
         const tagList = (result as TagInfo[]) || [];
         setTags(tagList);
-        // Clear active tag if it's no longer in the filtered list
-        if (activeTagId && !tagList.some((t) => t.id === activeTagId)) {
-          setActiveTagId(null);
-          onSelectTag?.(null);
+        // Clear active tags that are no longer in the filtered list
+        if (
+          activeTagIds.length > 0 &&
+          activeTagIds.some((id) => !tagList.some((t) => t.id === id))
+        ) {
+          for (const id of activeTagIds) {
+            if (!tagList.some((t) => t.id === id)) {
+              onToggleTag?.(id);
+            }
+          }
         }
         // Stop polling once tags appear
         if (tagList.length > 0 && interval) {
@@ -547,7 +615,7 @@ export function Sidebar({
         clearInterval(interval);
       }
     };
-  }, [totalPhotos, activeFolderId, activeTagId, onSelectTag]);
+  }, [totalPhotos, activeFolderId, activeTagIds, onToggleTag]);
 
   useEffect(() => {
     function handler(event: MessageEvent) {
@@ -578,6 +646,112 @@ export function Sidebar({
   }, [activeFolderId]);
 
   const closeCtx = useCallback(() => setFolderCtx(null), []);
+
+  // Keyboard navigation handler for tag tree
+  function handleTagTreeKeyDown(
+    e: React.KeyboardEvent,
+    expandedIds: Set<number>,
+    setExpandedIds: (next: Set<number>) => void,
+    onTagToggle: ((tagId: number | null) => void) | undefined,
+    setSearch: (v: string) => void,
+    setDebouncedSearch: (v: string) => void
+  ) {
+    const currentFocus = document.activeElement as HTMLElement;
+    const treeContainer = e.currentTarget as HTMLElement;
+    const allItems = Array.from(
+      treeContainer.querySelectorAll('[role="treeitem"]')
+    ) as HTMLElement[];
+    if (allItems.length === 0) {
+      return;
+    }
+
+    let currentIndex = allItems.indexOf(currentFocus);
+    // If focus is not on any treeitem (e.g. on the search input),
+    // default to the first visible item
+    if (currentIndex === -1) {
+      currentIndex = 0;
+    }
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = allItems[Math.min(currentIndex + 1, allItems.length - 1)];
+        if (next) {
+          for (const item of allItems) {
+            item.setAttribute("tabindex", "-1");
+          }
+          next.setAttribute("tabindex", "0");
+          next.focus();
+        }
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = allItems[Math.max(currentIndex - 1, 0)];
+        if (prev) {
+          for (const item of allItems) {
+            item.setAttribute("tabindex", "-1");
+          }
+          prev.setAttribute("tabindex", "0");
+          prev.focus();
+        }
+        break;
+      }
+      case "ArrowRight": {
+        e.preventDefault();
+        const currentId = Number(currentFocus?.getAttribute("data-tag-id"));
+        if (currentId && !expandedIds.has(currentId)) {
+          const tag = tags.find((t) => t.id === currentId);
+          if (tag && tags.some((t) => t.parentId === currentId)) {
+            const next = new Set(expandedIds);
+            next.add(currentId);
+            setExpandedIds(next);
+          }
+        }
+        break;
+      }
+      case "ArrowLeft": {
+        e.preventDefault();
+        const curId = Number(currentFocus?.getAttribute("data-tag-id"));
+        if (curId && expandedIds.has(curId)) {
+          const nxt = new Set(expandedIds);
+          nxt.delete(curId);
+          setExpandedIds(nxt);
+        }
+        break;
+      }
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        const id = Number(currentFocus?.getAttribute("data-tag-id"));
+        if (id && !Number.isNaN(id)) {
+          onTagToggle?.(id);
+        }
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        setSearch("");
+        setDebouncedSearch("");
+        treeContainer.focus();
+        break;
+      }
+      case "/":
+      case "f": {
+        // Ctrl+F or / key: focus search input
+        if (e.key === "f" && !e.ctrlKey && !e.metaKey) {
+          break;
+        }
+        e.preventDefault();
+        const input = treeContainer
+          .closest(".flex.flex-col, .p-1\\.5")
+          ?.querySelector('input[role="searchbox"]') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+        break;
+      }
+    }
+  }
 
   async function handleCreateChildTag() {
     const name = newChildTagName.trim();
@@ -618,9 +792,8 @@ export function Sidebar({
         folderId: activeFolderId ?? undefined,
       });
       setTags((updated as TagInfo[]) || []);
-      if (activeTagId === id) {
-        setActiveTagId(null);
-        onSelectTag?.(null);
+      if (activeTagIds.includes(id)) {
+        onToggleTag?.(id);
       }
       toast.success(t("tagDeleted", { name }));
     } catch {
@@ -651,6 +824,26 @@ export function Sidebar({
       document.removeEventListener("keydown", handleKey);
     };
   }, [folderCtx, tagCtx, closeCtx]);
+
+  // Global keyboard shortcut: [ toggles sidebar collapse
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "[" && !e.ctrlKey && !e.metaKey) {
+        const target = e.target as HTMLElement;
+        if (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+        e.preventDefault();
+        onToggleCollapse();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onToggleCollapse]);
 
   const folderTree = buildFolderTree(folders);
 
@@ -703,8 +896,7 @@ export function Sidebar({
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => {
-                setActiveTagId(null);
-                onSelectTag?.(null);
+                onToggleTag?.(null);
                 onSelectFolder(null);
               }}
               title={t("sidebarAllPhotos")}
@@ -719,7 +911,12 @@ export function Sidebar({
                     ? "bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
-                onClick={onSelectFavorites}
+                onClick={() => {
+                  if (favoriteActive) {
+                    return;
+                  }
+                  onSelectFavorites?.();
+                }}
                 title={t("favorite")}
               >
                 <Star className="h-4 w-4" />
@@ -755,7 +952,7 @@ export function Sidebar({
                 <PopoverTrigger asChild>
                   <button
                     className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                      activeTagId
+                      activeTagIds.length > 0
                         ? "bg-primary/15 text-primary"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
@@ -770,20 +967,151 @@ export function Sidebar({
                       {t("sidebarTags")}
                     </p>
                     <div className="px-1 pb-1">
-                      <input
-                        className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                        onChange={(e) => setTagSearch(e.target.value)}
-                        placeholder={t("tagSearchPlaceholder")}
-                        value={tagSearch}
-                      />
+                      <div className="relative">
+                        <input
+                          aria-label={t("tagSearchPlaceholder")}
+                          className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                          onChange={(e) => setTagSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setTagSearch("");
+                              setDebouncedTagSearch("");
+                              const tree = (
+                                e.currentTarget as HTMLElement
+                              ).closest('[role="tree"]') as HTMLElement | null;
+                              tree?.focus();
+                            }
+                          }}
+                          placeholder={t("tagSearchPlaceholder")}
+                          role="searchbox"
+                          value={tagSearch}
+                        />
+                        {tagSearch && (
+                          <button
+                            className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                            onClick={() => {
+                              setTagSearch("");
+                              setDebouncedTagSearch("");
+                            }}
+                            type="button"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="max-h-[280px] overflow-y-auto">
+                    {activeTagIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1 px-1 pb-1">
+                        {activeTagIds.slice(0, 3).map((id) => {
+                          const tag = tags.find((t) => t.id === id);
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
+                              key={id}
+                            >
+                              <span
+                                className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: tag?.color ?? "#888",
+                                }}
+                              />
+                              <span className="max-w-[80px] truncate">
+                                {getTagDisplayName(
+                                  tag?.name ?? "",
+                                  i18n.language
+                                )}
+                              </span>
+                              <button
+                                aria-label={
+                                  t("clickToRemove") +
+                                  " " +
+                                  getTagDisplayName(
+                                    tag?.name ?? "",
+                                    i18n.language
+                                  )
+                                }
+                                className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleTag?.(id);
+                                }}
+                                type="button"
+                              >
+                                <X className="h-2 w-2" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                        {activeTagIds.length > 3 && (
+                          <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {t("andMore", { count: activeTagIds.length - 3 })}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {activeTagIds.length >= 2 && onToggleTagMode && (
+                      <div className="flex items-center justify-between px-1 pb-1">
+                        <span className="text-[10px] text-muted-foreground/70">
+                          {t("tagFilterMode")}
+                        </span>
+                        <button
+                          aria-label={t("tagFilterMode")}
+                          aria-pressed={tagMode === "and"}
+                          className="rounded-[3px] border border-border px-1.5 py-0 font-[510] text-[10px] text-primary transition-colors hover:bg-primary/10"
+                          onClick={onToggleTagMode}
+                          type="button"
+                        >
+                          {tagMode.toUpperCase()}
+                        </button>
+                      </div>
+                    )}
+                    <div
+                      aria-label={t("sidebarTags")}
+                      className="max-h-[280px] overflow-y-auto"
+                      onFocus={(e) => {
+                        const container = e.currentTarget;
+                        const currentFocus = document.activeElement;
+                        if (
+                          currentFocus === container ||
+                          !container.contains(currentFocus)
+                        ) {
+                          const first = container.querySelector(
+                            '[role="treeitem"]'
+                          ) as HTMLElement | null;
+                          if (first) {
+                            const items =
+                              container.querySelectorAll('[role="treeitem"]');
+                            for (const item of items) {
+                              (item as HTMLElement).setAttribute(
+                                "tabindex",
+                                "-1"
+                              );
+                            }
+                            first.setAttribute("tabindex", "0");
+                            first.focus();
+                          }
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        handleTagTreeKeyDown(
+                          e,
+                          expandedTagIds,
+                          setExpandedTagIds,
+                          onToggleTag,
+                          setTagSearch,
+                          setDebouncedTagSearch
+                        );
+                      }}
+                      role="tree"
+                      tabIndex={0}
+                    >
                       {(() => {
                         const filtered = tags.filter((t) =>
-                          tagSearch
+                          debouncedTagSearch
                             ? t.name
                                 .toLowerCase()
-                                .includes(tagSearch.toLowerCase())
+                                .includes(debouncedTagSearch.toLowerCase())
                             : true
                         );
                         const allIds = new Set(filtered.map((t) => t.id));
@@ -817,10 +1145,11 @@ export function Sidebar({
                             }
                             setExpandedTagIds(next);
                           },
-                          activeTagId,
+                          activeTagIds,
                           (nextId) => {
-                            setActiveTagId(nextId);
-                            onSelectTag?.(nextId);
+                            if (nextId !== null) {
+                              onToggleTag?.(nextId);
+                            }
                             setTagPopoverOpen(false);
                           },
                           (e, id, name) => {
@@ -850,14 +1179,13 @@ export function Sidebar({
           <div className="flex flex-col items-center gap-1 px-1.5">
             <button
               className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-              disabled={importPhase !== "idle"}
               onClick={() => onAddFolder()}
               title={t("sidebarAddFolder")}
             >
-              {importPhase !== "idle" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
+              {importPhase === "idle" ? (
                 <Plus className="h-4 w-4" />
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin" />
               )}
             </button>
 
@@ -1014,7 +1342,7 @@ export function Sidebar({
 
           {/* AI Progress Bar */}
           <div className="px-3 py-2">
-            <AiProgressBar />
+            <AiProgressBar disabled={importPhase !== "idle"} />
           </div>
 
           {/* Scan progress */}
@@ -1057,8 +1385,7 @@ export function Sidebar({
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => {
-                setActiveTagId(null);
-                onSelectTag?.(null);
+                onToggleTag?.(null);
                 onSelectFolder(null);
               }}
             >
@@ -1072,7 +1399,12 @@ export function Sidebar({
                     ? "bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
-                onClick={onSelectFavorites}
+                onClick={() => {
+                  if (favoriteActive) {
+                    return;
+                  }
+                  onSelectFavorites?.();
+                }}
               >
                 <Star className="h-3.5 w-3.5" />
                 {t("favorite")}
@@ -1108,10 +1440,10 @@ export function Sidebar({
                   }}
                   title={t("sidebarAddFolder")}
                 >
-                  {importPhase !== "idle" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
+                  {importPhase === "idle" ? (
                     <Plus className="h-3 w-3" />
+                  ) : (
+                    <Loader2 className="h-3 w-3 animate-spin" />
                   )}
                 </button>
               </div>
@@ -1171,21 +1503,156 @@ export function Sidebar({
                   {!tagsCollapsed &&
                     (tags.length > 0 ? (
                       <>
+                        {/* Active tag chips */}
+                        {activeTagIds.length > 0 && (
+                          <div className="flex flex-wrap gap-1 px-1 pb-1">
+                            {activeTagIds.slice(0, 3).map((id) => {
+                              const tag = tags.find((t) => t.id === id);
+                              return (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
+                                  key={id}
+                                >
+                                  <span
+                                    className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                                    style={{
+                                      backgroundColor: tag?.color ?? "#888",
+                                    }}
+                                  />
+                                  <span className="max-w-[90px] truncate">
+                                    {getTagDisplayName(
+                                      tag?.name ?? "",
+                                      i18n.language
+                                    )}
+                                  </span>
+                                  <button
+                                    aria-label={
+                                      t("clickToRemove") +
+                                      " " +
+                                      getTagDisplayName(
+                                        tag?.name ?? "",
+                                        i18n.language
+                                      )
+                                    }
+                                    className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                    onClick={() => onToggleTag?.(id)}
+                                    type="button"
+                                  >
+                                    <X className="h-2 w-2" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                            {activeTagIds.length > 3 && (
+                              <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                {t("andMore", {
+                                  count: activeTagIds.length - 3,
+                                })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {activeTagIds.length >= 2 && onToggleTagMode && (
+                          <div className="flex items-center justify-between px-1 pb-1">
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {t("tagFilterMode")}
+                            </span>
+                            <button
+                              aria-label={t("tagFilterMode")}
+                              aria-pressed={tagMode === "and"}
+                              className="rounded-[3px] border border-border px-1.5 py-0 font-[510] text-[10px] text-primary transition-colors hover:bg-primary/10"
+                              onClick={onToggleTagMode}
+                              type="button"
+                            >
+                              {tagMode.toUpperCase()}
+                            </button>
+                          </div>
+                        )}
                         <div className="px-1 pb-1">
-                          <input
-                            className="w-full rounded-[4px] bg-card px-2 py-1 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                            onChange={(e) => setTagSearch(e.target.value)}
-                            placeholder={t("tagSearchPlaceholder")}
-                            value={tagSearch}
-                          />
+                          <div className="relative">
+                            <input
+                              aria-label={t("tagSearchPlaceholder")}
+                              className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                              onChange={(e) => setTagSearch(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setTagSearch("");
+                                  setDebouncedTagSearch("");
+                                  const tree = (
+                                    e.currentTarget as HTMLElement
+                                  ).closest(
+                                    '[role="tree"]'
+                                  ) as HTMLElement | null;
+                                  tree?.focus();
+                                }
+                              }}
+                              placeholder={t("tagSearchPlaceholder")}
+                              role="searchbox"
+                              value={tagSearch}
+                            />
+                            {tagSearch && (
+                              <button
+                                className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                onClick={() => {
+                                  setTagSearch("");
+                                  setDebouncedTagSearch("");
+                                }}
+                                type="button"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto">
+                        <div
+                          aria-label={t("sidebarTags")}
+                          className="flex-1 overflow-y-auto"
+                          onFocus={(e) => {
+                            const container = e.currentTarget;
+                            const currentFocus = document.activeElement;
+                            if (
+                              currentFocus === container ||
+                              !container.contains(currentFocus)
+                            ) {
+                              const first = container.querySelector(
+                                '[role="treeitem"]'
+                              ) as HTMLElement | null;
+                              if (first) {
+                                const items =
+                                  container.querySelectorAll(
+                                    '[role="treeitem"]'
+                                  );
+                                for (const item of items) {
+                                  (item as HTMLElement).setAttribute(
+                                    "tabindex",
+                                    "-1"
+                                  );
+                                }
+                                first.setAttribute("tabindex", "0");
+                                first.focus();
+                              }
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            handleTagTreeKeyDown(
+                              e,
+                              expandedTagIds,
+                              setExpandedTagIds,
+                              onToggleTag,
+                              setTagSearch,
+                              setDebouncedTagSearch
+                            );
+                          }}
+                          role="tree"
+                          tabIndex={0}
+                        >
                           {(() => {
                             const filtered = tags.filter((t) =>
-                              tagSearch
+                              debouncedTagSearch
                                 ? t.name
                                     .toLowerCase()
-                                    .includes(tagSearch.toLowerCase())
+                                    .includes(debouncedTagSearch.toLowerCase())
                                 : true
                             );
                             const allIds = new Set(filtered.map((t) => t.id));
@@ -1221,10 +1688,11 @@ export function Sidebar({
                                 }
                                 setExpandedTagIds(next);
                               },
-                              activeTagId,
+                              activeTagIds,
                               (nextId) => {
-                                setActiveTagId(nextId);
-                                onSelectTag?.(nextId);
+                                if (nextId !== null) {
+                                  onToggleTag?.(nextId);
+                                }
                               },
                               (e, id, name) => {
                                 e.preventDefault();
