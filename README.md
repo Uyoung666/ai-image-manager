@@ -4,6 +4,8 @@
 
 就地索引文件夹。语义搜索、智能相册、人脸识别、选片筛选、重复检测、云端分享 — 全部在你自己的电脑上运行。
 
+网址：https://ai-image-manager.uyoungvision.cn
+
 [![Version](https://img.shields.io/badge/version-1.3.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
