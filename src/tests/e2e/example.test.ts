@@ -44,5 +44,6 @@ test("renders the first page", async () => {
 
   const title = await page.waitForSelector("h1");
   const text = await title.textContent();
-  expect(text).toBe("欢迎使用 AI 图片管理器");
+  // 语言自动检测：CI 环境为英文，本地开发通常为中文
+  expect(text).toMatch(/^(欢迎使用 AI 图片管理器|Welcome to AI Image Manager)$/);
 });
