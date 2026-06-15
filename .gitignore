@@ -112,6 +112,7 @@ models/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Editor configs
 .vscode/
