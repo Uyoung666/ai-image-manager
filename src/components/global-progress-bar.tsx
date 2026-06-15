@@ -1,10 +1,30 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
+import { getRandomPhrase } from "@/utils/progress-phrases";
 
 /** Smooth-transitioning global progress indicator for the header area. */
 export function GlobalProgressBar() {
   const status = useGlobalAiStatus();
+
+  // ── Fun phrase rotation ─────────────────────────────────────
+  const [phrase, setPhrase] = useState(() => getRandomPhrase(status.phase));
+  const phraseTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (status.isRunning) {
+      setPhrase(getRandomPhrase(status.phase));
+      phraseTimerRef.current = window.setInterval(() => {
+        setPhrase(getRandomPhrase(status.phase));
+      }, 4000);
+    } else {
+      clearInterval(phraseTimerRef.current!);
+      phraseTimerRef.current = null;
+    }
+    return () => {
+      clearInterval(phraseTimerRef.current!);
+    };
+  }, [status.isRunning, status.phase]);
 
   // ── Smooth enter / exit ──────────────────────────────────────
   // Use a delayed unmount so the slide-out animation completes.
@@ -90,17 +110,14 @@ export function GlobalProgressBar() {
       `}
     >
       <div className="flex items-center gap-2 border-border/40 border-b bg-card/80 px-3 py-1.5 backdrop-blur-sm">
-        {/* Spinner for model-loading phase */}
         {showSpinner && (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />
         )}
 
-        {/* Status text */}
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-          {status.statusText}
+          {phrase}
         </span>
 
-        {/* Percent badge */}
         {!isIndeterminate && (
           <span className="shrink-0 font-[510] text-[11px] text-primary tabular-nums">
             {Math.round(smoothPct)}%
@@ -108,7 +125,6 @@ export function GlobalProgressBar() {
         )}
       </div>
 
-      {/* Thin progress bar */}
       <div className="h-[2px] w-full bg-secondary">
         <div
           className={`h-full bg-primary transition-[width] duration-300 ease-out ${isIndeterminate ? "animate-indeterminate-bar" : ""}
