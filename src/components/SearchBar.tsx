@@ -543,16 +543,43 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       setShowSuggestions(false);
     }
 
+    // Electron 拖拽时 MIME type 为空，改用扩展名判断
+    const IMAGE_EXTENSIONS = new Set([
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".gif",
+      ".webp",
+      ".bmp",
+      ".avif",
+      ".heic",
+      ".heif",
+      ".tiff",
+      ".tif",
+      ".svg",
+      ".ico",
+      ".raw",
+      ".cr2",
+      ".cr3",
+      ".nef",
+      ".arw",
+      ".orf",
+      ".rw2",
+      ".dng",
+      ".pef",
+      ".raf",
+      ".sr2",
+    ]);
+
     function handleDragOver(e: React.DragEvent) {
       if (!onImageSearch) {
         return;
       }
-      // Only accept single image files (reject folders)
+      // 接受单个文件拖放
       if (
         e.dataTransfer.types.includes("Files") &&
         e.dataTransfer.items.length === 1 &&
-        e.dataTransfer.items[0].kind === "file" &&
-        e.dataTransfer.items[0].type.startsWith("image/")
+        e.dataTransfer.items[0].kind === "file"
       ) {
         e.preventDefault();
         e.stopPropagation();
@@ -563,21 +590,28 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
     function handleDragLeave(e: React.DragEvent) {
       e.preventDefault();
+      e.stopPropagation();
       setDragOver(false);
     }
 
     function handleDrop(e: React.DragEvent) {
       e.preventDefault();
+      e.stopPropagation();
       setDragOver(false);
       if (!onImageSearch) {
         return;
       }
       const file = e.dataTransfer.files[0];
-      if (file?.type.startsWith("image/")) {
-        const filePath = (window as any).electronAPI?.getFilePath?.(file);
-        if (filePath) {
-          onImageSearch(filePath);
-        }
+      if (!file) {
+        return;
+      }
+      const filePath = (window as any).electronAPI?.getFilePath?.(file);
+      if (!filePath) {
+        return;
+      }
+      const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+      if (IMAGE_EXTENSIONS.has(ext)) {
+        onImageSearch(filePath);
       }
     }
 
