@@ -1,7 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createFileRoute,
-  Link,
   Outlet,
   useMatch,
   useNavigate,
@@ -19,7 +18,6 @@ import {
 import {
   memo,
   useCallback,
-  useDeferredValue,
   useEffect,
   useRef,
   useState,
@@ -162,103 +160,84 @@ const PersonCard = memo(function PersonCard({
   onDelete: (id: number, name: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const isEditing = editingId === identity.id;
+
+  const handleClick = () => {
+    if (selectMode) {
+      onToggleSelect(identity.id);
+    } else {
+      navigate({ to: "/people/$identityId", params: { identityId: identity.id.toString() } });
+    }
+  };
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors ${
+      className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors cursor-pointer ${
         isSelected
           ? "border-primary ring-2 ring-primary/30"
           : "border-border hover:border-primary/30"
-      } ${selectMode ? "cursor-pointer" : ""}`}
-      onClick={selectMode ? () => onToggleSelect(identity.id) : undefined}
+      }`}
+      onClick={handleClick}
     >
-      {selectMode ? (
-        <div className="block">
-          <div className="aspect-square overflow-hidden">
-            <PersonCoverImage identity={identity} />
-          </div>
-          <div className="p-3">
-            <h3 className="truncate font-[510] text-[13px] text-foreground">
-              {identity.name || t("unnamedPerson")}
-            </h3>
-            <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-              {identity.faceCount} {t("photos")}
-            </p>
-          </div>
-          {isSelected && (
-            <div className="pointer-events-none absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white">
-              <Check className="h-3.5 w-3.5" />
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          <Link
-            className="block"
-            params={{ identityId: identity.id.toString() }}
-            to="/people/$identityId"
-          >
-            <div className="aspect-square overflow-hidden">
-              <PersonCoverImage identity={identity} />
-            </div>
-            <div className="p-3">
-              {isEditing ? (
-                <input
-                  autoFocus
-                  className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
-                  onBlur={() => onRename(identity.id)}
-                  onChange={(e) => onNameInputChange(e.target.value)}
-                  onCompositionEnd={(e) => {
-                    onNameInputCompositionEnd(e);
-                  }}
-                  onCompositionStart={onNameInputCompositionStart}
-                  onFocus={(e) => e.target.select()}
-                  onKeyDown={(e) => {
-                    if (composingRef.current) {
-                      return;
-                    }
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      onRename(identity.id);
-                    }
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      onCancelEdit();
-                    }
-                  }}
-                  value={nameInput}
-                />
-              ) : (
-                <h3
-                  className="cursor-pointer truncate font-[510] text-[13px] text-foreground transition-colors hover:text-primary"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onStartEdit(identity.id, identity.name);
-                  }}
-                >
-                  {identity.name || t("unnamedPerson")}
-                </h3>
-              )}
-              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                {identity.faceCount} {t("photos")}
-              </p>
-            </div>
-          </Link>
-          <button
-            className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onDelete(identity.id, identity.name);
+      <div className="aspect-square overflow-hidden">
+        <PersonCoverImage identity={identity} />
+      </div>
+      <div className="p-3">
+        {isEditing ? (
+          <input
+            autoFocus
+            className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
+            onBlur={() => onRename(identity.id)}
+            onChange={(e) => onNameInputChange(e.target.value)}
+            onCompositionEnd={(e) => {
+              onNameInputCompositionEnd(e);
             }}
-            title={t("deletePerson")}
-            type="button"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </>
+            onCompositionStart={onNameInputCompositionStart}
+            onFocus={(e) => e.target.select()}
+            onKeyDown={(e) => {
+              if (composingRef.current) {
+                return;
+              }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onRename(identity.id);
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancelEdit();
+              }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            value={nameInput}
+          />
+        ) : (
+          <h3 className="truncate font-[510] text-[13px] text-foreground">
+            {identity.name || t("unnamedPerson")}
+          </h3>
+        )}
+        <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+          {identity.faceCount} {t("photos")}
+        </p>
+      </div>
+      {isSelected && (
+        <div className="pointer-events-none absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white">
+          <Check className="h-3.5 w-3.5" />
+        </div>
+      )}
+      {!selectMode && (
+        <button
+          className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(identity.id, identity.name);
+          }}
+          title={t("deletePerson")}
+          type="button"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       )}
     </div>
   );
@@ -317,8 +296,6 @@ function PeoplePage() {
     staleTime: 30_000,
   });
 
-  // React 19: 延迟列表渲染，保持页面响应
-  const deferredIdentities = useDeferredValue(identities);
 
   // Face detection state
   const [detecting, setDetecting] = useState(false);
@@ -497,12 +474,31 @@ function PeoplePage() {
     const targetId = sorted[0].id;
     const sourceIds = ids.filter((id) => id !== targetId);
 
+    // Snapshot for rollback
+    const previousData = queryClient.getQueryData<FaceIdentity[]>(["faces", "identities"]);
+
     try {
-      await ipc.client.faces.mergeIdentities({ targetId, sourceIds });
+      // Optimistic update: remove source identities immediately (no flash)
+      const mergedFaceCount = sorted.reduce((sum, i) => sum + i.faceCount, 0);
+      queryClient.setQueryData<FaceIdentity[]>(["faces", "identities"], (old) =>
+        old
+          ?.filter((i) => !sourceIds.includes(i.id))
+          .map((i) =>
+            i.id === targetId ? { ...i, faceCount: mergedFaceCount } : i
+          )
+      );
+
       setSelectMode(false);
       setSelected(new Set());
-      loadIdentities();
+
+      await ipc.client.faces.mergeIdentities({ targetId, sourceIds });
+      // Background refetch to sync cover bbox + other server-side updates
+      queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
     } catch {
+      // Rollback on failure
+      if (previousData) {
+        queryClient.setQueryData(["faces", "identities"], previousData);
+      }
       toast.error(t("mergePeopleFailed"));
     }
   }
@@ -517,10 +513,22 @@ function PeoplePage() {
     }
     const { id } = confirmDelete;
     setConfirmDelete(null);
+
+    const previousData = queryClient.getQueryData<FaceIdentity[]>(["faces", "identities"]);
+
     try {
+      // Optimistic update: remove from list immediately (no flash)
+      queryClient.setQueryData<FaceIdentity[]>(["faces", "identities"], (old) =>
+        old?.filter((i) => i.id !== id)
+      );
+
       await ipc.client.faces.deleteFaceIdentity({ id });
-      loadIdentities();
+      // Background refetch to stay in sync
+      queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
     } catch {
+      if (previousData) {
+        queryClient.setQueryData(["faces", "identities"], previousData);
+      }
       toast.error(t("deletePersonFailed"));
     }
   }
@@ -687,7 +695,7 @@ function PeoplePage() {
         )}
 
         {/* 空状态 */}
-        {showContent && deferredIdentities.length === 0 && (
+        {showContent && identities.length === 0 && (
           <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
             <User className="h-12 w-12 opacity-20" />
             <p className="text-[13px]">{t("noPeopleTitle")}</p>
@@ -704,10 +712,10 @@ function PeoplePage() {
           </div>
         )}
 
-        {/* 人物卡片网格（使用 useDeferredValue 延迟渲染） */}
-        {showContent && deferredIdentities.length > 0 && (
+        {/* 人物卡片网格 */}
+        {showContent && identities.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-            {deferredIdentities.map((identity) => (
+            {identities.map((identity) => (
               <PersonCard
                 composingRef={composingRef}
                 editingId={editingId}

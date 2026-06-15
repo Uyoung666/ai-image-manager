@@ -192,9 +192,14 @@ export const listFaceIdentities = os.handler(() => {
     }
   }
 
-  // 3. Batch-fetch first face bbox per identity + unique photo count
+  // 3. Batch-fetch face bbox per identity + unique photo count
   // JOIN photos to exclude soft-deleted photos from face count & bbox
+  // Include vectorId so we can look up the exact bbox for representative_vector_id
   const bboxMap = new Map<
+    number,
+    { x: number; y: number; width: number; height: number }
+  >();
+  const vectorBboxMap = new Map<
     number,
     { x: number; y: number; width: number; height: number }
   >();
@@ -203,6 +208,7 @@ export const listFaceIdentities = os.handler(() => {
     .select({
       identityId: faceIdentityMembers.identityId,
       photoId: faceVectors.photoId,
+      vectorId: faceVectors.id,
       bboxX: faceVectors.bboxX,
       bboxY: faceVectors.bboxY,
       bboxWidth: faceVectors.bboxWidth,
@@ -216,11 +222,6 @@ export const listFaceIdentities = os.handler(() => {
     .innerJoin(photos, eq(photos.id, faceVectors.photoId))
     .where(isNull(photos.deletedAt))
     .all();
-  // Build a map from face_vector id → bbox for override lookups
-  const vectorBboxMap = new Map<
-    number,
-    { x: number; y: number; width: number; height: number }
-  >();
   for (const m of allMembers) {
     if (!bboxMap.has(m.identityId)) {
       bboxMap.set(m.identityId, {
@@ -230,45 +231,17 @@ export const listFaceIdentities = os.handler(() => {
         height: m.bboxHeight,
       });
     }
+    // Build per-vector-id bbox map for representative_vector_id override
+    vectorBboxMap.set(m.vectorId, {
+      x: m.bboxX,
+      y: m.bboxY,
+      width: m.bboxWidth,
+      height: m.bboxHeight,
+    });
     if (!uniquePhotoCountMap.has(m.identityId)) {
       uniquePhotoCountMap.set(m.identityId, new Set());
     }
     uniquePhotoCountMap.get(m.identityId)!.add(m.photoId);
-  }
-
-  // Override bbox for identities that have a specific representative_vector_id
-  for (const identity of identities) {
-    if (identity.representativeVectorId != null) {
-      // Find the bbox of the specific representative vector
-      const repMember = allMembers.find(
-        (m) =>
-          m.identityId === identity.id &&
-          db
-            .select({ id: faceVectors.id })
-            .from(faceVectors)
-            .where(eq(faceVectors.id, identity.representativeVectorId!))
-            .get() !== undefined
-      );
-      // Re-query the specific vector's bbox
-      const specificVector = db
-        .select({
-          bboxX: faceVectors.bboxX,
-          bboxY: faceVectors.bboxY,
-          bboxWidth: faceVectors.bboxWidth,
-          bboxHeight: faceVectors.bboxHeight,
-        })
-        .from(faceVectors)
-        .where(eq(faceVectors.id, identity.representativeVectorId))
-        .get();
-      if (specificVector) {
-        bboxMap.set(identity.id, {
-          x: specificVector.bboxX,
-          y: specificVector.bboxY,
-          width: specificVector.bboxWidth,
-          height: specificVector.bboxHeight,
-        });
-      }
-    }
   }
 
   // 4. Assemble results (pure in-memory)
@@ -278,6 +251,17 @@ export const listFaceIdentities = os.handler(() => {
       ? photoMap.get(identity.representativePhotoId)
       : undefined;
     const uniquePhotos = uniquePhotoCountMap.get(identity.id);
+    // Use the exact face vector's bbox when representative_vector_id is set
+    let coverBbox = bboxMap.get(identity.id) ?? null;
+    if (identity.representativeVectorId != null) {
+      const repId = Number(identity.representativeVectorId);
+      if (!Number.isNaN(repId)) {
+        const specificBbox = vectorBboxMap.get(repId);
+        if (specificBbox) {
+          coverBbox = specificBbox;
+        }
+      }
+    }
     return {
       ...identity,
       faceCount: uniquePhotos?.size ?? 0,
@@ -285,7 +269,7 @@ export const listFaceIdentities = os.handler(() => {
       coverPhotoPath: photo?.path ?? null,
       coverPhotoWidth: photo?.width ?? null,
       coverPhotoHeight: photo?.height ?? null,
-      coverBbox: bboxMap.get(identity.id) ?? null,
+      coverBbox,
     };
   });
 });
@@ -482,6 +466,42 @@ export const mergeIdentities = os
       })
       .where(eq(faceIdentities.id, input.targetId))
       .run();
+
+    // Fix representative_vector_id after merge: the default bbox (first face_vector
+    // per identity) may now come from a merged source's photo with different dimensions.
+    // Look up the correct face_vector in the current representative photo.
+    const target = db
+      .select({
+        representativePhotoId: faceIdentities.representativePhotoId,
+      })
+      .from(faceIdentities)
+      .where(eq(faceIdentities.id, input.targetId))
+      .get();
+
+    if (target?.representativePhotoId) {
+      const bestFace = db
+        .select({ vectorId: faceVectors.id })
+        .from(faceIdentityMembers)
+        .innerJoin(
+          faceVectors,
+          eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+        )
+        .where(
+          and(
+            eq(faceIdentityMembers.identityId, input.targetId),
+            eq(faceVectors.photoId, target.representativePhotoId)
+          )
+        )
+        .orderBy(desc(faceVectors.confidence))
+        .limit(1)
+        .get();
+
+      db.update(faceIdentities)
+        .set({ representativeVectorId: bestFace?.vectorId ?? null })
+        .where(eq(faceIdentities.id, input.targetId))
+        .run();
+    }
+
     return { ok: true };
   });
 

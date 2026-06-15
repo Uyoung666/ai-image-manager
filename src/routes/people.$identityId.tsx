@@ -313,6 +313,22 @@ function PersonDetailPage() {
     setShareDialogOpen(true);
   }
 
+  async function handleSetAsPersonCover(id: number) {
+    if (!identity) {
+      return;
+    }
+    try {
+      await ipc.client.faces.updateFaceIdentity({
+        id: identity.id,
+        representativePhotoId: id,
+      });
+      toast.success(t("setAsPersonCover"));
+      queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
+    } catch {
+      // ignore
+    }
+  }
+
   // Batch actions
   function handleExportSelected() {
     setExportIds(Array.from(selectedIds));
@@ -952,6 +968,7 @@ function PersonDetailPage() {
         onDelete={handleDeletePhoto}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
+        onSetAsPersonCover={handleSetAsPersonCover}
         onShare={handleShare}
         onToggleFavorite={handleToggleFavorite}
         onUploadToCloud={handleUploadToCloud}

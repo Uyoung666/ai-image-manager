@@ -343,6 +343,24 @@ function AlbumDetailPage() {
     toast.success(t("toastRemovedFromAlbum"));
   }
 
+  async function handleSetAsAlbumCover(id: number) {
+    if (!album) {
+      return;
+    }
+    try {
+      await ipc.client.albums.updateAlbum({
+        id: album.id,
+        coverPhotoId: id,
+      });
+      setAlbum((prev) =>
+        prev ? { ...prev, coverPhotoId: id } : prev
+      );
+      toast.success(t("setAsAlbumCover"));
+    } catch {
+      // ignore
+    }
+  }
+
   async function handleDeleteAlbum() {
     if (!album) {
       return;
@@ -962,6 +980,7 @@ function AlbumDetailPage() {
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
         onRemoveFromAlbum={album?.isSmart ? undefined : handleRemoveFromAlbum}
+        onSetAsAlbumCover={album?.isSmart ? undefined : handleSetAsAlbumCover}
         onShare={handleShare}
         onToggleFavorite={handleToggleFavorite}
         onUploadToCloud={handleUploadToCloud}

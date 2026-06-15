@@ -39,6 +39,8 @@ interface PhotoContextMenuProps {
   onExport: (id: number) => void;
   onOpenExplorer: (path: string) => void;
   onRemoveFromAlbum?: (id: number) => void;
+  onSetAsAlbumCover?: (id: number) => void;
+  onSetAsPersonCover?: (id: number) => void;
   onShare?: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   onUploadToCloud?: (id: number) => void;
@@ -56,6 +58,8 @@ export function PhotoContextMenu({
   onToggleFavorite,
   onUploadToCloud,
   onRemoveFromAlbum,
+  onSetAsAlbumCover,
+  onSetAsPersonCover,
   onShare,
   onBatchDelete,
   onBatchExport,
@@ -214,6 +218,36 @@ export function PhotoContextMenu({
           {menu.isBatch
             ? `${t("removeFromAlbum")} (${menu.selectionCount})`
             : t("removeFromAlbum")}
+        </button>
+      )}
+      {onSetAsAlbumCover && (
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          disabled={menu.photoId === null || menu.isBatch}
+          onClick={() => {
+            if (menu.photoId !== null) {
+              onSetAsAlbumCover(menu.photoId);
+            }
+            onClose();
+          }}
+        >
+          <Image className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("setAsAlbumCover")}
+        </button>
+      )}
+      {onSetAsPersonCover && (
+        <button
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
+          disabled={menu.photoId === null || menu.isBatch}
+          onClick={() => {
+            if (menu.photoId !== null) {
+              onSetAsPersonCover(menu.photoId);
+            }
+            onClose();
+          }}
+        >
+          <Image className="h-3.5 w-3.5 flex-shrink-0" />
+          {t("setAsPersonCover")}
         </button>
       )}
       <button
