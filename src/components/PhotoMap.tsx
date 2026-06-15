@@ -145,7 +145,7 @@ export function PhotoMap({
   return (
     <div className="photo-map-wrapper relative overflow-hidden rounded-[8px] border border-border">
       <MapContainer
-        attributionControl={true}
+        attributionControl={false}
         center={center}
         className="h-[380px] w-full"
         key={mapSource}
