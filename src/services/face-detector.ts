@@ -370,7 +370,7 @@ async function clusterUnassignedFaces(): Promise<void> {
 
       db.update(faceIdentities)
         .set({
-          faceCount: sql`(SELECT COUNT(*) FROM face_identity_members WHERE identity_id = ${match.identityId})`,
+          faceCount: sql`(SELECT COUNT(DISTINCT fv.photo_id) FROM face_identity_members fim JOIN face_vectors fv ON fv.id = fim.face_vector_id WHERE fim.identity_id = ${match.identityId})`,
           ...(cur?.representativePhotoId
             ? {}
             : { representativePhotoId: face.photoId }),

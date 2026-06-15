@@ -233,8 +233,9 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     // Recalculate faceCount for identities that still have members
     db.run(
       sql`UPDATE face_identities SET face_count = (
-        SELECT COUNT(*) FROM face_identity_members
-        WHERE face_identity_members.identity_id = face_identities.id
+        SELECT COUNT(DISTINCT fv.photo_id) FROM face_identity_members fim
+        JOIN face_vectors fv ON fv.id = fim.face_vector_id
+        WHERE fim.identity_id = face_identities.id
       )`
     );
   }

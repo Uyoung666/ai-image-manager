@@ -192,14 +192,17 @@ export const listFaceIdentities = os.handler(() => {
     }
   }
 
-  // 3. Batch-fetch first face bbox per identity (single JOIN, JS dedup)
+  // 3. Batch-fetch first face bbox per identity + unique photo count
+  // JOIN photos to exclude soft-deleted photos from face count & bbox
   const bboxMap = new Map<
     number,
     { x: number; y: number; width: number; height: number }
   >();
+  const uniquePhotoCountMap = new Map<number, Set<number>>();
   const allMembers = db
     .select({
       identityId: faceIdentityMembers.identityId,
+      photoId: faceVectors.photoId,
       bboxX: faceVectors.bboxX,
       bboxY: faceVectors.bboxY,
       bboxWidth: faceVectors.bboxWidth,
@@ -210,8 +213,14 @@ export const listFaceIdentities = os.handler(() => {
       faceVectors,
       eq(faceVectors.id, faceIdentityMembers.faceVectorId)
     )
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+    .where(isNull(photos.deletedAt))
     .all();
-  // Keep only the first bbox per identity
+  // Build a map from face_vector id → bbox for override lookups
+  const vectorBboxMap = new Map<
+    number,
+    { x: number; y: number; width: number; height: number }
+  >();
   for (const m of allMembers) {
     if (!bboxMap.has(m.identityId)) {
       bboxMap.set(m.identityId, {
@@ -221,15 +230,57 @@ export const listFaceIdentities = os.handler(() => {
         height: m.bboxHeight,
       });
     }
+    if (!uniquePhotoCountMap.has(m.identityId)) {
+      uniquePhotoCountMap.set(m.identityId, new Set());
+    }
+    uniquePhotoCountMap.get(m.identityId)!.add(m.photoId);
+  }
+
+  // Override bbox for identities that have a specific representative_vector_id
+  for (const identity of identities) {
+    if (identity.representativeVectorId != null) {
+      // Find the bbox of the specific representative vector
+      const repMember = allMembers.find(
+        (m) =>
+          m.identityId === identity.id &&
+          db
+            .select({ id: faceVectors.id })
+            .from(faceVectors)
+            .where(eq(faceVectors.id, identity.representativeVectorId!))
+            .get() !== undefined
+      );
+      // Re-query the specific vector's bbox
+      const specificVector = db
+        .select({
+          bboxX: faceVectors.bboxX,
+          bboxY: faceVectors.bboxY,
+          bboxWidth: faceVectors.bboxWidth,
+          bboxHeight: faceVectors.bboxHeight,
+        })
+        .from(faceVectors)
+        .where(eq(faceVectors.id, identity.representativeVectorId))
+        .get();
+      if (specificVector) {
+        bboxMap.set(identity.id, {
+          x: specificVector.bboxX,
+          y: specificVector.bboxY,
+          width: specificVector.bboxWidth,
+          height: specificVector.bboxHeight,
+        });
+      }
+    }
   }
 
   // 4. Assemble results (pure in-memory)
+  // Override faceCount with unique photo count per identity
   return identities.map((identity) => {
     const photo = identity.representativePhotoId
       ? photoMap.get(identity.representativePhotoId)
       : undefined;
+    const uniquePhotos = uniquePhotoCountMap.get(identity.id);
     return {
       ...identity,
+      faceCount: uniquePhotos?.size ?? 0,
       coverThumbnailPath: photo?.thumbnailPath || photo?.path || null,
       coverPhotoPath: photo?.path ?? null,
       coverPhotoWidth: photo?.width ?? null,
@@ -268,7 +319,20 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
         .all()
     : [];
 
-  const photoIds = [...new Set(faces.map((f) => f.photoId))];
+  // Exclude faces from soft-deleted photos
+  const allPhotoIds = [...new Set(faces.map((f) => f.photoId))];
+  const validPhotoSet = new Set<number>();
+  if (allPhotoIds.length > 0) {
+    const rows = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(and(inArray(photos.id, allPhotoIds), isNull(photos.deletedAt)))
+      .all();
+    for (const r of rows) validPhotoSet.add(r.id);
+  }
+  const validFaces = faces.filter((f) => validPhotoSet.has(f.photoId));
+
+  const photoIds = [...new Set(validFaces.map((f) => f.photoId))];
   const photoRows = photoIds.length
     ? db
         .select({
@@ -287,7 +351,7 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
         .all()
     : [];
 
-  return { ...identity, faces, photos: photoRows };
+  return { ...identity, faces: validFaces, photos: photoRows };
 });
 
 export const createFaceIdentity = os
@@ -299,11 +363,20 @@ export const createFaceIdentity = os
   )
   .handler(async ({ input }) => {
     const db = getDatabase();
+    let faceCount = 0;
+    if (input.faceVectorIds?.length) {
+      const photoIds = db
+        .select({ photoId: faceVectors.photoId })
+        .from(faceVectors)
+        .where(inArray(faceVectors.id, input.faceVectorIds))
+        .all();
+      faceCount = new Set(photoIds.map((p) => p.photoId)).size;
+    }
     const result = db
       .insert(faceIdentities)
       .values({
         name: input.name,
-        faceCount: input.faceVectorIds?.length ?? 0,
+        faceCount,
       })
       .returning({ insertedId: faceIdentities.id })
       .get();
@@ -329,12 +402,46 @@ export const updateFaceIdentity = os
     z.object({
       id: z.number(),
       name: z.string().optional(),
+      representativePhotoId: z.number().optional().nullable(),
     })
   )
   .handler(({ input }) => {
     const db = getDatabase();
+    const setData: Record<string, unknown> = {};
+    if (input.name !== undefined) {
+      setData.name = input.name;
+      setData.isConfirmed = true;
+    }
+    if (input.representativePhotoId !== undefined) {
+      setData.representativePhotoId = input.representativePhotoId;
+      if (input.representativePhotoId !== null) {
+        // Find the face_vector in the chosen photo that belongs to this identity
+        const memberFace = db
+          .select({
+            vectorId: faceVectors.id,
+            confidence: faceVectors.confidence,
+          })
+          .from(faceIdentityMembers)
+          .innerJoin(
+            faceVectors,
+            eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+          )
+          .where(
+            and(
+              eq(faceIdentityMembers.identityId, input.id),
+              eq(faceVectors.photoId, input.representativePhotoId)
+            )
+          )
+          .orderBy(desc(faceVectors.confidence))
+          .limit(1)
+          .get();
+        setData.representativeVectorId = memberFace?.vectorId ?? null;
+      } else {
+        setData.representativeVectorId = null;
+      }
+    }
     db.update(faceIdentities)
-      .set({ name: input.name, isConfirmed: true })
+      .set(setData)
       .where(eq(faceIdentities.id, input.id))
       .run();
     return db
@@ -371,7 +478,7 @@ export const mergeIdentities = os
     db.update(faceIdentities)
       .set({
         isConfirmed: true,
-        faceCount: sql`(SELECT COUNT(*) FROM ${faceIdentityMembers} WHERE ${faceIdentityMembers.identityId} = ${input.targetId})`,
+        faceCount: sql`(SELECT COUNT(DISTINCT ${faceVectors.photoId}) FROM ${faceIdentityMembers} INNER JOIN ${faceVectors} ON ${faceVectors.id} = ${faceIdentityMembers.faceVectorId} WHERE ${faceIdentityMembers.identityId} = ${input.targetId})`,
       })
       .where(eq(faceIdentities.id, input.targetId))
       .run();
@@ -419,8 +526,12 @@ export const removeFaceFromIdentity = os
       .run();
 
     const remaining = db
-      .select({ count: sql<number>`COUNT(*)` })
+      .select({ count: sql<number>`COUNT(DISTINCT ${faceVectors.photoId})` })
       .from(faceIdentityMembers)
+      .innerJoin(
+        faceVectors,
+        eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+      )
       .where(eq(faceIdentityMembers.identityId, input.identityId))
       .get();
 
