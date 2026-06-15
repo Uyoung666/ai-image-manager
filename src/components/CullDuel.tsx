@@ -376,6 +376,16 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // ? 键始终处理（切换面板），不受面板打开状态影响
+      if (e.key === "?") {
+        e.preventDefault();
+        e.stopPropagation();
+        setShortcutsOpen((prev) => {
+          shortcutsOpenRef.current = !prev;
+          return !prev;
+        });
+        return;
+      }
       if (
         shortcutsOpenRef.current ||
         fatigueOpenRef.current ||
@@ -395,12 +405,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
       const current = pairRef.current;
 
-      if (e.key === "?") {
-        e.preventDefault();
-        e.stopPropagation();
-        shortcutsOpenRef.current = true;
-        setShortcutsOpen(true);
-      } else if (e.key === "ArrowLeft" && current) {
+      if (e.key === "ArrowLeft" && current) {
         e.preventDefault();
         if (isSubmitting) {
           return;

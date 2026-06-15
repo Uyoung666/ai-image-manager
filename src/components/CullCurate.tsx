@@ -296,6 +296,16 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // ? 键始终处理（切换面板），不受面板打开状态影响
+      if (e.key === "?") {
+        e.preventDefault();
+        e.stopPropagation();
+        setShortcutsOpen((prev) => {
+          shortcutsOpenRef.current = !prev;
+          return !prev;
+        });
+        return;
+      }
       if (shortcutsOpenRef.current || finishConfirmOpenRef.current) {
         return;
       }
@@ -308,12 +318,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
       const current = itemRef.current;
 
-      if (e.key === "?") {
-        e.preventDefault();
-        e.stopPropagation();
-        shortcutsOpenRef.current = true;
-        setShortcutsOpen(true);
-      } else if (e.key === "ArrowRight" && current && !isSubmitting) {
+      if (e.key === "ArrowRight" && current && !isSubmitting) {
         e.preventDefault();
         keepMutation.mutate(current);
       } else if (

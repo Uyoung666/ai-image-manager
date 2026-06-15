@@ -1,5 +1,5 @@
 import { useLocation } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import DragWindowRegion from "@/components/drag-window-region";
 import { GlobalProgressBar } from "@/components/global-progress-bar";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
@@ -67,29 +67,28 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [perfOn] = useState(isPerfMonitorEnabled);
   const { metrics, memory } = usePerfMonitor(perfOn);
+  const shortcutsOpenRef = useRef(shortcutsOpen);
+  shortcutsOpenRef.current = shortcutsOpen;
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      // ? key (with or without shift)
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const target = e.target as HTMLElement;
-        // Don't trigger when typing in input/textarea/search
-        if (
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable
-        ) {
-          return;
-        }
-        e.preventDefault();
-        setShortcutsOpen((prev) => !prev);
+  // 使用 ref 读取 shortcutsOpen，避免回调依赖变化导致监听器反复重建，
+  // 防止按 ? 键时多个 handler 同时触发产生叠加面板
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
       }
-      if (e.key === "Escape" && shortcutsOpen) {
-        setShortcutsOpen(false);
-      }
-    },
-    [shortcutsOpen]
-  );
+      e.preventDefault();
+      setShortcutsOpen((prev) => !prev);
+    }
+    if (e.key === "Escape" && shortcutsOpenRef.current) {
+      setShortcutsOpen(false);
+    }
+  }, []);
 
   useEffect(() => {
     document.addEventListener("keydown", handleKeyDown);
