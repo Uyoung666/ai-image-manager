@@ -194,9 +194,10 @@
     @apply font-sans;
   }
 
-  /* Themed scrollbar — slim, subtle, non-intrusive */
+  /* Slim themed scrollbar */
   * {
-    scrollbar-color: var(--foreground-tertiary) transparent;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--foreground-tertiary) 35%, transparent) transparent;
   }
   ::-webkit-scrollbar {
     width: 6px;
@@ -205,18 +206,18 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-  ::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--foreground-tertiary) 55%, transparent);
-    background-clip: padding-box;
-    border: 1px solid transparent;
-    border-radius: 9999px;
-    transition: background 200ms ease;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--foreground-tertiary) 80%, transparent);
-  }
   ::-webkit-scrollbar-corner {
     background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--foreground-tertiary) 30%, transparent);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--foreground-tertiary) 55%, transparent);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background: color-mix(in srgb, var(--foreground-tertiary) 75%, transparent);
   }
 
   [data-masonry-scroll] {
