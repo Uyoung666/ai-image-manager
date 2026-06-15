@@ -1,0 +1,26 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { CloudConfigPanel } from "@/components/CloudConfigPanel";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+
+function CloudSyncSettingsPage() {
+  const { t } = useTranslation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef);
+
+  return (
+    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
+      <section className="space-y-3">
+        <h2 className="font-[590] text-[14px] text-foreground">
+          {t("cloudSync")}
+        </h2>
+        <CloudConfigPanel />
+      </section>
+    </div>
+  );
+}
+
+export const Route = createFileRoute("/settings/cloud-sync")({
+  component: CloudSyncSettingsPage,
+});

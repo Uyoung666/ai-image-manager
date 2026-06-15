@@ -17,6 +17,13 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as CullRouteImport } from './routes/cull'
 import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsWatermarkRouteImport } from './routes/settings.watermark'
+import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
+import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
+import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
+import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
+import { Route as SettingsAccelerationRouteImport } from './routes/settings.acceleration'
+import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityId'
 import { Route as CullSessionIdRouteImport } from './routes/cull.$sessionId'
 import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
@@ -61,6 +68,41 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsWatermarkRoute = SettingsWatermarkRouteImport.update({
+  id: '/watermark',
+  path: '/watermark',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsUpdateRoute = SettingsUpdateRouteImport.update({
+  id: '/update',
+  path: '/update',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsStorageRoute = SettingsStorageRouteImport.update({
+  id: '/storage',
+  path: '/storage',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsCloudSyncRoute = SettingsCloudSyncRouteImport.update({
+  id: '/cloud-sync',
+  path: '/cloud-sync',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
+  id: '/appearance',
+  path: '/appearance',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAccelerationRoute = SettingsAccelerationRouteImport.update({
+  id: '/acceleration',
+  path: '/acceleration',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAboutRoute = SettingsAboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const PeopleIdentityIdRoute = PeopleIdentityIdRouteImport.update({
   id: '/$identityId',
   path: '/$identityId',
@@ -84,11 +126,18 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/settings/about': typeof SettingsAboutRoute
+  '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/storage': typeof SettingsStorageRoute
+  '/settings/update': typeof SettingsUpdateRoute
+  '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -97,11 +146,18 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/settings/about': typeof SettingsAboutRoute
+  '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/storage': typeof SettingsStorageRoute
+  '/settings/update': typeof SettingsUpdateRoute
+  '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -111,11 +167,18 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/duplicates': typeof DuplicatesRoute
   '/people': typeof PeopleRouteWithChildren
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/settings/about': typeof SettingsAboutRoute
+  '/settings/acceleration': typeof SettingsAccelerationRoute
+  '/settings/appearance': typeof SettingsAppearanceRoute
+  '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/storage': typeof SettingsStorageRoute
+  '/settings/update': typeof SettingsUpdateRoute
+  '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +194,13 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/settings/about'
+    | '/settings/acceleration'
+    | '/settings/appearance'
+    | '/settings/cloud-sync'
+    | '/settings/storage'
+    | '/settings/update'
+    | '/settings/watermark'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +214,13 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/settings/about'
+    | '/settings/acceleration'
+    | '/settings/appearance'
+    | '/settings/cloud-sync'
+    | '/settings/storage'
+    | '/settings/update'
+    | '/settings/watermark'
   id:
     | '__root__'
     | '/'
@@ -157,6 +234,13 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/settings/about'
+    | '/settings/acceleration'
+    | '/settings/appearance'
+    | '/settings/cloud-sync'
+    | '/settings/storage'
+    | '/settings/update'
+    | '/settings/watermark'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -166,7 +250,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   DuplicatesRoute: typeof DuplicatesRoute
   PeopleRoute: typeof PeopleRouteWithChildren
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   TrashRoute: typeof TrashRoute
 }
 
@@ -228,6 +312,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/watermark': {
+      id: '/settings/watermark'
+      path: '/watermark'
+      fullPath: '/settings/watermark'
+      preLoaderRoute: typeof SettingsWatermarkRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/update': {
+      id: '/settings/update'
+      path: '/update'
+      fullPath: '/settings/update'
+      preLoaderRoute: typeof SettingsUpdateRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/storage': {
+      id: '/settings/storage'
+      path: '/storage'
+      fullPath: '/settings/storage'
+      preLoaderRoute: typeof SettingsStorageRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/cloud-sync': {
+      id: '/settings/cloud-sync'
+      path: '/cloud-sync'
+      fullPath: '/settings/cloud-sync'
+      preLoaderRoute: typeof SettingsCloudSyncRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/appearance': {
+      id: '/settings/appearance'
+      path: '/appearance'
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof SettingsAppearanceRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/acceleration': {
+      id: '/settings/acceleration'
+      path: '/acceleration'
+      fullPath: '/settings/acceleration'
+      preLoaderRoute: typeof SettingsAccelerationRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/about': {
+      id: '/settings/about'
+      path: '/about'
+      fullPath: '/settings/about'
+      preLoaderRoute: typeof SettingsAboutRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/people/$identityId': {
       id: '/people/$identityId'
       path: '/$identityId'
@@ -284,6 +417,30 @@ const PeopleRouteChildren: PeopleRouteChildren = {
 const PeopleRouteWithChildren =
   PeopleRoute._addFileChildren(PeopleRouteChildren)
 
+interface SettingsRouteChildren {
+  SettingsAboutRoute: typeof SettingsAboutRoute
+  SettingsAccelerationRoute: typeof SettingsAccelerationRoute
+  SettingsAppearanceRoute: typeof SettingsAppearanceRoute
+  SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
+  SettingsStorageRoute: typeof SettingsStorageRoute
+  SettingsUpdateRoute: typeof SettingsUpdateRoute
+  SettingsWatermarkRoute: typeof SettingsWatermarkRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAboutRoute: SettingsAboutRoute,
+  SettingsAccelerationRoute: SettingsAccelerationRoute,
+  SettingsAppearanceRoute: SettingsAppearanceRoute,
+  SettingsCloudSyncRoute: SettingsCloudSyncRoute,
+  SettingsStorageRoute: SettingsStorageRoute,
+  SettingsUpdateRoute: SettingsUpdateRoute,
+  SettingsWatermarkRoute: SettingsWatermarkRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AlbumsRoute: AlbumsRouteWithChildren,
@@ -291,7 +448,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   DuplicatesRoute: DuplicatesRoute,
   PeopleRoute: PeopleRouteWithChildren,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   TrashRoute: TrashRoute,
 }
 export const routeTree = rootRouteImport

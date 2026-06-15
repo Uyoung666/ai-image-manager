@@ -383,3 +383,14 @@ export const markGpuPromptShown = os.handler(async () => {
   markPromptShown();
   return { ok: true };
 });
+
+export const getOpenAtLogin = os.handler(() => {
+  return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+});
+
+export const setOpenAtLogin = os
+  .input(z.object({ openAtLogin: z.boolean() }))
+  .handler(async ({ input }) => {
+    app.setLoginItemSettings({ openAtLogin: input.openAtLogin });
+    return { ok: true };
+  });

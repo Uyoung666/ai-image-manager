@@ -6,11 +6,13 @@ import {
   getDataPathInfo,
   getGpuSettings,
   getMirrorSettings,
+  getOpenAtLogin,
   markGpuPromptShown,
   setAppSetting,
   setDataPath,
   setGpuSettings,
   setMirrorSettings,
+  setOpenAtLogin,
 } from "./handlers";
 
 export const settings = {
@@ -26,4 +28,6 @@ export const settings = {
   checkMirrorHealth,
   checkGpuCapability,
   markGpuPromptShown,
+  getOpenAtLogin,
+  setOpenAtLogin,
 };

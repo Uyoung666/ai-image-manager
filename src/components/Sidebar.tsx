@@ -1270,7 +1270,7 @@ export function Sidebar({
             {/* System group */}
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                location.pathname === "/settings"
+                location.pathname.startsWith("/settings")
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
@@ -1866,7 +1866,7 @@ export function Sidebar({
             {/* System group */}
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                location.pathname === "/settings"
+                location.pathname.startsWith("/settings")
                   ? "bg-primary/15 text-primary"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
