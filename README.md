@@ -6,7 +6,7 @@
 
 网址：https://ai-image-manager.uyoungvision.cn
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.3.1-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
@@ -19,9 +19,9 @@
 
 从 [Releases](https://github.com/Uyoung666/ai-image-manager/releases) 下载最新版本。Release 中包含操作演示视频。
 
-**安装版（推荐）：** `AI Image Manager-1.3.0 Setup.exe` — 安装到系统默认位置，创建快捷方式，支持自动更新。
+**安装版（推荐）：** `AI Image Manager-1.3.1 Setup.exe` — 安装到系统默认位置，创建快捷方式，支持自动更新。
 
-**便携版：** `AI Image Manager-win32-x64-1.3.0.zip` — 解压即用，不写注册表。
+**便携版：** `AI Image Manager-win32-x64-1.3.1.zip` — 解压即用，不写注册表。
 
 ---
 
