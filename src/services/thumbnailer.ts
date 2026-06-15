@@ -347,14 +347,7 @@ export function clearThumbnailDiskCache(): {
   };
 }
 
-/**
- * Build a Set of expected thumbnail filenames by combining two sources:
- * (a) thumbnailPath column — the exact stored path (authoritative for "md")
- * (b) getThumbnailPath() — computed for all 3 sizes from the image path
- *
- * The dual-source approach prevents false positives when dprScale changes
- * between sessions (the Set deduplicates when both sources agree).
- */
+/** Build the set of expected thumbnail filenames from DB photo records. */
 function buildExpectedThumbnailSet(): Set<string> | null {
   try {
     const db = getDatabase();
@@ -380,10 +373,7 @@ function buildExpectedThumbnailSet(): Set<string> | null {
   }
 }
 
-/**
- * Scan the thumbnail cache directory for orphan files — thumbnails that
- * exist on disk but have no corresponding photo record in the database.
- */
+/** Scan cache dir for orphan files with no corresponding photo record. */
 export function scanOrphanThumbnails(): {
   orphanCount: number;
   orphanSizeBytes: number;
@@ -421,11 +411,7 @@ export function scanOrphanThumbnails(): {
   return { orphanCount, orphanSizeBytes, totalFiles };
 }
 
-/**
- * Delete orphan thumbnail files — those on disk with no corresponding
- * photo record. Only touches confirmed orphans; active thumbnails are
- * left untouched.
- */
+/** Delete orphan thumbnail files. Only touches confirmed orphans. */
 export function cleanOrphanThumbnails(): {
   removed: number;
   freedMB: number;
@@ -440,27 +426,34 @@ export function cleanOrphanThumbnails(): {
   }
 
   let removed = 0;
-  let totalBytes = 0;
+  let freedBytes = 0;
 
   const entries = fs.readdirSync(thumbnailDir);
   for (const entry of entries) {
-    if (!entry.endsWith(".webp")) {
-      continue;
-    }
+    if (!entry.endsWith(".webp")) continue;
     if (!expectedFiles.has(entry)) {
       const entryPath = path.join(thumbnailDir, entry);
+      let fileSize = 0;
       try {
-        totalBytes += fs.statSync(entryPath).size;
-        fs.unlinkSync(entryPath);
-        removed++;
+        fileSize = fs.statSync(entryPath).size;
       } catch {
-        /* skip locked / inaccessible files */
+        continue;
+      }
+
+      try {
+        fs.unlinkSync(entryPath);
+        freedBytes += fileSize;
+        removed++;
+      } catch (err: any) {
+        console.error(
+          `[Thumbnailer] Failed to delete orphan: ${entry} (code: ${err?.code || "unknown"})`
+        );
       }
     }
   }
 
   return {
     removed,
-    freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
+    freedMB: Math.round((freedBytes / (1024 * 1024)) * 10) / 10,
   };
 }
