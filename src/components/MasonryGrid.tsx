@@ -875,7 +875,7 @@ export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
           data-masonry-scroll=""
           onMouseDown={handleMarqueeStart}
           ref={scrollRef}
-          style={{ height: "100%", overflowY: "auto" }}
+          style={{ height: "100%", overflowY: "auto", overflowX: "hidden" }}
         >
           {layoutReady && (
             <div
