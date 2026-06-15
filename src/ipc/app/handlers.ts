@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { app, autoUpdater } from "electron";
+import { app, autoUpdater, net, session, shell } from "electron";
+import Store from "electron-store";
+import { z } from "zod";
 import { getHttpServerPort } from "@/services/http-server";
 import { getUpdateState } from "@/services/update-state";
 
@@ -55,4 +57,72 @@ export const getUpdateStatus = os.handler(() => {
  */
 export const getHttpPort = os.handler(() => {
   return getHttpServerPort();
+});
+
+// ── Update proxy ─────────────────────────────────────────────────────
+let __updateConfigStore: Store<{ proxy: string }> | null = null;
+function getStore() {
+  if (!__updateConfigStore) {
+    __updateConfigStore = new Store<{ proxy: string }>({
+      name: "update-config",
+      defaults: { proxy: "" },
+    });
+  }
+  return __updateConfigStore;
+}
+
+export const getUpdateProxy = os.handler(() => {
+  return { proxy: getStore().get("proxy", "") };
+});
+
+export const setUpdateProxy = os
+  .input(z.object({ proxy: z.string() }))
+  .handler(async ({ input }) => {
+    getStore().set("proxy", input.proxy);
+    if (input.proxy) {
+      await session.defaultSession.setProxy({ proxyRules: input.proxy });
+    } else {
+      await session.defaultSession.setProxy({});
+    }
+    return { ok: true };
+  });
+
+export const testProxy = os.handler(async () => {
+  const start = Date.now();
+  // Step 1: HEAD to measure latency
+  try {
+    const headRes = await net.fetch("https://github.com", {
+      method: "HEAD",
+    });
+    const latency = Date.now() - start;
+
+    // Step 2: GET a small page to measure throughput
+    const speedStart = Date.now();
+    const bodyRes = await net.fetch("https://github.com", { method: "GET" });
+    const buf = await bodyRes.arrayBuffer();
+    const elapsed = (Date.now() - speedStart) / 1000; // seconds
+    const bytes = buf.byteLength;
+    const bytesPerSecond = elapsed > 0 ? bytes / elapsed : 0;
+
+    return {
+      ok: true,
+      status: headRes.status,
+      latency,
+      bytes,
+      bytesPerSecond: Math.round(bytesPerSecond),
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: (err as Error)?.message || String(err),
+      latency: Date.now() - start,
+    };
+  }
+});
+
+export const openReleasePage = os.handler(() => {
+  shell.openExternal(
+    "https://github.com/Uyoung666/ai-image-manager/releases/latest"
+  );
+  return { ok: true };
 });

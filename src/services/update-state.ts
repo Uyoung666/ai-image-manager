@@ -3,8 +3,15 @@
 // module-level variable bridges them without requiring ipcMain.invoke.
 
 export interface UpdateStatus {
+  bytesPerSecond?: number;
   message?: string;
+  percent?: number;
   phase: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+  total?: number;
+  transferred?: number;
+  updateURL?: string;
   version?: string;
 }
 

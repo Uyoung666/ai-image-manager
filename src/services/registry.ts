@@ -6,6 +6,9 @@ import {
   isAiModelLoaded,
   isVectorDBInitialized,
   loadModel,
+  setEmbeddingModel,
+  setIsModelLoaded,
+  setLocalModelPath,
   stopEmbedding,
   wasAutoRepaired,
 } from "@/services/ai-embedder";
@@ -349,6 +352,12 @@ registry.register({
   },
   stop: async () => {
     stopEmbedding();
+    // Reset model state so the next start() reloads from the
+    // current getDataPath() — essential after data-path migration
+    // (onboarding / settings) which moves models to a new directory.
+    setIsModelLoaded(false);
+    setEmbeddingModel(null);
+    setLocalModelPath(null);
     try {
       shutdownPool();
     } catch {

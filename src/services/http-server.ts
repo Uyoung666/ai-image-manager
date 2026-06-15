@@ -12,6 +12,9 @@ import { isSafePath } from "@/utils/path-security";
 let server: http.Server | null = null;
 let serverPort: number | null = null;
 let isServerStarted = false;
+// 保存首次分配的端口号，重启时复用，避免 renderer 持有的
+// preload 注入端口（通过 --http-port）在迁移后失效。
+let lastUsedPort: number | null = null;
 
 // ── MIME 类型映射 ─────────────────────────────────────────────────────
 
@@ -558,7 +561,14 @@ export function startHttpServerEarly(): Promise<number> {
     let attempts = 0;
 
     function tryListen(): void {
-      const port = attempts === 0 ? 0 : getRandomDynamicPort();
+      // Prefer OS-assigned port on first attempt, but if we've
+      // already run before (e.g. restart after data migration),
+      // reuse the last-used port so the renderer's preload-injected
+      // --http-port value stays valid.
+      const port =
+        attempts === 0
+          ? lastUsedPort ?? 0
+          : getRandomDynamicPort();
 
       server = http.createServer(handleRequest);
 
@@ -588,6 +598,7 @@ export function startHttpServerEarly(): Promise<number> {
         const addr = server?.address();
         if (addr && typeof addr === "object") {
           serverPort = addr.port;
+          lastUsedPort = addr.port;
           isServerStarted = true;
           console.log(`[HttpServer] Started on http://127.0.0.1:${serverPort}`);
           resolve(serverPort);

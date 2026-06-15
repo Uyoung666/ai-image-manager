@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { app } from "electron";
 import Store from "electron-store";
 
@@ -16,16 +17,40 @@ function getConfigStore(): Store<{ dataPath: string }> {
   return configStore;
 }
 
+function readConfigFileDirectly(): string {
+  try {
+    const filePath = path.join(app.getPath("userData"), "app-config.json");
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const parsed = JSON.parse(raw);
+      return (parsed as any).dataPath || "";
+    }
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
 export function initDataPath(): string {
   if (resolvedDataPath) {
     return resolvedDataPath;
   }
 
-  const customPath = getConfigStore().get("dataPath", "");
+  // Read config file directly — more reliable than electron-store
+  // during early startup (electron-store via conf may return stale defaults)
+  const directValue = readConfigFileDirectly();
+  const storeValue = getConfigStore().get("dataPath", "");
+  const customPath = directValue || storeValue;
+  const defaultPath = app.getPath("userData");
+
   if (customPath) {
-    resolvedDataPath = customPath;
+    if (!fs.existsSync(customPath)) {
+      resolvedDataPath = defaultPath;
+    } else {
+      resolvedDataPath = customPath;
+    }
   } else {
-    resolvedDataPath = app.getPath("userData");
+    resolvedDataPath = defaultPath;
   }
 
   if (!fs.existsSync(resolvedDataPath)) {

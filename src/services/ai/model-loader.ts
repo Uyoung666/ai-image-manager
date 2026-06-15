@@ -99,6 +99,20 @@ function configureTransformersEnv(env: any, localModelPath: string): void {
   env.allowRemoteModels = true;
 }
 
+function copyRecursiveSync(src: string, dest: string): void {
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      fs.mkdirSync(destPath, { recursive: true });
+      copyRecursiveSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 function copyDir(src: string, dest: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     // 验证源路径和目标路径的安全性
@@ -119,13 +133,31 @@ function copyDir(src: string, dest: string): Promise<void> {
       return;
     }
 
-    fs.cp(src, dest, { recursive: true }, (err) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
+    // Log source contents before copy
+    try {
+      const srcExists = fs.existsSync(src);
+      const srcEntries = srcExists
+        ? fs.readdirSync(src, { recursive: true }).length
+        : 0;
+      console.error(
+        `[copyDir] src=${src} exists=${srcExists} entries=${srcEntries}`
+      );
+      console.error(`[copyDir] dest=${dest}`);
+    } catch {
+      /* best-effort logging */
+    }
+
+    // Manual recursive copy — more reliable than fs.cpSync with Unicode paths
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+      copyRecursiveSync(src, dest);
+      const destEntries = fs.readdirSync(dest, { recursive: true }).length;
+      console.error(`[copyDir] done — dest entries=${destEntries}`);
+      resolve();
+    } catch (err: any) {
+      console.error(`[copyDir] failed: ${err.message}`);
+      reject(err);
+    }
   });
 }
 

@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   app,
@@ -15,6 +14,7 @@ import {
   nativeTheme,
   protocol,
   screen,
+  session,
   shell,
   Tray,
 } from "electron";
@@ -476,6 +476,21 @@ const mediaSemaphore = new IoSemaphore(16);
 export { invalidateFoldersCache } from "@/utils/folder-paths";
 
 // ── AI model availability (copy from resources or dev paths) ─────────
+function copyRecursive(src: string, dest: string): void {
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  log.info(`[copyRecursive] src=${src} has ${entries.length} top-level entries`);
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      fs.mkdirSync(destPath, { recursive: true });
+      copyRecursive(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 async function ensureModelAvailable(): Promise<void> {
   const dataPath = getDataPath();
   const modelsDir = path.join(dataPath, "models");
@@ -484,11 +499,11 @@ async function ensureModelAvailable(): Promise<void> {
     "Xenova",
     "clip-vit-base-patch32",
     "onnx",
-    "vision_model_quantized.onnx",
+    "vision_model_quantized.onnx"
   );
 
   if (fs.existsSync(visionMarker)) {
-    log.info("AI models already cached");
+    log.info("AI models already cached at %s", modelsDir);
     return;
   }
 
@@ -500,15 +515,38 @@ async function ensureModelAvailable(): Promise<void> {
       "Xenova",
       "clip-vit-base-patch32",
       "onnx",
-      "vision_model_quantized.onnx",
+      "vision_model_quantized.onnx"
+    );
+
+    log.info(
+      "[ensureModelAvailable] bundledModels=%s exists=%s bundledMarker=%s exists=%s",
+      bundledModels,
+      fs.existsSync(bundledModels),
+      bundledMarker,
+      fs.existsSync(bundledMarker)
     );
 
     if (fs.existsSync(bundledMarker)) {
       log.info("Copying AI models from bundled resources...");
       try {
-        await fs.promises.cp(bundledModels, modelsDir, { recursive: true });
-        log.info("AI models copied to data directory");
-        return;
+        fs.mkdirSync(modelsDir, { recursive: true });
+        log.info("[ensureModelAvailable] modelsDir created: %s", modelsDir);
+        copyRecursive(bundledModels, modelsDir);
+        // Verify
+        const copied = fs.existsSync(visionMarker);
+        const size = copied ? fs.statSync(visionMarker).size : 0;
+        log.info(
+          "[ensureModelAvailable] copy done — marker exists=%s size=%d",
+          copied,
+          size
+        );
+        if (copied && size > 0) {
+          log.info("AI models copied to data directory");
+          return;
+        }
+        log.error(
+          "[ensureModelAvailable] copy verification FAILED — marker missing or empty"
+        );
       } catch (err) {
         log.error({ err }, "Failed to copy AI models from resources");
       }
@@ -532,7 +570,7 @@ async function ensureModelAvailable(): Promise<void> {
       "Xenova",
       "clip-vit-base-patch32",
       "onnx",
-      "vision_model_quantized.onnx",
+      "vision_model_quantized.onnx"
     );
     log.debug({ marker }, "Checking for AI model");
     if (fs.existsSync(marker)) {
@@ -669,14 +707,47 @@ function createWindow(httpPort: number) {
 // ── Auto-update state (persisted in main process so settings page can query on mount) ─
 import { setUpdateState } from "@/services/update-state";
 
+const NETWORK_ERROR_RE =
+  /ENOTFOUND|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|net::ERR/i;
+const HTTP_ERROR_RE = /403|404/i;
+
 function broadcastUpdateStatus(payload: Record<string, unknown>) {
   setUpdateState({
     phase: payload.phase as string,
     version: payload.version as string | undefined,
     message: payload.message as string | undefined,
+    percent: payload.percent as number | undefined,
+    bytesPerSecond: payload.bytesPerSecond as number | undefined,
+    transferred: payload.transferred as number | undefined,
+    total: payload.total as number | undefined,
+    releaseNotes: payload.releaseNotes as string | undefined,
+    releaseDate: payload.releaseDate as string | undefined,
+    updateURL: payload.updateURL as string | undefined,
   });
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send("update:status", payload);
+  }
+}
+
+// ── Update proxy config ──────────────────────────────────────────────
+function getUpdateConfigStore() {
+  if (!__updateConfigStore) {
+    __updateConfigStore = new Store<{
+      proxy: string;
+    }>({
+      name: "update-config",
+      defaults: { proxy: "" },
+    });
+  }
+  return __updateConfigStore;
+}
+let __updateConfigStore: Store<{ proxy: string }> | null = null;
+
+async function applyProxyConfig() {
+  const proxy = getUpdateConfigStore().get("proxy", "");
+  if (proxy) {
+    await session.defaultSession.setProxy({ proxyRules: proxy });
+    log.info({ proxy }, "Update proxy configured");
   }
 }
 
@@ -700,7 +771,13 @@ function checkForUpdates() {
           releaseNotes: info.releaseNotes,
         });
       }
-      broadcastUpdateStatus({ phase: "downloaded", version: info.releaseName });
+      broadcastUpdateStatus({
+        phase: "downloaded",
+        version: info.releaseName,
+        releaseNotes: info.releaseNotes,
+        releaseDate: info.releaseDate,
+        updateURL: info.updateURL,
+      });
     },
     logger: {
       log: (msg) => log.info(`[updater] ${msg}`),
@@ -723,10 +800,22 @@ function checkForUpdates() {
   });
 
   autoUpdater.on("error", (err) => {
-    broadcastUpdateStatus({
-      phase: "error",
-      message: err?.message || String(err),
-    });
+    const raw = err?.message || String(err);
+    let code = raw;
+    if (NETWORK_ERROR_RE.test(raw)) {
+      code = "NETWORK_ERROR";
+    } else if (HTTP_ERROR_RE.test(raw)) {
+      code = "UPDATE_NOT_FOUND";
+    } else if (/acquire.*lock|another.*instance|mutex/i.test(raw)) {
+      // Squirrel.Windows lock contention — another instance is running or
+      // stale lock file; not actionable by user, don't show in UI
+      log.warn({ raw }, "[updater] Squirrel lock contention, suppressing error");
+      return; // Don't broadcast — this is a transient Squirrel-internal error
+    }
+    // Truncate raw Squirrel/.NET stack traces — they contain GBK-garbled text
+    // that renders as mojibake in the UI
+    const sanitized = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+    broadcastUpdateStatus({ phase: "error", message: sanitized });
   });
 
   // download-progress: try to forward (Electron 41 types removed it, but Squirrel may still emit)
@@ -950,6 +1039,13 @@ if (process.platform === "win32") {
 }
 
 app.whenReady().then(async () => {
+  // Squirrel.Windows event (install/update/obsolete): quit immediately,
+  // don't run expensive init like model copying — the process gets killed
+  // and partial copies cause "AI embedding failure" on next launch.
+  if (started) {
+    return;
+  }
+
   fs.writeFileSync(
     path.join(logDir, "whenReady.log"),
     `WHENREADY ${new Date().toISOString()}\n`
@@ -1085,6 +1181,7 @@ app.whenReady().then(async () => {
     createWindow(httpPort);
     createTray();
     registerGlobalShortcuts();
+    applyProxyConfig(); // fire-and-forget, applies before first auto-update check
     checkForUpdates();
     setupSendToShortcut();
 
@@ -1095,7 +1192,7 @@ app.whenReady().then(async () => {
     // (step 2) and the Settings page's GpuSettingsCard — no automatic
     // startup popup needed.
     startBackgroundServices().catch((err) =>
-      log.warn({ err }, "Non-critical services degraded"),
+      log.warn({ err }, "Non-critical services degraded")
     );
 
     // ── Background color data backfill (non-blocking, deferred 5s) ─────

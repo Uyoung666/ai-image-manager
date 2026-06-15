@@ -7,13 +7,17 @@ import { initReactI18next } from "react-i18next";
 function detectInitialLang(): string {
   try {
     const saved = localStorage.getItem("ai-image-manager-language");
-    if (saved === "zh" || saved === "en") return saved;
+    if (saved === "zh" || saved === "en") {
+      return saved;
+    }
   } catch {
     // localStorage not available
   }
   const nav =
-    (typeof navigator !== "undefined" ? navigator.language : "") || "";
-  if (nav.toLowerCase().startsWith("zh")) return "zh";
+    (typeof navigator === "undefined" ? "" : navigator.language) || "";
+  if (nav.toLowerCase().startsWith("zh")) {
+    return "zh";
+  }
   return "en";
 }
 
@@ -259,6 +263,18 @@ i18n.use(initReactI18next).init({
         updateLastCheck: "上次检查：{{time}}",
         updateProgressBar: "下载进度",
         updateDevMode: "开发模式下不支持自动更新，请使用打包后的应用",
+        updateDownloadManually: "手动下载",
+        updateReleaseNotes: "更新内容",
+        updateProxyLabel: "更新代理",
+        updateProxyHint: "如 127.0.0.1:7890，保存后立即生效",
+        updateProxyTest: "测试",
+        updateProxyTesting: "测试中...",
+        updateProxyTestOk: "连接成功 ({{latency}}ms)",
+        updateProxyTestFail: "连接失败",
+        updateSave: "保存",
+        updateSaved: "已保存",
+        updateErrorNetwork: "网络连接失败，可尝试设置代理",
+        updateErrorNotFound: "未找到更新文件",
         settingsGitHub: "GitHub 项目主页",
         settingsOpenGitHub: "在浏览器中打开项目主页",
 
@@ -1273,6 +1289,19 @@ i18n.use(initReactI18next).init({
         updateRestartNow: "Restart to Update",
         updateLastCheck: "Last checked: {{time}}",
         updateProgressBar: "Download progress",
+        updateDownloadManually: "Download Manually",
+        updateReleaseNotes: "Release Notes",
+        updateProxyLabel: "Update Proxy",
+        updateProxyHint:
+          "e.g. 127.0.0.1:7890, takes effect immediately after saving",
+        updateProxyTest: "Test",
+        updateProxyTesting: "Testing...",
+        updateProxyTestOk: "Connected ({{latency}}ms)",
+        updateProxyTestFail: "Connection failed",
+        updateSave: "Save",
+        updateSaved: "Saved",
+        updateErrorNetwork: "Network error, try setting a proxy",
+        updateErrorNotFound: "Update files not found",
         settingsGitHub: "GitHub Project",
         settingsOpenGitHub: "Open project page in browser",
 

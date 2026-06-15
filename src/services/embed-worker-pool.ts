@@ -364,18 +364,25 @@ export function shutdownPool(): void {
       /* ignore */
     }
   }
+  // Capture the current slots reference so setTimeout(killAll)
+  // doesn't accidentally kill workers spawned by a subsequent
+  // initWorkerPool() call (which reassigns the module-level `slots`).
+  const oldSlots = slots;
   // Small grace period for abort messages to be processed
   const killAll = () => {
-    for (const slot of slots) {
+    for (const slot of oldSlots) {
       try {
         slot.process.kill();
       } catch {
         /* ignore */
       }
     }
-    slots = [];
-    requestQueue = [];
-    initialized = false;
+    // Only clear the module-level vars if still pointing to oldSlots
+    if (slots === oldSlots) {
+      slots = [];
+      requestQueue = [];
+      initialized = false;
+    }
   };
   // Give workers a brief chance to process abort, then kill
   setTimeout(killAll, 500);

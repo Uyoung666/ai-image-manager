@@ -270,6 +270,23 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
   const [updateVersion, setUpdateVersion] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [lastCheckTime, setLastCheckTime] = useState<string>("");
+  const [percent, setPercent] = useState<number | undefined>();
+  const [bytesPerSecond, setBytesPerSecond] = useState<number | undefined>();
+  const [releaseNotes, setReleaseNotes] = useState("");
+  const [manualUrl, setManualUrl] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [proxySaved, setProxySaved] = useState(false);
+  const [proxyTesting, setProxyTesting] = useState(false);
+  const [proxyResult, setProxyResult] = useState<
+    | {
+        ok: boolean;
+        latency?: number;
+        error?: string;
+        bytes?: number;
+        bytesPerSecond?: number;
+      }
+    | undefined
+  >();
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
@@ -281,8 +298,26 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
       if (status.version) {
         setUpdateVersion(status.version);
       }
+      if (status.releaseNotes) {
+        setReleaseNotes(status.releaseNotes);
+      }
+      if (status.updateURL) {
+        setManualUrl(status.updateURL);
+      }
+      if (status.percent != null) {
+        setPercent(status.percent);
+      }
+      if (status.bytesPerSecond != null) {
+        setBytesPerSecond(status.bytesPerSecond);
+      }
       if (status.message && status.message !== "DEV_MODE") {
-        setErrorMsg(status.message);
+        setErrorMsg(mapErrorMessage(status.message));
+      }
+    });
+    // Restore saved proxy
+    ipc.client.app.getUpdateProxy({}).then((r: any) => {
+      if (r?.proxy) {
+        setProxy(r.proxy);
       }
     });
   }, []);
@@ -298,11 +333,19 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
       switch (data.phase) {
         case "checking":
           setPhase("checking");
+          setPercent(undefined);
+          setBytesPerSecond(undefined);
           break;
         case "downloading":
           setPhase("downloading");
           if (data.version) {
             setUpdateVersion(data.version);
+          }
+          if (data.percent != null) {
+            setPercent(data.percent);
+          }
+          if (data.bytesPerSecond != null) {
+            setBytesPerSecond(data.bytesPerSecond);
           }
           break;
         case "up-to-date":
@@ -314,14 +357,16 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
           if (data.version) {
             setUpdateVersion(data.version);
           }
+          if (data.releaseNotes) {
+            setReleaseNotes(data.releaseNotes);
+          }
+          if (data.updateURL) {
+            setManualUrl(data.updateURL);
+          }
           break;
         case "error":
           setPhase("error");
-          setErrorMsg(
-            data.message === "DEV_MODE"
-              ? t("updateDevMode")
-              : data.message || t("updateError")
-          );
+          setErrorMsg(mapErrorMessage(data.message));
           break;
       }
     }
@@ -330,6 +375,9 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
       if (event.data?.channel === "update:available") {
         setPhase("downloaded");
         setUpdateVersion(event.data.version || "");
+        if (event.data.releaseNotes) {
+          setReleaseNotes(event.data.releaseNotes);
+        }
       }
     }
     window.addEventListener("message", onMessage);
@@ -340,6 +388,35 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
     };
   }, [t]);
 
+  function mapErrorMessage(msg: string | undefined): string {
+    if (!msg) {
+      return t("updateError");
+    }
+    if (msg === "DEV_MODE") {
+      return t("updateDevMode");
+    }
+    if (msg === "NETWORK_ERROR") {
+      return t("updateErrorNetwork");
+    }
+    if (msg === "UPDATE_NOT_FOUND") {
+      return t("updateErrorNotFound");
+    }
+    return msg;
+  }
+
+  function formatSpeed(bps: number | undefined): string {
+    if (bps == null || bps <= 0) {
+      return "";
+    }
+    if (bps < 1024) {
+      return `${bps} B/s`;
+    }
+    if (bps < 1_048_576) {
+      return `${(bps / 1024).toFixed(0)} KB/s`;
+    }
+    return `${(bps / 1_048_576).toFixed(1)} MB/s`;
+  }
+
   async function handleCheck() {
     setPhase("checking");
     setErrorMsg("");
@@ -348,11 +425,7 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
       const data = result as { ok?: boolean; error?: string } | undefined;
       if (!data?.ok) {
         setPhase("error");
-        setErrorMsg(
-          data?.error === "DEV_MODE"
-            ? t("updateDevMode")
-            : data?.error || t("updateError")
-        );
+        setErrorMsg(mapErrorMessage(data?.error));
       }
     } catch (err: any) {
       setPhase("error");
@@ -362,6 +435,43 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
 
   function handleRestart() {
     window.electronAPI?.restartApp?.();
+  }
+
+  async function handleSaveProxy() {
+    await ipc.client.app.setUpdateProxy({ proxy });
+    setProxySaved(true);
+    setProxyResult(undefined);
+    setTimeout(() => setProxySaved(false), 2000);
+  }
+
+  async function handleTestProxy() {
+    setProxyTesting(true);
+    setProxyResult(undefined);
+    try {
+      const r = (await ipc.client.app.testProxy({})) as {
+        ok: boolean;
+        status?: number;
+        latency?: number;
+        error?: string;
+        bytes?: number;
+        bytesPerSecond?: number;
+      };
+      setProxyResult({
+        ok: r.ok,
+        latency: r.latency,
+        error: r.error,
+        bytes: r.bytes,
+        bytesPerSecond: r.bytesPerSecond,
+      });
+    } catch {
+      setProxyResult({ ok: false, error: "IPC error" });
+    } finally {
+      setProxyTesting(false);
+    }
+  }
+
+  async function handleOpenManual() {
+    await ipc.client.app.openReleasePage({});
   }
 
   return (
@@ -409,7 +519,7 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
             </div>
           )}
 
-          {/* Downloading (indeterminate progress bar with stripe animation) */}
+          {/* Downloading — real progress bar */}
           {phase === "downloading" && (
             <div>
               <p className="text-[13px] text-muted-foreground">
@@ -419,18 +529,17 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
               </p>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full animate-pulse rounded-full bg-primary"
-                  style={{
-                    width: "60%",
-                    backgroundImage:
-                      "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)",
-                    backgroundSize: "200% 100%",
-                    animation: "pulse 1.5s ease-in-out infinite",
-                  }}
+                  className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+                  style={{ width: `${Math.max(percent ?? 0, 2)}%` }}
                 />
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/60">
-                {t("updateDownloading")}
+                {percent != null && `${percent}%`}
+                {formatSpeed(bytesPerSecond) &&
+                  ` · ${formatSpeed(bytesPerSecond)}`}
+                {percent == null &&
+                  !formatSpeed(bytesPerSecond) &&
+                  t("updateDownloading")}
               </p>
             </div>
           )}
@@ -444,6 +553,13 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
                   {t("updateDownloadedStatus", { version: updateVersion })}
                 </span>
               </div>
+              {releaseNotes && (
+                <div className="mt-2 max-h-32 overflow-y-auto rounded-[6px] border border-border bg-background p-2">
+                  <p className="whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    {releaseNotes}
+                  </p>
+                </div>
+              )}
               <button
                 className="mt-2 w-full rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
                 onClick={handleRestart}
@@ -473,6 +589,16 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
               </div>
             </div>
           )}
+
+          {/* Manual download link (always show when downloaded or error) */}
+          {(phase === "downloaded" || phase === "error") && (
+            <button
+              className="mt-2 w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+              onClick={handleOpenManual}
+            >
+              {t("updateDownloadManually")}
+            </button>
+          )}
         </div>
 
         {/* Action button */}
@@ -495,6 +621,46 @@ function UpdateSection({ appVersion }: { appVersion: string }) {
               )}
             </button>
           )}
+        </div>
+
+        {/* Proxy setting */}
+        <div className="border-border border-t pt-3">
+          <label className="text-[11px] text-muted-foreground">
+            {t("updateProxyLabel")}
+          </label>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <input
+              className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40"
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="127.0.0.1:7890"
+              value={proxy}
+            />
+            <button
+              className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+              onClick={handleSaveProxy}
+            >
+              {proxySaved ? t("updateSaved") : t("updateSave")}
+            </button>
+            <button
+              className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={proxyTesting}
+              onClick={handleTestProxy}
+            >
+              {proxyTesting ? t("updateProxyTesting") : t("updateProxyTest")}
+            </button>
+          </div>
+          {proxyResult && (
+            <p
+              className={`mt-1 text-[11px] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
+            >
+              {proxyResult.ok
+                ? `${t("updateProxyTestOk", { latency: proxyResult.latency ?? "?" })} · ${formatSpeed(proxyResult.bytesPerSecond)}`
+                : `${t("updateProxyTestFail")}${proxyResult.error ? `: ${proxyResult.error}` : ""}`}
+            </p>
+          )}
+          <p className="mt-1 text-[10px] text-muted-foreground/50">
+            {t("updateProxyHint")}
+          </p>
         </div>
       </div>
     </section>
@@ -1017,7 +1183,6 @@ function SettingsPage() {
           </section>
 
           <DataDirSection />
-
         </div>
 
         {/* ── Divider ── */}
