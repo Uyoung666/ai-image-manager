@@ -265,7 +265,8 @@ export function enqueueImport(folderPath: string): ImportTask {
   broadcast();
 
   if (!running) {
-    processNext();
+    // 延迟到下一 tick，确保 task 以 "queued" 状态返回给调用者
+    setImmediate(() => processNext());
   }
 
   return task;
