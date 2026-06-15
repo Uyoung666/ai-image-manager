@@ -119,7 +119,7 @@ export function SettingsSidebar() {
         const isActive = location.pathname === item.to;
         return (
           <button
-            className={`flex items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+            className={`flex items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${
               isActive
                 ? "bg-primary/15 text-primary"
                 : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"

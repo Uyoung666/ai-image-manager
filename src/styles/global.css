@@ -243,6 +243,12 @@
   .window-buttons {
     -webkit-app-region: no-drag;
   }
+
+  /* ── 全局按钮按下反馈 ──────────────────── */
+  button:active:not(:disabled) {
+    transform: scale(0.97);
+    transition: transform 80ms ease-out;
+  }
 }
 
 /* Page transition animation */
@@ -303,7 +309,7 @@
   animation: star-bounce 300ms ease-out;
 }
 
-/* Indeterminate progress bar */
+/* Indeterminate progress bar — flowing gradient cursor */
 @keyframes indeterminate {
   0% {
     transform: translateX(-100%);
@@ -314,6 +320,10 @@
   100% {
     transform: translateX(300%);
   }
+}
+
+.animate-indeterminate-bar {
+  animation: indeterminate 1.4s ease-in-out infinite;
 }
 
 /* Lightbox active thumbnail highlight */
@@ -461,6 +471,23 @@
 
 .search-results-enter {
   animation: search-fade-in 200ms ease-out both;
+}
+
+/* ── 右键菜单弹出动画 ──────────────────────── */
+@keyframes context-menu-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-context-menu-enter {
+  animation: context-menu-enter 120ms ease-out both;
+  transform-origin: top left;
 }
 
 /* Spotlight loading 遮罩 */

@@ -426,11 +426,16 @@ export function PhotoDetailPanel({
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div
-        className={`relative flex h-full flex-col border-border border-l bg-secondary transition-[opacity,transform] duration-200 ease-out ${
-          visible ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0"
+        className={`relative flex h-full flex-col border-border border-l bg-secondary transition-all duration-300 ${
+          visible
+            ? "translate-x-0 opacity-100"
+            : "translate-x-12 opacity-0"
         }`}
         ref={panelRef}
-        style={{ width: panelWidth }}
+        style={{
+          width: panelWidth,
+          transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
       >
         {/* Resize handle — drag left edge to resize */}
         <div

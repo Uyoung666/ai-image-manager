@@ -111,7 +111,7 @@ export function GlobalProgressBar() {
       {/* Thin progress bar */}
       <div className="h-[2px] w-full bg-secondary">
         <div
-          className={`h-full bg-primary transition-[width] duration-300 ease-out ${isIndeterminate ? "animate-pulse" : ""}
+          className={`h-full bg-primary transition-[width] duration-300 ease-out ${isIndeterminate ? "animate-indeterminate-bar" : ""}
           `}
           style={{
             width: isIndeterminate ? "30%" : `${Math.max(1, smoothPct)}%`,

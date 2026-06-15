@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import Lightbox from "yet-another-react-lightbox";
+import Lightbox, { type ZoomRef } from "yet-another-react-lightbox";
 import {
   Captions,
   Counter,
@@ -74,6 +74,7 @@ export function PhotoLightbox({
   const [rotation, setRotation] = useState(0);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelAnchor, setPanelAnchor] = useState<HTMLDivElement | null>(null);
+  const zoomRef = useRef<ZoomRef>(null);
   const [previewMenu, setPreviewMenu] = useState<PreviewMenuState>({
     open: false,
     photoPath: null,
@@ -406,7 +407,16 @@ export function PhotoLightbox({
   return (
     <>
       <Lightbox
-        animation={{ navigation: 0 }}
+        animation={{
+          fade: 300,
+          navigation: 250,
+          swipe: 350,
+          easing: {
+            fade: "cubic-bezier(0.16, 1, 0.3, 1)",
+            swipe: "cubic-bezier(0.16, 1, 0.3, 1)",
+            navigation: "cubic-bezier(0.16, 1, 0.3, 1)",
+          },
+        }}
         captions={{ showToggle: true }}
         carousel={{
           finite: false,
@@ -414,6 +424,10 @@ export function PhotoLightbox({
             draggable: true,
             onDragStart: (e: React.DragEvent) => {
               e.preventDefault();
+              // 缩放状态下不触发文件导出，留给 Zoom 插件做平移拖拽
+              if ((zoomRef.current?.zoom ?? 1) > 1) {
+                return;
+              }
               const idx = photoIndexRef.current;
               const p = photosRef.current[idx];
               if (p) {
@@ -560,6 +574,7 @@ export function PhotoLightbox({
           ],
         }}
         zoom={{
+          ref: zoomRef,
           maxZoomPixelRatio: 5,
           scrollToZoom: true,
         }}

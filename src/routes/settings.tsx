@@ -39,8 +39,10 @@ function SettingsLayout() {
       {/* Body: Sidebar + Content */}
       <div className="flex min-h-0 flex-1">
         <SettingsSidebar />
-        <div className="min-h-0 flex-1">
-          <Outlet />
+        <div className="min-h-0 flex-1" key={location.pathname}>
+          <div className="animate-page-enter">
+            <Outlet />
+          </div>
         </div>
       </div>
     </div>

@@ -141,7 +141,7 @@ function renderFolderTree(
           )}
         </button>
         <button
-          className={`flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+          className={`flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${
             isDragOver
               ? "bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
@@ -259,7 +259,7 @@ function renderTagTree(
           )}
         </button>
         <button
-          className={`group/tag flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors ${
+          className={`group/tag flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-3 py-1 text-left text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 ${
             isDragOver
               ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
@@ -874,12 +874,15 @@ export function Sidebar({
 
   return (
     <>
-      {collapsed ? (
-        <div
-          className="flex h-full w-12 flex-col items-center border-sidebar-border border-r bg-sidebar py-3"
-          onDragOver={handleSidebarDragOver}
-          onDrop={handleSidebarDrop}
-        >
+      <div
+        className={`flex h-full flex-col border-sidebar-border border-r bg-sidebar overflow-hidden ${
+          collapsed ? "w-12" : "w-[240px]"
+        }`}
+        onDragOver={handleSidebarDragOver}
+        onDrop={handleSidebarDrop}
+      >
+        {collapsed ? (
+          <div className="flex h-full w-12 flex-col items-center py-3">
           <button
             className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={onToggleCollapse}
@@ -1294,11 +1297,7 @@ export function Sidebar({
           </div>
         </div>
       ) : (
-        <div
-          className="flex h-full w-[240px] select-none flex-col border-sidebar-border border-r bg-sidebar"
-          onDragOver={handleSidebarDragOver}
-          onDrop={handleSidebarDrop}
-        >
+        <div className="flex h-full w-[240px] select-none flex-col">
           {/* Header */}
           <div className="flex items-center justify-between border-border border-b px-4 py-3">
             <div>
@@ -1878,6 +1877,7 @@ export function Sidebar({
           </div>
         </div>
       )}
+      </div>
 
       {/* Delete tag confirmation dialog */}
       <ConfirmDialog
@@ -1897,7 +1897,7 @@ export function Sidebar({
       {/* Folder context menu */}
       {folderCtx && (
         <div
-          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5 animate-context-menu-enter"
           ref={ctxRef}
           style={{
             left: Math.min(folderCtx.x, window.innerWidth - 160),
@@ -1924,7 +1924,7 @@ export function Sidebar({
       {/* Tag context menu */}
       {tagCtx && (
         <div
-          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          className="fixed z-[200] min-w-[140px] overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5 animate-context-menu-enter"
           ref={ctxRef}
           style={{
             left: Math.min(tagCtx.x, window.innerWidth - 160),
