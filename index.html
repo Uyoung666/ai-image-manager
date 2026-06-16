@@ -4,6 +4,23 @@
   <head>
     <meta charset="UTF-8">
     <title>AI Image Manager</title>
+    <!-- 在 CSS 加载前同步设置主题 class，避免暗色/浅色闪烁 -->
+    <script>
+    "use strict";
+    (() => {
+      try {
+        let theme = localStorage.getItem("theme") || "system";
+        if (theme === "system") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        }
+        document.documentElement.classList.add(theme);
+      } catch {
+        // localStorage 不可用时静默忽略
+      }
+    })();
+    </script>
     <link rel="stylesheet" href="/src/styles/global.css">
   </head>
   <body>
