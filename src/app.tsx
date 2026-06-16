@@ -32,7 +32,7 @@ export default function App() {
           action: {
             label: t("updateRestart"),
             onClick: () => {
-              window.electronAPI?.restartApp?.();
+              window.electronAPI?.installUpdate?.();
             },
           },
         });

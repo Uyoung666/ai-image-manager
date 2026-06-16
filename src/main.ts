@@ -844,6 +844,15 @@ ipcMain.on("app:restart", () => {
   app.quit();
 });
 
+ipcMain.on("app:install-update", () => {
+  fs.writeFileSync(
+    path.join(logDir, "startup.log"),
+    `${new Date().toISOString()} install-update: quitAndInstall\n`,
+    { flag: "a" }
+  );
+  autoUpdater.quitAndInstall();
+});
+
 // Sync language from renderer to main process (updates tray menu labels)
 ipcMain.on("app:language-changed", (_event, lang: string) => {
   if (lang && (lang === "zh" || lang === "en")) {

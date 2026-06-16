@@ -17,6 +17,7 @@ interface Window {
     startDrag: (filePath: string) => void;
     copyImageToClipboard: (filePath: string) => Promise<boolean>;
     restartApp: () => void;
+    installUpdate: () => void;
     setLanguage: (lang: string) => void;
     openExternal: (url: string) => void;
     app: {

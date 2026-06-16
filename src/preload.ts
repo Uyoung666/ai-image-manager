@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   restartApp: (): void => {
     ipcRenderer.send("app:restart");
   },
+  installUpdate: (): void => {
+    ipcRenderer.send("app:install-update");
+  },
   setLanguage: (lang: string): void => {
     ipcRenderer.send("app:language-changed", lang);
   },

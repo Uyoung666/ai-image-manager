@@ -324,6 +324,7 @@ i18n.use(initReactI18next).init({
         updateUpToDate: "已是最新版本",
         updateFound: "发现新版本 {{version}}",
         updateDownloading: "正在下载...",
+        updateElapsed: "已耗时 {{seconds}} 秒...",
         updateDownloadedStatus: "{{version}} 已下载就绪",
         updateError: "检查更新失败",
         updateCheckBtn: "检查更新",
@@ -1420,6 +1421,7 @@ i18n.use(initReactI18next).init({
         updateUpToDate: "Up to date",
         updateFound: "New version {{version}} found",
         updateDownloading: "Downloading...",
+        updateElapsed: "{{seconds}}s elapsed...",
         updateDownloadedStatus: "{{version}} ready to install",
         updateError: "Update check failed",
         updateDevMode:

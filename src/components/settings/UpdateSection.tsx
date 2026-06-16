@@ -1,5 +1,5 @@
 import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 
@@ -34,6 +34,9 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
       }
     | undefined
   >();
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const downloadStartRef = useRef<number>(0);
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
@@ -135,6 +138,30 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     };
   }, [t]);
 
+  // Track elapsed time while downloading
+  useEffect(() => {
+    if (phase === "downloading") {
+      downloadStartRef.current = Date.now();
+      setElapsedSeconds(0);
+      elapsedTimerRef.current = setInterval(() => {
+        setElapsedSeconds(
+          Math.floor((Date.now() - downloadStartRef.current) / 1000)
+        );
+      }, 1000);
+    } else {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current);
+        elapsedTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current);
+        elapsedTimerRef.current = null;
+      }
+    };
+  }, [phase]);
+
   function mapErrorMessage(msg: string | undefined): string {
     if (!msg) {
       return t("updateError");
@@ -181,7 +208,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   function handleRestart() {
-    window.electronAPI?.restartApp?.();
+    window.electronAPI?.installUpdate?.();
   }
 
   async function handleSaveProxy() {
@@ -266,7 +293,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
             </div>
           )}
 
-          {/* Downloading — real progress bar */}
+          {/* Downloading — indeterminate shimmer bar */}
           {phase === "downloading" && (
             <div>
               <p className="text-[13px] text-muted-foreground">
@@ -274,19 +301,13 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                   ? t("updateFound", { version: updateVersion })
                   : t("updateDownloading")}
               </p>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
-                  style={{ width: `${Math.max(percent ?? 0, 2)}%` }}
-                />
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted relative">
+                <div className="absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-primary to-transparent rounded-full animate-indeterminate-bar" />
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/60">
-                {percent != null && `${percent}%`}
-                {formatSpeed(bytesPerSecond) &&
-                  ` · ${formatSpeed(bytesPerSecond)}`}
-                {percent == null &&
-                  !formatSpeed(bytesPerSecond) &&
-                  t("updateDownloading")}
+                {elapsedSeconds > 0
+                  ? t("updateElapsed", { seconds: elapsedSeconds })
+                  : t("updateDownloading")}
               </p>
             </div>
           )}
