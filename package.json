@@ -69,7 +69,7 @@
     "react-i18next": "^17.0.4",
     "react-leaflet": "^5.0.0",
     "react-virtuoso": "^4.12.7",
-    "recharts": "^2.15.0",
+    "recharts": "^3.8.1",
     "shadcn": "^4.1.2",
     "sharp": "^0.34.5",
     "sonner": "^2.0.7",
