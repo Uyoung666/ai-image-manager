@@ -74,9 +74,9 @@ export function CullSessionCard({
       className="group relative flex cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
       onClick={onClick}
     >
-      {/* Delete */}
+      {/* Delete — enlarged hit target to prevent mis-taps */}
       <div
-        className="absolute top-3 right-3 z-10 opacity-0 transition-opacity group-hover:opacity-100"
+        className="absolute top-1.5 right-1.5 z-10 rounded-[6px] p-2 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/8 group/delete"
         onClick={(e) => {
           e.stopPropagation();
           onDelete();
@@ -90,7 +90,7 @@ export function CullSessionCard({
         role="button"
         tabIndex={0}
       >
-        <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+        <Trash2 className="h-4 w-4 text-muted-foreground transition-colors group-hover/delete:text-destructive" />
       </div>
 
       {/* Mode badge */}
