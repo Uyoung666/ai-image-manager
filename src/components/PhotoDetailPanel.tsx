@@ -426,7 +426,7 @@ export function PhotoDetailPanel({
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div
-        className={`relative flex h-full flex-col border-border border-l bg-secondary transition-all duration-300 ${
+        className={`relative flex h-full flex-col border-border border-l glass-surface-heavy transition-all duration-300 ${
           visible ? "translate-x-0 opacity-100" : "translate-x-12 opacity-0"
         }`}
         ref={panelRef}

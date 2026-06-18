@@ -376,7 +376,10 @@ export function PhotoGrid({
       }}
     >
       {/* Floating glass toolbar — 悬浮毛玻璃工具条 */}
-      <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between border-border border-b glass-surface px-4 py-2">
+      <div
+        className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between border-border border-b glass-surface px-4 py-2"
+        onClick={(e) => e.stopPropagation()}
+      >
         <span className="truncate text-[12px] text-muted-foreground">
           {t("photosCount", { count: photos.length.toLocaleString() })}
           {selectedIds.size > 0 &&
