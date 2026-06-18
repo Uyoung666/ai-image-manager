@@ -597,6 +597,89 @@
   animation: context-menu-enter 180ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
+/* ── 引导覆盖层退出动画 ──────────────────────────── */
+@keyframes onboarding-exit {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+.animate-onboarding-exit {
+  pointer-events: none;
+  animation: onboarding-exit 350ms ease-out both;
+}
+
+/* ── 引导步骤过渡动画 ────────────────────────────── */
+@keyframes step-enter-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes step-enter-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-step-enter-right {
+  animation: step-enter-from-right 200ms ease-out both;
+}
+
+.animate-step-enter-left {
+  animation: step-enter-from-left 200ms ease-out both;
+}
+
+/* ── 引导完成庆祝动画 ────────────────────────────── */
+@keyframes celebrate-bounce {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.18);
+  }
+  75% {
+    transform: scale(0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-celebrate-bounce {
+  animation: celebrate-bounce 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes celebrate-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.animate-celebrate-pulse {
+  animation: celebrate-pulse 800ms ease-out both;
+}
+
 /* Spotlight loading 遮罩 */
 .spotlight-loading-shield {
   position: absolute;

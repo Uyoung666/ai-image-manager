@@ -1,13 +1,18 @@
 import { useLocation } from "@tanstack/react-router";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import DragWindowRegion from "@/components/drag-window-region";
 import { GlobalProgressBar } from "@/components/global-progress-bar";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
-import {
-  OnboardingOverlay,
-} from "@/components/onboarding/OnboardingOverlay";
+import { OnboardingOverlay } from "@/components/onboarding/OnboardingOverlay";
 import {
   OnboardingProvider,
+  useOnboarding,
 } from "@/components/onboarding/OnboardingProvider";
 import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
 import { Sidebar } from "@/components/Sidebar";
@@ -99,25 +104,41 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
     <ScrollPositionProvider>
       <OnboardingProvider>
         <OnboardingOverlay />
-        <BrowseSessionProvider>
-          <SidebarFilterProvider>
-            <div className="flex h-screen flex-col overflow-hidden">
-              <DragWindowRegion title="AI Image Manager" />
-              <GlobalProgressBar />
-              <div className="flex flex-1 overflow-hidden">
-                <SidebarSlot />
-                <main className="flex-1 overflow-hidden">{children}</main>
+        <AppContentGate>
+          <BrowseSessionProvider>
+            <SidebarFilterProvider>
+              <div className="flex h-screen flex-col overflow-hidden">
+                <DragWindowRegion title="AI Image Manager" />
+                <GlobalProgressBar />
+                <div className="flex flex-1 overflow-hidden">
+                  <SidebarSlot />
+                  <main className="flex-1 overflow-hidden">{children}</main>
+                </div>
+                <SpotlightSearch />
+                <KeyboardShortcuts
+                  onClose={() => setShortcutsOpen(false)}
+                  open={shortcutsOpen}
+                />
+                {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
               </div>
-              <SpotlightSearch />
-              <KeyboardShortcuts
-                onClose={() => setShortcutsOpen(false)}
-                open={shortcutsOpen}
-              />
-              {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
-            </div>
-          </SidebarFilterProvider>
-        </BrowseSessionProvider>
+            </SidebarFilterProvider>
+          </BrowseSessionProvider>
+        </AppContentGate>
       </OnboardingProvider>
     </ScrollPositionProvider>
   );
+}
+
+/**
+ * 引导期间不渲染应用内容，节省资源并避免覆盖层下视觉跳跃。
+ * 退出动画期间（exiting=true）开始渲染内容，确保覆盖层淡出时下方已有应用 UI。
+ */
+function AppContentGate({ children }: { children: ReactNode }) {
+  const { needsOnboarding, exiting } = useOnboarding();
+
+  if (needsOnboarding && !exiting) {
+    return null;
+  }
+
+  return <>{children}</>;
 }

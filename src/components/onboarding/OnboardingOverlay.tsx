@@ -11,29 +11,90 @@ import { useTranslation } from "react-i18next";
 import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
 import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
 import { useOnboarding } from "./OnboardingProvider";
 import { StepIndicator } from "./StepIndicator";
+
+// ── 步骤持久化 key ──────────────────────────────────────────────
+
+const ONBOARDING_STEP_KEY = "onboarding_current_step";
+
+function loadPersistedStep(): number {
+  try {
+    const raw = localStorage.getItem(ONBOARDING_STEP_KEY);
+    if (raw !== null) {
+      const n = Number(raw);
+      return n >= 1 && n <= 3 ? n : 1;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
+function persistStep(step: number) {
+  try {
+    localStorage.setItem(ONBOARDING_STEP_KEY, String(step));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPersistedStep() {
+  try {
+    localStorage.removeItem(ONBOARDING_STEP_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 // ── Component ───────────────────────────────────────────────────────
 
 export function OnboardingOverlay() {
   const { t } = useTranslation();
-  const { needsOnboarding, setNeedsOnboarding } = useOnboarding();
+  const { needsOnboarding, exiting, setNeedsOnboarding, setExiting } =
+    useOnboarding();
 
   // ── Step state ──────────────────────────────────────────────────
 
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(() => loadPersistedStep());
+  const [stepDirection, setStepDirection] = useState<"forward" | "backward">(
+    "forward"
+  );
   const [dataPath, setDataPath] = useState<string>("");
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [celebrated, setCelebrated] = useState(false);
+
+  // 步骤切换动画 key：每次步骤变化时更新，驱动 CSS 动画重新播放
+  const [stepAnimKey, setStepAnimKey] = useState(0);
+
+  // ── 开发开关：设置 localStorage DEV_FORCE_ONBOARDING = "true" 后刷新即可强制进入引导 ─
+  const devForce =
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem("DEV_FORCE_ONBOARDING") === "true";
 
   // ── Init: check onboarding status + get data path ───────────────
 
   useEffect(() => {
     let cancelled = false;
 
-    async function init() {
-      // Check if user previously completed onboarding
+    async function initDevForce() {
+      if (cancelled) {
+        return;
+      }
+      setNeedsOnboarding(true);
+      try {
+        const pathInfo = await ipc.client.settings.getDataPathInfo({});
+        if (!cancelled && pathInfo?.path) {
+          setDataPath(pathInfo.path);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    async function initNormal() {
       let onboardingCompleted = false;
       try {
         const result = await ipc.client.settings.getAppSetting({
@@ -52,13 +113,13 @@ export function OnboardingOverlay() {
 
       if (onboardingCompleted) {
         setNeedsOnboarding(false);
+        clearPersistedStep();
         return;
       }
 
       // First launch — show onboarding
       setNeedsOnboarding(true);
 
-      // Get current data path
       try {
         const pathInfo = await ipc.client.settings.getDataPathInfo({});
         if (!cancelled && pathInfo?.path) {
@@ -69,11 +130,91 @@ export function OnboardingOverlay() {
       }
     }
 
-    init();
+    if (devForce) {
+      initDevForce();
+    } else {
+      initNormal();
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [setNeedsOnboarding]);
+  }, [setNeedsOnboarding, devForce]);
+
+  // ── 步骤切换包装（记录方向 + 持久化）─────────────────────────
+
+  const goToStep = useCallback((step: number) => {
+    setCurrentStep((prev) => {
+      setStepDirection(step > prev ? "forward" : "backward");
+      persistStep(step);
+      return step;
+    });
+    setStepAnimKey((k) => k + 1);
+  }, []);
+
+  // ── 步骤 3 预加载首页数据 ──────────────────────────────────────
+
+  useEffect(() => {
+    if (currentStep !== 3) {
+      return;
+    }
+
+    // 预加载侧边栏文件夹列表
+    queryClient.prefetchQuery({
+      queryKey: ["folders"],
+      queryFn: async () => {
+        try {
+          return await ipc.client.photos.getFolders({});
+        } catch {
+          return [];
+        }
+      },
+      staleTime: 30_000,
+    });
+
+    // 预加载默认照片列表第一页
+    queryClient.prefetchInfiniteQuery({
+      queryKey: [
+        "photos",
+        {
+          folderId: null,
+          tagId: null,
+          tagIds: null,
+          tagMode: "or",
+          favoriteOnly: false,
+          sort: "date",
+          order: "desc",
+        },
+      ],
+      queryFn: async ({ pageParam = 0 }) => {
+        try {
+          return await ipc.client.photos.listPhotos({
+            offset: pageParam as number,
+            limit: 100,
+            sort: "date",
+            order: "desc",
+          });
+        } catch {
+          return { photos: [], total: 0, offset: 0, limit: 100 };
+        }
+      },
+      initialPageParam: 0,
+      staleTime: 30_000,
+    });
+  }, [currentStep]);
+
+  // ── 步骤 3 庆祝动画触发 ────────────────────────────────────────
+
+  useEffect(() => {
+    if (currentStep === 3 && !celebrated) {
+      // 延迟一帧确保 DOM 已挂载
+      const raf = requestAnimationFrame(() => setCelebrated(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    if (currentStep !== 3 && celebrated) {
+      setCelebrated(false);
+    }
+  }, [currentStep, celebrated]);
 
   // ── Handlers ──────────────────────────────────────────────────
 
@@ -102,6 +243,9 @@ export function OnboardingOverlay() {
   }, [t]);
 
   const handleFinish = useCallback(async () => {
+    // 先触发退出动画
+    setExiting(true);
+
     try {
       await ipc.client.settings.setAppSetting({
         key: "onboarding.completed",
@@ -112,9 +256,16 @@ export function OnboardingOverlay() {
     } catch {
       // best-effort
     }
-    setNeedsOnboarding(false);
+
+    clearPersistedStep();
     window.postMessage({ channel: "onboarding-done" }, "*");
-  }, [setNeedsOnboarding]);
+    // setNeedsOnboarding(false) 由 animationEnd 回调执行
+  }, [setExiting]);
+
+  const handleExitAnimationEnd = useCallback(() => {
+    setNeedsOnboarding(false);
+    setExiting(false);
+  }, [setNeedsOnboarding, setExiting]);
 
   // ── Steps definition ──────────────────────────────────────────
 
@@ -142,16 +293,37 @@ export function OnboardingOverlay() {
     return null;
   }
 
+  const overlayAnimClass = exiting ? "animate-onboarding-exit" : "";
+  const stepAnimClass =
+    stepDirection === "forward"
+      ? "animate-step-enter-right"
+      : "animate-step-enter-left";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-lg rounded-xl border border-border bg-card p-8 shadow-2xl">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-background ${overlayAnimClass}`}
+      onAnimationEnd={(e) => {
+        if (exiting && e.currentTarget === e.target) {
+          handleExitAnimationEnd();
+        }
+      }}
+      style={{
+        backgroundImage:
+          "radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--primary) 12%, transparent) 0%, transparent 65%)",
+      }}
+    >
+      {/* 卡片 */}
+      <div className="surface-elevated relative mx-4 w-full max-w-lg rounded-xl border border-border bg-card p-8 shadow-2xl">
         {/* Step indicator */}
         <StepIndicator currentStep={currentStep} steps={steps} />
 
         <div className="mt-8">
           {/* ── Step 1: Data directory ─────────────────────────── */}
           {currentStep === 1 && (
-            <div className="space-y-6">
+            <div
+              className={`space-y-6 ${stepAnimClass}`}
+              key={`step-1-${stepAnimKey}`}
+            >
               <div className="space-y-2">
                 <h2 className="font-semibold text-foreground text-lg">
                   {t("onboardingStep1Title")}
@@ -201,7 +373,7 @@ export function OnboardingOverlay() {
                 <button
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                   disabled={isMigrating}
-                  onClick={() => setCurrentStep(2)}
+                  onClick={() => goToStep(2)}
                   type="button"
                 >
                   {t("gpuAcceleration")}
@@ -213,7 +385,10 @@ export function OnboardingOverlay() {
 
           {/* ── Step 2: GPU Acceleration ─────────────────────────── */}
           {currentStep === 2 && (
-            <div className="space-y-6">
+            <div
+              className={`space-y-6 ${stepAnimClass}`}
+              key={`step-2-${stepAnimKey}`}
+            >
               <div className="space-y-2">
                 <h2 className="font-semibold text-foreground text-lg">
                   {t("gpuAcceleration")}
@@ -228,7 +403,7 @@ export function OnboardingOverlay() {
               <div className="flex items-center justify-between">
                 <button
                   className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => setCurrentStep(1)}
+                  onClick={() => goToStep(1)}
                   type="button"
                 >
                   <ArrowLeft className="h-4 w-4" />
@@ -236,7 +411,7 @@ export function OnboardingOverlay() {
                 </button>
                 <button
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
-                  onClick={() => setCurrentStep(3)}
+                  onClick={() => goToStep(3)}
                   type="button"
                 >
                   {t("onboardingStep3Title")}
@@ -248,10 +423,26 @@ export function OnboardingOverlay() {
 
           {/* ── Step 3: Complete ────────────────────────────────── */}
           {currentStep === 3 && (
-            <div className="space-y-6 text-center">
+            <div
+              className={`space-y-6 text-center ${stepAnimClass}`}
+              key={`step-3-${stepAnimKey}`}
+            >
               <div className="space-y-4">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10">
-                  <CheckCircle className="h-8 w-8 text-green-500" />
+                {/* 庆祝动画：脉冲环 + 弹性勾 */}
+                <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
+                  {celebrated && (
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 animate-celebrate-pulse rounded-full bg-green-500/20"
+                    />
+                  )}
+                  <div
+                    className={`relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 ${
+                      celebrated ? "animate-celebrate-bounce" : "opacity-0"
+                    }`}
+                  >
+                    <CheckCircle className="h-8 w-8 text-green-500" />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -267,7 +458,7 @@ export function OnboardingOverlay() {
               <div className="flex items-center justify-between">
                 <button
                   className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => setCurrentStep(2)}
+                  onClick={() => goToStep(2)}
                   type="button"
                 >
                   <ArrowLeft className="h-4 w-4" />
@@ -275,6 +466,7 @@ export function OnboardingOverlay() {
                 </button>
                 <button
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
+                  disabled={exiting}
                   onClick={handleFinish}
                   type="button"
                 >
