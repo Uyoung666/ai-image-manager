@@ -98,7 +98,7 @@ export function PerfOverlay({
   return (
     <div className="pointer-events-none fixed right-3 bottom-3 z-50 rounded-[6px] border border-border bg-background/90 px-3 py-2 font-mono text-[11px] backdrop-blur-sm">
       <div className="flex items-center gap-2">
-        <span className="font-[590] text-[14px]" style={{ color: fpsColor }}>
+        <span className="font-semibold text-[14px]" style={{ color: fpsColor }}>
           {metrics.fps}
         </span>
         <span className="text-muted-foreground/70">FPS</span>

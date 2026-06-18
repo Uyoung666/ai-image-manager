@@ -90,7 +90,7 @@ function AboutSettingsPage() {
       <div className="space-y-6">
         {/* App info */}
         <section className="space-y-3">
-          <h2 className="font-[590] text-[14px] text-foreground">
+          <h2 className="font-semibold text-[14px] text-foreground">
             {t("settingsAbout")}
           </h2>
           <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
@@ -151,7 +151,7 @@ function AboutSettingsPage() {
         {/* Dependencies (collapsible) */}
         <section className="space-y-3">
           <button
-            className="flex w-full items-center gap-1.5 text-left font-[590] text-[14px] text-foreground hover:text-foreground/80"
+            className="flex w-full items-center gap-1.5 text-left font-semibold text-[14px] text-foreground hover:text-foreground/80"
             onClick={() => setDepsExpanded(!depsExpanded)}
             type="button"
           >

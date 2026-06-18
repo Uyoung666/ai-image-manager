@@ -157,7 +157,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
 
     return (
       <div className="mt-2 rounded-[6px] border border-danger/30 bg-danger/5 px-3 py-2">
-        <p className="font-[510] text-[11px] text-danger">{lastError}</p>
+        <p className="font-medium text-[11px] text-danger">{lastError}</p>
 
         {isNetworkError ? (
           <div className="mt-2 space-y-2">
@@ -192,7 +192,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
         )}
 
         <button
-          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/20"
           onClick={handleStart}
         >
           {t("aiRetry")}
@@ -210,7 +210,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   ) {
     return (
       <button
-        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-40"
+        className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-40"
         disabled={disabled}
         onClick={handleStart}
       >
@@ -230,14 +230,14 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
               total: progress.total,
             })}
           </span>
-          <span className="font-[510] text-[11px] text-primary">
+          <span className="font-medium text-[11px] text-primary">
             {progress.total > 0
               ? `${Math.round((progress.processed / progress.total) * 100)}%`
               : "100%"}
           </span>
         </div>
         <button
-          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/20"
+          className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/20"
           onClick={handleStart}
         >
           {t("aiIndexNewPhotos")}
@@ -276,7 +276,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
       )}
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">{phaseLabel}</span>
-        <span className="font-[510] text-[11px] text-primary">{pct}%</span>
+        <span className="font-medium text-[11px] text-primary">{pct}%</span>
       </div>
       <div className="h-1 overflow-hidden rounded-full bg-secondary">
         <div
@@ -294,13 +294,13 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
           {paused ? (
             <>
               <button
-                className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-primary transition-colors hover:bg-primary/10"
+                className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/10"
                 onClick={handleResume}
               >
                 {t("aiResume")}
               </button>
               <button
-                className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                 onClick={handleCancel}
               >
                 {t("cancel")}
@@ -308,7 +308,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
             </>
           ) : (
             <button
-              className="flex-1 rounded-[4px] px-2 py-1 font-[510] text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
               onClick={handlePause}
             >
               {t("aiPause")}

@@ -12,7 +12,7 @@ function CloudSyncSettingsPage() {
   return (
     <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
       <section className="space-y-3">
-        <h2 className="font-[590] text-[14px] text-foreground">
+        <h2 className="font-semibold text-[14px] text-foreground">
           {t("cloudSync")}
         </h2>
         <CloudConfigPanel />

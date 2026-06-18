@@ -109,7 +109,7 @@ export function GlobalProgressBar() {
       className={`overflow-hidden transition-all duration-300 ease-out ${visible ? "max-h-12 opacity-100" : "max-h-0 opacity-0"}
       `}
     >
-      <div className="flex items-center gap-2 border-border/40 border-b bg-card/80 px-3 py-1.5 backdrop-blur-sm">
+      <div className="flex items-center gap-2 border-border/40 border-b glass-surface px-3 py-1.5">
         {showSpinner && (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />
         )}
@@ -119,7 +119,7 @@ export function GlobalProgressBar() {
         </span>
 
         {!isIndeterminate && (
-          <span className="shrink-0 font-[510] text-[11px] text-primary tabular-nums">
+          <span className="shrink-0 font-medium text-[11px] text-primary tabular-nums">
             {Math.round(smoothPct)}%
           </span>
         )}

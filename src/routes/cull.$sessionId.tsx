@@ -168,7 +168,7 @@ function CullSessionPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-[590] text-[16px] text-foreground">
+          <h1 className="font-semibold text-[16px] text-foreground">
             {session.name}
           </h1>
           {!showResults && (
@@ -200,10 +200,10 @@ function CullSessionPage() {
                 : `${keepCount + rejectCount}/${session.totalPhotos} reviewed`}
             </span>
           )}
-          <span className="rounded-[4px] bg-success/10 px-1.5 py-0.5 font-[510] text-[10px] text-success">
+          <span className="rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
             {t("cullKeptCount", { count: keepCount })}
           </span>
-          <span className="rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-[510] text-[10px] text-destructive">
+          <span className="rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
             {t("cullRejectedCount", { count: rejectCount })}
           </span>
         </div>
@@ -216,7 +216,7 @@ function CullSessionPage() {
             className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
               showResults
                 ? "text-muted-foreground hover:text-foreground"
-                : "bg-primary/10 font-[510] text-primary"
+                : "bg-primary/10 font-medium text-primary"
             }`}
             onClick={() => setShowResults(false)}
           >
@@ -228,7 +228,7 @@ function CullSessionPage() {
             className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
               showResults
                 ? "text-muted-foreground hover:text-foreground"
-                : "bg-primary/10 font-[510] text-primary"
+                : "bg-primary/10 font-medium text-primary"
             }`}
             onClick={() => setShowResults(false)}
           >
@@ -239,7 +239,7 @@ function CullSessionPage() {
         <button
           className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
             showResults
-              ? "bg-primary/10 font-[510] text-primary"
+              ? "bg-primary/10 font-medium text-primary"
               : "text-muted-foreground hover:text-foreground"
           }`}
           onClick={() => {

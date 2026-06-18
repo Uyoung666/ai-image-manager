@@ -92,14 +92,14 @@ const CullResultRow = memo(
       switch (status) {
         case "kept":
           return (
-            <span className="flex items-center gap-1 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-[510] text-[10px] text-success">
+            <span className="flex items-center gap-1 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
               <CheckCircle2 className="h-3 w-3" />
               {t("cullKeep")}
             </span>
           );
         case "rejected":
           return (
-            <span className="flex items-center gap-1 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-[510] text-[10px] text-destructive">
+            <span className="flex items-center gap-1 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
               <XCircle className="h-3 w-3" />
               {t("cullReject")}
             </span>
@@ -136,7 +136,7 @@ const CullResultRow = memo(
         </div>
 
         {/* Rank */}
-        <span className="w-7 text-center font-[590] text-[13px] text-muted-foreground">
+        <span className="w-7 text-center font-semibold text-[13px] text-muted-foreground">
           #{index + 1}
         </span>
 
@@ -175,7 +175,7 @@ const CullResultRow = memo(
         {isDuel && (
           <div className="flex items-center gap-3 text-right">
             <div>
-              <span className="font-[590] text-[14px] text-foreground">
+              <span className="font-semibold text-[14px] text-foreground">
                 {item.rating}
               </span>
               <span className="ml-1 text-[10px] text-muted-foreground/50">

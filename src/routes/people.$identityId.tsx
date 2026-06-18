@@ -712,7 +712,7 @@ function PersonDetailPage() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <span className="font-[590] text-[18px] text-muted-foreground">
+            <span className="font-semibold text-[18px] text-muted-foreground">
               {(identity?.name || "?")[0]}
             </span>
           </div>
@@ -721,7 +721,7 @@ function PersonDetailPage() {
               <div className="flex items-center gap-2">
                 <input
                   autoFocus
-                  className="h-8 rounded-[6px] border border-input bg-card px-3 font-[590] text-[16px] text-foreground outline-none focus:border-primary"
+                  className="h-8 rounded-[6px] border border-input bg-card px-3 font-semibold text-[16px] text-foreground outline-none focus:border-primary"
                   onChange={(e) => setNameInput(e.target.value)}
                   onCompositionEnd={(e) => {
                     composingRef.current = false;
@@ -753,7 +753,7 @@ function PersonDetailPage() {
               </div>
             ) : (
               <h1
-                className="cursor-pointer font-[590] text-[20px] text-foreground tracking-tight hover:text-primary"
+                className="cursor-pointer font-semibold text-[20px] text-foreground tracking-tight hover:text-primary"
                 onClick={() => setEditingName(true)}
               >
                 {identity?.name || t("unnamedPerson")}

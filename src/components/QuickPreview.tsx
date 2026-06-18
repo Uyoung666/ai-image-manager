@@ -243,7 +243,7 @@ export function QuickPreview({
           </div>
         )}
         <div className="mt-3 flex items-center gap-3 text-[12px] text-white/70">
-          <span className="font-[510] text-white/90">{photo.filename}</span>
+          <span className="font-medium text-white/90">{photo.filename}</span>
           <span>
             {photo.width} × {photo.height}
           </span>

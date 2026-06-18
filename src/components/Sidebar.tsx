@@ -145,7 +145,7 @@ function renderFolderTree(
             isDragOver
               ? "bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
-                ? "bg-primary/15 text-primary"
+                ? "bg-primary/15 text-primary nav-item-active"
                 : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onClick={() => onSelect(node.folder.id)}
@@ -263,7 +263,7 @@ function renderTagTree(
             isDragOver
               ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
               : isActive
-                ? "bg-primary/15 text-primary"
+                ? "bg-primary/15 text-primary nav-item-active"
                 : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
           }`}
           onClick={() => {
@@ -875,7 +875,7 @@ export function Sidebar({
   return (
     <>
       <div
-        className={`flex h-full flex-col border-sidebar-border border-r bg-sidebar overflow-hidden ${
+        className={`flex h-full flex-col border-sidebar-border border-r sidebar-bg overflow-hidden ${
           collapsed ? "w-12" : "w-[240px]"
         }`}
         onDragOver={handleSidebarDragOver}
@@ -895,7 +895,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 activeFolderId === null && !favoriteActive
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => {
@@ -911,7 +911,7 @@ export function Sidebar({
               <button
                 className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                   favoriteActive
-                    ? "bg-primary/15 text-primary"
+                    ? "bg-primary/15 text-primary nav-item-active"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 onClick={() => {
@@ -932,7 +932,7 @@ export function Sidebar({
                   dragOverFolderId === folder.id
                     ? "bg-primary/20 text-primary ring-1 ring-primary/50"
                     : activeFolderId === folder.id
-                      ? "bg-primary/15 text-primary"
+                      ? "bg-primary/15 text-primary nav-item-active"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 key={folder.id}
@@ -956,7 +956,7 @@ export function Sidebar({
                   <button
                     className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                       activeTagIds.length > 0
-                        ? "bg-primary/15 text-primary"
+                        ? "bg-primary/15 text-primary nav-item-active"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                     }`}
                     title={t("sidebarTags")}
@@ -966,7 +966,7 @@ export function Sidebar({
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-48 p-0" sideOffset={8}>
                   <div className="p-1.5">
-                    <p className="px-2 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    <p className="px-2 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                       {t("sidebarTags")}
                     </p>
                     <div className="px-1 pb-1">
@@ -1061,7 +1061,7 @@ export function Sidebar({
                         <button
                           aria-label={t("tagFilterMode")}
                           aria-pressed={tagMode === "and"}
-                          className="rounded-[3px] border border-border px-1.5 py-0 font-[510] text-[10px] text-primary transition-colors hover:bg-primary/10"
+                          className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
                           onClick={onToggleTagMode}
                           type="button"
                         >
@@ -1196,7 +1196,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname === "/dashboard"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/dashboard" })}
@@ -1208,7 +1208,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname.startsWith("/albums")
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/albums" as const })}
@@ -1220,7 +1220,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname === "/people"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/people" })}
@@ -1235,7 +1235,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname === "/duplicates"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/duplicates" })}
@@ -1247,7 +1247,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname.startsWith("/cull")
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/cull" })}
@@ -1259,7 +1259,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname === "/trash"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/trash" })}
@@ -1274,7 +1274,7 @@ export function Sidebar({
             <button
               className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                 location.pathname.startsWith("/settings")
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/settings" })}
@@ -1302,7 +1302,7 @@ export function Sidebar({
           <div className="flex items-center justify-between border-border border-b px-4 py-3">
             <div>
               <button
-                className="font-[590] text-[14px] text-foreground transition-colors hover:text-primary"
+                className="font-semibold text-[14px] text-foreground transition-colors hover:text-primary"
                 onClick={() => {
                   window.electronAPI?.openExternal(
                     "https://ai-image-manager.uyoungvision.cn/"
@@ -1354,7 +1354,7 @@ export function Sidebar({
                   </p>
                   {importPhase === "scanning" && onCancelScan && (
                     <button
-                      className="shrink-0 rounded-[4px] px-2 py-0.5 font-[510] text-[10px] text-danger transition-colors hover:bg-danger/10"
+                      className="shrink-0 rounded-[4px] px-2 py-0.5 font-medium text-[10px] text-danger transition-colors hover:bg-danger/10"
                       onClick={onCancelScan}
                       type="button"
                     >
@@ -1380,7 +1380,7 @@ export function Sidebar({
             <button
               className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 activeFolderId === null && !favoriteActive
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => {
@@ -1395,7 +1395,7 @@ export function Sidebar({
               <button
                 className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                   favoriteActive
-                    ? "bg-primary/15 text-primary"
+                    ? "bg-primary/15 text-primary nav-item-active"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 onClick={() => {
@@ -1422,7 +1422,7 @@ export function Sidebar({
                   onClick={() => setFoldersCollapsed((v) => !v)}
                 >
                   <p
-                    className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                    className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
                   >
                     {t("sidebarFolders")}
                   </p>
@@ -1491,7 +1491,7 @@ export function Sidebar({
                     onClick={() => setTagsCollapsed((v) => !v)}
                   >
                     <p
-                      className={`flex-1 font-[510] text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                      className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
                     >
                       {t("sidebarTags")}
                     </p>
@@ -1559,7 +1559,7 @@ export function Sidebar({
                             <button
                               aria-label={t("tagFilterMode")}
                               aria-pressed={tagMode === "and"}
-                              className="rounded-[3px] border border-border px-1.5 py-0 font-[510] text-[10px] text-primary transition-colors hover:bg-primary/10"
+                              className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
                               onClick={onToggleTagMode}
                               type="button"
                             >
@@ -1777,7 +1777,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname === "/dashboard"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/dashboard" })}
@@ -1790,7 +1790,7 @@ export function Sidebar({
                 dragOverAlbumNav
                   ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
                   : location.pathname.startsWith("/albums")
-                    ? "bg-primary/15 text-primary"
+                    ? "bg-primary/15 text-primary nav-item-active"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/albums" as const })}
@@ -1814,7 +1814,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname === "/people"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/people" })}
@@ -1829,7 +1829,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname === "/duplicates"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/duplicates" })}
@@ -1840,7 +1840,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname.startsWith("/cull")
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/cull" })}
@@ -1851,7 +1851,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname === "/trash"
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/trash" })}
@@ -1866,7 +1866,7 @@ export function Sidebar({
             <button
               className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                 location.pathname.startsWith("/settings")
-                  ? "bg-primary/15 text-primary"
+                  ? "bg-primary/15 text-primary nav-item-active"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
               }`}
               onClick={() => navigate({ to: "/settings" })}
@@ -1904,7 +1904,7 @@ export function Sidebar({
             top: Math.min(folderCtx.y, window.innerHeight - 100),
           }}
         >
-          <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+          <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {folderCtx.displayName}
           </div>
           <div className="mx-2 my-1 border-border border-t" />
@@ -1931,7 +1931,7 @@ export function Sidebar({
             top: Math.min(tagCtx.y, window.innerHeight - 140),
           }}
         >
-          <div className="truncate px-3 py-1 font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+          <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {tagCtx.tagName}
           </div>
           <div className="mx-2 my-1 border-border border-t" />
@@ -2003,7 +2003,7 @@ export function Sidebar({
           />
           <DialogFooter>
             <button
-              className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
+              className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
               onClick={() => {
                 setChildTagParent(null);
                 setNewChildTagName("");
@@ -2013,7 +2013,7 @@ export function Sidebar({
               {t("cancel")}
             </button>
             <button
-              className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               disabled={!newChildTagName.trim()}
               onClick={handleCreateChildTag}
               type="button"

@@ -31,7 +31,7 @@ function SettingsLayout() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="font-[590] text-[18px] text-foreground">
+        <h1 className="font-semibold text-[18px] text-foreground">
           {t("settingsTitle")}
         </h1>
       </div>

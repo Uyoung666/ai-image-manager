@@ -179,7 +179,7 @@ export function PhotoMap({
                     src={toLocalMediaUrl(loc.path)}
                   />
                 )}
-                <p className="font-[510] text-[12px] text-foreground">
+                <p className="font-medium text-[12px] text-foreground">
                   {loc.filename || "—"}
                 </p>
                 {loc.width && loc.height && (

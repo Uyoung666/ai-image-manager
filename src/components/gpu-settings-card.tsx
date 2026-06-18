@@ -246,7 +246,7 @@ export function GpuSettingsCard() {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">
+      <h2 className="font-semibold text-[14px] text-foreground">
         {t("gpuAcceleration")}
       </h2>
 
@@ -258,7 +258,7 @@ export function GpuSettingsCard() {
               {t("gpuEnableAcceleration")}
             </span>
             {detectedInfo?.gpuName && (
-              <p className="mt-0.5 font-[500] text-[11px] text-foreground/80">
+              <p className="mt-0.5 font-medium text-[11px] text-foreground/80">
                 {detectedInfo.gpuName}
               </p>
             )}

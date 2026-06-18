@@ -187,7 +187,7 @@ const PersonCard = memo(function PersonCard({
         {isEditing ? (
           <input
             autoFocus
-            className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-[510] text-[13px] text-foreground outline-none"
+            className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-medium text-[13px] text-foreground outline-none"
             onBlur={() => onRename(identity.id)}
             onChange={(e) => onNameInputChange(e.target.value)}
             onCompositionEnd={(e) => {
@@ -212,7 +212,7 @@ const PersonCard = memo(function PersonCard({
             value={nameInput}
           />
         ) : (
-          <h3 className="truncate font-[510] text-[13px] text-foreground">
+          <h3 className="truncate font-medium text-[13px] text-foreground">
             {identity.name || t("unnamedPerson")}
           </h3>
         )}
@@ -575,7 +575,7 @@ function PeoplePage() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+            <h1 className="font-semibold text-[24px] text-foreground tracking-tight">
               {t("people")}
             </h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground/70">
@@ -592,7 +592,7 @@ function PeoplePage() {
                 {t("selectedPeopleCount", { count: selected.size })}
               </span>
               <button
-                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={selected.size < 2}
                 onClick={handleMerge}
               >
@@ -611,7 +611,7 @@ function PeoplePage() {
             <>
               {identities.length > 1 && (
                 <button
-                  className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-[510] text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                   disabled={detecting}
                   onClick={() => setSelectMode(true)}
                   title={t("mergePeopleHint")}
@@ -623,7 +623,7 @@ function PeoplePage() {
               {identities.length > 0 && (
                 <>
                   <button
-                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-[510] text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                     disabled={detecting}
                     onClick={handleRecluster}
                     title={t("reclusterFacesHint")}
@@ -632,7 +632,7 @@ function PeoplePage() {
                     {t("reclusterFaces")}
                   </button>
                   <button
-                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-[510] text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                     disabled={detecting}
                     onClick={() => handleStartDetection(true)}
                     title={t("rescanFacesHint")}
@@ -643,7 +643,7 @@ function PeoplePage() {
                 </>
               )}
               <button
-                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={detecting}
                 onClick={() => handleStartDetection(false)}
               >
@@ -682,7 +682,7 @@ function PeoplePage() {
             <User className="h-12 w-12 opacity-20" />
             <p className="text-[13px]">{t("loadFailedRetry")}</p>
             <button
-              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               onClick={() =>
                 queryClient.invalidateQueries({
                   queryKey: ["faces", "identities"],
@@ -703,7 +703,7 @@ function PeoplePage() {
               {t("noPeopleDescription")}
             </p>
             <button
-              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               disabled={detecting}
               onClick={() => handleStartDetection(false)}
             >

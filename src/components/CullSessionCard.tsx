@@ -102,14 +102,14 @@ export function CullSessionCard({
           {getModeLabel(session.mode)}
         </span>
         {session.status === "completed" && (
-          <span className="ml-auto rounded-[4px] bg-success/10 px-1.5 py-0.5 font-[510] text-[10px] text-success">
+          <span className="ml-auto rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
             ✓
           </span>
         )}
       </div>
 
       {/* Name */}
-      <h3 className="truncate font-[510] text-[14px] text-foreground">
+      <h3 className="truncate font-medium text-[14px] text-foreground">
         {session.name}
       </h3>
 

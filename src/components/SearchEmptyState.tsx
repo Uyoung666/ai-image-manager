@@ -241,7 +241,7 @@ function EmptyCard({
 
       {/* 标题 + 描述 */}
       <div className="space-y-1.5">
-        <p className="font-[510] text-[14px] text-foreground">{title}</p>
+        <p className="font-medium text-[14px] text-foreground">{title}</p>
         <p className="max-w-[320px] text-[12px] text-muted-foreground/70 leading-relaxed">
           {description}
         </p>
@@ -252,7 +252,7 @@ function EmptyCard({
         <div className="flex flex-wrap items-center justify-center gap-2">
           {actions.map((action, i) => (
             <button
-              className={`rounded-[6px] px-3 py-1.5 font-[510] text-[12px] transition-colors ${
+              className={`rounded-[6px] px-3 py-1.5 font-medium text-[12px] transition-colors ${
                 action.primary
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "border border-border bg-card text-foreground hover:bg-foreground/5"

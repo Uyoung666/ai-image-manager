@@ -1,4 +1,4 @@
-﻿import { Cloud, CloudUpload } from "lucide-react";
+import { Cloud, CloudUpload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -143,7 +143,7 @@ export function CloudUploadDialog({
         ) : (
           <>
             <div>
-              <label className="mb-1.5 block font-[510] text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("cloudTargetStorage")}
               </label>
               <div className="space-y-1">
@@ -209,7 +209,7 @@ export function CloudUploadDialog({
 
         <DialogFooter>
           <button
-            className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+            className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
             disabled={uploading}
             onClick={onClose}
             type="button"
@@ -218,7 +218,7 @@ export function CloudUploadDialog({
           </button>
           {configs.length > 0 && !done && (
             <button
-              className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               disabled={!selectedId || uploading}
               onClick={handleUpload}
               type="button"

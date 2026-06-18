@@ -146,7 +146,7 @@ export function DataDirSection() {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">
+      <h2 className="font-semibold text-[14px] text-foreground">
         {t("dataDirectory")}
       </h2>
       <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">

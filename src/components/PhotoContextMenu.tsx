@@ -109,7 +109,7 @@ export function PhotoContextMenu({
 
   return (
     <div
-      className="fixed z-50 min-w-[210px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 animate-context-menu-enter"
+      className="fixed z-50 min-w-[210px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 surface-elevated animate-context-menu-enter"
       ref={ref}
       style={{ left: x, top: y }}
     >
@@ -178,7 +178,7 @@ export function PhotoContextMenu({
               ? `${t("shortcutToggleFavorite")} (${menu.selectionCount})`
               : t("shortcutToggleFavorite")}
           </span>
-          <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+          <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-medium text-[10px] text-muted-foreground/60">
             F
           </span>
         </button>
@@ -268,7 +268,7 @@ export function PhotoContextMenu({
             ? `${t("exportPhoto")} (${menu.selectionCount})`
             : t("exportPhoto")}
         </span>
-        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-medium text-[10px] text-muted-foreground/60">
           Ctrl+Shift+E
         </span>
       </button>
@@ -329,7 +329,7 @@ export function PhotoContextMenu({
             ? `${t("deletePhoto")} (${menu.selectionCount})`
             : t("deletePhoto")}
         </span>
-        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-[510] text-[10px] text-muted-foreground/60">
+        <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-medium text-[10px] text-muted-foreground/60">
           Delete
         </span>
       </button>

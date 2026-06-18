@@ -142,7 +142,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
               </div>
             )}
             <div>
-              <label className="mb-1.5 block font-[510] text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("shareLink")}
               </label>
               <div className="flex items-center gap-2">
@@ -171,7 +171,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
             </div>
             <DialogFooter>
               <button
-                className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
+                className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5"
                 onClick={onClose}
                 type="button"
               >
@@ -192,7 +192,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
         ) : (
           <>
             <div>
-              <label className="mb-1.5 block font-[510] text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("uploadTo")}
               </label>
               <div className="space-y-1">
@@ -223,7 +223,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
 
             <DialogFooter>
               <button
-                className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                 disabled={loading}
                 onClick={onClose}
                 type="button"
@@ -231,7 +231,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
                 {t("cancel")}
               </button>
               <button
-                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={!selectedId || loading}
                 onClick={handleGenerate}
                 type="button"

@@ -96,7 +96,7 @@ function AlbumsPage() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-            <h1 className="font-[590] text-[24px] text-foreground tracking-tight">
+            <h1 className="font-semibold text-[24px] text-foreground tracking-tight">
               {t("albums")}
             </h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground/70">
@@ -106,14 +106,14 @@ function AlbumsPage() {
         </div>
         <div className="flex gap-2">
           <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-primary/40 px-4 py-1.5 font-[510] text-[13px] text-primary transition-colors hover:border-primary hover:bg-primary/5"
+            className="flex items-center gap-1.5 rounded-[6px] border border-primary/40 px-4 py-1.5 font-medium text-[13px] text-primary transition-colors hover:border-primary hover:bg-primary/5"
             onClick={() => setShowSmartDialog(true)}
           >
             <Sparkles className="h-3.5 w-3.5" />
             {t("smartAlbum")}
           </button>
           <button
-            className="rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+            className="rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
             onClick={() => setShowCreate(true)}
           >
             {t("albumNew")}
@@ -199,14 +199,14 @@ function AlbumsPage() {
               <path d="M3 9h18" />
               <path d="M9 21V9" />
             </svg>
-            <p className="font-[510] text-[14px] text-foreground">
+            <p className="font-medium text-[14px] text-foreground">
               {t("noAlbumsTitle")}
             </p>
             <p className="max-w-[260px] text-[12px] text-muted-foreground/70">
               {t("noAlbumsDescription")}
             </p>
             <button
-              className="mt-1 rounded-[6px] bg-primary px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+              className="mt-1 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               onClick={() => setShowCreate(true)}
             >
               {t("createFirstAlbum")}
@@ -265,7 +265,7 @@ function AlbumsPage() {
                 <div className="p-3">
                   <div className="flex items-center gap-1.5">
                     {album.isSmart && <Zap className="h-3 w-3 text-primary" />}
-                    <h3 className="truncate font-[510] text-[14px] text-foreground">
+                    <h3 className="truncate font-medium text-[14px] text-foreground">
                       {album.name}
                     </h3>
                   </div>

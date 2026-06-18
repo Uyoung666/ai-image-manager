@@ -93,7 +93,7 @@ export function SelectionActionBar({
         }
       }}
     >
-      <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-border bg-card/95 px-3 py-1.5 shadow-lg backdrop-blur-xl">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-border glass-surface px-3 py-1.5 shadow-lg">
         <span className="mr-2 font-medium text-[12px] text-foreground tabular-nums">
           {t("selectedPhotos", { count: selectedCount })}
         </span>

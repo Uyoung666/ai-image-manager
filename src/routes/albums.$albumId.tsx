@@ -683,7 +683,7 @@ function AlbumDetailPage() {
                 <div className="flex items-center gap-2">
                   <input
                     autoFocus
-                    className="h-8 rounded-[6px] border border-input bg-card px-3 font-[590] text-[16px] text-foreground outline-none focus:border-primary"
+                    className="h-8 rounded-[6px] border border-input bg-card px-3 font-semibold text-[16px] text-foreground outline-none focus:border-primary"
                     onChange={(e) => setNameInput(e.target.value)}
                     onCompositionEnd={(e) => {
                       composingRef.current = false;
@@ -715,7 +715,7 @@ function AlbumDetailPage() {
                 </div>
               ) : (
                 <h1
-                  className="cursor-pointer font-[590] text-[24px] text-foreground tracking-tight hover:text-primary"
+                  className="cursor-pointer font-semibold text-[24px] text-foreground tracking-tight hover:text-primary"
                   onClick={() => {
                     setNameInput(album?.name || "");
                     setEditingName(true);
@@ -748,7 +748,7 @@ function AlbumDetailPage() {
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && !album?.isSmart && (
             <button
-              className="rounded-[6px] bg-destructive px-4 py-1.5 font-[510] text-[13px] text-white transition-opacity hover:opacity-90"
+              className="rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               onClick={handleRemoveSelected}
             >
               {t("removePhotosCount", { count: selectedIds.size })}

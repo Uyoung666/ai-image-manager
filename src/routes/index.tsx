@@ -572,7 +572,7 @@ function HomePage() {
               strokeLinejoin="round"
             />
           </svg>
-          <p className="font-[510] text-[14px] text-foreground">
+          <p className="font-medium text-[14px] text-foreground">
             {t("emptyFavoritesTitle")}
           </p>
           <p className="max-w-[280px] text-[12px] text-muted-foreground/70">

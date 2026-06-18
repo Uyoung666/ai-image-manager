@@ -250,7 +250,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-[590] text-[14px] text-foreground">
+      <h2 className="font-semibold text-[14px] text-foreground">
         {t("settingsUpdate")}
       </h2>
       <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">

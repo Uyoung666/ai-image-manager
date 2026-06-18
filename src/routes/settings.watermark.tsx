@@ -148,7 +148,7 @@ function WatermarkSettingsPage() {
     <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-[590] text-[14px] text-foreground">
+          <h2 className="font-semibold text-[14px] text-foreground">
             {t("watermarkSettings")}
           </h2>
           <button

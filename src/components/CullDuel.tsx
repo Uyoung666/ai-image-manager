@@ -471,7 +471,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <Swords className="mx-auto h-12 w-12 text-success/50" />
-          <p className="mt-4 font-[510] text-[16px] text-foreground">
+          <p className="mt-4 font-medium text-[16px] text-foreground">
             {t("cullAllComparisonsComplete")}
           </p>
           {stats && (
@@ -735,7 +735,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             </div>
           </div>
           <div
-            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-all ${
+            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-medium text-[13px] text-primary transition-all ${
               isSubmitting ? "opacity-30" : "hover:bg-primary/20"
             }`}
           >
@@ -744,7 +744,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         </div>
 
         {/* VS divider */}
-        <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2 select-none rounded-full border border-border bg-background px-3 py-1.5 font-[590] text-[11px] text-muted-foreground shadow-sm">
+        <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2 select-none rounded-full border border-border bg-background px-3 py-1.5 font-semibold text-[11px] text-muted-foreground shadow-sm">
           VS
         </div>
 
@@ -821,7 +821,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             </div>
           </div>
           <div
-            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-[510] text-[13px] text-primary transition-all ${
+            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-medium text-[13px] text-primary transition-all ${
               isSubmitting ? "opacity-30" : "hover:bg-primary/20"
             }`}
           >

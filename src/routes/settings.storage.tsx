@@ -162,7 +162,7 @@ function StorageSettingsPage() {
   return (
     <div className="h-full space-y-6 overflow-y-auto p-6" ref={scrollRef}>
       <section className="space-y-3">
-        <h2 className="font-[590] text-[14px] text-foreground">
+        <h2 className="font-semibold text-[14px] text-foreground">
           {t("settingsIndexing")}
         </h2>
         <div className="rounded-[8px] border border-border bg-secondary p-4">
@@ -201,7 +201,7 @@ function StorageSettingsPage() {
                       <span className="shrink-0 text-[11px] text-muted-foreground/60">
                         {t("settingsThumbnailCacheSize")}
                       </span>
-                      <span className="font-[590] text-[12px] text-foreground">
+                      <span className="font-semibold text-[12px] text-foreground">
                         {formatBytes(indexStats.thumbnailCacheBytes)}
                       </span>
                       <span className="text-[11px] text-muted-foreground/60">
@@ -314,7 +314,7 @@ function StorageSettingsPage() {
                         <span className="text-[11px] text-muted-foreground/60">
                           {t("settingsValidIndexCount")}
                         </span>
-                        <span className="font-[590] text-[12px] text-foreground">
+                        <span className="font-semibold text-[12px] text-foreground">
                           {indexStats.validPhotoCount.toLocaleString()}
                         </span>
                       </div>
@@ -323,7 +323,7 @@ function StorageSettingsPage() {
                           {t("settingsInvalidIndexCount")}
                         </span>
                         <span
-                          className={`font-[590] text-[12px] ${
+                          className={`font-semibold text-[12px] ${
                             indexStats.invalidPhotoCount > 0
                               ? "text-destructive"
                               : "text-foreground"

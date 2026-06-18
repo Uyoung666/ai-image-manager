@@ -486,14 +486,14 @@ function DashboardPage() {
             />
           </svg>
         </div>
-        <p className="font-[510] text-[13px] text-foreground">
+        <p className="font-medium text-[13px] text-foreground">
           {t("errorBoundaryTitle")}
         </p>
         <p className="text-[12px] text-muted-foreground">
           {t("dashboardLoadFailed")}
         </p>
         <button
-          className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
+          className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/20"
           onClick={() => refetch()}
         >
           {t("retry")}
@@ -511,7 +511,7 @@ function DashboardPage() {
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <h1 className="font-[590] text-[18px] text-foreground">
+        <h1 className="font-semibold text-[18px] text-foreground">
           {t("dashboardTitle")}
         </h1>
       </div>
@@ -597,7 +597,7 @@ function DashboardPage() {
 
                 {/* Palette Swatch Row — sorted by hue */}
                 <div className="mb-4">
-                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
                     {t("colorPalette")}
                   </h3>
                   <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
@@ -622,7 +622,7 @@ function DashboardPage() {
 
                 {/* Hue Distribution Bar — equal-width segments, opacity = relative count */}
                 <div className="mb-4">
-                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
                     {t("colorHueDistribution")}
                   </h3>
                   {(() => {
@@ -671,7 +671,7 @@ function DashboardPage() {
 
                 {/* Saturation Distribution */}
                 <div>
-                  <h3 className="mb-2 font-[590] text-[12px] text-foreground uppercase tracking-wider">
+                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
                     {t("colorSaturationDistribution")}
                   </h3>
                   {(() => {
@@ -1161,10 +1161,10 @@ function DashboardBarChart({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-4">
-      <p className="font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+      <p className="font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
         {label}
       </p>
-      <p className="mt-1 font-[590] text-[24px] text-foreground">{value}</p>
+      <p className="mt-1 font-semibold text-[24px] text-foreground">{value}</p>
     </div>
   );
 }
@@ -1181,7 +1181,7 @@ function ChartSection({
   return (
     <div className="rounded-[8px] border border-border bg-secondary p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-[590] text-[16px] text-foreground">{title}</h2>
+        <h2 className="font-semibold text-[16px] text-foreground">{title}</h2>
         {hint && (
           <span className="text-[10px] text-muted-foreground/70">{hint}</span>
         )}

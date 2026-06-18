@@ -470,7 +470,7 @@ function TrashPage() {
             <ArrowLeft className="h-4 w-4" />
           </button>
           <div>
-            <h1 className="font-[590] text-[16px] text-foreground">
+            <h1 className="font-semibold text-[16px] text-foreground">
               {t("recentlyDeletedTitle")}
             </h1>
             <p className="text-[12px] text-muted-foreground">

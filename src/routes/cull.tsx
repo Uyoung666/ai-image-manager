@@ -161,7 +161,7 @@ function CullListPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-[590] text-[18px] text-foreground">
+          <h1 className="font-semibold text-[18px] text-foreground">
             {t("cullTitle")}
           </h1>
           <span className="text-[13px] text-muted-foreground/70">
@@ -191,7 +191,7 @@ function CullListPage() {
           <div className="flex h-full items-center justify-center">
             <div className="max-w-[320px] text-center">
               <Swords className="mx-auto h-10 w-10 text-muted-foreground/40" />
-              <p className="mt-3 font-[510] text-[16px] text-foreground">
+              <p className="mt-3 font-medium text-[16px] text-foreground">
                 {t("cullNoSessions")}
               </p>
               <p className="mt-2 text-[13px] text-muted-foreground/70">
@@ -267,7 +267,7 @@ function CullListPage() {
                   <button
                     className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
                       newMode === mode
-                        ? "bg-primary/10 font-[510] text-primary"
+                        ? "bg-primary/10 font-medium text-primary"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
                     key={mode}
@@ -291,13 +291,13 @@ function CullListPage() {
                     <button
                       className={`w-full rounded-[6px] px-3 py-2 text-left text-[12px] transition-colors ${
                         newSortStrategy === strategy
-                          ? "bg-primary/10 font-[510] text-primary"
+                          ? "bg-primary/10 font-medium text-primary"
                           : "text-muted-foreground hover:bg-muted"
                       }`}
                       key={strategy}
                       onClick={() => setNewSortStrategy(strategy)}
                     >
-                      <div className="font-[510]">
+                      <div className="font-medium">
                         {strategy === "time"
                           ? t("cullSortByTime")
                           : t("cullSortBySimilarity")}
@@ -324,13 +324,13 @@ function CullListPage() {
                     <button
                       className={`w-full rounded-[6px] px-3 py-2 text-left text-[12px] transition-colors ${
                         newPkMode === mode
-                          ? "bg-primary/10 font-[510] text-primary"
+                          ? "bg-primary/10 font-medium text-primary"
                           : "text-muted-foreground hover:bg-muted"
                       }`}
                       key={mode}
                       onClick={() => setNewPkMode(mode)}
                     >
-                      <div className="font-[510]">
+                      <div className="font-medium">
                         {(() => {
                           const labels: Record<string, string> = {
                             quick: t("cullPkModeQuick"),
@@ -371,7 +371,7 @@ function CullListPage() {
                     <button
                       className={`w-full rounded-[6px] px-3 py-2 text-left text-[12px] transition-colors ${
                         selectedFolderId === f.id
-                          ? "bg-primary/10 font-[510] text-primary"
+                          ? "bg-primary/10 font-medium text-primary"
                           : "text-muted-foreground hover:bg-muted"
                       }`}
                       key={f.id}

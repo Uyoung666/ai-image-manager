@@ -166,7 +166,7 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
         <div className="space-y-4">
           {sections.map((section) => (
             <div key={section}>
-              <h3 className="mb-1.5 font-[590] text-[13px] text-foreground uppercase tracking-wider">
+              <h3 className="mb-1.5 font-semibold text-[13px] text-foreground uppercase tracking-wider">
                 {t(section)}
               </h3>
               <div className="space-y-0.5">
@@ -181,7 +181,7 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
                     <div className="flex items-center gap-1">
                       {s.keyLabels.map((k, j) => (
                         <span
-                          className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-[510] text-[11px] text-muted-foreground"
+                          className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-medium text-[11px] text-muted-foreground"
                           key={j}
                         >
                           {keyLabel(k)}

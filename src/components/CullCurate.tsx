@@ -366,7 +366,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <Eye className="mx-auto h-12 w-12 text-success/50" />
-          <p className="mt-4 font-[510] text-[16px] text-foreground">
+          <p className="mt-4 font-medium text-[16px] text-foreground">
             {t("cullCurateComplete")}
           </p>
           <p className="mt-2 text-[13px] text-muted-foreground/70">
@@ -529,7 +529,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           {t("cullReject")} ← ↓
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-success/30 bg-success/5 px-6 py-3 font-[510] text-[14px] text-success transition-all hover:bg-success/10 hover:shadow-md disabled:opacity-40"
+          className="flex items-center gap-2 rounded-full border border-success/30 bg-success/5 px-6 py-3 font-medium text-[14px] text-success transition-all hover:bg-success/10 hover:shadow-md disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() => keepMutation.mutate(item)}
         >

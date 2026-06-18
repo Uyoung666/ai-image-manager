@@ -561,7 +561,7 @@ export function PhotoLightbox({
             </button>,
             <button
               aria-label={t("slideshowInterval", { value: currentDelayLabel })}
-              className="flex items-center justify-center rounded-[6px] px-2 py-2 font-[510] text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              className="flex items-center justify-center rounded-[6px] px-2 py-2 font-medium text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
               key="slideshow-delay"
               onClick={cycleDelay}
               title={t("switchInterval")}

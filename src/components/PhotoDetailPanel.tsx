@@ -446,7 +446,7 @@ export function PhotoDetailPanel({
         />
         {/* Header */}
         <div className="flex items-center justify-between border-border border-b px-4 py-3">
-          <h3 className="font-[590] text-[14px] text-foreground">
+          <h3 className="font-semibold text-[14px] text-foreground">
             {t("photoDetail")}
           </h3>
           <div className="flex items-center gap-1">
@@ -492,7 +492,7 @@ export function PhotoDetailPanel({
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           {/* Basic Info */}
           <section>
-            <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+            <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
               {t("photoInfo")}
             </h4>
             <div className="space-y-1.5">
@@ -511,7 +511,7 @@ export function PhotoDetailPanel({
 
           {/* Tags */}
           <section>
-            <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+            <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
               {t("sidebarTags")}
             </h4>
             <div className="flex flex-wrap gap-1.5">
@@ -622,7 +622,7 @@ export function PhotoDetailPanel({
 
           {/* AI Tag Suggestions */}
           <section>
-            <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+            <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
               {t("aiSuggestionTitle")}
             </h4>
             {aiSuggestions === null && !aiLoading ? (
@@ -693,7 +693,7 @@ export function PhotoDetailPanel({
           {/* EXIF Info */}
           {loading ? (
             <section>
-              <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+              <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
                 {t("exifInfo")}
               </h4>
               <div className="flex items-center justify-center py-6">
@@ -702,7 +702,7 @@ export function PhotoDetailPanel({
             </section>
           ) : exif ? (
             <section>
-              <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+              <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
                 {t("exifInfo")}
               </h4>
               <div className="space-y-1.5">
@@ -757,7 +757,7 @@ export function PhotoDetailPanel({
             </section>
           ) : (
             <section>
-              <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+              <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
                 {t("exifInfo")}
               </h4>
               <p className="text-[12px] text-muted-foreground/70">
@@ -768,7 +768,7 @@ export function PhotoDetailPanel({
 
           {/* File Location */}
           <section>
-            <h4 className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-wider">
+            <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
               {t("filePath")}
             </h4>
             <p className="mb-2 truncate text-[11px] text-muted-foreground">

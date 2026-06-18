@@ -132,7 +132,7 @@ export function FormatConvertDialog({
             </div>
             <DialogFooter>
               <button
-                className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
+                className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
                 onClick={onClose}
                 type="button"
               >
@@ -158,7 +158,7 @@ export function FormatConvertDialog({
                     onClick={() => setFormat(f.value)}
                     type="button"
                   >
-                    <div className="font-[510] text-[13px]">{f.label}</div>
+                    <div className="font-medium text-[13px]">{f.label}</div>
                     <div className="mt-0.5 text-[11px] opacity-60">
                       {t(f.descriptionKey)}
                     </div>
@@ -240,7 +240,7 @@ export function FormatConvertDialog({
 
             <DialogFooter>
               <button
-                className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                 disabled={executing}
                 onClick={onClose}
                 type="button"
@@ -248,7 +248,7 @@ export function FormatConvertDialog({
                 {t("cancel")}
               </button>
               <button
-                className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={executing}
                 onClick={handleConvert}
                 type="button"

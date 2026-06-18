@@ -307,7 +307,7 @@ export function SpotlightSearch() {
       {/* Dialog */}
       <div className="absolute top-[20%] right-0 left-0 mx-auto w-full max-w-[560px] px-4">
         <Command
-          className="overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl"
+          className="overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl surface-elevated"
           loop
           shouldFilter={!query.trim()}
         >
@@ -340,7 +340,7 @@ export function SpotlightSearch() {
             {/* Photo results */}
             {photoResults.length > 0 && (
               <Command.Group
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 heading={t("photos")}
               >
                 {photoResults.map((photo) => (
@@ -374,7 +374,7 @@ export function SpotlightSearch() {
             {/* Tag results */}
             {tagResults.length > 0 && (
               <Command.Group
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 heading={t("sidebarTags")}
               >
                 {tagResults.map((tag) => (
@@ -405,7 +405,7 @@ export function SpotlightSearch() {
             {/* Person results */}
             {personResults.length > 0 && (
               <Command.Group
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 heading={t("people")}
               >
                 {personResults.map((person) => (
@@ -437,7 +437,7 @@ export function SpotlightSearch() {
             {/* Album results */}
             {albumResults.length > 0 && (
               <Command.Group
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 heading={t("albums")}
               >
                 {albumResults.map((album) => (
@@ -464,7 +464,7 @@ export function SpotlightSearch() {
             {/* Navigation — 仅空输入时显示，输入后收起以让焦点直达搜索结果 */}
             {!query.trim() && (
               <Command.Group
-                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-[510] [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 heading={t("spotlightNavigationGroup")}
               >
                 {navigationItems.map((item) => (

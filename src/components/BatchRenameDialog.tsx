@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -216,7 +216,7 @@ export function BatchRenameDialog({
             )}
             <DialogFooter>
               <button
-                className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
+                className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
                 onClick={onClose}
                 type="button"
               >
@@ -227,7 +227,7 @@ export function BatchRenameDialog({
         ) : (
           <>
             <div>
-              <div className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-[0.01em]">
+              <div className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-[0.01em]">
                 {t("batchRenameTemplates")}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -266,7 +266,7 @@ export function BatchRenameDialog({
             </div>
 
             <div>
-              <div className="mb-2 font-[510] text-[11px] text-muted-foreground/70 uppercase tracking-[0.01em]">
+              <div className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-[0.01em]">
                 {t("batchRenameTokens")}
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -301,7 +301,7 @@ export function BatchRenameDialog({
               </span>
               <div className="flex gap-2">
                 <button
-                  className="rounded-md border border-border px-4 py-1.5 font-[510] text-[13px] text-muted-foreground hover:bg-foreground/5 disabled:opacity-40"
+                  className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground hover:bg-foreground/5 disabled:opacity-40"
                   disabled={executing}
                   onClick={onClose}
                   type="button"
@@ -309,7 +309,7 @@ export function BatchRenameDialog({
                   {t("cancel")}
                 </button>
                 <button
-                  className="rounded-md bg-primary px-4 py-1.5 font-[510] text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                  className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground hover:opacity-90 disabled:opacity-40"
                   disabled={executing || !pattern.trim()}
                   onClick={handleRename}
                   type="button"

@@ -204,12 +204,12 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       aria-selected={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
         deleting
           ? "scale-95 opacity-0 duration-180"
           : isSelected
             ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
-            : "hover:ring-1 hover:ring-foreground/10 hover:brightness-110"
+            : "hover:-translate-y-0.5 hover:shadow-lg hover:ring-1 hover:ring-foreground/10 hover:brightness-110"
       }
       `}
       data-photo-id={id}
@@ -262,7 +262,7 @@ export const PhotoCard = memo(function PhotoCard({
       <div className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2">
-          <p className="truncate font-[510] text-[#f7f8f8] text-[11px] leading-tight">
+          <p className="truncate font-medium text-[#f7f8f8] text-[11px] leading-tight">
             <HighlightText query={searchQuery} text={filename} />
           </p>
           {width > 0 && height > 0 && (
@@ -309,7 +309,7 @@ export const PhotoCard = memo(function PhotoCard({
 
       {/* Similarity badge — shown on AI search results */}
       {similarity !== undefined && similarity > 0 && (
-        <div className="absolute top-2 left-2 rounded-[4px] bg-primary/80 px-1.5 py-0.5 font-[510] text-[10px] text-white backdrop-blur-sm">
+        <div className="absolute top-2 left-2 rounded-[4px] bg-primary/80 px-1.5 py-0.5 font-medium text-[10px] text-white backdrop-blur-sm">
           {Math.round(similarity * 100)}%
         </div>
       )}

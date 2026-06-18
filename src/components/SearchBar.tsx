@@ -760,7 +760,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-primary border-dashed bg-primary/10">
-            <span className="font-[510] text-[13px] text-primary">
+            <span className="font-medium text-[13px] text-primary">
               {t("dropImageToSearch")}
             </span>
           </div>
@@ -883,7 +883,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             resultCount !== undefined) && (
             <div className="mt-2 flex items-center gap-2 text-[11px]">
               {searchMode && (
-                <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-[510] text-primary">
+                <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
                   {searchMode === "text" ? (
                     t("searchModeSemantic")
                   ) : searchMode === "image" ? (
@@ -923,7 +923,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
           {/* Color hex chip — shown separately from Exif filter chips */}
           {colorHex && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1.5 rounded-[4px] bg-primary/10 px-2 py-0.5 font-[510] text-[10px] text-primary">
+              <span className="inline-flex items-center gap-1.5 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
                 <span
                   className="inline-block h-2.5 w-2.5 rounded-full"
                   style={{ backgroundColor: `#${colorHex}` }}
@@ -1041,7 +1041,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {/* Date range */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("dateRangeLabel")}
                   </label>
                   <div className="space-y-1">
@@ -1086,7 +1086,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* Camera */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("cameraModelLabel")}
                   </label>
                   <div className="relative" ref={cameraDropdownRef}>
@@ -1134,7 +1134,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* Lens */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("lensModelLabel")}
                   </label>
                   <div className="relative" ref={lensDropdownRef}>
@@ -1182,7 +1182,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* ISO range */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("isoRangeLabel")}
                   </label>
                   <div className="space-y-1">
@@ -1241,7 +1241,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* Aperture range */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("apertureLabel")}
                   </label>
                   <div className="space-y-1">
@@ -1304,7 +1304,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* Focal length range */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("focalLabel")}
                   </label>
                   <div className="space-y-1">
@@ -1363,7 +1363,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
                 {/* Shutter speed range */}
                 <div>
-                  <label className="mb-1 block font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                  <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                     {t("shutterSpeedLabel")}
                   </label>
                   <div className="flex gap-2">
@@ -1442,7 +1442,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                     {t("reset")}
                   </button>
                   <button
-                    className="rounded-[4px] bg-primary/10 px-2 py-1 font-[510] text-[11px] text-primary hover:bg-primary/20"
+                    className="rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary hover:bg-primary/20"
                     onClick={() => {
                       onSearch(
                         query.trim(),
@@ -1488,7 +1488,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             tabIndex={0}
           >
             <div className="flex items-center justify-between px-3 py-1.5">
-              <span className="font-[510] text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+              <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
                 {query.trim() ? t("searchSuggestions") : t("recentSearches")}
               </span>
               {!query.trim() && (
@@ -1570,7 +1570,7 @@ function FilterChip({
   onRemove: () => void;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-2 py-0.5 font-[510] text-[10px] text-primary">
+    <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
       {label}
       <button className="ml-0.5 hover:text-foreground" onClick={onRemove}>
         <X className="h-2.5 w-2.5" />

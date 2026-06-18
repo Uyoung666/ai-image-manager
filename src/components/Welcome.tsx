@@ -19,7 +19,7 @@ export function Welcome({ onAddFolder, disabled }: WelcomeProps) {
 
         {/* Title & steps */}
         <div className="space-y-4">
-          <h1 className="font-[590] text-[24px] text-foreground tracking-[-0.02em]">
+          <h1 className="font-semibold text-[24px] text-foreground tracking-[-0.02em]">
             {t("welcomeTitle")}
           </h1>
           <div className="space-y-3 text-left text-[14px] text-muted-foreground leading-relaxed">
@@ -46,7 +46,7 @@ export function Welcome({ onAddFolder, disabled }: WelcomeProps) {
 
         {/* CTA */}
         <button
-          className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-5 py-2.5 font-[510] text-[14px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-5 py-2.5 font-medium text-[14px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           disabled={disabled}
           onClick={onAddFolder}
         >

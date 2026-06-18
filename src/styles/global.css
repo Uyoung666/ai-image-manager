@@ -58,6 +58,14 @@
   --chart-4: oklch(0.6 0.17 320);
   --chart-5: oklch(0.55 0.2 15);
 
+  /* 阴影令牌 — 深色主题用有色投影产生发光边缘感 */
+  --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm-val: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 0 8px -4px rgb(255 255 255 / 0.02);
+  --shadow-md-val: 0 4px 12px -2px rgb(0 0 0 / 0.5), 0 0 12px -4px rgb(255 255 255 / 0.015);
+  --shadow-lg-val: 0 12px 24px -6px rgb(0 0 0 / 0.6), 0 0 18px -4px rgb(255 255 255 / 0.02);
+  --shadow-xl-val: 0 20px 32px -8px rgb(0 0 0 / 0.7);
+  --shadow-2xl-val: 0 32px 48px -12px rgb(0 0 0 / 0.8);
+
   /* 圆角令牌 (对齐 PDR: 4/6/8/12/full) */
   --radius: 0.5rem;
   --radius-sm: 4px;
@@ -127,6 +135,14 @@
   --input: var(--border-default);
   --ring: var(--primary);
 
+  /* 浅色主题阴影 — 更柔和、更浅的投影 */
+  --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-sm-val: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-md-val: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-lg-val: 0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+  --shadow-xl-val: 0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.06);
+  --shadow-2xl-val: 0 25px 50px -12px rgb(0 0 0 / 0.12);
+
   --sidebar: #fafafa;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -140,6 +156,18 @@
 @theme inline {
   --font-sans: "Inter Variable", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", SF Mono, monospace;
+
+  /* 字重 token — 覆盖 Tailwind 默认值以匹配 Inter Variable 可变字体 */
+  --font-weight-medium: 510;
+  --font-weight-semibold: 590;
+
+  /* 阴影 token — 链接到主题 CSS 变量 */
+  --shadow-xs: var(--shadow-xs-val);
+  --shadow-sm: var(--shadow-sm-val);
+  --shadow-md: var(--shadow-md-val);
+  --shadow-lg: var(--shadow-lg-val);
+  --shadow-xl: var(--shadow-xl-val);
+  --shadow-2xl: var(--shadow-2xl-val);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -190,6 +218,12 @@
   body {
     @apply bg-background text-foreground overflow-hidden font-sans antialiased;
   }
+
+  /* ── 焦点环发光 — Tab 切换时柔光扩散 ── */
+  *:focus-visible {
+    box-shadow: 0 0 0 2px hsl(237 58% 62% / 0.4), 0 0 12px -2px hsl(237 58% 62% / 0.25);
+    border-radius: 2px;
+  }
   html {
     @apply font-sans;
   }
@@ -226,6 +260,41 @@
     will-change: scroll-position;
   }
 
+  /* ── 选中文本颜色 ──────────────────── */
+  ::selection {
+    background: hsl(237 58% 62% / 0.25);
+    color: var(--foreground);
+  }
+
+  /* ── 浮层内发光边框 — 模拟顶边受光效果（伪元素不干扰 shadow-*）── */
+  .surface-elevated {
+    position: relative;
+  }
+  .surface-elevated::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 1;
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+  }
+  .light .surface-elevated::before {
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.5);
+  }
+
+  /* ── 玻璃拟态 utility ──────────────── */
+  .glass-surface {
+    background: color-mix(in srgb, var(--surface) 85%, transparent);
+    backdrop-filter: blur(12px) saturate(1.2);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  }
+  .glass-surface-heavy {
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  }
+
   /* Theme transition — smooth color shift on theme switch */
   html.transitioning *,
   html.transitioning *::before,
@@ -245,11 +314,34 @@
     -webkit-app-region: no-drag;
   }
 
-  /* ── 全局按钮按下反馈 ──────────────────── */
+  /* ── 全局按钮按下反馈（弹簧曲线）─────── */
   button:active:not(:disabled) {
-    transform: scale(0.97);
-    transition: transform 80ms ease-out;
+    transform: scale(0.96);
+    transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
   }
+}
+
+/* ── 侧边栏选中项左侧亮色指示线 ── */
+.nav-item-active {
+  box-shadow: inset 3px 0 0 0 var(--primary);
+}
+
+/* ── 侧边栏渐变 — 顶部到底部逐渐加深 ── */
+.sidebar-bg {
+  background: linear-gradient(
+    180deg,
+    var(--sidebar) 0%,
+    var(--sidebar) 30%,
+    color-mix(in srgb, var(--sidebar) 85%, black) 100%
+  );
+}
+.light .sidebar-bg {
+  background: linear-gradient(
+    180deg,
+    var(--sidebar) 0%,
+    var(--sidebar) 30%,
+    color-mix(in srgb, var(--sidebar) 90%, black) 100%
+  );
 }
 
 /* Page transition animation */
@@ -474,11 +566,11 @@
   animation: search-fade-in 200ms ease-out both;
 }
 
-/* ── 右键菜单弹出动画 ──────────────────────── */
+/* ── 右键菜单弹出动画（弹簧曲线）──────────── */
 @keyframes context-menu-enter {
   from {
     opacity: 0;
-    transform: scale(0.92);
+    transform: scale(0.94);
   }
   to {
     opacity: 1;
@@ -487,7 +579,7 @@
 }
 
 .animate-context-menu-enter {
-  animation: context-menu-enter 120ms ease-out both;
+  animation: context-menu-enter 180ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
   transform-origin: top left;
 }
 

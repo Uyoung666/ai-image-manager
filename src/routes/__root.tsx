@@ -46,7 +46,7 @@ function RootError() {
         </svg>
       </div>
       <div>
-        <p className="font-[510] text-[13px] text-foreground">
+        <p className="font-medium text-[13px] text-foreground">
           {t("routeErrorTitle")}
         </p>
         <p className="mt-1 text-[12px] text-muted-foreground">
@@ -54,7 +54,7 @@ function RootError() {
         </p>
       </div>
       <button
-        className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-[510] text-[12px] text-primary transition-colors hover:bg-primary/20"
+        className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/20"
         onClick={() => window.location.reload()}
       >
         {t("refresh")}

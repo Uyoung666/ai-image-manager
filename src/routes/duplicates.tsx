@@ -205,7 +205,7 @@ const PairCard = memo(function PairCard({
       <div className="flex items-center justify-between border-border border-b px-4 py-2">
         <div className="flex items-center gap-3">
           <span
-            className={`rounded-[4px] px-1.5 py-0.5 font-[510] text-[10px] ${label.color}`}
+            className={`rounded-[4px] px-1.5 py-0.5 font-medium text-[10px] ${label.color}`}
           >
             {label.text}
           </span>
@@ -237,7 +237,7 @@ const PairCard = memo(function PairCard({
             >
               <PairImage photo={photo} t={t} />
               {isSelected && (
-                <div className="absolute top-2 right-2 rounded-full bg-destructive px-2 py-0.5 font-[510] text-[10px] text-white">
+                <div className="absolute top-2 right-2 rounded-full bg-destructive px-2 py-0.5 font-medium text-[10px] text-white">
                   {t("pendingDelete")}
                 </div>
               )}
@@ -255,7 +255,7 @@ const PairCard = memo(function PairCard({
                   <button
                     className={`rounded-[4px] px-2 py-0.5 text-[10px] transition-colors ${
                       isSelected
-                        ? "bg-destructive/10 font-[510] text-destructive"
+                        ? "bg-destructive/10 font-medium text-destructive"
                         : "text-muted-foreground hover:bg-muted"
                     }`}
                     onClick={() => onToggle(photo.id)}
@@ -655,7 +655,7 @@ function DuplicatesPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-[590] text-[18px] text-foreground">
+          <h1 className="font-semibold text-[18px] text-foreground">
             {t("duplicatesTitle")}
           </h1>
           {!loading && (
@@ -706,7 +706,7 @@ function DuplicatesPage() {
             <button
               className={`rounded-[6px] px-2.5 py-1 text-[11px] transition-colors ${
                 strategy === key
-                  ? "bg-primary/10 font-[510] text-primary"
+                  ? "bg-primary/10 font-medium text-primary"
                   : "text-muted-foreground hover:text-foreground"
               }`}
               key={key}
@@ -750,7 +750,7 @@ function DuplicatesPage() {
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
               <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
-              <p className="mt-3 font-[510] text-[16px] text-foreground">
+              <p className="mt-3 font-medium text-[16px] text-foreground">
                 {t("noDuplicatesTitle")}
               </p>
               <p className="mt-2 text-[13px] text-muted-foreground/70">
@@ -785,7 +785,7 @@ function DuplicatesPage() {
                   {row.type === "header" ? (
                     <div className="flex items-center gap-2 pb-3">
                       <span
-                        className={`rounded-[4px] px-2 py-0.5 font-[510] text-[11px] ${row.label.color}`}
+                        className={`rounded-[4px] px-2 py-0.5 font-medium text-[11px] ${row.label.color}`}
                       >
                         {row.title}
                       </span>
