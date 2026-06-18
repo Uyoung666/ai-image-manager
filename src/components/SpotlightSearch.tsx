@@ -314,7 +314,7 @@ export function SpotlightSearch() {
           <div className="flex items-center border-border border-b px-4">
             <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <Command.Input
-              className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground"
+              className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
               onValueChange={setQuery}
               placeholder={t("spotlightSearchPlaceholder")}
               ref={inputRef}
