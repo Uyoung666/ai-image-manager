@@ -614,7 +614,10 @@ function createWindow(httpPort: number) {
       ? path.join(process.resourcesPath, "icon.png")
       : path.join(app.getAppPath(), "assets", "icon.png"),
     webPreferences: {
-      additionalArguments: [`--http-port=${httpPort}`],
+      additionalArguments: [
+          `--http-port=${httpPort}`,
+          ...(process.env.CI === "e2e" ? ["--e2e"] : []),
+        ],
       devTools: inDevelopment,
       contextIsolation: true,
       nodeIntegration: false,

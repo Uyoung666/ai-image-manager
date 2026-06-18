@@ -21,6 +21,7 @@ test.beforeAll(async () => {
 
   electronApp = await electron.launch({
     args: [appInfo.main],
+    env: { ...process.env, CI: "e2e" },
   });
   electronApp.on("window", (page) => {
     const filename = page.url()?.split("/").pop();

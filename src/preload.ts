@@ -15,11 +15,16 @@ const httpPort = httpPortArg
   ? Number.parseInt(httpPortArg.split("=")[1], 10)
   : 0;
 
+// E2E 测试模式：跳过引导流程
+const isE2E = process.argv.includes("--e2e");
+
 contextBridge.exposeInMainWorld("electronAPI", {
   getFilePath: (file: File): string => webUtils.getPathForFile(file),
   preloadReady: true,
   // HTTP 服务器端口（由主进程在 createWindow 时通过 additionalArguments 注入）
   httpPort,
+  // E2E 测试模式
+  isE2E,
   startDrag: (filePath: string): void => {
     ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath);
   },

@@ -95,6 +95,13 @@ export function OnboardingOverlay() {
     }
 
     async function initNormal() {
+      // E2E 测试模式下跳过引导流程
+      if (window.electronAPI?.isE2E) {
+        setNeedsOnboarding(false);
+        clearPersistedStep();
+        return;
+      }
+
       let onboardingCompleted = false;
       try {
         const result = await ipc.client.settings.getAppSetting({

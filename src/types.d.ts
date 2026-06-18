@@ -14,6 +14,8 @@ interface Window {
     preloadReady: boolean;
     /** HTTP 服务器端口（由主进程在 createWindow 时通过 --http-port 参数同步注入） */
     httpPort: number;
+    /** E2E 测试模式，用于跳过引导流程等 */
+    isE2E: boolean;
     startDrag: (filePath: string) => void;
     copyImageToClipboard: (filePath: string) => Promise<boolean>;
     restartApp: () => void;
