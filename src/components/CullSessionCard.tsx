@@ -76,7 +76,7 @@ export function CullSessionCard({
     >
       {/* Delete — enlarged hit target to prevent mis-taps */}
       <div
-        className="absolute top-1.5 right-1.5 z-10 rounded-[6px] p-2 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/8 group/delete"
+        className="group/delete absolute top-1.5 right-1.5 z-10 rounded-[6px] p-2 opacity-0 transition-opacity hover:bg-destructive/8 group-hover:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
           onDelete();
