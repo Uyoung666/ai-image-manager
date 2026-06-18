@@ -808,7 +808,8 @@ export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
       };
     }, [marquee, positions, items, onMarqueeSelect]);
 
-    const scrollToTop = () => {
+    const scrollToTop = (e: React.MouseEvent) => {
+      e.stopPropagation();
       const el = scrollRef.current;
       if (!el) {
         return;
