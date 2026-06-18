@@ -5,8 +5,10 @@
 import fs from "node:fs";
 import sharp from "sharp";
 
-const SAMPLE_SIZE = 32; // resize thumbnail to 32×32 (1024 pixels)
-const BINS = 16; // 4 bits per channel → 16×16×16 = 4096 histogram bins
+const SAMPLE_SIZE = 128; // resize thumbnail to 128×128 (16384 pixels)
+const BINS = 32; // 5 bits per channel → 32×32×32 = 32768 histogram bins
+const BIN_SIZE = 256 / BINS; // pixel value range per bin (8 for BINS=32)
+const SHIFT = Math.log2(BIN_SIZE); // right-shift to map 8-bit channel → bin index
 const TOP_PER_PHOTO = 5;
 const TOP_GLOBAL = 25;
 
@@ -101,14 +103,15 @@ function isValidPixel(r: number, g: number, b: number) {
 // ── Histogram binning ─────────────────────────────────────────────────
 
 function binIndex(r: number, g: number, b: number) {
-  return (r >> 4) * BINS * BINS + (g >> 4) * BINS + (b >> 4);
+  return (r >> SHIFT) * BINS * BINS + (g >> SHIFT) * BINS + (b >> SHIFT);
 }
 
 function binToRgb(idx: number): [number, number, number] {
   const bBin = idx % BINS;
   const gBin = Math.floor(idx / BINS) % BINS;
   const rBin = Math.floor(idx / (BINS * BINS));
-  return [rBin * 16 + 8, gBin * 16 + 8, bBin * 16 + 8];
+  const halfBin = BIN_SIZE / 2;
+  return [rBin * BIN_SIZE + halfBin, gBin * BIN_SIZE + halfBin, bBin * BIN_SIZE + halfBin];
 }
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -192,14 +195,18 @@ export async function extractPerPhotoPalette(
     return null;
   }
 
-  // Sort bins by count descending, take top N
-  const bins: { idx: number; count: number }[] = [];
+  // Sort bins by chroma-weighted score (count × (1 + saturation)).
+  // This prevents large areas of near-gray (sky, concrete) from dominating
+  // the palette and lets vivid subject colors rise to the top.
+  const bins: { idx: number; count: number; score: number }[] = [];
   for (let i = 0; i < histogram.length; i++) {
     if (histogram[i] > 0) {
-      bins.push({ idx: i, count: histogram[i] });
+      const [br, bg, bb] = binToRgb(i);
+      const { s } = rgbToHsl(br, bg, bb);
+      bins.push({ idx: i, count: histogram[i], score: histogram[i] * (1 + s) });
     }
   }
-  bins.sort((a, b) => b.count - a.count);
+  bins.sort((a, b) => b.score - a.score);
   const top = bins.slice(0, TOP_PER_PHOTO);
 
   // Merge near-identical colors (Euclidean distance < 40 in RGB)

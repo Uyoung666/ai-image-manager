@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, ChevronUp, MapPin } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -544,35 +544,36 @@ function DashboardPage() {
 
         {/* GPS Map — collapsed by default */}
         <div className="rounded-[8px] border border-border bg-secondary p-5">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <h2 className="font-semibold text-[16px] text-foreground">
               {t("geoMap")}
             </h2>
             <button
               className="flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               onClick={() => setMapExpanded((v) => !v)}
-              title={mapExpanded ? t("collapseMap") : t("expandMap")}
+              title={t("expandMap")}
             >
-              {mapExpanded ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-              <span>{mapExpanded ? t("collapseMap") : t("expandMap")}</span>
+              <svg
+                className="h-4 w-4 transition-transform"
+                style={{ transform: mapExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                viewBox="0 0 24 24"
+              >
+                <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>{t("expandMap")}</span>
             </button>
           </div>
-
-          {mapExpanded ? (
-            <PhotoMap
-              locations={data?.geoLocations || []}
-              mapSource={mapSource}
-              onMapSourceChange={handleMapSourceChange}
-            />
-          ) : (
-            <CollapsedLocationList
-              locations={data?.geoLocations || []}
-              onExpand={() => setMapExpanded(true)}
-            />
+          {mapExpanded && (
+            <div className="mt-4">
+              <PhotoMap
+                locations={data?.geoLocations || []}
+                mapSource={mapSource}
+                onMapSourceChange={handleMapSourceChange}
+              />
+            </div>
           )}
         </div>
 

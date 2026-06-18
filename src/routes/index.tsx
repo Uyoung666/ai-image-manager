@@ -260,6 +260,7 @@ function HomePage() {
       setSearchQuery("");
       setSearchTime(undefined);
       setSearchResults(null);
+      setColorHex(null);
     }
     window.addEventListener("sidebar:clear-search", handler);
     return () => window.removeEventListener("sidebar:clear-search", handler);

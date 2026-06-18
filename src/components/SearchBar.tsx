@@ -895,6 +895,18 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                         style={{ backgroundColor: `#${colorHex}` }}
                       />
                       {hexToColorName(`#${colorHex}`, "zh")}
+                      <span className="font-mono opacity-70">
+                        #{colorHex.toUpperCase()}
+                      </span>
+                      <button
+                        className="ml-0.5 hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClear();
+                        }}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
                     </>
                   ) : (
                     t("searchModeExif")
@@ -917,25 +929,6 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                       : ""}
                 </span>
               )}
-            </div>
-          )}
-
-          {/* Color hex chip — shown separately from Exif filter chips */}
-          {colorHex && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1.5 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
-                <span
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: `#${colorHex}` }}
-                />
-                <span className="font-mono">#{colorHex.toUpperCase()}</span>
-                <button
-                  className="ml-0.5 hover:text-foreground"
-                  onClick={() => onClear()}
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </span>
             </div>
           )}
 

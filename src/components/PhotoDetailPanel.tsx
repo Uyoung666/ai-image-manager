@@ -433,6 +433,13 @@ export function PhotoDetailPanel({
         style={{
           width: panelWidth,
           transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+          ...(ambientHex
+            ? {
+                background: `color-mix(in srgb, ${ambientHex} 18%, color-mix(in srgb, var(--surface) 92%, transparent))`,
+                transition:
+                  "background 1.5s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+              }
+            : {}),
         }}
       >
         {/* Resize handle — drag left edge to resize */}
