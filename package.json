@@ -90,7 +90,7 @@
     "@electron-forge/plugin-fuses": "^7.11.1",
     "@electron-forge/plugin-vite": "^7.11.2",
     "@electron-forge/publisher-github": "^7.11.1",
-    "@electron-forge/shared-types": "^7.11.1",
+    "@electron-forge/shared-types": "^7.11.2",
     "@electron/fuses": "^2.1.1",
     "@electron/rebuild": "^4.0.0",
     "@playwright/test": "^1.59.1",
