@@ -85,7 +85,7 @@ function CullListPage() {
   }, []);
 
   async function handleCreate() {
-    if (!newName.trim() || creating) {
+    if (creating) {
       return;
     }
 
@@ -94,11 +94,15 @@ function CullListPage() {
       return;
     }
 
+    const selectedFolder = folders.find((f) => f.id === selectedFolderId);
+    const sessionName = newName.trim()
+      || `${selectedFolder?.displayName ?? ""} - ${getModeLabel(newMode)}`;
+
     setCreating(true);
     setNoFolderHint(false);
     try {
       const result = (await ipc.client.cull.createSession({
-        name: newName.trim(),
+        name: sessionName,
         mode: newMode,
         pkMode: newPkMode,
         sortStrategy: newSortStrategy,
@@ -282,10 +286,10 @@ function CullListPage() {
                 <label className="mb-1 block text-[12px] text-muted-foreground">
                   {t("cullSortStrategy")}
                 </label>
-                <div className="flex gap-1.5">
+                <div className="space-y-1">
                   {(["time", "similarity"] as const).map((strategy) => (
                     <button
-                      className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+                      className={`w-full rounded-[6px] px-3 py-2 text-left text-[12px] transition-colors ${
                         newSortStrategy === strategy
                           ? "bg-primary/10 font-[510] text-primary"
                           : "text-muted-foreground hover:bg-muted"
@@ -293,9 +297,16 @@ function CullListPage() {
                       key={strategy}
                       onClick={() => setNewSortStrategy(strategy)}
                     >
-                      {strategy === "time"
-                        ? t("cullSortByTime")
-                        : t("cullSortBySimilarity")}
+                      <div className="font-[510]">
+                        {strategy === "time"
+                          ? t("cullSortByTime")
+                          : t("cullSortBySimilarity")}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground/60">
+                        {strategy === "time"
+                          ? t("cullSortByTimeDesc")
+                          : t("cullSortBySimilarityDesc")}
+                      </div>
                     </button>
                   ))}
                 </div>

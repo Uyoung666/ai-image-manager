@@ -1008,7 +1008,9 @@ i18n.use(initReactI18next).init({
         cullModeCurate: "甄选模式",
         cullSortStrategy: "排序策略",
         cullSortByTime: "按时间",
+        cullSortByTimeDesc: "按拍摄时间顺序逐一展示，适合时间线筛选",
         cullSortBySimilarity: "按相似度",
+        cullSortBySimilarityDesc: "将相似照片分组展示，方便选出各组最佳",
         cullStart: "开始选片",
         cullProgress: "进度: {{done}}/{{total}}",
         cullCurateProgress: "已处理: {{done}}/{{total}}",
@@ -2138,7 +2140,11 @@ i18n.use(initReactI18next).init({
         cullModeCurate: "Curate Mode",
         cullSortStrategy: "Sort Strategy",
         cullSortByTime: "By Time",
+        cullSortByTimeDesc:
+          "Show photos in chronological order for timeline-based selection",
         cullSortBySimilarity: "By Similarity",
+        cullSortBySimilarityDesc:
+          "Group similar photos together to easily pick the best from each group",
         cullStart: "Start Cull",
         cullProgress: "Progress: {{done}}/{{total}}",
         cullCurateProgress: "Processed: {{done}}/{{total}}",
