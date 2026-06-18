@@ -1,23 +1,32 @@
 import { useCallback, useEffect, useRef } from "react";
 
 interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
   color: string;
-  size: number;
-  rotation: number;
-  rotationSpeed: number;
   life: number;
   maxLife: number;
+  rotation: number;
+  rotationSpeed: number;
   shape: "rect" | "circle" | "triangle";
+  size: number;
+  vx: number;
+  vy: number;
+  x: number;
+  y: number;
 }
 
 const COLORS = [
-  "#FF6B6B", "#4ECDC4", "#FFE66D", "#A78BFA",
-  "#F472B6", "#60A5FA", "#34D399", "#FB923C",
-  "#FACC15", "#22D3EE", "#F87171", "#C084FC",
+  "#FF6B6B",
+  "#4ECDC4",
+  "#FFE66D",
+  "#A78BFA",
+  "#F472B6",
+  "#60A5FA",
+  "#34D399",
+  "#FB923C",
+  "#FACC15",
+  "#22D3EE",
+  "#F87171",
+  "#C084FC",
 ];
 
 interface ConfettiOverlayProps {
@@ -26,7 +35,11 @@ interface ConfettiOverlayProps {
   onMidpoint?: () => void;
 }
 
-export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayProps) {
+export function ConfettiOverlay({
+  active,
+  onDone,
+  onMidpoint,
+}: ConfettiOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const rafRef = useRef<number>(0);
@@ -48,20 +61,27 @@ export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayP
         rotationSpeed: (Math.random() - 0.5) * 12,
         life: 0,
         maxLife: 100 + Math.random() * 160,
-        shape: shapeRand < 0.15 ? "triangle" : shapeRand < 0.55 ? "rect" : "circle",
+        shape:
+          shapeRand < 0.15 ? "triangle" : shapeRand < 0.55 ? "rect" : "circle",
       });
     }
     return particles;
   }, []);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      return;
+    }
 
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      return;
+    }
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      return;
+    }
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -70,15 +90,24 @@ export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayP
     particlesRef.current = spawnParticles(150, 1.2);
 
     const wave2 = setTimeout(() => {
-      particlesRef.current = [...particlesRef.current, ...spawnParticles(120, 0.9)];
+      particlesRef.current = [
+        ...particlesRef.current,
+        ...spawnParticles(120, 0.9),
+      ];
     }, 300);
 
     const wave3 = setTimeout(() => {
-      particlesRef.current = [...particlesRef.current, ...spawnParticles(100, 0.7)];
+      particlesRef.current = [
+        ...particlesRef.current,
+        ...spawnParticles(100, 0.7),
+      ];
     }, 650);
 
     const wave4 = setTimeout(() => {
-      particlesRef.current = [...particlesRef.current, ...spawnParticles(60, 0.5)];
+      particlesRef.current = [
+        ...particlesRef.current,
+        ...spawnParticles(60, 0.5),
+      ];
     }, 1000);
 
     startTimeRef.current = performance.now();
@@ -100,7 +129,9 @@ export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayP
 
       for (const p of particles) {
         p.life++;
-        if (p.life >= p.maxLife) continue;
+        if (p.life >= p.maxLife) {
+          continue;
+        }
         allDead = false;
 
         p.x += p.vx;
@@ -138,7 +169,9 @@ export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayP
       }
 
       if (elapsed > duration - 1000) {
-        canvas.style.opacity = String(Math.max(0, 1 - (elapsed - (duration - 1000)) / 1000));
+        canvas.style.opacity = String(
+          Math.max(0, 1 - (elapsed - (duration - 1000)) / 1000)
+        );
       }
 
       if (allDead && elapsed > 2500) {
@@ -168,12 +201,14 @@ export function ConfettiOverlay({ active, onDone, onMidpoint }: ConfettiOverlayP
     };
   }, [active, spawnParticles, onDone, onMidpoint]);
 
-  if (!active) return null;
+  if (!active) {
+    return null;
+  }
 
   return (
     <canvas
-      ref={canvasRef}
       className="pointer-events-none fixed inset-0 z-[9999]"
+      ref={canvasRef}
       style={{ opacity: 1 }}
     />
   );

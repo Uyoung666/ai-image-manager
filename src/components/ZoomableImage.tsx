@@ -135,12 +135,16 @@ export const ZoomableImage = memo(function ZoomableImage({
   const getFitSize = useCallback(() => {
     const container = containerRef.current;
     const img = imgRef.current;
-    if (!container || !img) return null;
+    if (!(container && img)) {
+      return null;
+    }
     const cw = container.clientWidth;
     const ch = container.clientHeight;
     const nw = img.naturalWidth;
     const nh = img.naturalHeight;
-    if (nw <= 0 || nh <= 0) return null;
+    if (nw <= 0 || nh <= 0) {
+      return null;
+    }
 
     // object-fit: contain — 等比缩放以适配容器，不放大
     const scale = Math.min(1, cw / nw, ch / nh);
@@ -159,7 +163,11 @@ export const ZoomableImage = memo(function ZoomableImage({
       const displayW = fit.w * s;
       const displayH = fit.h * s;
 
-      const clamp1D = (v: number, displaySize: number, containerSize: number) => {
+      const clamp1D = (
+        v: number,
+        displaySize: number,
+        containerSize: number
+      ) => {
         if (displaySize <= containerSize) {
           return 0; // 居中
         }
@@ -278,10 +286,14 @@ export const ZoomableImage = memo(function ZoomableImage({
       // fit → 100% 像素（1:1 像素映射）
       const img = imgRef.current;
       const container = containerRef.current;
-      if (!img || !container) return;
+      if (!(img && container)) {
+        return;
+      }
 
       const naturalW = img.naturalWidth;
-      if (naturalW <= 0) return;
+      if (naturalW <= 0) {
+        return;
+      }
 
       const containerW = container.clientWidth;
       const containerH = container.clientHeight;
@@ -481,16 +493,15 @@ export const ZoomableImage = memo(function ZoomableImage({
   // ── 正常渲染 ────────────────────────────────────────────────────
   return (
     <div
-      ref={containerRef}
       className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[6px]"
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
+      ref={containerRef}
     >
       {/* 纯 opacity 硬切。拖拽中用 inline style 禁用 transition 保证跟手，
           松手后恢复 CSS transition 以驱动回弹和缩放平滑过渡。 */}
       <img
-        ref={imgRef}
         alt={alt}
         className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ease-out ${
           loaded ? "opacity-100" : "opacity-0"
@@ -499,6 +510,7 @@ export const ZoomableImage = memo(function ZoomableImage({
         onError={handleImageError}
         onLoad={() => setLoaded(true)}
         onMouseDown={handleMouseDown}
+        ref={imgRef}
         src={src}
         style={{
           transform: imgTransform,

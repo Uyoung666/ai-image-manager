@@ -1316,7 +1316,8 @@ i18n.use(initReactI18next).init({
         openAtLogin: "Launch at startup",
         openAtLoginHint: "Automatically start the app when you sign in",
         sidebarDefaultCollapsed: "Default sidebar collapsed",
-        sidebarDefaultCollapsedHint: "Start with the sidebar collapsed by default",
+        sidebarDefaultCollapsedHint:
+          "Start with the sidebar collapsed by default",
         settingsSearchPlaceholder: "Search settings...",
         noResults: "No results",
         settingsDependencies: "Open Source Dependencies",

@@ -109,7 +109,7 @@ export function PhotoContextMenu({
 
   return (
     <div
-      className="fixed z-50 min-w-[210px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 surface-elevated animate-context-menu-enter"
+      className="surface-elevated fixed z-50 min-w-[210px] animate-context-menu-enter rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
       ref={ref}
       style={{ left: x, top: y }}
     >

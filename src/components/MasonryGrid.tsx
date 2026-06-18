@@ -952,8 +952,8 @@ export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
         <button
           aria-hidden={!showScrollTop}
           aria-label={t("backToTop")}
-          className={`absolute right-4 z-40 flex h-9 w-9 items-center justify-center rounded-full glass-surface text-muted-foreground shadow-lg ring-1 ring-border transition-all duration-200 hover:bg-popover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 ${
-            selectionActive ? "bottom-16" : "bottom-4"
+          className={`glass-surface absolute right-4 z-40 flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground shadow-lg ring-1 ring-border transition-all duration-200 hover:bg-popover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 ${
+            selectionActive ? "bottom-[92px]" : "bottom-11"
           } ${
             showScrollTop
               ? "scale-100 opacity-100"
@@ -976,7 +976,7 @@ export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
           </svg>
         </button>
         {isScrolling && currentTimeLabel && headerPositions.length > 1 && (
-          <div className="pointer-events-none absolute top-3 right-4 z-40 rounded-[6px] glass-surface px-3 py-1.5 font-medium text-[12px] text-foreground shadow-lg ring-1 ring-border">
+          <div className="glass-surface pointer-events-none absolute top-10 right-4 z-40 rounded-[6px] px-3 py-1.5 font-medium text-[12px] text-foreground shadow-lg ring-1 ring-border">
             {currentTimeLabel}
           </div>
         )}

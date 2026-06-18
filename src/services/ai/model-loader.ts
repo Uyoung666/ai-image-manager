@@ -203,7 +203,7 @@ export async function ensureLocalModel(): Promise<string> {
       "Xenova",
       "clip-vit-base-patch32",
       "onnx",
-      "vision_model_quantized.onnx",
+      "vision_model_quantized.onnx"
     );
 
     if (fs.existsSync(bundledVisionMarker)) {
@@ -213,8 +213,7 @@ export async function ensureLocalModel(): Promise<string> {
       return localModelPath;
     }
 
-    const error =
-      "安装包未包含模型文件，请重新打包";
+    const error = "安装包未包含模型文件，请重新打包";
     setCurrentProgress({
       ...currentProgress,
       phase: "error",
@@ -239,7 +238,7 @@ export async function ensureLocalModel(): Promise<string> {
       "Xenova",
       "clip-vit-base-patch32",
       "onnx",
-      "vision_model_quantized.onnx",
+      "vision_model_quantized.onnx"
     );
     if (fs.existsSync(marker)) {
       console.log(`[AI] Found model at: ${candidate}`);

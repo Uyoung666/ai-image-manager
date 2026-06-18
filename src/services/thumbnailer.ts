@@ -430,7 +430,9 @@ export function cleanOrphanThumbnails(): {
 
   const entries = fs.readdirSync(thumbnailDir);
   for (const entry of entries) {
-    if (!entry.endsWith(".webp")) continue;
+    if (!entry.endsWith(".webp")) {
+      continue;
+    }
     if (!expectedFiles.has(entry)) {
       const entryPath = path.join(thumbnailDir, entry);
       let fileSize = 0;

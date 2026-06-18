@@ -427,9 +427,7 @@ export function PhotoDetailPanel({
     >
       <div
         className={`relative flex h-full flex-col border-border border-l bg-secondary transition-all duration-300 ${
-          visible
-            ? "translate-x-0 opacity-100"
-            : "translate-x-12 opacity-0"
+          visible ? "translate-x-0 opacity-100" : "translate-x-12 opacity-0"
         }`}
         ref={panelRef}
         style={{

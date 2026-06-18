@@ -8,9 +8,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ipc } from "@/ipc/manager";
 import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
+import { ipc } from "@/ipc/manager";
 import { useOnboarding } from "./OnboardingProvider";
 import { StepIndicator } from "./StepIndicator";
 
@@ -46,7 +46,9 @@ export function OnboardingOverlay() {
         // settings IPC not ready
       }
 
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
 
       if (onboardingCompleted) {
         setNeedsOnboarding(false);
@@ -79,7 +81,9 @@ export function OnboardingOverlay() {
     try {
       const result = await ipc.client.shell.openFolderDialog({});
       const newPath = (result as any).path;
-      if (!newPath) return;
+      if (!newPath) {
+        return;
+      }
 
       setIsMigrating(true);
       setMigrationError(null);
@@ -90,7 +94,7 @@ export function OnboardingOverlay() {
       setMigrationError(
         t("onboardingErrorMigration", {
           error: (err as Error).message ?? String(err),
-        }),
+        })
       );
     } finally {
       setIsMigrating(false);
@@ -129,7 +133,7 @@ export function OnboardingOverlay() {
         description: t("onboardingStep3Desc"),
       },
     ],
-    [t],
+    [t]
   );
 
   // ── Don't render if onboarding is not needed ──────────────────
@@ -149,10 +153,10 @@ export function OnboardingOverlay() {
           {currentStep === 1 && (
             <div className="space-y-6">
               <div className="space-y-2">
-                <h2 className="text-lg font-semibold text-foreground">
+                <h2 className="font-semibold text-foreground text-lg">
                   {t("onboardingStep1Title")}
                 </h2>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   {t("onboardingStep1Desc")}
                 </p>
               </div>
@@ -163,12 +167,12 @@ export function OnboardingOverlay() {
                     <p className="text-[11px] text-muted-foreground">
                       {t("onboardingStep1CurrentPath")}
                     </p>
-                    <p className="mt-0.5 truncate font-mono text-xs text-foreground">
+                    <p className="mt-0.5 truncate font-mono text-foreground text-xs">
                       {dataPath || t("defaultPath")}
                     </p>
                   </div>
                   <button
-                    className="ml-3 inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="ml-3 inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 font-medium text-foreground text-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                     disabled={isMigrating}
                     onClick={handleChangeDirectory}
                     type="button"
@@ -179,14 +183,14 @@ export function OnboardingOverlay() {
                 </div>
 
                 {isMigrating && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t("onboardingStep1Migrating")}
                   </div>
                 )}
 
                 {migrationError && (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{migrationError}</span>
                   </div>
@@ -195,7 +199,7 @@ export function OnboardingOverlay() {
 
               <div className="flex justify-end">
                 <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                   disabled={isMigrating}
                   onClick={() => setCurrentStep(2)}
                   type="button"
@@ -211,10 +215,10 @@ export function OnboardingOverlay() {
           {currentStep === 2 && (
             <div className="space-y-6">
               <div className="space-y-2">
-                <h2 className="text-lg font-semibold text-foreground">
+                <h2 className="font-semibold text-foreground text-lg">
                   {t("gpuAcceleration")}
                 </h2>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   {t("gpuEnableAcceleration")}
                 </p>
               </div>
@@ -223,7 +227,7 @@ export function OnboardingOverlay() {
 
               <div className="flex items-center justify-between">
                 <button
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => setCurrentStep(1)}
                   type="button"
                 >
@@ -231,7 +235,7 @@ export function OnboardingOverlay() {
                   {t("onboardingStep1Title")}
                 </button>
                 <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
                   onClick={() => setCurrentStep(3)}
                   type="button"
                 >
@@ -251,10 +255,10 @@ export function OnboardingOverlay() {
                 </div>
 
                 <div className="space-y-2">
-                  <h2 className="text-xl font-semibold text-foreground">
+                  <h2 className="font-semibold text-foreground text-xl">
                     {t("onboardingStep3Title")}
                   </h2>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-muted-foreground text-sm">
                     {t("onboardingStep3Desc")}
                   </p>
                 </div>
@@ -262,7 +266,7 @@ export function OnboardingOverlay() {
 
               <div className="flex items-center justify-between">
                 <button
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => setCurrentStep(2)}
                   type="button"
                 >
@@ -270,7 +274,7 @@ export function OnboardingOverlay() {
                   {t("gpuAcceleration")}
                 </button>
                 <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
                   onClick={handleFinish}
                   type="button"
                 >

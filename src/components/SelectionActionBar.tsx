@@ -83,7 +83,7 @@ export function SelectionActionBar({
 
   return (
     <div
-      className={`pointer-events-none absolute right-0 bottom-2 left-0 z-40 flex items-center justify-center px-4 transition-all duration-200 ease-out ${
+      className={`pointer-events-none absolute right-0 bottom-9 left-0 z-40 flex items-center justify-center px-4 transition-all duration-200 ease-out ${
         visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
       }`}
       onTransitionEnd={() => {
@@ -93,7 +93,7 @@ export function SelectionActionBar({
         }
       }}
     >
-      <div className="pointer-events-auto flex items-center gap-1 rounded-[10px] border border-border glass-surface px-3 py-1.5 shadow-lg">
+      <div className="glass-surface pointer-events-auto flex items-center gap-1 rounded-[10px] border border-border px-3 py-1.5 shadow-lg">
         <span className="mr-2 font-medium text-[12px] text-foreground tabular-nums">
           {t("selectedPhotos", { count: selectedCount })}
         </span>

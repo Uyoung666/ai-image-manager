@@ -64,7 +64,7 @@ export function PreviewContextMenu({
 
   return createPortal(
     <div
-      className="fixed min-w-[210px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 animate-context-menu-enter"
+      className="fixed min-w-[210px] animate-context-menu-enter rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
       ref={ref}
       style={{ left: x, top: y, zIndex: 99_999 }}
     >

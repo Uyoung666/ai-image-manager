@@ -4,35 +4,35 @@ import fsp from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
-import { Transform, pipeline } from "node:stream";
+import { pipeline, Transform } from "node:stream";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
 export interface ModelManifestEntry {
-  name: string;
   fileName: string;
-  subPath: string;
-  urls: string[];
+  name: string;
+  required: boolean;
   sha256: string;
   sizeBytes: number;
-  required: boolean;
+  subPath: string;
+  urls: string[];
 }
 
 export interface DownloadProgress {
-  phase: "idle" | "downloading" | "verifying" | "retrying" | "done" | "error";
-  totalFiles: number;
+  bytesPerSecond: number;
   completedFiles: number;
   currentFileName: string;
   /** 0–100 for in-progress / 100 for file-complete / -1 for file-error */
   currentFilePercent: number;
-  bytesPerSecond: number;
-  remainingSeconds: number;
-  mirrorLabel: string;
-  warnings: string[];
-  /** Total byte count across ALL files in the current download batch */
-  totalBytes: number;
   /** Bytes already written to disk (completed files + partial current). */
   downloadedBytes: number;
+  mirrorLabel: string;
+  phase: "idle" | "downloading" | "verifying" | "retrying" | "done" | "error";
+  remainingSeconds: number;
+  /** Total byte count across ALL files in the current download batch */
+  totalBytes: number;
+  totalFiles: number;
+  warnings: string[];
 }
 
 // ── Model Manifest ──────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     // (e.g. 85 * 1024 * 1024 = 89128960) differs from the true size
     // by a few KB, which causes isFileValid's strict === comparison
     // to delete correctly-downloaded models.
-    sizeBytes: 89104085,
+    sizeBytes: 89_104_085,
     required: true,
   },
   {
@@ -61,7 +61,7 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
       "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
     ],
     sha256: "",
-    sizeBytes: 64893708,
+    sizeBytes: 64_893_708,
     required: true,
   },
   {
@@ -73,7 +73,7 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
       "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
     ],
     sha256: "",
-    sizeBytes: 173873425,
+    sizeBytes: 173_873_425,
     required: false,
   },
   // ultraface-320.onnx (~1.2 MB) is now bundled inside models-tokenizer
@@ -104,7 +104,7 @@ class HashTransform extends Transform {
   _transform(
     chunk: Buffer,
     _encoding: BufferEncoding,
-    callback: (error?: Error | null) => void,
+    callback: (error?: Error | null) => void
   ): void {
     this.hash.update(chunk);
     this.push(chunk);
@@ -151,7 +151,7 @@ function resolveMirrorLabel(url: string): string {
 async function isFileValid(
   filePath: string,
   expectedSha256: string,
-  expectedSizeBytes: number,
+  expectedSizeBytes: number
 ): Promise<boolean> {
   let stat: fs.Stats;
   try {
@@ -190,11 +190,11 @@ function sha256FileStream(filePath: string): Promise<string> {
 interface DownloadFileOptions {
   destPath: string;
   entry: ModelManifestEntry;
+  maxRetries: number;
   mirrorBaseUrl: string;
   modelsDir: string;
-  maxRetries: number;
-  signal?: AbortSignal;
   onProgress?: (progress: DownloadProgress) => void;
+  signal?: AbortSignal;
 }
 
 interface DownloadFileResult {
@@ -206,7 +206,7 @@ interface DownloadFileResult {
  * .tmp atomic rename, mirror fallback, and retries.
  */
 async function downloadOneFile(
-  opts: DownloadFileOptions,
+  opts: DownloadFileOptions
 ): Promise<DownloadFileResult> {
   const {
     destPath,
@@ -237,7 +237,7 @@ async function downloadOneFile(
   }
 
   const resolvedUrls = entry.urls.map((url) =>
-    substituteMirror(url, mirrorBaseUrl),
+    substituteMirror(url, mirrorBaseUrl)
   );
 
   let lastError: Error | null = null;
@@ -303,7 +303,7 @@ async function downloadOneFile(
 
           if (actualHash !== entry.sha256) {
             throw new Error(
-              `SHA256 mismatch: expected ${entry.sha256}, got ${actualHash}`,
+              `SHA256 mismatch: expected ${entry.sha256}, got ${actualHash}`
             );
           }
         }
@@ -337,19 +337,19 @@ async function downloadOneFile(
 
   // All retries exhausted
   throw new Error(
-    `Failed to download ${entry.name} after ${maxRetries} attempts: ${lastError?.message ?? "unknown error"}`,
+    `Failed to download ${entry.name} after ${maxRetries} attempts: ${lastError?.message ?? "unknown error"}`
   );
 }
 
 // ── Single attempt (one mirror) ─────────────────────────────────────────
 
 interface AttemptDownloadOptions {
-  url: string;
-  tmpPath: string;
   entry: ModelManifestEntry;
   mirrorLabel: string;
-  signal?: AbortSignal;
   onProgress?: (progress: DownloadProgress) => void;
+  signal?: AbortSignal;
+  tmpPath: string;
+  url: string;
 }
 
 /**
@@ -370,10 +370,10 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
 
     // Guard: if already settled, silently ignore any subsequent
     // resolve/reject calls (prevents unhandled rejection noise).
-    const onceSettle = (
-      fn: () => void,
-    ): void => {
-      if (settled) return;
+    const onceSettle = (fn: () => void): void => {
+      if (settled) {
+        return;
+      }
       settled = true;
       fn();
     };
@@ -412,9 +412,7 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
 
         if (response.statusCode !== 200) {
           response.resume();
-          onceSettle(() =>
-            reject(new Error(`HTTP ${response.statusCode}`)),
-          );
+          onceSettle(() => reject(new Error(`HTTP ${response.statusCode}`)));
           return;
         }
 
@@ -437,8 +435,7 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
           if (now - lastProgressTime >= 100) {
             lastProgressTime = now;
             const elapsed = (now - startTime) / 1000; // seconds
-            const bytesPerSecond =
-              elapsed > 0 ? downloadedBytes / elapsed : 0;
+            const bytesPerSecond = elapsed > 0 ? downloadedBytes / elapsed : 0;
             const remainingBytes = totalBytes - downloadedBytes;
             const remainingSeconds =
               bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : 0;
@@ -474,7 +471,7 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
           // Return SHA256 computed in-stream — avoids re-reading the file from disk
           onceSettle(() => resolve(hashTransform.digest()));
         });
-      },
+      }
     );
 
     req.on("error", (err) => {
@@ -485,9 +482,7 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
       onceSettle(() => {
         req.destroy();
         reject(
-          new Error(
-            `Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`,
-          ),
+          new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`)
         );
       });
     });
@@ -514,7 +509,7 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
  */
 async function probeSingleMirror(
   mirrorBaseUrl: string,
-  signal: AbortSignal,
+  signal: AbortSignal
 ): Promise<{ url: string; ttfb: number }> {
   // Strip trailing slash, then append the real model file path
   const base = mirrorBaseUrl.replace(/\/+$/, "");
@@ -537,7 +532,7 @@ async function probeSingleMirror(
       headErr?.message?.includes("timeout") ||
       headErr?.message?.includes("TIMEOUT");
 
-    if (!isHeadBlocked && !isTimeout) {
+    if (!(isHeadBlocked || isTimeout)) {
       throw headErr; // Fatal: mirror unreachable
     }
   }
@@ -561,7 +556,7 @@ function extractStatusCode(message: string): number | null {
  */
 export async function probeFastestMirror(
   mirrorBaseUrls: string[],
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
   if (mirrorBaseUrls.length === 0) {
     throw new Error("No mirror URLs provided");
@@ -586,7 +581,7 @@ export async function probeFastestMirror(
         clearTimeout(timeoutId);
         signal?.removeEventListener("abort", onParentAbort);
       }
-    }),
+    })
   );
 
   // Return the mirror with the lowest TTFB
@@ -626,7 +621,7 @@ function headRequest(url: string, signal: AbortSignal): Promise<void> {
         } else {
           reject(new Error(`HTTP ${res.statusCode}`));
         }
-      },
+      }
     );
     req.on("error", reject);
     req.on("timeout", () => {
@@ -667,7 +662,7 @@ function rangeGetRequest(url: string, signal: AbortSignal): Promise<number> {
         } else {
           reject(new Error(`HTTP ${res.statusCode}`));
         }
-      },
+      }
     );
     req.on("error", reject);
     req.on("timeout", () => {
@@ -764,7 +759,7 @@ export async function downloadAllModels(
   modelsDir: string,
   mirrorBaseUrl: string,
   onProgress?: (progress: DownloadProgress) => void,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{ success: boolean; downloaded: number; warnings: string[] }> {
   // Ensure models directory exists
   await fsp.mkdir(modelsDir, { recursive: true });
@@ -831,8 +826,7 @@ export async function downloadAllModels(
     // from (downloadedBytes / totalBytes) without flickering.
     const forwardProgress = (p: DownloadProgress): void => {
       // Partial bytes for the file currently being downloaded
-      const currentPartial =
-        (p.currentFilePercent / 100) * entry.sizeBytes;
+      const currentPartial = (p.currentFilePercent / 100) * entry.sizeBytes;
       onProgress?.({
         ...p,
         totalFiles,
@@ -874,12 +868,12 @@ export async function downloadAllModels(
       });
     } catch (err: any) {
       // ── Per-file failure — do NOT abort siblings (问题 3) ─────
-      if (signal?.aborted) throw err; // external cancellation
+      if (signal?.aborted) {
+        throw err; // external cancellation
+      }
 
       failedFileNames.add(entry.name);
-      allWarnings.push(
-        `${entry.name}: ${err?.message ?? String(err)}`,
-      );
+      allWarnings.push(`${entry.name}: ${err?.message ?? String(err)}`);
 
       // Per-file error signal so the UI can mark this card red
       onProgress?.({
@@ -906,9 +900,13 @@ export async function downloadAllModels(
 
   async function worker(): Promise<void> {
     while (queue.length > 0) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) {
+        return;
+      }
       const entry = queue.shift();
-      if (!entry) break;
+      if (!entry) {
+        break;
+      }
 
       await downloadOne(entry);
     }

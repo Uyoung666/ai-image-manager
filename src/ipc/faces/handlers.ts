@@ -312,7 +312,9 @@ export const getFaceIdentity = os.input(IdSchema).handler(({ input }) => {
       .from(photos)
       .where(and(inArray(photos.id, allPhotoIds), isNull(photos.deletedAt)))
       .all();
-    for (const r of rows) validPhotoSet.add(r.id);
+    for (const r of rows) {
+      validPhotoSet.add(r.id);
+    }
   }
   const validFaces = faces.filter((f) => validPhotoSet.has(f.photoId));
 
@@ -398,7 +400,9 @@ export const updateFaceIdentity = os
     }
     if (input.representativePhotoId !== undefined) {
       setData.representativePhotoId = input.representativePhotoId;
-      if (input.representativePhotoId !== null) {
+      if (input.representativePhotoId === null) {
+        setData.representativeVectorId = null;
+      } else {
         // Find the face_vector in the chosen photo that belongs to this identity
         const memberFace = db
           .select({
@@ -420,8 +424,6 @@ export const updateFaceIdentity = os
           .limit(1)
           .get();
         setData.representativeVectorId = memberFace?.vectorId ?? null;
-      } else {
-        setData.representativeVectorId = null;
       }
     }
     db.update(faceIdentities)

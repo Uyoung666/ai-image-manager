@@ -546,7 +546,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   }
 
   return (
-    <div className="relative flex h-full flex-col select-none">
+    <div className="relative flex h-full select-none flex-col">
       {/* Top bar */}
       <div className="flex items-center justify-between border-border border-b px-6 py-2">
         <span className="text-[11px] text-muted-foreground/70">

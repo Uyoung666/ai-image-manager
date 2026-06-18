@@ -307,7 +307,7 @@ export function SpotlightSearch() {
       {/* Dialog */}
       <div className="absolute top-[20%] right-0 left-0 mx-auto w-full max-w-[560px] px-4">
         <Command
-          className="overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl surface-elevated"
+          className="surface-elevated overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl"
           loop
           shouldFilter={!query.trim()}
         >

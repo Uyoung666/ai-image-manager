@@ -3,6 +3,7 @@ import type { AiStatus } from "@/types/photo";
 
 interface StatusBarProps {
   aiStatus: AiStatus | null;
+  className?: string;
   selectedCount: number;
   totalPhotos: number;
 }
@@ -11,6 +12,7 @@ export function StatusBar({
   totalPhotos,
   selectedCount,
   aiStatus,
+  className,
 }: StatusBarProps) {
   const { t } = useTranslation();
   let aiLabel: string;
@@ -39,7 +41,9 @@ export function StatusBar({
   }
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between border-border-subtle border-t bg-secondary px-4 text-[11px]">
+    <div
+      className={`glass-surface flex h-7 items-center justify-between border-border-subtle border-t px-4 text-[11px] ${className ?? ""}`}
+    >
       <div className="flex items-center gap-3 text-muted-foreground">
         <span>
           {t("totalPhotosStatus", { count: totalPhotos.toLocaleString() })}

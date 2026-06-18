@@ -35,7 +35,9 @@ function AboutSettingsPage() {
   const [signatureActive, setSignatureActive] = useState(false);
   const [easterEggFound, setEasterEggFound] = useState(false);
   const clickCountRef = useRef(0);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef);
 
@@ -104,9 +106,7 @@ function AboutSettingsPage() {
                 title={t("settingsVersion")}
                 type="button"
               >
-                <span className="select-none">
-                  {appVersion || "..."}
-                </span>
+                <span className="select-none">{appVersion || "..."}</span>
                 {easterEggFound && (
                   <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" />
                 )}

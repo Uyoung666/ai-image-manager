@@ -3,9 +3,10 @@ import { LOCAL_STORAGE_KEYS } from "@/constants";
 
 function detectSystemLanguage(): string {
   // navigator.language returns e.g. "zh-CN", "en-US", "ja-JP"
-  const nav =
-    navigator.language || (navigator as any).userLanguage || "";
-  if (nav.toLowerCase().startsWith("zh")) return "zh";
+  const nav = navigator.language || (navigator as any).userLanguage || "";
+  if (nav.toLowerCase().startsWith("zh")) {
+    return "zh";
+  }
   return "en";
 }
 

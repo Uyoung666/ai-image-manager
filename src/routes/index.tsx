@@ -1137,7 +1137,7 @@ function HomePage() {
   return (
     <>
       <div
-        className="flex h-full min-w-0 flex-col"
+        className="relative flex h-full min-w-0 flex-col"
         onDragOver={handleGlobalDragOver}
         onDrop={handleGlobalDrop}
       >
@@ -1323,13 +1323,16 @@ function HomePage() {
             />
           </div>
         ) : (
-          <Welcome
-            disabled={filter.importPhase !== "idle"}
-            onAddFolder={filter.handleAddFolder}
-          />
+          <div className="flex min-h-0 flex-1">
+            <Welcome
+              disabled={filter.importPhase !== "idle"}
+              onAddFolder={filter.handleAddFolder}
+            />
+          </div>
         )}
         <StatusBar
           aiStatus={aiStatus ?? null}
+          className="absolute right-0 bottom-0 left-0 z-50"
           selectedCount={selectedIds.size}
           totalPhotos={totalPhotos}
         />

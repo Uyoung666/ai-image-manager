@@ -41,9 +41,9 @@ export function QuickPreview({
     x: 0,
     y: 0,
   });
-  const [animState, setAnimState] = useState<"entering" | "visible" | "exiting">(
-    "entering"
-  );
+  const [animState, setAnimState] = useState<
+    "entering" | "visible" | "exiting"
+  >("entering");
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const scaleRef = useRef(1);
@@ -71,7 +71,9 @@ export function QuickPreview({
   }, [photo.id]);
 
   function handleClose() {
-    if (animState === "exiting") return;
+    if (animState === "exiting") {
+      return;
+    }
     setAnimState("exiting");
   }
   const handleCloseRef = useRef(handleClose);
@@ -172,21 +174,21 @@ export function QuickPreview({
   return (
     <div
       className={`fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm transition-all duration-200 ease-out ${
-        animState === "visible"
-          ? "opacity-100"
-          : "opacity-0"
+        animState === "visible" ? "opacity-100" : "opacity-0"
       }`}
       onClick={handleClose}
       onTransitionEnd={() => {
-        if (animState === "exiting") onCloseRef.current();
+        if (animState === "exiting") {
+          onCloseRef.current();
+        }
       }}
       onWheel={handleWheel}
     >
       <div
         className={`relative flex max-h-[90vh] max-w-[90vw] flex-col items-center transition-all duration-200 ease-out ${
           animState === "visible"
-            ? "scale-100 translate-y-0 opacity-100"
-            : "scale-95 translate-y-2 opacity-0"
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-2 scale-95 opacity-0"
         }`}
         onClick={(e) => e.stopPropagation()}
       >

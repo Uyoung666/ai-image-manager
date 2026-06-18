@@ -95,8 +95,9 @@ function CullListPage() {
     }
 
     const selectedFolder = folders.find((f) => f.id === selectedFolderId);
-    const sessionName = newName.trim()
-      || `${selectedFolder?.displayName ?? ""} - ${getModeLabel(newMode)}`;
+    const sessionName =
+      newName.trim() ||
+      `${selectedFolder?.displayName ?? ""} - ${getModeLabel(newMode)}`;
 
     setCreating(true);
     setNoFolderHint(false);

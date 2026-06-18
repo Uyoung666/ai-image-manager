@@ -44,10 +44,10 @@ export function initDataPath(): string {
   const defaultPath = app.getPath("userData");
 
   if (customPath) {
-    if (!fs.existsSync(customPath)) {
-      resolvedDataPath = defaultPath;
-    } else {
+    if (fs.existsSync(customPath)) {
       resolvedDataPath = customPath;
+    } else {
+      resolvedDataPath = defaultPath;
     }
   } else {
     resolvedDataPath = defaultPath;

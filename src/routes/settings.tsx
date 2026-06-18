@@ -40,7 +40,7 @@ function SettingsLayout() {
       <div className="flex min-h-0 flex-1">
         <SettingsSidebar />
         <div className="min-h-0 flex-1 overflow-hidden" key={location.pathname}>
-          <div className="animate-page-enter h-full">
+          <div className="h-full animate-page-enter">
             <Outlet />
           </div>
         </div>

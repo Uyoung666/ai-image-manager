@@ -364,7 +364,7 @@ export function PhotoGrid({
 
   return (
     <div
-      className="flex flex-1 flex-col"
+      className="flex flex-1 flex-col relative"
       onClick={(e) => {
         if (onBackgroundClick) {
           const target = e.target as HTMLElement;
@@ -375,8 +375,8 @@ export function PhotoGrid({
         }
       }}
     >
-      {/* Toolbar */}
-      <div className="flex items-center justify-between border-border border-b px-4 py-2">
+      {/* Floating glass toolbar — 悬浮毛玻璃工具条 */}
+      <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between border-border border-b glass-surface px-4 py-2">
         <span className="truncate text-[12px] text-muted-foreground">
           {t("photosCount", { count: photos.length.toLocaleString() })}
           {selectedIds.size > 0 &&
@@ -424,7 +424,7 @@ export function PhotoGrid({
         ref={containerCallbackRef}
       >
         <MasonryGrid
-          className="scrollbar-thin px-2 pt-2"
+          className="scrollbar-thin px-2 pt-10 pb-7"
           columnCount={columnCount}
           containerWidth={containerWidth - 16}
           gap={GAP}
@@ -445,7 +445,7 @@ export function PhotoGrid({
 
       {/* Loading overlay */}
       {loading && photos.length > 0 && (
-        <div className="pointer-events-none absolute top-[41px] right-0 bottom-0 left-0 flex items-start justify-center bg-background/30 pt-4">
+        <div className="pointer-events-none absolute top-0 right-0 bottom-0 left-0 flex items-start justify-center bg-background/30 pt-4">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       )}

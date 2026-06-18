@@ -15,8 +15,8 @@ import {
   initFaceWorkerPool,
   shutdownFacePool,
 } from "@/services/face-worker-pool";
-import { getDataPath } from "@/utils/data-path";
 import { getSetting } from "@/services/settings-manager";
+import { getDataPath } from "@/utils/data-path";
 
 const BATCH_SIZE = 40;
 const CLUSTERING_THRESHOLD = 0.55;
@@ -39,10 +39,7 @@ function findModelsDir(): string {
   return path.join(getDataPath(), "models");
 }
 
-const FACE_MODEL_FILES = [
-  "ultraface-320.onnx",
-  "w600k_r50.onnx",
-];
+const FACE_MODEL_FILES = ["ultraface-320.onnx", "w600k_r50.onnx"];
 
 async function ensureFaceModels(): Promise<boolean> {
   const faceDir = path.join(findModelsDir(), "face");

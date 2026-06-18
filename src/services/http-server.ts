@@ -566,9 +566,7 @@ export function startHttpServerEarly(): Promise<number> {
       // reuse the last-used port so the renderer's preload-injected
       // --http-port value stays valid.
       const port =
-        attempts === 0
-          ? lastUsedPort ?? 0
-          : getRandomDynamicPort();
+        attempts === 0 ? (lastUsedPort ?? 0) : getRandomDynamicPort();
 
       server = http.createServer(handleRequest);
 

@@ -352,9 +352,7 @@ function AlbumDetailPage() {
         id: album.id,
         coverPhotoId: id,
       });
-      setAlbum((prev) =>
-        prev ? { ...prev, coverPhotoId: id } : prev
-      );
+      setAlbum((prev) => (prev ? { ...prev, coverPhotoId: id } : prev));
       toast.success(t("setAsAlbumCover"));
     } catch {
       // ignore

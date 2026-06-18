@@ -478,7 +478,9 @@ export { invalidateFoldersCache } from "@/utils/folder-paths";
 // ── AI model availability (copy from resources or dev paths) ─────────
 function copyRecursive(src: string, dest: string): void {
   const entries = fs.readdirSync(src, { withFileTypes: true });
-  log.info(`[copyRecursive] src=${src} has ${entries.length} top-level entries`);
+  log.info(
+    `[copyRecursive] src=${src} has ${entries.length} top-level entries`
+  );
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
@@ -809,7 +811,10 @@ function checkForUpdates() {
     } else if (/acquire.*lock|another.*instance|mutex/i.test(raw)) {
       // Squirrel.Windows lock contention — another instance is running or
       // stale lock file; not actionable by user, don't show in UI
-      log.warn({ raw }, "[updater] Squirrel lock contention, suppressing error");
+      log.warn(
+        { raw },
+        "[updater] Squirrel lock contention, suppressing error"
+      );
       return; // Don't broadcast — this is a transient Squirrel-internal error
     }
     // Truncate raw Squirrel/.NET stack traces — they contain GBK-garbled text

@@ -15,13 +15,7 @@ import {
   User,
   X,
 } from "lucide-react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -167,13 +161,16 @@ const PersonCard = memo(function PersonCard({
     if (selectMode) {
       onToggleSelect(identity.id);
     } else {
-      navigate({ to: "/people/$identityId", params: { identityId: identity.id.toString() } });
+      navigate({
+        to: "/people/$identityId",
+        params: { identityId: identity.id.toString() },
+      });
     }
   };
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-[8px] border bg-card transition-colors cursor-pointer ${
+      className={`group relative cursor-pointer overflow-hidden rounded-[8px] border bg-card transition-colors ${
         isSelected
           ? "border-primary ring-2 ring-primary/30"
           : "border-border hover:border-primary/30"
@@ -190,6 +187,7 @@ const PersonCard = memo(function PersonCard({
             className="w-full truncate rounded-[3px] border border-primary/40 bg-background px-1 py-px font-medium text-[13px] text-foreground outline-none"
             onBlur={() => onRename(identity.id)}
             onChange={(e) => onNameInputChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
             onCompositionEnd={(e) => {
               onNameInputCompositionEnd(e);
             }}
@@ -208,7 +206,6 @@ const PersonCard = memo(function PersonCard({
                 onCancelEdit();
               }
             }}
-            onClick={(e) => e.stopPropagation()}
             value={nameInput}
           />
         ) : (
@@ -295,7 +292,6 @@ function PeoplePage() {
     },
     staleTime: 30_000,
   });
-
 
   // Face detection state
   const [detecting, setDetecting] = useState(false);
@@ -475,7 +471,10 @@ function PeoplePage() {
     const sourceIds = ids.filter((id) => id !== targetId);
 
     // Snapshot for rollback
-    const previousData = queryClient.getQueryData<FaceIdentity[]>(["faces", "identities"]);
+    const previousData = queryClient.getQueryData<FaceIdentity[]>([
+      "faces",
+      "identities",
+    ]);
 
     try {
       // Optimistic update: remove source identities immediately (no flash)
@@ -514,7 +513,10 @@ function PeoplePage() {
     const { id } = confirmDelete;
     setConfirmDelete(null);
 
-    const previousData = queryClient.getQueryData<FaceIdentity[]>(["faces", "identities"]);
+    const previousData = queryClient.getQueryData<FaceIdentity[]>([
+      "faces",
+      "identities",
+    ]);
 
     try {
       // Optimistic update: remove from list immediately (no flash)

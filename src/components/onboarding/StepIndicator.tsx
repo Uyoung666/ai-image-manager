@@ -15,12 +15,12 @@ export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
         const isLast = i === steps.length - 1;
 
         return (
-          <div key={step.title} className="flex items-start">
+          <div className="flex items-start" key={step.title}>
             {/* Step circle + label */}
             <div className="flex flex-col items-center gap-2">
               {/* Circle */}
               <div
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-300 ${
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-semibold text-sm transition-colors duration-300 ${
                   isCompleted
                     ? "bg-primary text-primary-foreground"
                     : isCurrent
@@ -38,7 +38,7 @@ export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
               {/* Label */}
               <div className="text-center">
                 <p
-                  className={`text-sm font-medium ${
+                  className={`font-medium text-sm ${
                     isCurrent
                       ? "text-foreground"
                       : isCompleted
@@ -48,7 +48,7 @@ export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
                 >
                   {step.title}
                 </p>
-                <p className="mt-0.5 max-w-[140px] text-xs text-muted-foreground">
+                <p className="mt-0.5 max-w-[140px] text-muted-foreground text-xs">
                   {step.description}
                 </p>
               </div>

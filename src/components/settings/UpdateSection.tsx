@@ -148,11 +148,9 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           Math.floor((Date.now() - downloadStartRef.current) / 1000)
         );
       }, 1000);
-    } else {
-      if (elapsedTimerRef.current) {
-        clearInterval(elapsedTimerRef.current);
-        elapsedTimerRef.current = null;
-      }
+    } else if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
     }
     return () => {
       if (elapsedTimerRef.current) {
@@ -301,8 +299,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                   ? t("updateFound", { version: updateVersion })
                   : t("updateDownloading")}
               </p>
-              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted relative">
-                <div className="absolute inset-y-0 w-2/5 bg-gradient-to-r from-transparent via-primary to-transparent rounded-full animate-indeterminate-bar" />
+              <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div className="absolute inset-y-0 w-2/5 animate-indeterminate-bar rounded-full bg-gradient-to-r from-transparent via-primary to-transparent" />
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/60">
                 {elapsedSeconds > 0
