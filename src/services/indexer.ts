@@ -13,7 +13,12 @@ import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { extractRawPreview, isRawFile } from "./raw-preview";
-import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
+import {
+  deletePhotoThumbnails,
+  generateDuelPreview,
+  generateThumbnail,
+  getDuelPreviewStrategy,
+} from "./thumbnailer";
 
 const log = createLogger("indexer");
 
@@ -254,34 +259,25 @@ async function readExif(
   filePath: string
 ): Promise<Record<string, unknown> | null> {
   try {
-    return await exifr.parse(filePath, {
-      pick: [
-        "Make",
-        "Model",
-        "LensMake",
-        "LensModel",
-        "FocalLength",
-        "FocalLengthIn35mmFormat",
-        "FNumber",
-        "ExposureTime",
-        "ISO",
-        "ExposureCompensation",
-        "DateTimeOriginal",
-        "DateTimeDigitized",
-        "Flash",
-        "Orientation",
-        "GPSLatitude",
-        "GPSLongitude",
-        "GPSAltitude",
-        "latitude",
-        "longitude",
-        "Software",
-        "ImageDescription",
-        "Artist",
-        "Copyright",
-      ],
+    const result = await exifr.parse(filePath, {
+      // 40KB first chunk — matches orientation()'s tuning for HEIC files
+      // where the meta box (containing EXIF via iloc/iinf) may sit beyond
+      // the default 512-byte first chunk (firstChunkSizeNode).
+      firstChunkSize: 40_000,
     });
-  } catch {
+    if (!result || Object.keys(result).length === 0) {
+      log.warn(
+        { filePath, ext: path.extname(filePath).toLowerCase() },
+        "EXIF extraction returned empty result"
+      );
+      return null;
+    }
+    return result;
+  } catch (err) {
+    log.warn(
+      { filePath, ext: path.extname(filePath).toLowerCase(), err },
+      "EXIF extraction threw an error"
+    );
     return null;
   }
 }
@@ -289,6 +285,7 @@ async function readExif(
 interface PhotoRecord {
   colorSpace: string;
   dominantColors: string | null;
+  duelPreviewPath: string | null;
   fileDate: number;
   filename: string;
   fileSize: number;
@@ -393,6 +390,25 @@ async function preparePhotoRecord(
     thumb = { thumbnailPath: null, width: 0, height: 0 };
   }
 
+  // 对比预览（PK 选片专用 2560px JPEG Q92）
+  let duelPreviewPath: string | null = null;
+  const strategy = getDuelPreviewStrategy(
+    filePath,
+    meta.width,
+    meta.height,
+    meta.format
+  );
+  if (strategy === "generate") {
+    try {
+      const preview = await generateDuelPreview(filePath);
+      duelPreviewPath = preview?.previewPath ?? null;
+    } catch {
+      log.warn({ filePath }, "Duel preview generation failed");
+      duelPreviewPath = null;
+    }
+  }
+  // strategy === "use_original" → duelPreviewPath 保持 null，前端直接用原图
+
   let phash: string | null = null;
   try {
     phash = await computePHash(filePath);
@@ -432,6 +448,7 @@ async function preparePhotoRecord(
     hasAlpha: meta.hasAlpha,
     thumbnailPath: thumb.thumbnailPath,
     thumbnailSize: `${thumb.width}x${thumb.height}`,
+    duelPreviewPath,
     isIndexed: true,
     phash,
     dominantColors,
@@ -475,6 +492,15 @@ async function preparePhotoRecord(
       copyright: exif.Copyright as string,
       rawJson: JSON.stringify(exif),
     };
+  } else {
+    log.warn(
+      {
+        filePath,
+        ext: path.extname(filePath).toLowerCase(),
+        hasExif: exif !== null && exif !== undefined,
+      },
+      "No EXIF metadata extracted for photo"
+    );
   }
 
   return { photoRecord, exifRecord, stat, phash };

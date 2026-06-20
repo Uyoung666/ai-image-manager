@@ -42,6 +42,7 @@ export const photos = sqliteTable(
     hasAlpha: integer("has_alpha", { mode: "boolean" }),
     thumbnailPath: text("thumbnail_path"),
     thumbnailSize: text("thumbnail_size"),
+    duelPreviewPath: text("duel_preview_path"),
     dominantColors: text("dominant_colors"),
     phash: text("phash"),
     contentHash: text("content_hash"),

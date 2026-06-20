@@ -183,6 +183,13 @@
       "when": 1786100000000,
       "tag": "0025_add_face_perf_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1786200000000,
+      "tag": "0026_add_duel_preview_path",
+      "breakpoints": true
     }
   ]
 }

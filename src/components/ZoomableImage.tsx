@@ -1,6 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toLocalMediaUrl, toPreviewUrl } from "@/utils/local-media-url";
+import {
+  toDuelPreviewUrl,
+  toLocalMediaUrl,
+  toPreviewUrl,
+} from "@/utils/local-media-url";
 
 // RAW 文件扩展名集合（与 raw-preview.ts 保持同步）
 const RAW_EXTENSIONS = new Set([
@@ -35,6 +39,11 @@ const INERTIA_FRICTION = 0.94;
 const INERTIA_THRESHOLD = 0.3;
 const OVERSCROLL_MARGIN = 0.3; // 允许拖出边界的比例
 
+// ── 渐进式加载常量 ────────────────────────────────────────────────
+const ZOOM_UPGRADE_RATIO = 0.9; // 显示像素 > 预览像素 × ratio → 加载原图
+const ZOOM_DOWNGRADE_RATIO = 0.7; // 显示像素 < 预览像素 × ratio → 释放原图
+const ORIGINAL_RELEASE_DELAY = 5000; // 缩小后 5s 释放原图内存
+
 // ── ZoomableImage Props ──────────────────────────────────────────
 
 export interface ZoomState {
@@ -45,6 +54,12 @@ export interface ZoomState {
 interface ZoomableImageProps {
   alt: string;
   filePath: string;
+  /** 对比预览路径（2560px JPEG），PK 选片专用 */
+  duelPreviewPath?: string | null;
+  /** 启用三级渐进式加载（默认 false，完全向后兼容） */
+  enableProgressiveLoading?: boolean;
+  /** 缩放时自动加载原图（仅在 progressive 模式下生效） */
+  enableOriginalOnZoom?: boolean;
   fillContainer?: boolean;
   onError?: () => void;
   onSync?: (state: ZoomState) => void;
@@ -58,11 +73,17 @@ interface ZoomableImageProps {
 
 type ImageSource = "preview" | "image" | "error";
 
+// ── 渐进式加载层级状态 ───────────────────────────────────────────
+type ProgressiveTier = "thumbnail" | "preview" | "original";
+
 export const ZoomableImage = memo(function ZoomableImage({
   alt,
   filePath,
+  duelPreviewPath,
+  enableProgressiveLoading = false,
+  enableOriginalOnZoom = false,
   thumbnailPath,
-  fillContainer,
+  fillContainer: _fillContainer,
   syncState,
   onSync,
   onError,
@@ -103,6 +124,21 @@ export const ZoomableImage = memo(function ZoomableImage({
   // 拖拽中禁用 CSS transition 以保证跟手，松手后恢复以驱动回弹
   const [isDragging, setIsDragging] = useState(false);
 
+  // ── 渐进式加载状态 ─────────────────────────────────────────────
+  const [activeTier, setActiveTier] = useState<ProgressiveTier>("thumbnail");
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [originalLoaded, setOriginalLoaded] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [originalLoading, setOriginalLoading] = useState(false);
+  const [originalError, setOriginalError] = useState(false);
+
+  const previewImgRef = useRef<HTMLImageElement>(null);
+  const originalImgRef = useRef<HTMLImageElement>(null);
+  const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const originalAbortRef = useRef<AbortController | null>(null);
+  // 记录原图是否需要重新加载（释放后再次缩放触发时）
+  const shouldReloadOriginalRef = useRef(false);
+
   scaleRef.current = scale;
   translateRef.current = translate;
 
@@ -130,11 +166,21 @@ export const ZoomableImage = memo(function ZoomableImage({
   }, [syncState]);
 
   // ── 边界约束 ──────────────────────────────────────────────────
-  // tx=0 为居中；显示尺寸 > 容器时允许 30% 越界，超出硬截断
+
+  // 渐进模式下使用当前激活层的 img ref
+  const getActiveImgRef = useCallback(() => {
+    if (!enableProgressiveLoading) {
+      return imgRef.current;
+    }
+    if (activeTier === "original") {
+      return originalImgRef.current;
+    }
+    return previewImgRef.current || imgRef.current;
+  }, [enableProgressiveLoading, activeTier]);
 
   const getFitSize = useCallback(() => {
     const container = containerRef.current;
-    const img = imgRef.current;
+    const img = getActiveImgRef();
     if (!(container && img)) {
       return null;
     }
@@ -147,9 +193,9 @@ export const ZoomableImage = memo(function ZoomableImage({
     }
 
     // object-fit: contain — 等比缩放以适配容器，不放大
-    const scale = Math.min(1, cw / nw, ch / nh);
-    return { w: nw * scale, h: nh * scale };
-  }, []);
+    const s = Math.min(1, cw / nw, ch / nh);
+    return { w: nw * s, h: nh * s };
+  }, [getActiveImgRef]);
 
   const clampToBounds = useCallback(
     (tx: number, ty: number, s: number) => {
@@ -207,7 +253,6 @@ export const ZoomableImage = memo(function ZoomableImage({
       const speed = Math.sqrt(v.x * v.x + v.y * v.y);
 
       if (speed < INERTIA_THRESHOLD) {
-        // 惯性结束 → 回弹到合法边界
         setIsDragging(false);
         const clamped = clampToBounds(
           translateRef.current.x,
@@ -224,7 +269,6 @@ export const ZoomableImage = memo(function ZoomableImage({
       const rawX = translateRef.current.x + v.x;
       const rawY = translateRef.current.y + v.y;
 
-      // 接近停止时开始软性回弹（过渡到 clamp 值）
       if (speed < INERTIA_THRESHOLD * 8) {
         const clamped = clampToBounds(rawX, rawY, scaleRef.current);
         const t = 1 - speed / (INERTIA_THRESHOLD * 8);
@@ -243,6 +287,114 @@ export const ZoomableImage = memo(function ZoomableImage({
     inertiaRafRef.current = requestAnimationFrame(step);
   }, [cancelInertia, clampToBounds, fireSync]);
 
+  // ── 渐进式加载：缩放触发原图加载 ──────────────────────────────
+
+  const startOriginalLoad = useCallback(() => {
+    if (!enableOriginalOnZoom) return;
+    if (originalLoaded || originalLoading) return;
+    if (originalError) return;
+
+    setOriginalLoading(true);
+
+    // 取消之前的释放计时器
+    if (releaseTimerRef.current) {
+      clearTimeout(releaseTimerRef.current);
+      releaseTimerRef.current = null;
+    }
+
+    // 取消之前的加载
+    if (originalAbortRef.current) {
+      originalAbortRef.current.abort();
+    }
+
+    shouldReloadOriginalRef.current = false;
+    const controller = new AbortController();
+    originalAbortRef.current = controller;
+
+    const img = new Image();
+    img.onload = () => {
+      if (controller.signal.aborted) return;
+      setOriginalLoaded(true);
+      setOriginalLoading(false);
+      setActiveTier("original");
+    };
+    img.onerror = () => {
+      if (controller.signal.aborted) return;
+      setOriginalError(true);
+      setOriginalLoading(false);
+    };
+    // 原图走 /image 路由
+    img.src = toLocalMediaUrl(filePath);
+  }, [
+    enableOriginalOnZoom,
+    filePath,
+    originalLoaded,
+    originalLoading,
+    originalError,
+  ]);
+
+  const scheduleOriginalRelease = useCallback(() => {
+    if (releaseTimerRef.current) {
+      clearTimeout(releaseTimerRef.current);
+    }
+    releaseTimerRef.current = setTimeout(() => {
+      // 取消加载中的请求
+      if (originalAbortRef.current) {
+        originalAbortRef.current.abort();
+        originalAbortRef.current = null;
+      }
+      setOriginalLoading(false);
+      setOriginalLoaded(false);
+      setOriginalError(false);
+      shouldReloadOriginalRef.current = true;
+      setActiveTier("preview");
+    }, ORIGINAL_RELEASE_DELAY);
+  }, []);
+
+  // 监听缩放，触发原图加载/释放
+  useEffect(() => {
+    if (!(enableProgressiveLoading && enableOriginalOnZoom)) return;
+    if (!previewLoaded) return;
+
+    const fit = getFitSize();
+    if (!fit) return;
+
+    const displayPixels = Math.max(fit.w, fit.h) * scale;
+    // 对比预览短边约 2560px / aspectRatio，这里用长边估算
+    const previewNativePixels = 2560; // 对比预览长边
+
+    if (displayPixels > previewNativePixels * ZOOM_UPGRADE_RATIO) {
+      startOriginalLoad();
+    } else if (
+      (originalLoaded || originalLoading) &&
+      displayPixels < previewNativePixels * ZOOM_DOWNGRADE_RATIO
+    ) {
+      scheduleOriginalRelease();
+    }
+  }, [
+    scale,
+    enableProgressiveLoading,
+    enableOriginalOnZoom,
+    previewLoaded,
+    originalLoaded,
+    originalLoading,
+    getFitSize,
+    startOriginalLoad,
+    scheduleOriginalRelease,
+  ]);
+
+  // 清理释放计时器
+  useEffect(() => {
+    return () => {
+      if (releaseTimerRef.current) {
+        clearTimeout(releaseTimerRef.current);
+      }
+      if (originalAbortRef.current) {
+        originalAbortRef.current.abort();
+      }
+    };
+  }, []);
+
   // ── 交互处理 ──────────────────────────────────────────────────
 
   const handleClick = useCallback(
@@ -251,7 +403,6 @@ export const ZoomableImage = memo(function ZoomableImage({
         didDrag.current = false;
         return;
       }
-      // 仅在已缩放且需要同步时（PK 模式）回弹到 100%
       if (onSync && scaleRef.current > 1) {
         cancelInertia();
         setScale(1);
@@ -273,7 +424,6 @@ export const ZoomableImage = memo(function ZoomableImage({
       const s = scaleRef.current;
 
       if (s > 1.05) {
-        // 已缩放 → 回到 fit
         setScale(1);
         setTranslate({ x: 0, y: 0 });
         scaleRef.current = 1;
@@ -283,8 +433,8 @@ export const ZoomableImage = memo(function ZoomableImage({
         return;
       }
 
-      // fit → 100% 像素（1:1 像素映射）
-      const img = imgRef.current;
+      // fit → 100% 像素
+      const img = getActiveImgRef();
       const container = containerRef.current;
       if (!(img && container)) {
         return;
@@ -317,7 +467,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       setIsDragging(false);
       setTimeout(() => fireSync(), 0);
     },
-    [fireSync, cancelInertia, clampToBounds]
+    [fireSync, cancelInertia, clampToBounds, getActiveImgRef]
   );
 
   const handleWheel = useCallback(
@@ -326,18 +476,15 @@ export const ZoomableImage = memo(function ZoomableImage({
       cancelInertia();
 
       const rect = e.currentTarget.getBoundingClientRect();
-      // 光标相对于容器中心的偏移
       const relX = e.clientX - rect.left - rect.width / 2;
       const relY = e.clientY - rect.top - rect.height / 2;
 
       let newScale: number;
 
       if (e.ctrlKey) {
-        // ── 触控板捏合手势（Chromium ctrlKey + wheel）──────────
         newScale = scaleRef.current - e.deltaY / PINCH_FACTOR;
         newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
       } else {
-        // ── 鼠标滚轮缩放 ────────────────────────────────────────
         const direction = e.deltaY < 0 ? 1 : -1;
         newScale =
           direction > 0
@@ -399,7 +546,6 @@ export const ZoomableImage = memo(function ZoomableImage({
       const now = performance.now();
       const dt = now - lastMoveTimeRef.current;
       if (dt > 0) {
-        // 归一化到 16ms 帧以消除帧率波动
         velocityRef.current = {
           x: (dx / dt) * 16,
           y: (dy / dt) * 16,
@@ -426,10 +572,8 @@ export const ZoomableImage = memo(function ZoomableImage({
       );
 
       if (speed > 2) {
-        // 有足够初速度 → 惯性滑行（结束时自动回弹）
         startInertia();
       } else {
-        // 无明显速度 → 直接回弹
         setIsDragging(false);
         const clamped = clampToBounds(
           translateRef.current.x,
@@ -453,13 +597,21 @@ export const ZoomableImage = memo(function ZoomableImage({
   const isZoomed = scale > 1;
   const imgTransform = `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`;
 
-  // ── URL 构造 ────────────────────────────────────────────────────
+  // ── URL 构造（legacy 模式）────────────────────────────────────
   const src = (() => {
     if (source === "preview") {
       return toPreviewUrl(filePath);
     }
     return toLocalMediaUrl(thumbnailPath ?? filePath);
   })();
+
+  // ── 渐进式模式 URL 构造 ────────────────────────────────────────
+  const tier1Src = toLocalMediaUrl(thumbnailPath ?? filePath);
+  // Tier 2：有对比预览用 duel-preview 路由，否则回退到原图
+  const tier2Src = duelPreviewPath
+    ? toDuelPreviewUrl(duelPreviewPath)
+    : toLocalMediaUrl(filePath);
+  const tier3Src = toLocalMediaUrl(filePath);
 
   // ── 降级链：ref 驱动，杜绝闭包过期竞态 ─────────────────────────
   const handleImageError = useCallback(() => {
@@ -481,6 +633,12 @@ export const ZoomableImage = memo(function ZoomableImage({
     }
   }, [onError]);
 
+  // ── 渐进式模式：Tier 加载回调 ──────────────────────────────────
+  const handlePreviewLoad = useCallback(() => {
+    setPreviewLoaded(true);
+    setActiveTier("preview");
+  }, []);
+
   // ── 错误状态 UI ─────────────────────────────────────────────────
   if (hasError) {
     return (
@@ -490,7 +648,85 @@ export const ZoomableImage = memo(function ZoomableImage({
     );
   }
 
-  // ── 正常渲染 ────────────────────────────────────────────────────
+  // ── 渐进式渲染（PK 选片用）────────────────────────────────────
+  if (enableProgressiveLoading) {
+    // 确定当前应显示的图片源
+    const currentSrc = (() => {
+      if (originalLoaded && activeTier === "original") return tier3Src;
+      if (previewLoaded) return tier2Src;
+      return tier1Src;
+    })();
+
+    // 是否仍在等待更优画质
+    const isUpgrading =
+      (!previewLoaded && !previewError) || originalLoading;
+
+    return (
+      <div
+        className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[6px]"
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onWheel={handleWheel}
+        ref={containerRef}
+      >
+        {/* 使用与 legacy 完全一致的渲染方式的单一 img 标签 */}
+        <img
+          alt={alt}
+          className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ease-out ${
+            previewLoaded || originalLoaded ? "opacity-100" : "opacity-100"
+          } ${isZoomed ? "cursor-grab active:cursor-grabbing" : ""}`}
+          draggable={false}
+          onError={() => {
+            // 加载失败时尝试降级
+            if (activeTier === "original") {
+              setOriginalError(true);
+              setOriginalLoading(false);
+              setActiveTier("preview");
+            } else if (!previewLoaded) {
+              setPreviewError(true);
+            } else {
+              onError?.();
+            }
+          }}
+          onLoad={() => {
+            if (!previewLoaded && !previewError) {
+              setPreviewLoaded(true);
+              setActiveTier("preview");
+            }
+            if (originalLoading) {
+              setOriginalLoaded(true);
+              setOriginalLoading(false);
+              setActiveTier("original");
+            }
+          }}
+          onMouseDown={handleMouseDown}
+          ref={imgRef}
+          src={currentSrc}
+          style={{
+            transform: imgTransform,
+            willChange: isZoomed ? "transform" : "auto",
+            transition: isDragging ? "none" : undefined,
+          }}
+        />
+
+        {/* 加载指示器 */}
+        {isUpgrading && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-[6px]">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          </div>
+        )}
+
+        {/* 缩放百分比标签 */}
+        {isZoomed && (
+          <div className="pointer-events-none absolute top-2 right-2 z-10 rounded-[4px] bg-black/60 px-1.5 py-0.5 text-[10px] text-white/70">
+            {Math.round(scale * 100)}%
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── 传统渲染（网格/灯箱/快速预览用，行为完全不变）─────────────
   return (
     <div
       className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-[6px]"
@@ -499,8 +735,6 @@ export const ZoomableImage = memo(function ZoomableImage({
       onWheel={handleWheel}
       ref={containerRef}
     >
-      {/* 纯 opacity 硬切。拖拽中用 inline style 禁用 transition 保证跟手，
-          松手后恢复 CSS transition 以驱动回弹和缩放平滑过渡。 */}
       <img
         alt={alt}
         className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ease-out ${
@@ -519,7 +753,6 @@ export const ZoomableImage = memo(function ZoomableImage({
         }}
       />
 
-      {/* 轻量加载指示器 */}
       {!(loaded || hasError) && (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-[6px]">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />

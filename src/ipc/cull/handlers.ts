@@ -9,6 +9,10 @@ import {
   photos,
 } from "@/db/schema";
 import { BKTree, hammingDistance } from "@/services/bk-tree";
+import {
+  generateDuelPreview,
+  getDuelPreviewStrategy,
+} from "@/services/thumbnailer";
 
 // ── Per-session caches to avoid redundant work on every getNextPair call ──
 
@@ -134,6 +138,7 @@ function selectPhotoFields() {
     fileSize: photos.fileSize,
     format: photos.format,
     thumbnailPath: photos.thumbnailPath,
+    duelPreviewPath: photos.duelPreviewPath,
     fileDate: photos.fileDate,
     isFavorite: photos.isFavorite,
     isIndexed: photos.isIndexed,
@@ -160,6 +165,7 @@ function loadPendingWithMetadata(sessionId: number) {
       fileSize: photos.fileSize,
       format: photos.format,
       thumbnailPath: photos.thumbnailPath,
+      duelPreviewPath: photos.duelPreviewPath,
       isFavorite: photos.isFavorite,
       isIndexed: photos.isIndexed,
     })
@@ -189,6 +195,7 @@ function buildPairItem(row: PendingRow) {
       fileSize: row.fileSize,
       format: row.format,
       thumbnailPath: row.thumbnailPath,
+      duelPreviewPath: row.duelPreviewPath,
       fileDate: row.fileDate,
       isFavorite: row.isFavorite,
       isIndexed: row.isIndexed,
@@ -418,6 +425,58 @@ export const deleteSession = os
     return { success: true };
   });
 
+// ── 对比预览懒生成 ──────────────────────────────────────────────
+
+export const ensureDuelPreview = os
+  .input(z.object({ photoId: z.number() }))
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const photo = db
+      .select({
+        path: photos.path,
+        width: photos.width,
+        height: photos.height,
+        format: photos.format,
+        duelPreviewPath: photos.duelPreviewPath,
+      })
+      .from(photos)
+      .where(eq(photos.id, input.photoId))
+      .get();
+
+    if (!photo) {
+      throw new Error("照片不存在");
+    }
+
+    // 已有对比预览（或已标记为直接用原图）→ 直接返回
+    if (photo.duelPreviewPath) {
+      return { duelPreviewPath: photo.duelPreviewPath };
+    }
+
+    const longEdge = Math.max(photo.width ?? 0, photo.height ?? 0);
+    const strategy = getDuelPreviewStrategy(
+      photo.path,
+      photo.width ?? 0,
+      photo.height ?? 0,
+      photo.format ?? ""
+    );
+
+    if (strategy === "use_original") {
+      // 小文件直接用原图，无需生成预览
+      return { duelPreviewPath: null, strategy: "use_original" };
+    }
+
+    const preview = await generateDuelPreview(photo.path);
+    if (preview) {
+      db.update(photos)
+        .set({ duelPreviewPath: preview.previewPath })
+        .where(eq(photos.id, input.photoId))
+        .run();
+      return { duelPreviewPath: preview.previewPath };
+    }
+
+    return { duelPreviewPath: null };
+  });
+
 function sortBySimilarityGroups(pending: PendingRow[]): PendingRow[] {
   const withPHash = pending.filter((p) => p.phash != null);
   if (withPHash.length < 2) {
@@ -539,6 +598,7 @@ export const getNextPair = os
             fileSize: item.fileSize,
             format: item.format,
             thumbnailPath: item.thumbnailPath,
+            duelPreviewPath: item.duelPreviewPath,
             fileDate: item.fileDate,
             isFavorite: item.isFavorite,
             isIndexed: item.isIndexed,

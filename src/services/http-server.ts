@@ -188,6 +188,60 @@ function handleThumbnail(safePath: string, res: http.ServerResponse): void {
         if (code === "ENOENT") {
           res.writeHead(404);
           res.end("Not Found");
+        } else {
+          res.writeHead(500);
+          res.end("Internal Server Error");
+        }
+        console.warn(
+          `[HttpServer] /thumbnail error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
+        );
+      }
+    });
+}
+
+/** /duel-preview 路由 — 预生成的 2560px JPEG 对比预览（PK 选片专用） */
+function handleDuelPreview(
+  safePath: string,
+  res: http.ServerResponse
+): void {
+  setCorsHeaders(res);
+
+  fs.promises
+    .stat(safePath)
+    .then((stats) => {
+      if (!stats.isFile()) {
+        res.writeHead(404);
+        res.end("Not a file");
+        return;
+      }
+
+      res.setHeader("content-type", "image/jpeg");
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      res.setHeader("content-length", stats.size);
+      res.writeHead(200);
+
+      const readStream = fs.createReadStream(safePath);
+
+      readStream.on("error", (err) => {
+        if (res.headersSent) {
+          res.destroy();
+        } else {
+          res.writeHead(500);
+          res.end("Internal Server Error");
+        }
+        console.warn(
+          `[HttpServer] /duel-preview stream error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
+        );
+      });
+
+      readStream.pipe(res);
+    })
+    .catch((err: NodeJS.ErrnoException) => {
+      if (!res.headersSent) {
+        const code = err?.code;
+        if (code === "ENOENT") {
+          res.writeHead(404);
+          res.end("Not Found");
         } else if (code === "EACCES" || code === "EPERM") {
           res.writeHead(403);
           res.end("Forbidden");
@@ -530,6 +584,9 @@ function handleRequest(
       break;
     case "/image":
       handleImage(safePath, res, req);
+      break;
+    case "/duel-preview":
+      handleDuelPreview(safePath, res);
       break;
     default:
       setCorsHeaders(res);

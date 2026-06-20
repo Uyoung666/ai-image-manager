@@ -31,6 +31,7 @@ import { preloadImage } from "@/utils/local-media-url";
 // ── Types ──
 
 interface PhotoInfo {
+  duelPreviewPath?: string | null;
   fileDate: number | null;
   filename: string;
   fileSize: number;
@@ -153,7 +154,9 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       .then((result) => {
         if (result?.single) {
           preloadImage(
-            result.single.photo.thumbnailPath ?? result.single.photo.path
+            result.single.photo.duelPreviewPath ??
+              result.single.photo.thumbnailPath ??
+              result.single.photo.path
           );
         }
       })
@@ -161,6 +164,22 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         // 静默失败 — useQuery 在激活时会自动 refetch
       });
   }, [item, done, photoFetchId, session.id, queryClient]);
+
+  // 懒触发生成对比预览
+  useEffect(() => {
+    if (!item?.photo?.duelPreviewPath && item?.photo?.id) {
+      ipc.client.cull
+        .ensureDuelPreview({ photoId: item.photo.id })
+        .then(() => {
+          queryClient.invalidateQueries({
+            queryKey: ["cull", "session", session.id],
+          });
+        })
+        .catch(() => {
+          /* 静默失败 */
+        });
+    }
+  }, [item, session.id, queryClient]);
 
   // useMutation.isPending drives button locking — no manual submittingRef
 
@@ -454,6 +473,9 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         >
           <ZoomableImage
             alt={item.photo.filename}
+            duelPreviewPath={item.photo.duelPreviewPath}
+            enableOriginalOnZoom={true}
+            enableProgressiveLoading={true}
             filePath={item.photo.path}
             key={item.photo.id}
             onError={handleImageError}

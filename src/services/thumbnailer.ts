@@ -18,6 +18,25 @@ const THUMBNAIL_BASE_SIZES = {
 
 type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
 
+// ── 对比预览 (Duel Preview) — PK 选片专用高质量预览 ─────────────────
+
+/** 对比预览长边像素（Lightroom Smart Preview 同款 2560px） */
+const DUEL_PREVIEW_LONG_EDGE = 2560;
+
+/** 对比预览 JPEG 质量（92 = 接近无损的视觉质量） */
+const DUEL_PREVIEW_QUALITY = 92;
+
+/** 浏览器原生支持且不需要转换的格式 */
+const BROWSER_NATIVE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".bmp",
+  ".gif",
+  ".avif",
+]);
+
 interface ThumbnailCacheConfig {
   cleanupThresholdMB: number;
   maxDiskFiles: number;
@@ -27,9 +46,9 @@ interface ThumbnailCacheConfig {
 
 const CACHE_CONFIG: ThumbnailCacheConfig = {
   maxMemoryMB: 250,
-  maxDiskMB: 2048, // 2GB
-  maxDiskFiles: 10_000,
-  cleanupThresholdMB: 1800, // 1.8GB 触发清理
+  maxDiskMB: 3072, // 3GB（含对比预览 .jpg）
+  maxDiskFiles: 15_000,
+  cleanupThresholdMB: 2700, // 2.7GB 触发清理
 };
 
 let thumbnailDir: string;
@@ -51,7 +70,7 @@ export function initThumbnailer(): void {
 
   try {
     const primaryDisplay = screen.getPrimaryDisplay();
-    dprScale = Math.min(Math.ceil(primaryDisplay.scaleFactor), 2);
+    dprScale = Math.min(Math.ceil(primaryDisplay.scaleFactor), 3);
   } catch {
     dprScale = 2;
   }
@@ -73,6 +92,143 @@ export function getThumbnailPath(imagePath: string, size: ThumbSize): string {
     .update(`${imagePath}_${size}_v3_${dprScale}`)
     .digest("hex");
   return path.join(thumbnailDir, `${hash}.webp`);
+}
+
+// ── 对比预览路径与生成 ──────────────────────────────────────────────
+
+/**
+ * 返回对比预览的预期磁盘路径。
+ * 哈希输入包含 imagePath + "duel_v1"，换版本号即可全局失效缓存。
+ */
+export function getDuelPreviewPath(imagePath: string): string {
+  const hash = crypto
+    .createHash("md5")
+    .update(`${imagePath}_duel_v1`)
+    .digest("hex");
+  return path.join(thumbnailDir, `${hash}.jpg`);
+}
+
+/**
+ * 判断是否需要为某张照片生成对比预览。
+ * - 长边 ≤ 2560px 的浏览器原生格式 → 直接用原图即可
+ * - RAW / HEIC / TIFF / 超大 JPEG → 需要生成预览
+ */
+export function getDuelPreviewStrategy(
+  _imagePath: string,
+  width: number,
+  height: number,
+  format: string
+): "use_original" | "generate" {
+  const longEdge = Math.max(width, height);
+  const ext = format.toLowerCase();
+
+  // 浏览器原生格式且尺寸较小 → 直接用原图
+  if (
+    longEdge <= DUEL_PREVIEW_LONG_EDGE &&
+    BROWSER_NATIVE_EXTENSIONS.has(`.${ext}`)
+  ) {
+    return "use_original";
+  }
+
+  return "generate";
+}
+
+/**
+ * 生成对比预览（2560px 长边 JPEG Q92）。
+ * - RAW: 先提取内嵌 JPEG 预览，再 resize
+ * - JPEG/PNG/WebP 等: 直接 sharp resize
+ * - withoutEnlargement: true 保证不放大比 2560px 还小的原图
+ * - 返回 null 表示生成失败（调用方回退到原图）
+ */
+export async function generateDuelPreview(
+  imagePath: string
+): Promise<{ previewPath: string; width: number; height: number } | null> {
+  const cacheKey = `${imagePath}_duel`;
+  const previewPath = getDuelPreviewPath(imagePath);
+
+  // L2: 磁盘
+  if (fs.existsSync(previewPath)) {
+    try {
+      const meta = await sharp(previewPath).metadata();
+      return {
+        previewPath,
+        width: meta.width || 0,
+        height: meta.height || 0,
+      };
+    } catch {
+      // 文件损坏 → 删除并重新生成
+      try {
+        fs.unlinkSync(previewPath);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  // L3: 生成（inflight 去重，同 generateThumbnail 模式）
+  const existing = inFlightRequests.get(cacheKey);
+  if (existing) {
+    // 复用进行中的 Promise（类型不同但模式相同）
+    return existing as unknown as Promise<{
+      previewPath: string;
+      width: number;
+      height: number;
+    } | null>;
+  }
+
+  const promise = doGenerateDuelPreview(imagePath, previewPath, cacheKey);
+  inFlightRequests.set(cacheKey, promise as unknown as Promise<ThumbnailResult>);
+
+  try {
+    return await promise;
+  } finally {
+    inFlightRequests.delete(cacheKey);
+  }
+}
+
+async function doGenerateDuelPreview(
+  imagePath: string,
+  previewPath: string,
+  _cacheKey: string
+): Promise<{ previewPath: string; width: number; height: number } | null> {
+  let input: string | Buffer = imagePath;
+  if (isRawFile(imagePath)) {
+    const preview = await extractRawPreview(imagePath);
+    if (!preview) return null;
+    input = preview;
+  }
+
+  const pipeline = sharp(input, { failOn: "none" })
+    .rotate()
+    .resize(DUEL_PREVIEW_LONG_EDGE, DUEL_PREVIEW_LONG_EDGE, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: DUEL_PREVIEW_QUALITY });
+
+  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
+  fs.writeFileSync(previewPath, data);
+
+  return {
+    previewPath,
+    width: info.width,
+    height: info.height,
+  };
+}
+
+/**
+ * 删除单张照片的对比预览文件。
+ */
+export function deleteDuelPreview(imagePath: string): void {
+  if (!thumbnailDir) return;
+  const previewPath = getDuelPreviewPath(imagePath);
+  try {
+    if (fs.existsSync(previewPath)) {
+      fs.unlinkSync(previewPath);
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 export function checkAndCleanDiskCache(): {
@@ -221,7 +377,7 @@ async function doGenerate(
   const pipeline = sharp(input, { failOn: "none" })
     .rotate()
     .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 80, effort: 1 });
+    .webp({ quality: 85, effort: 4 });
   const { data: thumbBuffer, info } = await pipeline.toBuffer({
     resolveWithObject: true,
   });
@@ -315,6 +471,9 @@ export function deletePhotoThumbnails(imagePath: string): void {
     }
     memoryCache?.delete(`${imagePath}_${size}`);
   }
+
+  // 同时清理对比预览
+  deleteDuelPreview(imagePath);
 }
 
 export function clearThumbnailDiskCache(): {
@@ -352,7 +511,11 @@ function buildExpectedThumbnailSet(): Set<string> | null {
   try {
     const db = getDatabase();
     const records = db
-      .select({ path: photos.path, thumbnailPath: photos.thumbnailPath })
+      .select({
+        path: photos.path,
+        thumbnailPath: photos.thumbnailPath,
+        duelPreviewPath: photos.duelPreviewPath,
+      })
       .from(photos)
       .all();
 
@@ -361,10 +524,15 @@ function buildExpectedThumbnailSet(): Set<string> | null {
       if (r.thumbnailPath) {
         expected.add(path.basename(r.thumbnailPath));
       }
+      if (r.duelPreviewPath) {
+        expected.add(path.basename(r.duelPreviewPath));
+      }
       if (r.path) {
         for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
           expected.add(path.basename(getThumbnailPath(r.path, size)));
         }
+        // 对比预览的确定性路径也加入预期集
+        expected.add(path.basename(getDuelPreviewPath(r.path)));
       }
     }
     return expected;
@@ -394,7 +562,9 @@ export function scanOrphanThumbnails(): {
 
   const entries = fs.readdirSync(thumbnailDir);
   for (const entry of entries) {
-    if (!entry.endsWith(".webp")) {
+    const isManaged =
+      entry.endsWith(".webp") || entry.endsWith(".jpg");
+    if (!isManaged) {
       continue;
     }
     totalFiles++;
@@ -430,7 +600,9 @@ export function cleanOrphanThumbnails(): {
 
   const entries = fs.readdirSync(thumbnailDir);
   for (const entry of entries) {
-    if (!entry.endsWith(".webp")) {
+    const isManaged =
+      entry.endsWith(".webp") || entry.endsWith(".jpg");
+    if (!isManaged) {
       continue;
     }
     if (!expectedFiles.has(entry)) {

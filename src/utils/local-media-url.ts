@@ -68,6 +68,24 @@ export async function toHttpMediaUrl(
 }
 
 /**
+ * 构造对比预览 URL（PK 选片专用 2560px JPEG）。
+ * 走 /duel-preview 路由，immutable 缓存。
+ */
+export function toDuelPreviewUrl(
+  filePath: string | null | undefined
+): string {
+  if (!filePath) {
+    return "";
+  }
+  const port = getHttpPortSync();
+  if (port !== null) {
+    return `http://127.0.0.1:${port}/duel-preview?path=${encodeURIComponent(filePath)}`;
+  }
+  // 回退：JPEG 走 /image 路由
+  return toLocalMediaUrl(filePath);
+}
+
+/**
  * 预加载图片到浏览器缓存。
  */
 export function preloadImage(filePath: string | null | undefined): void {

@@ -32,6 +32,7 @@ import { preloadImage } from "@/utils/local-media-url";
 // ── Types ──
 
 interface PhotoInfo {
+  duelPreviewPath?: string | null;
   fileDate: number | null;
   filename: string;
   fileSize: number;
@@ -177,11 +178,16 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       })
       .then((result) => {
         if (result?.pair) {
+          // 优先预加载对比预览，再降级到缩略图
           preloadImage(
-            result.pair[0].photo.thumbnailPath ?? result.pair[0].photo.path
+            result.pair[0].photo.duelPreviewPath ??
+              result.pair[0].photo.thumbnailPath ??
+              result.pair[0].photo.path
           );
           preloadImage(
-            result.pair[1].photo.thumbnailPath ?? result.pair[1].photo.path
+            result.pair[1].photo.duelPreviewPath ??
+              result.pair[1].photo.thumbnailPath ??
+              result.pair[1].photo.path
           );
         }
       })
@@ -189,6 +195,25 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         // 静默失败 — useQuery 在激活时会自动 refetch
       });
   }, [pairData?.pair, pairData?.done, pairFetchId, session.id, queryClient]);
+
+  // 懒触发生成对比预览：当前 pair 的照片若缺失则后台生成
+  useEffect(() => {
+    if (!pair) return;
+    for (const item of pair) {
+      if (!item.photo.duelPreviewPath) {
+        ipc.client.cull
+          .ensureDuelPreview({ photoId: item.photo.id })
+          .then(() => {
+            queryClient.invalidateQueries({
+              queryKey: ["cull", "session", session.id],
+            });
+          })
+          .catch(() => {
+            /* 静默失败，下次重试 */
+          });
+      }
+    }
+  }, [pair, session.id, queryClient]);
 
   // useMutation.isPending drives button locking — no manual submittingRef
 
@@ -697,6 +722,9 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
               alt={left.photo.filename}
+              duelPreviewPath={left.photo.duelPreviewPath}
+              enableOriginalOnZoom={true}
+              enableProgressiveLoading={true}
               filePath={left.photo.path}
               key={`L-${pairFetchId}`}
               onError={() => handleImageError("left")}
@@ -783,6 +811,9 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
               alt={right.photo.filename}
+              duelPreviewPath={right.photo.duelPreviewPath}
+              enableOriginalOnZoom={true}
+              enableProgressiveLoading={true}
               filePath={right.photo.path}
               key={`R-${pairFetchId}`}
               onError={() => handleImageError("right")}
