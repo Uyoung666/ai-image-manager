@@ -40,7 +40,7 @@ When you first open the app, a **three-step setup wizard** will guide you:
 
 After the wizard, click **"Add Folder"** on the home screen (or drag a folder directly into the app window) to select your photo directory.
 
-The app scans for images (supporting 30+ formats including JPG, PNG, RAW, HEIC, WebP, AVIF), generates thumbnails, and extracts EXIF metadata.
+The app scans for images (supporting 27 formats including JPG, PNG, RAW, HEIC, WebP, AVIF), generates thumbnails, and extracts EXIF metadata.
 
 ### 3. Import Progress
 
@@ -193,7 +193,7 @@ In the detail panel, click "Analyze Suggested Tags" — the AI analyzes the phot
 | Merge | Enter select mode, check multiple people → "Merge as Same Person" |
 | Delete | Right-click a person → Delete |
 | View Photos | Click the card to enter detail view |
-| Remove from Person | In detail view, right-click a photo → "Remove from this person group" |
+| Remove from Person | In detail view, select photos and click "Remove from Person" in the top bar |
 
 ### Reclustering
 
@@ -214,7 +214,7 @@ On the **Albums** page, click "New Album" and enter name/description. Add photos
 
 Smart albums automatically match photos based on rules — no manual adding required.
 
-**Available Rules**: Date range, camera model, lens model, tags, focal length, aperture, file format
+**Available Rules**: Date range, camera model, lens model, tags, focal length, aperture, ISO, file format
 
 **Preset Templates**:
 - Last 7 / 30 days
@@ -258,16 +258,16 @@ Navigate to the **Culling** page via the sidebar and click "New Culling Session"
 
 Two photos side by side — pick the better one. Features:
 - Synchronized zoom and pan (zooming one auto-syncs the other)
-- Keyboard shortcuts: `1` pick left, `2` pick right, `3` skip
+- Keyboard shortcuts: `←` pick left, `→` pick right, `Space` / `↓` skip, `D` draw
 - EXIF overlay display
-- Fatigue reminder (after every 50 comparisons)
+- Fatigue reminder (after every 100 comparisons, up to 2 reminders)
 - Undo last choice
 
 The system uses an Elo rating algorithm — after multiple rounds of pairing, a final ranking is produced.
 
 ### Curate Mode
 
-Review photos one at a time — keep or reject. Keyboard shortcuts: `Y` keep, `N` reject.
+Review photos one at a time — keep or reject. Keyboard shortcuts: `→` keep, `←` / `↓` / `Space` reject, `S` skip similar.
 
 ### Results
 
@@ -398,11 +398,32 @@ Deleted photos go to the trash and are kept for **30 days** before automatic per
 - **Manual Toggle**: Settings → GPU Acceleration, toggle on/off anytime
 - **Face Recognition Only**: GPU acceleration currently applies to face detection; CLIP embeddings and other AI tasks still use CPU
 
+### Software Update
+
+The app automatically checks GitHub Releases for updates on startup. A toast notification appears when a new version is available. You can also manually check at **Settings → Software Update**.
+
+- **Auto Check**: Silent check at startup; toast notification with "Restart" button when an update is downloaded
+- **Download Progress**: Animated progress bar with elapsed time shown on the settings page
+- **Manual Download**: "Download Manually" opens the GitHub Releases page as a fallback
+- **Restart to Install**: Click "Restart and Install" after download completes
+
+#### Update Proxy
+
+If your network cannot reach GitHub directly, configure an HTTP proxy on the update page:
+
+- Proxy address format: `127.0.0.1:port` (e.g., `127.0.0.1:7890`)
+- Takes effect immediately after saving, no restart needed
+- Click "Test" to verify connectivity (shows latency and download speed)
+
 ### Watermark
 - Text or image watermark
 - 9 anchor positions + drag to position
 - Adjustable margin, opacity, font size / image scale
 - Live Canvas preview
+
+### About
+
+View app version, license, and open-source dependency list. Click the Sparkles icon 7 times for an easter egg.
 
 ---
 
@@ -477,7 +498,7 @@ In the app data directory (default location). You can view and change this in **
 
 ### Face detection isn't accurate enough?
 
-Try "Recluster" to improve grouping, or manually merge/split identities. The detection threshold is fixed at 0.55, balancing precision and recall.
+Try "Recluster" to improve grouping, or manually merge/split identities. The clustering threshold is fixed at 0.55 (cosine similarity), balancing precision and recall.
 
 ### Face detection is too slow?
 
@@ -493,4 +514,4 @@ Visual duplicate detection requires AI indexing to be complete. Exact duplicates
 
 ### What image formats are supported?
 
-JPG, JPEG, PNG, WebP, AVIF, HEIC, HEIF, TIFF, BMP, GIF, RAW (CR2/CR3/NEF/ARW/DNG/RAF/RW2/ORF and more) — 30+ formats. RAW files are converted to previews via the sharp engine.
+JPG, JPEG, PNG, WebP, AVIF, HEIC, HEIF, TIFF, BMP, GIF, RAW (CR2/CR3/NEF/ARW/DNG/RAF/RW2/ORF and more) — 27 formats. RAW files are previewed by extracting embedded JPEGs with exiftool.
