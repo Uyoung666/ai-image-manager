@@ -87,9 +87,10 @@ Panel width is adjustable by dragging the edge; preference is remembered.
 ### Quick Preview
 
 Select a photo and press **`Space`** for quick preview:
-- Scroll wheel zoom (0.5x – 5x)
-- Drag to pan (when zoomed >1x)
-- Double-click to toggle 2x zoom
+- Scroll wheel zoom (1x – 8x, stops at fit)
+- Drag to pan (when zoomed)
+- `+/-/0` keyboard zoom
+- Double-click to toggle 1:1 / fit
 - Arrow keys to navigate
 
 ### Lightbox
@@ -257,8 +258,11 @@ Navigate to the **Culling** page via the sidebar and click "New Culling Session"
 ### PK Mode
 
 Two photos side by side — pick the better one. Features:
-- Synchronized zoom and pan (zooming one auto-syncs the other)
-- Keyboard shortcuts: `←` pick left, `→` pick right, `Space` / `↓` skip, `D` draw
+- **Zoom**: Scroll wheel zoom (viewport-center based, stops at fit), drag to pan, double-click to toggle 1:1 / fit
+- **Keyboard zoom**: `+` zoom in, `-` zoom out, `0` reset to fit
+- **Synchronized zoom**: Zooming/pannning one auto-syncs the other (available when both photos have similar aspect ratios)
+- **Keyboard shortcuts**: `←` pick left, `→` pick right, `Space` / `↓` skip, `D` draw, `Ctrl+Z` undo
+- **Click does NOT reset zoom** (prevents accidental position loss, matches Windows Photos behavior)
 - EXIF overlay display
 - Fatigue reminder (after every 100 comparisons, up to 2 reminders)
 - Undo last choice
@@ -267,7 +271,9 @@ The system uses an Elo rating algorithm — after multiple rounds of pairing, a 
 
 ### Curate Mode
 
-Review photos one at a time — keep or reject. Keyboard shortcuts: `→` keep, `←` / `↓` / `Space` reject, `S` skip similar.
+Review photos one at a time — keep or reject.
+- **Zoom**: Same as PK mode (scroll, double-click, `+/-/0` keys)
+- **Keyboard shortcuts**: `→` keep, `←` / `↓` / `Space` reject, `S` skip similar, `Ctrl+Z` undo
 
 ### Results
 
@@ -469,12 +475,32 @@ Press **`?`** to open the shortcuts panel.
 | `Ctrl` + `K` | Global search (Spotlight) |
 | `?` | Keyboard shortcuts help |
 
+### Culling
+
+| Shortcut | Action |
+|----------|--------|
+| `←` | Pick left (PK) / Reject (Curate) |
+| `→` | Pick right (PK) / Keep (Curate) |
+| `Space` / `↓` | Skip (PK) / Reject (Curate) |
+| `D` | Draw (PK) |
+| `S` | Skip similar photos (Curate) |
+| `Ctrl` + `Z` | Undo last action |
+| `+` | Zoom in |
+| `-` | Zoom out (stops at fit) |
+| `0` | Reset to fit |
+| Scroll wheel | Zoom (viewport-center based) |
+| Double-click | Toggle 1:1 / fit |
+| `?` | Shortcuts help |
+
 ### Lightbox
 
 | Shortcut | Action |
 |----------|--------|
 | `Space` | Play/pause slideshow |
 | `Esc` | Exit lightbox |
+| `I` | Toggle detail panel |
+| `R` | Rotate 90° clockwise |
+| `Shift` + `R` | Rotate 90° counter-clockwise |
 
 ---
 

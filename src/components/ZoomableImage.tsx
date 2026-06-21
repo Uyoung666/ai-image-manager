@@ -32,6 +32,7 @@ function isRawExtension(filePath: string): boolean {
 
 // ── 缩放常量 ──────────────────────────────────────────────────────
 const MIN_SCALE = 0.25;
+const FIT_SCALE = 1; // 滚轮缩放下限（匹配 Windows Photos：滚轮到 fit 即停）
 const MAX_SCALE = 8;
 const WHEEL_FACTOR = 1.15;
 const PINCH_FACTOR = 120; // 触控板捏合灵敏度
@@ -132,11 +133,8 @@ export const ZoomableImage = memo(function ZoomableImage({
   const [originalLoading, setOriginalLoading] = useState(false);
   const [originalError, setOriginalError] = useState(false);
 
-  const previewImgRef = useRef<HTMLImageElement>(null);
-  const originalImgRef = useRef<HTMLImageElement>(null);
   const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const originalAbortRef = useRef<AbortController | null>(null);
-  // 记录原图是否需要重新加载（释放后再次缩放触发时）
   const shouldReloadOriginalRef = useRef(false);
 
   scaleRef.current = scale;
@@ -167,20 +165,9 @@ export const ZoomableImage = memo(function ZoomableImage({
 
   // ── 边界约束 ──────────────────────────────────────────────────
 
-  // 渐进模式下使用当前激活层的 img ref
-  const getActiveImgRef = useCallback(() => {
-    if (!enableProgressiveLoading) {
-      return imgRef.current;
-    }
-    if (activeTier === "original") {
-      return originalImgRef.current;
-    }
-    return previewImgRef.current || imgRef.current;
-  }, [enableProgressiveLoading, activeTier]);
-
   const getFitSize = useCallback(() => {
     const container = containerRef.current;
-    const img = getActiveImgRef();
+    const img = imgRef.current;
     if (!(container && img)) {
       return null;
     }
@@ -195,7 +182,7 @@ export const ZoomableImage = memo(function ZoomableImage({
     // object-fit: contain — 等比缩放以适配容器，不放大
     const s = Math.min(1, cw / nw, ch / nh);
     return { w: nw * s, h: nh * s };
-  }, [getActiveImgRef]);
+  }, []);
 
   const clampToBounds = useCallback(
     (tx: number, ty: number, s: number) => {
@@ -351,26 +338,39 @@ export const ZoomableImage = memo(function ZoomableImage({
     }, ORIGINAL_RELEASE_DELAY);
   }, []);
 
-  // 监听缩放，触发原图加载/释放
+  // 监听缩放，触发原图加载/释放（防抖，避免缩放/拖拽时频繁执行 DOM 读取）
+  const zoomCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!(enableProgressiveLoading && enableOriginalOnZoom)) return;
     if (!previewLoaded) return;
 
-    const fit = getFitSize();
-    if (!fit) return;
-
-    const displayPixels = Math.max(fit.w, fit.h) * scale;
-    // 对比预览短边约 2560px / aspectRatio，这里用长边估算
-    const previewNativePixels = 2560; // 对比预览长边
-
-    if (displayPixels > previewNativePixels * ZOOM_UPGRADE_RATIO) {
-      startOriginalLoad();
-    } else if (
-      (originalLoaded || originalLoading) &&
-      displayPixels < previewNativePixels * ZOOM_DOWNGRADE_RATIO
-    ) {
-      scheduleOriginalRelease();
+    // 防抖 300ms：只在缩放/拖拽停止后才检查是否需要加载原图
+    if (zoomCheckTimerRef.current) {
+      clearTimeout(zoomCheckTimerRef.current);
     }
+    zoomCheckTimerRef.current = setTimeout(() => {
+      const fit = getFitSize();
+      if (!fit) return;
+
+      const displayPixels = Math.max(fit.w, fit.h) * scaleRef.current;
+      const previewNativePixels = 2560;
+
+      if (displayPixels > previewNativePixels * ZOOM_UPGRADE_RATIO) {
+        startOriginalLoad();
+      } else if (
+        (originalLoaded || originalLoading) &&
+        displayPixels < previewNativePixels * ZOOM_DOWNGRADE_RATIO
+      ) {
+        scheduleOriginalRelease();
+      }
+    }, 300);
+
+    return () => {
+      if (zoomCheckTimerRef.current) {
+        clearTimeout(zoomCheckTimerRef.current);
+      }
+    };
   }, [
     scale,
     enableProgressiveLoading,
@@ -399,21 +399,12 @@ export const ZoomableImage = memo(function ZoomableImage({
 
   const handleClick = useCallback(
     (_e: React.MouseEvent) => {
-      if (didDrag.current) {
-        didDrag.current = false;
-        return;
-      }
-      if (onSync && scaleRef.current > 1) {
-        cancelInertia();
-        setScale(1);
-        setTranslate({ x: 0, y: 0 });
-        scaleRef.current = 1;
-        translateRef.current = { x: 0, y: 0 };
-        setIsDragging(false);
-        setTimeout(() => fireSync(), 0);
-      }
+      // 拖拽后不触发 click
+      didDrag.current = false;
+      // 与 Windows Photos 一致：单击不改变缩放状态
+      // 缩放态单击留给拖拽平移使用，fit 态单击无操作
     },
-    [onSync, fireSync, cancelInertia]
+    []
   );
 
   const handleDoubleClick = useCallback(
@@ -434,7 +425,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       }
 
       // fit → 100% 像素
-      const img = getActiveImgRef();
+      const img = imgRef.current;
       const container = containerRef.current;
       if (!(img && container)) {
         return;
@@ -467,7 +458,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       setIsDragging(false);
       setTimeout(() => fireSync(), 0);
     },
-    [fireSync, cancelInertia, clampToBounds, getActiveImgRef]
+    [fireSync, cancelInertia, clampToBounds]
   );
 
   const handleWheel = useCallback(
@@ -475,27 +466,26 @@ export const ZoomableImage = memo(function ZoomableImage({
       e.preventDefault();
       cancelInertia();
 
-      const rect = e.currentTarget.getBoundingClientRect();
-      const relX = e.clientX - rect.left - rect.width / 2;
-      const relY = e.clientY - rect.top - rect.height / 2;
-
       let newScale: number;
 
       if (e.ctrlKey) {
+        // 触控板捏合 — 允许缩小到 MIN_SCALE（捏合精度高，不会误触）
         newScale = scaleRef.current - e.deltaY / PINCH_FACTOR;
         newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
       } else {
+        // 鼠标滚轮 — 缩小到 FIT_SCALE 即停（匹配 Windows Photos）
         const direction = e.deltaY < 0 ? 1 : -1;
         newScale =
           direction > 0
             ? scaleRef.current * WHEEL_FACTOR
             : scaleRef.current / WHEEL_FACTOR;
-        newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
+        newScale = Math.min(MAX_SCALE, Math.max(FIT_SCALE, newScale));
       }
 
+      // 视口中心缩放（匹配 Windows Photos / yet-another-react-lightbox）
       const ratio = newScale / scaleRef.current;
-      const rawTx = relX - ratio * (relX - translateRef.current.x);
-      const rawTy = relY - ratio * (relY - translateRef.current.y);
+      const rawTx = translateRef.current.x * ratio;
+      const rawTy = translateRef.current.y * ratio;
 
       setScale(newScale);
       scaleRef.current = newScale;
@@ -515,6 +505,83 @@ export const ZoomableImage = memo(function ZoomableImage({
     [fireSync, cancelInertia, clampToBounds]
   );
 
+  // ── 键盘缩放快捷键（+/-/0）────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      // 输入框中不拦截
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      // 按 0 回到 fit
+      if (e.key === "0" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        cancelInertia();
+        setScale(1);
+        setTranslate({ x: 0, y: 0 });
+        scaleRef.current = 1;
+        translateRef.current = { x: 0, y: 0 };
+        setIsDragging(false);
+        setTimeout(() => fireSync(), 0);
+        return;
+      }
+
+      // + 或 = 放大
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        cancelInertia();
+        const newScale = Math.min(
+          MAX_SCALE,
+          scaleRef.current * WHEEL_FACTOR
+        );
+        const ratio = newScale / scaleRef.current;
+        setScale(newScale);
+        scaleRef.current = newScale;
+        const rawTx = translateRef.current.x * ratio;
+        const rawTy = translateRef.current.y * ratio;
+        const clamped = clampToBounds(rawTx, rawTy, newScale);
+        setTranslate(clamped);
+        translateRef.current = clamped;
+        setIsDragging(false);
+        setTimeout(() => fireSync(), 0);
+        return;
+      }
+
+      // - 缩小（不低于 FIT_SCALE）
+      if (e.key === "-") {
+        e.preventDefault();
+        cancelInertia();
+        const newScale = Math.max(
+          FIT_SCALE,
+          scaleRef.current / WHEEL_FACTOR
+        );
+        const ratio = newScale / scaleRef.current;
+        setScale(newScale);
+        scaleRef.current = newScale;
+        if (newScale <= 1.001) {
+          setTranslate({ x: 0, y: 0 });
+          translateRef.current = { x: 0, y: 0 };
+        } else {
+          const rawTx = translateRef.current.x * ratio;
+          const rawTy = translateRef.current.y * ratio;
+          const clamped = clampToBounds(rawTx, rawTy, newScale);
+          setTranslate(clamped);
+          translateRef.current = clamped;
+        }
+        setIsDragging(false);
+        setTimeout(() => fireSync(), 0);
+        return;
+      }
+    }
+
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [cancelInertia, clampToBounds, fireSync]);
+
+  // ── 鼠标拖拽 ──────────────────────────────────────────────────
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (scaleRef.current <= 1) {
@@ -633,12 +700,6 @@ export const ZoomableImage = memo(function ZoomableImage({
     }
   }, [onError]);
 
-  // ── 渐进式模式：Tier 加载回调 ──────────────────────────────────
-  const handlePreviewLoad = useCallback(() => {
-    setPreviewLoaded(true);
-    setActiveTier("preview");
-  }, []);
-
   // ── 错误状态 UI ─────────────────────────────────────────────────
   if (hasError) {
     return (
@@ -672,7 +733,7 @@ export const ZoomableImage = memo(function ZoomableImage({
         {/* 使用与 legacy 完全一致的渲染方式的单一 img 标签 */}
         <img
           alt={alt}
-          className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ease-out ${
+          className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ${
             previewLoaded || originalLoaded ? "opacity-100" : "opacity-100"
           } ${isZoomed ? "cursor-grab active:cursor-grabbing" : ""}`}
           draggable={false}
@@ -706,6 +767,9 @@ export const ZoomableImage = memo(function ZoomableImage({
             transform: imgTransform,
             willChange: isZoomed ? "transform" : "auto",
             transition: isDragging ? "none" : undefined,
+            transitionTimingFunction: isDragging
+              ? undefined
+              : "cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         />
 
@@ -737,7 +801,7 @@ export const ZoomableImage = memo(function ZoomableImage({
     >
       <img
         alt={alt}
-        className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ease-out ${
+        className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ${
           loaded ? "opacity-100" : "opacity-0"
         } ${isZoomed ? "cursor-grab active:cursor-grabbing" : ""}`}
         draggable={false}

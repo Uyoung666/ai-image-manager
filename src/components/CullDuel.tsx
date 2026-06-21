@@ -985,15 +985,33 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
               </p>
               <p className="flex justify-between">
                 <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
+                  +
+                </kbd>{" "}
+                <span>{t("cullZoomIn")}</span>
+              </p>
+              <p className="flex justify-between">
+                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
+                  -
+                </kbd>{" "}
+                <span>{t("cullZoomOut")}</span>
+              </p>
+              <p className="flex justify-between">
+                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
+                  0
+                </kbd>{" "}
+                <span>{t("cullZoomFit")}</span>
+              </p>
+              <p className="flex justify-between">
+                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
                   Scroll
                 </kbd>{" "}
-                <span>{t("cullZoom100")}</span>
+                <span>{t("cullZoomScroll")}</span>
               </p>
               <p className="flex justify-between">
                 <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
                   DblClick
                 </kbd>{" "}
-                <span>{t("cullZoom100")}</span>
+                <span>{t("cullZoomToggle")}</span>
               </p>
               <p className="flex justify-between">
                 <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
