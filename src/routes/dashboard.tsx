@@ -271,6 +271,17 @@ function DashboardPage() {
     [data?.lensStats]
   );
 
+  // Format focal length label cleanly: strip trailing ".0", append "mm",
+  // and defend against any remaining precision artifacts from the database.
+  function formatFocalLabel(raw: string): string {
+    const n = Number.parseFloat(raw);
+    if (!Number.isNaN(n) && n > 0) {
+      // toFixed(1) → strip trailing ".0" for whole-number focal lengths
+      return `${n.toFixed(1).replace(/\.0$/, "")}mm`;
+    }
+    return `${raw}mm`;
+  }
+
   const focalData = useMemo(
     () =>
       (data?.focalStats || [])
@@ -278,7 +289,7 @@ function DashboardPage() {
         .map((f) => {
           const range = focalToRange(f.focalLength);
           return {
-            name: `${f.focalLength}mm`,
+            name: formatFocalLabel(f.focalLength),
             count: f.count,
             focalMin: range?.min,
             focalMax: range?.max,
@@ -296,16 +307,52 @@ function DashboardPage() {
     [data?.focalStats]
   );
 
+  // Standard aperture stops for binning near-identical values.
+  // Covers common 1/3-stop increments from f/1.0 to f/32.
+  const STANDARD_APERTURES = [
+    1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5,
+    5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32,
+  ];
+
+  // Snap an aperture value to the nearest standard stop within tolerance.
+  // Tolerance is 6% of the standard stop value — enough to absorb float
+  // artifacts while not merging genuinely different apertures.
+  function snapToStandardAperture(raw: number): number {
+    const tol = raw * 0.06;
+    let best = raw;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const std of STANDARD_APERTURES) {
+      const dist = Math.abs(std - raw);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = std;
+      }
+    }
+    return bestDist <= tol ? best : raw;
+  }
+
+  // Format aperture label cleanly: e.g. "f/2.8", "f/4", "f/5.6"
+  function formatApertureLabel(value: number): string {
+    const snapped = snapToStandardAperture(value);
+    // Round to 1 decimal, strip trailing ".0"
+    const clean = snapped.toFixed(1).replace(/\.0$/, "");
+    return `f/${clean}`;
+  }
+
   const apertureData = useMemo(
     () =>
       (data?.apertureStats || [])
         .filter((a) => a.aperture)
-        .map((a) => ({
-          name: `f/${a.aperture}`,
-          count: a.count,
-          apertureMin: (a.aperture - 0.2).toFixed(1),
-          apertureMax: (a.aperture + 0.2).toFixed(1),
-        }))
+        .map((a) => {
+          const snapped = snapToStandardAperture(a.aperture);
+          return {
+            name: formatApertureLabel(a.aperture),
+            count: a.count,
+            // Drill-down range: ±1/3 stop around the snapped value
+            apertureMin: (snapped * 0.89).toFixed(1),
+            apertureMax: (snapped * 1.12).toFixed(1),
+          };
+        })
         .slice(0, 10),
     [data?.apertureStats]
   );

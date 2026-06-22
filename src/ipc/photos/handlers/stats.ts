@@ -64,19 +64,24 @@ export const getExifCandidates = os.handler(() => {
     .all()
     .map((r) => r.val);
 
+  // Round to prevent precision artifacts from EXIF rational conversion
   const focalLengths = db
-    .selectDistinct({ val: exifData.focalLength })
+    .selectDistinct({
+      val: sql<string>`CAST(ROUND(${exifData.focalLengthNum}, 0) AS TEXT)`,
+    })
     .from(exifData)
-    .where(sql`${exifData.focalLength} IS NOT NULL`)
-    .orderBy(exifData.focalLength)
+    .where(sql`${exifData.focalLengthNum} IS NOT NULL`)
+    .orderBy(sql`ROUND(${exifData.focalLengthNum}, 0)`)
     .all()
     .map((r) => r.val);
 
   const apertures = db
-    .selectDistinct({ val: exifData.aperture })
+    .selectDistinct({
+      val: sql<number>`ROUND(${exifData.aperture}, 1)`,
+    })
     .from(exifData)
     .where(sql`${exifData.aperture} IS NOT NULL`)
-    .orderBy(exifData.aperture)
+    .orderBy(sql`ROUND(${exifData.aperture}, 1)`)
     .all()
     .map((r) => r.val);
 
@@ -226,27 +231,31 @@ export const getStats = os
       .limit(20)
       .all();
 
+    // ROUND(focal_length_num, 0) prevents EXIF rational→float precision
+    // artifacts (e.g. 85.00000000001 → 85) from splitting GROUP BY buckets.
     const focalStats = db
       .select({
-        focalLength: exifData.focalLength,
+        focalLength: sql<string>`CAST(ROUND(${exifData.focalLengthNum}, 0) AS TEXT)`,
         count: sql<number>`count(*)`,
       })
       .from(exifData)
-      .where(sql`${exifData.focalLength} IS NOT NULL`)
-      .groupBy(exifData.focalLength)
-      .orderBy(exifData.focalLengthNum)
+      .where(sql`${exifData.focalLengthNum} IS NOT NULL`)
+      .groupBy(sql`ROUND(${exifData.focalLengthNum}, 0)`)
+      .orderBy(sql`ROUND(${exifData.focalLengthNum}, 0)`)
       .limit(20)
       .all();
 
+    // ROUND(aperture, 1) merges near-identical values from EXIF rational
+    // precision artifacts (e.g. 1.9999999713880652 → 2.0 → GROUP BY f/2).
     const apertureStats = db
       .select({
-        aperture: exifData.aperture,
+        aperture: sql<number>`ROUND(${exifData.aperture}, 1)`,
         count: sql<number>`count(*)`,
       })
       .from(exifData)
       .where(sql`${exifData.aperture} IS NOT NULL`)
-      .groupBy(exifData.aperture)
-      .orderBy(exifData.aperture)
+      .groupBy(sql`ROUND(${exifData.aperture}, 1)`)
+      .orderBy(sql`ROUND(${exifData.aperture}, 1)`)
       .limit(20)
       .all();
     // ISO distribution by common ranges (SQL-level bucketing)

@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { eq, sql } from "drizzle-orm";
@@ -330,6 +330,30 @@ function parseFocalLengthToNum(value: string | undefined): number | null {
   return Number.isFinite(num) && num > 0 ? num : null;
 }
 
+// Clean focal length display text: rational→float precision artifacts produce
+// strings like "85.00000000001" which break GROUP BY and look ugly in charts.
+// Single-number → rounded to 0 decimals; zoom range "24-70" → kept as-is.
+function cleanFocalLengthText(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  // Zoom range like "24-70" or "18-55"
+  if (/^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/.test(trimmed)) {
+    // Clean each part: "24.000001-70.00001" → "24-70"
+    const parts = trimmed.split(/\s*-\s*/);
+    const cleaned = parts.map((p) => {
+      const n = Number.parseFloat(p);
+      return Number.isFinite(n) ? Math.round(n).toString() : p;
+    });
+    return cleaned.join("-");
+  }
+  // Single number → round to nearest integer
+  const n = Number.parseFloat(trimmed);
+  if (Number.isFinite(n) && n > 0) {
+    return Math.round(n).toString();
+  }
+  return trimmed;
+}
+
 interface ExifRecord {
   aperture?: number;
   artist?: string;
@@ -501,10 +525,17 @@ async function preparePhotoRecord(
       cameraModel,
       lensMake: exif.LensMake as string,
       lensModel: exif.LensModel as string,
-      focalLength: focalLengthStr,
-      focalLength35mm: exif.FocalLengthIn35mmFormat?.toString(),
-      focalLengthNum: parseFocalLengthToNum(focalLengthStr),
-      aperture: exif.FNumber as number,
+      focalLength: cleanFocalLengthText(focalLengthStr),
+      focalLength35mm: cleanFocalLengthText(
+        exif.FocalLengthIn35mmFormat?.toString()
+      ),
+      focalLengthNum: parseFocalLengthToNum(focalLengthStr)
+        ? Math.round(parseFocalLengthToNum(focalLengthStr)! * 10) / 10
+        : null,
+      aperture:
+        exif.FNumber != null
+          ? Math.round((exif.FNumber as number) * 10) / 10
+          : undefined,
       shutterSpeed: shutterSpeedStr,
       shutterSpeedNum: parseShutterSpeedToNum(shutterSpeedStr),
       iso: exif.ISO as number,
