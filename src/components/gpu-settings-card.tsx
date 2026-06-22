@@ -162,7 +162,11 @@ function getDetectButtonLabel(
 
 // ── Main component ───────────────────────────────────────────────────
 
-export function GpuSettingsCard() {
+export function GpuSettingsCard({
+  hideTitle = false,
+}: {
+  hideTitle?: boolean;
+}) {
   const { t } = useTranslation();
 
   const [enabled, setEnabled] = useState(false);
@@ -246,9 +250,11 @@ export function GpuSettingsCard() {
 
   return (
     <section className="space-y-3">
-      <h2 className="font-semibold text-[14px] text-foreground">
-        {t("gpuAcceleration")}
-      </h2>
+      {!hideTitle && (
+        <h2 className="font-semibold text-[14px] text-foreground">
+          {t("gpuAcceleration")}
+        </h2>
+      )}
 
       <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
         {/* Toggle row */}

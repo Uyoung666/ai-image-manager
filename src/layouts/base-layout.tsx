@@ -130,15 +130,21 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
 }
 
 /**
- * 引导期间不渲染应用内容，节省资源并避免覆盖层下视觉跳跃。
- * 退出动画期间（exiting=true）开始渲染内容，确保覆盖层淡出时下方已有应用 UI。
+ * 幕布模式：引导期间应用内容预渲染在遮罩后方。
+ * - preRenderContent（Step 3 显示时）：DOM 已挂载但 invisible，遮罩 z-[100] 完全覆盖
+ * - exiting（点击完成后）：移除 invisible，遮罩淡出 400ms 露出已就绪的内容
+ * - wrapper 始终为同一 DOM 节点，避免 React 重新挂载子组件树
  */
 function AppContentGate({ children }: { children: ReactNode }) {
-  const { needsOnboarding, exiting } = useOnboarding();
+  const { needsOnboarding, exiting, preRenderContent } = useOnboarding();
 
-  if (needsOnboarding && !exiting) {
+  if (needsOnboarding && !exiting && !preRenderContent) {
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <div className={preRenderContent && !exiting ? "invisible" : ""}>
+      {children}
+    </div>
+  );
 }

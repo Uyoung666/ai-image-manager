@@ -1100,14 +1100,19 @@ i18n.use(initReactI18next).init({
           "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · 剩余 ~{{count}} 次",
         cullTrashConfirmBtn: "移入回收站",
         // Onboarding
-        onboardingStep1Title: "选择数据目录",
-        onboardingStep1Desc: "缩略图、向量索引和 AI 模型将存储在此目录",
+        onboardingStep1Title: "你的数据，由你掌控",
+        onboardingStep1Desc: "选择图片库存储位置，所有数据保持本地私有",
         onboardingStep1CurrentPath: "当前路径",
-        onboardingStep1Change: "更改目录",
+        onboardingStep1Change: "更改",
         onboardingStep1Migrating: "正在迁移数据...",
-        onboardingStep3Title: "一切就绪！",
-        onboardingStep3Desc: "AI 图片管理器已准备就绪",
+        onboardingStep2Title: "开启 AI 加速引擎",
+        onboardingStep2Desc: "GPU 加速使人脸检测提速约 6 倍，AI 搜索响应更快",
+        onboardingStep3Title: "一切就绪",
+        onboardingStep3Desc: "AI Image Manager 已为你准备好",
         onboardingStep3Start: "开始使用",
+        onboardingStep3Starting: "正在开启...",
+        onboardingContinue: "继续",
+        onboardingBack: "返回",
         onboardingErrorMigration: "数据迁移失败：{{error}}",
 
         // Common
@@ -2246,15 +2251,21 @@ i18n.use(initReactI18next).init({
           "{{pkCount}} / ~{{totalWork}} PKs ({{pct}}%) · ~{{count}} remaining",
         cullTrashConfirmBtn: "Move to Trash",
         // Onboarding
-        onboardingStep1Title: "Choose Data Directory",
+        onboardingStep1Title: "Your data, your rules",
         onboardingStep1Desc:
-          "Thumbnails, vector index, and AI models will be stored here",
+          "Choose where to store your library. Everything stays local and private.",
         onboardingStep1CurrentPath: "Current Path",
-        onboardingStep1Change: "Change Directory",
+        onboardingStep1Change: "Change",
         onboardingStep1Migrating: "Migrating data...",
-        onboardingStep3Title: "All Set!",
-        onboardingStep3Desc: "AI Image Manager is ready to use",
+        onboardingStep2Title: "Power up AI engine",
+        onboardingStep2Desc:
+          "GPU acceleration delivers ~6× faster face detection and quicker AI search.",
+        onboardingStep3Title: "Ready to go",
+        onboardingStep3Desc: "AI Image Manager is ready for you",
         onboardingStep3Start: "Get Started",
+        onboardingStep3Starting: "Starting...",
+        onboardingContinue: "Continue",
+        onboardingBack: "Back",
         onboardingErrorMigration: "Data migration failed: {{error}}",
 
         // Common

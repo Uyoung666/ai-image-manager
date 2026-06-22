@@ -1,30 +1,33 @@
 import {
   AlertCircle,
-  ArrowLeft,
   ArrowRight,
-  CheckCircle,
+  Cpu,
+  FolderHeart,
   FolderOpen,
   Loader2,
+  Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
+import appIcon from "../../../assets/icon.png";
 import { useOnboarding } from "./OnboardingProvider";
 import { StepIndicator } from "./StepIndicator";
 
 // ── 步骤持久化 key ──────────────────────────────────────────────
 
 const ONBOARDING_STEP_KEY = "onboarding_current_step";
+const TOTAL_STEPS = 3;
 
 function loadPersistedStep(): number {
   try {
     const raw = localStorage.getItem(ONBOARDING_STEP_KEY);
     if (raw !== null) {
       const n = Number(raw);
-      return n >= 1 && n <= 3 ? n : 1;
+      return n >= 1 && n <= TOTAL_STEPS ? n : 1;
     }
   } catch {
     /* ignore */
@@ -48,28 +51,79 @@ function clearPersistedStep() {
   }
 }
 
+// ── Hero icon components ──────────────────────────────────────────
+
+function Step1Hero() {
+  return (
+    <div className="flex items-center justify-center">
+      <div className="animate-hero-float rounded-2xl bg-primary/10 p-5">
+        <FolderHeart className="h-16 w-16 text-primary" strokeWidth={1.5} />
+      </div>
+    </div>
+  );
+}
+
+function Step2Hero({ gpuDetected }: { gpuDetected: boolean }) {
+  return (
+    <div className="flex items-center justify-center">
+      <div
+        className={`animate-hero-float rounded-2xl p-5 transition-colors duration-500 ${
+          gpuDetected ? "bg-primary/10" : "bg-muted/50"
+        }`}
+      >
+        {gpuDetected ? (
+          <Zap className="h-16 w-16 text-primary" strokeWidth={1.5} />
+        ) : (
+          <Cpu
+            className="h-16 w-16 text-muted-foreground/50"
+            strokeWidth={1.5}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Step3Hero() {
+  return (
+    <div className="flex items-center justify-center">
+      <div className="animate-hero-float rounded-2xl bg-primary/10 p-5">
+        <img
+          alt="App logo"
+          className="h-16 w-16 select-none"
+          draggable={false}
+          height={64}
+          src={appIcon}
+          width={64}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export function OnboardingOverlay() {
   const { t } = useTranslation();
-  const { needsOnboarding, exiting, setNeedsOnboarding, setExiting } =
-    useOnboarding();
+  const {
+    needsOnboarding,
+    exiting,
+    setNeedsOnboarding,
+    setExiting,
+    setPreRenderContent,
+  } = useOnboarding();
 
   // ── Step state ──────────────────────────────────────────────────
 
   const [currentStep, setCurrentStep] = useState(() => loadPersistedStep());
-  const [stepDirection, setStepDirection] = useState<"forward" | "backward">(
-    "forward"
-  );
+  const [stepAnimKey, setStepAnimKey] = useState(0);
   const [dataPath, setDataPath] = useState<string>("");
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
-  const [celebrated, setCelebrated] = useState(false);
+  const [gpuDetected, setGpuDetected] = useState(false);
 
-  // 步骤切换动画 key：每次步骤变化时更新，驱动 CSS 动画重新播放
-  const [stepAnimKey, setStepAnimKey] = useState(0);
+  // ── 开发开关 ────────────────────────────────────────────────────
 
-  // ── 开发开关：设置 localStorage DEV_FORCE_ONBOARDING = "true" 后刷新即可强制进入引导 ─
   const devForce =
     typeof localStorage !== "undefined" &&
     localStorage.getItem("DEV_FORCE_ONBOARDING") === "true";
@@ -95,7 +149,6 @@ export function OnboardingOverlay() {
     }
 
     async function initNormal() {
-      // E2E 测试模式下跳过引导流程
       if (window.electronAPI?.isE2E) {
         setNeedsOnboarding(false);
         clearPersistedStep();
@@ -124,7 +177,6 @@ export function OnboardingOverlay() {
         return;
       }
 
-      // First launch — show onboarding
       setNeedsOnboarding(true);
 
       try {
@@ -148,25 +200,41 @@ export function OnboardingOverlay() {
     };
   }, [setNeedsOnboarding, devForce]);
 
-  // ── 步骤切换包装（记录方向 + 持久化）─────────────────────────
+  // ── Step 2: detect GPU status on mount ──────────────────────────
+
+  useEffect(() => {
+    if (currentStep !== 2) {
+      return;
+    }
+    ipc.client.settings
+      .getGpuSettings({})
+      .then((r: any) => {
+        if (r?.detected?.dmlAvailable) {
+          setGpuDetected(true);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, [currentStep]);
+
+  // ── 步骤切换 ────────────────────────────────────────────────────
 
   const goToStep = useCallback((step: number) => {
-    setCurrentStep((prev) => {
-      setStepDirection(step > prev ? "forward" : "backward");
-      persistStep(step);
-      return step;
-    });
+    setCurrentStep(step);
+    persistStep(step);
     setStepAnimKey((k) => k + 1);
   }, []);
 
-  // ── 步骤 3 预加载首页数据 ──────────────────────────────────────
+  // ── 步骤 3：预渲染主界面内容 + 预加载数据 ────────────────────
 
   useEffect(() => {
     if (currentStep !== 3) {
       return;
     }
 
-    // 预加载侧边栏文件夹列表
+    setPreRenderContent(true);
+
     queryClient.prefetchQuery({
       queryKey: ["folders"],
       queryFn: async () => {
@@ -179,7 +247,6 @@ export function OnboardingOverlay() {
       staleTime: 30_000,
     });
 
-    // 预加载默认照片列表第一页
     queryClient.prefetchInfiniteQuery({
       queryKey: [
         "photos",
@@ -210,19 +277,6 @@ export function OnboardingOverlay() {
     });
   }, [currentStep]);
 
-  // ── 步骤 3 庆祝动画触发 ────────────────────────────────────────
-
-  useEffect(() => {
-    if (currentStep === 3 && !celebrated) {
-      // 延迟一帧确保 DOM 已挂载
-      const raf = requestAnimationFrame(() => setCelebrated(true));
-      return () => cancelAnimationFrame(raf);
-    }
-    if (currentStep !== 3 && celebrated) {
-      setCelebrated(false);
-    }
-  }, [currentStep, celebrated]);
-
   // ── Handlers ──────────────────────────────────────────────────
 
   const handleChangeDirectory = useCallback(async () => {
@@ -250,7 +304,6 @@ export function OnboardingOverlay() {
   }, [t]);
 
   const handleFinish = useCallback(async () => {
-    // 先触发退出动画
     setExiting(true);
 
     try {
@@ -258,7 +311,6 @@ export function OnboardingOverlay() {
         key: "onboarding.completed",
         value: "true",
       });
-      // Mark GPU prompt as shown so legacy dialog doesn't appear
       await ipc.client.settings.markGpuPromptShown({});
     } catch {
       // best-effort
@@ -266,33 +318,13 @@ export function OnboardingOverlay() {
 
     clearPersistedStep();
     window.postMessage({ channel: "onboarding-done" }, "*");
-    // setNeedsOnboarding(false) 由 animationEnd 回调执行
   }, [setExiting]);
 
   const handleExitAnimationEnd = useCallback(() => {
     setNeedsOnboarding(false);
     setExiting(false);
-  }, [setNeedsOnboarding, setExiting]);
-
-  // ── Steps definition ──────────────────────────────────────────
-
-  const steps = useMemo(
-    () => [
-      {
-        title: t("onboardingStep1Title"),
-        description: t("onboardingStep1Desc"),
-      },
-      {
-        title: t("gpuAcceleration"),
-        description: t("gpuEnableAcceleration"),
-      },
-      {
-        title: t("onboardingStep3Title"),
-        description: t("onboardingStep3Desc"),
-      },
-    ],
-    [t]
-  );
+    setPreRenderContent(false);
+  }, [setNeedsOnboarding, setExiting, setPreRenderContent]);
 
   // ── Don't render if onboarding is not needed ──────────────────
 
@@ -301,14 +333,10 @@ export function OnboardingOverlay() {
   }
 
   const overlayAnimClass = exiting ? "animate-onboarding-exit" : "";
-  const stepAnimClass =
-    stepDirection === "forward"
-      ? "animate-step-enter-right"
-      : "animate-step-enter-left";
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-background ${overlayAnimClass}`}
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background ${overlayAnimClass}`}
       onAnimationEnd={(e) => {
         if (exiting && e.currentTarget === e.target) {
           handleExitAnimationEnd();
@@ -316,42 +344,46 @@ export function OnboardingOverlay() {
       }}
       style={{
         backgroundImage:
-          "radial-gradient(ellipse at 50% 35%, color-mix(in srgb, var(--primary) 12%, transparent) 0%, transparent 65%)",
+          "radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--primary) 8%, transparent) 0%, transparent 60%)",
       }}
     >
-      {/* 卡片 */}
-      <div className="surface-elevated relative mx-4 w-full max-w-lg rounded-xl border border-border bg-card p-8 shadow-2xl">
-        {/* Step indicator */}
-        <StepIndicator currentStep={currentStep} steps={steps} />
+      {/* Step indicator — top, subtle */}
+      <div className="absolute top-8">
+        <StepIndicator currentStep={currentStep} totalSteps={TOTAL_STEPS} />
+      </div>
 
-        <div className="mt-8">
+      {/* Content area — centered, max-width for readability */}
+      <div className="mx-auto w-full max-w-md px-6">
+        <div
+          className="flex flex-col items-center gap-6 text-center"
+          key={`step-${currentStep}-${stepAnimKey}`}
+        >
           {/* ── Step 1: Data directory ─────────────────────────── */}
           {currentStep === 1 && (
-            <div
-              className={`space-y-6 ${stepAnimClass}`}
-              key={`step-1-${stepAnimKey}`}
-            >
+            <div className="flex animate-step-enter flex-col items-center gap-6">
+              <Step1Hero />
+
               <div className="space-y-2">
-                <h2 className="font-semibold text-foreground text-lg">
+                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
                   {t("onboardingStep1Title")}
                 </h2>
-                <p className="text-muted-foreground text-sm">
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   {t("onboardingStep1Desc")}
                 </p>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-4 py-3">
+              <div className="w-full space-y-3">
+                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-5 py-4">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground/70">
                       {t("onboardingStep1CurrentPath")}
                     </p>
-                    <p className="mt-0.5 truncate font-mono text-foreground text-xs">
+                    <p className="mt-1 truncate font-mono text-foreground/80 text-xs">
                       {dataPath || t("defaultPath")}
                     </p>
                   </div>
                   <button
-                    className="ml-3 inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 font-medium text-foreground text-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="ml-4 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 font-medium text-foreground text-xs transition-all hover:border-foreground/20 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                     disabled={isMigrating}
                     onClick={handleChangeDirectory}
                     type="button"
@@ -362,7 +394,7 @@ export function OnboardingOverlay() {
                 </div>
 
                 {isMigrating && (
-                  <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                  <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {t("onboardingStep1Migrating")}
                   </div>
@@ -376,52 +408,51 @@ export function OnboardingOverlay() {
                 )}
               </div>
 
-              <div className="flex justify-end">
-                <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-                  disabled={isMigrating}
-                  onClick={() => goToStep(2)}
-                  type="button"
-                >
-                  {t("gpuAcceleration")}
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
+                disabled={isMigrating}
+                onClick={() => goToStep(2)}
+                type="button"
+              >
+                {t("onboardingContinue")}
+                <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
           )}
 
           {/* ── Step 2: GPU Acceleration ─────────────────────────── */}
           {currentStep === 2 && (
-            <div
-              className={`space-y-6 ${stepAnimClass}`}
-              key={`step-2-${stepAnimKey}`}
-            >
+            <div className="flex animate-step-enter flex-col items-center gap-6">
+              <Step2Hero gpuDetected={gpuDetected} />
+
               <div className="space-y-2">
-                <h2 className="font-semibold text-foreground text-lg">
-                  {t("gpuAcceleration")}
+                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
+                  {t("onboardingStep2Title")}
                 </h2>
-                <p className="text-muted-foreground text-sm">
-                  {t("gpuEnableAcceleration")}
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  {t("onboardingStep2Desc")}
                 </p>
               </div>
 
-              <GpuSettingsCard />
+              {/* GPU card — title hidden, onboarding has its own */}
+              <div className="w-full [&_h2]:hidden">
+                <GpuSettingsCard hideTitle />
+              </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex w-full items-center justify-between gap-3">
                 <button
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => goToStep(1)}
                   type="button"
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                  {t("onboardingStep1Title")}
+                  {t("onboardingBack")}
                 </button>
                 <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97]"
                   onClick={() => goToStep(3)}
                   type="button"
                 >
-                  {t("onboardingStep3Title")}
+                  {t("onboardingContinue")}
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
@@ -430,65 +461,50 @@ export function OnboardingOverlay() {
 
           {/* ── Step 3: Complete ────────────────────────────────── */}
           {currentStep === 3 && (
-            <div
-              className={`space-y-6 text-center ${stepAnimClass}`}
-              key={`step-3-${stepAnimKey}`}
-            >
-              <div className="space-y-4">
-                {/* 庆祝动画：脉冲环 + 弹性勾 */}
-                <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
-                  {celebrated && (
-                    <div
-                      aria-hidden="true"
-                      className="absolute inset-0 animate-celebrate-pulse rounded-full bg-green-500/20"
-                    />
-                  )}
-                  <div
-                    className={`relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 ${
-                      celebrated ? "animate-celebrate-bounce" : "opacity-0"
-                    }`}
-                  >
-                    <CheckCircle className="h-8 w-8 text-green-500" />
-                  </div>
-                </div>
+            <div className="flex animate-step-enter flex-col items-center gap-8">
+              <Step3Hero />
 
-                <div className="space-y-2">
-                  <h2 className="font-semibold text-foreground text-xl">
-                    {t("onboardingStep3Title")}
-                  </h2>
-                  <p className="text-muted-foreground text-sm">
-                    {t("onboardingStep3Desc")}
-                  </p>
-                </div>
+              <div className="space-y-3">
+                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
+                  {t("onboardingStep3Title")}
+                </h2>
+                <p className="text-muted-foreground text-sm leading-relaxed">
+                  {t("onboardingStep3Desc")}
+                </p>
               </div>
 
-              <div className="flex items-center justify-between">
-                <button
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => goToStep(2)}
-                  type="button"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  {t("gpuAcceleration")}
-                </button>
-                <button
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-colors hover:bg-primary/90"
-                  disabled={exiting}
-                  onClick={handleFinish}
-                  type="button"
-                >
-                  {t("onboardingStep3Start")}
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                className="inline-flex animate-btn-glow items-center gap-2 rounded-lg bg-primary px-10 py-3 font-medium text-base text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-primary/25 hover:shadow-xl active:scale-[0.97] disabled:pointer-events-none disabled:opacity-70"
+                disabled={exiting}
+                onClick={handleFinish}
+                type="button"
+              >
+                {exiting ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    {t("onboardingStep3Starting")}
+                  </>
+                ) : (
+                  t("onboardingStep3Start")
+                )}
+              </button>
+
+              <button
+                className="font-medium text-muted-foreground text-xs transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={exiting}
+                onClick={() => goToStep(2)}
+                type="button"
+              >
+                {t("onboardingBack")}
+              </button>
             </div>
           )}
         </div>
+      </div>
 
-        {/* Language switch — subtle, at card bottom */}
-        <div className="mt-8 flex items-center justify-center border-border border-t pt-4">
-          <LangToggle />
-        </div>
+      {/* Language toggle — bottom right, subtle */}
+      <div className="absolute right-6 bottom-6 opacity-30 transition-opacity duration-300 hover:opacity-100">
+        <LangToggle />
       </div>
     </div>
   );
