@@ -88,6 +88,7 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
         return;
       }
       e.preventDefault();
+      e.stopImmediatePropagation();
       setShortcutsOpen((prev) => !prev);
     }
     if (e.key === "Escape" && shortcutsOpenRef.current) {

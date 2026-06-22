@@ -318,7 +318,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       // ? 键始终处理（切换面板），不受面板打开状态影响
       if (e.key === "?") {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         setShortcutsOpen((prev) => {
           shortcutsOpenRef.current = !prev;
           return !prev;
