@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
@@ -71,24 +72,21 @@ const CullResultCard = memo(
     index,
     isSelected,
     isDuel,
-    onToggle,
+    onSelect,
     onStatusChange,
-    onPreview,
     updating,
   }: {
     item: RankedItem;
     index: number;
     isSelected: boolean;
     isDuel: boolean;
-    onToggle: (id: number) => void;
+    onSelect: (id: number, index: number, e: React.MouseEvent) => void;
     onStatusChange: (
       id: number,
       status: "kept" | "rejected" | "pending"
     ) => void;
-    onPreview: (index: number) => void;
     updating: Set<number>;
   }) {
-    const { t } = useTranslation();
     const isUpdating = updating.has(item.id);
     const isKept = item.status === "kept";
     const isRejected = item.status === "rejected";
@@ -99,25 +97,20 @@ const CullResultCard = memo(
           isSelected
             ? "scale-[1.02] ring-2 ring-primary ring-offset-1 ring-offset-background"
             : isKept
-              ? "ring-1 ring-amber-500/20"
+              ? "shadow-[0_0_12px_-2px_rgba(251,191,36,0.12)] ring-1 ring-amber-400/30"
               : isRejected
                 ? "opacity-60 grayscale-[20%]"
                 : "hover:scale-[1.01]"
         }`}
         data-card=""
-        onClick={(e) => {
-          if (e.detail === 1) {
-            onToggle(item.id);
-          } else if (e.detail === 2) {
-            onPreview(index);
-          }
-        }}
+        data-card-id={item.id}
+        onClick={(e) => onSelect(item.id, index, e)}
       >
         {/* Thumbnail */}
-        <div className="pointer-events-none relative aspect-[4/3] overflow-hidden bg-muted">
+        <div className="relative aspect-[4/3] overflow-hidden bg-muted">
           <img
             alt={item.photo.filename}
-            className="h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
             decoding="async"
             loading="lazy"
             src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
@@ -149,6 +142,13 @@ const CullResultCard = memo(
                   <XCircle className="h-3 w-3" />
                 </span>
               )}
+            </div>
+          )}
+
+          {/* Heart watermark for kept items */}
+          {isKept && (
+            <div className="pointer-events-none absolute right-1 bottom-1 z-[5] select-none text-[72px] text-white/10 leading-none">
+              ♥
             </div>
           )}
 
@@ -238,7 +238,7 @@ const CullResultRow = memo(function CullResultRow({
   index,
   isSelected,
   isDuel,
-  onToggle,
+  onSelect,
   onStatusChange,
   onPreview,
   updating,
@@ -247,7 +247,7 @@ const CullResultRow = memo(function CullResultRow({
   index: number;
   isSelected: boolean;
   isDuel: boolean;
-  onToggle: (id: number) => void;
+  onSelect: (id: number, index: number, e: React.MouseEvent) => void;
   onStatusChange: (id: number, status: "kept" | "rejected" | "pending") => void;
   onPreview: (index: number) => void;
   updating: Set<number>;
@@ -266,7 +266,7 @@ const CullResultRow = memo(function CullResultRow({
               ? "border-destructive/10 bg-destructive/[0.02]"
               : "border-border bg-secondary"
       }`}
-      onClick={() => onToggle(item.id)}
+      onClick={(e) => onSelect(item.id, index, e)}
     >
       <div
         className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border-2 transition-colors ${
@@ -385,7 +385,7 @@ const CullResultRow = memo(function CullResultRow({
 
 export function CullResult({ session, onUpdate }: CullResultProps) {
   const { t } = useTranslation();
-  const [creatingAlbum, setCreatingAlbum] = useState(false);
+  const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState(false);
   const [updating, setUpdating] = useState<Set<number>>(new Set());
   const isDuel = session.mode !== "curate";
@@ -414,6 +414,16 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   // Virtual scrolling container ref
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // ── Marquee selection state ──
+  const [marquee, setMarquee] = useState<{
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const marqueeStartScrollRef = useRef(0);
+  const lastClickedIndexRef = useRef<number | null>(null);
 
   // ── useMemo: derived data ──
 
@@ -469,17 +479,132 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   // ── useCallback: stable handler references ──
 
-  const toggleSelect = useCallback((itemId: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
+  // Card click with Ctrl/Shift modifier support
+  const handleCardSelect = useCallback(
+    (itemId: number, index: number, e: React.MouseEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl/Cmd + click: toggle single item
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (next.has(itemId)) {
+            next.delete(itemId);
+          } else {
+            next.add(itemId);
+          }
+          return next;
+        });
+        lastClickedIndexRef.current = index;
+      } else if (e.shiftKey && lastClickedIndexRef.current !== null) {
+        // Shift + click: range select from last clicked index
+        const start = Math.min(lastClickedIndexRef.current, index);
+        const end = Math.max(lastClickedIndexRef.current, index);
+        setSelected(new Set(sorted.slice(start, end + 1).map((i) => i.id)));
       } else {
-        next.add(itemId);
+        // Plain click: single select, clear others
+        setSelected(new Set([itemId]));
+        lastClickedIndexRef.current = index;
       }
-      return next;
-    });
+    },
+    [sorted]
+  );
+
+  // ── Marquee selection handlers ──
+  const handleMarqueeStart = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) {
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-card]")) {
+      return;
+    }
+
+    const scrollEl = containerRef.current;
+    if (!scrollEl) {
+      return;
+    }
+    const rect = scrollEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top + scrollEl.scrollTop;
+    marqueeStartScrollRef.current = scrollEl.scrollTop;
+    setMarquee({ startX: x, startY: y, x, y });
   }, []);
+
+  // Marquee mousemove/mouseup effect
+  useEffect(() => {
+    if (!marquee) {
+      return;
+    }
+    const scrollEl = containerRef.current;
+    if (!scrollEl) {
+      return;
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = scrollEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top + scrollEl.scrollTop;
+      setMarquee((prev) => (prev ? { ...prev, x, y } : null));
+    };
+
+    const handleMouseUp = () => {
+      setMarquee((prev) => {
+        if (!prev) {
+          return null;
+        }
+        const minX = Math.min(prev.startX, prev.x);
+        const maxX = Math.max(prev.startX, prev.x);
+        const minY = Math.min(prev.startY, prev.y);
+        const maxY = Math.max(prev.startY, prev.y);
+
+        // Only select if drag was meaningful (> 5px in either axis)
+        if (maxX - minX > 5 || maxY - minY > 5) {
+          const scrollEl = containerRef.current;
+          if (!scrollEl) {
+            return null;
+          }
+          const scrollRect = scrollEl.getBoundingClientRect();
+          const cards = scrollEl.querySelectorAll("[data-card]");
+          const selectedIds = new Set<number>();
+
+          for (const card of cards) {
+            const cardRect = card.getBoundingClientRect();
+            const cardLeft = cardRect.left - scrollRect.left;
+            const cardRight = cardRect.right - scrollRect.left;
+            const cardTop = cardRect.top - scrollRect.top + scrollEl.scrollTop;
+            const cardBottom =
+              cardRect.bottom - scrollRect.top + scrollEl.scrollTop;
+
+            if (
+              cardLeft < maxX &&
+              cardRight > minX &&
+              cardTop < maxY &&
+              cardBottom > minY
+            ) {
+              const idAttr = (card as HTMLElement).dataset.cardId;
+              if (idAttr) {
+                selectedIds.add(Number(idAttr));
+              }
+            }
+          }
+
+          if (selectedIds.size > 0) {
+            setSelected(selectedIds);
+          }
+        } else {
+          // Very short drag (< 5px) — treat as blank space click, clear selection
+          setSelected(new Set());
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [marquee]);
 
   const toggleSelectAll = useCallback(() => {
     if (selected.size === sorted.length) {
@@ -512,6 +637,8 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
               favorite: false,
             });
           }
+          // Immediately invalidate photo queries so favorites page reflects changes
+          queryClient.invalidateQueries({ queryKey: ["photos"] });
         }
         onUpdate?.();
       } catch (err) {
@@ -524,7 +651,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         });
       }
     },
-    [session.id, session.items, onUpdate]
+    [session.id, session.items, onUpdate, queryClient]
   );
 
   // Stable callback wrapper for CullResultCard — avoids stale closures when
@@ -567,6 +694,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             favorite: false,
           });
         }
+        // Immediately invalidate photo queries so favorites page reflects changes
+        if (status === "kept" || wereKept.length > 0) {
+          queryClient.invalidateQueries({ queryKey: ["photos"] });
+        }
         setSelected(new Set());
         onUpdate?.();
       } catch (err) {
@@ -575,7 +706,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         setUpdating(new Set());
       }
     },
-    [session.id, sorted, selected, onUpdate]
+    [session.id, sorted, selected, onUpdate, queryClient]
   );
 
   const handleTopNApply = useCallback(async () => {
@@ -612,27 +743,6 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       setUpdating(new Set());
     }
   }, [session.id, sorted, topN, isDuel, onUpdate]);
-
-  const handleCreateAlbumFromKept = useCallback(async () => {
-    if (kept.length === 0) {
-      return;
-    }
-    setCreatingAlbum(true);
-    try {
-      const album = (await ipc.client.albums.createAlbum({
-        name: `${session.name} · ${new Date().toLocaleDateString()}`,
-      })) as { id: number };
-      await ipc.client.albums.addPhotosToAlbum({
-        albumId: album.id,
-        photoIds: kept.map((i) => i.photo.id),
-      });
-      toast.success(t("cullKeptToAlbum"));
-    } catch (err) {
-      console.error("[handleCreateAlbum] failed:", err);
-    } finally {
-      setCreatingAlbum(false);
-    }
-  }, [session.name, kept, t]);
 
   const handleTrashRejected = useCallback(async () => {
     if (rejected.length === 0) {
@@ -701,14 +811,6 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           >
             <Download className="h-3 w-3" />
             {t("cullExportKept")}
-          </button>
-          <button
-            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-            disabled={kept.length === 0 || creatingAlbum}
-            onClick={handleCreateAlbumFromKept}
-          >
-            <FolderPlus className="h-3 w-3" />
-            {t("cullCreateAlbumFromKept")}
           </button>
           <button
             className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
@@ -794,13 +896,8 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       {/* Gallery grid */}
       {viewMode === "gallery" ? (
         <div
-          className="flex-1 overflow-y-auto p-4"
-          onClick={(e) => {
-            const target = e.target as HTMLElement;
-            if (!target.closest("[data-card]")) {
-              setSelected(new Set());
-            }
-          }}
+          className="relative flex-1 select-none overflow-y-auto p-4"
+          onMouseDown={handleMarqueeStart}
           ref={containerRef}
         >
           {sorted.length === 0 ? (
@@ -816,13 +913,24 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                   isSelected={selected.has(item.id)}
                   item={item}
                   key={item.id}
-                  onPreview={setLightboxIndex}
+                  onSelect={handleCardSelect}
                   onStatusChange={stableHandleStatusChange}
-                  onToggle={toggleSelect}
                   updating={updating}
                 />
               ))}
             </div>
+          )}
+          {/* Marquee selection overlay */}
+          {marquee && (
+            <div
+              className="pointer-events-none absolute z-30 rounded-[2px] border border-primary/40 bg-primary/10"
+              style={{
+                left: Math.min(marquee.startX, marquee.x),
+                top: Math.min(marquee.startY, marquee.y),
+                width: Math.abs(marquee.x - marquee.startX),
+                height: Math.abs(marquee.y - marquee.startY),
+              }}
+            />
           )}
         </div>
       ) : (
@@ -860,8 +968,8 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                       isSelected={selected.has(item.id)}
                       item={item}
                       onPreview={setLightboxIndex}
+                      onSelect={handleCardSelect}
                       onStatusChange={stableHandleStatusChange}
-                      onToggle={toggleSelect}
                       updating={updating}
                     />
                   </div>

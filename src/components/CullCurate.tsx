@@ -329,7 +329,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   // Chrome auto-hide: toolbars fade out after 2s of mouse inactivity
   const chrome = useChromeVisibility({
-    forceVisible: shortcutsOpen || finishConfirmOpen,
+    forceVisible: finishConfirmOpen,
   });
 
   const itemRef = useRef(item);
@@ -347,7 +347,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         });
         return;
       }
-      if (shortcutsOpenRef.current || finishConfirmOpenRef.current) {
+      if (finishConfirmOpenRef.current) {
         return;
       }
       if (
@@ -637,84 +637,66 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         </Dialog>
       )}
 
+      {/* Keyboard shortcuts — glass overlay */}
       {shortcutsOpen && (
-        <Dialog
-          onOpenChange={(open) => {
-            setShortcutsOpen(open);
-            if (!open) {
-              shortcutsOpenRef.current = false;
-            }
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/20"
+          onClick={() => {
+            setShortcutsOpen(false);
+            shortcutsOpenRef.current = false;
           }}
-          open={shortcutsOpen}
         >
-          <DialogContent className="max-w-[360px]">
-            <DialogHeader>
-              <DialogTitle>{t("cullShortcuts")}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 py-2 text-[12px] text-muted-foreground">
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  →
-                </kbd>{" "}
-                <span>{t("cullKeep")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  ← / ↓ / Space
-                </kbd>{" "}
-                <span>{t("cullReject")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  S
-                </kbd>{" "}
-                <span>{t("cullSkipSimilar")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  Ctrl+Z
-                </kbd>{" "}
-                <span>{t("cullUndo")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  +
-                </kbd>{" "}
-                <span>{t("cullZoomIn")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  -
-                </kbd>{" "}
-                <span>{t("cullZoomOut")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  0
-                </kbd>{" "}
-                <span>{t("cullZoomFit")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  Scroll
-                </kbd>{" "}
-                <span>{t("cullZoomScroll")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  DblClick
-                </kbd>{" "}
-                <span>{t("cullZoomToggle")}</span>
-              </p>
-              <p className="flex justify-between">
-                <kbd className="rounded-[3px] bg-muted px-1.5 text-[11px]">
-                  ?
-                </kbd>{" "}
-                <span>{t("cullShortcuts")}</span>
-              </p>
+          <div
+            className="pointer-events-auto rounded-[12px] border border-white/[0.08] bg-black/60 px-6 py-4 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] backdrop-blur-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 text-center font-medium text-[13px] text-white/80">
+              {t("cullShortcuts")}
+            </h3>
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[12px]">
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                →
+              </kbd>
+              <span className="text-white/60">{t("cullKeep")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                ← / ↓ / Space
+              </kbd>
+              <span className="text-white/60">{t("cullReject")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                S
+              </kbd>
+              <span className="text-white/60">{t("cullSkipSimilar")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                Ctrl+Z
+              </kbd>
+              <span className="text-white/60">{t("cullUndo")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                +
+              </kbd>
+              <span className="text-white/60">{t("cullZoomIn")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                -
+              </kbd>
+              <span className="text-white/60">{t("cullZoomOut")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                0
+              </kbd>
+              <span className="text-white/60">{t("cullZoomFit")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                Scroll
+              </kbd>
+              <span className="text-white/60">{t("cullZoomScroll")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                DblClick
+              </kbd>
+              <span className="text-white/60">{t("cullZoomToggle")}</span>
+              <kbd className="rounded-[4px] border border-white/20 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                ?
+              </kbd>
+              <span className="text-white/60">{t("cullShortcuts")}</span>
             </div>
-          </DialogContent>
-        </Dialog>
+          </div>
+        </div>
       )}
     </div>
   );
