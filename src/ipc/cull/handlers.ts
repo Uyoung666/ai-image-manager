@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -174,7 +174,8 @@ function loadPendingWithMetadata(sessionId: number) {
     .where(
       and(
         eq(cullSessionPhotos.sessionId, sessionId),
-        eq(cullSessionPhotos.status, "pending")
+        eq(cullSessionPhotos.status, "pending"),
+        isNull(photos.deletedAt)
       )
     )
     .orderBy(asc(photos.fileDate))
@@ -214,14 +215,32 @@ export const createSession = os
 
     let allPhotoIds = [...input.photoIds];
 
-    // If folderId is provided, load photos from that folder
+    // If folderId is provided, load non-deleted photos from that folder
     if (input.folderId && allPhotoIds.length === 0) {
       const folderPhotos = db
         .select({ id: photos.id })
         .from(photos)
-        .where(eq(photos.folderId, input.folderId))
+        .where(
+          and(
+            eq(photos.folderId, input.folderId),
+            isNull(photos.deletedAt)
+          )
+        )
         .all();
       allPhotoIds = folderPhotos.map((p) => p.id);
+    } else if (allPhotoIds.length > 0) {
+      // Exclude soft-deleted photos from explicit photoIds
+      allPhotoIds = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(
+          and(
+            inArray(photos.id, allPhotoIds),
+            isNull(photos.deletedAt)
+          )
+        )
+        .all()
+        .map((p) => p.id);
     }
 
     if (allPhotoIds.length < 2) {
@@ -293,7 +312,23 @@ export const addPhotosToSession = os
         .where(eq(cullSessionPhotos.sessionId, input.sessionId))
         .all();
       const existingSet = new Set(existingPhotos.map((p) => p.photoId));
-      const newPhotoIds = input.photoIds.filter((id) => !existingSet.has(id));
+
+      // Exclude soft-deleted photos (in trash) from being added to session
+      const deletedPhotos = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(
+          and(
+            inArray(photos.id, input.photoIds),
+            isNotNull(photos.deletedAt)
+          )
+        )
+        .all();
+      const deletedSet = new Set(deletedPhotos.map((p) => p.id));
+
+      const newPhotoIds = input.photoIds.filter(
+        (id) => !existingSet.has(id) && !deletedSet.has(id)
+      );
 
       const batchSize = 500;
       for (let i = 0; i < newPhotoIds.length; i += batchSize) {
@@ -365,7 +400,13 @@ export const listSessions = os.handler(async () => {
     const countResult = db
       .select({ count: sql<number>`count(*)` })
       .from(cullSessionPhotos)
-      .where(eq(cullSessionPhotos.sessionId, s.id))
+      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, s.id),
+          isNull(photos.deletedAt)
+        )
+      )
       .get();
     return { ...s, totalPhotos: countResult?.count ?? 0 };
   });
@@ -396,16 +437,28 @@ export const getSession = os
       })
       .from(cullSessionPhotos)
       .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-      .where(eq(cullSessionPhotos.sessionId, input.sessionId))
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
+          isNull(photos.deletedAt)
+        )
+      )
       .orderBy(desc(cullSessionPhotos.rating))
       .all();
 
     // Dynamic COUNT — the static cullSessions.totalPhotos drifts when
-    // photos are cascade-deleted externally (e.g. file-system removal).
+    // photos are cascade-deleted externally (e.g. file-system removal)
+    // or soft-deleted (moved to trash).
     const actualCount = db
       .select({ count: sql<number>`count(*)` })
       .from(cullSessionPhotos)
-      .where(eq(cullSessionPhotos.sessionId, input.sessionId))
+      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
+          isNull(photos.deletedAt)
+        )
+      )
       .get();
 
     return { ...session, totalPhotos: actualCount?.count ?? 0, items };
@@ -440,7 +493,7 @@ export const ensureDuelPreview = os
         duelPreviewPath: photos.duelPreviewPath,
       })
       .from(photos)
-      .where(eq(photos.id, input.photoId))
+      .where(and(eq(photos.id, input.photoId), isNull(photos.deletedAt)))
       .get();
 
     if (!photo) {
@@ -1454,7 +1507,12 @@ export const skipSimilarPhotos = os
       .select({ phash: photos.phash })
       .from(cullSessionPhotos)
       .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-      .where(eq(cullSessionPhotos.id, input.photoId))
+      .where(
+        and(
+          eq(cullSessionPhotos.id, input.photoId),
+          isNull(photos.deletedAt)
+        )
+      )
       .get();
 
     if (!current?.phash) {

@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ZoomableImage, type ZoomState } from "@/components/ZoomableImage";
+import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
 import type { Session } from "@/routes/cull.$sessionId";
@@ -125,6 +126,10 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   // Increment to trigger a fresh getNextPair IPC call
   const [pairFetchId, setPairFetchId] = useState(0);
 
+  // EXIF hover overlay visibility per side — React state ensures clean transition start
+  const [showExifLeft, setShowExifLeft] = useState(false);
+  const [showExifRight, setShowExifRight] = useState(false);
+
   // Accumulates broken-photo IDs across the session; never cleared on
   // successful mutations because a broken photo stays broken. Sent to
   // backend as excludeIds to prevent infinite retry loops.
@@ -198,7 +203,9 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   // 懒触发生成对比预览：当前 pair 的照片若缺失则后台生成
   useEffect(() => {
-    if (!pair) return;
+    if (!pair) {
+      return;
+    }
     for (const item of pair) {
       if (!item.photo.duelPreviewPath) {
         ipc.client.cull
@@ -230,7 +237,11 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onSuccess: () => {
       onMutationSuccess();
-      startTransition(() => setPairFetchId((n) => n + 1));
+      startTransition(() => {
+        setPairFetchId((n) => n + 1);
+        setShowExifLeft(false);
+        setShowExifRight(false);
+      });
     },
     onError: (err) => {
       console.error("[submitComparison] failed:", err);
@@ -246,7 +257,11 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onSuccess: () => {
       onMutationSuccess();
-      startTransition(() => setPairFetchId((n) => n + 1));
+      startTransition(() => {
+        setPairFetchId((n) => n + 1);
+        setShowExifLeft(false);
+        setShowExifRight(false);
+      });
     },
     onError: (err) => {
       console.error("[recordSkip] failed:", err);
@@ -261,7 +276,11 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onSuccess: () => {
       onMutationSuccess();
-      startTransition(() => setPairFetchId((n) => n + 1));
+      startTransition(() => {
+        setPairFetchId((n) => n + 1);
+        setShowExifLeft(false);
+        setShowExifRight(false);
+      });
     },
     onError: (err) => {
       console.error("[undoLastAction] failed:", err);
@@ -304,7 +323,11 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       toast.warning(t("cullPhotoUnavailable"), { duration: 2500 });
 
       // Skip without submitting — server-side progress stays correct
-      startTransition(() => setPairFetchId((n) => n + 1));
+      startTransition(() => {
+        setPairFetchId((n) => n + 1);
+        setShowExifLeft(false);
+        setShowExifRight(false);
+      });
     },
     [pairQuery.data?.pair, t]
   );
@@ -335,6 +358,11 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const finishConfirmOpenRef = useRef(false);
   finishConfirmOpenRef.current = finishConfirmOpen;
   const fatigueOpenRef = useRef(false);
+
+  // Chrome auto-hide: toolbars fade out after 2s of mouse inactivity
+  const chrome = useChromeVisibility({
+    forceVisible: shortcutsOpen || finishConfirmOpen || fatigueOpen,
+  });
 
   const comparisonCountRef = useRef(0);
   const fatigueRemindersRef = useRef(0);
@@ -529,7 +557,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       return null;
     }
     return (
-      <span className="text-[10px] text-muted-foreground/50">
+      <span className="text-[10px] text-white/50">
         {label}: {value}
       </span>
     );
@@ -537,7 +565,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
 
   function renderExifInfo(exif: ExifData | null, photo: PhotoInfo) {
     return (
-      <div className="mt-2 flex max-w-[400px] flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
+      <div className="mt-0 flex max-w-[400px] flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
         {exif ? (
           <>
             {renderExifRow(t("cullFileName"), photo.filename)}
@@ -562,18 +590,23 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             )}
           </>
         ) : (
-          <span className="text-[10px] text-muted-foreground/30">
-            {t("cullNoExif")}
-          </span>
+          <span className="text-[10px] text-white/30">{t("cullNoExif")}</span>
         )}
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-full select-none flex-col">
-      {/* Top bar */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-2">
+    <div
+      className="relative flex h-full select-none flex-col bg-black"
+      {...chrome}
+    >
+      {/* Top bar — glass overlay */}
+      <div
+        className={`flex items-center justify-between border-white/[0.06] border-b bg-background/70 px-6 py-2 backdrop-blur-xl transition-opacity duration-500 ${
+          chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
         <span className="text-[11px] text-muted-foreground/70">
           {(() => {
             const pkCount = stats?.completed ?? session.completedComparisons;
@@ -680,44 +713,18 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         </div>
       </div>
 
-      {/* 0ms 硬切，key 驱除 ZoomableImage 重新挂载 */}
+      {/* Photo pair — fade-in on swap */}
       <div
-        className={`flex flex-1 overflow-hidden ${
+        className={`flex flex-1 animate-photo-fade-in overflow-hidden ${
           showTransition ? "pointer-events-none" : ""
         }`}
         key={pairFetchId}
       >
         {/* Left photo */}
         <div
-          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden border-border border-r p-4 transition-colors hover:bg-primary/5 focus:outline-none"
-          onClick={(e) => {
-            if (isSubmitting) {
-              return;
-            }
-            if (e.detail !== 1) {
-              return;
-            }
-            if (
-              e.target instanceof HTMLElement &&
-              e.target.closest("[data-zoom]")
-            ) {
-              return;
-            }
-            submitMutation.mutate({
-              winnerId: left.sessionPhotoId,
-              loserId: right.sessionPhotoId,
-            });
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !isSubmitting) {
-              submitMutation.mutate({
-                winnerId: left.sessionPhotoId,
-                loserId: right.sessionPhotoId,
-              });
-            }
-          }}
-          role="button"
-          tabIndex={0}
+          className="relative flex flex-1 flex-col items-center justify-center overflow-hidden"
+          onMouseEnter={() => setShowExifLeft(true)}
+          onMouseLeave={() => setShowExifLeft(false)}
         >
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
@@ -748,65 +755,72 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
               thumbnailPath={left.photo.thumbnailPath}
             />
           </div>
-          <div className="mt-2 shrink-0 text-center">
-            {renderExifInfo(exifLeft, left.photo)}
-            <div className="mt-1 flex items-center justify-center gap-3 text-[10px] text-muted-foreground/60">
-              <span>
-                {t("cullRating")}: {left.rating}
-              </span>
-              <span>
-                {t("cullWins")}: {left.wins}
-              </span>
-              <span>
-                {t("cullLosses")}: {left.losses}
-              </span>
-            </div>
-          </div>
+
+          {/* EXIF hover overlay — fades in on hover */}
           <div
-            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-medium text-[13px] text-primary transition-all ${
-              isSubmitting ? "opacity-30" : "hover:bg-primary/20"
+            className={`pointer-events-none absolute right-0 bottom-0 left-0 z-10 transition-opacity duration-200 ${
+              showExifLeft ? "opacity-100" : "opacity-0"
             }`}
           >
-            {t("cullPickLeft")} ←
+            <div className="mx-auto max-w-[400px] px-4 pb-14">
+              <div className="rounded-[8px] bg-black/60 px-3 py-1.5 backdrop-blur-md">
+                {renderExifInfo(exifLeft, left.photo)}
+                <div className="mt-0.5 flex items-center justify-center gap-3 text-[10px] text-white/50">
+                  <span>
+                    {t("cullRating")}: {left.rating}
+                  </span>
+                  <span>
+                    {t("cullWins")}: {left.wins}
+                  </span>
+                  <span>
+                    {t("cullLosses")}: {left.losses}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Pick button — dedicated glass button at bottom */}
+          <div className="absolute right-0 bottom-3 left-0 z-10 flex justify-center">
+            <button
+              className="rounded-full border border-white/20 bg-black/40 px-4 py-1.5 text-[12px] text-white/90 backdrop-blur-md transition-all hover:border-white/35 hover:bg-black/60 hover:text-white hover:shadow-[0_0_16px_-4px_rgba(0,0,0,0.3)] active:scale-[0.96] disabled:opacity-30"
+              disabled={isSubmitting}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isSubmitting) {
+                  return;
+                }
+                submitMutation.mutate({
+                  winnerId: left.sessionPhotoId,
+                  loserId: right.sessionPhotoId,
+                });
+              }}
+              type="button"
+            >
+              ← {t("cullPickLeft")}
+            </button>
           </div>
         </div>
 
-        {/* VS divider */}
-        <div className="absolute top-1/2 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2 select-none rounded-full border border-border bg-background px-3 py-1.5 font-semibold text-[11px] text-muted-foreground shadow-sm">
-          VS
+        {/* VS divider — vertical gradient + glass badge */}
+        <div className="pointer-events-none absolute top-0 right-0 bottom-0 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center">
+          {/* Top gradient line */}
+          <div className="w-px flex-1 bg-gradient-to-b from-transparent via-white/[0.04] to-white/[0.10]" />
+          {/* VS badge with halo */}
+          <div className="relative flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.10] bg-black/50 shadow-[0_0_20px_-4px_rgba(255,255,255,0.10)] backdrop-blur-xl">
+            <span className="select-none font-semibold text-[11px] text-white/50 tracking-wider">
+              VS
+            </span>
+          </div>
+          {/* Bottom gradient line */}
+          <div className="w-px flex-1 bg-gradient-to-b from-white/[0.10] via-white/[0.04] to-transparent" />
         </div>
 
         {/* Right photo */}
         <div
-          className="flex flex-1 cursor-pointer flex-col items-center justify-center overflow-hidden p-4 transition-colors hover:bg-primary/5 focus:outline-none"
-          onClick={(e) => {
-            if (isSubmitting) {
-              return;
-            }
-            if (e.detail !== 1) {
-              return;
-            }
-            if (
-              e.target instanceof HTMLElement &&
-              e.target.closest("[data-zoom]")
-            ) {
-              return;
-            }
-            submitMutation.mutate({
-              winnerId: right.sessionPhotoId,
-              loserId: left.sessionPhotoId,
-            });
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !isSubmitting) {
-              submitMutation.mutate({
-                winnerId: right.sessionPhotoId,
-                loserId: left.sessionPhotoId,
-              });
-            }
-          }}
-          role="button"
-          tabIndex={0}
+          className="relative flex flex-1 flex-col items-center justify-center overflow-hidden"
+          onMouseEnter={() => setShowExifRight(true)}
+          onMouseLeave={() => setShowExifRight(false)}
         >
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
@@ -837,41 +851,69 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
               thumbnailPath={right.photo.thumbnailPath}
             />
           </div>
-          <div className="mt-2 shrink-0 text-center">
-            {renderExifInfo(exifRight, right.photo)}
-            <div className="mt-1 flex items-center justify-center gap-3 text-[10px] text-muted-foreground/60">
-              <span>
-                {t("cullRating")}: {right.rating}
-              </span>
-              <span>
-                {t("cullWins")}: {right.wins}
-              </span>
-              <span>
-                {t("cullLosses")}: {right.losses}
-              </span>
-            </div>
-          </div>
+
+          {/* EXIF hover overlay — fades in on hover */}
           <div
-            className={`mt-2 shrink-0 rounded-[6px] bg-primary/10 px-4 py-2 font-medium text-[13px] text-primary transition-all ${
-              isSubmitting ? "opacity-30" : "hover:bg-primary/20"
+            className={`pointer-events-none absolute right-0 bottom-0 left-0 z-10 transition-opacity duration-200 ${
+              showExifRight ? "opacity-100" : "opacity-0"
             }`}
           >
-            → {t("cullPickRight")}
+            <div className="mx-auto max-w-[400px] px-4 pb-14">
+              <div className="rounded-[8px] bg-black/60 px-3 py-1.5 backdrop-blur-md">
+                {renderExifInfo(exifRight, right.photo)}
+                <div className="mt-0.5 flex items-center justify-center gap-3 text-[10px] text-white/50">
+                  <span>
+                    {t("cullRating")}: {right.rating}
+                  </span>
+                  <span>
+                    {t("cullWins")}: {right.wins}
+                  </span>
+                  <span>
+                    {t("cullLosses")}: {right.losses}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Pick button — dedicated glass button at bottom */}
+          <div className="absolute right-0 bottom-3 left-0 z-10 flex justify-center">
+            <button
+              className="rounded-full border border-white/20 bg-black/40 px-4 py-1.5 text-[12px] text-white/90 backdrop-blur-md transition-all hover:border-white/35 hover:bg-black/60 hover:text-white hover:shadow-[0_0_16px_-4px_rgba(0,0,0,0.3)] active:scale-[0.96] disabled:opacity-30"
+              disabled={isSubmitting}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isSubmitting) {
+                  return;
+                }
+                submitMutation.mutate({
+                  winnerId: right.sessionPhotoId,
+                  loserId: left.sessionPhotoId,
+                });
+              }}
+              type="button"
+            >
+              {t("cullPickRight")} →
+            </button>
           </div>
         </div>
       </div>
 
       {/* 防抖 Spinner — 仅过渡持续 > 150ms 时挂载 */}
       {showSpinner && (
-        <div className="absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        <div className="pointer-events-none absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         </div>
       )}
 
-      {/* Bottom bar */}
-      <div className="flex items-center justify-center gap-4 border-border border-t px-6 py-3">
+      {/* Bottom bar — glass overlay */}
+      <div
+        className={`flex items-center justify-center gap-4 border-white/[0.06] border-t bg-background/70 px-6 py-3 backdrop-blur-xl transition-opacity duration-500 ${
+          chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
         <button
-          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          className="rounded-[6px] border border-border bg-secondary px-4 py-1.5 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() =>
             skipMutation.mutate({
@@ -883,7 +925,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           {t("cullSkip")} (Space)
         </button>
         <button
-          className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          className="rounded-[6px] border border-border bg-secondary px-4 py-1.5 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() =>
             submitMutation.mutate({
@@ -896,7 +938,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           {t("cullDraw")} (D)
         </button>
         {lastReason && (
-          <span className="ml-auto text-[10px] text-muted-foreground/40">
+          <span className="ml-auto text-[10px] text-white/30">
             {t("cullNextPairReason")}: {lastReason}
           </span>
         )}

@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ZoomableImage } from "@/components/ZoomableImage";
+import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
 import type { Session } from "@/routes/cull.$sessionId";
@@ -200,7 +201,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     onSuccess: () => {
       toast.success(t("toastFavoriteAdded"));
       onMutationSuccess();
-      startTransition(() => setPhotoFetchId((n) => n + 1));
+      startTransition(() => {
+        setPhotoFetchId((n) => n + 1);
+        setShowExif(false);
+      });
     },
     onError: (err) => console.error("[keep] failed:", err),
   });
@@ -215,7 +219,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     },
     onSuccess: () => {
       onMutationSuccess();
-      startTransition(() => setPhotoFetchId((n) => n + 1));
+      startTransition(() => {
+        setPhotoFetchId((n) => n + 1);
+        setShowExif(false);
+      });
     },
     onError: (err) => console.error("[reject] failed:", err),
   });
@@ -229,7 +236,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     onSuccess: (result) => {
       if (result.success) {
         onMutationSuccess();
-        startTransition(() => setPhotoFetchId((n) => n + 1));
+        startTransition(() => {
+          setPhotoFetchId((n) => n + 1);
+          setShowExif(false);
+        });
       }
     },
     onError: (err) => console.error("[undo] failed:", err),
@@ -248,7 +258,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         toast.success(t("cullSkippedSimilar", { count: result.skippedCount }));
       }
       onMutationSuccess();
-      startTransition(() => setPhotoFetchId((n) => n + 1));
+      startTransition(() => {
+        setPhotoFetchId((n) => n + 1);
+        setShowExif(false);
+      });
     },
     onError: (err) => console.error("[skipSimilar] failed:", err),
   });
@@ -275,11 +288,15 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       erroredPhotosRef.current.add(currentItem.sessionPhotoId);
     }
     toast.warning(t("cullPhotoUnavailable"), { duration: 2500 });
-    startTransition(() => setPhotoFetchId((n) => n + 1));
+    startTransition(() => {
+      setPhotoFetchId((n) => n + 1);
+      setShowExif(false);
+    });
   }, [photoQuery.data?.single, t]);
 
   // EXIF — loaded on every photo change
   const [exif, setExif] = useState<ExifData | null>(null);
+  const [showExif, setShowExif] = useState(false);
 
   useEffect(() => {
     if (!item) {
@@ -309,6 +326,11 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   shortcutsOpenRef.current = shortcutsOpen;
   const finishConfirmOpenRef = useRef(false);
   finishConfirmOpenRef.current = finishConfirmOpen;
+
+  // Chrome auto-hide: toolbars fade out after 2s of mouse inactivity
+  const chrome = useChromeVisibility({
+    forceVisible: shortcutsOpen || finishConfirmOpen,
+  });
 
   const itemRef = useRef(item);
   itemRef.current = item;
@@ -415,16 +437,23 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       return null;
     }
     return (
-      <span className="text-[10px] text-muted-foreground/50">
+      <span className="text-[10px] text-white/50">
         {label}: {value}
       </span>
     );
   }
 
   return (
-    <div className="relative flex h-full select-none flex-col">
-      {/* Top bar */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-2">
+    <div
+      className="relative flex h-full select-none flex-col bg-black"
+      {...chrome}
+    >
+      {/* Top bar — glass overlay */}
+      <div
+        className={`flex items-center justify-between border-white/[0.06] border-b bg-background/70 px-6 py-2 backdrop-blur-xl transition-opacity duration-500 ${
+          chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
         <span className="text-[11px] text-muted-foreground/70">
           {t("cullCurateProgress", {
             done: stats?.completed ?? session.completedComparisons,
@@ -460,12 +489,15 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         </div>
       </div>
 
-      {/* Photo — 0ms 硬切 */}
+      {/* Photo — full-bleed immersive */}
       <div
-        className={`flex min-h-0 flex-1 items-center justify-center p-4 ${
+        className={`relative flex min-h-0 flex-1 animate-photo-fade-in items-center justify-center ${
           showTransition ? "pointer-events-none" : ""
         }`}
         key={photoFetchId}
+        onMouseEnter={() => setShowExif(true)}
+        onMouseLeave={() => setShowExif(false)}
+        role="none"
       >
         <div
           className="flex h-full w-full items-center justify-center"
@@ -482,60 +514,72 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             thumbnailPath={item.photo.thumbnailPath}
           />
         </div>
-      </div>
 
-      {/* EXIF info bar */}
-      <div className="border-border border-t px-6 py-2">
-        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
-          {exif ? (
-            <>
-              {renderExifRow(t("cullFileName"), item.photo.filename)}
-              {renderExifRow(
-                t("cullDateTaken"),
-                formatExifDate(exif.dateTaken)
-              )}
-              {renderExifRow(
-                t("cullDimensions"),
-                `${item.photo.width}×${item.photo.height}`
-              )}
-              {renderExifRow(
-                t("focalLength"),
-                exif.focalLength ? `${exif.focalLength}mm` : null
-              )}
-              {renderExifRow(t("shutter"), exif.shutterSpeed)}
-              {renderExifRow(
-                t("iso"),
-                exif.iso == null ? null : String(exif.iso)
-              )}
-              {renderExifRow(
-                t("aperture"),
-                exif.aperture == null ? null : `f/${exif.aperture}`
-              )}
-            </>
-          ) : (
-            <span className="text-[10px] text-muted-foreground/30">
-              {t("cullNoExif")}
-            </span>
-          )}
-          {similarCount > 0 && (
-            <span className="text-[10px] text-primary">
-              {t("cullSimilarPhotos")}: {similarCount}
-            </span>
-          )}
+        {/* EXIF hover overlay — fades in on hover */}
+        <div
+          className={`absolute right-0 bottom-0 left-0 z-10 transition-opacity duration-200 ${
+            showExif ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <div className="mx-auto max-w-[600px] px-4 pb-3">
+            <div className="rounded-[8px] bg-black/60 px-4 py-2 backdrop-blur-md">
+              <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
+                {exif ? (
+                  <>
+                    {renderExifRow(t("cullFileName"), item.photo.filename)}
+                    {renderExifRow(
+                      t("cullDateTaken"),
+                      formatExifDate(exif.dateTaken)
+                    )}
+                    {renderExifRow(
+                      t("cullDimensions"),
+                      `${item.photo.width}×${item.photo.height}`
+                    )}
+                    {renderExifRow(
+                      t("focalLength"),
+                      exif.focalLength ? `${exif.focalLength}mm` : null
+                    )}
+                    {renderExifRow(t("shutter"), exif.shutterSpeed)}
+                    {renderExifRow(
+                      t("iso"),
+                      exif.iso == null ? null : String(exif.iso)
+                    )}
+                    {renderExifRow(
+                      t("aperture"),
+                      exif.aperture == null ? null : `f/${exif.aperture}`
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[10px] text-white/40">
+                    {t("cullNoExif")}
+                  </span>
+                )}
+                {similarCount > 0 && (
+                  <span className="text-[10px] text-amber-400">
+                    {t("cullSimilarPhotos")}: {similarCount}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* 防抖 Spinner — 操作栏内部，图像区域之外 */}
-      <div className="flex items-center justify-center border-border border-t px-6 py-1.5">
+        {/* Spinner — centered overlay during transition */}
         {showSpinner && (
-          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          </div>
         )}
       </div>
 
-      {/* Action bar */}
-      <div className="flex items-center justify-center gap-6 border-border border-t px-6 py-3">
+      {/* Action bar — glass overlay */}
+      <div
+        className={`flex items-center justify-center gap-6 border-white/[0.06] border-t bg-background/70 px-6 py-3 backdrop-blur-xl transition-opacity duration-500 ${
+          chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
         <button
-          className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 disabled:opacity-40"
+          className="flex items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() => skipSimilarMutation.mutate(item)}
         >
@@ -543,7 +587,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           {t("cullSkipSimilar")} (S)
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-[13px] text-muted-foreground transition-all hover:border-destructive/30 hover:bg-destructive/5 hover:text-destructive disabled:opacity-40"
+          className="flex items-center gap-2 rounded-full border border-destructive/25 bg-destructive/[0.08] px-5 py-2.5 text-[13px] text-destructive backdrop-blur-md transition-all hover:border-destructive/45 hover:bg-destructive/[0.14] hover:text-destructive-foreground hover:shadow-[0_0_16px_-4px_var(--destructive)/25] disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() => rejectMutation.mutate(item)}
         >
@@ -551,7 +595,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           {t("cullReject")} ← ↓
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-success/30 bg-success/5 px-6 py-3 font-medium text-[14px] text-success transition-all hover:bg-success/10 hover:shadow-md disabled:opacity-40"
+          className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/[0.12] px-6 py-3 font-medium text-[14px] text-foreground backdrop-blur-md transition-all hover:border-amber-500/50 hover:bg-amber-500/[0.20] hover:shadow-[0_0_20px_-4px_var(--amber-500)/30] active:scale-[0.96] disabled:opacity-40"
           disabled={isSubmitting}
           onClick={() => keepMutation.mutate(item)}
         >

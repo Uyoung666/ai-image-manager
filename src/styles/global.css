@@ -688,6 +688,16 @@
   animation: btn-glow 2s ease-in-out infinite;
 }
 
+/* ── 照片切换淡入动画 (甄选模式用) ── */
+@keyframes photo-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-photo-fade-in {
+  animation: photo-fade-in 200ms ease-out both;
+}
+
 /* Spotlight loading 遮罩 */
 .spotlight-loading-shield {
   position: absolute;

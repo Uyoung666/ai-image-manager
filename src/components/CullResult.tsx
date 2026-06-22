@@ -4,6 +4,8 @@ import {
   Download,
   FolderPlus,
   Heart,
+  LayoutGrid,
+  LayoutList,
   Star,
   Trash2,
   XCircle,
@@ -60,11 +62,11 @@ interface CullResultProps {
 }
 
 // ──────────────────────────────────────────────────────────────
-// CullResultRow — memo'd row for virtual scrolling
+// CullResultCard — memo'd gallery card
 // ──────────────────────────────────────────────────────────────
 
-const CullResultRow = memo(
-  function CullResultRow({
+const CullResultCard = memo(
+  function CullResultCard({
     item,
     index,
     isSelected,
@@ -87,152 +89,137 @@ const CullResultRow = memo(
     updating: Set<number>;
   }) {
     const { t } = useTranslation();
-
-    function getStatusBadge(status: string) {
-      switch (status) {
-        case "kept":
-          return (
-            <span className="flex items-center gap-1 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
-              <CheckCircle2 className="h-3 w-3" />
-              {t("cullKeep")}
-            </span>
-          );
-        case "rejected":
-          return (
-            <span className="flex items-center gap-1 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
-              <XCircle className="h-3 w-3" />
-              {t("cullReject")}
-            </span>
-          );
-        default:
-          return null;
-      }
-    }
-
     const isUpdating = updating.has(item.id);
+    const isKept = item.status === "kept";
+    const isRejected = item.status === "rejected";
 
     return (
       <div
-        className={`flex cursor-pointer items-center gap-3 rounded-[8px] border p-3 transition-colors ${
+        className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-[8px] transition-all duration-200 ${
           isSelected
-            ? "border-primary/30 bg-primary/[0.04]"
-            : item.status === "kept"
-              ? "border-success/20 bg-success/[0.03]"
-              : item.status === "rejected"
-                ? "border-destructive/10 bg-destructive/[0.02]"
-                : "border-border bg-secondary"
+            ? "scale-[1.02] ring-2 ring-primary ring-offset-1 ring-offset-background"
+            : isKept
+              ? "ring-1 ring-amber-500/20"
+              : isRejected
+                ? "opacity-60 grayscale-[20%]"
+                : "hover:scale-[1.01]"
         }`}
-        onClick={() => onToggle(item.id)}
+        data-card=""
+        onClick={(e) => {
+          if (e.detail === 1) {
+            onToggle(item.id);
+          } else if (e.detail === 2) {
+            onPreview(index);
+          }
+        }}
       >
-        {/* Checkbox */}
-        <div
-          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border-2 transition-colors ${
-            isSelected
-              ? "border-primary bg-primary text-primary-foreground"
-              : "border-muted-foreground/30"
-          }`}
-        >
-          {isSelected && <CheckCircle2 className="h-3.5 w-3.5" />}
-        </div>
-
-        {/* Rank */}
-        <span className="w-7 text-center font-semibold text-[13px] text-muted-foreground">
-          #{index + 1}
-        </span>
-
         {/* Thumbnail */}
-        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[4px] bg-muted">
+        <div className="pointer-events-none relative aspect-[4/3] overflow-hidden bg-muted">
           <img
             alt={item.photo.filename}
-            className="h-full w-full cursor-pointer object-cover transition-opacity hover:opacity-80"
+            className="h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105"
             decoding="async"
-            fetchPriority="low"
             loading="lazy"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPreview(index);
-            }}
             src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
           />
-        </div>
 
-        {/* Info */}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] text-foreground">
-            {item.photo.filename}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground/60">
-            <span>
-              {item.photo.width}×{item.photo.height}
+          {/* Bottom gradient overlay */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/60 to-transparent" />
+
+          {/* Select checkbox (top-left, visible on hover or when selected) */}
+          <div
+            className={`pointer-events-none absolute top-2 left-2 z-10 flex h-5 w-5 items-center justify-center rounded-[4px] border-2 transition-all ${
+              isSelected
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-white/50 bg-black/40 opacity-0 group-hover:opacity-100"
+            }`}
+          >
+            {isSelected && <CheckCircle2 className="h-3 w-3" />}
+          </div>
+
+          {/* Status badge (top-right) */}
+          {item.status !== "pending" && (
+            <div className="absolute top-2 right-2">
+              {isKept ? (
+                <span className="flex items-center gap-1 rounded-[4px] bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200 backdrop-blur-sm">
+                  <Heart className="h-3 w-3" fill="currentColor" />
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 rounded-[4px] bg-black/40 px-1.5 py-0.5 text-[10px] text-white/60 backdrop-blur-sm">
+                  <XCircle className="h-3 w-3" />
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Rank + Duel stats overlay at bottom */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between px-2 pb-1.5">
+            <span className="font-semibold text-[11px] text-white/80">
+              #{index + 1}
             </span>
-            {item.photo.isFavorite && (
-              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+            {isDuel && (
+              <span className="text-[11px] text-white/70">
+                {item.rating}
+                <span className="ml-0.5 text-[9px] text-white/40">Elo</span>
+              </span>
             )}
           </div>
         </div>
 
-        {/* Stats (duel only) */}
-        {isDuel && (
-          <div className="flex items-center gap-3 text-right">
-            <div>
-              <span className="font-semibold text-[14px] text-foreground">
-                {item.rating}
-              </span>
-              <span className="ml-1 text-[10px] text-muted-foreground/50">
-                Elo
-              </span>
-            </div>
-            <div className="text-[10px] text-muted-foreground/50">
-              <span className="text-success">{item.wins}W</span>{" "}
-              <span className="text-destructive">{item.losses}L</span>
-            </div>
-          </div>
-        )}
+        {/* Info bar */}
+        <div className="flex items-center gap-1.5 px-2.5 py-2">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
+            {item.photo.filename}
+          </span>
+          {item.photo.isFavorite && (
+            <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
+          )}
 
-        {/* Status badge & per-item actions */}
-        <div className="flex items-center gap-2">
-          {getStatusBadge(item.status)}
-          {item.status === "pending" && (
-            <>
+          {/* Quick actions */}
+          <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {item.status === "pending" ? (
+              <>
+                <button
+                  className="rounded-[4px] bg-success/10 p-1 text-[10px] text-success hover:bg-success/20"
+                  disabled={isUpdating}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStatusChange(item.id, "kept");
+                  }}
+                  type="button"
+                >
+                  <Heart className="h-3 w-3" />
+                </button>
+                <button
+                  className="rounded-[4px] bg-destructive/10 p-1 text-[10px] text-destructive hover:bg-destructive/20"
+                  disabled={isUpdating}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStatusChange(item.id, "rejected");
+                  }}
+                  type="button"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </>
+            ) : (
               <button
-                className="rounded-[4px] bg-success/10 px-2 py-1 text-[10px] text-success transition-colors hover:bg-success/20"
+                className="rounded-[4px] bg-muted p-1 text-[10px] text-muted-foreground hover:text-foreground"
                 disabled={isUpdating}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onStatusChange(item.id, "kept");
+                  onStatusChange(item.id, "pending");
                 }}
+                type="button"
               >
-                <Heart className="inline h-3 w-3" /> {t("cullKeep")}
+                ↺
               </button>
-              <button
-                className="rounded-[4px] bg-destructive/10 px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
-                disabled={isUpdating}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStatusChange(item.id, "rejected");
-                }}
-              >
-                <Trash2 className="inline h-3 w-3" /> {t("cullReject")}
-              </button>
-            </>
-          )}
-          {item.status !== "pending" && (
-            <button
-              className="rounded-[4px] bg-muted px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-              disabled={isUpdating}
-              onClick={(e) => {
-                e.stopPropagation();
-                onStatusChange(item.id, "pending");
-              }}
-            >
-              ↺
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     );
   },
-  // Custom comparison: only re-render when observable primitives change
   (prev, next) =>
     prev.item.id === next.item.id &&
     prev.isSelected === next.isSelected &&
@@ -241,6 +228,156 @@ const CullResultRow = memo(
     prev.item.comparisons === next.item.comparisons &&
     prev.updating.has(prev.item.id) === next.updating.has(next.item.id)
 );
+
+// ──────────────────────────────────────────────────────────────
+// CullResultRow — memo'd list row (original view)
+// ──────────────────────────────────────────────────────────────
+
+const CullResultRow = memo(function CullResultRow({
+  item,
+  index,
+  isSelected,
+  isDuel,
+  onToggle,
+  onStatusChange,
+  onPreview,
+  updating,
+}: {
+  item: RankedItem;
+  index: number;
+  isSelected: boolean;
+  isDuel: boolean;
+  onToggle: (id: number) => void;
+  onStatusChange: (id: number, status: "kept" | "rejected" | "pending") => void;
+  onPreview: (index: number) => void;
+  updating: Set<number>;
+}) {
+  const { t } = useTranslation();
+  const isUpdating = updating.has(item.id);
+
+  return (
+    <div
+      className={`flex cursor-pointer items-center gap-3 rounded-[8px] border p-3 transition-colors ${
+        isSelected
+          ? "border-primary/30 bg-primary/[0.04]"
+          : item.status === "kept"
+            ? "border-success/20 bg-success/[0.03]"
+            : item.status === "rejected"
+              ? "border-destructive/10 bg-destructive/[0.02]"
+              : "border-border bg-secondary"
+      }`}
+      onClick={() => onToggle(item.id)}
+    >
+      <div
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border-2 transition-colors ${
+          isSelected
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground/30"
+        }`}
+      >
+        {isSelected && <CheckCircle2 className="h-3.5 w-3.5" />}
+      </div>
+      <span className="w-7 text-center font-semibold text-[13px] text-muted-foreground">
+        #{index + 1}
+      </span>
+      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[4px] bg-muted">
+        <img
+          alt={item.photo.filename}
+          className="h-full w-full cursor-pointer object-cover transition-opacity hover:opacity-80"
+          decoding="async"
+          fetchPriority="low"
+          loading="lazy"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreview(index);
+          }}
+          src={toLocalMediaUrl(item.photo.thumbnailPath ?? item.photo.path)}
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] text-foreground">
+          {item.photo.filename}
+        </p>
+        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground/60">
+          <span>
+            {item.photo.width}×{item.photo.height}
+          </span>
+          {item.photo.isFavorite && (
+            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+          )}
+        </div>
+      </div>
+      {isDuel && (
+        <div className="flex items-center gap-3 text-right">
+          <div>
+            <span className="font-semibold text-[14px] text-foreground">
+              {item.rating}
+            </span>
+            <span className="ml-1 text-[10px] text-muted-foreground/50">
+              Elo
+            </span>
+          </div>
+          <div className="text-[10px] text-muted-foreground/50">
+            <span className="text-success">{item.wins}W</span>{" "}
+            <span className="text-destructive">{item.losses}L</span>
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        {item.status === "kept" && (
+          <span className="flex items-center gap-1 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
+            <CheckCircle2 className="h-3 w-3" />
+            {t("cullKeep")}
+          </span>
+        )}
+        {item.status === "rejected" && (
+          <span className="flex items-center gap-1 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
+            <XCircle className="h-3 w-3" />
+            {t("cullReject")}
+          </span>
+        )}
+        {item.status === "pending" ? (
+          <>
+            <button
+              className="rounded-[4px] bg-success/10 px-2 py-1 text-[10px] text-success transition-colors hover:bg-success/20"
+              disabled={isUpdating}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(item.id, "kept");
+              }}
+              type="button"
+            >
+              <Heart className="inline h-3 w-3" /> {t("cullKeep")}
+            </button>
+            <button
+              className="rounded-[4px] bg-destructive/10 px-2 py-1 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
+              disabled={isUpdating}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(item.id, "rejected");
+              }}
+              type="button"
+            >
+              <Trash2 className="inline h-3 w-3" /> {t("cullReject")}
+            </button>
+          </>
+        ) : (
+          <button
+            className="rounded-[4px] bg-muted px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+            disabled={isUpdating}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStatusChange(item.id, "pending");
+            }}
+            type="button"
+          >
+            ↺
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
 
 // ──────────────────────────────────────────────────────────────
 // CullResult — main component
@@ -271,6 +408,9 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   // Lightbox preview
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+
+  // View mode toggle
+  const [viewMode, setViewMode] = useState<"list" | "gallery">("gallery");
 
   // Virtual scrolling container ref
   const containerRef = useRef<HTMLDivElement>(null);
@@ -319,8 +459,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   const lightboxPhotos = useMemo(() => sorted.map((i) => i.photo), [sorted]);
 
-  // ── useVirtualizer ──
-
+  // ── useVirtualizer (list view only) ──
   const virtualizer = useVirtualizer({
     count: sorted.length,
     getScrollElement: () => containerRef.current,
@@ -354,17 +493,23 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     async (itemId: number, status: "kept" | "rejected" | "pending") => {
       setUpdating((s) => new Set(s).add(itemId));
       try {
+        const item = session.items.find((i) => i.id === itemId);
+        const wasKept = item?.status === "kept";
         await ipc.client.cull.updatePhotoStatus({
           sessionId: session.id,
           photoId: itemId,
           status,
         });
-        if (status === "kept") {
-          const item = session.items.find((i) => i.id === itemId);
-          if (item) {
+        if (item) {
+          if (status === "kept") {
             await ipc.client.photos.toggleFavorite({
               ids: [item.photo.id],
               favorite: true,
+            });
+          } else if (wasKept) {
+            await ipc.client.photos.toggleFavorite({
+              ids: [item.photo.id],
+              favorite: false,
             });
           }
         }
@@ -382,7 +527,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     [session.id, session.items, onUpdate]
   );
 
-  // Stable callback wrapper for CullResultRow — avoids stale closures when
+  // Stable callback wrapper for CullResultCard — avoids stale closures when
   // handleStatusChange reference changes but the memo'd row does not re-render.
   const handleStatusChangeRef = useRef(handleStatusChange);
   useEffect(() => {
@@ -404,16 +549,22 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       }
       setUpdating((s) => new Set([...s, ...items.map((i) => i.id)]));
       try {
+        const wereKept = items.filter((i) => i.status === "kept");
         await ipc.client.cull.batchUpdatePhotoStatus({
           sessionId: session.id,
           photoIds: items.map((i) => i.id),
           status,
         });
         if (status === "kept") {
-          const favIds = items.map((i) => i.photo.id);
           await ipc.client.photos.toggleFavorite({
-            ids: favIds,
+            ids: items.map((i) => i.photo.id),
             favorite: true,
+          });
+        }
+        if (status !== "kept" && wereKept.length > 0) {
+          await ipc.client.photos.toggleFavorite({
+            ids: wereKept.map((i) => i.photo.id),
+            favorite: false,
           });
         }
         setSelected(new Set());
@@ -506,8 +657,8 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Summary bar */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-border border-b px-6 py-2">
+      {/* Summary bar — stats row */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-border border-b px-4 py-1.5">
         <span className="text-[12px] text-muted-foreground">
           {t("cullResultsSummary", {
             total,
@@ -516,15 +667,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             pending: pending.length,
           })}
         </span>
-        <span className="h-4 w-px bg-border" />
-
-        {/* Top N */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground/60">
-            {t("cullTopN")}
-          </span>
+        <span className="ml-auto flex items-center gap-2">
+          {/* Top N */}
           <input
-            className="w-14 rounded-[4px] border border-input bg-transparent px-2 py-0.5 text-center text-[12px] text-foreground outline-none focus:border-primary"
+            className="w-16 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
             onChange={(e) => setTopN(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -538,58 +684,61 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             value={topN}
           />
           <button
-            className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+            className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
             disabled={!topN || isNaN(Number.parseInt(topN, 10))}
             onClick={() => setTopNConfirmOpen(true)}
           >
             {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
           </button>
-        </div>
-
-        <span className="h-4 w-px bg-border" />
-
-        {/* Export kept */}
-        <button
-          className="flex items-center gap-1 rounded-[4px] px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          disabled={kept.length === 0}
-          onClick={() => {
-            setExportIds(kept.map((i) => i.photo.id));
-            setExportOpen(true);
-          }}
-        >
-          <Download className="h-3 w-3" />
-          {t("cullExportKept")} ({kept.length})
-        </button>
-
-        {/* Create album from kept */}
-        <button
-          className="flex items-center gap-1 rounded-[4px] px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          disabled={kept.length === 0 || creatingAlbum}
-          onClick={handleCreateAlbumFromKept}
-        >
-          <FolderPlus className="h-3 w-3" />
-          {t("cullCreateAlbumFromKept")} ({kept.length})
-        </button>
-
-        {/* Trash rejected */}
-        <button
-          className="flex items-center gap-1 rounded-[4px] px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
-          disabled={rejected.length === 0 || deleting}
-          onClick={() => setTrashConfirmOpen(true)}
-        >
-          <Trash2 className="h-3 w-3" />
-          {t("cullTrashRejected")} ({rejected.length})
-        </button>
-
-        {/* Select all */}
-        <button
-          className="ml-auto rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
-          onClick={toggleSelectAll}
-        >
-          {selected.size === sorted.length
-            ? t("cullDeselectAll")
-            : t("cullSelectAll")}
-        </button>
+          <span className="h-3 w-px bg-border/50" />
+          <button
+            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={kept.length === 0}
+            onClick={() => {
+              setExportIds(kept.map((i) => i.photo.id));
+              setExportOpen(true);
+            }}
+          >
+            <Download className="h-3 w-3" />
+            {t("cullExportKept")}
+          </button>
+          <button
+            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            disabled={kept.length === 0 || creatingAlbum}
+            onClick={handleCreateAlbumFromKept}
+          >
+            <FolderPlus className="h-3 w-3" />
+            {t("cullCreateAlbumFromKept")}
+          </button>
+          <button
+            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
+            disabled={rejected.length === 0 || deleting}
+            onClick={() => setTrashConfirmOpen(true)}
+          >
+            <Trash2 className="h-3 w-3" />
+            {t("cullTrashRejected")}
+          </button>
+          <button
+            className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
+            onClick={toggleSelectAll}
+          >
+            {selected.size === sorted.length
+              ? t("cullDeselectAll")
+              : t("cullSelectAll")}
+          </button>
+          <button
+            className="rounded-[4px] p-1 text-muted-foreground/50 transition-colors hover:text-foreground"
+            onClick={() =>
+              setViewMode((v) => (v === "gallery" ? "list" : "gallery"))
+            }
+          >
+            {viewMode === "gallery" ? (
+              <LayoutList className="h-3.5 w-3.5" />
+            ) : (
+              <LayoutGrid className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </span>
       </div>
 
       {/* Batch action bar (when items selected) */}
@@ -642,49 +791,86 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         </div>
       )}
 
-      {/* Virtual-scrolled list */}
-      <div className="flex-1 overflow-y-auto p-6" ref={containerRef}>
-        {sorted.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            {t("cullNoPhotosInSession")}
-          </div>
-        ) : (
-          <div
-            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-          >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const item = sorted[virtualRow.index];
-              return (
-                <div
-                  data-index={virtualRow.index}
-                  key={virtualRow.key}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                    contentVisibility: "auto",
-                    containIntrinsicSize: "auto 80px",
-                  }}
-                >
-                  <CullResultRow
-                    index={virtualRow.index}
-                    isDuel={isDuel}
-                    isSelected={selected.has(item.id)}
-                    item={item}
-                    onPreview={setLightboxIndex}
-                    onStatusChange={stableHandleStatusChange}
-                    onToggle={toggleSelect}
-                    updating={updating}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {/* Gallery grid */}
+      {viewMode === "gallery" ? (
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          onClick={(e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest("[data-card]")) {
+              setSelected(new Set());
+            }
+          }}
+          ref={containerRef}
+        >
+          {sorted.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              {t("cullNoPhotosInSession")}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {sorted.map((item, idx) => (
+                <CullResultCard
+                  index={idx}
+                  isDuel={isDuel}
+                  isSelected={selected.has(item.id)}
+                  item={item}
+                  key={item.id}
+                  onPreview={setLightboxIndex}
+                  onStatusChange={stableHandleStatusChange}
+                  onToggle={toggleSelect}
+                  updating={updating}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── Original list view ── */
+        <div className="flex-1 overflow-y-auto p-6" ref={containerRef}>
+          {sorted.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              {t("cullNoPhotosInSession")}
+            </div>
+          ) : (
+            <div
+              style={{
+                height: virtualizer.getTotalSize(),
+                position: "relative",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const item = sorted[virtualRow.index];
+                return (
+                  <div
+                    data-index={virtualRow.index}
+                    key={virtualRow.key}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <CullResultRow
+                      index={virtualRow.index}
+                      isDuel={isDuel}
+                      isSelected={selected.has(item.id)}
+                      item={item}
+                      onPreview={setLightboxIndex}
+                      onStatusChange={stableHandleStatusChange}
+                      onToggle={toggleSelect}
+                      updating={updating}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Top N confirm dialog */}
       {topNConfirmOpen && (
