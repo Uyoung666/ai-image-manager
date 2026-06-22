@@ -16,8 +16,10 @@ import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import {
   isVectorDBReady,
   photoTable,
+  colorTable,
   setIsVectorDBReady,
   setPhotoTable,
+  setColorTable,
   setVectordb,
   setWasAutoRepaired,
   vectordb,
@@ -160,6 +162,9 @@ export async function initVectorDB(): Promise<void> {
             );
           }
 
+          // ── 初始化颜色向量表（如不存在则创建） ───────────────
+          await initColorTable(db);
+
           setIsVectorDBReady(true);
           scheduleVectorMaintenance();
           return;
@@ -222,6 +227,9 @@ export async function initVectorDB(): Promise<void> {
     "[AI] Created photo_embeddings table (explicit FixedSizeList<Float32>[512] schema)"
   );
   markIndexDirty(); // New table has no data — will be set to ready after index build completes
+
+  // ── 初始化颜色向量表（3D RGB） ───────────────────────────────────
+  await initColorTable(db);
 
   setIsVectorDBReady(true);
   scheduleVectorMaintenance();
@@ -610,6 +618,129 @@ function isIndexCleanShutdown(): boolean {
     return fs.existsSync(indexReadyPath());
   } catch {
     return false;
+  }
+}
+
+// ── 颜色向量表（Color Vector Table） ──────────────────────────────
+// 替代 SQLite closest_color_dist JS UDF 全表扫描，将主导色 [R,G,B] 存入
+// LanceDB 3D 向量表，利用 IVF_PQ ANN 将 O(N) 转化为 O(log N)。
+
+const COLOR_TABLE_NAME = "color_embeddings";
+const COLOR_VECTOR_DIM = 3;
+
+async function initColorTable(db: any): Promise<void> {
+  try {
+    const tableNames = await db.tableNames();
+
+    if (tableNames.includes(COLOR_TABLE_NAME)) {
+      const table = await db.openTable(COLOR_TABLE_NAME);
+      setColorTable(table);
+      console.log("[AI] Opened existing color_embeddings table");
+      return;
+    }
+
+    // 创建新表
+    const schema = new Schema([
+      new Field("photo_id", new Int32()),
+      new Field(
+        "vector",
+        new FixedSizeList(COLOR_VECTOR_DIM, new Field("item", new Float32()))
+      ),
+    ]);
+
+    const table = await db.createEmptyTable(COLOR_TABLE_NAME, schema);
+    setColorTable(table);
+    console.log("[AI] Created color_embeddings table (FixedSizeList<Float32>[3])");
+  } catch (err: any) {
+    console.warn("[AI] Color table init skipped:", err?.message);
+    // 非关键路径：颜色搜索降级为 SQLite UDF
+  }
+}
+
+/** 写入或更新照片的主导颜色向量 */
+export async function upsertColorVector(
+  photoId: number,
+  r: number,
+  g: number,
+  b: number
+): Promise<void> {
+  if (!colorTable) {
+    return;
+  }
+  try {
+    // 删除旧记录（如果存在）
+    await colorTable.delete(`photo_id = ${photoId}`);
+    // 写入新记录
+    await colorTable.add([
+      { photo_id: photoId, vector: new Float32Array([r, g, b]) },
+    ]);
+  } catch (err: any) {
+    console.error(`[AI] Upsert color vector failed for photo ${photoId}:`, err?.message);
+  }
+}
+
+/** 批量写入颜色向量 */
+export async function upsertColorVectors(
+  entries: Array<{ photoId: number; r: number; g: number; b: number }>
+): Promise<void> {
+  if (!colorTable || entries.length === 0) {
+    return;
+  }
+  try {
+    // 批量删除旧记录
+    const ids = entries.map((e) => e.photoId);
+    await colorTable.delete(`photo_id IN (${ids.join(",")})`);
+    // 批量写入
+    const rows = entries.map((e) => ({
+      photo_id: e.photoId,
+      vector: new Float32Array([e.r, e.g, e.b]),
+    }));
+    await colorTable.add(rows);
+    console.log(`[AI] Upserted ${entries.length} color vectors`);
+  } catch (err: any) {
+    console.error("[AI] Batch upsert color vectors failed:", err?.message);
+  }
+}
+
+/** 颜色向量 ANN 搜索。colorTable 不可用时返回 null，调用方降级 SQLite UDF。 */
+export async function searchByColorVector(
+  r: number,
+  g: number,
+  b: number,
+  limit: number
+): Promise<Array<{ photoId: number; distance: number }> | null> {
+  if (!colorTable) {
+    return null;
+  }
+  try {
+    const targetVector = Array.from({ length: COLOR_VECTOR_DIM }, (_, i) =>
+      [r, g, b][i]
+    );
+    const rawResults = (await colorTable
+      .vectorSearch(targetVector)
+      .distanceType("l2")
+      .limit(limit)
+      .toArray()) as Record<string, unknown>[];
+
+    return rawResults.map((row) => ({
+      photoId: row.photo_id as number,
+      distance: row._distance as number,
+    }));
+  } catch (err: any) {
+    console.error("[AI] Color vector search failed:", err?.message);
+    return null;
+  }
+}
+
+/** 删除指定照片的颜色向量 */
+export async function deleteColorVectors(photoIds: number[]): Promise<void> {
+  if (!colorTable || photoIds.length === 0) {
+    return;
+  }
+  try {
+    await colorTable.delete(`photo_id IN (${photoIds.join(",")})`);
+  } catch (err: any) {
+    console.error("[AI] Delete color vectors failed:", err?.message);
   }
 }
 

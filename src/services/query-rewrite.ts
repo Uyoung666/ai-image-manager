@@ -39,7 +39,191 @@ const STOP_WORDS = new Set([
   "嘛",
 ]);
 
-// 时间表达式映射
+// ── 动态时间表达式正则引擎 ──────────────────────────────────────────
+// 替代纯硬编码字符串匹配，支持灵活的自然语言时间描述
+
+interface DynamicTimeRange {
+  /** 提取到的时间范围 */
+  timeFilter: { from: number; to: number };
+  /** 匹配到的原始文本（用于从查询中移除） */
+  matchedText: string;
+}
+
+// 相对时间：N天前 / N周前 / N个月前 / N年前 / 过去N天 等
+const RELATIVE_TIME_RE =
+  /(?:前|过去)\s*(\d+)\s*(天|周|个?月|年)|(\d+)\s*(天|周|个?月|年)\s*(?:前|之前|以前)/;
+
+// 绝对时间：2024年 / 2024年3月 / 2024年3月15日 / 3月15日 等
+const ABSOLUTE_DATE_RE =
+  /(\d{4})\s*[年\/\-\.]\s*(\d{1,2})\s*(?:[月\/\-\.]\s*(\d{1,2})\s*[日号]?)?/;
+
+// 口语化季节+年份组合：去年夏天 / 2024年春天 等
+const YEAR_QUALIFIED_SEASON_RE =
+  /(去年|今年|明年|前年|(\d{4})\s*年)\s*(春天|夏天|秋天|冬天|春季|夏季|秋季|冬季)/;
+
+// 纯季节（无年份限定）
+const BARE_SEASON_RE = /(春天|夏天|秋天|冬天|春季|夏季|秋季|冬季)/;
+
+function parseDynamicTime(query: string, now: Date): DynamicTimeRange | null {
+  // 1. 尝试相对时间（N天前/周前等）
+  const relMatch = RELATIVE_TIME_RE.exec(query);
+  if (relMatch) {
+    const num = Number.parseInt(relMatch[1] || relMatch[3], 10);
+    const unit = relMatch[2] || relMatch[4];
+    if (num > 0 && num <= 3650) {
+      // 10年上限，防止异常输入
+      return buildRelativeRange(num, unit, now, relMatch[0]);
+    }
+  }
+
+  // 2. 尝试年份限定季节（去年夏天 / 2024年春天）
+  const seasonYearMatch = YEAR_QUALIFIED_SEASON_RE.exec(query);
+  if (seasonYearMatch) {
+    const yearQualifier = seasonYearMatch[1];
+    const explicitYear = seasonYearMatch[2];
+    const season = seasonYearMatch[3];
+    const resolvedYear = resolveYearQualifier(yearQualifier, explicitYear, now);
+    return buildSeasonRange(season, resolvedYear, seasonYearMatch[0]);
+  }
+
+  // 3. 尝试绝对日期（2024年3月 / 2024年3月15日 / 3月15日）
+  const absMatch = ABSOLUTE_DATE_RE.exec(query);
+  if (absMatch) {
+    const year = Number.parseInt(absMatch[1], 10);
+    const month = Number.parseInt(absMatch[2], 10) - 1; // 0-indexed
+    const day = absMatch[3] ? Number.parseInt(absMatch[3], 10) : undefined;
+
+    if (month >= 0 && month <= 11 && year >= 1970 && year <= 2100) {
+      if (day !== undefined && (day < 1 || day > 31)) {
+        return null; // invalid day
+      }
+      const from = new Date(year, month, day ?? 1, 0, 0, 0, 0);
+      let to: Date;
+      if (day !== undefined) {
+        to = new Date(year, month, day, 23, 59, 59, 999);
+      } else {
+        // 只有年月 → 到月末
+        to = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      }
+      return {
+        timeFilter: { from: from.getTime(), to: to.getTime() },
+        matchedText: absMatch[0],
+      };
+    }
+  }
+
+  // 4. 尝试裸季节（在当前上下文推断年份）
+  const seasonMatch = BARE_SEASON_RE.exec(query);
+  if (seasonMatch) {
+    const season = seasonMatch[1];
+    const inferredYear = inferSeasonYear(season, now);
+    return buildSeasonRange(season, inferredYear, seasonMatch[0]);
+  }
+
+  return null;
+}
+
+function buildRelativeRange(
+  num: number,
+  unit: string,
+  now: Date,
+  matchedText: string
+): DynamicTimeRange {
+  const to = new Date(now);
+  to.setHours(23, 59, 59, 999);
+  const from = new Date(to);
+
+  switch (unit) {
+    case "天":
+      from.setDate(from.getDate() - num);
+      from.setHours(0, 0, 0, 0);
+      break;
+    case "周":
+      from.setDate(from.getDate() - num * 7);
+      from.setHours(0, 0, 0, 0);
+      break;
+    case "个月":
+    case "月":
+      from.setMonth(from.getMonth() - num);
+      from.setHours(0, 0, 0, 0);
+      break;
+    case "年":
+      from.setFullYear(from.getFullYear() - num);
+      from.setHours(0, 0, 0, 0);
+      break;
+    default:
+      from.setDate(from.getDate() - num);
+      from.setHours(0, 0, 0, 0);
+  }
+
+  return {
+    timeFilter: { from: from.getTime(), to: to.getTime() },
+    matchedText,
+  };
+}
+
+function resolveYearQualifier(
+  qualifier: string,
+  explicitYear: string | undefined,
+  now: Date
+): number {
+  if (explicitYear) {
+    return Number.parseInt(explicitYear, 10);
+  }
+  switch (qualifier) {
+    case "去年":
+      return now.getFullYear() - 1;
+    case "明年":
+      return now.getFullYear() + 1;
+    case "前年":
+      return now.getFullYear() - 2;
+    case "今年":
+    default:
+      return now.getFullYear();
+  }
+}
+
+function inferSeasonYear(season: string, now: Date): number {
+  const month = now.getMonth();
+  const seasonStartMonths: Record<string, number> = {
+    "春": 2, "春天": 2, "春季": 2,
+    "夏": 5, "夏天": 5, "夏季": 5,
+    "秋": 8, "秋天": 8, "秋季": 8,
+    "冬": 11, "冬天": 11, "冬季": 11,
+  };
+  const startMonth = seasonStartMonths[season] ?? 0;
+  // 如果当前月份 >= 季节开始月份，用今年；否则用去年
+  return month >= startMonth ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function buildSeasonRange(
+  season: string,
+  year: number,
+  matchedText: string
+): DynamicTimeRange | null {
+  const seasonMonths: Record<string, [number, number]> = {
+    "春": [2, 4], "春天": [2, 4], "春季": [2, 4],
+    "夏": [5, 7], "夏天": [5, 7], "夏季": [5, 7],
+    "秋": [8, 10], "秋天": [8, 10], "秋季": [8, 10],
+    "冬": [11, 13], "冬天": [11, 13], "冬季": [11, 13], // 13 → 次年1月
+  };
+  const [startMonth, endMonth] = seasonMonths[season] ?? [0, 2];
+  const from = new Date(year, startMonth, 1, 0, 0, 0, 0);
+  let to: Date;
+  if (endMonth > 11) {
+    // 冬季跨年
+    to = new Date(year + 1, endMonth - 12, 0, 23, 59, 59, 999);
+  } else {
+    to = new Date(year, endMonth + 1, 0, 23, 59, 59, 999);
+  }
+  return {
+    timeFilter: { from: from.getTime(), to: to.getTime() },
+    matchedText,
+  };
+}
+
+// ── 静态时间表达式映射（兜底精确短词） ──────────────────────────────
+
 const TIME_EXPRESSIONS: Record<
   string,
   (now: Date) => { from: number; to: number }
@@ -129,6 +313,8 @@ export interface RewrittenQuery {
   originalQuery: string; // 原始查询
   removedTerms: string[]; // 移除的口语化词汇
   timeFilter?: { from: number; to: number }; // 解析出的时间筛选
+  /** 动态时间匹配的原始文本（用于从查询中移除） */
+  timeMatchedText?: string;
 }
 
 // 去除口语化表达（单次扫描，避免顺序依赖）
@@ -158,20 +344,30 @@ function removeColloquialisms(query: string): {
   return { cleaned: cleaned.trim(), removed };
 }
 
-// 解析时间表达式 — 保留时间词在查询中（对 CLIP 语义搜索有意义）
+// 解析时间表达式 — 优先动态正则，再回退静态词典
 function parseTimeExpression(query: string): {
   timeFilter?: { from: number; to: number };
+  matchedText?: string;
 } {
   const now = new Date();
 
-  // 按长度降序检测（避免 "上个月" 被 "上月" 或 "月" 误匹配）
+  // 1. 优先尝试动态正则引擎（覆盖范围远超静态词典）
+  const dynamic = parseDynamicTime(query, now);
+  if (dynamic) {
+    return {
+      timeFilter: dynamic.timeFilter,
+      matchedText: dynamic.matchedText,
+    };
+  }
+
+  // 2. 回退到静态词典（精确短词如"今天""昨天"）
   const sorted = Object.entries(TIME_EXPRESSIONS).sort(
     (a, b) => b[0].length - a[0].length
   );
 
   for (const [expr, getRange] of sorted) {
     if (query.includes(expr)) {
-      return { timeFilter: getRange(now) };
+      return { timeFilter: getRange(now), matchedText: expr };
     }
   }
 
@@ -182,30 +378,48 @@ function parseTimeExpression(query: string): {
 export function rewriteQuery(query: string): RewrittenQuery {
   const originalQuery = query.trim();
 
-  const { timeFilter } = parseTimeExpression(originalQuery);
+  // ── 关键顺序：先解析时间，再去除口语/停用词 ────────────────────
+  // 停用词集包含 "过" 等字，会破坏 "过去2周"→"去2周" 的时间模式。
+  // 必须在停用词移除之前，在原始查询上完成时间表达式匹配。
 
+  // 1. 在原始查询上解析时间表达式（优先动态正则 → 回退静态词典）
+  const { timeFilter, matchedText } = parseTimeExpression(originalQuery);
+
+  // 2. 去除口语化表达和停用词
   const { cleaned: afterColloquial, removed: removedTerms } =
     removeColloquialisms(originalQuery);
 
   let cleanQuery = afterColloquial.replace(/\s+/g, " ").trim();
 
+  // 3. 从 cleanQuery 中移除匹配到的时间文本
+  if (matchedText && cleanQuery.includes(matchedText)) {
+    cleanQuery = cleanQuery.replace(matchedText, " ").replace(/\s+/g, " ").trim();
+  }
+
+  // 4. 如果 cleanQuery 只剩下时间词（纯时间查询），清空 cleanQuery
   if (cleanQuery && timeFilter) {
-    let isPureTime = Object.keys(TIME_EXPRESSIONS).some(
-      (e) => cleanQuery === e
-    );
-    if (!isPureTime) {
-      let testQuery = cleanQuery;
-      for (const expr of Object.keys(TIME_EXPRESSIONS)) {
-        testQuery = testQuery.replace(new RegExp(expr, "g"), " ").trim();
-      }
-      isPureTime = !testQuery;
+    let testQuery = cleanQuery;
+    for (const expr of Object.keys(TIME_EXPRESSIONS)) {
+      testQuery = testQuery.replace(new RegExp(expr, "g"), " ").trim();
     }
-    if (isPureTime) {
+    if (testQuery) {
+      const dynamicCheck = parseDynamicTime(testQuery, new Date());
+      if (dynamicCheck) {
+        testQuery = testQuery.replace(dynamicCheck.matchedText, " ").trim();
+      }
+    }
+    if (!testQuery) {
       cleanQuery = "";
     }
   }
 
-  return { cleanQuery, originalQuery, timeFilter, removedTerms };
+  return {
+    cleanQuery,
+    originalQuery,
+    timeFilter,
+    removedTerms,
+    timeMatchedText: matchedText,
+  };
 }
 
 // 标准化 EXIF 筛选（将时间筛选转换为日期字符串）

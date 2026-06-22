@@ -123,9 +123,11 @@ export function embedImageInWorker(
   });
 }
 
-// 自适应阈值范围：覆盖率 0% → 0.35, 覆盖率 100% → 0.75
+// 自适应阈值范围：覆盖率 0% → 0.22, 覆盖率 100% → 0.55
+// 中文 CLIP 零样本余弦距离天然偏高（0.4–0.7），过严阈值会导致全部过滤。
+// 放宽下限确保抽象词汇也能返回结果，同时保留覆盖率越高阈值越严的趋势。
 function adaptiveThreshold(coverage: number): number {
-  return 0.35 + coverage * 0.4;
+  return 0.22 + coverage * 0.33;
 }
 
 async function fallbackSearch(
@@ -375,26 +377,18 @@ export async function searchByText(
     const parsed = parseChineseQuery(query);
     const coverage = getQueryCoverage(query, parsed);
     const threshold = adaptiveThreshold(coverage);
-    const prompts = generateSearchPrompts(parsed);
+    // 始终将原始 query 传入 generateSearchPrompts 作为 Zero-Shot 兜底
+    const prompts = generateSearchPrompts(parsed, query);
 
     console.log(
       `[AI] searchByText: "${query}" → coverage=${(coverage * 100).toFixed(0)}% threshold=${threshold.toFixed(2)} prompts=${prompts.length}: ${JSON.stringify(prompts)}`
     );
 
-    results = [];
     if (prompts.length > 0) {
       results = await multiPromptSearch(prompts, limit, threshold);
-    }
-
-    // Fallback: try raw query directly if multi-prompt returned nothing
-    // But only when coverage is high enough — raw Chinese is meaningless for CLIP
-    if (results.length === 0 && coverage >= 0.5) {
-      console.log("[AI] Multi-prompt returned 0, trying raw query embedding");
+    } else {
+      // 极端情况：连 raw query 都没有生成 prompt（query 被完全过滤为空白）
       results = await singleVectorSearch(query, limit, threshold);
-    } else if (results.length === 0) {
-      console.log(
-        `[AI] Low coverage (${(coverage * 100).toFixed(0)}%), skipping raw Chinese fallback`
-      );
     }
   } else {
     // English query: single prompt

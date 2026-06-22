@@ -10,6 +10,7 @@ import {
   isNull,
   like,
   lte,
+  or,
   sql,
 } from "drizzle-orm";
 import { getDatabase } from "@/db";
@@ -45,6 +46,10 @@ const HASH_PREFIX_RE = /^#/;
 const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const HEX_COLOR_QUERY_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const CHINESE_CHAR_RE = /[一-鿿]/;
+
+// ── 熔断与超时配置 ──────────────────────────────────────────────────
+const LANCEDB_TIMEOUT_MS = 2000; // LanceDB 向量检索硬超时
+const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
 // EXIF filter cache: cache key -> { result, timestamp }
 const filterCache = new Map<string, { result: any; timestamp: number }>();
@@ -174,6 +179,63 @@ export const searchByImage = os
     return { results: scored };
   });
 
+// ── 超时包装器 ──────────────────────────────────────────────────────
+// 为异步操作添加硬超时，超时后自动 Reject，
+// 与 Promise.allSettled 配合使用实现优雅降级。
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    return promise;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`[Timeout] ${label} exceeded ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise
+      .then((result) => {
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+// ── 从时间过滤器中构建 temporalBoost ───────────────────────────────
+// 自动补全不完整的时间边界（如 "今年" 只有 from，补 to=Date.now()）
+
+function buildTemporalBoost(
+  dateFrom?: number,
+  dateTo?: number
+): { targetFrom: number; targetTo: number; factor: number } | undefined {
+  if (dateFrom == null && dateTo == null) {
+    return undefined;
+  }
+  const now = Date.now();
+  const from = dateFrom ?? 0;
+  const to = dateTo ?? now;
+  // 根据时间窗口跨度选择 factor
+  const spanMs = to - from;
+  const oneDay = 24 * 60 * 60 * 1000;
+  let factor: number;
+  if (spanMs <= oneDay) {
+    factor = 1.5; // 1天内 → 高提权
+  } else if (spanMs <= 7 * oneDay) {
+    factor = 1.4; // 1周内
+  } else if (spanMs <= 31 * oneDay) {
+    factor = 1.3; // 1月内
+  } else {
+    factor = 1.2; // 更长时间窗口
+  }
+  return { targetFrom: from, targetTo: to, factor };
+}
+
 // Compound search: text + EXIF filters
 export const searchCompound = os
   .input(CompoundSearchSchema)
@@ -228,96 +290,103 @@ export const searchCompound = os
     if (effectiveColorHex) {
       const rgb = parseHexColor(effectiveColorHex);
       if (rgb) {
-        // 动态构建 SQL：颜色搜索 + 可选 EXIF 叠加
-        const exifActive =
-          dateFrom ||
-          dateTo ||
-          cameraModel ||
-          lensModel ||
-          focalMin !== undefined ||
-          focalMax !== undefined ||
-          apertureMin !== undefined ||
-          apertureMax !== undefined ||
-          isoMin !== undefined ||
-          isoMax !== undefined ||
-          shutterMin !== undefined ||
-          shutterMax !== undefined;
+        // ── 颜色搜索双路并行：LanceDB ANN + SQLite UDF ─────────────
+        // LanceDB 颜色表可能稀疏（仅部分照片已索引），不能替代 SQLite。
+        // 双路并行执行，合并结果去重，避免稀疏表导致的"全色块同一结果"。
 
-        let colorSQL = sql``;
-        if (exifActive) {
-          // 有 EXIF 筛选：JOIN exif_data 并附加条件
-          const conditions: SQL[] = [];
-          conditions.push(sql`p.deleted_at IS NULL`);
-          conditions.push(sql`p.dominant_colors IS NOT NULL`);
-          if (dateFrom) {
-            conditions.push(sql`e.date_taken >= ${dateFrom}`);
-          }
-          if (dateTo) {
-            conditions.push(sql`e.date_taken <= ${dateTo}`);
-          }
-          if (cameraModel) {
-            conditions.push(
-              sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`
-            );
-          }
-          if (lensModel) {
-            conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
-          }
-          if (focalMin !== undefined) {
-            conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
-          }
-          if (focalMax !== undefined) {
-            conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
-          }
-          if (apertureMin !== undefined) {
-            conditions.push(sql`e.aperture >= ${apertureMin}`);
-          }
-          if (apertureMax !== undefined) {
-            conditions.push(sql`e.aperture <= ${apertureMax}`);
-          }
-          if (isoMin !== undefined) {
-            conditions.push(sql`e.iso >= ${isoMin}`);
-          }
-          if (isoMax !== undefined) {
-            conditions.push(sql`e.iso <= ${isoMax}`);
-          }
-          if (shutterMin !== undefined) {
-            conditions.push(
-              sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`
-            );
-          }
-          if (shutterMax !== undefined) {
-            conditions.push(
-              sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`
-            );
-          }
+        const sqlitePromise = (async () => {
+          const exifActive =
+            dateFrom ||
+            dateTo ||
+            cameraModel ||
+            lensModel ||
+            focalMin !== undefined ||
+            focalMax !== undefined ||
+            apertureMin !== undefined ||
+            apertureMax !== undefined ||
+            isoMin !== undefined ||
+            isoMax !== undefined ||
+            shutterMin !== undefined ||
+            shutterMax !== undefined;
 
-          colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
-              FROM photos p
-              JOIN exif_data e ON e.photo_id = p.id
-              WHERE ${and(...conditions)}
-                AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
-              ORDER BY dist ASC
-              LIMIT ${limit}`;
-        } else {
-          colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
-              FROM photos p
-              WHERE p.deleted_at IS NULL AND p.dominant_colors IS NOT NULL
-                AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
-              ORDER BY dist ASC
-              LIMIT ${limit}`;
+          let colorSQL = sql``;
+          if (exifActive) {
+            const conditions: SQL[] = [];
+            conditions.push(sql`p.deleted_at IS NULL`);
+            conditions.push(sql`p.dominant_colors IS NOT NULL`);
+            if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
+            if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
+            if (cameraModel) conditions.push(sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`);
+            if (lensModel) conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
+            if (focalMin !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
+            if (focalMax !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
+            if (apertureMin !== undefined) conditions.push(sql`e.aperture >= ${apertureMin}`);
+            if (apertureMax !== undefined) conditions.push(sql`e.aperture <= ${apertureMax}`);
+            if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
+            if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
+            if (shutterMin !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`);
+            if (shutterMax !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`);
+
+            colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+                FROM photos p
+                JOIN exif_data e ON e.photo_id = p.id
+                WHERE ${and(...conditions)}
+                  AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
+                ORDER BY dist ASC
+                LIMIT ${limit}`;
+          } else {
+            colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+                FROM photos p
+                WHERE p.deleted_at IS NULL AND p.dominant_colors IS NOT NULL
+                  AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
+                ORDER BY dist ASC
+                LIMIT ${limit}`;
+          }
+          return db.all(colorSQL) as Array<Record<string, unknown> & { dist: number }>;
+        })();
+
+        const lancePromise = (async () => {
+          try {
+            const { searchByColorVector } = await import("@/services/ai/vector-db");
+            const results = await searchByColorVector(rgb.r, rgb.g, rgb.b, limit);
+            // 距离阈值：RGB 欧氏距离 < 10000（与 SQLite UDF 一致）
+            return (results ?? []).filter((r) => r.distance < 10000);
+          } catch {
+            return [];
+          }
+        })();
+
+        const [sqliteResults, lanceResults] = await Promise.all([sqlitePromise, lancePromise]);
+
+        // 合并去重：LanceDB 结果作为补充，不影响 SQLite 的准确性
+        const seenIds = new Set<number>();
+        const merged: Array<Record<string, unknown> & { dist: number }> = [];
+
+        for (const r of sqliteResults) {
+          seenIds.add(r.id as number);
+          merged.push(r);
+        }
+        for (const r of lanceResults) {
+          if (!seenIds.has(r.photoId)) {
+            // LanceDB 结果补充到列表末尾（距离通常比 SQLite 大）
+            merged.push({
+              id: r.photoId,
+              dist: r.distance,
+            } as any);
+            seenIds.add(r.photoId);
+          }
         }
 
-        const results = db.all(colorSQL) as Array<
-          Record<string, unknown> & { dist: number }
-        >;
-
-        const photoList = results.map((r) => ({
+        const photoList = merged.map((r) => ({
           ...r,
           id: r.id as number,
           similarity:
-            Math.round((1 / (1 + Math.sqrt(r.dist || 0))) * 10_000) / 10_000,
+            Math.round((1 / (1 + Math.sqrt((r.dist as number) || 0))) * 10_000) / 10_000,
         }));
+
+        console.log(
+          `[Search] Color #${effectiveColorHex}: SQLite=${sqliteResults.length} LanceDB=${lanceResults.length} merged=${photoList.length}`
+        );
 
         return {
           results: photoList as any,
@@ -350,58 +419,171 @@ export const searchCompound = os
     if (searchText?.trim()) {
       const q = searchText.trim();
 
-      const [aiResults, tagPhotoRows, filenamePhotoRows, personPhotoRows] =
-        await Promise.all([
-          aiSearchByText(q, 200),
-          db
-            .select({ id: photos.id })
-            .from(photos)
-            .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
-            .innerJoin(tags, eq(tags.id, photoTags.tagId))
-            .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
-            .all(),
-          db
-            .select({ id: photos.id })
-            .from(photos)
-            .where(
-              and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
-            )
-            .all(),
-          // Person name search: match face_identities.name
-          db
-            .select({ id: photos.id })
-            .from(photos)
-            .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
-            .innerJoin(
-              faceIdentityMembers,
-              eq(faceIdentityMembers.faceVectorId, faceVectors.id)
-            )
-            .innerJoin(
-              faceIdentities,
-              eq(faceIdentities.id, faceIdentityMembers.identityId)
-            )
-            .where(
-              and(isNull(photos.deletedAt), like(faceIdentities.name, `%${q}%`))
-            )
-            .all(),
-        ]);
+      // ── 提取原始查询中的潜在专有名词 token ─────────────────────
+      // 中文姓名/标签通常 2-4 字，从原始 query 中提取 n-gram 子串，
+      // 用于 SQLite LIKE 搜索，避免改写后丢失专有名词信息。
+      function extractNameTokens(raw: string): string[] {
+        // 去除已知停用词、口语词、标点
+        let cleaned = raw;
+        for (const c of ["的", "了", "着", "过", "吗", "呢", "吧", "啊", "在", "是", "有", "和", "与", "或", "及", "等", "这", "那", "也", "拍", "照", "找", "看", "帮"]) {
+          cleaned = cleaned.replaceAll(c, " ");
+        }
+        // 保留 2-4 字的中文连续片段
+        const cjkOnly = cleaned.replace(/[^一-鿿]+/g, " ").trim();
+        const tokens = new Set<string>();
+        if (cjkOnly.length >= 2) {
+          for (let len = 4; len >= 2; len--) {
+            for (let i = 0; i <= cjkOnly.length - len; i++) {
+              tokens.add(cjkOnly.slice(i, i + len));
+            }
+          }
+        }
+        return [...tokens].slice(0, 12); // 上限 12 个 token，避免 SQL 过大
+      }
 
+      const nameTokens = extractNameTokens(input.query ?? "");
+      // 构建 OR LIKE 条件：column LIKE '%token1%' OR column LIKE '%token2%' ...
+      function buildTokenConditions(
+        tokens: string[],
+        field: any,
+        fallbackQ: string
+      ): SQL[] {
+        // 始终包含完整 q 的 LIKE 条件 + 所有 n-gram token 的 OR 条件
+        // 不做 dedup：n-gram LIKE '%小美%' 与完整 LIKE '%小美床上%' 匹配不同行
+        const conditions: SQL[] = [like(field, `%${fallbackQ}%`)];
+        for (const token of tokens) {
+          if (token !== fallbackQ) {
+            conditions.push(like(field, `%${token}%`));
+          }
+        }
+        return conditions;
+      }
+
+      // ── 四路并行召回（Promise.allSettled + 硬超时） ─────────────────
+      // 替代脆弱的 Promise.all：单路故障不影响其他路结果。
+      // LanceDB 有 2000ms 硬超时，SQLite 依赖 busy_timeout=5000ms。
+
+      const settled = await Promise.allSettled([
+        // 路 1：LanceDB CLIP 向量搜索（2000ms 超时熔断）
+        withTimeout(aiSearchByText(q, 200), LANCEDB_TIMEOUT_MS, "LanceDB"),
+        // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+          .innerJoin(tags, eq(tags.id, photoTags.tagId))
+          .where(
+            and(
+              isNull(photos.deletedAt),
+              or(...buildTokenConditions(nameTokens, tags.name, q))
+            )
+          )
+          .all(),
+        // 路 3：文件名 LIKE 搜索
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(
+            and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
+          )
+          .all(),
+        // 路 4：人脸识别名搜索（token 化匹配中文姓名）
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
+          .innerJoin(
+            faceIdentityMembers,
+            eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+          )
+          .innerJoin(
+            faceIdentities,
+            eq(faceIdentities.id, faceIdentityMembers.identityId)
+          )
+          .where(
+            and(
+              isNull(photos.deletedAt),
+              or(...buildTokenConditions(nameTokens, faceIdentities.name, q))
+            )
+          )
+          .all(),
+      ]);
+
+      // 拆解 allSettled 结果，记录降级日志
+      const aiResults =
+        settled[0].status === "fulfilled"
+          ? (settled[0].value as Awaited<ReturnType<typeof aiSearchByText>>)
+          : [];
+      const tagPhotoRows =
+        settled[1].status === "fulfilled"
+          ? (settled[1].value as { id: number }[])
+          : [];
+      const filenamePhotoRows =
+        settled[2].status === "fulfilled"
+          ? (settled[2].value as { id: number }[])
+          : [];
+      const personPhotoRows =
+        settled[3].status === "fulfilled"
+          ? (settled[3].value as { id: number }[])
+          : [];
+
+      if (settled[0].status === "rejected") {
+        console.warn(
+          `[Search] LanceDB recall degraded: ${settled[0].reason?.message ?? "timeout"}. Proceeding with SQLite-only results.`
+        );
+      }
+      if (settled[1].status === "rejected") {
+        console.warn("[Search] Tag search degraded:", settled[1].reason?.message);
+      }
+      if (settled[2].status === "rejected") {
+        console.warn(
+          "[Search] Filename search degraded:",
+          settled[2].reason?.message
+        );
+      }
+      if (settled[3].status === "rejected") {
+        console.warn(
+          "[Search] Person search degraded:",
+          settled[3].reason?.message
+        );
+      }
+
+      // ── 合并去重（保留来源标记供晚期融合使用） ────────────────────
       // Merge with dedup priority: person > tag > filename > AI
-      const merged = new Map<number, { photoId: number; similarity: number }>();
+      const merged = new Map<
+        number,
+        {
+          photoId: number;
+          similarity: number;
+          _source: "person" | "tag" | "filename" | "ai";
+        }
+      >();
 
       for (const r of personPhotoRows) {
-        merged.set(r.id, { photoId: r.id, similarity: 1.0 });
+        merged.set(r.id, {
+          photoId: r.id,
+          similarity: 1.0,
+          _source: "person",
+        });
       }
       for (const r of tagPhotoRows) {
         const existing = merged.get(r.id);
         if (!existing || existing.similarity < 0.95) {
-          merged.set(r.id, { photoId: r.id, similarity: 0.95 });
+          merged.set(r.id, {
+            photoId: r.id,
+            similarity: 0.95,
+            _source: "tag",
+          });
         }
       }
       for (const r of filenamePhotoRows) {
         const existing = merged.get(r.id);
         if (!existing || existing.similarity < 0.7) {
-          merged.set(r.id, { photoId: r.id, similarity: 0.7 });
+          merged.set(r.id, {
+            photoId: r.id,
+            similarity: 0.7,
+            _source: "filename",
+          });
         }
       }
       for (const r of aiResults) {
@@ -410,6 +592,7 @@ export const searchCompound = os
           merged.set(r.photoId, {
             photoId: r.photoId,
             similarity: r.similarity,
+            _source: "ai",
           });
         }
       }
@@ -506,14 +689,7 @@ export const searchCompound = os
             (p): p is NonNullable<typeof p> => p !== null && p.id != null
           );
 
-        const temporalBoost =
-          effectiveDateFrom && effectiveDateTo
-            ? {
-                targetFrom: effectiveDateFrom,
-                targetTo: effectiveDateTo,
-                factor: 1.4,
-              }
-            : undefined;
+        const temporalBoost = buildTemporalBoost(effectiveDateFrom, effectiveDateTo);
         const scored = applyTimeDecay(combined, { temporalBoost });
         return {
           results: scored.slice(0, limit),
@@ -612,7 +788,8 @@ export const searchCompound = os
         })
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-      const scored = applyTimeDecay(combined);
+      const temporalBoost = buildTemporalBoost(effectiveDateFrom, effectiveDateTo);
+      const scored = applyTimeDecay(combined, { temporalBoost });
       return {
         results: scored.slice(0, limit),
         query: q,

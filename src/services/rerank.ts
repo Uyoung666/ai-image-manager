@@ -3,6 +3,16 @@ import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { embeddingModel } from "./ai/state";
 
+// 晚期融合：S_final = α·S_exact·sourceBoost + β·S_clip
+const ALPHA_EXACT = 0.35;
+const BETA_CLIP = 0.65;
+const SOURCE_BOOST: Record<string, number> = {
+  person: 1.5, // 人脸识别强信号
+  tag: 1.2,
+  filename: 1.1,
+  ai: 1.0,
+};
+
 // 计算余弦相似度
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) {
@@ -70,7 +80,6 @@ async function getPhotoVectors(
       const batch = vectorIds.slice(i, i + BATCH_SIZE);
 
       try {
-        // 使用 photo_id IN (...) 而不是 vector_id
         const photoIdsBatch = batch
           .map((vectorId) => vectorIdMap.get(vectorId))
           .filter((id): id is number => id !== undefined);
@@ -118,10 +127,15 @@ async function getPhotoVectors(
   }
 }
 
-// 跨模态重排序：使用 CLIP Score 精排
+/** 跨模态晚期融合：S_final = α·S_exact·sourceBoost + β·S_clip，不覆盖精确语义 */
 export async function rerankWithCLIPScore(
   query: string,
-  candidates: Array<{ photoId: number; similarity: number }>,
+  candidates: Array<{
+    photoId: number;
+    similarity: number;
+    /** 可选：召回来源标记，用于语义提权 */
+    _source?: "person" | "tag" | "filename" | "ai";
+  }>,
   topK = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (candidates.length === 0 || !query.trim()) {
@@ -149,29 +163,33 @@ export async function rerankWithCLIPScore(
     const photoVectors = await getPhotoVectors(photoIds);
 
     if (photoVectors.size === 0) {
-      console.warn("[Rerank] No photo vectors found, skip reranking");
+      console.warn(
+        "[Rerank] No photo vectors found, returning original scores"
+      );
       return candidates.slice(0, topK);
     }
 
-    // 3. 计算 CLIP Score（余弦相似度）
-    const scored = candidates
-      .map((candidate) => {
-        const photoVector = photoVectors.get(candidate.photoId);
-        if (!photoVector) {
-          return { ...candidate, clipScore: candidate.similarity };
-        }
+    // 3. 晚期融合
+    const scored = candidates.map((candidate) => {
+      const photoVector = photoVectors.get(candidate.photoId);
+      const sExact = candidate.similarity;
 
-        const clipScore = cosineSimilarity(queryVector, photoVector);
-        return {
-          photoId: candidate.photoId,
-          similarity: clipScore, // 更新为 CLIP Score
-          clipScore,
-        };
-      })
-      .filter((item) => item.clipScore > 0);
+      if (!photoVector) {
+        return { photoId: candidate.photoId, similarity: sExact };
+      }
 
-    // 4. 按 CLIP Score 重新排序
-    scored.sort((a, b) => b.clipScore - a.clipScore);
+      const sClip = Math.max(0, cosineSimilarity(queryVector, photoVector));
+      const boost = SOURCE_BOOST[candidate._source ?? "ai"] ?? 1.0;
+      const sFinal = ALPHA_EXACT * sExact * boost + BETA_CLIP * sClip;
+
+      return {
+        photoId: candidate.photoId,
+        similarity: Math.round(sFinal * 10_000) / 10_000,
+      };
+    });
+
+    // 4. 按融合分数降序排列
+    scored.sort((a, b) => b.similarity - a.similarity);
 
     return scored.slice(0, topK);
   } catch (err) {

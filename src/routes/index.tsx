@@ -423,6 +423,12 @@ function HomePage() {
     if (restoredSearchRef.current) {
       return;
     }
+    // 如果 URL 已有钻取参数（如从仪表盘色块点击），跳过恢复：
+    // 钻取参数优先于 sessionStorage，否则旧颜色会 setTimeout 覆盖新钻取结果。
+    const hasDrillParams = Object.values(drillParams).some((v) => v !== undefined);
+    if (hasDrillParams) {
+      return;
+    }
     const saved = getBrowseSession("home-search");
     if (saved.searchQuery || saved.searchMode === "color" || saved.colorHex) {
       restoredSearchRef.current = true;
@@ -633,6 +639,9 @@ function HomePage() {
       setLightboxIndex(idx);
     }
   }, []);
+  // 搜索生成计数器：每次新搜索递增，用于丢弃过时请求的响应
+  const searchGenerationRef = useRef(0);
+
   async function handleSearch(
     query: string,
     filters?: ExifFilters,
@@ -655,6 +664,8 @@ function HomePage() {
       return;
     }
 
+    // 递增代数，使前一个未完成的请求变成 stale
+    const gen = ++searchGenerationRef.current;
     const startTime = performance.now();
     setSearchMode(hasColorHex ? "color" : query.trim() ? "text" : "exif");
     setSearchLoading(true);
@@ -725,6 +736,12 @@ function HomePage() {
       const result = (await ipc.client.photos.searchCompound(
         searchParams
       )) as any;
+
+      // 竞态保护：如果代数不匹配，说明已有更新的搜索启动，丢弃此过时响应
+      if (gen !== searchGenerationRef.current) {
+        return;
+      }
+
       const results = result.results || [];
 
       if (result.timeFilter) {

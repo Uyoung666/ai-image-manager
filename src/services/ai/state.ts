@@ -22,6 +22,8 @@ export interface EmbeddingModel {
 
 export let vectordb: any = null;
 export let photoTable: any = null;
+/** LanceDB 颜色向量表（3D RGB），用于替代 SQLite closest_color_dist JS UDF */
+export let colorTable: any = null;
 export let isModelLoaded = false;
 export let isVectorDBReady = false;
 export let embeddingModel: EmbeddingModel | null = null;
@@ -47,6 +49,9 @@ export function setVectordb(v: any): void {
 }
 export function setPhotoTable(t: any): void {
   photoTable = t;
+}
+export function setColorTable(t: any): void {
+  colorTable = t;
 }
 export function setIsModelLoaded(v: boolean): void {
   isModelLoaded = v;

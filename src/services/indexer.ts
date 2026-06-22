@@ -644,6 +644,25 @@ async function indexSingleFile(
     }
   }
 
+  // 写入 LanceDB 颜色向量表（在 photoId 确定后异步执行）
+  if (photoRecord.dominantColors) {
+    try {
+      const palette = JSON.parse(photoRecord.dominantColors) as Array<{
+        r: number; g: number; b: number; weight: number;
+      }>;
+      if (palette.length > 0) {
+        const primary = palette[0]; // 已按 chroma-weighted score 排序
+        import("./ai/vector-db")
+          .then(({ upsertColorVector }) =>
+            upsertColorVector(photoId, primary.r, primary.g, primary.b)
+          )
+          .catch(() => { /* 非关键路径静默失败 */ });
+      }
+    } catch {
+      // JSON 解析失败静默跳过
+    }
+  }
+
   return photoId;
 }
 

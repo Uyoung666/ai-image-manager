@@ -25,9 +25,11 @@ export type { EmbedProgress, EmbedProgressCallback } from "./state";
 export {
   addWrittenPhotoId,
   addWrittenPhotoIds,
+  colorTable,
   getWrittenPhotoIds,
   isPaused,
   poolCancelled,
+  setColorTable,
   setCurrentProgress,
   setEmbeddingModel,
   setIsEmbedding,
@@ -44,6 +46,7 @@ export {
   cleanupOrphanVectors,
   cleanupStaleBackups,
   closeVectorDB,
+  deleteColorVectors,
   deletePhotoVectors,
   ensureVectorIndex,
   getPhotoVectors,
@@ -51,6 +54,9 @@ export {
   isVectorDBInitialized,
   rebuildVectorDB,
   resetAllAiProcessedFlags,
+  searchByColorVector,
+  upsertColorVector,
+  upsertColorVectors,
   validateVectorDB,
 } from "./vector-db";
 export type { DictCategory, DictEntry } from "./zh-en-dict";
