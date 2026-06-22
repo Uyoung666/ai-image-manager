@@ -51,12 +51,12 @@
   --input: var(--border-default);
   --ring: var(--primary);
 
-  /* 图表色 */
-  --chart-1: oklch(0.65 0.19 250);
-  --chart-2: oklch(0.6 0.14 175);
-  --chart-3: oklch(0.65 0.17 55);
-  --chart-4: oklch(0.6 0.17 320);
-  --chart-5: oklch(0.55 0.2 15);
+  /* 图表色 — 深色主题：高亮度保证在暗背景上可见 */
+  --chart-1: oklch(0.72 0.18 250);
+  --chart-2: oklch(0.68 0.14 160);
+  --chart-3: oklch(0.75 0.14 75);
+  --chart-4: oklch(0.68 0.15 300);
+  --chart-5: oklch(0.68 0.18 20);
 
   /* 阴影令牌 — 深色主题用有色投影产生发光边缘感 */
   --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.3);
@@ -137,6 +137,13 @@
   --border: var(--border-subtle);
   --input: var(--border-default);
   --ring: var(--primary);
+
+  /* 图表色 — 浅色主题：中低亮度保证在白背景上饱满可见 */
+  --chart-1: oklch(0.55 0.17 250);
+  --chart-2: oklch(0.5 0.12 160);
+  --chart-3: oklch(0.58 0.14 70);
+  --chart-4: oklch(0.52 0.14 300);
+  --chart-5: oklch(0.52 0.17 15);
 
   /* 浅色主题阴影 — 更柔和、更浅的投影 */
   --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.04);

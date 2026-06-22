@@ -21,6 +21,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { createPortal } from "react-dom";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 
 interface ChartClickState {
@@ -828,7 +829,6 @@ function DashboardPage() {
           <ChartSection hint={t("clickToView")} title={t("lensUsage")}>
             <DashboardBarChart
               barRadius={[0, 4, 4, 0]}
-              cursor={true}
               data={lensData}
               fillColor={CHART_5}
               horizontal
@@ -1063,7 +1063,6 @@ function DashboardPage() {
           <ChartSection title={t("monthlyDistribution")}>
             {monthlyData.some((d) => d.count > 0) ? (
               <DashboardBarChart
-                cursor={false}
                 data={monthlyData}
                 fillColor={CHART_4}
                 height={200}
@@ -1080,7 +1079,6 @@ function DashboardPage() {
 
 interface DashboardBarChartProps {
   barRadius?: [number, number, number, number];
-  cursor?: boolean;
   data: any[];
   dataKey?: string;
   fillColor: string;
@@ -1092,6 +1090,48 @@ interface DashboardBarChartProps {
   xAxisFontSize?: number;
   xAxisHeight?: number;
   xAxisInterval?: number;
+}
+
+// Tooltip rendered to document.body via portal so it escapes any
+// overflow:auto/scroll container and is never clipped.
+function PortalTooltip({
+  active,
+  payload,
+  label,
+  coordinate,
+}: any) {
+  // Track mouse position for portal placement
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => setPos({ x: e.clientX, y: e.clientY });
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, []);
+
+  if (!(active && payload?.length && pos)) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      className="pointer-events-none rounded-[6px] border border-border bg-popover px-3 py-2 text-[12px] text-foreground shadow-md"
+      style={{
+        left: pos.x + 12,
+        position: "fixed",
+        top: pos.y - 40,
+        zIndex: 9999,
+      }}
+    >
+      <div className="font-medium">{label}</div>
+      {payload.map((p: any, i: number) => (
+        <div key={i} className="text-muted-foreground">
+          {p.name}: {p.value}
+        </div>
+      ))}
+    </div>,
+    document.body
+  );
 }
 
 function DashboardBarChart({
@@ -1106,14 +1146,18 @@ function DashboardBarChart({
   xAxisFontSize = 11,
   xAxisInterval = 0,
   barRadius = [4, 4, 0, 0],
-  cursor = true,
   onBarClick,
 }: DashboardBarChartProps) {
   const noAnim = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (horizontal) {
-    const containerHeight = data.length * 36 + 20;
+    // Render full chart at natural height, wrap in a scrollable container.
+    // Tooltip clipping is avoided by rendering it to document.body via Portal.
+    const barHeight = 36;
+    const fullHeight = data.length * barHeight + 20;
+    const maxHeight = 8 * barHeight + 20;
     return (
-      <ResponsiveContainer height={containerHeight} width="100%">
+      <div className="overflow-y-auto" style={{ maxHeight }}>
+        <ResponsiveContainer height={fullHeight} width="100%">
         <BarChart
           data={data}
           layout="vertical"
@@ -1133,13 +1177,13 @@ function DashboardBarChart({
             type="category"
             width={leftMargin - 10}
           />
-          <Tooltip {...chartTooltipStyle} />
+          <Tooltip content={<PortalTooltip />} />
           <Bar
             animationDuration={noAnim ? 0 : 800}
-            className={onBarClick && cursor ? "cursor-pointer" : undefined}
             dataKey={dataKey}
             onClick={onBarClick}
             radius={barRadius as [number, number, number, number]}
+            style={onBarClick ? { cursor: "pointer" } : undefined}
           >
             {data.map((_, i) => (
               <Cell fill={fillColor} key={i} />
@@ -1147,6 +1191,7 @@ function DashboardBarChart({
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+      </div>
     );
   }
 
@@ -1171,10 +1216,10 @@ function DashboardBarChart({
         <Tooltip {...chartTooltipStyle} />
         <Bar
           animationDuration={noAnim ? 0 : 800}
-          className={onBarClick && cursor ? "cursor-pointer" : undefined}
           dataKey={dataKey}
           onClick={onBarClick}
           radius={barRadius as [number, number, number, number]}
+          style={onBarClick ? { cursor: "pointer" } : undefined}
         >
           {data.map((_, i) => (
             <Cell fill={fillColor} key={i} />

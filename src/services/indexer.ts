@@ -461,10 +461,44 @@ async function preparePhotoRecord(
   if (exif && Object.keys(exif).length > 0) {
     const focalLengthStr = exif.FocalLength?.toString();
     const shutterSpeedStr = exif.ExposureTime?.toString();
+
+    // Derive camera model with fallback: phone photos (iPhone/OPPO/etc.)
+    // often have an empty Model tag but a descriptive LensModel like
+    // "iPhone 17 Pro Max back triple camera 6.765mm f/1.78".
+    // Extract the phone name from LensModel as a fallback.
+    let cameraModel = (exif.Model as string) || "";
+    const rawLensModel = (exif.LensModel as string) || "";
+    if (!cameraModel && rawLensModel) {
+      // Lens model format for phones: "<PhoneName> back <rest>"
+      const backIdx = rawLensModel.indexOf(" back ");
+      if (backIdx > 0) {
+        cameraModel = rawLensModel.slice(0, backIdx).trim();
+      }
+    }
+    // Last resort: use Make (brand name) if Model is still empty
+    if (!cameraModel) {
+      cameraModel = (exif.Make as string) || "";
+    }
+
+    // Derive camera make with the same fallback philosophy:
+    // 1. Use EXIF Make tag directly when present
+    // 2. When missing but we have a resolved camera model, extract the
+    //    first word or map known phone model prefixes to manufacturers.
+    let cameraMake = (exif.Make as string) || "";
+    if (!cameraMake && cameraModel) {
+      const modelLower = cameraModel.toLowerCase();
+      if (modelLower.startsWith("iphone") || modelLower.startsWith("ipad")) {
+        cameraMake = "Apple";
+      } else {
+        // Use first word of camera model as a best-effort make
+        cameraMake = cameraModel.split(" ")[0] || "";
+      }
+    }
+
     exifRecord = {
       photoId: 0, // Will be set after insert
-      cameraMake: exif.Make as string,
-      cameraModel: exif.Model as string,
+      cameraMake,
+      cameraModel,
       lensMake: exif.LensMake as string,
       lensModel: exif.LensModel as string,
       focalLength: focalLengthStr,

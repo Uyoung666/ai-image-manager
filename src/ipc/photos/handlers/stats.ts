@@ -194,15 +194,36 @@ export const getStats = os
     const totalPhotos = photoCounts?.total ?? 0;
     const aiProcessed = photoCounts?.aiProcessed ?? 0;
 
+    // EXIF completeness: single conditional-aggregation query so every
+    // chart can show how many photos are missing each field. This prevents
+    // the "silent data loss" where chart totals don't add up to totalPhotos.
+    const completeness = db
+      .select({
+        withExif: sql<number>`count(*)`,
+        missingCamera: sql<number>`SUM(CASE WHEN ${exifData.cameraModel} IS NULL OR ${exifData.cameraModel} = '' THEN 1 ELSE 0 END)`,
+        missingLens: sql<number>`SUM(CASE WHEN ${exifData.lensModel} IS NULL OR ${exifData.lensModel} = '' THEN 1 ELSE 0 END)`,
+        missingFocal: sql<number>`SUM(CASE WHEN ${exifData.focalLength} IS NULL THEN 1 ELSE 0 END)`,
+        missingAperture: sql<number>`SUM(CASE WHEN ${exifData.aperture} IS NULL THEN 1 ELSE 0 END)`,
+        missingIso: sql<number>`SUM(CASE WHEN ${exifData.iso} IS NULL THEN 1 ELSE 0 END)`,
+        missingShutter: sql<number>`SUM(CASE WHEN ${exifData.shutterSpeedNum} IS NULL THEN 1 ELSE 0 END)`,
+        missingDate: sql<number>`SUM(CASE WHEN ${exifData.dateTaken} IS NULL THEN 1 ELSE 0 END)`,
+        missingGps: sql<number>`SUM(CASE WHEN ${exifData.gpsLatitude} IS NULL OR ${exifData.gpsLongitude} IS NULL THEN 1 ELSE 0 END)`,
+      })
+      .from(exifData)
+      .get();
+
     const cameraStats = db
       .select({
         model: exifData.cameraModel,
         count: sql<number>`count(*)`,
       })
       .from(exifData)
+      .where(
+        sql`${exifData.cameraModel} IS NOT NULL AND ${exifData.cameraModel} != ''`
+      )
       .groupBy(exifData.cameraModel)
       .orderBy(desc(sql`count(*)`))
-      .limit(5)
+      .limit(20)
       .all();
 
     const focalStats = db
@@ -226,6 +247,7 @@ export const getStats = os
       .where(sql`${exifData.aperture} IS NOT NULL`)
       .groupBy(exifData.aperture)
       .orderBy(exifData.aperture)
+      .limit(20)
       .all();
     // ISO distribution by common ranges (SQL-level bucketing)
     const isoBuckets = db
@@ -260,7 +282,7 @@ export const getStats = os
       )
       .groupBy(exifData.lensModel)
       .orderBy(desc(sql`count(*)`))
-      .limit(8)
+      .limit(20)
       .all();
 
     // Shutter speed distribution (SQL-level bucketing)
@@ -364,6 +386,21 @@ export const getStats = os
     const result = {
       totalPhotos,
       aiProcessed,
+      exifCompleteness: completeness
+        ? {
+            withExif: completeness.withExif,
+            missingCamera: completeness.missingCamera,
+            missingLens: completeness.missingLens,
+            missingFocal: completeness.missingFocal,
+            missingAperture: completeness.missingAperture,
+            missingIso: completeness.missingIso,
+            missingShutter: completeness.missingShutter,
+            missingDate: completeness.missingDate,
+            missingGps: completeness.missingGps,
+            // Photos in the photos table that have no exif_data row at all
+            withoutExif: totalPhotos - completeness.withExif,
+          }
+        : null,
       cameraStats: cameraStats.filter((c) => c.model),
       lensStats: lensStats.filter((l) => l.model),
       focalStats: focalStats.filter((f) => f.focalLength),
