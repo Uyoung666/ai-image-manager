@@ -3,7 +3,7 @@
  * Does NOT require a real database — tests computeElo, PK_MODE_CONFIG, etc.
  */
 import { describe, expect, it } from "vitest";
-import { computeElo, PK_MODE_CONFIG } from "@/ipc/cull/handlers";
+import { computeElo, PK_MODE_CONFIG } from "@/ipc/cull/elo";
 
 describe("computeElo", () => {
   it("winner gains rating, loser loses rating", () => {
