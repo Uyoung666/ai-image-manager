@@ -1108,7 +1108,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                       value={filters.cameraModel || ""}
                     />
                     {showCameraSuggestions && cameraSuggestions.length > 0 && (
-                      <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
+                      <div className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
                         {cameraSuggestions.map((model) => (
                           <button
                             className="flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5"
@@ -1156,7 +1156,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                       value={filters.lensModel || ""}
                     />
                     {showLensSuggestions && lensSuggestions.length > 0 && (
-                      <div className="absolute top-full right-0 left-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
+                      <div className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
                         {lensSuggestions.map((model) => (
                           <button
                             className="flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5"
@@ -1455,7 +1455,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         {/* Search suggestions dropdown */}
         {showSuggestions && suggestions.length > 0 && (
           <div
-            className="absolute top-full right-4 left-4 z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
+            className="absolute top-full right-4 left-4 z-[60] mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
             onBlur={(e) => {
               // 焦点离开建议列表且没有回到 input 时关闭
               const related = e.relatedTarget as Node | null;
