@@ -4,7 +4,7 @@
 
 Index folders in-place. Semantic search, smart albums, face recognition, photo culling, deduplication, cloud sharing — all running locally on your machine.
 
-[![Version](https://img.shields.io/badge/version-1.3.2-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.3.3-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
@@ -17,9 +17,9 @@ Index folders in-place. Semantic search, smart albums, face recognition, photo c
 
 Get the latest version from [Releases](https://github.com/Uyoung666/ai-image-manager/releases). Each release includes a demo video.
 
-**Installer (Recommended):** `AI Image Manager-1.3.2 Setup.exe` — installs to `%LocalAppData%`, creates shortcuts, auto-updates.
+**Installer (Recommended):** `AI Image Manager-1.3.3 Setup.exe` — installs to `%LocalAppData%`, creates shortcuts, auto-updates.
 
-**Portable:** `AI Image Manager-win32-x64-1.3.2.zip` — extract anywhere, run directly, no registry writes.
+**Portable:** `AI Image Manager-win32-x64-1.3.3.zip` — extract anywhere, run directly, no registry writes.
 
 ---
 
