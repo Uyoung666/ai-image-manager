@@ -26,6 +26,7 @@ import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
+import { RouteError } from "@/components/RouteError";
 
 interface FaceInfo {
   bboxHeight: number;
@@ -1076,4 +1077,5 @@ function PersonDetailPage() {
 
 export const Route = createFileRoute("/people/$identityId" as const)({
   component: PersonDetailPage,
+  errorComponent: RouteError,
 });

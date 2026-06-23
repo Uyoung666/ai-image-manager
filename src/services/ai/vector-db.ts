@@ -486,7 +486,8 @@ export async function rebuildVectorDB(): Promise<{
       }
     }
 
-    // 2. 关闭连接
+    // 2. 关闭连接（先清理维护定时器，避免在已关闭连接上执行维护操作）
+    clearVectorMaintenance();
     if (vectordb) {
       try {
         await vectordb.close();

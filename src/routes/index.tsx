@@ -305,15 +305,13 @@ function HomePage() {
         }
       }
       if (event.data?.channel === "ai-auto-repair-started") {
-        toast.info(
-          "检测到向量数据库损坏，已自动重建。索引进度可在侧边栏查看。"
-        );
+        toast.info(t("aiAutoRepairStarted"));
       }
       if (event.data?.channel === "ai-embedding-done") {
         aiIndexingRef.current = false;
         filter.setImportPhase("idle");
         if (event.data?.error) {
-          filter.setScanProgress(`AI 索引失败: ${event.data.error}`);
+          filter.setScanProgress(t("aiIndexFailed", { error: event.data.error }));
         } else {
           filter.setScanProgress("");
         }
@@ -1292,7 +1290,7 @@ function HomePage() {
                       params: { sessionId: String(session.id) },
                     });
                   } catch {
-                    toast.error("Failed to create cull session");
+                    toast.error(t("cullCreateSessionFailed"));
                   }
                 }}
                 onToggleFavorite={() => {

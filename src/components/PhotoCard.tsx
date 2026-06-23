@@ -75,10 +75,13 @@ export const PhotoCard = memo(function PhotoCard({
   // ── URL 计算 ──────────────────────────────────────────────────────
   // toLocalMediaUrl 现在是同步函数（端口由 preload 在窗口创建时注入），
   // URL 在组件生命周期内稳定不变。
+  const [retryCount, setRetryCount] = useState(0);
   const url = useMemo(
-    () =>
-      thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path),
-    [thumbnailPath, path]
+    () => {
+      const base = thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path);
+      return retryCount > 0 ? `${base}?retry=${retryCount}` : base;
+    },
+    [thumbnailPath, path, retryCount]
   );
 
   // ── 原生图片加载状态 ──────────────────────────────────────────────
@@ -191,6 +194,7 @@ export const PhotoCard = memo(function PhotoCard({
             e.stopPropagation();
             setImgError(false);
             setImgLoaded(false);
+            setRetryCount((c) => c + 1);
           }}
           type="button"
         >
@@ -225,7 +229,7 @@ export const PhotoCard = memo(function PhotoCard({
         aspectRatio,
         ...(bgColor ? { backgroundColor: bgColor } : {}),
       }}
-      tabIndex={0}
+      tabIndex={-1}
     >
       {/* 骨架屏：图片未加载完成前显示 shimmer 动画 */}
       {!imgLoaded && (
@@ -276,6 +280,8 @@ export const PhotoCard = memo(function PhotoCard({
       {/* Favorite star */}
       {onToggleFavorite && (
         <button
+          aria-label={isFavorite ? t("unfavorite") : t("favorite")}
+          aria-pressed={isFavorite}
           className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full transition-opacity ${
             isFavorite
               ? "opacity-100"

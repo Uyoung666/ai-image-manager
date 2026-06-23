@@ -1,6 +1,7 @@
 import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -186,7 +187,8 @@ function getFilterLabel(
   }
 }
 
-export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
+export const SearchBar = memo(
+  forwardRef<SearchBarHandle, SearchBarProps>(
   (
     {
       aiStatus,
@@ -753,10 +755,12 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
     return (
       <div
+        aria-label={t("searchPlaceholder")}
         className={`relative border-border border-b transition-colors ${dragOver ? "bg-primary/5" : ""}`}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        role="search"
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-primary border-dashed bg-primary/10">
@@ -772,8 +776,13 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             <form className="relative flex-1" onSubmit={handleSubmit}>
               <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
               <input
+                aria-activedescendant={suggestionIndex >= 0 ? `search-suggestion-${suggestionIndex}` : undefined}
+                aria-autocomplete="list"
+                aria-controls="search-suggestions-listbox"
+                aria-expanded={showSuggestions && suggestions.length > 0}
                 className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring"
                 onBlur={handleInputBlur}
+                role="combobox"
                 onChange={(e) => {
                   setQuery(e.target.value);
                   setShowSuggestions(true);
@@ -1456,6 +1465,8 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         {showSuggestions && suggestions.length > 0 && (
           <div
             className="absolute top-full right-4 left-4 z-[60] mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
+            id="search-suggestions-listbox"
+            role="listbox"
             onBlur={(e) => {
               // 焦点离开建议列表且没有回到 input 时关闭
               const related = e.relatedTarget as Node | null;
@@ -1497,16 +1508,19 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             </div>
             {suggestions.map((s, i) => (
               <button
+                aria-selected={i === suggestionIndex}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
                   i === suggestionIndex
                     ? "bg-foreground/8 text-foreground"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 data-suggestion-index={i}
+                id={`search-suggestion-${i}`}
                 key={`${s.type}-${i}`}
                 onClick={() => handleSuggestionClick(s)}
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseEnter={() => setSuggestionIndex(i)}
+                role="option"
                 tabIndex={-1}
               >
                 {s.type === "person" ? (
@@ -1553,7 +1567,16 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       </div>
     );
   }
-);
+),
+(prevProps, nextProps) => {
+  if (prevProps.aiStatus !== nextProps.aiStatus) return false;
+  if (prevProps.colorHex !== nextProps.colorHex) return false;
+  if (prevProps.imageSearchActive !== nextProps.imageSearchActive) return false;
+  if (prevProps.resultCount !== nextProps.resultCount) return false;
+  if (prevProps.searchMode !== nextProps.searchMode) return false;
+  if (prevProps.searchTime !== nextProps.searchTime) return false;
+  return true;
+});
 
 function FilterChip({
   label,

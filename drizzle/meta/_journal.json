@@ -95,7 +95,7 @@
     },
     {
       "idx": 13,
-      "version": "1",
+      "version": "6",
       "when": 1780100000000,
       "tag": "0013_add_sort_strategy",
       "breakpoints": true

@@ -233,8 +233,18 @@
     @apply bg-background text-foreground overflow-hidden font-sans antialiased;
   }
 
-  /* ── 焦点环发光 — Tab 切换时柔光扩散 ── */
-  *:focus-visible {
+  /* ── 焦点环发光 — Tab 切换时柔光扩散，仅作用于可交互元素 ── */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible,
+  [role="button"]:focus-visible,
+  [role="combobox"]:focus-visible,
+  [role="listbox"]:focus-visible,
+  [role="option"]:focus-visible,
+  [role="gridcell"]:focus-visible {
     border-radius: 2px;
     box-shadow:
       0 0 0 2px hsl(237 58% 62% / 0.4),
@@ -316,15 +326,18 @@
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
-  /* Theme transition — smooth color shift on theme switch */
-  html.transitioning *,
-  html.transitioning *::before,
-  html.transitioning *::after {
+  /* Theme transition — smooth color shift on theme switch, scope to theme-sensitive containers */
+  html.transitioning body,
+  html.transitioning .sidebar-bg,
+  html.transitioning .glass-surface,
+  html.transitioning .glass-surface-heavy,
+  html.transitioning .surface-elevated,
+  html.transitioning [data-theme-sensitive] {
     transition:
       background-color 300ms ease-out,
       color 300ms ease-out,
       border-color 300ms ease-out,
-      box-shadow 300ms ease-out !important;
+      box-shadow 300ms ease-out;
   }
 
   .draglayer {

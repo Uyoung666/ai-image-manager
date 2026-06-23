@@ -74,6 +74,7 @@ footer a{color:var(--accent);text-decoration:none}
 @media(max-width:600px){.grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}}`;
   const script = `(function(){
   var data=${itemsJson};
+  var h=function(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");};
   var grid=document.getElementById("grid");
   var search=document.getElementById("search");
   var lb=document.getElementById("lightbox");
@@ -91,7 +92,7 @@ footer a{color:var(--accent);text-decoration:none}
     items.forEach(function(p,i){
       var card=document.createElement("div");
       card.className="card";
-      card.innerHTML='<img src="'+p.src+'" alt="" loading="lazy"><div class="overlay"><div class="info">'+((p.exif&&p.exif.d)||'')+'</div></div>';
+      card.innerHTML='<img src="'+h(p.src)+'" alt="" loading="lazy"><div class="overlay"><div class="info">'+h((p.exif&&p.exif.d)||'')+'</div></div>';
       card.addEventListener("click",function(){openLightbox(i);});
       grid.appendChild(card);
     });
@@ -101,20 +102,20 @@ footer a{color:var(--accent);text-decoration:none}
   function openLightbox(idx){
     currentIdx=idx;
     var p=filteredData[idx];
-    lbImg.src=p.src;
+    lbImg.src=h(p.src);
     var meta="";
     if(p.exif){
       var parts=[];
-      if(p.exif.d) parts.push(p.exif.d);
-      if(p.exif.c) parts.push(p.exif.c);
-      if(p.exif.l) parts.push(p.exif.l);
-      if(p.exif.f) parts.push(p.exif.f+"mm");
-      if(p.exif.a) parts.push("f/"+p.exif.a);
-      if(p.exif.s) parts.push(p.exif.s+"s");
-      if(p.exif.i) parts.push("ISO "+p.exif.i);
+      if(p.exif.d) parts.push(h(p.exif.d));
+      if(p.exif.c) parts.push(h(p.exif.c));
+      if(p.exif.l) parts.push(h(p.exif.l));
+      if(p.exif.f) parts.push(h(p.exif.f+"mm"));
+      if(p.exif.a) parts.push(h("f/"+p.exif.a));
+      if(p.exif.s) parts.push(h(p.exif.s+"s"));
+      if(p.exif.i) parts.push(h("ISO "+p.exif.i));
       meta=parts.join(" &middot; ");
     }
-    if(p.tags.length) meta+='<div class="tags">'+p.tags.map(function(t){return '<span>'+t+'</span>';}).join("")+'</div>';
+    if(p.tags.length) meta+='<div class="tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
     lbMeta.innerHTML=meta;
     lb.classList.add("open");
   }

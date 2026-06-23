@@ -147,7 +147,8 @@ export async function generateDuelPreview(
   const previewPath = getDuelPreviewPath(imagePath);
 
   // L2: 磁盘
-  if (fs.existsSync(previewPath)) {
+  try {
+    await fs.promises.access(previewPath);
     try {
       const meta = await sharp(previewPath).metadata();
       return {
@@ -158,11 +159,13 @@ export async function generateDuelPreview(
     } catch {
       // 文件损坏 → 删除并重新生成
       try {
-        fs.unlinkSync(previewPath);
+        await fs.promises.unlink(previewPath);
       } catch {
         /* skip */
       }
     }
+  } catch {
+    // 文件不存在，继续生成
   }
 
   // L3: 生成（inflight 去重，同 generateThumbnail 模式）
@@ -177,7 +180,10 @@ export async function generateDuelPreview(
   }
 
   const promise = doGenerateDuelPreview(imagePath, previewPath, cacheKey);
-  inFlightRequests.set(cacheKey, promise as unknown as Promise<ThumbnailResult>);
+  inFlightRequests.set(
+    cacheKey,
+    promise as unknown as Promise<ThumbnailResult>
+  );
 
   try {
     return await promise;
@@ -194,7 +200,9 @@ async function doGenerateDuelPreview(
   let input: string | Buffer = imagePath;
   if (isRawFile(imagePath)) {
     const preview = await extractRawPreview(imagePath);
-    if (!preview) return null;
+    if (!preview) {
+      return null;
+    }
     input = preview;
   }
 
@@ -207,7 +215,7 @@ async function doGenerateDuelPreview(
     .jpeg({ quality: DUEL_PREVIEW_QUALITY });
 
   const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
-  fs.writeFileSync(previewPath, data);
+  await fs.promises.writeFile(previewPath, data);
 
   return {
     previewPath,
@@ -219,24 +227,27 @@ async function doGenerateDuelPreview(
 /**
  * 删除单张照片的对比预览文件。
  */
-export function deleteDuelPreview(imagePath: string): void {
-  if (!thumbnailDir) return;
+export async function deleteDuelPreview(imagePath: string): Promise<void> {
+  if (!thumbnailDir) {
+    return;
+  }
   const previewPath = getDuelPreviewPath(imagePath);
   try {
-    if (fs.existsSync(previewPath)) {
-      fs.unlinkSync(previewPath);
-    }
+    await fs.promises.access(previewPath);
+    await fs.promises.unlink(previewPath).catch(() => {
+      /* ignore */
+    });
   } catch {
     /* best-effort */
   }
 }
 
-export function checkAndCleanDiskCache(): {
+export async function checkAndCleanDiskCache(): Promise<{
   cleaned: boolean;
   freedMB: number;
   filesRemoved: number;
-} {
-  const usage = getThumbnailDiskUsage();
+}> {
+  const usage = await getThumbnailDiskUsage();
   const usageMB = usage.bytes / (1024 * 1024);
 
   if (
@@ -252,19 +263,24 @@ export function checkAndCleanDiskCache(): {
 
   const files: Array<{ path: string; atime: number; size: number }> = [];
 
-  if (thumbnailDir && fs.existsSync(thumbnailDir)) {
-    const entries = fs.readdirSync(thumbnailDir);
-    for (const entry of entries) {
-      const entryPath = path.join(thumbnailDir, entry);
-      try {
-        const stat = fs.statSync(entryPath);
-        if (stat.isFile()) {
-          const atime = diskAccessLog.get(entry) || stat.atimeMs;
-          files.push({ path: entryPath, atime, size: stat.size });
+  if (thumbnailDir) {
+    try {
+      await fs.promises.access(thumbnailDir);
+      const entries = await fs.promises.readdir(thumbnailDir);
+      for (const entry of entries) {
+        const entryPath = path.join(thumbnailDir, entry);
+        try {
+          const stat = await fs.promises.stat(entryPath);
+          if (stat.isFile()) {
+            const atime = diskAccessLog.get(entry) || stat.atimeMs;
+            files.push({ path: entryPath, atime, size: stat.size });
+          }
+        } catch {
+          /* skip */
         }
-      } catch {
-        /* skip */
       }
+    } catch {
+      /* directory inaccessible */
     }
   }
 
@@ -285,7 +301,7 @@ export function checkAndCleanDiskCache(): {
     }
 
     try {
-      fs.unlinkSync(file.path);
+      await fs.promises.unlink(file.path);
       freedBytes += file.size;
       currentMB -= file.size / (1024 * 1024);
       filesRemoved++;
@@ -329,8 +345,9 @@ export async function generateThumbnail(
   }
 
   // L2: disk
-  if (fs.existsSync(thumbPath)) {
-    const diskData = fs.readFileSync(thumbPath);
+  try {
+    await fs.promises.access(thumbPath);
+    const diskData = await fs.promises.readFile(thumbPath);
     memoryCache?.set(cacheKey, diskData);
     const meta = await sharp(thumbPath).metadata();
     return {
@@ -338,6 +355,8 @@ export async function generateThumbnail(
       width: meta.width || 0,
       height: meta.height || 0,
     };
+  } catch {
+    // 不在磁盘上，继续生成
   }
 
   // ── 请求去重：正在生成中的缩略图直接 await 同一个 Promise ──
@@ -382,12 +401,16 @@ async function doGenerate(
     resolveWithObject: true,
   });
 
-  fs.writeFileSync(thumbPath, thumbBuffer);
+  await fs.promises.writeFile(thumbPath, thumbBuffer);
   memoryCache?.set(cacheKey, thumbBuffer);
 
   // Periodically check and clean cache (1% chance per generation)
   if (Math.random() < 0.01) {
-    setTimeout(() => checkAndCleanDiskCache(), 0);
+    setTimeout(() => {
+      checkAndCleanDiskCache().catch(() => {
+        /* ignore */
+      });
+    }, 0);
   }
 
   return {
@@ -402,7 +425,7 @@ export async function getThumbnailBuffer(
   size: ThumbSize = "md"
 ): Promise<Buffer> {
   const { thumbnailPath: thumbPath } = await generateThumbnail(imagePath, size);
-  return fs.readFileSync(thumbPath);
+  return await fs.promises.readFile(thumbPath);
 }
 
 export function getThumbnailSizes(): Record<ThumbSize, number> {
@@ -421,21 +444,22 @@ export function getThumbnailDir(): string {
   return thumbnailDir || "";
 }
 
-export function getThumbnailDiskUsage(): {
+export async function getThumbnailDiskUsage(): Promise<{
   dir: string;
   bytes: number;
   fileCount: number;
-} {
+}> {
   const dir = thumbnailDir || "";
   let bytes = 0;
   let fileCount = 0;
-  if (dir && fs.existsSync(dir)) {
+  if (dir) {
     try {
-      const entries = fs.readdirSync(dir);
+      await fs.promises.access(dir);
+      const entries = await fs.promises.readdir(dir);
       for (const entry of entries) {
         const entryPath = path.join(dir, entry);
         try {
-          const stat = fs.statSync(entryPath);
+          const stat = await fs.promises.stat(entryPath);
           if (stat.isFile()) {
             bytes += stat.size;
             fileCount++;
@@ -455,7 +479,7 @@ export function getThumbnailDiskUsage(): {
  * Delete all thumbnail variants for a single photo from disk and memory cache.
  * Safe to call even if the photo has no thumbnails — errors are silently caught.
  */
-export function deletePhotoThumbnails(imagePath: string): void {
+export async function deletePhotoThumbnails(imagePath: string): Promise<void> {
   if (!thumbnailDir) {
     return;
   }
@@ -463,9 +487,10 @@ export function deletePhotoThumbnails(imagePath: string): void {
   for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
     const thumbPath = getThumbnailPath(imagePath, size);
     try {
-      if (fs.existsSync(thumbPath)) {
-        fs.unlinkSync(thumbPath);
-      }
+      await fs.promises.access(thumbPath);
+      await fs.promises.unlink(thumbPath).catch(() => {
+        /* ignore */
+      });
     } catch {
       // best-effort: permission errors or locked files are not fatal
     }
@@ -473,28 +498,33 @@ export function deletePhotoThumbnails(imagePath: string): void {
   }
 
   // 同时清理对比预览
-  deleteDuelPreview(imagePath);
+  await deleteDuelPreview(imagePath);
 }
 
-export function clearThumbnailDiskCache(): {
+export async function clearThumbnailDiskCache(): Promise<{
   fileCount: number;
   freedMB: number;
-} {
+}> {
   let fileCount = 0;
   let totalBytes = 0;
 
-  if (thumbnailDir && fs.existsSync(thumbnailDir)) {
-    const entries = fs.readdirSync(thumbnailDir);
-    for (const entry of entries) {
-      const entryPath = path.join(thumbnailDir, entry);
-      try {
-        const stat = fs.statSync(entryPath);
-        totalBytes += stat.size;
-        fs.unlinkSync(entryPath);
-        fileCount++;
-      } catch {
-        /* skip locked / inaccessible files */
+  if (thumbnailDir) {
+    try {
+      await fs.promises.access(thumbnailDir);
+      const entries = await fs.promises.readdir(thumbnailDir);
+      for (const entry of entries) {
+        const entryPath = path.join(thumbnailDir, entry);
+        try {
+          const stat = await fs.promises.stat(entryPath);
+          totalBytes += stat.size;
+          await fs.promises.unlink(entryPath);
+          fileCount++;
+        } catch {
+          /* skip locked / inaccessible files */
+        }
       }
+    } catch {
+      /* directory inaccessible */
     }
   }
 
@@ -542,12 +572,17 @@ function buildExpectedThumbnailSet(): Set<string> | null {
 }
 
 /** Scan cache dir for orphan files with no corresponding photo record. */
-export function scanOrphanThumbnails(): {
+export async function scanOrphanThumbnails(): Promise<{
   orphanCount: number;
   orphanSizeBytes: number;
   totalFiles: number;
-} {
-  if (!(thumbnailDir && fs.existsSync(thumbnailDir))) {
+}> {
+  if (!thumbnailDir) {
+    return { orphanCount: 0, orphanSizeBytes: 0, totalFiles: 0 };
+  }
+  try {
+    await fs.promises.access(thumbnailDir);
+  } catch {
     return { orphanCount: 0, orphanSizeBytes: 0, totalFiles: 0 };
   }
 
@@ -560,17 +595,18 @@ export function scanOrphanThumbnails(): {
   let orphanCount = 0;
   let orphanSizeBytes = 0;
 
-  const entries = fs.readdirSync(thumbnailDir);
+  const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged =
-      entry.endsWith(".webp") || entry.endsWith(".jpg");
+    const isManaged = entry.endsWith(".webp") || entry.endsWith(".jpg");
     if (!isManaged) {
       continue;
     }
     totalFiles++;
     if (!expectedFiles.has(entry)) {
       try {
-        orphanSizeBytes += fs.statSync(path.join(thumbnailDir, entry)).size;
+        orphanSizeBytes += (
+          await fs.promises.stat(path.join(thumbnailDir, entry))
+        ).size;
       } catch {
         /* skip inaccessible */
       }
@@ -582,11 +618,16 @@ export function scanOrphanThumbnails(): {
 }
 
 /** Delete orphan thumbnail files. Only touches confirmed orphans. */
-export function cleanOrphanThumbnails(): {
+export async function cleanOrphanThumbnails(): Promise<{
   removed: number;
   freedMB: number;
-} {
-  if (!(thumbnailDir && fs.existsSync(thumbnailDir))) {
+}> {
+  if (!thumbnailDir) {
+    return { removed: 0, freedMB: 0 };
+  }
+  try {
+    await fs.promises.access(thumbnailDir);
+  } catch {
     return { removed: 0, freedMB: 0 };
   }
 
@@ -598,10 +639,9 @@ export function cleanOrphanThumbnails(): {
   let removed = 0;
   let freedBytes = 0;
 
-  const entries = fs.readdirSync(thumbnailDir);
+  const entries = await fs.promises.readdir(thumbnailDir);
   for (const entry of entries) {
-    const isManaged =
-      entry.endsWith(".webp") || entry.endsWith(".jpg");
+    const isManaged = entry.endsWith(".webp") || entry.endsWith(".jpg");
     if (!isManaged) {
       continue;
     }
@@ -609,13 +649,13 @@ export function cleanOrphanThumbnails(): {
       const entryPath = path.join(thumbnailDir, entry);
       let fileSize = 0;
       try {
-        fileSize = fs.statSync(entryPath).size;
+        fileSize = (await fs.promises.stat(entryPath)).size;
       } catch {
         continue;
       }
 
       try {
-        fs.unlinkSync(entryPath);
+        await fs.promises.unlink(entryPath);
         freedBytes += fileSize;
         removed++;
       } catch (err: any) {

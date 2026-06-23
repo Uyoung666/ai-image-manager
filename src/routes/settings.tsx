@@ -1,11 +1,11 @@
 import {
   createFileRoute,
   Outlet,
+  redirect,
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsSidebar } from "@/components/settings/SettingsSidebar";
 
@@ -13,13 +13,6 @@ function SettingsLayout() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Redirect /settings → /settings/appearance
-  useEffect(() => {
-    if (location.pathname === "/settings") {
-      navigate({ to: "/settings/appearance", replace: true });
-    }
-  }, [location.pathname, navigate]);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -50,5 +43,10 @@ function SettingsLayout() {
 }
 
 export const Route = createFileRoute("/settings")({
+  beforeLoad: ({ location }) => {
+    if (location.pathname === "/settings") {
+      throw redirect({ to: "/settings/appearance", replace: true });
+    }
+  },
   component: SettingsLayout,
 });

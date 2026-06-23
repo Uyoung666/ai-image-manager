@@ -3,31 +3,7 @@
  * Does NOT require a real database — tests computeElo, PK_MODE_CONFIG, etc.
  */
 import { describe, expect, it } from "vitest";
-
-// Replicate the computeElo function from handlers.ts for testing
-function computeElo(
-  ratingA: number,
-  ratingB: number,
-  scoreA: number,
-  comparisonsA: number,
-  comparisonsB: number
-): { newRatingA: number; newRatingB: number } {
-  const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
-  const avgComparisons = (comparisonsA + comparisonsB) / 2;
-  const k = 32 / (1 + avgComparisons / 10);
-  const newRatingA = Math.round(ratingA + k * (scoreA - expectedA));
-  const newRatingB = Math.round(ratingB + k * (expectedA - scoreA));
-  return { newRatingA, newRatingB };
-}
-
-const PK_MODE_CONFIG: Record<
-  string,
-  { minComparisons: number; allowRecompare: boolean; similarityWeight: number }
-> = {
-  quick: { minComparisons: 5, allowRecompare: false, similarityWeight: 0.3 },
-  standard: { minComparisons: 8, allowRecompare: true, similarityWeight: 0.5 },
-  fine: { minComparisons: 12, allowRecompare: true, similarityWeight: 0.7 },
-};
+import { computeElo, PK_MODE_CONFIG } from "@/ipc/cull/handlers";
 
 describe("computeElo", () => {
   it("winner gains rating, loser loses rating", () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import Lightbox, { type ZoomRef } from "yet-another-react-lightbox";
@@ -53,7 +53,7 @@ function formatDimensions(w: number, h: number): string {
   return `${w} × ${h} · ${mp}MP`;
 }
 
-export function PhotoLightbox({
+export const PhotoLightbox = memo(function PhotoLightbox({
   photos,
   index,
   open,
@@ -353,15 +353,88 @@ export function PhotoLightbox({
     []
   );
 
-  const slides = photos.map((p) => ({
+  const slides = useMemo(() => photos.map((p) => ({
     src: toLocalMediaUrl(p.path),
     alt: p.filename,
     title: p.filename,
     description: formatDimensions(p.width, p.height),
-  }));
+  })), [photos]);
 
   const currentDelayLabel =
     SLIDESHOW_DELAYS.find((d) => d.value === delay)?.label || "5s";
+
+  // 稳定化 toolbar.buttons 引用，避免每次渲染重建数组
+  const toolbarButtons = useMemo(() => [
+    <button
+      aria-label={t("photoDetail")}
+      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      key="info-panel"
+      onClick={() => setInfoPanelVisible((v) => !v)}
+      title={t("photoDetail")}
+      type="button"
+    >
+      <svg fill="none" height="20" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="20">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4" strokeLinecap="round" />
+        <circle cx="12" cy="8" fill="currentColor" r="1" stroke="none" />
+      </svg>
+    </button>,
+    <button
+      aria-label={t("rotateLeft")}
+      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      key="rotate-left"
+      onClick={() => setRotation((prev) => (prev - 90) % 360)}
+      title={t("rotateLeft")}
+      type="button"
+    >
+      <svg fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+        <path d="M2.5 2v6h6M2.66 15.57a10 10 0 1 0 .57-8.38" />
+      </svg>
+    </button>,
+    <button
+      aria-label={t("rotateRight")}
+      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      key="rotate-right"
+      onClick={() => setRotation((prev) => (prev + 90) % 360)}
+      title={t("rotateRight")}
+      type="button"
+    >
+      <svg fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
+        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38" />
+      </svg>
+    </button>,
+    <button
+      aria-label={playing ? t("pause") : t("play")}
+      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      key="slideshow-play"
+      onClick={togglePlay}
+      title={playing ? t("pauseSlideshow") : t("playSlideshow")}
+      type="button"
+    >
+      {playing ? (
+        <svg fill="currentColor" height="20" viewBox="0 0 24 24" width="20">
+          <rect height="16" rx="1" width="6" x="5" y="4" />
+          <rect height="16" rx="1" width="6" x="13" y="4" />
+        </svg>
+      ) : (
+        <svg fill="currentColor" height="20" viewBox="0 0 24 24" width="20">
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+      )}
+    </button>,
+    <button
+      aria-label={t("slideshowInterval", { value: currentDelayLabel })}
+      className="flex items-center justify-center rounded-[6px] px-2 py-2 font-medium text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      key="slideshow-delay"
+      onClick={cycleDelay}
+      title={t("switchInterval")}
+      type="button"
+    >
+      {currentDelayLabel}
+    </button>,
+    "fullscreen",
+    "close",
+  ], [t, playing, currentDelayLabel, togglePlay, cycleDelay]);
 
   // 当旋转90度或270度时需要调整容器尺寸以适应屏幕
   const isRotated90or270 = rotation % 180 !== 0;
@@ -459,120 +532,7 @@ export function PhotoLightbox({
           border: 0,
           showToggle: true,
         }}
-        toolbar={{
-          buttons: [
-            <button
-              aria-label={t("photoDetail")}
-              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              key="info-panel"
-              onClick={() => setInfoPanelVisible((v) => !v)}
-              title={t("photoDetail")}
-              type="button"
-            >
-              <svg
-                fill="none"
-                height="20"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                width="20"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4" strokeLinecap="round" />
-                <circle
-                  cx="12"
-                  cy="8"
-                  fill="currentColor"
-                  r="1"
-                  stroke="none"
-                />
-              </svg>
-            </button>,
-            <button
-              aria-label={t("rotateLeft")}
-              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              key="rotate-left"
-              onClick={() => setRotation((prev) => (prev - 90) % 360)}
-              title={t("rotateLeft")}
-              type="button"
-            >
-              <svg
-                fill="none"
-                height="20"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                width="20"
-              >
-                <path d="M2.5 2v6h6M2.66 15.57a10 10 0 1 0 .57-8.38" />
-              </svg>
-            </button>,
-            <button
-              aria-label={t("rotateRight")}
-              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              key="rotate-right"
-              onClick={() => setRotation((prev) => (prev + 90) % 360)}
-              title={t("rotateRight")}
-              type="button"
-            >
-              <svg
-                fill="none"
-                height="20"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                width="20"
-              >
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38" />
-              </svg>
-            </button>,
-            <button
-              aria-label={playing ? t("pause") : t("play")}
-              className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              key="slideshow-play"
-              onClick={togglePlay}
-              title={playing ? t("pauseSlideshow") : t("playSlideshow")}
-              type="button"
-            >
-              {playing ? (
-                <svg
-                  fill="currentColor"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  width="20"
-                >
-                  <rect height="16" rx="1" width="6" x="5" y="4" />
-                  <rect height="16" rx="1" width="6" x="13" y="4" />
-                </svg>
-              ) : (
-                <svg
-                  fill="currentColor"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  width="20"
-                >
-                  <polygon points="5,3 19,12 5,21" />
-                </svg>
-              )}
-            </button>,
-            <button
-              aria-label={t("slideshowInterval", { value: currentDelayLabel })}
-              className="flex items-center justify-center rounded-[6px] px-2 py-2 font-medium text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              key="slideshow-delay"
-              onClick={cycleDelay}
-              title={t("switchInterval")}
-              type="button"
-            >
-              {currentDelayLabel}
-            </button>,
-            "fullscreen",
-            "close",
-          ],
-        }}
+        toolbar={{ buttons: toolbarButtons }}
         zoom={{
           ref: zoomRef,
           maxZoomPixelRatio: 5,
@@ -603,4 +563,4 @@ export function PhotoLightbox({
       />
     </>
   );
-}
+});

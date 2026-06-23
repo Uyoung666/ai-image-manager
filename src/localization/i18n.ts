@@ -134,6 +134,9 @@ i18n.use(initReactI18next).init({
           "扫描完成，共索引 {{count}} 张照片，{{skipped}} 个文件被跳过（非有效图片）",
         aiIndexingStarted: "AI 索引已启动...",
         aiIndexedCount: "已 AI 索引 {{count}} 张照片",
+        aiAutoRepairStarted:
+          "检测到向量数据库损坏，已自动重建。索引进度可在侧边栏查看。",
+        aiIndexFailed: "AI 索引失败: {{error}}",
 
         // Photo detail
         photoDetail: "照片详情",
@@ -1044,6 +1047,7 @@ i18n.use(initReactI18next).init({
         cullRejectedCount: "已淘汰 {{count}}",
         cullCreateAlbumFromKept: "保留照片新建相册",
         cullTrashRejected: "淘汰照片丢入回收站",
+        cullCreateSessionFailed: "创建筛选会话失败",
         cullSessionDeleted: "会话已删除",
         cullPhotoDeletedExternally: "某张图片已被外部删除，会话数据已刷新",
         cullPhotoUnavailable: "图片无法加载，自动跳过",
@@ -1231,6 +1235,9 @@ i18n.use(initReactI18next).init({
           "Scan complete, {{count}} photos indexed, {{skipped}} files skipped (invalid images)",
         aiIndexingStarted: "AI indexing started...",
         aiIndexedCount: "AI indexed {{count}} photos",
+        aiAutoRepairStarted:
+          "Vector database corruption detected. Auto-repair in progress — check sidebar for indexing status.",
+        aiIndexFailed: "AI indexing failed: {{error}}",
 
         photoDetail: "Photo Detail",
         photoInfo: "Basic Info",
@@ -2189,6 +2196,7 @@ i18n.use(initReactI18next).init({
         cullRejectedCount: "Rejected {{count}}",
         cullCreateAlbumFromKept: "Create album from kept",
         cullTrashRejected: "Move rejected to trash",
+        cullCreateSessionFailed: "Failed to create cull session",
         cullSessionDeleted: "Session deleted",
         cullPhotoDeletedExternally:
           "A photo was deleted externally, session data refreshed",

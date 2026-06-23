@@ -31,7 +31,7 @@ describe("SearchBar", () => {
   it("does not search empty query", async () => {
     const onSearch = vi.fn();
     render(<SearchBar {...baseProps} onSearch={onSearch} />);
-    fireEvent.submit(screen.getByRole("textbox").closest("form")!);
+    fireEvent.submit(screen.getByRole("combobox").closest("form")!);
     expect(onSearch).not.toHaveBeenCalled();
   });
 

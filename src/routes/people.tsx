@@ -22,6 +22,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { RouteError } from "@/components/RouteError";
 
 interface FaceIdentity {
   coverBbox: { x: number; y: number; width: number; height: number } | null;
@@ -773,4 +774,5 @@ function PeopleLayout() {
 
 export const Route = createFileRoute("/people" as const)({
   component: PeopleLayout,
+  errorComponent: RouteError,
 });

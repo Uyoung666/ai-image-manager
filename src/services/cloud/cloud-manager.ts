@@ -3,7 +3,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { cloudConfigs, cloudSyncLog, photos } from "@/db/schema";
-import { decrypt } from "@/services/credential-vault";
+import { decrypt, encrypt, needsMigration } from "@/services/credential-vault";
 import type { CloudProvider, CloudProviderType } from "./abstract-provider";
 import { s3Provider } from "./s3-provider";
 import { webdavProvider } from "./webdav-provider";
@@ -23,7 +23,20 @@ export async function testConnection(configId: number) {
     throw new Error("云配置不存在");
   }
 
-  const config = JSON.parse(decrypt(cfg.configJson));
+  const configJson = cfg.configJson;
+  const plaintext = decrypt(configJson);
+  // 旧版格式惰性迁移到 safeStorage
+  if (needsMigration(configJson)) {
+    try {
+      db.update(cloudConfigs)
+        .set({ configJson: encrypt(plaintext) })
+        .where(eq(cloudConfigs.id, configId))
+        .run();
+    } catch {
+      // 迁移失败不影响正常使用，下次访问时重试
+    }
+  }
+  const config = JSON.parse(plaintext);
   const provider = getProvider(cfg.provider as CloudProviderType);
   return provider.checkConnection(config);
 }
@@ -47,7 +60,20 @@ export async function uploadPhoto(
     throw new Error("云配置不存在");
   }
 
-  const config = JSON.parse(decrypt(cfg.configJson));
+  const configJson = cfg.configJson;
+  const plaintext = decrypt(configJson);
+  // 旧版格式惰性迁移到 safeStorage
+  if (needsMigration(configJson)) {
+    try {
+      db.update(cloudConfigs)
+        .set({ configJson: encrypt(plaintext) })
+        .where(eq(cloudConfigs.id, configId))
+        .run();
+    } catch {
+      // 迁移失败不影响正常使用
+    }
+  }
+  const config = JSON.parse(plaintext);
   const provider = getProvider(cfg.provider as CloudProviderType);
 
   const buffer = fs.readFileSync(photo.path);

@@ -7,22 +7,28 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-export const folders = sqliteTable("folders", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  path: text("path").notNull().unique(),
-  displayName: text("display_name").notNull(),
-  parentId: integer("parent_id"),
-  photoCount: integer("photo_count").notNull().default(0),
-  lastScannedAt: integer("last_scanned_at"),
-  createdAt: integer("created_at")
-    .notNull()
-    .$defaultFn(() => Date.now()),
-  isWatching: integer("is_watching", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  watcherStartedAt: integer("watcher_started_at"),
-  lastWatcherEventAt: integer("last_watcher_event_at"),
-});
+export const folders = sqliteTable(
+  "folders",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    path: text("path").notNull().unique(),
+    displayName: text("display_name").notNull(),
+    parentId: integer("parent_id"),
+    photoCount: integer("photo_count").notNull().default(0),
+    lastScannedAt: integer("last_scanned_at"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    isWatching: integer("is_watching", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    watcherStartedAt: integer("watcher_started_at"),
+    lastWatcherEventAt: integer("last_watcher_event_at"),
+  },
+  (table) => ({
+    parentIdIdx: index("idx_folders_parent_id").on(table.parentId),
+  })
+);
 
 export const photos = sqliteTable(
   "photos",

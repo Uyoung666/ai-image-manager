@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
+import { RouteError } from "@/components/RouteError";
 
 interface CullSession {
   completedAt: number | null;
@@ -438,4 +439,5 @@ function CullLayout() {
 
 export const Route = createFileRoute("/cull")({
   component: CullLayout,
+  errorComponent: RouteError,
 });

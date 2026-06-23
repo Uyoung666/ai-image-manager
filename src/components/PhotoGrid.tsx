@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
@@ -84,7 +84,7 @@ function loadColWidth(): number {
   return COL_WIDTH_DEFAULT;
 }
 
-export function PhotoGrid({
+export const PhotoGrid = memo(function PhotoGrid({
   photos,
   loading,
   isLoadingMore = false,
@@ -454,4 +454,18 @@ export function PhotoGrid({
       )}
     </div>
   );
-}
+},
+(prevProps, nextProps) => {
+  if (prevProps.photos !== nextProps.photos) return false;
+  if (prevProps.loading !== nextProps.loading) return false;
+  if (prevProps.isLoadingMore !== nextProps.isLoadingMore) return false;
+  if (prevProps.selectedIds !== nextProps.selectedIds) return false;
+  if (prevProps.routeKey !== nextProps.routeKey) return false;
+  if (prevProps.searchQuery !== nextProps.searchQuery) return false;
+  if (prevProps.sort !== nextProps.sort) return false;
+  if (prevProps.sortOrder !== nextProps.sortOrder) return false;
+  if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData) return false;
+  if (prevProps.error !== nextProps.error) return false;
+  if (prevProps.hasMore !== nextProps.hasMore) return false;
+  return true;
+});

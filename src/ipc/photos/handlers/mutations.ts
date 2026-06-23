@@ -535,16 +535,16 @@ export const convertPhotos = os
     return { converted, outputDir };
   });
 
-export const clearThumbCache = os.handler(() => {
-  return clearThumbnailDiskCache();
+export const clearThumbCache = os.handler(async () => {
+  return await clearThumbnailDiskCache();
 });
 
-export const scanOrphanThumbnails = os.handler(() => {
-  return scanOrphanThumbnailsService();
+export const scanOrphanThumbnails = os.handler(async () => {
+  return await scanOrphanThumbnailsService();
 });
 
-export const cleanOrphanThumbnails = os.handler(() => {
-  return cleanOrphanThumbnailsService();
+export const cleanOrphanThumbnails = os.handler(async () => {
+  return await cleanOrphanThumbnailsService();
 });
 
 export const toggleFavorite = os

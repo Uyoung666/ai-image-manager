@@ -8,6 +8,7 @@ import { CullCurate } from "@/components/CullCurate";
 import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
 import { ipc } from "@/ipc/manager";
+import { RouteError } from "@/components/RouteError";
 
 // ── Shared types ──
 
@@ -278,4 +279,5 @@ function CullSessionPage() {
 
 export const Route = createFileRoute("/cull/$sessionId")({
   component: CullSessionPage,
+  errorComponent: RouteError,
 });

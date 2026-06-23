@@ -25,6 +25,7 @@ import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
+import { RouteError } from "@/components/RouteError";
 
 interface PhotoInfo {
   filename: string;
@@ -842,7 +843,7 @@ function AlbumDetailPage() {
                   params: { sessionId: String(session.id) },
                 });
               } catch {
-                toast.error("Failed to create cull session");
+                toast.error(t("cullCreateSessionFailed"));
               }
             }}
             onToggleFavorite={() => {
@@ -1065,4 +1066,5 @@ function AlbumDetailPage() {
 
 export const Route = createFileRoute("/albums/$albumId" as const)({
   component: AlbumDetailPage,
+  errorComponent: RouteError,
 });

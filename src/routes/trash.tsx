@@ -9,6 +9,7 @@ import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { RouteError } from "@/components/RouteError";
 
 interface DeletedPhoto {
   deletedAt: number | null;
@@ -727,4 +728,5 @@ function TrashPage() {
 
 export const Route = createFileRoute("/trash")({
   component: TrashPage,
+  errorComponent: RouteError,
 });

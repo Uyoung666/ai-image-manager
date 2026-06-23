@@ -409,7 +409,7 @@ registry.register({
   level: ServiceLevel.Optional,
   start: async () => {
     // 启动时清理一次
-    const result = checkAndCleanDiskCache();
+    const result = await checkAndCleanDiskCache();
     if (result.cleaned) {
       console.log(
         `[Registry] Thumbnail cache cleaned on startup: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
@@ -419,12 +419,15 @@ registry.register({
     // 每天清理一次
     const cleanupInterval = setInterval(
       () => {
-        const result = checkAndCleanDiskCache();
-        if (result.cleaned) {
-          console.log(
-            `[Registry] Thumbnail cache cleaned: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
-          );
-        }
+        checkAndCleanDiskCache()
+          .then((result) => {
+            if (result.cleaned) {
+              console.log(
+                `[Registry] Thumbnail cache cleaned: ${result.filesRemoved} files, ${result.freedMB.toFixed(1)}MB freed`
+              );
+            }
+          })
+          .catch(() => {});
       },
       24 * 60 * 60 * 1000
     );

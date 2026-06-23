@@ -18,14 +18,6 @@ export interface SharePhoto {
   width: number;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function buildSharePageHtml(items: SharePhoto[], locale = "zh-CN"): string {
   const itemsJson = JSON.stringify(
     items.map((p) => ({
@@ -84,6 +76,7 @@ header{padding:12px 16px}header h1{font-size:14px}#search{width:100%;order:3;fle
 
   const script = `(function(){
 var data=${itemsJson};
+var h=function(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");};
 var grid=document.getElementById("grid");
 var search=document.getElementById("search");
 var lb=document.getElementById("lightbox");
@@ -105,8 +98,8 @@ function render(items){
     if(p.exif.c) gear.push(p.exif.c);
     if(p.exif.l) gear.push(p.exif.l);
     var tagsHtml="";
-    if(p.tags.length) tagsHtml='<div class="tags-row">'+p.tags.map(function(t){return '<span>'+t+'</span>';}).join("")+'</div>';
-    card.innerHTML='<img src="'+p.thumb+'" alt="'+p.fn+'" loading="lazy"><div class="meta"><div class="date">'+p.dt+'</div><div class="gear">'+gear.join(" · ")+'</div>'+tagsHtml+'</div>';
+    if(p.tags.length) tagsHtml='<div class="tags-row">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
+    card.innerHTML='<img src="'+h(p.thumb)+'" alt="'+h(p.fn)+'" loading="lazy"><div class="meta"><div class="date">'+h(p.dt)+'</div><div class="gear">'+h(gear.join(" · "))+'</div>'+tagsHtml+'</div>';
     card.addEventListener("click",function(){openLightbox(i);});
     grid.appendChild(card);
   });
@@ -116,15 +109,15 @@ function render(items){
 function openLightbox(idx){
   currentIdx=idx;
   var p=filteredData[idx];
-  lbImg.src=p.thumb;
+  lbImg.src=h(p.thumb);
   var parts=[];
-  if(p.dt) parts.push(p.dt);
-  if(p.exif.c) parts.push(p.exif.c);
-  if(p.exif.l) parts.push(p.exif.l);
-  if(p.exif.f) parts.push(p.exif.f+"mm f/"+p.exif.a);
-  if(p.exif.s) parts.push(p.exif.s+"s ISO"+p.exif.i);
+  if(p.dt) parts.push(h(p.dt));
+  if(p.exif.c) parts.push(h(p.exif.c));
+  if(p.exif.l) parts.push(h(p.exif.l));
+  if(p.exif.f) parts.push(h(p.exif.f+"mm f/"+p.exif.a));
+  if(p.exif.s) parts.push(h(p.exif.s+"s ISO"+p.exif.i));
   var meta=parts.join(" · ");
-  if(p.tags.length) meta+='<div class="lb-tags">'+p.tags.map(function(t){return '<span>'+t+'</span>';}).join("")+'</div>';
+  if(p.tags.length) meta+='<div class="lb-tags">'+p.tags.map(function(t){return '<span>'+h(t)+'</span>';}).join("")+'</div>';
   lbMeta.innerHTML=meta;
   lb.classList.add("open");
 }

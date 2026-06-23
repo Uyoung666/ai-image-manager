@@ -929,10 +929,10 @@ export const getDuplicateStats = os.handler(() => {
 // database file location, and counts of valid vs invalid photo records.
 // "Invalid" matches cleanupOrphanPhotos: photos whose folderId is NULL or
 // points at a folder that no longer exists.
-export const getIndexStats = os.input(z.object({}).optional()).handler(() => {
+export const getIndexStats = os.input(z.object({}).optional()).handler(async () => {
   const db = getDatabase();
 
-  const thumb = getThumbnailDiskUsage();
+  const thumb = await getThumbnailDiskUsage();
   const databasePath = getDbPath();
 
   const validPhotoCount =

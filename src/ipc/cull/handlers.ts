@@ -76,7 +76,7 @@ const UpdatePhotoStatusSchema = z.object({
   status: z.enum(["pending", "kept", "rejected"]),
 });
 
-function computeElo(
+export function computeElo(
   ratingA: number,
   ratingB: number,
   scoreA: number,
@@ -91,7 +91,7 @@ function computeElo(
   return { newRatingA, newRatingB };
 }
 
-const PK_MODE_CONFIG: Record<
+export const PK_MODE_CONFIG: Record<
   string,
   {
     minComparisons: number;

@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   type ReactNode,
   useCallback,
   useEffect,
@@ -77,8 +78,8 @@ interface MasonryGridProps {
   selectionActive?: boolean;
 }
 
-export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
-  function MasonryGrid(
+export const MasonryGrid = memo(
+  forwardRef<MasonryGridHandle, MasonryGridProps>(function MasonryGrid(
     {
       items,
       containerWidth,
@@ -983,4 +984,19 @@ export const MasonryGrid = forwardRef<MasonryGridHandle, MasonryGridProps>(
       </div>
     );
   }
-);
+),
+(prevProps, nextProps) => {
+  // 仅比较影响渲染的核心 props，跳过回调函数（由父组件 useCallback 稳定化）
+  if (prevProps.items !== nextProps.items) return false;
+  if (prevProps.groupHeaders !== nextProps.groupHeaders) return false;
+  if (prevProps.containerWidth !== nextProps.containerWidth) return false;
+  if (prevProps.columnCount !== nextProps.columnCount) return false;
+  if (prevProps.gap !== nextProps.gap) return false;
+  if (prevProps.isLoadingMore !== nextProps.isLoadingMore) return false;
+  if (prevProps.hasMore !== nextProps.hasMore) return false;
+  if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData) return false;
+  if (prevProps.selectionActive !== nextProps.selectionActive) return false;
+  if (prevProps.scrollToId !== nextProps.scrollToId) return false;
+  if (prevProps.routeKey !== nextProps.routeKey) return false;
+  return true;
+});

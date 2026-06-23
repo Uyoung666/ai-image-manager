@@ -14,6 +14,7 @@ import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { RouteError } from "@/components/RouteError";
 
 interface AlbumInfo {
   coverPhotoId: number | null;
@@ -307,4 +308,5 @@ function AlbumsLayout() {
 
 export const Route = createFileRoute("/albums" as const)({
   component: AlbumsLayout,
+  errorComponent: RouteError,
 });
