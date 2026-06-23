@@ -427,7 +427,7 @@ export function PhotoGrid({
         ref={containerCallbackRef}
       >
         <MasonryGrid
-          className="scrollbar-thin px-2 pt-10 pb-7"
+          className="scrollbar-thin px-2 pt-12 pb-7"
           columnCount={columnCount}
           containerWidth={containerWidth - 16}
           gap={GAP}
