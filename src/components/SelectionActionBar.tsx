@@ -93,19 +93,20 @@ export function SelectionActionBar({
         }
       }}
     >
-      <div className="glass-surface pointer-events-auto flex items-center gap-1 rounded-[10px] border border-border px-3 py-1.5 shadow-lg">
-        <span className="mr-2 font-medium text-[12px] text-foreground tabular-nums">
+      <div className="selection-menu pointer-events-auto">
+        <span className="selection-menu-count">
           {t("selectedPhotos", { count: selectedCount })}
         </span>
 
         {onToggleFavorite && (
           <>
-            <div className="mx-1 h-4 w-px bg-border" />
-            <ActionButton
+            <div className="selection-menu-divider" />
+            <MenuAction
+              executing={executing === "favorite"}
               icon={
                 <Heart
                   className={allFavorite ? "fill-current" : ""}
-                  size={15}
+                  size={18}
                 />
               }
               label={allFavorite ? t("unfavorite") : t("favorite")}
@@ -114,53 +115,53 @@ export function SelectionActionBar({
           </>
         )}
         {onAddToAlbum && (
-          <ActionButton
-            icon={<FolderPlus size={15} />}
+          <MenuAction
+            icon={<FolderPlus size={18} />}
             label={t("addToAlbum")}
             onClick={onAddToAlbum}
           />
         )}
         {onStartCull && (
           <>
-            <div className="mx-1 h-4 w-px bg-border" />
-            <ActionButton
-              icon={<Swords size={15} />}
+            <div className="selection-menu-divider" />
+            <MenuAction
+              icon={<Swords size={18} />}
               label={t("cullStart")}
               onClick={onStartCull}
             />
           </>
         )}
         {onExport && (
-          <ActionButton
-            icon={<Download size={15} />}
+          <MenuAction
+            icon={<Download size={18} />}
             label={t("export")}
             onClick={onExport}
           />
         )}
         {onUploadToCloud && (
-          <ActionButton
-            icon={<CloudUpload size={15} />}
+          <MenuAction
+            icon={<CloudUpload size={18} />}
             label={t("upload")}
             onClick={onUploadToCloud}
           />
         )}
         {onShare && (
-          <ActionButton
-            icon={<Share2 size={15} />}
+          <MenuAction
+            icon={<Share2 size={18} />}
             label={t("share")}
             onClick={onShare}
           />
         )}
         {onRename && (
-          <ActionButton
-            icon={<Pencil size={15} />}
+          <MenuAction
+            icon={<Pencil size={18} />}
             label={t("rename")}
             onClick={onRename}
           />
         )}
         {onConvert && (
-          <ActionButton
-            icon={<ImageIcon size={15} />}
+          <MenuAction
+            icon={<ImageIcon size={18} />}
             label={t("convertFormat")}
             onClick={onConvert}
           />
@@ -168,41 +169,44 @@ export function SelectionActionBar({
 
         {onDelete && (
           <>
-            <div className="mx-1 h-4 w-px bg-border" />
-            <ActionButton
-              className="text-destructive hover:bg-destructive/10"
+            <div className="selection-menu-divider" />
+            <MenuAction
+              destructive
               disabled={executing !== null}
               executing={executing === "delete"}
-              icon={<Trash2 size={15} />}
+              icon={<Trash2 size={18} />}
               label={t("delete")}
               onClick={wrapAction("delete", onDelete)}
             />
           </>
         )}
 
-        <div className="mx-1 h-4 w-px bg-border" />
+        <div className="selection-menu-divider" />
 
         <button
-          className="flex items-center gap-1 rounded-[6px] px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          className="selection-menu-link"
           onClick={onClearSelection}
           title={t("clearSelectionTitle")}
         >
-          <X size={14} />
+          <span className="selection-menu-icon">
+            <X size={18} />
+          </span>
+          <span className="selection-menu-title">{t("clearSelection")}</span>
         </button>
       </div>
     </div>
   );
 }
 
-function ActionButton({
+function MenuAction({
   icon,
   label,
   onClick,
-  className = "",
+  destructive = false,
   disabled = false,
   executing = false,
 }: {
-  className?: string;
+  destructive?: boolean;
   disabled?: boolean;
   executing?: boolean;
   icon: React.ReactNode;
@@ -211,17 +215,19 @@ function ActionButton({
 }) {
   return (
     <button
-      className={`flex items-center gap-1.5 rounded-[6px] px-2.5 py-1.5 text-[11px] text-foreground/80 transition-colors hover:bg-foreground/8 hover:text-foreground disabled:opacity-40 ${className}`}
-      disabled={disabled || executing}
+      className={`selection-menu-link${destructive ? " selection-menu-destructive" : ""}`}
+      disabled={disabled}
       onClick={onClick}
       title={label}
     >
-      {executing ? (
-        <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
-      ) : (
-        icon
-      )}
-      <span className="hidden sm:inline">{label}</span>
+      <span className="selection-menu-icon">
+        {executing ? (
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        ) : (
+          icon
+        )}
+      </span>
+      <span className="selection-menu-title">{label}</span>
     </button>
   );
 }
