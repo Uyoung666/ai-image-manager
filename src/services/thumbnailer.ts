@@ -7,7 +7,10 @@ import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
+import { createLogger } from "@/utils/logger";
 import { extractRawPreview, isRawFile } from "./raw-preview";
+
+const log = createLogger("thumbnailer");
 
 // Base sizes at 1x DPI — actual generation size is multiplied by devicePixelRatio
 const THUMBNAIL_BASE_SIZES = {
@@ -339,7 +342,7 @@ export async function checkAndCleanDiskCache(): Promise<{
     return { cleaned: false, freedMB: 0, filesRemoved: 0 };
   }
 
-  console.log(
+  log.info(
     `[Thumbnailer] Disk cache cleanup triggered: ${usageMB.toFixed(1)}MB, ${usage.fileCount} files`
   );
 
@@ -393,7 +396,7 @@ export async function checkAndCleanDiskCache(): Promise<{
     }
   }
 
-  console.log(
+  log.info(
     `[Thumbnailer] Cleaned ${filesRemoved} files, freed ${(freedBytes / (1024 * 1024)).toFixed(1)}MB`
   );
 
@@ -769,7 +772,7 @@ export async function cleanOrphanThumbnails(): Promise<{
         freedBytes += fileSize;
         removed++;
       } catch (err: any) {
-        console.error(
+        log.error(
           `[Thumbnailer] Failed to delete orphan: ${entry} (code: ${err?.code || "unknown"})`
         );
       }

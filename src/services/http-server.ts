@@ -11,7 +11,10 @@ import {
 } from "@/services/thumbnailer";
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
+import { createLogger } from "@/utils/logger";
 import { isSafePath } from "@/utils/path-security";
+
+const log = createLogger("http-server");
 
 // ── 服务器实例与状态 ──────────────────────────────────────────────────
 
@@ -191,7 +194,7 @@ function serveStaticFile(
           res.writeHead(500);
           res.end("Internal Server Error");
         }
-        console.warn(
+        log.warn(
           `[HttpServer] stream error for ${filePath}: ${(err as Error)?.message ?? String(err)}`
         );
       });
@@ -207,7 +210,7 @@ function serveStaticFile(
           res.writeHead(500);
           res.end("Internal Server Error");
         }
-        console.warn(
+        log.warn(
           `[HttpServer] stat error for ${filePath}: ${(err as Error)?.message ?? String(err)}`
         );
       }
@@ -227,13 +230,13 @@ async function regenerateAndServeThumbnail(
         res.writeHead(404);
         res.end("Not Found");
       }
-      console.warn(
+      log.warn(
         `[HttpServer] /thumbnail orphaned, no original photo: ${safePath}`
       );
       return;
     }
 
-    console.log(
+    log.info(
       `[HttpServer] /thumbnail regenerating: ${path.basename(safePath)} → ${lookup.photoPath} (${lookup.size})`
     );
 
@@ -244,7 +247,7 @@ async function regenerateAndServeThumbnail(
       res.writeHead(500);
       res.end("Thumbnail regeneration failed");
     }
-    console.warn(
+    log.warn(
       `[HttpServer] /thumbnail regeneration failed for ${safePath}: ${(regenerateErr as Error)?.message ?? String(regenerateErr)}`
     );
   }
@@ -261,13 +264,13 @@ async function regenerateAndServeDuelPreview(
         res.writeHead(404);
         res.end("Not Found");
       }
-      console.warn(
+      log.warn(
         `[HttpServer] /duel-preview orphaned, no original photo: ${safePath}`
       );
       return;
     }
 
-    console.log(
+    log.info(
       `[HttpServer] /duel-preview regenerating: ${path.basename(safePath)} → ${photoPath}`
     );
 
@@ -286,7 +289,7 @@ async function regenerateAndServeDuelPreview(
       res.writeHead(500);
       res.end("Duel preview regeneration failed");
     }
-    console.warn(
+    log.warn(
       `[HttpServer] /duel-preview regeneration failed for ${safePath}: ${(regenerateErr as Error)?.message ?? String(regenerateErr)}`
     );
   }
@@ -321,7 +324,7 @@ async function handleThumbnail(
       await sharp(safePath).metadata();
     } catch {
       // Corrupt file → delete and fall through to regeneration
-      console.warn(
+      log.warn(
         `[HttpServer] /thumbnail corrupt file, deleting: ${safePath}`
       );
       await fs.promises.unlink(safePath).catch(() => {
@@ -374,7 +377,7 @@ async function handleDuelPreview(
     try {
       await sharp(safePath).metadata();
     } catch {
-      console.warn(
+      log.warn(
         `[HttpServer] /duel-preview corrupt file, deleting: ${safePath}`
       );
       await fs.promises.unlink(safePath).catch(() => {
@@ -404,7 +407,7 @@ async function handlePreview(
   const ext = path.extname(safePath).toLowerCase();
 
   if (!isRawFile(safePath)) {
-    console.warn(
+    log.warn(
       `[HttpServer] /preview rejected: not a RAW file — ext=${ext} path=${safePath}`
     );
     res.writeHead(404);
@@ -417,7 +420,7 @@ async function handlePreview(
     stats = await fs.promises.stat(safePath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    console.error(
+    log.error(
       `[HttpServer] /preview stat failed: path=${safePath} code=${code} message=${(err as Error).message}`
     );
     if (!res.headersSent) {
@@ -428,7 +431,7 @@ async function handlePreview(
   }
 
   if (!stats.isFile()) {
-    console.warn(
+    log.warn(
       `[HttpServer] /preview rejected: path is not a file — path=${safePath}`
     );
     res.writeHead(404);
@@ -436,7 +439,7 @@ async function handlePreview(
     return;
   }
 
-  console.log(
+  log.info(
     `[HttpServer] /preview extracting: path=${safePath} size=${stats.size} ext=${ext}`
   );
 
@@ -446,7 +449,7 @@ async function handlePreview(
   try {
     preview = await extractRawPreview(safePath);
   } catch (err) {
-    console.error(
+    log.error(
       `[HttpServer] /preview extractRawPreview THREW: path=${safePath} error=${(err as Error).message} stack=${(err as Error).stack}`
     );
     if (!res.headersSent) {
@@ -459,7 +462,7 @@ async function handlePreview(
   const extractMs = Date.now() - extractStart;
 
   if (!preview) {
-    console.warn(
+    log.warn(
       `[HttpServer] /preview returned null — all 4 extraction stages failed. path=${safePath} ext=${ext} size=${stats.size} elapsed=${extractMs}ms`
     );
     res.writeHead(404);
@@ -468,7 +471,7 @@ async function handlePreview(
   }
 
   if (preview.length === 0) {
-    console.error(
+    log.error(
       `[HttpServer] /preview returned EMPTY buffer — length=0. path=${safePath} elapsed=${extractMs}ms`
     );
     res.writeHead(404);
@@ -476,7 +479,7 @@ async function handlePreview(
     return;
   }
 
-  console.log(
+  log.info(
     `[HttpServer] /preview OK: path=${safePath} size=${preview.length} bytes elapsed=${extractMs}ms`
   );
 
@@ -514,7 +517,7 @@ function handleImage(
       // Sharp 的预编译 libvips 不含专有 RAW 解码器（CR2/NEF 等），
       // 强行传入会导致 "compression method is not configured" 致命错误。
       if (isRawFile(safePath)) {
-        console.log(
+        log.info(
           `[HttpServer] /image RAW → extractRawPreview: path=${safePath} ext=${ext}`
         );
 
@@ -524,7 +527,7 @@ function handleImage(
         try {
           preview = await extractRawPreview(safePath);
         } catch (err) {
-          console.error(
+          log.error(
             `[HttpServer] /image extractRawPreview THREW: path=${safePath} error=${(err as Error).message}`
           );
           safeEndError(res, 500, "Preview extraction failed");
@@ -532,14 +535,14 @@ function handleImage(
         }
 
         if (!preview || preview.length === 0) {
-          console.error(
+          log.error(
             `[HttpServer] /image extractRawPreview failed: path=${safePath} elapsed=${Date.now() - extractStart}ms`
           );
           safeEndError(res, 500, "No embedded preview available");
           return;
         }
 
-        console.log(
+        log.info(
           `[HttpServer] /image RAW preview OK: path=${safePath} size=${preview.length} bytes elapsed=${Date.now() - extractStart}ms`
         );
 
@@ -568,7 +571,7 @@ function handleImage(
             res.writeHead(500);
             res.end("Internal Server Error");
           }
-          console.warn(
+          log.warn(
             `[HttpServer] /image static stream error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
           );
         });
@@ -579,7 +582,7 @@ function handleImage(
 
       // ── 路径 3：其他需转换格式 (HEIC/TIFF/…) → sharp 流式转换 ──
       // 受并发信号量保护，上限 4 个同时转换。
-      console.log(
+      log.info(
         `[HttpServer] /image converting via sharp: path=${safePath} ext=${ext} size=${stats.size}`
       );
 
@@ -628,7 +631,7 @@ function handleImage(
               res.writeHead(500);
               res.end("Image conversion failed");
             }
-            console.error(
+            log.error(
               `[HttpServer] /image sharp conversion error for ${safePath}: ${err.message}`
             );
           });
@@ -640,7 +643,7 @@ function handleImage(
             res.writeHead(500);
             res.end("Image conversion failed");
           }
-          console.error(
+          log.error(
             `[HttpServer] /image sharp init error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
           );
         }
@@ -711,7 +714,7 @@ function handleRequest(
     setCorsHeaders(res);
     res.writeHead(403);
     res.end("Forbidden");
-    console.warn(`[HttpServer] Security: blocked access to ${filePath}`);
+    log.warn(`[HttpServer] Security: blocked access to ${filePath}`);
     return;
   }
 
@@ -771,7 +774,7 @@ export function startHttpServerEarly(): Promise<number> {
         if (err.code === "EADDRINUSE") {
           attempts++;
           if (attempts < MAX_RETRIES) {
-            console.warn(
+            log.warn(
               `[HttpServer] Port ${port} is occupied, retrying (attempt ${attempts + 1}/${MAX_RETRIES})…`
             );
             server?.close();
