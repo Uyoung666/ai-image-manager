@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Switch } from "@/components/ui/switch";
 import {
   WatermarkPreview,
   type WatermarkPreviewSettings,
@@ -151,20 +152,12 @@ function WatermarkSettingsPage() {
           <h2 className="font-semibold text-[14px] text-foreground">
             {t("watermarkSettings")}
           </h2>
-          <button
-            className={`h-5 w-9 rounded-full transition-colors ${
-              wm.enabled ? "bg-primary" : "bg-muted"
-            }`}
-            onClick={() =>
-              setWm((prev) => ({ ...prev, enabled: !prev.enabled }))
+          <Switch
+            checked={wm.enabled}
+            onCheckedChange={(checked) =>
+              setWm((prev) => ({ ...prev, enabled: checked }))
             }
-          >
-            <div
-              className={`h-4 w-4 rounded-full bg-white transition-transform ${
-                wm.enabled ? "translate-x-[18px]" : "translate-x-[2px]"
-              }`}
-            />
-          </button>
+          />
         </div>
 
         {/* Preview (always visible, dimmed when disabled) */}

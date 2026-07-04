@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -269,20 +270,11 @@ export function GpuSettingsCard({
               </p>
             )}
           </div>
-          <button
-            className={`h-5 w-9 rounded-full transition-colors ${
-              enabled ? "bg-primary" : "bg-muted"
-            }`}
+          <Switch
+            checked={enabled}
             disabled={detectPhase === "checking"}
-            onClick={() => setEnabled(!enabled)}
-            type="button"
-          >
-            <div
-              className={`h-4 w-4 rounded-full bg-white transition-transform ${
-                enabled ? "translate-x-[18px]" : "translate-x-[2px]"
-              }`}
-            />
-          </button>
+            onCheckedChange={setEnabled}
+          />
         </div>
 
         {/* Feature status */}

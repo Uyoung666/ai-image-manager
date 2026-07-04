@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import LangToggle from "@/components/lang-toggle";
 import ToggleTheme from "@/components/toggle-theme";
+import { Switch } from "@/components/ui/switch";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -90,19 +91,10 @@ function AppearanceSettingsPage() {
                 {t("openAtLoginHint")}
               </p>
             </div>
-            <button
-              className={`h-5 w-9 rounded-full transition-colors ${
-                openAtLogin ? "bg-primary" : "bg-muted"
-              }`}
-              onClick={handleOpenAtLoginToggle}
-              type="button"
-            >
-              <div
-                className={`h-4 w-4 rounded-full bg-white transition-transform ${
-                  openAtLogin ? "translate-x-[18px]" : "translate-x-[2px]"
-                }`}
-              />
-            </button>
+            <Switch
+              checked={openAtLogin}
+              onCheckedChange={handleOpenAtLoginToggle}
+            />
           </div>
 
           {/* Sidebar default state */}
@@ -115,19 +107,10 @@ function AppearanceSettingsPage() {
                 {t("sidebarDefaultCollapsedHint")}
               </p>
             </div>
-            <button
-              className={`h-5 w-9 rounded-full transition-colors ${
-                sidebarCollapsed ? "bg-primary" : "bg-muted"
-              }`}
-              onClick={handleSidebarCollapsedToggle}
-              type="button"
-            >
-              <div
-                className={`h-4 w-4 rounded-full bg-white transition-transform ${
-                  sidebarCollapsed ? "translate-x-[18px]" : "translate-x-[2px]"
-                }`}
-              />
-            </button>
+            <Switch
+              checked={sidebarCollapsed}
+              onCheckedChange={handleSidebarCollapsedToggle}
+            />
           </div>
         </div>
       </section>

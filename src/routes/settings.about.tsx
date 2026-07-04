@@ -1,9 +1,8 @@
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { ChevronDown, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openExternalLink } from "@/actions/shell";
+import { AnimatedGitHubButton } from "@/components/animated-github-button";
 import { ConfettiOverlay } from "@/components/ConfettiOverlay";
 import { SignatureOverlay } from "@/components/SignatureOverlay";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -84,10 +83,7 @@ function AboutSettingsPage() {
         onDone={handleConfettiDone}
         onMidpoint={handleConfettiMidpoint}
       />
-      <SignatureOverlay
-        active={signatureActive}
-        onDone={handleSignatureDone}
-      />
+      <SignatureOverlay active={signatureActive} onDone={handleSignatureDone} />
 
       <div className="space-y-6">
         {/* App info */}
@@ -128,23 +124,11 @@ function AboutSettingsPage() {
               </span>
               <span className="text-[13px] text-foreground">Uyoung</span>
             </div>
+          </div>
 
-            {/* GitHub link */}
-            <div className="border-border border-t pt-3">
-              <button
-                className="flex w-full items-center gap-2 rounded-[6px] border border-input px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
-                onClick={() =>
-                  openExternalLink(
-                    "https://github.com/Uyoung666/ai-image-manager"
-                  )
-                }
-                title={t("settingsOpenGitHub")}
-                type="button"
-              >
-                <SiGithub className="h-4 w-4" />
-                <span>{t("settingsGitHub")}</span>
-              </button>
-            </div>
+          {/* GitHub — standalone 3D flip button */}
+          <div className="flex justify-start pt-1">
+            <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
           </div>
         </section>
 
