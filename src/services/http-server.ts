@@ -3,6 +3,12 @@ import http from "node:http";
 import path from "node:path";
 import sharp from "sharp";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
+import {
+  findPhotoPathByDuelPreview,
+  findPhotoPathByThumbnail,
+  generateDuelPreview,
+  generateThumbnail,
+} from "@/services/thumbnailer";
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { isSafePath } from "@/utils/path-security";
@@ -147,12 +153,19 @@ function resolveSafePath(targetPath: string): string | null {
 }
 
 // ── 路由：GET /thumbnail ──────────────────────────────────────────────
+// 三阶段处理：
+//   Phase A — 文件存在且有效 → 直接流式返回
+//   Phase B — 文件缺失 (ENOENT) 或损坏 → 按需重新生成后返回
+// 重试按钮（前端 ?retry=N 参数）和缓存淘汰后均自动恢复。
 
-function handleThumbnail(safePath: string, res: http.ServerResponse): void {
-  setCorsHeaders(res);
-
+function serveStaticFile(
+  filePath: string,
+  res: http.ServerResponse,
+  mimeType: string,
+  immutable: boolean
+): void {
   fs.promises
-    .stat(safePath)
+    .stat(filePath)
     .then((stats) => {
       if (!stats.isFile()) {
         res.writeHead(404);
@@ -160,14 +173,17 @@ function handleThumbnail(safePath: string, res: http.ServerResponse): void {
         return;
       }
 
-      const diskExt = path.extname(safePath).toLowerCase();
-      res.setHeader("content-type", getMimeType(diskExt));
-      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      res.setHeader("content-type", mimeType);
+      res.setHeader(
+        "cache-control",
+        immutable
+          ? "public, max-age=31536000, immutable"
+          : "public, max-age=86400"
+      );
       res.setHeader("content-length", stats.size);
       res.writeHead(200);
 
-      const readStream = fs.createReadStream(safePath);
-
+      const readStream = fs.createReadStream(filePath);
       readStream.on("error", (err) => {
         if (res.headersSent) {
           res.destroy();
@@ -176,10 +192,9 @@ function handleThumbnail(safePath: string, res: http.ServerResponse): void {
           res.end("Internal Server Error");
         }
         console.warn(
-          `[HttpServer] /thumbnail stream error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
+          `[HttpServer] stream error for ${filePath}: ${(err as Error)?.message ?? String(err)}`
         );
       });
-
       readStream.pipe(res);
     })
     .catch((err: NodeJS.ErrnoException) => {
@@ -193,64 +208,189 @@ function handleThumbnail(safePath: string, res: http.ServerResponse): void {
           res.end("Internal Server Error");
         }
         console.warn(
-          `[HttpServer] /thumbnail error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
+          `[HttpServer] stat error for ${filePath}: ${(err as Error)?.message ?? String(err)}`
         );
       }
     });
 }
 
-/** /duel-preview 路由 — 预生成的 2560px JPEG 对比预览（PK 选片专用） */
-function handleDuelPreview(
+// ── 按需重新生成辅助函数 ────────────────────────────────────────────────
+
+async function regenerateAndServeThumbnail(
   safePath: string,
   res: http.ServerResponse
-): void {
+): Promise<void> {
+  try {
+    const lookup = findPhotoPathByThumbnail(safePath);
+    if (!lookup) {
+      if (!res.headersSent) {
+        res.writeHead(404);
+        res.end("Not Found");
+      }
+      console.warn(
+        `[HttpServer] /thumbnail orphaned, no original photo: ${safePath}`
+      );
+      return;
+    }
+
+    console.log(
+      `[HttpServer] /thumbnail regenerating: ${path.basename(safePath)} → ${lookup.photoPath} (${lookup.size})`
+    );
+
+    const result = await generateThumbnail(lookup.photoPath, lookup.size);
+    serveStaticFile(result.thumbnailPath, res, "image/webp", true);
+  } catch (regenerateErr) {
+    if (!res.headersSent) {
+      res.writeHead(500);
+      res.end("Thumbnail regeneration failed");
+    }
+    console.warn(
+      `[HttpServer] /thumbnail regeneration failed for ${safePath}: ${(regenerateErr as Error)?.message ?? String(regenerateErr)}`
+    );
+  }
+}
+
+async function regenerateAndServeDuelPreview(
+  safePath: string,
+  res: http.ServerResponse
+): Promise<void> {
+  try {
+    const photoPath = findPhotoPathByDuelPreview(safePath);
+    if (!photoPath) {
+      if (!res.headersSent) {
+        res.writeHead(404);
+        res.end("Not Found");
+      }
+      console.warn(
+        `[HttpServer] /duel-preview orphaned, no original photo: ${safePath}`
+      );
+      return;
+    }
+
+    console.log(
+      `[HttpServer] /duel-preview regenerating: ${path.basename(safePath)} → ${photoPath}`
+    );
+
+    const result = await generateDuelPreview(photoPath);
+    if (!result) {
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end("Duel preview generation returned null");
+      }
+      return;
+    }
+
+    serveStaticFile(result.previewPath, res, "image/jpeg", true);
+  } catch (regenerateErr) {
+    if (!res.headersSent) {
+      res.writeHead(500);
+      res.end("Duel preview regeneration failed");
+    }
+    console.warn(
+      `[HttpServer] /duel-preview regeneration failed for ${safePath}: ${(regenerateErr as Error)?.message ?? String(regenerateErr)}`
+    );
+  }
+}
+
+async function handleThumbnail(
+  safePath: string,
+  res: http.ServerResponse
+): Promise<void> {
   setCorsHeaders(res);
 
-  fs.promises
-    .stat(safePath)
-    .then((stats) => {
-      if (!stats.isFile()) {
-        res.writeHead(404);
-        res.end("Not a file");
-        return;
-      }
-
-      res.setHeader("content-type", "image/jpeg");
-      res.setHeader("cache-control", "public, max-age=31536000, immutable");
-      res.setHeader("content-length", stats.size);
-      res.writeHead(200);
-
-      const readStream = fs.createReadStream(safePath);
-
-      readStream.on("error", (err) => {
-        if (res.headersSent) {
-          res.destroy();
-        } else {
-          res.writeHead(500);
-          res.end("Internal Server Error");
-        }
-        console.warn(
-          `[HttpServer] /duel-preview stream error for ${safePath}: ${(err as Error)?.message ?? String(err)}`
-        );
-      });
-
-      readStream.pipe(res);
-    })
-    .catch((err: NodeJS.ErrnoException) => {
+  // Phase A: Try to serve existing file (with integrity validation)
+  let stats: fs.Stats;
+  try {
+    stats = await fs.promises.stat(safePath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
       if (!res.headersSent) {
-        const code = err?.code;
-        if (code === "ENOENT") {
-          res.writeHead(404);
-          res.end("Not Found");
-        } else if (code === "EACCES" || code === "EPERM") {
-          res.writeHead(403);
-          res.end("Forbidden");
-        } else {
-          res.writeHead(500);
-          res.end("Internal Server Error");
-        }
+        res.writeHead(500);
+        res.end("Internal Server Error");
       }
-    });
+      return;
+    }
+    // File not found → Phase B
+    stats = null as unknown as fs.Stats;
+  }
+
+  if (stats?.isFile()) {
+    // Validate integrity: sharp.metadata() on a corrupt file will throw
+    try {
+      await sharp(safePath).metadata();
+    } catch {
+      // Corrupt file → delete and fall through to regeneration
+      console.warn(
+        `[HttpServer] /thumbnail corrupt file, deleting: ${safePath}`
+      );
+      await fs.promises.unlink(safePath).catch(() => {
+        /* best-effort deletion */
+      });
+      stats = null as unknown as fs.Stats; // trigger Phase B
+    }
+  }
+
+  if (stats?.isFile()) {
+    // Valid file → serve
+    const diskExt = path.extname(safePath).toLowerCase();
+    serveStaticFile(safePath, res, getMimeType(diskExt), true);
+    return;
+  }
+
+  // Phase B: On-demand regeneration
+  await regenerateAndServeThumbnail(safePath, res);
+}
+
+/** /duel-preview 路由 — 预生成的 2560px JPEG 对比预览（PK 选片专用）。
+ *  文件缺失或损坏时自动触发重新生成。 */
+async function handleDuelPreview(
+  safePath: string,
+  res: http.ServerResponse
+): Promise<void> {
+  setCorsHeaders(res);
+
+  // Phase A: Try to serve existing file (with integrity validation)
+  let stats: fs.Stats;
+  try {
+    stats = await fs.promises.stat(safePath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+    if (code === "ENOENT") {
+      stats = null as unknown as fs.Stats; // Phase B
+    } else {
+      res.writeHead(500);
+      res.end("Internal Server Error");
+      return;
+    }
+  }
+
+  if (stats?.isFile()) {
+    try {
+      await sharp(safePath).metadata();
+    } catch {
+      console.warn(
+        `[HttpServer] /duel-preview corrupt file, deleting: ${safePath}`
+      );
+      await fs.promises.unlink(safePath).catch(() => {
+        /* best-effort deletion */
+      });
+      stats = null as unknown as fs.Stats;
+    }
+  }
+
+  if (stats?.isFile()) {
+    serveStaticFile(safePath, res, "image/jpeg", true);
+    return;
+  }
+
+  // Phase B: On-demand regeneration
+  await regenerateAndServeDuelPreview(safePath, res);
 }
 
 // ── 路由：GET /preview ────────────────────────────────────────────────

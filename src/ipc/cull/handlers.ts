@@ -76,7 +76,9 @@ const UpdatePhotoStatusSchema = z.object({
   status: z.enum(["pending", "kept", "rejected"]),
 });
 
-export { computeElo, PK_MODE_CONFIG } from "./elo";
+import { computeElo, PK_MODE_CONFIG } from "./elo";
+
+export { computeElo, PK_MODE_CONFIG };
 
 function selectPhotoFields() {
   return {

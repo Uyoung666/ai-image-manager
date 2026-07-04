@@ -16,7 +16,7 @@ const THUMBNAIL_BASE_SIZES = {
   lg: 800,
 } as const;
 
-type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
+export type ThumbSize = keyof typeof THUMBNAIL_BASE_SIZES;
 
 // ── 对比预览 (Duel Preview) — PK 选片专用高质量预览 ─────────────────
 
@@ -46,9 +46,9 @@ interface ThumbnailCacheConfig {
 
 const CACHE_CONFIG: ThumbnailCacheConfig = {
   maxMemoryMB: 250,
-  maxDiskMB: 3072, // 3GB（含对比预览 .jpg）
-  maxDiskFiles: 15_000,
-  cleanupThresholdMB: 2700, // 2.7GB 触发清理
+  maxDiskMB: 20480, // 20GB（含对比预览 .jpg）
+  maxDiskFiles: 100_000,
+  cleanupThresholdMB: 18432, // ~90% of max, triggers cleanup at 18GB
 };
 
 let thumbnailDir: string;
@@ -61,6 +61,46 @@ interface ThumbnailResult {
 let dprScale = 2; // default to 2x for HiDPI displays
 const diskAccessLog = new Map<string, number>();
 const inFlightRequests = new Map<string, Promise<ThumbnailResult>>();
+
+// ── 生成并发控制 ────────────────────────────────────────────────────────
+// 防止大量导入时 sharp 实例爆炸，限制同时执行的生成任务数。
+// 复用 http-server.ts 中 ConversionSemaphore 的同款模式。
+
+class GenerationSemaphore {
+  private running = 0;
+  private readonly pending: Array<() => void> = [];
+  private readonly max: number;
+
+  constructor(max: number) {
+    this.max = max;
+  }
+
+  acquire(): Promise<void> {
+    if (this.running < this.max) {
+      this.running++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.pending.push(resolve);
+    });
+  }
+
+  release(): void {
+    this.running--;
+    const next = this.pending.shift();
+    if (next) {
+      this.running++;
+      next();
+    }
+  }
+}
+
+// 并发数上限：取 CPU 核心数的一半，最少 2，最多 4
+const genSemaphore = new GenerationSemaphore(4);
+
+// ── 清理触发计数器（替代 1% 概率）───────────────────────────────────────
+let generationCount = 0;
+const CLEANUP_CHECK_INTERVAL = 50;
 
 export function initThumbnailer(): void {
   thumbnailDir = path.join(getDataPath(), "thumbnails");
@@ -197,31 +237,73 @@ async function doGenerateDuelPreview(
   previewPath: string,
   _cacheKey: string
 ): Promise<{ previewPath: string; width: number; height: number } | null> {
-  let input: string | Buffer = imagePath;
-  if (isRawFile(imagePath)) {
-    const preview = await extractRawPreview(imagePath);
-    if (!preview) {
+  await genSemaphore.acquire();
+  try {
+    // 生成前检查：如果存在损坏文件，先删除
+    try {
+      await fs.promises.access(previewPath);
+      try {
+        await sharp(previewPath).metadata();
+      } catch {
+        // 文件存在但损坏 → 删除
+        await fs.promises.unlink(previewPath).catch(() => {});
+      }
+    } catch {
+      // 文件不存在，正常继续
+    }
+
+    let input: string | Buffer = imagePath;
+    if (isRawFile(imagePath)) {
+      const preview = await extractRawPreview(imagePath);
+      if (!preview) {
+        return null;
+      }
+      input = preview;
+    }
+
+    const pipeline = sharp(input, { failOn: "none" })
+      .rotate()
+      .resize(DUEL_PREVIEW_LONG_EDGE, DUEL_PREVIEW_LONG_EDGE, {
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: DUEL_PREVIEW_QUALITY });
+
+    const { data, info } = await pipeline.toBuffer({
+      resolveWithObject: true,
+    });
+    await fs.promises.writeFile(previewPath, data);
+
+    // ── 写入后验证 ──
+    try {
+      const verifyMeta = await sharp(previewPath).metadata();
+      if (!verifyMeta.width || !verifyMeta.height || verifyMeta.width === 0) {
+        throw new Error("Generated duel preview is invalid (zero dimensions)");
+      }
+    } catch (verifyErr) {
+      await fs.promises.unlink(previewPath).catch(() => {});
       return null;
     }
-    input = preview;
+
+    // 计入生成计数器（与缩略图共享清理触发）
+    generationCount++;
+    if (generationCount >= CLEANUP_CHECK_INTERVAL) {
+      generationCount = 0;
+      setTimeout(() => {
+        checkAndCleanDiskCache().catch(() => {
+          /* ignore */
+        });
+      }, 0);
+    }
+
+    return {
+      previewPath,
+      width: info.width,
+      height: info.height,
+    };
+  } finally {
+    genSemaphore.release();
   }
-
-  const pipeline = sharp(input, { failOn: "none" })
-    .rotate()
-    .resize(DUEL_PREVIEW_LONG_EDGE, DUEL_PREVIEW_LONG_EDGE, {
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .jpeg({ quality: DUEL_PREVIEW_QUALITY });
-
-  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
-  await fs.promises.writeFile(previewPath, data);
-
-  return {
-    previewPath,
-    width: info.width,
-    height: info.height,
-  };
 }
 
 /**
@@ -356,7 +438,10 @@ export async function generateThumbnail(
       height: meta.height || 0,
     };
   } catch {
-    // 不在磁盘上，继续生成
+    // 文件损坏或不存在 → 删除损坏文件后重新生成
+    await fs.promises.unlink(thumbPath).catch(() => {
+      /* skip */
+    });
   }
 
   // ── 请求去重：正在生成中的缩略图直接 await 同一个 Promise ──
@@ -384,40 +469,65 @@ async function doGenerate(
 ): Promise<ThumbnailResult> {
   const targetSize = getThumbnailSize(size);
 
-  // For RAW files, extract the embedded JPEG preview first
-  let input: string | Buffer = imagePath;
-  if (isRawFile(imagePath)) {
-    const preview = await extractRawPreview(imagePath);
-    if (preview) {
-      input = preview;
+  await genSemaphore.acquire();
+  try {
+    // For RAW files, extract the embedded JPEG preview first
+    let input: string | Buffer = imagePath;
+    if (isRawFile(imagePath)) {
+      const preview = await extractRawPreview(imagePath);
+      if (preview) {
+        input = preview;
+      }
     }
+
+    const pipeline = sharp(input, { failOn: "none" })
+      .rotate()
+      .resize(targetSize, targetSize, {
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 85, effort: 4 });
+    const { data: thumbBuffer, info } = await pipeline.toBuffer({
+      resolveWithObject: true,
+    });
+
+    await fs.promises.writeFile(thumbPath, thumbBuffer);
+
+    // ── 写入后验证：确保磁盘上的文件是完整有效的图像 ──
+    try {
+      const verifyMeta = await sharp(thumbPath).metadata();
+      if (!verifyMeta.width || !verifyMeta.height || verifyMeta.width === 0) {
+        throw new Error("Generated thumbnail is invalid (zero dimensions)");
+      }
+    } catch (verifyErr) {
+      // 删除损坏文件，避免污染缓存
+      await fs.promises.unlink(thumbPath).catch(() => {});
+      throw new Error(
+        `Thumbnail write verification failed for ${thumbPath}: ${(verifyErr as Error).message}`
+      );
+    }
+
+    memoryCache?.set(cacheKey, thumbBuffer);
+
+    // 每生成 50 个缩略图触发一次磁盘缓存清理检查
+    generationCount++;
+    if (generationCount >= CLEANUP_CHECK_INTERVAL) {
+      generationCount = 0;
+      setTimeout(() => {
+        checkAndCleanDiskCache().catch(() => {
+          /* ignore */
+        });
+      }, 0);
+    }
+
+    return {
+      thumbnailPath: thumbPath,
+      width: info.width,
+      height: info.height,
+    };
+  } finally {
+    genSemaphore.release();
   }
-
-  const pipeline = sharp(input, { failOn: "none" })
-    .rotate()
-    .resize(targetSize, targetSize, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 85, effort: 4 });
-  const { data: thumbBuffer, info } = await pipeline.toBuffer({
-    resolveWithObject: true,
-  });
-
-  await fs.promises.writeFile(thumbPath, thumbBuffer);
-  memoryCache?.set(cacheKey, thumbBuffer);
-
-  // Periodically check and clean cache (1% chance per generation)
-  if (Math.random() < 0.01) {
-    setTimeout(() => {
-      checkAndCleanDiskCache().catch(() => {
-        /* ignore */
-      });
-    }, 0);
-  }
-
-  return {
-    thumbnailPath: thumbPath,
-    width: info.width,
-    height: info.height,
-  };
 }
 
 export async function getThumbnailBuffer(
@@ -670,4 +780,90 @@ export async function cleanOrphanThumbnails(): Promise<{
     removed,
     freedMB: Math.round((freedBytes / (1024 * 1024)) * 10) / 10,
   };
+}
+
+// ── HTTP Server 回退生成辅助函数 ─────────────────────────────────────────
+// 当 HTTP Server 发现缩略图 / 对比预览文件缺失或损坏时，
+// 通过这些函数反查原始照片路径并触发重新生成。
+
+/**
+ * 根据缩略图文件路径反查原始照片路径和缩略图尺寸。
+ * 先通过数据库 thumbnailPath 列直接匹配（快速路径），
+ * 再遍历所有照片计算预期路径（覆盖 sm/lg 尺寸的按需生成场景）。
+ */
+export function findPhotoPathByThumbnail(
+  thumbPath: string
+): { photoPath: string; size: ThumbSize } | null {
+  try {
+    const db = getDatabase();
+    const thumbFilename = path.basename(thumbPath);
+
+    // 快速路径：匹配 DB 中记录的 thumbnailPath 列
+    const allPhotos = db
+      .select({
+        path: photos.path,
+        thumbnailPath: photos.thumbnailPath,
+      })
+      .from(photos)
+      .all();
+
+    for (const photo of allPhotos) {
+      if (photo.thumbnailPath === thumbPath) {
+        return { photoPath: photo.path, size: "md" };
+      }
+    }
+
+    // 慢速路径：遍历所有照片，计算预期路径（覆盖 sm/lg 尺寸）
+    for (const photo of allPhotos) {
+      for (const size of ["sm", "md", "lg"] as ThumbSize[]) {
+        if (
+          path.basename(getThumbnailPath(photo.path, size)) === thumbFilename
+        ) {
+          return { photoPath: photo.path, size };
+        }
+      }
+    }
+  } catch {
+    // 数据库未就绪
+  }
+  return null;
+}
+
+/**
+ * 根据对比预览文件路径反查原始照片路径。
+ * 先通过数据库 duelPreviewPath 列匹配，再遍历计算预期路径。
+ */
+export function findPhotoPathByDuelPreview(
+  previewPath: string
+): string | null {
+  try {
+    const db = getDatabase();
+    const previewFilename = path.basename(previewPath);
+
+    const allPhotos = db
+      .select({
+        path: photos.path,
+        duelPreviewPath: photos.duelPreviewPath,
+      })
+      .from(photos)
+      .all();
+
+    for (const photo of allPhotos) {
+      if (photo.duelPreviewPath === previewPath) {
+        return photo.path;
+      }
+    }
+
+    // 慢速路径
+    for (const photo of allPhotos) {
+      if (
+        path.basename(getDuelPreviewPath(photo.path)) === previewFilename
+      ) {
+        return photo.path;
+      }
+    }
+  } catch {
+    /* DB not ready */
+  }
+  return null;
 }
