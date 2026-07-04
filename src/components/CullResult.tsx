@@ -74,6 +74,7 @@ const CullResultCard = memo(
     isDuel,
     onSelect,
     onStatusChange,
+    onPreview,
     updating,
   }: {
     item: RankedItem;
@@ -85,6 +86,7 @@ const CullResultCard = memo(
       id: number,
       status: "kept" | "rejected" | "pending"
     ) => void;
+    onPreview: (index: number) => void;
     updating: Set<number>;
   }) {
     const isUpdating = updating.has(item.id);
@@ -105,6 +107,7 @@ const CullResultCard = memo(
         data-card=""
         data-card-id={item.id}
         onClick={(e) => onSelect(item.id, index, e)}
+        onDoubleClick={() => onPreview(index)}
       >
         {/* Thumbnail */}
         <div className="relative aspect-[4/3] overflow-hidden bg-muted">
@@ -913,6 +916,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
                   isSelected={selected.has(item.id)}
                   item={item}
                   key={item.id}
+                  onPreview={setLightboxIndex}
                   onSelect={handleCardSelect}
                   onStatusChange={stableHandleStatusChange}
                   updating={updating}
