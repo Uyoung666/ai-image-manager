@@ -400,10 +400,12 @@ function HomePage() {
   // blocking the main thread when switching between 20K+ item lists.
   const rawPhotos = isSearching ? (searchResults ?? []) : pagedPhotos;
   const photos = useDeferredValue(rawPhotos);
-  // Only show stale overlay for large dataset switches (search↔browse),
-  // not for in-place refreshes like toggleFavorite where length stays same.
+  // Only show stale overlay when the data *source* changes (search↔browse),
+  // not during pagination or in-place refreshes.
+  const prevIsSearching = useRef(isSearching);
   const isPhotosStale =
-    rawPhotos !== photos && Math.abs(rawPhotos.length - photos.length) > 50;
+    rawPhotos !== photos && prevIsSearching.current !== isSearching;
+  prevIsSearching.current = isSearching;
   const photosRef = useRef(rawPhotos);
   photosRef.current = rawPhotos;
 
