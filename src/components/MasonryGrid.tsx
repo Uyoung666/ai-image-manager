@@ -953,7 +953,8 @@ export const MasonryGrid = memo(
         <button
           aria-hidden={!showScrollTop}
           aria-label={t("backToTop")}
-          className={`glass-surface absolute right-4 z-40 flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground shadow-lg ring-1 ring-border transition-all duration-200 hover:bg-popover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 ${
+          data-text={t("backToTop")}
+          className={`scroll-to-top-btn absolute right-4 z-40 focus-visible:ring-2 focus-visible:ring-ring/50 ${
             selectionActive ? "bottom-[92px]" : "bottom-11"
           } ${
             showScrollTop
@@ -964,16 +965,12 @@ export const MasonryGrid = memo(
           tabIndex={showScrollTop ? 0 : -1}
         >
           <svg
-            fill="none"
-            height="16"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            viewBox="0 0 16 16"
-            width="16"
+            className="scroll-to-top-icon"
+            viewBox="0 0 384 512"
           >
-            <path d="M8 12V4M4 7l4-4 4 4" />
+            <path
+              d="M214.6 41.4c-12.5-12.5-32.8-12.5-45.3 0l-160 160c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L160 141.2V448c0 17.7 14.3 32 32 32s32-14.3 32-32V141.2L329.4 246.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-160-160z"
+            />
           </svg>
         </button>
         {isScrolling && currentTimeLabel && headerPositions.length > 1 && (

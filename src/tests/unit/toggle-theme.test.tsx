@@ -4,23 +4,21 @@ import ToggleTheme from "@/components/toggle-theme";
 
 test("renders ToggleTheme", () => {
   const { getByRole } = render(<ToggleTheme />);
-  const isButton = getByRole("button");
+  const checkbox = getByRole("checkbox");
 
-  expect(isButton).toBeInTheDocument();
+  expect(checkbox).toBeInTheDocument();
 });
 
-test("has icon", () => {
-  const { getByRole } = render(<ToggleTheme />);
-  const button = getByRole("button");
-  const icon = button.querySelector("svg");
+test("has slider", () => {
+  const { container } = render(<ToggleTheme />);
+  const slider = container.querySelector(".theme-toggle-slider");
 
-  expect(icon).toBeInTheDocument();
+  expect(slider).toBeInTheDocument();
 });
 
-test("is moon icon", () => {
-  const svgIconClassName: string = "lucide-moon";
-  const { getByRole } = render(<ToggleTheme />);
-  const svg = getByRole("button").querySelector("svg");
+test("renders sun-moon element", () => {
+  const { container } = render(<ToggleTheme />);
+  const sunMoon = container.querySelector(".theme-toggle-sun-moon");
 
-  expect(svg?.classList).toContain(svgIconClassName);
+  expect(sunMoon).toBeInTheDocument();
 });
