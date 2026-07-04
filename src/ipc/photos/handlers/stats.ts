@@ -925,11 +925,14 @@ export const getDuplicateStats = os.handler(() => {
   };
 });
 
-// Index info for the settings page: thumbnail cache location/size,
-// database file location, and counts of valid vs invalid photo records.
-// "Invalid" matches cleanupOrphanPhotos: photos whose folderId is NULL or
-// points at a folder that no longer exists.
-export const getIndexStats = os.input(z.object({}).optional()).handler(async () => {
+// ── Index stats cache (mirrors statsCache pattern above) ────────────
+let indexStatsCache: {
+  value: Awaited<ReturnType<typeof computeIndexStats>>;
+  timestamp: number;
+} | null = null;
+const INDEX_STATS_CACHE_TTL = 120_000; // 2 min — slower to compute (thumbnail dir scan)
+
+async function computeIndexStats() {
   const db = getDatabase();
 
   const thumb = await getThumbnailDiskUsage();
@@ -959,7 +962,28 @@ export const getIndexStats = os.input(z.object({}).optional()).handler(async () 
     validPhotoCount,
     invalidPhotoCount,
   };
+}
+
+// Index info for the settings page: thumbnail cache location/size,
+// database file location, and counts of valid vs invalid photo records.
+// "Invalid" matches cleanupOrphanPhotos: photos whose folderId is NULL or
+// points at a folder that no longer exists.
+export const getIndexStats = os.input(z.object({}).optional()).handler(async () => {
+  if (
+    indexStatsCache &&
+    Date.now() - indexStatsCache.timestamp < INDEX_STATS_CACHE_TTL
+  ) {
+    return indexStatsCache.value;
+  }
+  const result = await computeIndexStats();
+  indexStatsCache = { value: result, timestamp: Date.now() };
+  return result;
 });
+
+/** Invalidate index stats cache (call after import / bulk delete). */
+export function invalidateIndexStatsCache(): void {
+  indexStatsCache = null;
+}
 
 // ── Color migration: backfill dominant_colors for existing photos ─────
 // Exported as a plain function so main.ts can call it directly on startup,

@@ -479,14 +479,37 @@ export const searchCompound = os
             )
           )
           .all(),
-        // 路 3：文件名 LIKE 搜索
-        db
-          .select({ id: photos.id })
-          .from(photos)
-          .where(
-            and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
-          )
-          .all(),
+        // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
+        (async () => {
+          // FTS5 简单模式下仅 * 和 " 为特殊字符；
+          // 查询含这些字符时直接走 LIKE 回退以避免语法错误。
+          const needsFts5Escape = /[*"]/.test(q);
+          if (!needsFts5Escape && q.trim().length > 0) {
+            try {
+              const normalized = q.trim().replace(/\s+/g, " ");
+              const terms = normalized
+                .split(/\s+/)
+                .map((t) => `"${t}"*`)
+                .join(" ");
+              const ftsResults = db.all(
+                sql`SELECT rowid AS id FROM photos_fts WHERE photos_fts MATCH ${terms}`
+              ) as Array<{ id: number }>;
+              if (ftsResults.length > 0) {
+                return ftsResults;
+              }
+            } catch {
+              // FTS5 语法错误 → 回退到 LIKE
+            }
+          }
+          // LIKE 回退
+          return db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(
+              and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`))
+            )
+            .all();
+        })(),
         // 路 4：人脸识别名搜索（token 化匹配中文姓名）
         db
           .select({ id: photos.id })

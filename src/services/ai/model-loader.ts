@@ -99,66 +99,45 @@ function configureTransformersEnv(env: any, localModelPath: string): void {
   env.allowRemoteModels = true;
 }
 
-function copyRecursiveSync(src: string, dest: string): void {
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      copyRecursiveSync(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
+async function copyDir(src: string, dest: string): Promise<void> {
+  // 验证源路径和目标路径的安全性
+  const allowedSources = [
+    process.resourcesPath,
+    app.getAppPath(),
+    process.cwd(),
+  ];
+  const allowedDestinations = [getDataPath()];
+
+  if (!isSafePath(src, allowedSources)) {
+    throw new Error(`[Security] 不安全的源路径: ${src}`);
   }
-}
 
-function copyDir(src: string, dest: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    // 验证源路径和目标路径的安全性
-    const allowedSources = [
-      process.resourcesPath,
-      app.getAppPath(),
-      process.cwd(),
-    ];
-    const allowedDestinations = [getDataPath()];
+  if (!isSafePath(dest, allowedDestinations)) {
+    throw new Error(`[Security] 不安全的目标路径: ${dest}`);
+  }
 
-    if (!isSafePath(src, allowedSources)) {
-      reject(new Error(`[Security] 不安全的源路径: ${src}`));
-      return;
-    }
+  // Log source contents before copy
+  try {
+    const srcExists = fs.existsSync(src);
+    const srcEntries = srcExists
+      ? fs.readdirSync(src, { recursive: true }).length
+      : 0;
+    console.error(
+      `[copyDir] src=${src} exists=${srcExists} entries=${srcEntries}`
+    );
+    console.error(`[copyDir] dest=${dest}`);
+  } catch {
+    /* best-effort logging */
+  }
 
-    if (!isSafePath(dest, allowedDestinations)) {
-      reject(new Error(`[Security] 不安全的目标路径: ${dest}`));
-      return;
-    }
-
-    // Log source contents before copy
-    try {
-      const srcExists = fs.existsSync(src);
-      const srcEntries = srcExists
-        ? fs.readdirSync(src, { recursive: true }).length
-        : 0;
-      console.error(
-        `[copyDir] src=${src} exists=${srcExists} entries=${srcEntries}`
-      );
-      console.error(`[copyDir] dest=${dest}`);
-    } catch {
-      /* best-effort logging */
-    }
-
-    // Manual recursive copy — more reliable than fs.cpSync with Unicode paths
-    try {
-      fs.mkdirSync(dest, { recursive: true });
-      copyRecursiveSync(src, dest);
-      const destEntries = fs.readdirSync(dest, { recursive: true }).length;
-      console.error(`[copyDir] done — dest entries=${destEntries}`);
-      resolve();
-    } catch (err: any) {
-      console.error(`[copyDir] failed: ${err.message}`);
-      reject(err);
-    }
-  });
+  try {
+    await fs.promises.cp(src, dest, { recursive: true });
+    const destEntries = fs.readdirSync(dest, { recursive: true }).length;
+    console.error(`[copyDir] done — dest entries=${destEntries}`);
+  } catch (err: any) {
+    console.error(`[copyDir] failed: ${err.message}`);
+    throw err;
+  }
 }
 
 function hasBundledClipModel(): boolean {

@@ -437,15 +437,13 @@ async function preparePhotoRecord(
   try {
     phash = await computePHash(filePath);
   } catch (err) {
-    // pHash computation failed — clean up thumbnail we just generated
+    // pHash computation failed — photo can still be indexed and browsed;
+    // it simply won't participate in pHash-based dedup.
     log.warn(
       { filePath, err },
-      "pHash computation failed, cleaning up thumbnail"
+      "pHash computation failed, photo will be indexed without dedup hash"
     );
-    if (thumb.thumbnailPath) {
-      deletePhotoThumbnails(filePath);
-    }
-    return null;
+    phash = null;
   }
 
   // 提取主色调（使用缩略图，3-8ms/张）

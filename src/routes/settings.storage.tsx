@@ -85,7 +85,7 @@ function StorageSettingsPage() {
   const { data: indexStats } = useQuery({
     queryKey: ["indexStats"],
     queryFn: () => ipc.client.photos.getIndexStats({}),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000, // 5min — backed by 2min server-side cache
     refetchOnWindowFocus: false,
   });
 

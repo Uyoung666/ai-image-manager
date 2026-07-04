@@ -201,7 +201,7 @@ function AlbumDetailPage() {
       console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
-    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
   }
 
   const handleToggleFavorite = useCallback((id: number) => {
@@ -225,7 +225,7 @@ function AlbumDetailPage() {
             ),
           };
         });
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         toast.success(
           newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
           {
@@ -247,7 +247,7 @@ function AlbumDetailPage() {
                     ),
                   };
                 });
-                queryClient.invalidateQueries({ queryKey: ["photos"] });
+                queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
               },
             },
           }
@@ -278,7 +278,7 @@ function AlbumDetailPage() {
           : prev
       );
       clearSelection();
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
       toast.error(t("deleteFailed"));
@@ -305,7 +305,7 @@ function AlbumDetailPage() {
           ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
           : prev
       );
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
       toast.error(t("toastDeleteFailed"));
@@ -465,7 +465,7 @@ function AlbumDetailPage() {
     const ids = Array.from(selectedIds);
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       const r = result as {
         renamed: number;
         errors: number;
@@ -605,7 +605,7 @@ function AlbumDetailPage() {
               ),
             };
           });
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
           toast.success(
             newVal
               ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -618,7 +618,7 @@ function AlbumDetailPage() {
                     ids,
                     favorite: allFav,
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                 },
               },
             }
@@ -867,7 +867,7 @@ function AlbumDetailPage() {
                       ),
                     };
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                   toast.success(
                     newVal
                       ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -953,7 +953,7 @@ function AlbumDetailPage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["photos"] });
+              queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
               toast.success(
                 newVal
                   ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -966,7 +966,7 @@ function AlbumDetailPage() {
                         ids,
                         favorite: allFav,
                       });
-                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                     },
                   },
                 }

@@ -310,7 +310,7 @@ export function useGlobalAiStatus(): GlobalAiProgress {
       for (const id of doneIds) {
         if (!prevIds.has(id)) {
           queryClient.invalidateQueries({ queryKey: ["folders"] });
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
           break;
         }
       }

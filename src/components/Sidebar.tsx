@@ -502,7 +502,7 @@ export function Sidebar({
       })) as { moved: number };
       if (result.moved > 0) {
         toast.success(t("photosMoved", { count: result.moved }));
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
       }
     } catch {
@@ -527,7 +527,7 @@ export function Sidebar({
         failed++;
       }
     }
-    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
     // Refresh tag counts
     try {
       const updated = await ipc.client.photos.getTags({
@@ -773,7 +773,7 @@ export function Sidebar({
       setTags((updated as TagInfo[]) || []);
       // Auto-expand parent
       setExpandedTagIds((prev) => new Set(prev).add(parentId));
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       toast.success(t("childTagCreated", { name, parent: parentName }));
     } catch {
       toast.error(t("createChildTagFailed"));

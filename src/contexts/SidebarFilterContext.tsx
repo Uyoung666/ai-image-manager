@@ -200,7 +200,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
         // If the deleted folder is the currently active one, deselect it
         setActiveFolderIdState((prev) => (prev === id ? null : prev));
         queryClient.invalidateQueries({ queryKey: ["folders"] });
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         toast.success(t("toastFolderRemoved"));
       } catch {
         toast.error(t("toastDeleteFolderFailed"));

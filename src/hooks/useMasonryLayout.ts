@@ -36,7 +36,8 @@ function computeLayout(
   gap: number,
   groupHeaders: GroupHeaderInput[] | undefined,
   startIndex: number,
-  initialColumnHeights?: number[]
+  initialColumnHeights?: number[],
+  existingHeaders?: HeaderPosition[]
 ): {
   positions: MasonryItem[];
   columnHeights: number[];
@@ -103,7 +104,12 @@ function computeLayout(
     columnHeights[shortestCol] += itemHeight + gap;
   }
 
-  return { positions, columnHeights, headerPositions };
+  // 合并已有 headers（前缀复用场景）
+  const allHeaderPositions = existingHeaders
+    ? [...existingHeaders, ...headerPositions]
+    : headerPositions;
+
+  return { positions, columnHeights, headerPositions: allHeaderPositions };
 }
 
 export function useMasonryLayout(
@@ -117,6 +123,7 @@ export function useMasonryLayout(
   const prevRef = useRef<{
     positions: MasonryItem[];
     columnHeights: number[];
+    headerPositions: HeaderPosition[];
     itemCount: number;
     colWidth: number;
     columnCount: number;
@@ -141,25 +148,40 @@ export function useMasonryLayout(
       firstItemId === prev.firstItemId &&
       prev.columnCount === columnCount &&
       Math.abs(prev.colWidth - colWidth) < 0.5 &&
-      items.length > prev.itemCount &&
-      // 有 group header 时不做前缀复用（保守策略：header 位置依赖全局列对齐）
-      (!groupHeaders || groupHeaders.length === 0);
+      items.length > prev.itemCount;
 
     if (canReuse) {
       // 前缀复用：已计算的 positions 不变，传入上次列高度作为起始值，
       // 仅计算新增 items（从 prev.itemCount 索引开始）
       const newItems = items.slice(prev.itemCount);
+
+      // 筛选出在新增范围内的 groupHeaders，并转换 beforeIndex 为相对索引
+      const hasGroupHeaders = groupHeaders && groupHeaders.length > 0;
+      const newHeaders: GroupHeaderInput[] | undefined = hasGroupHeaders
+        ? groupHeaders
+            .filter(
+              (h) =>
+                h.beforeIndex >= prev.itemCount &&
+                h.beforeIndex < items.length
+            )
+            .map((h) => ({
+              ...h,
+              beforeIndex: h.beforeIndex - prev.itemCount,
+            }))
+        : undefined;
+
       const result = computeLayout(
         newItems,
         colWidth,
         columnCount,
         gap,
-        undefined, // groupHeaders 已在 canReuse 条件中排除
+        newHeaders,
         prev.itemCount,
-        [...prev.columnHeights]
+        [...prev.columnHeights],
+        prev.headerPositions
       );
+
       const positions = [...prev.positions, ...result.positions];
-      const headerPositions: HeaderPosition[] = []; // groupHeaders 为 undefined/空
 
       let totalHeight = 0;
       for (let c = 0; c < columnCount; c++) {
@@ -171,13 +193,18 @@ export function useMasonryLayout(
       prevRef.current = {
         positions,
         columnHeights: result.columnHeights,
+        headerPositions: result.headerPositions,
         itemCount: items.length,
         colWidth,
         columnCount,
         firstItemId,
       };
 
-      return { positions, totalHeight, headerPositions };
+      return {
+        positions,
+        totalHeight,
+        headerPositions: result.headerPositions,
+      };
     }
 
     // 全量重算
@@ -200,6 +227,7 @@ export function useMasonryLayout(
     prevRef.current = {
       positions: result.positions,
       columnHeights: result.columnHeights,
+      headerPositions: result.headerPositions,
       itemCount: items.length,
       colWidth,
       columnCount,

@@ -162,7 +162,7 @@ function TrashPage() {
         toast.success(t("restoredPhotosCount", { count: result.restored }));
       }
       clearSelection();
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
     } catch {
@@ -403,7 +403,7 @@ function TrashPage() {
       } else {
         toast.success(t("restoredPhotosCount", { count: result.restored }));
       }
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       loadPhotos();
     } catch {

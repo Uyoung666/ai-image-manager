@@ -4,6 +4,7 @@ import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
+import { invalidateIndexStatsCache } from "@/ipc/photos/handlers/stats";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
@@ -226,6 +227,7 @@ async function processNext(): Promise<void> {
     // immediately after import finishes — no stale counts from before
     // the task started.
     invalidateCountCache();
+    invalidateIndexStatsCache();
     current = null;
     running = false;
     broadcast();

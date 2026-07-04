@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
@@ -395,10 +395,14 @@ function HomePage() {
     }
   }, [pagedPhotos]);
 
-  // Active photo list: search results or paginated query
-  const photos = isSearching ? (searchResults ?? []) : pagedPhotos;
-  const photosRef = useRef(photos);
-  photosRef.current = photos;
+  // Active photo list: search results or paginated query.
+  // `rawPhotos` is the real-time array; `photos` is deferred to avoid
+  // blocking the main thread when switching between 20K+ item lists.
+  const rawPhotos = isSearching ? (searchResults ?? []) : pagedPhotos;
+  const photos = useDeferredValue(rawPhotos);
+  const isPhotosStale = rawPhotos !== photos;
+  const photosRef = useRef(rawPhotos);
+  photosRef.current = rawPhotos;
 
   // 持久化搜索状态 + 挂载时自动重新搜索
   const searchStateRef = useRef({ searchQuery, searchMode, colorHex });
@@ -613,7 +617,7 @@ function HomePage() {
     const prevVal = !!photo.isFavorite;
     const newVal = !prevVal;
     await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
-    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
     toast.success(
       newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
       {
@@ -624,7 +628,7 @@ function HomePage() {
               ids: [id],
               favorite: prevVal,
             });
-            queryClient.invalidateQueries({ queryKey: ["photos"] });
+            queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
           },
         },
       }
@@ -913,7 +917,7 @@ function HomePage() {
           (prev) => prev?.filter((p) => !ids.includes(p.id)) ?? null
         );
       } else {
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       }
       toast.success(t("toastDeletedCount", { count }));
     } catch {
@@ -925,7 +929,7 @@ function HomePage() {
     const ids = Array.from(selectedIds);
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       const r = result as {
         renamed: number;
         errors: number;
@@ -1077,7 +1081,7 @@ function HomePage() {
         );
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
           toast.success(
             newVal
               ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1090,7 +1094,7 @@ function HomePage() {
                     ids,
                     favorite: allFav,
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                 },
               },
             }
@@ -1250,6 +1254,7 @@ function HomePage() {
                 onSortChange={handleSortChange}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
+                isStale={isPhotosStale}
                 routeKey={routeKey}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
@@ -1302,7 +1307,7 @@ function HomePage() {
                   ipc.client.photos
                     .toggleFavorite({ ids, favorite: newVal })
                     .then(() => {
-                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                       toast.success(
                         newVal
                           ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1403,7 +1408,7 @@ function HomePage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["photos"] });
+              queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
               toast.success(
                 newVal
                   ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1416,7 +1421,7 @@ function HomePage() {
                         ids,
                         favorite: allFav,
                       });
-                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                     },
                   },
                 }

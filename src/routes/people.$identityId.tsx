@@ -259,7 +259,7 @@ function PersonDetailPage() {
             ),
           };
         });
-        queryClient.invalidateQueries({ queryKey: ["photos"] });
+        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         toast.success(
           newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
           {
@@ -281,7 +281,7 @@ function PersonDetailPage() {
                     ),
                   };
                 });
-                queryClient.invalidateQueries({ queryKey: ["photos"] });
+                queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
               },
             },
           }
@@ -422,7 +422,7 @@ function PersonDetailPage() {
       console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
-    queryClient.invalidateQueries({ queryKey: ["photos"] });
+    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
   }
 
   function handleDeleteSelected() {
@@ -448,7 +448,7 @@ function PersonDetailPage() {
           : prev
       );
       clearSelection();
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
       toast.error(t("deleteFailed"));
@@ -470,7 +470,7 @@ function PersonDetailPage() {
           ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
           : prev
       );
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
       toast.error(t("toastDeleteFailed"));
@@ -481,7 +481,7 @@ function PersonDetailPage() {
     const ids = Array.from(selectedIds);
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
-      queryClient.invalidateQueries({ queryKey: ["photos"] });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       const r = result as {
         renamed: number;
         errors: number;
@@ -639,7 +639,7 @@ function PersonDetailPage() {
               ),
             };
           });
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
           toast.success(
             newVal
               ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -652,7 +652,7 @@ function PersonDetailPage() {
                     ids,
                     favorite: allFav,
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                 },
               },
             }
@@ -861,7 +861,7 @@ function PersonDetailPage() {
                       ),
                     };
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"] });
+                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                   toast.success(
                     newVal
                       ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -944,7 +944,7 @@ function PersonDetailPage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["photos"] });
+              queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
               toast.success(
                 newVal
                   ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -957,7 +957,7 @@ function PersonDetailPage() {
                         ids,
                         favorite: allFav,
                       });
-                      queryClient.invalidateQueries({ queryKey: ["photos"] });
+                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
                     },
                   },
                 }

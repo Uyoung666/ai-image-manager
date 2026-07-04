@@ -638,7 +638,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             });
           }
           // Immediately invalidate photo queries so favorites page reflects changes
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         }
         onUpdate?.();
       } catch (err) {
@@ -696,7 +696,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         }
         // Immediately invalidate photo queries so favorites page reflects changes
         if (status === "kept" || wereKept.length > 0) {
-          queryClient.invalidateQueries({ queryKey: ["photos"] });
+          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
         }
         setSelected(new Set());
         onUpdate?.();

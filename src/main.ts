@@ -476,22 +476,6 @@ const mediaSemaphore = new IoSemaphore(16);
 export { invalidateFoldersCache } from "@/utils/folder-paths";
 
 // ── AI model availability (copy from resources or dev paths) ─────────
-function copyRecursive(src: string, dest: string): void {
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  log.info(
-    `[copyRecursive] src=${src} has ${entries.length} top-level entries`
-  );
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      copyRecursive(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
-}
 
 async function ensureModelAvailable(): Promise<void> {
   const dataPath = getDataPath();
@@ -533,7 +517,7 @@ async function ensureModelAvailable(): Promise<void> {
       try {
         fs.mkdirSync(modelsDir, { recursive: true });
         log.info("[ensureModelAvailable] modelsDir created: %s", modelsDir);
-        copyRecursive(bundledModels, modelsDir);
+        await fs.promises.cp(bundledModels, modelsDir, { recursive: true });
         // Verify
         const copied = fs.existsSync(visionMarker);
         const size = copied ? fs.statSync(visionMarker).size : 0;
@@ -997,12 +981,14 @@ async function startBackgroundServices() {
     await runStartupCleanup();
     logMain("[bg] runStartupCleanup done");
 
-    await ensureModelAvailable();
-    logMain("[bg] ensureModelAvailable done");
-
+    // 模型复制和服务初始化并行：AI 服务在模型就绪前启动会优雅降级
+    const modelPromise = ensureModelAvailable();
     await registry.startRemaining();
     log.info("All services started");
     logMain("[bg] startRemaining done");
+
+    await modelPromise;
+    logMain("[bg] ensureModelAvailable done");
 
     // ── Periodic trash cleanup: enforce 30-day retention even when app runs for days ──
     trashCleanupTimer = setInterval(() => {

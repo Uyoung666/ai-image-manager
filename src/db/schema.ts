@@ -81,6 +81,25 @@ export const photos = sqliteTable(
     fileDateIdx: index("idx_photos_file_date").on(table.fileDate),
     phashIdx: index("idx_photos_phash").on(table.phash),
     deletedAtIdx: index("idx_photos_deleted_at").on(table.deletedAt),
+    deletedFileDateIdx: index("idx_photos_deleted_file_date").on(
+      table.deletedAt,
+      table.fileDate
+    ),
+    deletedFolderFileDateIdx:
+      index("idx_photos_deleted_folder_file_date").on(
+        table.deletedAt,
+        table.folderId,
+        table.fileDate
+      ),
+    deletedFavFileDateIdx: index("idx_photos_deleted_fav_file_date").on(
+      table.deletedAt,
+      table.isFavorite,
+      table.fileDate
+    ),
+    fileSizeIdx: index("idx_photos_file_size").on(table.fileSize),
+    thumbnailPathIdx: index("idx_photos_thumbnail_path").on(
+      table.thumbnailPath
+    ),
   })
 );
 

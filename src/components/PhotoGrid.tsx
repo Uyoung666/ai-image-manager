@@ -39,6 +39,8 @@ interface PhotoGridProps {
    * 避免基于假数据做错误定位。
    */
   isPlaceholderData?: boolean;
+  /** 当搜索/浏览切换时数据尚未同步，显示半透明遮罩以避免闪烁 */
+  isStale?: boolean;
   loading: boolean;
   onBackgroundClick?: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -98,6 +100,7 @@ export const PhotoGrid = memo(function PhotoGrid({
   emptyState,
   error,
   isPlaceholderData = false,
+  isStale = false,
   onSelect,
   onDoubleClick,
   onContextMenu,
@@ -425,6 +428,10 @@ export const PhotoGrid = memo(function PhotoGrid({
         className="min-h-0 flex-1"
         onContextMenu={onContextMenu}
         ref={containerCallbackRef}
+        style={{
+          opacity: isStale ? 0.6 : 1,
+          transition: "opacity 0.15s ease",
+        }}
       >
         <MasonryGrid
           className="scrollbar-thin px-2 pt-12 pb-7"
@@ -465,6 +472,7 @@ export const PhotoGrid = memo(function PhotoGrid({
   if (prevProps.sort !== nextProps.sort) return false;
   if (prevProps.sortOrder !== nextProps.sortOrder) return false;
   if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData) return false;
+  if (prevProps.isStale !== nextProps.isStale) return false;
   if (prevProps.error !== nextProps.error) return false;
   if (prevProps.hasMore !== nextProps.hasMore) return false;
   return true;
