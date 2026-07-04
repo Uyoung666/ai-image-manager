@@ -351,6 +351,7 @@ i18n.use(initReactI18next).init({
         updateErrorNotFound: "未找到更新文件",
         settingsGitHub: "GitHub 项目主页",
         settingsOpenGitHub: "在浏览器中打开项目主页",
+        settingsVisitWebsite: "访问项目网站查看使用文档",
 
         // Actions
         openInExplorer: "在资源管理器中打开",
@@ -1467,6 +1468,7 @@ i18n.use(initReactI18next).init({
         updateErrorNotFound: "Update files not found",
         settingsGitHub: "GitHub Project",
         settingsOpenGitHub: "Open project page in browser",
+        settingsVisitWebsite: "Visit Website & Docs",
 
         openInExplorer: "Open in Explorer",
         deletePhoto: "Delete Photo",

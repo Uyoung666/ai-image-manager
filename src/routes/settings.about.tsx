@@ -3,6 +3,7 @@ import { ChevronDown, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatedGitHubButton } from "@/components/animated-github-button";
+import { AnimatedNameLoader } from "@/components/animated-name-loader";
 import { ConfettiOverlay } from "@/components/ConfettiOverlay";
 import { SignatureOverlay } from "@/components/SignatureOverlay";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -126,9 +127,10 @@ function AboutSettingsPage() {
             </div>
           </div>
 
-          {/* GitHub — standalone 3D flip button */}
-          <div className="flex justify-start pt-1">
+          {/* GitHub — standalone 3D flip button + animated name loader */}
+          <div className="flex items-center gap-3 pt-1">
             <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
+            <AnimatedNameLoader />
           </div>
         </section>
 
