@@ -85,8 +85,9 @@ async function loadOrt() {
   // the script's location and is more reliable than creating a new one.
   try {
     _ort = require("onnxruntime-node");
-  } catch {
+  } catch (err0) {
     // Fallback: resolve from project root (packaged builds may differ)
+    console.error("[Worker] Primary onnxruntime-node load failed:", err0.message);
     const projectRoot = path.resolve(import.meta.dirname, "..");
     _ort = require(path.join(projectRoot, "node_modules", "onnxruntime-node"));
   }

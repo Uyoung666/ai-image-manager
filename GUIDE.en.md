@@ -538,6 +538,24 @@ Visual duplicate detection requires AI indexing to be complete. Exact duplicates
 
 30 days. After that, they are automatically and permanently deleted.
 
+### AI indexing or face detection fails with "Worker process" error
+
+This error means the AI worker process failed to start or initialize, typically caused by system environment issues. AI models are pre-bundled in the installer and are not the cause.
+
+**Troubleshooting steps:**
+
+1. **Check worker logs**: Open `%APPDATA%\AI Image Manager\logs\ai-worker.log` to see the actual error. Common errors include `onnxruntime-node` or `sharp` module loading failures.
+
+2. **Install VC++ Runtime**: AI models require Visual C++ 2015-2022 Redistributable. Download: https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+3. **Check antivirus**: Security software may block `.dll` / `.node` files. Check your antivirus quarantine logs and add the app installation directory to the exclusion list.
+
+4. **Avoid non-ASCII paths**: Try extracting the portable version to a pure ASCII path (e.g., `D:\ai-image-manager\`).
+
+5. **Clean reinstall**: Uninstall and remove leftover directories (`%LOCALAPPDATA%\ai-image-manager\` and `%APPDATA%\AI Image Manager\`), then reinstall the latest version.
+
+If none of the above helps, please attach the `ai-worker.log` content when filing a GitHub issue.
+
 ### What image formats are supported?
 
 JPG, JPEG, PNG, WebP, AVIF, HEIC, HEIF, TIFF, BMP, GIF, RAW (CR2/CR3/NEF/ARW/DNG/RAF/RW2/ORF and more) — 27 formats. RAW files are previewed by extracting embedded JPEGs with exiftool.

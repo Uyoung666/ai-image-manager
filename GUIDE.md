@@ -541,6 +541,24 @@ AI 模型已内置在安装包中，首次使用无需下载。如果模型文�
 
 30 天。超过 30 天自动永久删除。
 
+### AI 索引或人脸识别报错"Worker 进程未能处理任何照片"
+
+此错误表示 AI Worker 进程启动或初始化失败，通常由运行环境问题引起（模型文件已内置在安装包中，与此无关）。
+
+**排查步骤：**
+
+1. **查看 Worker 日志**：打开 `%APPDATA%\AI Image Manager\logs\ai-worker.log`，查看具体的错误信息。常见错误包括 `onnxruntime-node` 或 `sharp` 模块加载失败。
+
+2. **安装 VC++ 运行库**：AI 模型运行依赖 Visual C++ 2015-2022 Redistributable。下载地址：https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+3. **检查杀毒软件**：360、火绒、腾讯电脑管家等可能误拦 `.dll` / `.node` 文件。检查拦截/隔离日志，将应用安装目录加入信任区。
+
+4. **避免中文路径**：尝试将应用（便携版）放置到纯英文路径下运行（如 `D:\ai-image-manager\`）。
+
+5. **重新安装**：卸载后清理残留目录（`%LOCALAPPDATA%\ai-image-manager\` 和 `%APPDATA%\AI Image Manager\`），重新安装最新版。
+
+如果以上步骤无法解决，请在 GitHub Issues 提交问题时附上 `ai-worker.log` 的内容。
+
 ### 支持哪些图片格式？
 
 JPG、JPEG、PNG、WebP、AVIF、HEIC、HEIF、TIFF、BMP、GIF、RAW（CR2/CR3/NEF/ARW/DNG/RAF/RW2/ORF 等），共 27 种格式。RAW 格式通过 exiftool 提取嵌入的 JPEG 预览图。
