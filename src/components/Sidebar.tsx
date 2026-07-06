@@ -7,7 +7,6 @@ import {
   Folder,
   Images,
   LayoutDashboard,
-  Loader2,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -34,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
   PopoverContent,
@@ -502,7 +502,10 @@ export function Sidebar({
       })) as { moved: number };
       if (result.moved > 0) {
         toast.success(t("photosMoved", { count: result.moved }));
-        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         queryClient.invalidateQueries({ queryKey: ["folders"] });
       }
     } catch {
@@ -527,7 +530,10 @@ export function Sidebar({
         failed++;
       }
     }
-    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+    queryClient.invalidateQueries({
+      queryKey: ["photos"],
+      refetchType: "active",
+    });
     // Refresh tag counts
     try {
       const updated = await ipc.client.photos.getTags({
@@ -773,7 +779,10 @@ export function Sidebar({
       setTags((updated as TagInfo[]) || []);
       // Auto-expand parent
       setExpandedTagIds((prev) => new Set(prev).add(parentId));
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       toast.success(t("childTagCreated", { name, parent: parentName }));
     } catch {
       toast.error(t("createChildTagFailed"));
@@ -1194,7 +1203,7 @@ export function Sidebar({
                 {importPhase === "idle" ? (
                   <Plus className="h-4 w-4" />
                 ) : (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <LoadingSpinner size="sm" variant="inherit" />
                 )}
               </button>
 
@@ -1448,7 +1457,7 @@ export function Sidebar({
                     {importPhase === "idle" ? (
                       <Plus className="h-3 w-3" />
                     ) : (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <LoadingSpinner size="xs" variant="inherit" />
                     )}
                   </button>
                 </div>

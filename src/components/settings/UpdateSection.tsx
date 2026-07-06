@@ -1,6 +1,6 @@
-import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 
 type UpdatePhase =
@@ -267,7 +267,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {/* Checking */}
           {phase === "checking" && (
             <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <LoadingSpinner size="sm" variant="secondary" />
               <span className="text-[13px] text-muted-foreground">
                 {t("updateChecking")}
               </span>
@@ -377,7 +377,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
             >
               {phase === "checking" || phase === "downloading" ? (
                 <span className="flex items-center justify-center gap-1.5">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <LoadingSpinner size="sm" variant="inherit" />
                   {t("updateChecking")}
                 </span>
               ) : phase === "error" ? (

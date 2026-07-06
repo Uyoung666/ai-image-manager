@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 
 interface CloudConfig {
@@ -200,7 +201,7 @@ export function CloudUploadDialog({
 
             {uploading && (
               <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <LoadingSpinner size="xs" />
                 {t("cloudUploadingHint")}
               </div>
             )}

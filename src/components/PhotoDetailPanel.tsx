@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { getDateLocale } from "@/utils/date-locale";
@@ -426,7 +427,7 @@ export function PhotoDetailPanel({
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div
-        className={`relative flex h-full flex-col border-border border-l glass-surface-heavy transition-all duration-300 ${
+        className={`glass-surface-heavy relative flex h-full flex-col border-border border-l transition-all duration-300 ${
           visible ? "translate-x-0 opacity-100" : "translate-x-12 opacity-0"
         }`}
         ref={panelRef}
@@ -633,7 +634,7 @@ export function PhotoDetailPanel({
               </button>
             ) : aiLoading ? (
               <div className="flex items-center gap-2 py-2">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <LoadingSpinner size="sm" />
                 <span className="text-[11px] text-muted-foreground/70">
                   {t("aiAnalyzing")}
                 </span>
@@ -695,7 +696,7 @@ export function PhotoDetailPanel({
                 {t("exifInfo")}
               </h4>
               <div className="flex items-center justify-center py-6">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <LoadingSpinner size="md" />
               </div>
             </section>
           ) : exif ? (

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   toDuelPreviewUrl,
   toLocalMediaUrl,
@@ -54,13 +55,13 @@ export interface ZoomState {
 
 interface ZoomableImageProps {
   alt: string;
-  filePath: string;
   /** 对比预览路径（2560px JPEG），PK 选片专用 */
   duelPreviewPath?: string | null;
-  /** 启用三级渐进式加载（默认 false，完全向后兼容） */
-  enableProgressiveLoading?: boolean;
   /** 缩放时自动加载原图（仅在 progressive 模式下生效） */
   enableOriginalOnZoom?: boolean;
+  /** 启用三级渐进式加载（默认 false，完全向后兼容） */
+  enableProgressiveLoading?: boolean;
+  filePath: string;
   fillContainer?: boolean;
   onError?: () => void;
   onSync?: (state: ZoomState) => void;
@@ -277,9 +278,15 @@ export const ZoomableImage = memo(function ZoomableImage({
   // ── 渐进式加载：缩放触发原图加载 ──────────────────────────────
 
   const startOriginalLoad = useCallback(() => {
-    if (!enableOriginalOnZoom) return;
-    if (originalLoaded || originalLoading) return;
-    if (originalError) return;
+    if (!enableOriginalOnZoom) {
+      return;
+    }
+    if (originalLoaded || originalLoading) {
+      return;
+    }
+    if (originalError) {
+      return;
+    }
 
     setOriginalLoading(true);
 
@@ -300,13 +307,17 @@ export const ZoomableImage = memo(function ZoomableImage({
 
     const img = new Image();
     img.onload = () => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        return;
+      }
       setOriginalLoaded(true);
       setOriginalLoading(false);
       setActiveTier("original");
     };
     img.onerror = () => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        return;
+      }
       setOriginalError(true);
       setOriginalLoading(false);
     };
@@ -342,8 +353,12 @@ export const ZoomableImage = memo(function ZoomableImage({
   const zoomCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!(enableProgressiveLoading && enableOriginalOnZoom)) return;
-    if (!previewLoaded) return;
+    if (!(enableProgressiveLoading && enableOriginalOnZoom)) {
+      return;
+    }
+    if (!previewLoaded) {
+      return;
+    }
 
     // 防抖 300ms：只在缩放/拖拽停止后才检查是否需要加载原图
     if (zoomCheckTimerRef.current) {
@@ -351,7 +366,9 @@ export const ZoomableImage = memo(function ZoomableImage({
     }
     zoomCheckTimerRef.current = setTimeout(() => {
       const fit = getFitSize();
-      if (!fit) return;
+      if (!fit) {
+        return;
+      }
 
       const displayPixels = Math.max(fit.w, fit.h) * scaleRef.current;
       const previewNativePixels = 2560;
@@ -397,15 +414,12 @@ export const ZoomableImage = memo(function ZoomableImage({
 
   // ── 交互处理 ──────────────────────────────────────────────────
 
-  const handleClick = useCallback(
-    (_e: React.MouseEvent) => {
-      // 拖拽后不触发 click
-      didDrag.current = false;
-      // 与 Windows Photos 一致：单击不改变缩放状态
-      // 缩放态单击留给拖拽平移使用，fit 态单击无操作
-    },
-    []
-  );
+  const handleClick = useCallback((_e: React.MouseEvent) => {
+    // 拖拽后不触发 click
+    didDrag.current = false;
+    // 与 Windows Photos 一致：单击不改变缩放状态
+    // 缩放态单击留给拖拽平移使用，fit 态单击无操作
+  }, []);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -533,10 +547,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         cancelInertia();
-        const newScale = Math.min(
-          MAX_SCALE,
-          scaleRef.current * WHEEL_FACTOR
-        );
+        const newScale = Math.min(MAX_SCALE, scaleRef.current * WHEEL_FACTOR);
         const ratio = newScale / scaleRef.current;
         setScale(newScale);
         scaleRef.current = newScale;
@@ -554,10 +565,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       if (e.key === "-") {
         e.preventDefault();
         cancelInertia();
-        const newScale = Math.max(
-          FIT_SCALE,
-          scaleRef.current / WHEEL_FACTOR
-        );
+        const newScale = Math.max(FIT_SCALE, scaleRef.current / WHEEL_FACTOR);
         const ratio = newScale / scaleRef.current;
         setScale(newScale);
         scaleRef.current = newScale;
@@ -713,14 +721,17 @@ export const ZoomableImage = memo(function ZoomableImage({
   if (enableProgressiveLoading) {
     // 确定当前应显示的图片源
     const currentSrc = (() => {
-      if (originalLoaded && activeTier === "original") return tier3Src;
-      if (previewLoaded) return tier2Src;
+      if (originalLoaded && activeTier === "original") {
+        return tier3Src;
+      }
+      if (previewLoaded) {
+        return tier2Src;
+      }
       return tier1Src;
     })();
 
     // 是否仍在等待更优画质
-    const isUpgrading =
-      (!previewLoaded && !previewError) || originalLoading;
+    const isUpgrading = !(previewLoaded || previewError) || originalLoading;
 
     return (
       <div
@@ -743,14 +754,14 @@ export const ZoomableImage = memo(function ZoomableImage({
               setOriginalError(true);
               setOriginalLoading(false);
               setActiveTier("preview");
-            } else if (!previewLoaded) {
-              setPreviewError(true);
-            } else {
+            } else if (previewLoaded) {
               onError?.();
+            } else {
+              setPreviewError(true);
             }
           }}
           onLoad={() => {
-            if (!previewLoaded && !previewError) {
+            if (!(previewLoaded || previewError)) {
               setPreviewLoaded(true);
               setActiveTier("preview");
             }
@@ -776,7 +787,7 @@ export const ZoomableImage = memo(function ZoomableImage({
         {/* 加载指示器 */}
         {isUpgrading && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-[6px]">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+            <LoadingSpinner size="lg" variant="soft" />
           </div>
         )}
 
@@ -819,7 +830,7 @@ export const ZoomableImage = memo(function ZoomableImage({
 
       {!(loaded || hasError) && (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-[6px]">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          <LoadingSpinner size="lg" variant="soft" />
         </div>
       )}
 

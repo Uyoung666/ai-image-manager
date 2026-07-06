@@ -1,6 +1,6 @@
-import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
 
@@ -81,7 +81,7 @@ function DetectionStatusLine({
   if (detectPhase === "checking") {
     return (
       <div className="flex items-center gap-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        <LoadingSpinner size="sm" variant="secondary" />
         <span className="text-[12px] text-muted-foreground">
           {t("gpuDetecting")}
         </span>

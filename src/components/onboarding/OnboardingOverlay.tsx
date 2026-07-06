@@ -4,13 +4,13 @@ import {
   Cpu,
   FolderHeart,
   FolderOpen,
-  Loader2,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GpuSettingsCard } from "@/components/gpu-settings-card";
 import LangToggle from "@/components/lang-toggle";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import appIcon from "../../../assets/icon.png";
@@ -395,7 +395,7 @@ export function OnboardingOverlay() {
 
                 {isMigrating && (
                   <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <LoadingSpinner size="sm" />
                     {t("onboardingStep1Migrating")}
                   </div>
                 )}
@@ -481,7 +481,7 @@ export function OnboardingOverlay() {
               >
                 {exiting ? (
                   <>
-                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <LoadingSpinner size="md" />
                     {t("onboardingStep3Starting")}
                   </>
                 ) : (

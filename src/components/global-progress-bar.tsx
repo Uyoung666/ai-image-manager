@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { getRandomPhrase } from "@/utils/progress-phrases";
 
@@ -109,10 +109,8 @@ export function GlobalProgressBar() {
       className={`overflow-hidden transition-all duration-300 ease-out ${visible ? "max-h-12 opacity-100" : "max-h-0 opacity-0"}
       `}
     >
-      <div className="flex items-center gap-2 border-border/40 border-b glass-surface px-3 py-1.5">
-        {showSpinner && (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />
-        )}
+      <div className="glass-surface flex items-center gap-2 border-border/40 border-b px-3 py-1.5">
+        {showSpinner && <LoadingSpinner size="xs" />}
 
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {phrase}

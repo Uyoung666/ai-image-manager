@@ -8,15 +8,16 @@ import { ArrowLeft, Eye, Plus, Swords } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CullSessionCard } from "@/components/CullSessionCard";
+import { RouteError } from "@/components/RouteError";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
-import { RouteError } from "@/components/RouteError";
 
 interface CullSession {
   completedAt: number | null;
@@ -147,7 +148,7 @@ function CullListPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <LoadingSpinner size="xl" />
       </div>
     );
   }

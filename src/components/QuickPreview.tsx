@@ -4,6 +4,7 @@ import {
   PreviewContextMenu,
   type PreviewMenuState,
 } from "@/components/PreviewContextMenu";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -241,7 +242,7 @@ export function QuickPreview({
         )}
         {!(loaded || imgError) && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            <LoadingSpinner size="xl" variant="overlay" />
           </div>
         )}
         <div className="mt-3 flex items-center gap-3 text-[12px] text-white/70">

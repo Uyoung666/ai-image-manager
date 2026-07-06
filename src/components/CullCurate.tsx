@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ZoomableImage } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
@@ -423,7 +424,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   if (photoQuery.isLoading && !photoQuery.data) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <LoadingSpinner size="xl" />
       </div>
     );
   }
@@ -567,7 +568,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         {/* Spinner — centered overlay during transition */}
         {showSpinner && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            <LoadingSpinner size="md" variant="overlay" />
           </div>
         )}
       </div>

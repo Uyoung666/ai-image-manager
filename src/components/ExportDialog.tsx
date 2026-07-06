@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 
@@ -213,9 +214,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
             onClick={handleExport}
             type="button"
           >
-            {exporting && (
-              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-            )}
+            {exporting && <LoadingSpinner size="sm" variant="inherit" />}
             {t("exportAction")}
           </button>
         </DialogFooter>

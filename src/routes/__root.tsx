@@ -2,12 +2,13 @@ import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import BaseLayout from "@/layouts/base-layout";
 
 function RouteSuspense() {
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <LoadingSpinner size="xl" />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 
 interface AlbumInfo {
@@ -147,9 +148,7 @@ export function AddToAlbumDialog({
                   </svg>
                 </div>
                 <span className="flex-1 truncate">{album.name}</span>
-                {adding.has(album.id) && (
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                )}
+                {adding.has(album.id) && <LoadingSpinner size="sm" />}
               </button>
             ))
           )}

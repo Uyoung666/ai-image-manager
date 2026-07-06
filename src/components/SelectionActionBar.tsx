@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 interface SelectionActionBarProps {
   allFavorite?: boolean;
@@ -215,17 +216,13 @@ function MenuAction({
 }) {
   return (
     <button
-      className={`selection-menu-link${destructive ? " selection-menu-destructive" : ""}`}
+      className={`selection-menu-link${destructive ? "selection-menu-destructive" : ""}`}
       disabled={disabled}
       onClick={onClick}
       title={label}
     >
       <span className="selection-menu-icon">
-        {executing ? (
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-        ) : (
-          icon
-        )}
+        {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
       </span>
       <span className="selection-menu-title">{label}</span>
     </button>

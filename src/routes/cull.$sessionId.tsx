@@ -9,6 +9,7 @@ import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
 import { ipc } from "@/ipc/manager";
 import { RouteError } from "@/components/RouteError";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 // ── Shared types ──
 
@@ -136,7 +137,7 @@ function CullSessionPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <LoadingSpinner size="xl" />
       </div>
     );
   }

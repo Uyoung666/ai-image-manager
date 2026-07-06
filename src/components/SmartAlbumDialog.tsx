@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import i18n from "@/localization/i18n";
 import { getTagDisplayName } from "@/localization/tag-display";
@@ -734,9 +735,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
             onClick={handleCreate}
             type="button"
           >
-            {creating && (
-              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-            )}
+            {creating && <LoadingSpinner size="sm" variant="inherit" />}
             {t("smartAlbumCreateTitle")}
           </button>
         </DialogFooter>

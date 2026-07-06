@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -328,7 +329,7 @@ export function SpotlightSearch() {
             {searching && (
               <div className="spotlight-loading-shield z-10 flex items-center justify-center bg-popover/50">
                 <div className="flex items-center gap-2 rounded-[6px] bg-popover px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm">
-                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <LoadingSpinner size="xs" />
                   {t("searching")}
                 </div>
               </div>

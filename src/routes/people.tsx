@@ -19,10 +19,11 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { RouteError } from "@/components/RouteError";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-import { RouteError } from "@/components/RouteError";
 
 interface FaceIdentity {
   coverBbox: { x: number; y: number; width: number; height: number } | null;
@@ -662,7 +663,7 @@ function PeoplePage() {
       {progress && (
         <div className="border-border border-b bg-primary/5 px-6 py-2 text-[12px] text-primary">
           {detecting && (
-            <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <LoadingSpinner className="mr-2 inline-block" size="xs" />
           )}
           {progress}
         </div>

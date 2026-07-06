@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ZoomableImage, type ZoomState } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
@@ -537,7 +538,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   if (pairQuery.isLoading && !pairQuery.data) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <LoadingSpinner size="xl" />
       </div>
     );
   }
@@ -898,7 +899,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       {/* 防抖 Spinner — 仅过渡持续 > 150ms 时挂载 */}
       {showSpinner && (
         <div className="pointer-events-none absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          <LoadingSpinner size="md" variant="overlay" />
         </div>
       )}
 
