@@ -13,6 +13,8 @@ import {
   photoTags,
   tags,
 } from "@/db/schema";
+
+const GLOB_WILDCARD_RE = /[*?[]/;
 import { deletePhotoVectors } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
@@ -383,7 +385,13 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     }
   }
   if (search) {
-    conditions.push(like(photos.filename, `%${search}%`) as any);
+    if (GLOB_WILDCARD_RE.test(search)) {
+      conditions.push(
+        sql`LOWER(${photos.filename}) GLOB LOWER(${search})` as any
+      );
+    } else {
+      conditions.push(like(photos.filename, `%${search}%`) as any);
+    }
   }
   if (favoriteOnly) {
     conditions.push(eq(photos.isFavorite, true) as any);

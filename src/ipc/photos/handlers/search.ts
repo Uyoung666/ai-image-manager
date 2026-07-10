@@ -46,6 +46,7 @@ const HASH_PREFIX_RE = /^#/;
 const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const HEX_COLOR_QUERY_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const CHINESE_CHAR_RE = /[一-鿿]/;
+const GLOB_WILDCARD_RE = /[*?[]/;
 
 // ── 熔断与超时配置 ──────────────────────────────────────────────────
 const LANCEDB_TIMEOUT_MS = 2000; // LanceDB 向量检索硬超时
@@ -314,18 +315,48 @@ export const searchCompound = os
             const conditions: SQL[] = [];
             conditions.push(sql`p.deleted_at IS NULL`);
             conditions.push(sql`p.dominant_colors IS NOT NULL`);
-            if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
-            if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
-            if (cameraModel) conditions.push(sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`);
-            if (lensModel) conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
-            if (focalMin !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
-            if (focalMax !== undefined) conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
-            if (apertureMin !== undefined) conditions.push(sql`e.aperture >= ${apertureMin}`);
-            if (apertureMax !== undefined) conditions.push(sql`e.aperture <= ${apertureMax}`);
-            if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
-            if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
-            if (shutterMin !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`);
-            if (shutterMax !== undefined) conditions.push(sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`);
+            if (dateFrom) {
+              conditions.push(sql`e.date_taken >= ${dateFrom}`);
+            }
+            if (dateTo) {
+              conditions.push(sql`e.date_taken <= ${dateTo}`);
+            }
+            if (cameraModel) {
+              conditions.push(
+                sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`
+              );
+            }
+            if (lensModel) {
+              conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
+            }
+            if (focalMin !== undefined) {
+              conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
+            }
+            if (focalMax !== undefined) {
+              conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
+            }
+            if (apertureMin !== undefined) {
+              conditions.push(sql`e.aperture >= ${apertureMin}`);
+            }
+            if (apertureMax !== undefined) {
+              conditions.push(sql`e.aperture <= ${apertureMax}`);
+            }
+            if (isoMin !== undefined) {
+              conditions.push(sql`e.iso >= ${isoMin}`);
+            }
+            if (isoMax !== undefined) {
+              conditions.push(sql`e.iso <= ${isoMax}`);
+            }
+            if (shutterMin !== undefined) {
+              conditions.push(
+                sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`
+              );
+            }
+            if (shutterMax !== undefined) {
+              conditions.push(
+                sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`
+              );
+            }
 
             colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
                 FROM photos p
@@ -342,21 +373,33 @@ export const searchCompound = os
                 ORDER BY dist ASC
                 LIMIT ${limit}`;
           }
-          return db.all(colorSQL) as Array<Record<string, unknown> & { dist: number }>;
+          return db.all(colorSQL) as Array<
+            Record<string, unknown> & { dist: number }
+          >;
         })();
 
         const lancePromise = (async () => {
           try {
-            const { searchByColorVector } = await import("@/services/ai/vector-db");
-            const results = await searchByColorVector(rgb.r, rgb.g, rgb.b, limit);
+            const { searchByColorVector } = await import(
+              "@/services/ai/vector-db"
+            );
+            const results = await searchByColorVector(
+              rgb.r,
+              rgb.g,
+              rgb.b,
+              limit
+            );
             // 距离阈值：RGB 欧氏距离 < 10000（与 SQLite UDF 一致）
-            return (results ?? []).filter((r) => r.distance < 10000);
+            return (results ?? []).filter((r) => r.distance < 10_000);
           } catch {
             return [];
           }
         })();
 
-        const [sqliteResults, lanceResults] = await Promise.all([sqlitePromise, lancePromise]);
+        const [sqliteResults, lanceResults] = await Promise.all([
+          sqlitePromise,
+          lancePromise,
+        ]);
 
         // 合并去重：LanceDB 结果作为补充，不影响 SQLite 的准确性
         const seenIds = new Set<number>();
@@ -381,7 +424,9 @@ export const searchCompound = os
           ...r,
           id: r.id as number,
           similarity:
-            Math.round((1 / (1 + Math.sqrt((r.dist as number) || 0))) * 10_000) / 10_000,
+            Math.round(
+              (1 / (1 + Math.sqrt((r.dist as number) || 0))) * 10_000
+            ) / 10_000,
         }));
 
         console.log(
@@ -415,6 +460,104 @@ export const searchCompound = os
       }
     }
 
+    // ── Glob wildcard shortcut ─────────────────────────────────────
+    // When the query contains shell-style wildcard characters (*, ?, [abc]),
+    // skip the expensive multi-source retrieval (AI, tags, FTS5, person)
+    // and do a direct GLOB match against the filename column.
+    // SQLite GLOB uses the same wildcard syntax as shell globs — no
+    // translation needed. LOWER() makes the match case-insensitive.
+    if (searchText?.trim() && GLOB_WILDCARD_RE.test(searchText.trim())) {
+      const globPattern = searchText.trim();
+      const baseConds: SQL[] = [
+        isNull(photos.deletedAt),
+        sql`LOWER(${photos.filename}) GLOB LOWER(${globPattern})`,
+      ];
+
+      const hasExifFilter =
+        effectiveDateFrom ||
+        effectiveDateTo ||
+        cameraModel ||
+        lensModel ||
+        focalMin !== undefined ||
+        focalMax !== undefined ||
+        apertureMin !== undefined ||
+        apertureMax !== undefined ||
+        isoMin !== undefined ||
+        isoMax !== undefined ||
+        shutterMin !== undefined ||
+        shutterMax !== undefined;
+
+      if (hasExifFilter) {
+        const exifConds: SQL[] = [];
+        if (effectiveDateFrom)
+          exifConds.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
+        if (effectiveDateTo)
+          exifConds.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
+        if (cameraModel)
+          exifConds.push(like(exifData.cameraModel, `%${cameraModel}%`));
+        if (lensModel)
+          exifConds.push(like(exifData.lensModel, `%${lensModel}%`));
+        if (focalMin !== undefined)
+          exifConds.push(gte(exifData.focalLengthNum, focalMin));
+        if (focalMax !== undefined)
+          exifConds.push(lte(exifData.focalLengthNum, focalMax));
+        if (apertureMin !== undefined)
+          exifConds.push(sql`${exifData.aperture} >= ${apertureMin}`);
+        if (apertureMax !== undefined)
+          exifConds.push(sql`${exifData.aperture} <= ${apertureMax}`);
+        if (isoMin !== undefined)
+          exifConds.push(gte(exifData.iso, isoMin));
+        if (isoMax !== undefined)
+          exifConds.push(lte(exifData.iso, isoMax));
+        if (shutterMin !== undefined)
+          exifConds.push(gte(exifData.shutterSpeedNum, shutterMin));
+        if (shutterMax !== undefined)
+          exifConds.push(lte(exifData.shutterSpeedNum, shutterMax));
+
+        const exifPhotoIds = db
+          .select({ photoId: exifData.photoId })
+          .from(exifData)
+          .innerJoin(photos, eq(photos.id, exifData.photoId))
+          .where(and(...baseConds, ...exifConds))
+          .limit(limit)
+          .all()
+          .map((r) => r.photoId)
+          .filter(Boolean) as number[];
+
+        if (exifPhotoIds.length === 0) {
+          return { results: [], query: globPattern, total: 0 };
+        }
+
+        const photoList = db
+          .select()
+          .from(photos)
+          .where(and(isNull(photos.deletedAt), inArray(photos.id, exifPhotoIds)))
+          .orderBy(desc(photos.fileDate))
+          .all();
+
+        return {
+          results: photoList,
+          query: globPattern,
+          total: photoList.length,
+        };
+      }
+
+      // No EXIF filters — simple GLOB query
+      const globResults = db
+        .select()
+        .from(photos)
+        .where(and(...baseConds))
+        .orderBy(desc(photos.fileDate))
+        .limit(limit)
+        .all();
+
+      return {
+        results: globResults,
+        query: globPattern,
+        total: globResults.length,
+      };
+    }
+
     // Text query: multi-source retrieval → dedup → rerank
     if (searchText?.trim()) {
       const q = searchText.trim();
@@ -425,7 +568,32 @@ export const searchCompound = os
       function extractNameTokens(raw: string): string[] {
         // 去除已知停用词、口语词、标点
         let cleaned = raw;
-        for (const c of ["的", "了", "着", "过", "吗", "呢", "吧", "啊", "在", "是", "有", "和", "与", "或", "及", "等", "这", "那", "也", "拍", "照", "找", "看", "帮"]) {
+        for (const c of [
+          "的",
+          "了",
+          "着",
+          "过",
+          "吗",
+          "呢",
+          "吧",
+          "啊",
+          "在",
+          "是",
+          "有",
+          "和",
+          "与",
+          "或",
+          "及",
+          "等",
+          "这",
+          "那",
+          "也",
+          "拍",
+          "照",
+          "找",
+          "看",
+          "帮",
+        ]) {
           cleaned = cleaned.replaceAll(c, " ");
         }
         // 保留 2-4 字的中文连续片段
@@ -481,9 +649,9 @@ export const searchCompound = os
           .all(),
         // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
         (async () => {
-          // FTS5 简单模式下仅 * 和 " 为特殊字符；
-          // 查询含这些字符时直接走 LIKE 回退以避免语法错误。
-          const needsFts5Escape = /[*"]/.test(q);
+          // FTS5 简单模式下仅 " 为特殊字符；
+          // * 和 ? 已由上方的 glob 短路路径处理，不会到达此处。
+          const needsFts5Escape = /["]/.test(q);
           if (!needsFts5Escape && q.trim().length > 0) {
             try {
               const normalized = q.trim().replace(/\s+/g, " ");
@@ -556,7 +724,10 @@ export const searchCompound = os
         );
       }
       if (settled[1].status === "rejected") {
-        console.warn("[Search] Tag search degraded:", settled[1].reason?.message);
+        console.warn(
+          "[Search] Tag search degraded:",
+          settled[1].reason?.message
+        );
       }
       if (settled[2].status === "rejected") {
         console.warn(
@@ -712,7 +883,10 @@ export const searchCompound = os
             (p): p is NonNullable<typeof p> => p !== null && p.id != null
           );
 
-        const temporalBoost = buildTemporalBoost(effectiveDateFrom, effectiveDateTo);
+        const temporalBoost = buildTemporalBoost(
+          effectiveDateFrom,
+          effectiveDateTo
+        );
         const scored = applyTimeDecay(combined, { temporalBoost });
         return {
           results: scored.slice(0, limit),
@@ -811,7 +985,10 @@ export const searchCompound = os
         })
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
-      const temporalBoost = buildTemporalBoost(effectiveDateFrom, effectiveDateTo);
+      const temporalBoost = buildTemporalBoost(
+        effectiveDateFrom,
+        effectiveDateTo
+      );
       const scored = applyTimeDecay(combined, { temporalBoost });
       return {
         results: scored.slice(0, limit),

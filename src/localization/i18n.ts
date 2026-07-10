@@ -104,7 +104,7 @@ i18n.use(initReactI18next).init({
         sidebarSettings: "设置",
 
         // Search
-        searchPlaceholder: "搜索照片… (例如: 去年秋天的红叶)",
+        searchPlaceholder: "搜索照片… (例如: 去年秋天的红叶, 支持通配符 *.jpg DSC_*)",
         searchShortcut: "Ctrl+K",
 
         // PhotoGrid
@@ -1206,7 +1206,7 @@ i18n.use(initReactI18next).init({
         sidebarDashboard: "Dashboard",
         sidebarSettings: "Settings",
 
-        searchPlaceholder: "Search photos... (e.g. autumn leaves last year)",
+        searchPlaceholder: "Search photos... (e.g. autumn leaves, supports wildcards *.jpg DSC_*)",
         searchShortcut: "Ctrl+K",
 
         photosCount: "{{count}} photos",
