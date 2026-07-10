@@ -6,6 +6,7 @@ export type { AiHealthStatus, AiReadiness } from "./health";
 export { checkAiHealth, getAiReadiness } from "./health";
 export {
   cancelEmbedding,
+  copyModelsOnce,
   ensureLocalModel,
   getEmbeddingProgress,
   isAiModelLoaded,

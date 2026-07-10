@@ -140,17 +140,70 @@ async function copyDir(src: string, dest: string): Promise<void> {
   }
 }
 
-function hasBundledClipModel(): boolean {
-  const resourcesPath = process.resourcesPath;
-  const bundledModelPath = path.join(resourcesPath, "models");
-  const bundledMarker = path.join(
-    bundledModelPath,
+// ── Shared single-flight model copy (fixes Issue #25 race condition) ──
+let _modelCopyPromise: Promise<void> | null = null;
+
+/**
+ * Copy bundled AI models to dataPath exactly once, regardless of how many
+ * callers invoke it concurrently. Callers that arrive while a copy is already
+ * in-flight will wait for (and reuse) that existing copy.
+ */
+export async function copyModelsOnce(): Promise<void> {
+  const dataPath = getDataPath();
+  const modelsDir = path.join(dataPath, "models");
+  const visionMarker = path.join(
+    modelsDir,
     "Xenova",
     "clip-vit-base-patch32",
     "onnx",
-    "model_quantized.onnx"
+    "vision_model_quantized.onnx"
   );
-  return fs.existsSync(bundledMarker);
+  const textMarker = path.join(
+    modelsDir,
+    "Xenova",
+    "clip-vit-base-patch32",
+    "onnx",
+    "text_model_quantized.onnx"
+  );
+
+  // Already cached from a previous run — no work needed.
+  if (fs.existsSync(visionMarker) && fs.existsSync(textMarker)) {
+    return;
+  }
+
+  // Copy already in progress — wait for it.
+  if (_modelCopyPromise) {
+    return _modelCopyPromise;
+  }
+
+  _modelCopyPromise = (async () => {
+    try {
+      if (app.isPackaged) {
+        const bundledModels = path.join(process.resourcesPath, "models");
+        const bundledMarker = path.join(
+          bundledModels,
+          "Xenova",
+          "clip-vit-base-patch32",
+          "onnx",
+          "vision_model_quantized.onnx"
+        );
+        if (!fs.existsSync(bundledMarker)) {
+          throw new Error("Bundled models not found in installation package");
+        }
+        await copyDir(bundledModels, modelsDir);
+        console.log(
+          "[AI] copyModelsOnce: models copied from bundled resources"
+        );
+      }
+      // Dev mode: ensureModelAvailable() in main.ts handles copying from project
+      // dirs to dataPath; ensureLocalModel() returns source path directly — no
+      // copy needed here.
+    } finally {
+      _modelCopyPromise = null; // clear on failure to allow retry
+    }
+  })();
+
+  return _modelCopyPromise;
 }
 
 export async function ensureLocalModel(): Promise<string> {
@@ -174,21 +227,12 @@ export async function ensureLocalModel(): Promise<string> {
     return localModelPath;
   }
 
-  // ── Production: copy from bundled resources ────────────────
+  // ── Production: use shared single-flight copy (fixes Issue #25 race) ──
   if (app.isPackaged) {
-    const bundledModelPath = path.join(process.resourcesPath, "models");
-    const bundledVisionMarker = path.join(
-      bundledModelPath,
-      "Xenova",
-      "clip-vit-base-patch32",
-      "onnx",
-      "vision_model_quantized.onnx"
-    );
+    await copyModelsOnce();
 
-    if (fs.existsSync(bundledVisionMarker)) {
-      console.log("[AI] Copying bundled models to userData...");
-      await copyDir(bundledModelPath, localModelPath);
-      console.log("[AI] Models copied from resources");
+    // Re-check after the shared copy completes.
+    if (fs.existsSync(visionMarker) && fs.existsSync(textMarker)) {
       return localModelPath;
     }
 

@@ -30,6 +30,7 @@ import {
   cleanupExpiredTrash,
   getOrphanPhotoIds,
 } from "@/ipc/photos/handlers/mutations";
+import { copyModelsOnce } from "@/services/ai/model-loader";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
   getHttpServerPort,
@@ -201,7 +202,7 @@ function logPackagedPathDiagnostics() {
         "Xenova",
         "clip-vit-base-patch32",
         "onnx",
-        "model_quantized.onnx"
+        "vision_model_quantized.onnx"
       )
     ),
     summarizePathState(
@@ -212,7 +213,7 @@ function logPackagedPathDiagnostics() {
         "Xenova",
         "clip-vit-base-patch32",
         "onnx",
-        "model_quantized.onnx"
+        "vision_model_quantized.onnx"
       )
     ),
   ];
@@ -493,7 +494,7 @@ async function ensureModelAvailable(): Promise<void> {
     return;
   }
 
-  // ── Production: copy from bundled resources ──────────────────
+  // ── Production: use shared single-flight copy (fixes Issue #25 race) ──
   if (app.isPackaged) {
     const bundledModels = path.join(process.resourcesPath, "models");
     const bundledMarker = path.join(
@@ -515,9 +516,7 @@ async function ensureModelAvailable(): Promise<void> {
     if (fs.existsSync(bundledMarker)) {
       log.info("Copying AI models from bundled resources...");
       try {
-        fs.mkdirSync(modelsDir, { recursive: true });
-        log.info("[ensureModelAvailable] modelsDir created: %s", modelsDir);
-        await fs.promises.cp(bundledModels, modelsDir, { recursive: true });
+        await copyModelsOnce();
         // Verify
         const copied = fs.existsSync(visionMarker);
         const size = copied ? fs.statSync(visionMarker).size : 0;
@@ -599,9 +598,9 @@ function createWindow(httpPort: number) {
       : path.join(app.getAppPath(), "assets", "icon.png"),
     webPreferences: {
       additionalArguments: [
-          `--http-port=${httpPort}`,
-          ...(process.env.CI === "e2e" ? ["--e2e"] : []),
-        ],
+        `--http-port=${httpPort}`,
+        ...(process.env.CI === "e2e" ? ["--e2e"] : []),
+      ],
       devTools: inDevelopment,
       contextIsolation: true,
       nodeIntegration: false,
