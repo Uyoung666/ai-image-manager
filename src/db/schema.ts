@@ -50,6 +50,7 @@ export const photos = sqliteTable(
     thumbnailSize: text("thumbnail_size"),
     duelPreviewPath: text("duel_preview_path"),
     dominantColors: text("dominant_colors"),
+    colorBucket: integer("color_bucket"),
     phash: text("phash"),
     contentHash: text("content_hash"),
     vectorId: text("vector_id"),
@@ -100,6 +101,8 @@ export const photos = sqliteTable(
     thumbnailPathIdx: index("idx_photos_thumbnail_path").on(
       table.thumbnailPath
     ),
+    filenameIdx: index("idx_photos_filename").on(table.filename),
+    colorBucketIdx: index("idx_photos_color_bucket").on(table.colorBucket),
   })
 );
 
@@ -296,6 +299,7 @@ export const faceIdentities = sqliteTable(
     repPhotoIdIdx: index("idx_face_identities_rep_photo").on(
       table.representativePhotoId
     ),
+    nameIdx: index("idx_face_identities_name").on(table.name),
   })
 );
 

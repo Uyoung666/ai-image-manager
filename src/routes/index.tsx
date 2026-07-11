@@ -149,6 +149,8 @@ function HomePage() {
       // Set tag filter via Context — need to set activeTagIds directly
       // No direct setter exposed; use toggleTag for single tag
       filter.toggleTag(tagId);
+      // 确保 usePhotos 在 tagId 变化后立即重新查询
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       return;
     }
 
@@ -960,6 +962,7 @@ function HomePage() {
   }
 
   async function handleImageSearch(imagePath: string) {
+    const gen = ++searchGenerationRef.current;
     setSearchQuery(t("imageSearchToken"));
     setSearchMode("image");
     setSearchLoading(true);
@@ -969,6 +972,10 @@ function HomePage() {
         imagePath,
         limit: 500,
       });
+      // 竞态保护：丢弃过时响应
+      if (gen !== searchGenerationRef.current) {
+        return;
+      }
       if (result.error) {
         console.warn("[ImageSearch]", result.error);
       }
@@ -976,12 +983,17 @@ function HomePage() {
       setSearchResults(results);
       setSearchTime(Math.round(performance.now() - startTime));
     } catch (err: any) {
+      if (gen !== searchGenerationRef.current) {
+        return;
+      }
       console.error("[ImageSearch] failed:", err?.message || err);
       toast.error(t("toastImageSearchFailed"));
       setSearchResults([]);
       setSearchTime(Math.round(performance.now() - startTime));
     } finally {
-      setSearchLoading(false);
+      if (gen === searchGenerationRef.current) {
+        setSearchLoading(false);
+      }
     }
   }
   // Keyboard shortcuts for batch operations

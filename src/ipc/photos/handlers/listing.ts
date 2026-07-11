@@ -370,17 +370,30 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
           allDescendantIds.add(id);
         }
       }
-      const idList = [...allDescendantIds].join(",");
-      conditions.push(
-        sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${sql.raw(idList)}))` as any
-      );
+      const idArray = [...allDescendantIds];
+      if (idArray.length > 0) {
+        // sql.join builds parameterized IN clause: pt.tag_id IN ($1, $2, $3)
+        const inClause = sql.join(
+          idArray.map((id) => sql`${id}`),
+          sql`, `
+        );
+        conditions.push(
+          sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${inClause}))` as any
+        );
+      }
     } else {
       // AND mode: photo must have at least one tag from each root tag's descendant set
       for (const descendantSet of rootDescendantSets) {
-        const idList = [...descendantSet].join(",");
-        conditions.push(
-          sql`EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = ${photos.id} AND pt.tag_id IN (${sql.raw(idList)}))` as any
-        );
+        const idArray = [...descendantSet];
+        if (idArray.length > 0) {
+          const inClause = sql.join(
+            idArray.map((id) => sql`${id}`),
+            sql`, `
+          );
+          conditions.push(
+            sql`EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = ${photos.id} AND pt.tag_id IN (${inClause}))` as any
+          );
+        }
       }
     }
   }

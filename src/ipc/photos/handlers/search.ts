@@ -41,6 +41,33 @@ import {
   SearchSchema,
 } from "./shared";
 
+// ── Lightweight field selection for search results ───────────────────
+// Excludes heavy columns (phash, contentHash, vectorId, duelPreviewPath)
+// that are never needed in search result lists, saving ~150+ bytes/photo.
+const SEARCH_PHOTO_COLUMNS = {
+  id: photos.id,
+  path: photos.path,
+  folderId: photos.folderId,
+  filename: photos.filename,
+  fileSize: photos.fileSize,
+  fileDate: photos.fileDate,
+  width: photos.width,
+  height: photos.height,
+  format: photos.format,
+  colorSpace: photos.colorSpace,
+  hasAlpha: photos.hasAlpha,
+  thumbnailPath: photos.thumbnailPath,
+  thumbnailSize: photos.thumbnailSize,
+  dominantColors: photos.dominantColors,
+  colorBucket: photos.colorBucket,
+  isIndexed: photos.isIndexed,
+  isAiProcessed: photos.isAiProcessed,
+  isFaceProcessed: photos.isFaceProcessed,
+  isFavorite: photos.isFavorite,
+  deletedAt: photos.deletedAt,
+  createdAt: photos.createdAt,
+};
+
 // Pre-compiled regex patterns for color search and temporal detection
 const HASH_PREFIX_RE = /^#/;
 const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
@@ -51,6 +78,29 @@ const GLOB_WILDCARD_RE = /[*?[]/;
 // ── 熔断与超时配置 ──────────────────────────────────────────────────
 const LANCEDB_TIMEOUT_MS = 2000; // LanceDB 向量检索硬超时
 const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
+
+// ── Hue bucket helper ──────────────────────────────────────────────────
+// RGB → HSL hue → 36-bucket index (0-35), used for color-search pre-filter.
+function rgbToHueBucket(r: number, g: number, b: number): number {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+  if (delta === 0) {
+    return 0; // achromatic → bucket 0
+  }
+  let hue: number;
+  if (max === rn) {
+    hue = ((gn - bn) / delta + (gn < bn ? 6 : 0)) * 60;
+  } else if (max === gn) {
+    hue = ((bn - rn) / delta + 2) * 60;
+  } else {
+    hue = ((rn - gn) / delta + 4) * 60;
+  }
+  return Math.floor(hue / 10) % 36;
+}
 
 // EXIF filter cache: cache key -> { result, timestamp }
 const filterCache = new Map<string, { result: any; timestamp: number }>();
@@ -103,7 +153,7 @@ export const searchByText = os
     }
 
     const photoList = db
-      .select()
+      .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
       .where(inArray(photos.id, photoIds))
       .all();
@@ -160,7 +210,7 @@ export const searchByImage = os
     }
 
     const photoList = db
-      .select()
+      .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
       .where(inArray(photos.id, photoIds))
       .all();
@@ -295,6 +345,17 @@ export const searchCompound = os
         // LanceDB 颜色表可能稀疏（仅部分照片已索引），不能替代 SQLite。
         // 双路并行执行，合并结果去重，避免稀疏表导致的"全色块同一结果"。
 
+        // Pre-filter: map target RGB to hue bucket (0-35) to shrink scan range
+        const hueBucket = rgbToHueBucket(rgb.r, rgb.g, rgb.b);
+        // Generate 3 candidate buckets (target ± 1, modulo 36)
+        const candidateBuckets = [
+          (hueBucket + 35) % 36,
+          hueBucket,
+          (hueBucket + 1) % 36,
+        ];
+        // Remove duplicates (when 36 wraps around)
+        const buckets = [...new Set(candidateBuckets)].sort();
+
         const sqlitePromise = (async () => {
           const exifActive =
             dateFrom ||
@@ -315,6 +376,10 @@ export const searchCompound = os
             const conditions: SQL[] = [];
             conditions.push(sql`p.deleted_at IS NULL`);
             conditions.push(sql`p.dominant_colors IS NOT NULL`);
+            // Hue bucket pre-filter: dramatically reduces rows scanned by UDF
+            conditions.push(
+              sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`
+            );
             if (dateFrom) {
               conditions.push(sql`e.date_taken >= ${dateFrom}`);
             }
@@ -369,6 +434,7 @@ export const searchCompound = os
             colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
                 FROM photos p
                 WHERE p.deleted_at IS NULL AND p.dominant_colors IS NOT NULL
+                  AND (p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))
                   AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
                 ORDER BY dist ASC
                 LIMIT ${limit}`;
@@ -529,7 +595,7 @@ export const searchCompound = os
         }
 
         const photoList = db
-          .select()
+          .select(SEARCH_PHOTO_COLUMNS)
           .from(photos)
           .where(and(isNull(photos.deletedAt), inArray(photos.id, exifPhotoIds)))
           .orderBy(desc(photos.fileDate))
@@ -544,7 +610,7 @@ export const searchCompound = os
 
       // No EXIF filters — simple GLOB query
       const globResults = db
-        .select()
+        .select(SEARCH_PHOTO_COLUMNS)
         .from(photos)
         .where(and(...baseConds))
         .orderBy(desc(photos.fileDate))
@@ -814,7 +880,7 @@ export const searchCompound = os
             .filter(Boolean) as number[];
           if (datePhotoIds.length > 0) {
             const datePhotos = db
-              .select()
+              .select(SEARCH_PHOTO_COLUMNS)
               .from(photos)
               .where(
                 and(isNull(photos.deletedAt), inArray(photos.id, datePhotoIds))
@@ -862,7 +928,7 @@ export const searchCompound = os
       if (!hasExifOrTimeFilter) {
         const allIds = rerankedList.map((r) => r.photoId);
         const photoList = db
-          .select()
+          .select(SEARCH_PHOTO_COLUMNS)
           .from(photos)
           .where(inArray(photos.id, allIds))
           .all();
@@ -966,7 +1032,7 @@ export const searchCompound = os
       }
       const filteredIds = filtered.map((r) => r.photoId);
       const photoList = db
-        .select()
+        .select(SEARCH_PHOTO_COLUMNS)
         .from(photos)
         .where(inArray(photos.id, filteredIds))
         .all();
@@ -1016,7 +1082,7 @@ export const searchCompound = os
       shutterMax !== undefined;
     if (!hasEffectiveFilters) {
       const items = db
-        .select()
+        .select(SEARCH_PHOTO_COLUMNS)
         .from(photos)
         .orderBy(desc(photos.fileDate))
         .limit(limit)
@@ -1091,7 +1157,7 @@ export const searchCompound = os
     }
 
     const photoList = db
-      .select()
+      .select(SEARCH_PHOTO_COLUMNS)
       .from(photos)
       .where(inArray(photos.id, exifPhotoIds))
       .limit(limit)
@@ -1100,4 +1166,78 @@ export const searchCompound = os
     const result = { results: photoList, total: photoList.length };
     setCachedResult(cacheKey, result);
     return result;
+  });
+
+// ── Spotlight 轻量搜索 ───────────────────────────────────────────────
+// 专为 Ctrl+K 全局搜索设计：仅返回 id + filename + thumbnailPath，
+// 跳过 LanceDB CLIP 推理和四路并行重排，延迟极低（通常 < 30ms）。
+export const searchSpotlight = os
+  .input(SearchSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const q = input.query.trim();
+    const limit = Math.min(input.limit ?? 8, 12);
+
+    // 两路快速召回：FTS5 文件名 + 标签 LIKE（跳过 AI 和人脸）
+    const settled = await Promise.allSettled([
+      // 路 1：FTS5 文件名 MATCH（优先）→ LIKE 回退
+      (async () => {
+        const needsFts5Escape = /["]/.test(q);
+        if (!needsFts5Escape && q.length > 0) {
+          try {
+            const normalized = q.replace(/\s+/g, " ");
+            const terms = normalized
+              .split(/\s+/)
+              .map((t) => `"${t}"*`)
+              .join(" ");
+            const ftsResults = db.all(
+              sql`SELECT rowid AS id FROM photos_fts WHERE photos_fts MATCH ${terms}`
+            ) as Array<{ id: number }>;
+            if (ftsResults.length > 0) return ftsResults.slice(0, limit);
+          } catch { /* FTS5 error → fallback */ }
+        }
+        return db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(and(isNull(photos.deletedAt), like(photos.filename, `%${q}%`)))
+          .limit(limit)
+          .all();
+      })(),
+      // 路 2：标签 LIKE 搜索
+      db
+        .select({ id: photos.id })
+        .from(photos)
+        .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+        .innerJoin(tags, eq(tags.id, photoTags.tagId))
+        .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
+        .limit(limit)
+        .all(),
+    ]);
+
+    // 合并去重（标签优先作为精确匹配）
+    const merged = new Map<number, number>();
+    const tagRows = settled[1].status === "fulfilled" ? settled[1].value : [];
+    const ftsRows = settled[0].status === "fulfilled" ? settled[0].value : [];
+
+    for (const r of tagRows) merged.set(r.id, 1);
+    for (const r of ftsRows) {
+      if (!merged.has(r.id)) merged.set(r.id, 0);
+    }
+
+    const ids = [...merged.keys()].slice(0, limit);
+    if (ids.length === 0) return { results: [], query: q };
+
+    // 仅返回三字段，IPC payload 极小
+    const results = db
+      .select({
+        id: photos.id,
+        filename: photos.filename,
+        thumbnailPath: photos.thumbnailPath,
+        path: photos.path,
+      })
+      .from(photos)
+      .where(inArray(photos.id, ids))
+      .all();
+
+    return { results, query: q };
   });

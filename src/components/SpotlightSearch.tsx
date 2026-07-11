@@ -97,6 +97,8 @@ export function SpotlightSearch() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open]);
 
+  const searchGenRef = useRef(0);
+
   const searchPhotos = useCallback(async (q: string) => {
     if (!q.trim()) {
       setPhotoResults([]);
@@ -105,6 +107,7 @@ export function SpotlightSearch() {
       setPersonResults([]);
       return;
     }
+    const gen = ++searchGenRef.current;
     setSearching(true);
     const qLower = q.toLowerCase();
     try {
@@ -146,14 +149,16 @@ export function SpotlightSearch() {
             });
 
       const [photos, tags, albums, faces] = await Promise.allSettled([
-        ipc.client.photos.searchCompound({
+        (ipc.client.photos as any).searchSpotlight({
           query: q,
-          limit: 5,
+          limit: 8,
         }),
         tagsPromise,
         albumsPromise,
         facesPromise,
       ]);
+      // 竞态保护：丢弃过时响应
+      if (gen !== searchGenRef.current) return;
       const failed = [photos, tags, albums, faces].filter(
         (r) => r.status === "rejected"
       ).length;

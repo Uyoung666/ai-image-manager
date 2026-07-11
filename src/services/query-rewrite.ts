@@ -375,7 +375,37 @@ function parseTimeExpression(query: string): {
 }
 
 // 查询改写主函数
+// ── LRU cache for rewriteQuery results (纯计算, 无副作用) ─────────────
+const rewriteCache = new Map<string, { result: RewrittenQuery; ts: number }>();
+const REWRITE_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const MAX_REWRITE_CACHE = 50;
+
+function getCachedRewrite(key: string): RewrittenQuery | null {
+  const entry = rewriteCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > REWRITE_CACHE_TTL) {
+    rewriteCache.delete(key);
+    return null;
+  }
+  // LRU bump
+  rewriteCache.delete(key);
+  rewriteCache.set(key, entry);
+  return entry.result;
+}
+
+function setCachedRewrite(key: string, result: RewrittenQuery): void {
+  if (rewriteCache.size >= MAX_REWRITE_CACHE) {
+    const lru = rewriteCache.keys().next().value;
+    if (lru !== undefined) rewriteCache.delete(lru);
+  }
+  rewriteCache.set(key, { result, ts: Date.now() });
+}
+
 export function rewriteQuery(query: string): RewrittenQuery {
+  const cacheKey = query.trim();
+  const cached = getCachedRewrite(cacheKey);
+  if (cached) return cached;
+
   const originalQuery = query.trim();
 
   // ── 关键顺序：先解析时间，再去除口语/停用词 ────────────────────
@@ -413,13 +443,15 @@ export function rewriteQuery(query: string): RewrittenQuery {
     }
   }
 
-  return {
+  const result: RewrittenQuery = {
     cleanQuery,
     originalQuery,
     timeFilter,
     removedTerms,
     timeMatchedText: matchedText,
   };
+  setCachedRewrite(cacheKey, result);
+  return result;
 }
 
 // 标准化 EXIF 筛选（将时间筛选转换为日期字符串）

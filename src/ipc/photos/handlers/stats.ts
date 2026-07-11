@@ -39,8 +39,35 @@ export function invalidateStatsCache(): void {
   invalidateColorCache();
 }
 
+// Cache for getExifCandidates — EXIF values only change on import/delete
+interface ExifCandidatesCacheEntry {
+  data: {
+    cameraModels: (string | null)[];
+    lensModels: (string | null)[];
+    focalLengths: string[];
+    apertures: number[];
+    isos: (number | null)[];
+    formats: string[];
+  };
+  timestamp: number;
+}
+let exifCandidatesCache: ExifCandidatesCacheEntry | null = null;
+const EXIF_CANDIDATES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export function invalidateExifCandidatesCache(): void {
+  exifCandidatesCache = null;
+}
+
 // Lightweight: distinct EXIF values for smart album autocomplete
 export const getExifCandidates = os.handler(() => {
+  // Return cached result if fresh
+  if (
+    exifCandidatesCache &&
+    Date.now() - exifCandidatesCache.timestamp < EXIF_CANDIDATES_CACHE_TTL
+  ) {
+    return exifCandidatesCache.data;
+  }
+
   const db = getDatabase();
 
   const cameraModels = db
@@ -101,7 +128,9 @@ export const getExifCandidates = os.handler(() => {
     .all()
     .map((r) => r.val ?? "");
 
-  return { cameraModels, lensModels, focalLengths, apertures, isos, formats };
+  const result = { cameraModels, lensModels, focalLengths, apertures, isos, formats };
+  exifCandidatesCache = { data: result, timestamp: Date.now() };
+  return result;
 });
 
 // Shared color-distribution helper — reused by getColorDistribution and getStats
@@ -319,49 +348,88 @@ export const getStats = os
       { range: "<1/30s", count: shutterBuckets?.b7 || 0 },
     ];
 
-    // Single pass over dateTaken for hour buckets, yearly stats, monthly stats and date range
-    const allDates = db
-      .select({ dateTaken: exifData.dateTaken })
+    // SQL-level time aggregation — avoids pulling all date_taken rows into JS.
+    // Hour buckets (24 CASE expressions, single scan over idx_exif_date_taken)
+    const hourBucketsRaw = db
+      .select({
+        h0:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 0  THEN 1 END)`,
+        h1:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 1  THEN 1 END)`,
+        h2:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 2  THEN 1 END)`,
+        h3:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 3  THEN 1 END)`,
+        h4:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 4  THEN 1 END)`,
+        h5:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 5  THEN 1 END)`,
+        h6:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 6  THEN 1 END)`,
+        h7:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 7  THEN 1 END)`,
+        h8:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 8  THEN 1 END)`,
+        h9:  sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 9  THEN 1 END)`,
+        h10: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 10 THEN 1 END)`,
+        h11: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 11 THEN 1 END)`,
+        h12: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 12 THEN 1 END)`,
+        h13: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 13 THEN 1 END)`,
+        h14: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 14 THEN 1 END)`,
+        h15: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 15 THEN 1 END)`,
+        h16: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 16 THEN 1 END)`,
+        h17: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 17 THEN 1 END)`,
+        h18: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 18 THEN 1 END)`,
+        h19: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 19 THEN 1 END)`,
+        h20: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 20 THEN 1 END)`,
+        h21: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 21 THEN 1 END)`,
+        h22: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 22 THEN 1 END)`,
+        h23: sql<number>`COUNT(CASE WHEN CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch') AS INTEGER) = 23 THEN 1 END)`,
+      })
       .from(exifData)
       .where(sql`${exifData.dateTaken} IS NOT NULL`)
+      .get();
+
+    const raw = hourBucketsRaw!;
+    const hourBuckets24 = [
+      raw.h0,  raw.h1,  raw.h2,  raw.h3,  raw.h4,  raw.h5,
+      raw.h6,  raw.h7,  raw.h8,  raw.h9,  raw.h10, raw.h11,
+      raw.h12, raw.h13, raw.h14, raw.h15, raw.h16, raw.h17,
+      raw.h18, raw.h19, raw.h20, raw.h21, raw.h22, raw.h23,
+    ];
+
+    // Yearly stats — GROUP BY in SQL
+    const yearlyRows = db
+      .select({
+        year: sql<string>`CAST(strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch') AS TEXT)`,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.dateTaken} IS NOT NULL`)
+      .groupBy(sql`strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch')`)
       .all();
-
-    const hourBuckets24 = new Array(24).fill(0);
-    const yearCount = new Map<string, number>();
-    const monthCount = new Map<string, number>();
-    let earliest = Number.POSITIVE_INFINITY;
-    let latest = Number.NEGATIVE_INFINITY;
-
-    for (const row of allDates) {
-      const ts = row.dateTaken!;
-      const d = new Date(ts);
-      hourBuckets24[d.getHours()]++;
-
-      const yearStr = d.getFullYear().toString();
-      yearCount.set(yearStr, (yearCount.get(yearStr) || 0) + 1);
-
-      const monthStr = String(d.getMonth() + 1).padStart(2, "0");
-      monthCount.set(monthStr, (monthCount.get(monthStr) || 0) + 1);
-
-      if (ts < earliest) {
-        earliest = ts;
-      }
-      if (ts > latest) {
-        latest = ts;
-      }
-    }
-
-    const yearlyStats = Array.from(yearCount.entries())
-      .map(([year, count]) => ({ year, count }))
+    const yearlyStats = yearlyRows
+      .map((r) => ({ year: r.year, count: r.count }))
       .sort((a, b) => a.year.localeCompare(b.year));
 
-    const monthlyStats = Array.from(monthCount.entries())
-      .map(([month, count]) => ({ month, count }))
+    // Monthly stats — GROUP BY in SQL
+    const monthlyRows = db
+      .select({
+        month: sql<string>`CAST(strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch') AS TEXT)`,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.dateTaken} IS NOT NULL`)
+      .groupBy(sql`strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch')`)
+      .all();
+    const monthlyStats = monthlyRows
+      .map((r) => ({ month: r.month, count: r.count }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
+    // Date range in SQL
+    const rangeRow = db
+      .select({
+        earliest: sql<number>`MIN(${exifData.dateTaken})`,
+        latest: sql<number>`MAX(${exifData.dateTaken})`,
+      })
+      .from(exifData)
+      .where(sql`${exifData.dateTaken} IS NOT NULL`)
+      .get();
+
     const dateRange =
-      earliest < Number.POSITIVE_INFINITY
-        ? { earliest, latest }
+      rangeRow?.earliest != null
+        ? { earliest: rangeRow.earliest, latest: rangeRow.latest }
         : {
             earliest: null as unknown as number,
             latest: null as unknown as number,
@@ -374,7 +442,7 @@ export const getStats = os
         .where(sql`${exifData.iso} IS NOT NULL`)
         .get()?.avgIso || 0;
 
-    // GPS geo-locations for map display
+    // GPS geo-locations for map display (capped to prevent huge payload)
     const geoLocations = db
       .select({
         photoId: exifData.photoId,
@@ -390,6 +458,7 @@ export const getStats = os
       .where(
         sql`${exifData.gpsLatitude} IS NOT NULL AND ${exifData.gpsLongitude} IS NOT NULL AND ${photos.deletedAt} IS NULL`
       )
+      .limit(2000)
       .all();
 
     const result = {
@@ -997,7 +1066,7 @@ export async function runColorMigration(
   if (force) {
     // Clear existing color data for re-extraction
     db.run(
-      sql`UPDATE photos SET dominant_colors = NULL WHERE deleted_at IS NULL`
+      sql`UPDATE photos SET dominant_colors = NULL, color_bucket = NULL WHERE deleted_at IS NULL`
     );
   }
 
@@ -1020,8 +1089,17 @@ export async function runColorMigration(
     try {
       const colors = await extractDominantColors(photo.thumbnailPath!);
       if (colors) {
+        // Compute hue bucket from the primary color for pre-filter optimization
+        let bucketSql = sql`NULL`;
+        try {
+          const palette = JSON.parse(colors) as Array<{ hue?: number; weight: number }>;
+          if (palette.length > 0 && palette[0].hue != null) {
+            const bucket = Math.floor(palette[0].hue / 10) % 36;
+            bucketSql = sql`${bucket}`;
+          }
+        } catch { /* keep NULL */ }
         db.run(
-          sql`UPDATE photos SET dominant_colors = ${colors} WHERE id = ${photo.id}`
+          sql`UPDATE photos SET dominant_colors = ${colors}, color_bucket = ${bucketSql} WHERE id = ${photo.id}`
         );
       }
     } catch (err) {

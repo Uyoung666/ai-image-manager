@@ -139,6 +139,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
   const toggleTag = useCallback((tagId: number | null) => {
     if (tagId === null) {
       setActiveTagIds([]);
+      window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
       return;
     }
     setActiveTagIds((prev) => {
@@ -148,6 +149,8 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       return [...prev, tagId];
     });
     setFavoriteOnlyState(false);
+    // 清除搜索状态，确保标签筛选结果不会被舊的搜索模式覆盖
+    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
   }, []);
 
   const toggleTagMode = useCallback(() => {

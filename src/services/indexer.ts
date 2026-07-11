@@ -286,6 +286,7 @@ async function readExif(
 
 interface PhotoRecord {
   colorSpace: string;
+  colorBucket: number | null;
   dominantColors: string | null;
   duelPreviewPath: string | null;
   fileDate: number;
@@ -384,6 +385,27 @@ interface ExifRecord {
   software?: string;
 }
 
+// ── Hue bucket helper ────────────────────────────────────────────────────
+// Maps the primary hue (0–359) from dominant_colors JSON to a 36-bucket
+// integer (0–35) for color-search pre-filtering. Returns null if no color data.
+function computeHueBucket(dominantColorsJson: string | null): number | null {
+  if (!dominantColorsJson) {
+    return null;
+  }
+  try {
+    const palette = JSON.parse(dominantColorsJson) as Array<{
+      hue?: number;
+      weight: number;
+    }>;
+    if (palette.length === 0 || palette[0].hue == null) {
+      return null;
+    }
+    return Math.floor(palette[0].hue / 10) % 36;
+  } catch {
+    return null;
+  }
+}
+
 function queuePrimaryColorVectorUpsert(
   photoId: number,
   dominantColors: string | null
@@ -478,6 +500,7 @@ async function preparePhotoRecord(
       console.warn(`[Indexer] Color extraction failed for ${filePath}:`, err);
     }
   }
+  const colorBucket = computeHueBucket(dominantColors);
 
   const photoRecord: PhotoRecord = {
     path: filePath,
@@ -489,6 +512,7 @@ async function preparePhotoRecord(
     height: meta.height,
     format: meta.format,
     colorSpace: meta.colorSpace,
+    colorBucket,
     hasAlpha: meta.hasAlpha,
     thumbnailPath: thumb.thumbnailPath,
     thumbnailSize: `${thumb.width}x${thumb.height}`,

@@ -43,7 +43,7 @@ import {
   scanOrphanThumbnails,
   toggleFavorite,
 } from "./handlers/mutations";
-import { searchByImage, searchByText, searchCompound } from "./handlers/search";
+import { searchByImage, searchByText, searchCompound, searchSpotlight } from "./handlers/search";
 import { generateAndUploadShare } from "./handlers/share";
 import {
   dismissDuplicate,
@@ -116,6 +116,7 @@ export const photos = {
   searchByImage,
   searchByText,
   searchCompound,
+  searchSpotlight,
   setPhotoTag,
   setWatermarkSettings,
   startAiIndexing,

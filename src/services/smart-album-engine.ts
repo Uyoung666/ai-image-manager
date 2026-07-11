@@ -331,13 +331,39 @@ function intersectIds(idSets: number[][]): number[] {
   return result;
 }
 
+// ── 智能相册结果缓存 ──────────────────────────────────────────────────
+// 相册规则不变时避免重复执行多条 SQL 查询（规则数 × 单次查询）。
+// 短 TTL 确保新导入/删除的照片能较快反映到智能相册中。
+const albumCache = new Map<string, { ids: number[]; ts: number }>();
+const ALBUM_CACHE_TTL = 15_000; // 15 seconds
+const MAX_ALBUM_CACHE = 20;
+
+export function invalidateSmartAlbumCache(): void {
+  albumCache.clear();
+}
+
 export function evaluateSmartAlbum(rules: SmartAlbumRules): number[] {
   if (!(rules.rules && rules.rules.length)) {
     return [];
   }
 
+  // 缓存键：规则 JSON 序列化
+  const cacheKey = JSON.stringify(rules.rules);
+  const cached = albumCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < ALBUM_CACHE_TTL) {
+    return cached.ids;
+  }
+
+  // LRU 淘汰
+  if (albumCache.size >= MAX_ALBUM_CACHE) {
+    const lru = albumCache.keys().next().value;
+    if (lru !== undefined) albumCache.delete(lru);
+  }
+
   const idSets = rules.rules.map(evaluateRule);
-  return intersectIds(idSets);
+  const result = intersectIds(idSets);
+  albumCache.set(cacheKey, { ids: result, ts: Date.now() });
+  return result;
 }
 
 export function validateSmartRules(rulesJson: string): {
