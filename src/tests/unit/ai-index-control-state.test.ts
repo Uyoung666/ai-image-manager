@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("electron", () => ({
-  app: {
-    getAppPath: () => process.cwd(),
-    getPath: () => process.cwd(),
-    isPackaged: false,
-  },
-}));
-
 describe("AI index control state", () => {
   beforeEach(() => {
     vi.resetModules();

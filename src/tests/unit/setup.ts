@@ -1,6 +1,19 @@
 ﻿import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
+// Mock electron globally — CI installs with --ignore-scripts (no Electron binary),
+// and any module that transitively imports electron will crash if the real module
+// is loaded. This mock must be in setup so it intercepts all import chains before
+// any test file's transitive dependencies can trigger a real electron require.
+vi.mock("electron", () => ({
+  app: {
+    getAppPath: () => process.cwd(),
+    getLocale: () => "zh-CN",
+    getPath: () => process.cwd(),
+    isPackaged: false,
+  },
+}));
+
 // Mock react-i18next to avoid the need for full i18n initialization in tests
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
