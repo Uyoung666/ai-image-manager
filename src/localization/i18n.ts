@@ -104,7 +104,7 @@ i18n.use(initReactI18next).init({
         sidebarSettings: "设置",
 
         // Search
-        searchPlaceholder: "搜索照片… (例如: 去年秋天的红叶, 支持通配符 *.jpg DSC_*)",
+        searchPlaceholder: "试试搜索“去年秋天的红叶”",
         searchShortcut: "Ctrl+K",
 
         // PhotoGrid
@@ -669,6 +669,14 @@ i18n.use(initReactI18next).init({
         applyFilters: "应用筛选",
         searchSuggestions: "搜索建议",
         recentSearches: "最近搜索",
+        searchStarterTitle: "试试这样搜索",
+        searchStarterDescription: "直接描述画面、场景或拍摄时间",
+        searchStarterWildcardHint: "也支持文件名和通配符，例如 *.jpg、DSC_*",
+        searchStarterAiUnavailable: "请先完成 AI 索引，再使用语义搜索示例",
+        searchExampleAutumnLeaves: "去年秋天的红叶",
+        searchExampleSeasideSunset: "海边的日落",
+        searchExampleCuteCat: "可爱的猫咪",
+        searchExampleNightCity: "夜晚的城市街道",
 
         // Selection / sort / status
         selectedPhotos: "已选 {{count}} 张",
@@ -1206,7 +1214,7 @@ i18n.use(initReactI18next).init({
         sidebarDashboard: "Dashboard",
         sidebarSettings: "Settings",
 
-        searchPlaceholder: "Search photos... (e.g. autumn leaves, supports wildcards *.jpg DSC_*)",
+        searchPlaceholder: "Try “sunset by the sea”",
         searchShortcut: "Ctrl+K",
 
         photosCount: "{{count}} photos",
@@ -1803,6 +1811,17 @@ i18n.use(initReactI18next).init({
         applyFilters: "Apply Filters",
         searchSuggestions: "Search Suggestions",
         recentSearches: "Recent Searches",
+        searchStarterTitle: "Try searching like this",
+        searchStarterDescription:
+          "Describe the subject, scene, or when the photo was taken",
+        searchStarterWildcardHint:
+          "File names and wildcards also work, such as *.jpg and DSC_*",
+        searchStarterAiUnavailable:
+          "Finish AI indexing before using semantic search examples",
+        searchExampleAutumnLeaves: "autumn leaves",
+        searchExampleSeasideSunset: "sunset by the sea",
+        searchExampleCuteCat: "cute cat",
+        searchExampleNightCity: "city streets at night",
 
         // Selection / sort / status
         selectedPhotos: "{{count}} selected",

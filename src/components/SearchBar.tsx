@@ -34,6 +34,13 @@ interface TimePreset {
   label: string;
 }
 
+interface SearchSuggestion {
+  type: "example" | "person" | "dictionary" | "tag" | "history";
+  text: string;
+  color?: string;
+  category?: string;
+}
+
 function formatDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -210,6 +217,7 @@ export const SearchBar = memo(
     );
     const [history, setHistory] = useState<string[]>(loadHistory);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [showFilters, setShowFilters] = useState(false);
     const [tags, setTags] = useState<TagInfo[]>([]);
     const [cameraModels, setCameraModels] = useState<string[]>([]);
     const [showCameraSuggestions, setShowCameraSuggestions] = useState(false);
@@ -218,6 +226,16 @@ export const SearchBar = memo(
     // Person names for search suggestions and AI-powered dictionary suggestions
     const [personNames, setPersonNames] = useState<string[]>([]);
     const [dictSuggestionsEnabled, setDictSuggestionsEnabled] = useState(false);
+
+    const searchExamples = useMemo<SearchSuggestion[]>(
+      () => [
+        { type: "example", text: t("searchExampleAutumnLeaves") },
+        { type: "example", text: t("searchExampleSeasideSunset") },
+        { type: "example", text: t("searchExampleCuteCat") },
+        { type: "example", text: t("searchExampleNightCity") },
+      ],
+      [t]
+    );
 
     // Fetch person names for search suggestions
     useEffect(() => {
@@ -279,18 +297,10 @@ export const SearchBar = memo(
     const suggestions = useMemo(() => {
       const q = query.trim().toLowerCase();
       if (!q) {
-        // Empty query: show recent history only
-        return history
-          .slice(0, 8)
-          .map((h) => ({ type: "history" as const, text: h }));
+        return [];
       }
 
-      const all: Array<{
-        type: "person" | "dictionary" | "tag" | "history";
-        text: string;
-        color?: string;
-        category?: string;
-      }> = [];
+      const all: SearchSuggestion[] = [];
 
       // 1) Person name matches
       const matchingPersons = personNames
@@ -339,13 +349,41 @@ export const SearchBar = memo(
       return all;
     }, [query, tags, history, personNames, dictSuggestionsEnabled]);
 
+    const examplesDisabled = Boolean(
+      aiStatus &&
+        (aiStatus.isEmbedding ||
+          aiStatus.model === "loading" ||
+          aiStatus.model === "error" ||
+          aiStatus.vectorDB !== "ready" ||
+          !aiStatus.hasVectors ||
+          !aiStatus.indexReady)
+    );
+    const recentSuggestions = useMemo<SearchSuggestion[]>(
+      () =>
+        history
+          .slice(0, 8)
+          .map((text) => ({ type: "history", text })),
+      [history]
+    );
+    const displayedSuggestions = query.trim()
+      ? suggestions
+      : [
+          ...(examplesDisabled ? [] : searchExamples),
+          ...recentSuggestions,
+        ];
+    const showSuggestionPanel =
+      showSuggestions &&
+      !imageSearchActive &&
+      !showFilters &&
+      (!query.trim() || suggestions.length > 0);
+
     useEffect(() => {
       if (imageSearchActive) {
         setQuery(t("imageSearchToken"));
+        setShowSuggestions(false);
       }
-    }, [imageSearchActive]);
+    }, [imageSearchActive, t]);
     const [dragOver, setDragOver] = useState(false);
-    const [showFilters, setShowFilters] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -366,7 +404,7 @@ export const SearchBar = memo(
         /* ignore */
       }
       setHistory([]);
-      setShowSuggestions(false);
+      setSuggestionIndex(-1);
     }
 
     // Filter state
@@ -422,7 +460,11 @@ export const SearchBar = memo(
     }
 
     function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-      if (e.key === "ArrowDown" && showSuggestions && suggestions.length > 0) {
+      if (
+        e.key === "ArrowDown" &&
+        showSuggestionPanel &&
+        displayedSuggestions.length > 0
+      ) {
         e.preventDefault();
         setSuggestionIndex(0);
         suggestionListRef.current?.focus();
@@ -443,7 +485,7 @@ export const SearchBar = memo(
     }
 
     function handleSuggestionKeyDown(e: React.KeyboardEvent) {
-      const len = suggestions.length;
+      const len = displayedSuggestions.length;
       if (len === 0) {
         return;
       }
@@ -460,7 +502,7 @@ export const SearchBar = memo(
         case "Enter":
           e.preventDefault();
           if (suggestionIndex >= 0 && suggestionIndex < len) {
-            handleSuggestionClick(suggestions[suggestionIndex]);
+            handleSuggestionClick(displayedSuggestions[suggestionIndex]);
           }
           break;
         case "Escape":
@@ -484,7 +526,7 @@ export const SearchBar = memo(
         `[data-suggestion-index="${suggestionIndex}"]`
       );
       if (activeEl) {
-        activeEl.scrollIntoView({ block: "nearest" });
+        activeEl.scrollIntoView?.({ block: "nearest" });
       }
     }, [suggestionIndex]);
 
@@ -536,7 +578,7 @@ export const SearchBar = memo(
     }
 
     function handleSuggestionClick(suggestion: {
-      type: "person" | "dictionary" | "tag" | "history";
+      type: "example" | "person" | "dictionary" | "tag" | "history";
       text: string;
     }) {
       setQuery(suggestion.text);
@@ -779,7 +821,7 @@ export const SearchBar = memo(
                 aria-activedescendant={suggestionIndex >= 0 ? `search-suggestion-${suggestionIndex}` : undefined}
                 aria-autocomplete="list"
                 aria-controls="search-suggestions-listbox"
-                aria-expanded={showSuggestions && suggestions.length > 0}
+                aria-expanded={showSuggestionPanel}
                 className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring"
                 onBlur={handleInputBlur}
                 role="combobox"
@@ -788,7 +830,11 @@ export const SearchBar = memo(
                   setShowSuggestions(true);
                   setSuggestionIndex(-1); // 输入变化时重置高亮
                 }}
-                onFocus={() => setShowSuggestions(suggestions.length > 0)}
+                onFocus={() => {
+                  if (!(imageSearchActive || showFilters)) {
+                    setShowSuggestions(true);
+                  }
+                }}
                 onKeyDown={handleInputKeyDown}
                 placeholder={getPlaceholder()}
                 ref={inputRef}
@@ -827,15 +873,18 @@ export const SearchBar = memo(
                   type="file"
                 />
                 <button
-                  className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
+                  aria-label={t("searchModeImage")}
+                  className={`flex h-9 items-center justify-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors ${
                     imageSearchActive
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                   }`}
                   onClick={() => fileInputRef.current?.click()}
                   title={t("imageSearchTitle")}
+                  type="button"
                 >
                   <ImageUp className="h-4 w-4" />
+                  <span>{t("searchModeImage")}</span>
                 </button>
               </>
             )}
@@ -845,8 +894,18 @@ export const SearchBar = memo(
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
               }`}
-              onClick={() => setShowFilters((prev) => !prev)}
+              onClick={() => {
+                setShowFilters((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setShowSuggestions(false);
+                    setSuggestionIndex(-1);
+                  }
+                  return next;
+                });
+              }}
               title={t("exifFilterTitle")}
+              type="button"
             >
               <Filter className="h-4 w-4" />
             </button>
@@ -1462,7 +1521,7 @@ export const SearchBar = memo(
         </div>
 
         {/* Search suggestions dropdown */}
-        {showSuggestions && suggestions.length > 0 && (
+        {showSuggestionPanel && (
           <div
             className="absolute top-full right-4 left-4 z-[60] mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
             id="search-suggestions-listbox"
@@ -1491,22 +1550,105 @@ export const SearchBar = memo(
             }}
             tabIndex={0}
           >
-            <div className="flex items-center justify-between px-3 py-1.5">
-              <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-                {query.trim() ? t("searchSuggestions") : t("recentSearches")}
-              </span>
-              {!query.trim() && (
-                <button
-                  className="text-[10px] text-muted-foreground/70 hover:text-foreground"
-                  onClick={clearHistory}
-                  tabIndex={-1}
-                  type="button"
-                >
-                  {t("clearAll")}
-                </button>
-              )}
-            </div>
-            {suggestions.map((s, i) => (
+            {!query.trim() ? (
+              <>
+                <div className="px-3 pt-2.5 pb-1.5">
+                  <div className="font-medium text-[12px] text-foreground">
+                    {t("searchStarterTitle")}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground/70">
+                    {t("searchStarterDescription")}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 px-3 pb-2.5">
+                  {searchExamples.map((example, i) => (
+                    <button
+                      aria-selected={
+                        !examplesDisabled && i === suggestionIndex
+                      }
+                      className={cn(
+                        "flex min-w-0 items-center gap-2 rounded-[6px] border border-border px-2.5 py-2 text-left text-[12px] transition-colors",
+                        examplesDisabled
+                          ? "cursor-not-allowed text-muted-foreground/50"
+                          : i === suggestionIndex
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:border-primary/20 hover:bg-primary/5 hover:text-foreground"
+                      )}
+                      data-suggestion-index={
+                        examplesDisabled ? undefined : i
+                      }
+                      disabled={examplesDisabled}
+                      id={
+                        examplesDisabled
+                          ? undefined
+                          : `search-suggestion-${i}`
+                      }
+                      key={example.text}
+                      onClick={() => handleSuggestionClick(example)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => {
+                        if (!examplesDisabled) {
+                          setSuggestionIndex(i);
+                        }
+                      }}
+                      role="option"
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      <Search className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="truncate">{example.text}</span>
+                    </button>
+                  ))}
+                </div>
+                {examplesDisabled && (
+                  <div className="mx-3 mb-2 rounded-[5px] bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                    {t("searchStarterAiUnavailable")}
+                  </div>
+                )}
+                <div className="border-border border-t px-3 py-2 text-[10px] text-muted-foreground/70">
+                  {t("searchStarterWildcardHint")}
+                </div>
+                {recentSuggestions.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between border-border border-t px-3 py-1.5">
+                      <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                        {t("recentSearches")}
+                      </span>
+                      <button
+                        className="text-[10px] text-muted-foreground/70 hover:text-foreground"
+                        onClick={clearHistory}
+                        tabIndex={-1}
+                        type="button"
+                      >
+                        {t("clearAll")}
+                      </button>
+                    </div>
+                    {recentSuggestions.map((s, historyIndex) => {
+                      const i =
+                        (examplesDisabled ? 0 : searchExamples.length) +
+                        historyIndex;
+                      return (
+                        <SuggestionButton
+                          index={i}
+                          isActive={i === suggestionIndex}
+                          key={`${s.type}-${s.text}`}
+                          onClick={() => handleSuggestionClick(s)}
+                          onMouseEnter={() => setSuggestionIndex(i)}
+                          suggestion={s}
+                        />
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between px-3 py-1.5">
+                  <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    {t("searchSuggestions")}
+                  </span>
+                </div>
+                {suggestions.map((s, i) => (
               <button
                 aria-selected={i === suggestionIndex}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
@@ -1516,12 +1658,13 @@ export const SearchBar = memo(
                 }`}
                 data-suggestion-index={i}
                 id={`search-suggestion-${i}`}
-                key={`${s.type}-${i}`}
+                key={`${s.type}-${s.text}`}
                 onClick={() => handleSuggestionClick(s)}
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseEnter={() => setSuggestionIndex(i)}
                 role="option"
                 tabIndex={-1}
+                type="button"
               >
                 {s.type === "person" ? (
                   <>
@@ -1561,7 +1704,9 @@ export const SearchBar = memo(
                   </>
                 )}
               </button>
-            ))}
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1577,6 +1722,43 @@ export const SearchBar = memo(
   if (prevProps.searchTime !== nextProps.searchTime) return false;
   return true;
 });
+
+function SuggestionButton({
+  suggestion,
+  index,
+  isActive,
+  onClick,
+  onMouseEnter,
+}: {
+  suggestion: SearchSuggestion;
+  index: number;
+  isActive: boolean;
+  onClick: () => void;
+  onMouseEnter: () => void;
+}) {
+  return (
+    <button
+      aria-selected={isActive}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors",
+        isActive
+          ? "bg-foreground/8 text-foreground"
+          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+      )}
+      data-suggestion-index={index}
+      id={`search-suggestion-${index}`}
+      onClick={onClick}
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={onMouseEnter}
+      role="option"
+      tabIndex={-1}
+      type="button"
+    >
+      <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+      <span className="truncate">{suggestion.text}</span>
+    </button>
+  );
+}
 
 function FilterChip({
   label,
