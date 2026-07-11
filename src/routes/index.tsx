@@ -599,9 +599,13 @@ function HomePage() {
       fetchNextPage();
     } else if (isSearching && searchResults && searchResults.length >= 200 && !searchExpandedRef.current) {
       // 搜索模式下：首次返回 200 条后，滚动到底自动加载更多
-      handleLoadMore();
+      const p = lastSearchParamsRef.current;
+      if (p) {
+        searchExpandedRef.current = true;
+        handleSearch(p.query, p.filters, p.colorHex);
+      }
     }
-  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage, searchResults, handleLoadMore]);
+  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage, searchResults]);
 
   const handleToggleFavorite = useCallback(async (id: number) => {
     const photo = photosRef.current.find((p) => p.id === id);
@@ -1010,14 +1014,6 @@ function HomePage() {
       }
     }
   }
-
-  // ── 搜索"加载更多"：用更大 limit 重新搜索 ──────────────────────────
-  const handleLoadMore = useCallback(() => {
-    const p = lastSearchParamsRef.current;
-    if (!p) return;
-    searchExpandedRef.current = true;
-    handleSearch(p.query, p.filters, p.colorHex);
-  }, []);
 
   // Keyboard shortcuts for batch operations
   // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
