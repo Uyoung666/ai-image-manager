@@ -599,11 +599,41 @@ function HomePage() {
       fetchNextPage();
     } else if (isSearching && searchResults && searchResults.length >= 200 && !searchExpandedRef.current) {
       // 搜索模式下：首次返回 200 条后，滚动到底自动加载更多
+      // 直接调 IPC 追加结果，不触发 loading 状态避免闪烁
       const p = lastSearchParamsRef.current;
-      if (p) {
-        searchExpandedRef.current = true;
-        handleSearch(p.query, p.filters, p.colorHex);
+      if (!p) return;
+      searchExpandedRef.current = true;
+
+      const startTime = performance.now();
+      const searchParams: any = { limit: 1000 };
+      if (p.query.trim()) searchParams.query = p.query.trim();
+      if (p.colorHex) searchParams.colorHex = p.colorHex;
+      if (p.filters?.dateFrom) {
+        const [y, m, d] = p.filters.dateFrom.split("-").map(Number);
+        searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
       }
+      if (p.filters?.dateTo) {
+        const [y, m, d] = p.filters.dateTo.split("-").map(Number);
+        searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      }
+      if (p.filters?.cameraModel) searchParams.cameraModel = p.filters.cameraModel;
+      if (p.filters?.lensModel) searchParams.lensModel = p.filters.lensModel;
+      if (p.filters?.focalMin) searchParams.focalMin = Number(p.filters.focalMin);
+      if (p.filters?.focalMax) searchParams.focalMax = Number(p.filters.focalMax);
+      if (p.filters?.apertureMin) searchParams.apertureMin = Number(p.filters.apertureMin);
+      if (p.filters?.apertureMax) searchParams.apertureMax = Number(p.filters.apertureMax);
+      if (p.filters?.isoMin) searchParams.isoMin = Number(p.filters.isoMin);
+      if (p.filters?.isoMax) searchParams.isoMax = Number(p.filters.isoMax);
+      if (p.filters?.shutterMin) searchParams.shutterMin = Number(p.filters.shutterMin);
+      if (p.filters?.shutterMax) searchParams.shutterMax = Number(p.filters.shutterMax);
+
+      ipc.client.photos.searchCompound(searchParams).then((result: any) => {
+        const newResults = result.results || [];
+        if (newResults.length > 0) {
+          setSearchResults(newResults);
+          setSearchTime(Math.round(performance.now() - startTime));
+        }
+      }).catch(() => { /* ignore */ });
     }
   }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage, searchResults]);
 

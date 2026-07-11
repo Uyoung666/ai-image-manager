@@ -777,6 +777,7 @@ export async function backfillColorVectors(): Promise<{
   backfilled: number;
 }> {
   if (!colorTable) {
+    console.log("[AI] Color backfill skipped: colorTable not initialized");
     return { total: 0, backfilled: 0 };
   }
 
@@ -790,6 +791,7 @@ export async function backfillColorVectors(): Promise<{
     .get() as { value: string } | undefined;
 
   if (marker?.value === "true") {
+    console.log("[AI] Color backfill: already completed (marker set)");
     return { total: 0, backfilled: 0 };
   }
 
@@ -807,6 +809,7 @@ export async function backfillColorVectors(): Promise<{
 
   const total = rows.length;
   if (total === 0) {
+    console.log("[AI] Color backfill: 0 photos need backfill (all up to date)");
     // 标记完成，避免重复检查
     try {
       db.run(
