@@ -474,6 +474,48 @@ export async function embedAllPhotos(
     let processed = 0;
     const successfulIds: number[] = [];
 
+    async function persistEmbedResults(results: EmbedResult[]): Promise<number> {
+      const successResults = results.filter(
+        (r) => r.vector && r.vector.length > 0
+      );
+      if (!(successResults.length > 0 && photoTable)) {
+        return 0;
+      }
+
+      const batchIds = successResults.map((r) => r.id);
+
+      try {
+        await photoTable.delete(buildPhotoIdFilter(batchIds));
+      } catch {
+        /* first write 鈥?table may be empty */
+      }
+
+      const records = successResults.map((r) => ({
+        photo_id: r.id,
+        vector: r.vector,
+        created_at: Date.now(),
+      }));
+      try {
+        await photoTable.add(records);
+      } catch (lanceErr: any) {
+        console.warn(
+          `[AI] Batch add failed (${lanceErr?.message}), falling back to individual writes`
+        );
+        for (const record of records) {
+          try {
+            await photoTable.add([record]);
+          } catch {
+            /* skip */
+          }
+        }
+      }
+
+      batchUpdatePhotoStatus(db, batchIds);
+      addWrittenPhotoIds(batchIds);
+      successfulIds.push(...batchIds);
+      return successResults.length;
+    }
+
     console.log(`[AI] Starting embedding for ${total} photos via Worker Pool`);
 
     // Use persistent worker pool
@@ -516,7 +558,7 @@ export async function embedAllPhotos(
       poolReady = true;
 
       setPoolCancelled(false);
-      const poolResults = await embedWithPool(
+      await embedWithPool(
         unprocessed,
         (done, tot) => {
           setCurrentProgress({
@@ -531,12 +573,13 @@ export async function embedAllPhotos(
             onProgress?.(currentProgress);
           }
         },
-        () => poolCancelled
+        () => poolCancelled,
+        async (results) => {
+          processed += await persistEmbedResults(results);
+        }
       );
       // Persist results to LanceDB and SQLite — batch write
-      const successResults = poolResults.filter(
-        (r) => r.vector && r.vector.length > 0
-      );
+      const successResults: EmbedResult[] = [];
       if (successResults.length > 0 && photoTable) {
         const batchIds = successResults.map((r) => r.id);
 

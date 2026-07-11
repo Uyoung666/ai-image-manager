@@ -3,9 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
-import { createLogger } from "@/utils/logger";
-
-const log = createLogger("embed-worker-pool");
 
 interface EmbedResult {
   error?: string;
@@ -31,7 +28,18 @@ interface QueuedRequest {
   resolve: (results: EmbedResult[]) => void;
 }
 
-const BATCH_SIZE = 25;
+interface EmbedPoolConfig {
+  batchSize: number;
+  intraOpNumThreads: number;
+  workers: number;
+}
+
+type EmbedBatchResultCallback = (
+  results: EmbedResult[],
+  batch: Array<{ id: number; path: string }>
+) => Promise<void> | void;
+
+const DEFAULT_BATCH_SIZE = 20;
 const WORKER_TIMEOUT = 300_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const RESPAWN_DELAY_MS = 1000;
@@ -42,9 +50,69 @@ let modelPath: string | null = null;
 let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
+let poolBatchSize = DEFAULT_BATCH_SIZE;
+let poolIntraOpNumThreads = 1;
 
 /** Per-worker init progress: Map<workerIndex, percent 0-100> */
 const workerInitProgress = new Map<number, number>();
+
+function parsePositiveInt(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function resolveEmbedPoolConfig(
+  cpuCount = os.cpus().length,
+  useGPU = false,
+  env: NodeJS.ProcessEnv = process.env
+): EmbedPoolConfig {
+  const safeCpuCount = Math.max(1, cpuCount);
+  // CLIP vision currently runs CPU-only in embed-worker.mjs because DirectML
+  // crashes on this model. Keep defaults conservative and allow opt-in tuning
+  // with AI_EMBED_WORKERS / AI_EMBED_THREADS.
+  let defaultWorkers = 1;
+  if ((useGPU && safeCpuCount >= 8) || safeCpuCount >= 12) {
+    defaultWorkers = 2;
+  }
+  const maxWorkers = Math.max(1, Math.min(3, safeCpuCount - 1 || 1));
+  const workers = Math.max(
+    1,
+    Math.min(
+      parsePositiveInt(env.AI_EMBED_WORKERS) ?? defaultWorkers,
+      maxWorkers
+    )
+  );
+
+  const maxThreadsPerWorker = Math.max(
+    1,
+    Math.floor(Math.max(1, safeCpuCount - 1) / workers)
+  );
+  const defaultThreads = Math.max(1, Math.min(4, maxThreadsPerWorker));
+  const intraOpNumThreads = Math.max(
+    1,
+    Math.min(
+      parsePositiveInt(env.AI_EMBED_THREADS) ?? defaultThreads,
+      maxThreadsPerWorker
+    )
+  );
+
+  const batchSize = Math.max(
+    1,
+    Math.min(
+      parsePositiveInt(env.AI_EMBED_BATCH_SIZE) ?? DEFAULT_BATCH_SIZE,
+      100
+    )
+  );
+
+  return { batchSize, intraOpNumThreads, workers };
+}
 
 function findWorkerScript(): string {
   if (app.isPackaged) {
@@ -116,30 +184,43 @@ function spawnWorker(index: number): WorkerSlot {
     }
   });
 
-  child.on("message", (msg: any) => {
+  child.on("message", (msg: unknown) => {
+    const message = msg as {
+      error?: string;
+      percent?: number;
+      results?: EmbedResult[];
+      type?: string;
+    };
     // Clear any pending dispatch timeout when worker responds
     if (slot.timeoutId) {
       clearTimeout(slot.timeoutId);
       slot.timeoutId = null;
     }
-    if (msg.type === "init-progress") {
-      const pct = Number(msg.percent ?? 0);
+    if (message.type === "init-progress") {
+      const pct = Number(message.percent ?? 0);
       workerInitProgress.set(index, pct);
       return;
     }
-    if (msg.type === "ready") {
+    if (message.type === "init-error") {
+      console.error(
+        `[Pool] Worker ${index} init failed: ${message.error || "unknown error"}`
+      );
+      handleWorkerDeath(slot);
+      return;
+    }
+    if (message.type === "ready") {
       workerInitProgress.set(index, 100);
       slot.status = "idle";
       drainQueue();
       return;
     }
-    if (msg.type === "result" && slot.status === "busy") {
+    if (message.type === "result" && slot.status === "busy") {
       const resolve = slot.pendingResolve;
       slot.pendingResolve = null;
       slot.pendingReject = null;
       slot.status = "idle";
       slot.consecutiveFailures = 0;
-      resolve?.(msg.results as EmbedResult[]);
+      resolve?.(message.results ?? []);
       drainQueue();
     }
   });
@@ -198,7 +279,12 @@ function handleWorkerDeath(slot: WorkerSlot): void {
       const newSlot = spawnWorker(slot.index);
       newSlot.consecutiveFailures = slot.consecutiveFailures;
       slots[slot.index] = newSlot;
-      newSlot.process.send({ type: "init", modelPath, useGPU: poolUseGPU });
+      newSlot.process.send({
+        type: "init",
+        modelPath,
+        useGPU: poolUseGPU,
+        intraOpNumThreads: poolIntraOpNumThreads,
+      });
     }, RESPAWN_DELAY_MS);
   } else {
     console.warn(
@@ -214,7 +300,10 @@ function drainQueue(): void {
       break;
     }
 
-    const request = requestQueue.shift()!;
+    const request = requestQueue.shift();
+    if (!request) {
+      break;
+    }
     dispatchToSlot(idleSlot, request.photos, request.resolve, request.reject);
   }
 }
@@ -238,7 +327,6 @@ function dispatchToSlot(
       const rej = slot.pendingReject;
       slot.pendingResolve = null;
       slot.pendingReject = null;
-      slot.status = "dead";
       slot.process.kill();
       rej(new Error(`Worker ${slot.index} timed out`));
       handleWorkerDeath(slot);
@@ -263,13 +351,15 @@ export async function initWorkerPool(
   requestQueue = [];
   workerInitProgress.clear();
 
-  const cpuCount = os.cpus().length;
+  const config = resolveEmbedPoolConfig(os.cpus().length, useGPU);
   // 每个 worker ~200MB，2 个 = 400MB，4 核以上可以 3 个
   // 4 个 worker 在 8GB 机器上容易触发 OOM
-  poolSize = cpuCount >= 8 ? 3 : 2;
+  poolSize = config.workers;
+  poolBatchSize = config.batchSize;
+  poolIntraOpNumThreads = config.intraOpNumThreads;
   const workerScript = findWorkerScript();
   console.log(
-    `[Pool] Starting ${poolSize} persistent workers: ${workerScript}`
+    `[Pool] Starting ${poolSize} persistent workers (${poolIntraOpNumThreads} ORT threads each, batch=${poolBatchSize}): ${workerScript}`
   );
 
   const readyPromises: Promise<void>[] = [];
@@ -301,7 +391,12 @@ export async function initWorkerPool(
 
   // Send init to all workers
   for (const slot of slots) {
-    slot.process.send({ type: "init", modelPath, useGPU: poolUseGPU });
+    slot.process.send({
+      type: "init",
+      modelPath,
+      useGPU: poolUseGPU,
+      intraOpNumThreads: poolIntraOpNumThreads,
+    });
   }
 
   await Promise.all(readyPromises);
@@ -444,7 +539,8 @@ export async function embedSingleImage(
 export async function embedWithPool(
   photos: Array<{ id: number; path: string }>,
   onProgress?: (processed: number, total: number) => void,
-  shouldCancel?: () => boolean
+  shouldCancel?: () => boolean,
+  onBatchResults?: EmbedBatchResultCallback
 ): Promise<EmbedResult[]> {
   if (!initialized) {
     throw new Error("Worker pool not initialized");
@@ -453,17 +549,37 @@ export async function embedWithPool(
   const total = photos.length;
   const aliveCount = slots.filter((s) => s.status !== "dead").length;
   const concurrency = Math.min(poolSize, aliveCount);
+  if (concurrency < 1) {
+    throw new Error("Worker pool has no live workers");
+  }
 
   // 预切批次
   const batchList: Array<Array<{ id: number; path: string }>> = [];
-  for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-    batchList.push(photos.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < photos.length; i += poolBatchSize) {
+    batchList.push(photos.slice(i, i + poolBatchSize));
   }
 
   const allResults: EmbedResult[] = [];
   let processed = 0;
   let cursor = 0;
+  let callbackChain = Promise.resolve();
 
+  async function publishBatchResults(
+    results: EmbedResult[],
+    batch: Array<{ id: number; path: string }>
+  ): Promise<void> {
+    if (!onBatchResults) {
+      return;
+    }
+    const next = callbackChain.then(() => onBatchResults(results, batch));
+    callbackChain = next.then(
+      () => undefined,
+      () => undefined
+    );
+    await next;
+  }
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: scheduling loop keeps cancellation, retry, progress, and callback ordering together.
   async function worker(): Promise<void> {
     while (cursor < batchList.length) {
       if (shouldCancel?.()) {
@@ -480,13 +596,17 @@ export async function embedWithPool(
       try {
         const results = await dispatchBatch(batch);
         allResults.push(...results);
-      } catch (err: any) {
-        console.warn(`[Pool] Batch failed: ${err.message}`);
+        await publishBatchResults(results, batch);
+      } catch (err: unknown) {
+        const message = getErrorMessage(err);
+        console.warn(`[Pool] Batch failed: ${message}`);
         // If cancelled, don't retry — just mark failed and move on
+        let fallbackResults: EmbedResult[];
         if (shouldCancel?.()) {
-          allResults.push(
-            ...batch.map((p) => ({ id: p.id, error: "cancelled" }))
-          );
+          fallbackResults = batch.map((p) => ({
+            id: p.id,
+            error: "cancelled",
+          }));
         } else if (batch.length > 1) {
           const left = await processResultsFallback(
             batch.slice(0, Math.floor(batch.length / 2))
@@ -494,10 +614,12 @@ export async function embedWithPool(
           const right = await processResultsFallback(
             batch.slice(Math.floor(batch.length / 2))
           );
-          allResults.push(...left, ...right);
+          fallbackResults = [...left, ...right];
         } else {
-          allResults.push({ id: batch[0].id, error: err.message });
+          fallbackResults = [{ id: batch[0].id, error: message }];
         }
+        allResults.push(...fallbackResults);
+        await publishBatchResults(fallbackResults, batch);
       }
       processed += batch.length;
       onProgress?.(Math.min(processed, total), total);
@@ -507,6 +629,7 @@ export async function embedWithPool(
   // 启动 poolSize 个并发调度 worker
   const workers = Array.from({ length: concurrency }, () => worker());
   await Promise.all(workers);
+  await callbackChain;
 
   return allResults;
 }
@@ -519,12 +642,13 @@ async function processResultsFallback(
   }
   try {
     return await dispatchBatch(batch);
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = getErrorMessage(err);
     if (batch.length === 1) {
       console.warn(
-        `[Pool] Skipping corrupted photo ${batch[0].id}: ${err.message}`
+        `[Pool] Skipping corrupted photo ${batch[0].id}: ${message}`
       );
-      return [{ id: batch[0].id, error: err.message }];
+      return [{ id: batch[0].id, error: message }];
     }
     const mid = Math.floor(batch.length / 2);
     const left = await processResultsFallback(batch.slice(0, mid));

@@ -21,6 +21,12 @@ import sharp from "sharp";
 const require = createRequire(import.meta.url);
 const exiftoolPath = require("exiftool-vendored.exe");
 
+const sharpThreads = Math.max(
+  1,
+  Number.parseInt(process.env.AI_EMBED_SHARP_THREADS || "1", 10) || 1
+);
+sharp.concurrency(sharpThreads);
+
 const RAW_EXTENSIONS = new Set([
   ".cr2",
   ".cr3",
@@ -52,7 +58,9 @@ function extractRawPreview(filePath) {
     if (buf && buf.length > 0) {
       return buf;
     }
-  } catch {}
+  } catch {
+    /* no JpgFromRaw preview */
+  }
   try {
     const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
       timeout: 15_000,
@@ -61,7 +69,9 @@ function extractRawPreview(filePath) {
     if (buf && buf.length > 0) {
       return buf;
     }
-  } catch {}
+  } catch {
+    /* no PreviewImage preview */
+  }
   return null;
 }
 
@@ -77,7 +87,7 @@ let aborted = false;
 let ortSession = null;
 // onnxruntime-node lazy-loaded singleton
 let _ort = null;
-async function loadOrt() {
+function loadOrt() {
   if (_ort) {
     return _ort;
   }
@@ -87,7 +97,10 @@ async function loadOrt() {
     _ort = require("onnxruntime-node");
   } catch (err0) {
     // Fallback: resolve from project root (packaged builds may differ)
-    console.error("[Worker] Primary onnxruntime-node load failed:", err0.message);
+    console.error(
+      "[Worker] Primary onnxruntime-node load failed:",
+      err0.message
+    );
     const projectRoot = path.resolve(import.meta.dirname, "..");
     _ort = require(path.join(projectRoot, "node_modules", "onnxruntime-node"));
   }
@@ -129,7 +142,14 @@ async function preprocessCLIP(filePath) {
 
 // --- Init handler: load CLIP vision ONNX model directly ---
 async function handleInit(msg) {
-  const { modelPath, useGPU } = msg;
+  const { modelPath } = msg;
+  const intraOpNumThreads = Math.max(
+    1,
+    Number.parseInt(
+      String(msg.intraOpNumThreads || process.env.AI_EMBED_THREADS || "1"),
+      10
+    ) || 1
+  );
   const onnxPath = path.join(
     modelPath,
     "Xenova",
@@ -145,13 +165,15 @@ async function handleInit(msg) {
     percent: 5,
     stage: "loading-runtime",
   });
-  const { InferenceSession } = await loadOrt();
+  const { InferenceSession } = loadOrt();
 
   // NOTE: DML crashes on ViT-B/32 (0xFFFF0003) in both onnxruntime 1.26.0
   // and 1.27.0-dev. Keep CPU-only until upstream fixes DML shader compilation
   // for Transformer models (LayerNorm/Gelu/MultiHeadAttention ops).
   const executionProviders = ["cpu"];
-  console.error("[Worker] Creating session with: [cpu]");
+  console.error(
+    `[Worker] Creating session with: [cpu], intraOpNumThreads=${intraOpNumThreads}, sharpThreads=${sharpThreads}`
+  );
 
   // Phase 2: creating ONNX session — the heavy part (~20% → ~95%)
   process.send?.({
@@ -164,6 +186,9 @@ async function handleInit(msg) {
     logSeverityLevel: 3,
     graphOptimizationLevel: "all",
     enableCpuMemArena: true,
+    executionMode: "sequential",
+    interOpNumThreads: 1,
+    intraOpNumThreads,
   });
   console.error("[Worker] CLIP model loaded, ready for batches");
 
@@ -190,7 +215,7 @@ async function handleEmbed(msg) {
     return;
   }
 
-  const ort = await loadOrt();
+  const ort = loadOrt();
   const batchStartMs = Date.now();
   const results = [];
 
@@ -279,7 +304,7 @@ process.on("message", async (msg) => {
         })),
       });
     } else if (msg.type === "init") {
-      process.send?.({ type: "ready" }); // Send anyway so pool doesn't hang
+      process.send?.({ type: "init-error", error: err.message });
     }
   }
 });
