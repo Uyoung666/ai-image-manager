@@ -166,9 +166,9 @@ export interface ColorDistributionResult {
 // ── Per-photo palette extraction ──────────────────────────────────────
 
 export async function extractPerPhotoPalette(
-  imagePath: string
+  imageInput: string | Buffer
 ): Promise<PerPhotoPalette | null> {
-  const { data, info } = await sharp(imagePath)
+  const { data, info } = await sharp(imageInput)
     .rotate()
     .resize(SAMPLE_SIZE, SAMPLE_SIZE, { fit: "fill" })
     .ensureAlpha()
@@ -254,9 +254,9 @@ export async function extractPerPhotoPalette(
 }
 
 export async function extractDominantColors(
-  imagePath: string
+  imageInput: string | Buffer
 ): Promise<string | null> {
-  const palette = await extractPerPhotoPalette(imagePath);
+  const palette = await extractPerPhotoPalette(imageInput);
   if (!(palette && palette.colors) || palette.colors.length === 0) {
     return null;
   }

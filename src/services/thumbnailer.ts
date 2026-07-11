@@ -57,13 +57,26 @@ const CACHE_CONFIG: ThumbnailCacheConfig = {
 let thumbnailDir: string;
 let memoryCache: LRUCache<string, Buffer>;
 interface ThumbnailResult {
+  buffer?: Buffer;
   height: number;
   thumbnailPath: string;
   width: number;
 }
+interface ThumbnailOptions {
+  input?: string | Buffer;
+}
+interface DuelPreviewResult {
+  height: number;
+  previewPath: string;
+  width: number;
+}
 let dprScale = 2; // default to 2x for HiDPI displays
 const diskAccessLog = new Map<string, number>();
-const inFlightRequests = new Map<string, Promise<ThumbnailResult>>();
+const inFlightThumbnails = new Map<string, Promise<ThumbnailResult>>();
+const inFlightDuelPreviews = new Map<
+  string,
+  Promise<DuelPreviewResult | null>
+>();
 
 // ── 生成并发控制 ────────────────────────────────────────────────────────
 // 防止大量导入时 sharp 实例爆炸，限制同时执行的生成任务数。
@@ -137,6 +150,19 @@ export function getThumbnailPath(imagePath: string, size: ThumbSize): string {
   return path.join(thumbnailDir, `${hash}.webp`);
 }
 
+async function writeFileAtomic(targetPath: string, data: Buffer): Promise<void> {
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.promises.writeFile(tempPath, data);
+    await fs.promises.rename(tempPath, targetPath);
+  } catch (err) {
+    await fs.promises.unlink(tempPath).catch(() => {
+      /* ignore */
+    });
+    throw err;
+  }
+}
+
 // ── 对比预览路径与生成 ──────────────────────────────────────────────
 
 /**
@@ -185,7 +211,7 @@ export function getDuelPreviewStrategy(
  */
 export async function generateDuelPreview(
   imagePath: string
-): Promise<{ previewPath: string; width: number; height: number } | null> {
+): Promise<DuelPreviewResult | null> {
   const cacheKey = `${imagePath}_duel`;
   const previewPath = getDuelPreviewPath(imagePath);
 
@@ -212,26 +238,19 @@ export async function generateDuelPreview(
   }
 
   // L3: 生成（inflight 去重，同 generateThumbnail 模式）
-  const existing = inFlightRequests.get(cacheKey);
+  const existing = inFlightDuelPreviews.get(cacheKey);
   if (existing) {
     // 复用进行中的 Promise（类型不同但模式相同）
-    return existing as unknown as Promise<{
-      previewPath: string;
-      width: number;
-      height: number;
-    } | null>;
+    return existing;
   }
 
   const promise = doGenerateDuelPreview(imagePath, previewPath, cacheKey);
-  inFlightRequests.set(
-    cacheKey,
-    promise as unknown as Promise<ThumbnailResult>
-  );
+  inFlightDuelPreviews.set(cacheKey, promise);
 
   try {
     return await promise;
   } finally {
-    inFlightRequests.delete(cacheKey);
+    inFlightDuelPreviews.delete(cacheKey);
   }
 }
 
@@ -239,7 +258,7 @@ async function doGenerateDuelPreview(
   imagePath: string,
   previewPath: string,
   _cacheKey: string
-): Promise<{ previewPath: string; width: number; height: number } | null> {
+): Promise<DuelPreviewResult | null> {
   await genSemaphore.acquire();
   try {
     // 生成前检查：如果存在损坏文件，先删除
@@ -249,7 +268,9 @@ async function doGenerateDuelPreview(
         await sharp(previewPath).metadata();
       } catch {
         // 文件存在但损坏 → 删除
-        await fs.promises.unlink(previewPath).catch(() => {});
+        await fs.promises.unlink(previewPath).catch(() => {
+          /* ignore */
+        });
       }
     } catch {
       // 文件不存在，正常继续
@@ -275,18 +296,10 @@ async function doGenerateDuelPreview(
     const { data, info } = await pipeline.toBuffer({
       resolveWithObject: true,
     });
-    await fs.promises.writeFile(previewPath, data);
-
-    // ── 写入后验证 ──
-    try {
-      const verifyMeta = await sharp(previewPath).metadata();
-      if (!verifyMeta.width || !verifyMeta.height || verifyMeta.width === 0) {
-        throw new Error("Generated duel preview is invalid (zero dimensions)");
-      }
-    } catch (verifyErr) {
-      await fs.promises.unlink(previewPath).catch(() => {});
+    if (!(info.width && info.height)) {
       return null;
     }
+    await writeFileAtomic(previewPath, data);
 
     // 计入生成计数器（与缩略图共享清理触发）
     generationCount++;
@@ -409,7 +422,8 @@ export async function checkAndCleanDiskCache(): Promise<{
 
 export async function generateThumbnail(
   imagePath: string,
-  size: ThumbSize = "md"
+  size: ThumbSize = "md",
+  options: ThumbnailOptions = {}
 ): Promise<ThumbnailResult> {
   const cacheKey = `${imagePath}_${size}`;
 
@@ -423,6 +437,7 @@ export async function generateThumbnail(
 
   if (cached) {
     return {
+      buffer: cached,
       thumbnailPath: thumbPath,
       width: getThumbnailSize(size),
       height: getThumbnailSize(size),
@@ -436,6 +451,7 @@ export async function generateThumbnail(
     memoryCache?.set(cacheKey, diskData);
     const meta = await sharp(thumbPath).metadata();
     return {
+      buffer: diskData,
       thumbnailPath: thumbPath,
       width: meta.width || 0,
       height: meta.height || 0,
@@ -448,19 +464,19 @@ export async function generateThumbnail(
   }
 
   // ── 请求去重：正在生成中的缩略图直接 await 同一个 Promise ──
-  const existing = inFlightRequests.get(cacheKey);
+  const existing = inFlightThumbnails.get(cacheKey);
   if (existing) {
     return existing;
   }
 
   // L3: generate（去重守护）
-  const promise = doGenerate(imagePath, size, thumbPath, cacheKey);
-  inFlightRequests.set(cacheKey, promise);
+  const promise = doGenerate(imagePath, size, thumbPath, cacheKey, options);
+  inFlightThumbnails.set(cacheKey, promise);
 
   try {
     return await promise;
   } finally {
-    inFlightRequests.delete(cacheKey);
+    inFlightThumbnails.delete(cacheKey);
   }
 }
 
@@ -468,15 +484,16 @@ async function doGenerate(
   imagePath: string,
   size: ThumbSize,
   thumbPath: string,
-  cacheKey: string
+  cacheKey: string,
+  options: ThumbnailOptions
 ): Promise<ThumbnailResult> {
   const targetSize = getThumbnailSize(size);
 
   await genSemaphore.acquire();
   try {
     // For RAW files, extract the embedded JPEG preview first
-    let input: string | Buffer = imagePath;
-    if (isRawFile(imagePath)) {
+    let input: string | Buffer = options.input ?? imagePath;
+    if (!options.input && isRawFile(imagePath)) {
       const preview = await extractRawPreview(imagePath);
       if (preview) {
         input = preview;
@@ -489,26 +506,15 @@ async function doGenerate(
         fit: "inside",
         withoutEnlargement: true,
       })
-      .webp({ quality: 85, effort: 4 });
+      .webp({ quality: 85, effort: 1 });
     const { data: thumbBuffer, info } = await pipeline.toBuffer({
       resolveWithObject: true,
     });
 
-    await fs.promises.writeFile(thumbPath, thumbBuffer);
-
-    // ── 写入后验证：确保磁盘上的文件是完整有效的图像 ──
-    try {
-      const verifyMeta = await sharp(thumbPath).metadata();
-      if (!verifyMeta.width || !verifyMeta.height || verifyMeta.width === 0) {
-        throw new Error("Generated thumbnail is invalid (zero dimensions)");
-      }
-    } catch (verifyErr) {
-      // 删除损坏文件，避免污染缓存
-      await fs.promises.unlink(thumbPath).catch(() => {});
-      throw new Error(
-        `Thumbnail write verification failed for ${thumbPath}: ${(verifyErr as Error).message}`
-      );
+    if (!(info.width && info.height)) {
+      throw new Error("Generated thumbnail is invalid (zero dimensions)");
     }
+    await writeFileAtomic(thumbPath, thumbBuffer);
 
     memoryCache?.set(cacheKey, thumbBuffer);
 
@@ -524,6 +530,7 @@ async function doGenerate(
     }
 
     return {
+      buffer: thumbBuffer,
       thumbnailPath: thumbPath,
       width: info.width,
       height: info.height,

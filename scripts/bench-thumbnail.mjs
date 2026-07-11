@@ -1,15 +1,35 @@
-// Quick sharp optimization benchmark for Electron
+// Quick sharp thumbnail benchmark for import-time encoding choices.
+// Usage:
+//   node scripts/bench-thumbnail.mjs [image-or-directory]
+
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import sharp from "sharp";
 
-const TEST_DIR = "D:/8806/ai-image-manager测试用例";
-const files = fs.readdirSync(TEST_DIR).filter((f) => /\.jpe?g$/i.test(f));
-const sample = path.join(TEST_DIR, files[250]);
+const IMAGE_EXT_RE = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i;
+const DEFAULT_TEST_DIR = "D:/8806/ai-image-manager测试用例";
+const inputPath = process.argv[2] || DEFAULT_TEST_DIR;
+
+function pickSample(targetPath) {
+  const stat = fs.statSync(targetPath);
+  if (stat.isFile()) {
+    return targetPath;
+  }
+
+  const files = fs
+    .readdirSync(targetPath)
+    .filter((file) => IMAGE_EXT_RE.test(file))
+    .sort();
+
+  if (files.length === 0) {
+    throw new Error(`No supported images found in ${targetPath}`);
+  }
+
+  return path.join(targetPath, files[Math.floor(files.length / 2)]);
+}
 
 async function bench(label, fn) {
-  // Warmup
   await fn();
   const times = [];
   for (let i = 0; i < 5; i++) {
@@ -25,59 +45,55 @@ async function bench(label, fn) {
 }
 
 async function main() {
-  console.log("=== sharp optimization benchmarks ===");
-  console.log(`Image: ${path.basename(sample)}`);
+  const sample = pickSample(inputPath);
 
-  // Baseline
-  await bench("effort=4 q=85 (baseline)", async () => {
+  console.log("=== sharp thumbnail benchmarks ===");
+  console.log(`Image: ${sample}`);
+
+  const baseline = await bench("webp effort=4 q=85 (baseline) ", async () => {
     await sharp(sample)
+      .rotate()
       .resize(512, 512, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85, effort: 4 })
       .toBuffer();
   });
 
-  // effort=1
-  await bench("effort=1 q=85          ", async () => {
+  const optimized = await bench("webp effort=1 q=85 (optimized)", async () => {
     await sharp(sample)
+      .rotate()
       .resize(512, 512, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85, effort: 1 })
       .toBuffer();
   });
 
-  // effort=1, quality=80
-  await bench("effort=1 q=80          ", async () => {
+  await bench("jpeg q=80                    ", async () => {
     await sharp(sample)
-      .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 80, effort: 1 })
-      .toBuffer();
-  });
-
-  // JPEG output
-  await bench("jpeg  q=80             ", async () => {
-    await sharp(sample)
+      .rotate()
       .resize(512, 512, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toBuffer();
   });
 
-  // Just decode + resize (no encode)
-  await bench("decode+resize only     ", async () => {
+  await bench("decode+resize only           ", async () => {
     await sharp(sample)
+      .rotate()
       .resize(512, 512, { fit: "inside", withoutEnlargement: true })
       .raw()
       .toBuffer();
   });
 
-  // Just decode metadata
-  await bench("decode metadata only   ", async () => {
+  await bench("metadata only                ", async () => {
     await sharp(sample).metadata();
   });
 
-  console.log("\n=== 结论 ===");
-  console.log("JPEG解码(metadata): 显示纯解码开销");
-  console.log("decode+resize: 解码+缩放的原始开销");
-  console.log("effort=1 vs 4: WebP编码effort的影响");
-  console.log("jpeg vs webp: 输出格式的影响");
+  const improvement = ((1 - optimized / baseline) * 100).toFixed(1);
+  console.log("\n=== summary ===");
+  console.log(
+    `Optimized WebP saved ${improvement}% vs baseline on this sample.`
+  );
 }
 
-main().catch((e) => console.error(e));
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});

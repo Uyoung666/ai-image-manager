@@ -15,9 +15,7 @@ import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { extractRawPreview, isRawFile } from "./raw-preview";
 import {
   deletePhotoThumbnails,
-  generateDuelPreview,
   generateThumbnail,
-  getDuelPreviewStrategy,
 } from "./thumbnailer";
 
 const log = createLogger("indexer");
@@ -215,15 +213,18 @@ async function readBasicMeta(filePath: string): Promise<{
   format: string;
   colorSpace: string;
   hasAlpha: boolean;
+  thumbnailInput?: Buffer;
 } | null> {
   try {
     const raw = isRawFile(filePath);
     // For RAW files, read metadata from the embedded JPEG preview
     let input: string | Buffer = filePath;
+    let thumbnailInput: Buffer | undefined;
     if (raw) {
       const preview = await extractRawPreview(filePath);
       if (preview) {
         input = preview;
+        thumbnailInput = preview;
       }
     }
     const meta = await sharp(input).metadata();
@@ -249,6 +250,7 @@ async function readBasicMeta(filePath: string): Promise<{
       format,
       colorSpace: meta.space || "",
       hasAlpha: meta.hasAlpha,
+      thumbnailInput,
     };
   } catch {
     return null;
@@ -440,30 +442,16 @@ async function preparePhotoRecord(
   // Generate thumbnail (md=320px for crisp display in grid)
   let thumb;
   try {
-    thumb = await generateThumbnail(filePath, "md");
+    thumb = await generateThumbnail(filePath, "md", {
+      input: meta.thumbnailInput,
+    });
   } catch {
     log.warn({ filePath }, "Thumbnail generation failed");
     thumb = { thumbnailPath: null, width: 0, height: 0 };
   }
 
-  // 对比预览（PK 选片专用 2560px JPEG Q92）
-  let duelPreviewPath: string | null = null;
-  const strategy = getDuelPreviewStrategy(
-    filePath,
-    meta.width,
-    meta.height,
-    meta.format
-  );
-  if (strategy === "generate") {
-    try {
-      const preview = await generateDuelPreview(filePath);
-      duelPreviewPath = preview?.previewPath ?? null;
-    } catch {
-      log.warn({ filePath }, "Duel preview generation failed");
-      duelPreviewPath = null;
-    }
-  }
-  // strategy === "use_original" → duelPreviewPath 保持 null，前端直接用原图
+  // Duel previews are generated lazily by cull.ensureDuelPreview.
+  const duelPreviewPath: string | null = null;
 
   let phash: string | null = null;
   try {
@@ -482,7 +470,9 @@ async function preparePhotoRecord(
   let dominantColors: string | null = null;
   if (thumb.thumbnailPath) {
     try {
-      dominantColors = await extractDominantColors(thumb.thumbnailPath);
+      dominantColors = await extractDominantColors(
+        thumb.buffer ?? thumb.thumbnailPath
+      );
     } catch (err) {
       // 颜色提取失败不阻塞索引
       console.warn(`[Indexer] Color extraction failed for ${filePath}:`, err);
