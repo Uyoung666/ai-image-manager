@@ -13,152 +13,32 @@ import {
   generateDuelPreview,
   getDuelPreviewStrategy,
 } from "@/services/thumbnailer";
-
-// ── Per-session caches to avoid redundant work on every getNextPair call ──
-
-interface ComparedPairCache {
-  latestKey: string | null;
-  maxLogId: number;
-  set: Set<string>;
-}
-const comparedPairCaches = new Map<number, ComparedPairCache>();
-
-interface BkTreeCache {
-  idsHash: string;
-  photoMap: Map<number, PendingRow>;
-  tree: BKTree;
-}
-const bkTreeCaches = new Map<number, BkTreeCache>();
-
-// Pre-computed similarity pair cache — avoids BK-tree query on every getNextPair.
-// Built once when the pending phash set is stable, scanned O(candidates) thereafter.
-interface SimPair {
-  aId: number;
-  bId: number;
-  distance: number;
-}
-interface SimilarityCache {
-  idsHash: string;
-  pairs: SimPair[];
-}
-const similarityCaches = new Map<number, SimilarityCache>();
-
-function clearCullCaches(sessionId: number) {
-  comparedPairCaches.delete(sessionId);
-  bkTreeCaches.delete(sessionId);
-  similarityCaches.delete(sessionId);
-}
-
-const SessionIdSchema = z.object({ sessionId: z.number() });
-const GetNextPairSchema = z.object({
-  sessionId: z.number(),
-  /** Photo IDs that the frontend reports as unloadable (corrupt / externally deleted).
-   *  These are excluded from pairing to prevent infinite retry loops. */
-  excludeIds: z.array(z.number()).optional().default([]),
-});
-const CreateSessionSchema = z.object({
-  name: z.string().min(1).max(200),
-  mode: z.enum(["duel", "curate"]).default("duel"),
-  pkMode: z.enum(["quick", "standard", "fine"]).default("standard"),
-  sortStrategy: z.enum(["time", "similarity"]).default("time"),
-  photoIds: z.array(z.number()).default([]),
-  folderId: z.number().optional(),
-});
-const SubmitComparisonSchema = z.object({
-  sessionId: z.number(),
-  winnerId: z.number(),
-  loserId: z.number(),
-  isDraw: z.boolean().default(false),
-});
-const UpdatePhotoStatusSchema = z.object({
-  sessionId: z.number(),
-  photoId: z.number(),
-  status: z.enum(["pending", "kept", "rejected"]),
-});
+import {
+  bkTreeCaches,
+  clearCullCaches,
+  comparedPairCaches,
+  similarityCaches,
+  type SimPair,
+} from "./cache";
 
 import { computeElo, PK_MODE_CONFIG } from "./elo";
+import {
+  buildPairItem,
+  loadPendingWithMetadata,
+  type PendingRow,
+  selectPhotoFields,
+} from "./queries";
+import {
+  BatchUpdatePhotoStatusSchema,
+  CreateSessionSchema,
+  GetNextPairSchema,
+  RecordSkipSchema,
+  SessionIdSchema,
+  SubmitComparisonSchema,
+  UpdatePhotoStatusSchema,
+} from "./schemas";
 
 export { computeElo, PK_MODE_CONFIG };
-
-function selectPhotoFields() {
-  return {
-    id: photos.id,
-    filename: photos.filename,
-    path: photos.path,
-    width: photos.width,
-    height: photos.height,
-    fileSize: photos.fileSize,
-    format: photos.format,
-    thumbnailPath: photos.thumbnailPath,
-    duelPreviewPath: photos.duelPreviewPath,
-    fileDate: photos.fileDate,
-    isFavorite: photos.isFavorite,
-    isIndexed: photos.isIndexed,
-  };
-}
-
-function loadPendingWithMetadata(sessionId: number) {
-  const db = getDatabase();
-  return db
-    .select({
-      id: cullSessionPhotos.id,
-      photoId: cullSessionPhotos.photoId,
-      rating: cullSessionPhotos.rating,
-      comparisons: cullSessionPhotos.comparisons,
-      wins: cullSessionPhotos.wins,
-      losses: cullSessionPhotos.losses,
-      status: cullSessionPhotos.status,
-      phash: photos.phash,
-      fileDate: photos.fileDate,
-      filename: photos.filename,
-      path: photos.path,
-      width: photos.width,
-      height: photos.height,
-      fileSize: photos.fileSize,
-      format: photos.format,
-      thumbnailPath: photos.thumbnailPath,
-      duelPreviewPath: photos.duelPreviewPath,
-      isFavorite: photos.isFavorite,
-      isIndexed: photos.isIndexed,
-    })
-    .from(cullSessionPhotos)
-    .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-    .where(
-      and(
-        eq(cullSessionPhotos.sessionId, sessionId),
-        eq(cullSessionPhotos.status, "pending"),
-        isNull(photos.deletedAt)
-      )
-    )
-    .orderBy(asc(photos.fileDate))
-    .all();
-}
-
-type PendingRow = ReturnType<typeof loadPendingWithMetadata>[number];
-
-function buildPairItem(row: PendingRow) {
-  return {
-    sessionPhotoId: row.id,
-    photo: {
-      id: row.photoId,
-      filename: row.filename,
-      path: row.path,
-      width: row.width,
-      height: row.height,
-      fileSize: row.fileSize,
-      format: row.format,
-      thumbnailPath: row.thumbnailPath,
-      duelPreviewPath: row.duelPreviewPath,
-      fileDate: row.fileDate,
-      isFavorite: row.isFavorite,
-      isIndexed: row.isIndexed,
-    },
-    rating: row.rating,
-    comparisons: row.comparisons,
-    wins: row.wins,
-    losses: row.losses,
-  };
-}
 
 export const createSession = os
   .input(CreateSessionSchema)
@@ -303,12 +183,6 @@ export const addPhotosToSession = os
 
     return { success: true, addedCount: added };
   });
-
-const RecordSkipSchema = z.object({
-  sessionId: z.number(),
-  photoAId: z.number(),
-  photoBId: z.number(),
-});
 
 export const recordSkip = os
   .input(RecordSkipSchema)
@@ -1383,12 +1257,6 @@ export const updatePhotoStatus = os
 
     return { success: true };
   });
-
-const BatchUpdatePhotoStatusSchema = z.object({
-  sessionId: z.number(),
-  photoIds: z.array(z.number()).min(1),
-  status: z.enum(["pending", "kept", "rejected"]),
-});
 
 export const batchUpdatePhotoStatus = os
   .input(BatchUpdatePhotoStatusSchema)

@@ -61,13 +61,7 @@ export function SelectionActionBar({
     }
   }, [selectedCount]);
 
-  function wrapAction(
-    key: string,
-    handler?: () => void
-  ): (() => void) | undefined {
-    if (!handler) {
-      return undefined;
-    }
+  function wrapAction(key: string, handler: () => void): () => void {
     return async () => {
       setExecuting(key);
       try {
@@ -174,6 +168,7 @@ export function SelectionActionBar({
             <MenuAction
               destructive
               disabled={executing !== null}
+              edge
               executing={executing === "delete"}
               icon={<Trash2 size={18} />}
               label={t("delete")}
@@ -185,9 +180,10 @@ export function SelectionActionBar({
         <div className="selection-menu-divider" />
 
         <button
-          className="selection-menu-link"
+          className="selection-menu-link selection-menu-link-edge"
           onClick={onClearSelection}
           title={t("clearSelectionTitle")}
+          type="button"
         >
           <span className="selection-menu-icon">
             <X size={18} />
@@ -205,21 +201,32 @@ function MenuAction({
   onClick,
   destructive = false,
   disabled = false,
+  edge = false,
   executing = false,
 }: {
   destructive?: boolean;
   disabled?: boolean;
+  edge?: boolean;
   executing?: boolean;
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
 }) {
+  const className = [
+    "selection-menu-link",
+    destructive ? "selection-menu-destructive" : "",
+    edge ? "selection-menu-link-edge" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <button
-      className={`selection-menu-link${destructive ? "selection-menu-destructive" : ""}`}
+      className={className}
       disabled={disabled}
       onClick={onClick}
       title={label}
+      type="button"
     >
       <span className="selection-menu-icon">
         {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}

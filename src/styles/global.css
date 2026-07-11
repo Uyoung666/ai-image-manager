@@ -1045,8 +1045,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  max-width: calc(100vw - 32px);
   padding: 0.45rem;
-  background-color: var(--surface);
+  overflow: visible;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
   border: 1px solid var(--border);
   border-radius: 15px;
   box-shadow: 0 10px 25px 0 rgba(0, 0, 0, 0.18);
@@ -1131,6 +1135,34 @@
 
 .selection-menu-link.selection-menu-destructive::before {
   background-color: color-mix(in srgb, var(--destructive) 12%, transparent);
+}
+
+.selection-menu-link-edge {
+  transform-origin: center right;
+}
+
+.selection-menu-link-edge::before {
+  transform: translateX(-100%);
+  transform-origin: center left;
+}
+
+.selection-menu-link-edge .selection-menu-icon {
+  right: 11px;
+  left: auto;
+}
+
+.selection-menu-link-edge .selection-menu-title {
+  opacity: 0;
+  padding-right: 30px;
+  text-align: center;
+  text-indent: 0;
+  transform: translateX(-100%);
+  transform-origin: center left;
+}
+
+.selection-menu-link-edge:hover .selection-menu-title,
+.selection-menu-link-edge:focus-visible .selection-menu-title {
+  opacity: 1;
 }
 
 .selection-menu-divider {

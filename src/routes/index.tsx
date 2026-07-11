@@ -41,33 +41,11 @@ import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
 import { preloadImagesWithConcurrency } from "@/utils/image-preloader";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-
-const GRID_SORT_FIELD_KEY = "grid_sort_field";
-const GRID_SORT_ORDER_KEY = "grid_sort_order";
-
-function loadSortField(): SortField {
-  try {
-    const raw = localStorage.getItem(GRID_SORT_FIELD_KEY);
-    if (raw === "date" || raw === "name" || raw === "size") {
-      return raw;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "date";
-}
-
-function loadSortOrder(): SortOrder {
-  try {
-    const raw = localStorage.getItem(GRID_SORT_ORDER_KEY);
-    if (raw === "asc" || raw === "desc") {
-      return raw;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "desc";
-}
+import {
+  loadSortField,
+  loadSortOrder,
+  saveSortPreference,
+} from "./home-sort-storage";
 
 function HomePage() {
   const { t } = useTranslation();
@@ -1145,12 +1123,7 @@ function HomePage() {
   const handleSortChange = useCallback((s: SortField, o: SortOrder) => {
     setSortField(s);
     setSortOrder(o);
-    try {
-      localStorage.setItem(GRID_SORT_FIELD_KEY, s);
-      localStorage.setItem(GRID_SORT_ORDER_KEY, o);
-    } catch {
-      /* ignore */
-    }
+    saveSortPreference(s, o);
   }, []);
 
   const hasPhotos =
