@@ -1,7 +1,7 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import exifr from "exifr";
 import PQueue from "p-queue";
 import sharp from "sharp";
@@ -382,6 +382,38 @@ interface ExifRecord {
   software?: string;
 }
 
+function queuePrimaryColorVectorUpsert(
+  photoId: number,
+  dominantColors: string | null
+): void {
+  if (!dominantColors) {
+    return;
+  }
+
+  try {
+    const palette = JSON.parse(dominantColors) as Array<{
+      b: number;
+      g: number;
+      r: number;
+      weight: number;
+    }>;
+    const primary = palette[0];
+    if (!primary) {
+      return;
+    }
+
+    import("./ai/vector-db")
+      .then(({ upsertColorVector }) =>
+        upsertColorVector(photoId, primary.r, primary.g, primary.b)
+      )
+      .catch(() => {
+        /* best-effort */
+      });
+  } catch {
+    // Invalid palette JSON should not block indexing.
+  }
+}
+
 async function preparePhotoRecord(
   filePath: string,
   folderId: number | null
@@ -642,24 +674,7 @@ async function indexSingleFile(
     }
   }
 
-  // 写入 LanceDB 颜色向量表（在 photoId 确定后异步执行）
-  if (photoRecord.dominantColors) {
-    try {
-      const palette = JSON.parse(photoRecord.dominantColors) as Array<{
-        r: number; g: number; b: number; weight: number;
-      }>;
-      if (palette.length > 0) {
-        const primary = palette[0]; // 已按 chroma-weighted score 排序
-        import("./ai/vector-db")
-          .then(({ upsertColorVector }) =>
-            upsertColorVector(photoId, primary.r, primary.g, primary.b)
-          )
-          .catch(() => { /* 非关键路径静默失败 */ });
-      }
-    } catch {
-      // JSON 解析失败静默跳过
-    }
-  }
+  queuePrimaryColorVectorUpsert(photoId, photoRecord.dominantColors);
 
   return photoId;
 }
@@ -942,41 +957,51 @@ export async function scanFolder(
     const photoRecords = batch.map((r) => r.photoRecord);
 
     try {
-      // Batch insert photos
-      const insertedIds = db
-        .insert(photos)
-        .values(photoRecords)
-        .returning({ insertedId: photos.id })
-        .all();
+      const insertedPairs: Array<{
+        photoId: number;
+        record: (typeof batch)[number];
+      }> = [];
 
-      // Process each inserted photo
-      for (let j = 0; j < insertedIds.length; j++) {
-        const photoId = insertedIds[j].insertedId;
-        const record = batch[j];
+      db.transaction(() => {
+        const insertedIds = db
+          .insert(photos)
+          .values(photoRecords)
+          .returning({ insertedId: photos.id })
+          .all();
 
-        photoIds.push(photoId);
-        newPhotoIds.push(photoId);
+        for (let j = 0; j < insertedIds.length; j++) {
+          const photoId = insertedIds[j].insertedId;
+          const record = batch[j];
 
-        // Incremental duplicate detection
+          photoIds.push(photoId);
+          newPhotoIds.push(photoId);
+          insertedPairs.push({ photoId, record });
+
+          if (record.exifRecord) {
+            try {
+              record.exifRecord.photoId = photoId;
+              db.insert(exifData).values(record.exifRecord).run();
+            } catch (err: any) {
+              log.warn(
+                { filePath: record.photoRecord.path, err },
+                "EXIF insert failed"
+              );
+            }
+          }
+        }
+      });
+
+      for (const { photoId, record } of insertedPairs) {
         checkNewPhotoDuplicates(
           photoId,
           record.phash,
           record.photoRecord.path,
           record.stat.size
         );
-
-        // Insert EXIF if available
-        if (record.exifRecord) {
-          try {
-            record.exifRecord.photoId = photoId;
-            db.insert(exifData).values(record.exifRecord).run();
-          } catch (err: any) {
-            log.warn(
-              { filePath: record.photoRecord.path, err },
-              "EXIF insert failed"
-            );
-          }
-        }
+        queuePrimaryColorVectorUpsert(
+          photoId,
+          record.photoRecord.dominantColors
+        );
       }
     } catch (err: any) {
       // Fallback to individual inserts if batch fails
@@ -1002,6 +1027,10 @@ export async function scanFolder(
               record.phash,
               record.photoRecord.path,
               record.stat.size
+            );
+            queuePrimaryColorVectorUpsert(
+              photoId,
+              record.photoRecord.dominantColors
             );
 
             if (record.exifRecord) {
@@ -1054,17 +1083,32 @@ export async function scanFolder(
     }
   }
 
-  for (const [dirPath, fid] of dirToFolderId) {
-    const count = photoIds.filter((pid) => {
-      const photo = db
-        .select({ folderId: photos.folderId })
-        .from(photos)
-        .where(eq(photos.id, pid))
-        .get();
-      return photo && photo.folderId === fid;
-    }).length;
+  const folderIds = Array.from(new Set(dirToFolderId.values()));
+  const folderPhotoCounts = new Map<number, number>();
+  if (folderIds.length > 0) {
+    const rows = db
+      .select({
+        count: sql<number>`count(*)`,
+        folderId: photos.folderId,
+      })
+      .from(photos)
+      .where(inArray(photos.folderId, folderIds))
+      .groupBy(photos.folderId)
+      .all();
+
+    for (const row of rows) {
+      if (row.folderId !== null) {
+        folderPhotoCounts.set(row.folderId, row.count);
+      }
+    }
+  }
+
+  for (const fid of folderIds) {
     db.update(folders)
-      .set({ photoCount: count, lastScannedAt: Date.now() })
+      .set({
+        lastScannedAt: Date.now(),
+        photoCount: folderPhotoCounts.get(fid) ?? 0,
+      })
       .where(eq(folders.id, fid))
       .run();
   }

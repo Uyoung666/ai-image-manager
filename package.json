@@ -15,6 +15,7 @@
     "check": "ultracite check",
     "fix": "ultracite fix",
     "bump-ui": "ts-node ./scripts/bump-ui.ts",
+    "perf:baseline": "node scripts/baseline-report.mjs",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:unit": "vitest",
