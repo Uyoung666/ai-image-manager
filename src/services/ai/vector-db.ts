@@ -8,9 +8,9 @@ import {
   Int32,
   Schema,
 } from "apache-arrow";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
-import { photos } from "@/db/schema";
+import { appSettings, photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import {
@@ -164,6 +164,11 @@ export async function initVectorDB(): Promise<void> {
 
           // ── 初始化颜色向量表（如不存在则创建） ───────────────
           await initColorTable(db);
+
+          // 后台回填已有的 dominant_colors 到 LanceDB 颜色表
+          backfillColorVectors().catch((err) =>
+            console.warn("[AI] Color backfill failed:", err?.message)
+          );
 
           setIsVectorDBReady(true);
           scheduleVectorMaintenance();
@@ -678,7 +683,7 @@ export async function upsertColorVector(
     await colorTable.delete(`photo_id = ${photoId}`);
     // 写入新记录
     await colorTable.add([
-      { photo_id: photoId, vector: new Float32Array([r, g, b]) },
+      { photo_id: photoId, vector: [r, g, b] },
     ]);
   } catch (err: any) {
     console.error(`[AI] Upsert color vector failed for photo ${photoId}:`, err?.message);
@@ -699,7 +704,7 @@ export async function upsertColorVectors(
     // 批量写入
     const rows = entries.map((e) => ({
       photo_id: e.photoId,
-      vector: new Float32Array([e.r, e.g, e.b]),
+      vector: [e.r, e.g, e.b],
     }));
     await colorTable.add(rows);
     console.log(`[AI] Upserted ${entries.length} color vectors`);
@@ -785,10 +790,10 @@ export async function backfillColorVectors(): Promise<{
 
   // 检查是否已回填
   const marker = db
-    .select({ value: sql<string>`value` })
-    .from(sql`app_settings`)
-    .where(sql`key = 'color_vectors_backfilled'`)
-    .get() as { value: string } | undefined;
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, "color_vectors_backfilled"))
+    .get();
 
   if (marker?.value === "true") {
     console.log("[AI] Color backfill: already completed (marker set)");
