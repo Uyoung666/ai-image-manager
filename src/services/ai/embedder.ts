@@ -12,13 +12,23 @@ import { ensureLocalModel } from "./model-loader";
 import type { EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
-  addWrittenPhotoIds,
+  activeEmbeddingRunId,
+  addPendingAutoTagPhotoIds,
+  addWrittenPhotoIdsForRun,
+  beginEmbeddingRun,
+  clearWrittenPhotoIdsForRun,
   currentProgress,
+  drainPendingAutoTagPhotoIds,
+  finishEmbeddingRun,
+  getAiControlState,
+  getWrittenPhotoIdsForRun,
   getWrittenPhotoIds,
   isEmbedding,
-  isPaused,
+  isCurrentEmbeddingRun,
+  isRunWritable,
   photoTable,
   poolCancelled,
+  removePendingAutoTagPhotoIds,
   setCurrentProgress,
   setIsEmbedding,
   setLocalModelPath,
@@ -237,9 +247,13 @@ function runEmbedBatch(
  * Clean up partially embedded data when user cancels AI indexing.
  * Follows the same pattern as scan cancellation cleanup in listing.ts.
  */
-export async function cleanupPartialEmbedding(): Promise<void> {
-  const ids = [...getWrittenPhotoIds()];
+export async function cleanupPartialEmbedding(runId = activeEmbeddingRunId): Promise<void> {
+  const ids =
+    runId > 0 ? [...getWrittenPhotoIdsForRun(runId)] : [...getWrittenPhotoIds()];
   if (ids.length === 0) {
+    if (runId > 0) {
+      clearWrittenPhotoIdsForRun(runId);
+    }
     return;
   }
 
@@ -262,11 +276,16 @@ export async function cleanupPartialEmbedding(): Promise<void> {
   await deletePhotoVectors(ids).catch(() => {
     /* best-effort */
   });
+  removePendingAutoTagPhotoIds(ids);
 
   // 3. Clear tracked IDs
   // Note: Thumbnail files are preserved — they were generated during import,
   // not during AI indexing. Deleting them would cause unnecessary regeneration.
-  setWrittenPhotoIds(new Set());
+  if (runId > 0) {
+    clearWrittenPhotoIdsForRun(runId);
+  } else {
+    setWrittenPhotoIds(new Set());
+  }
 
   console.log(`[AI] Cleanup complete: ${ids.length} photos reverted`);
 }
@@ -275,13 +294,34 @@ export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
   // Atomically guard against concurrent calls
-  if (isEmbedding) {
+  if (getAiControlState() !== "idle" || isEmbedding) {
     console.warn(
-      "[AI] embedAllPhotos already running, skipping duplicate call"
+      `[AI] embedAllPhotos skipped because controlState=${getAiControlState()}`
     );
     return 0;
   }
-  setIsEmbedding(true);
+  const shouldResetPool = poolCancelled;
+  const runId = beginEmbeddingRun();
+  const shouldStopRun = () => !isRunWritable(runId) || poolCancelled;
+  let didFinishCurrentRun = false;
+  const finishRun = (nextState: "idle" | "paused") => {
+    const finished = finishEmbeddingRun(runId, nextState);
+    didFinishCurrentRun = didFinishCurrentRun || finished;
+    return finished;
+  };
+  const settleStoppedRun = async (processedCount = 0) => {
+    if (isCurrentEmbeddingRun(runId) && getAiControlState() === "cancelling") {
+      await cleanupPartialEmbedding(runId);
+      finishRun("idle");
+      shutdownPool();
+      return 0;
+    }
+    if (isCurrentEmbeddingRun(runId) && getAiControlState() === "pausing") {
+      finishRun("paused");
+      shutdownPool();
+    }
+    return processedCount;
+  };
 
   // Reset the per-session tracking set so cancellations only affect this run.
   setWrittenPhotoIds(new Set());
@@ -290,7 +330,7 @@ export async function embedAllPhotos(
   // Explicitly destroy the old pool so initWorkerPool doesn't short-circuit
   // and reuse stale slots — which could cause duplicate embeddings or
   // inconsistent state after a rapid stop→start cycle.
-  if (poolCancelled) {
+  if (shouldResetPool) {
     await new Promise((resolve) => setTimeout(resolve, 100));
     try {
       shutdownPool();
@@ -326,6 +366,7 @@ export async function embedAllPhotos(
         error: `嵌入 Worker 脚本未找到: ${err.message}`,
       });
       onProgress?.(currentProgress);
+      finishRun("idle");
       return 0;
     }
 
@@ -346,8 +387,14 @@ export async function embedAllPhotos(
     if (!_localModelPath) {
       setLocalModelPath(await ensureLocalModel());
     }
+    if (shouldStopRun()) {
+      return await settleStoppedRun(0);
+    }
 
     await initVectorDB();
+    if (shouldStopRun()) {
+      return await settleStoppedRun(0);
+    }
 
     if (!photoTable) {
       setCurrentProgress({
@@ -359,6 +406,7 @@ export async function embedAllPhotos(
         error: "向量数据库初始化失败",
       });
       onProgress?.(currentProgress);
+      finishRun("idle");
       return 0;
     }
 
@@ -475,6 +523,9 @@ export async function embedAllPhotos(
     const successfulIds: number[] = [];
 
     async function persistEmbedResults(results: EmbedResult[]): Promise<number> {
+      if (!isRunWritable(runId)) {
+        return 0;
+      }
       const successResults = results.filter(
         (r) => r.vector && r.vector.length > 0
       );
@@ -510,8 +561,16 @@ export async function embedAllPhotos(
         }
       }
 
+      if (!isRunWritable(runId)) {
+        await deletePhotoVectors(batchIds).catch(() => {
+          /* best-effort */
+        });
+        return 0;
+      }
+
       batchUpdatePhotoStatus(db, batchIds);
-      addWrittenPhotoIds(batchIds);
+      addWrittenPhotoIdsForRun(runId, batchIds);
+      addPendingAutoTagPhotoIds(batchIds);
       successfulIds.push(...batchIds);
       return successResults.length;
     }
@@ -528,6 +587,9 @@ export async function embedAllPhotos(
       // Poll real pool init progress while workers load ONNX models.
       // Replaces the old time-based getClipProgressPercent() fake progress.
       const poolProgressInterval = setInterval(() => {
+        if (!isCurrentEmbeddingRun(runId)) {
+          return;
+        }
         const pct = getPoolInitProgress();
         if (pct > 0) {
           setCurrentProgress({
@@ -546,21 +608,28 @@ export async function embedAllPhotos(
       } finally {
         clearInterval(poolProgressInterval);
         // Mark init complete at 100%
-        setCurrentProgress({
-          ...currentProgress,
-          downloadPercent: 100,
-          loadingStartedAt: null,
-        });
-        if (isEmbedding) {
-          onProgress?.(currentProgress);
+        if (isCurrentEmbeddingRun(runId)) {
+          setCurrentProgress({
+            ...currentProgress,
+            downloadPercent: 100,
+            loadingStartedAt: null,
+          });
+          if (isEmbedding) {
+            onProgress?.(currentProgress);
+          }
         }
       }
       poolReady = true;
 
-      setPoolCancelled(false);
+      if (shouldStopRun()) {
+        throw new Error("Embedding run stopped before worker pool dispatch");
+      }
       await embedWithPool(
         unprocessed,
         (done, tot) => {
+          if (!isCurrentEmbeddingRun(runId)) {
+            return;
+          }
           setCurrentProgress({
             processed: done,
             total: tot,
@@ -573,7 +642,7 @@ export async function embedAllPhotos(
             onProgress?.(currentProgress);
           }
         },
-        () => poolCancelled,
+        shouldStopRun,
         async (results) => {
           processed += await persistEmbedResults(results);
         }
@@ -615,16 +684,17 @@ export async function embedAllPhotos(
         batchUpdatePhotoStatus(db, batchIds);
 
         // Track written IDs for potential cancel cleanup
-        addWrittenPhotoIds(batchIds);
+        addWrittenPhotoIdsForRun(runId, batchIds);
+        addPendingAutoTagPhotoIds(batchIds);
 
         processed = successResults.length;
         successfulIds.push(...batchIds);
       }
 
       // After pool completes (or stops due to cancel): check for cancellation
-      if (poolCancelled && !isPaused) {
+      if (isCurrentEmbeddingRun(runId) && getAiControlState() === "cancelling") {
         console.log("[AI] Embedding cancelled by user, cleaning up...");
-        await cleanupPartialEmbedding();
+        await cleanupPartialEmbedding(runId);
         setCurrentProgress({
           processed: 0,
           total: 0,
@@ -633,12 +703,12 @@ export async function embedAllPhotos(
           downloadPercent: undefined,
         });
         onProgress?.(currentProgress);
-        setIsEmbedding(false);
+        finishRun("idle");
         shutdownPool();
         return 0;
       }
 
-      if (poolCancelled && isPaused) {
+      if (isCurrentEmbeddingRun(runId) && getAiControlState() === "pausing") {
         console.log(
           `[AI] Embedding paused at ${processed}/${total}, preserving state`
         );
@@ -651,7 +721,7 @@ export async function embedAllPhotos(
           loadingStartedAt: null,
         });
         onProgress?.(currentProgress);
-        setIsEmbedding(false);
+        finishRun("paused");
         shutdownPool();
         return processed;
       }
@@ -660,9 +730,8 @@ export async function embedAllPhotos(
     }
 
     // If pool was cancelled or paused, don't proceed to fallback
-    if (poolCancelled) {
-      setIsEmbedding(false);
-      return processed;
+    if (shouldStopRun()) {
+      return await settleStoppedRun(processed);
     }
 
     // If pool is not available, fall back to legacy per-batch fork
@@ -676,6 +745,9 @@ export async function embedAllPhotos(
 
         try {
           const results = await runEmbedBatch(batch, _localModelPath!);
+          if (!isRunWritable(runId)) {
+            return 0;
+          }
           const successBatch = results.filter(
             (r) => r.vector && r.vector.length > 0
           );
@@ -705,9 +777,17 @@ export async function embedAllPhotos(
               }
             }
 
+            if (!isRunWritable(runId)) {
+              await deletePhotoVectors(ids).catch(() => {
+                /* best-effort */
+              });
+              return 0;
+            }
+
             batchUpdatePhotoStatus(db, ids);
             // Track written IDs for potential cancel cleanup
-            addWrittenPhotoIds(ids);
+            addWrittenPhotoIdsForRun(runId, ids);
+            addPendingAutoTagPhotoIds(ids);
             successfulIds.push(...ids);
             return successBatch.length;
           }
@@ -726,7 +806,7 @@ export async function embedAllPhotos(
         }
       }
       for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
-        if (!isEmbedding) {
+        if (shouldStopRun()) {
           console.log("[AI] Embedding stopped by user");
           break;
         }
@@ -749,8 +829,11 @@ export async function embedAllPhotos(
     }
 
     // If paused, skip the final phase reporting — already set in pool section
-    if (poolCancelled || isPaused) {
-      setIsEmbedding(false);
+    if (shouldStopRun()) {
+      return await settleStoppedRun(processed);
+    }
+
+    if (!isCurrentEmbeddingRun(runId)) {
       return processed;
     }
 
@@ -795,10 +878,11 @@ export async function embedAllPhotos(
     }
     onProgress?.(currentProgress);
 
-    // Run batch auto-tagging only for newly embedded photos (incremental).
-    if (successfulIds.length > 0) {
+    // Run batch auto-tagging for all photos embedded across pause/resume.
+    const autoTagIds = drainPendingAutoTagPhotoIds();
+    if (autoTagIds.length > 0) {
       try {
-        const r = await batchSuggestTags(successfulIds);
+        const r = await batchSuggestTags(autoTagIds);
         console.log(
           `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
         );
@@ -811,8 +895,15 @@ export async function embedAllPhotos(
       await ensureVectorIndex(true);
     }
 
+    finishRun("idle");
     return processed;
   } catch (err: any) {
+    if (!isCurrentEmbeddingRun(runId)) {
+      return 0;
+    }
+    if (getAiControlState() === "cancelling") {
+      return await settleStoppedRun(0);
+    }
     const message = err?.message || String(err);
     setCurrentProgress({
       processed: 0,
@@ -823,21 +914,26 @@ export async function embedAllPhotos(
       error: message,
     });
     onProgress?.(currentProgress);
+    finishRun("idle");
     throw err;
   } finally {
-    setIsEmbedding(false);
-    try {
-      const { BrowserWindow } = await import("electron");
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send("ai-embedding-done", {
-          error:
-            currentProgress.phase === "error"
-              ? currentProgress.error
-              : undefined,
-        });
+    if (isCurrentEmbeddingRun(runId)) {
+      setIsEmbedding(false);
+    }
+    if (didFinishCurrentRun) {
+      try {
+        const { BrowserWindow } = await import("electron");
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send("ai-embedding-done", {
+            error:
+              currentProgress.phase === "error"
+                ? currentProgress.error
+                : undefined,
+          });
+        }
+      } catch {
+        /* best-effort */
       }
-    } catch {
-      /* best-effort */
     }
   }
 }

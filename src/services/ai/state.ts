@@ -15,6 +15,13 @@ export interface EmbedProgress {
 
 export type EmbedProgressCallback = (progress: EmbedProgress) => void;
 
+export type AiControlState =
+  | "idle"
+  | "running"
+  | "pausing"
+  | "paused"
+  | "cancelling";
+
 export interface EmbeddingModel {
   embedImage: (imagePath: string) => Promise<number[]>;
   embedText: (text: string) => Promise<number[]>;
@@ -30,8 +37,13 @@ export let embeddingModel: EmbeddingModel | null = null;
 export let isEmbedding = false;
 export let poolCancelled = false;
 export let isPaused = false;
+export let aiControlState: AiControlState = "idle";
+export let activeEmbeddingRunId = 0;
+let nextEmbeddingRunId = 0;
 /** 本次嵌入会话中已成功写入的 photo_id 集合，用于取消时精确回滚 */
 export let writtenPhotoIds: Set<number> = new Set();
+const writtenPhotoIdsByRun = new Map<number, Set<number>>();
+const pendingAutoTagPhotoIds = new Set<number>();
 /** 全局 AbortController，用于跨模块传递取消信号 */
 export let abortController: AbortController | null = null;
 /** 向量数据库是否在本次启动中由自动修复流程重建过 */
@@ -71,19 +83,111 @@ export function setPoolCancelled(v: boolean): void {
 export function setIsPaused(v: boolean): void {
   isPaused = v;
 }
+export function setAiControlState(v: AiControlState): void {
+  aiControlState = v;
+  isEmbedding = v === "running" || v === "pausing" || v === "cancelling";
+  isPaused = v === "paused" || v === "pausing";
+  poolCancelled = v === "pausing" || v === "paused" || v === "cancelling";
+}
+export function getAiControlState(): AiControlState {
+  return aiControlState;
+}
+export function beginEmbeddingRun(): number {
+  const runId = ++nextEmbeddingRunId;
+  activeEmbeddingRunId = runId;
+  writtenPhotoIds = new Set();
+  writtenPhotoIdsByRun.set(runId, writtenPhotoIds);
+  setAiControlState("running");
+  poolCancelled = false;
+  isPaused = false;
+  isEmbedding = true;
+  return runId;
+}
+export function isCurrentEmbeddingRun(runId: number): boolean {
+  return activeEmbeddingRunId === runId;
+}
+export function isRunWritable(runId: number): boolean {
+  return (
+    activeEmbeddingRunId === runId &&
+    aiControlState !== "cancelling" &&
+    aiControlState !== "paused"
+  );
+}
+export function finishEmbeddingRun(
+  runId: number,
+  nextState: AiControlState
+): boolean {
+  if (activeEmbeddingRunId !== runId) {
+    return false;
+  }
+  setAiControlState(nextState);
+  if (nextState === "idle") {
+    activeEmbeddingRunId = 0;
+  }
+  return true;
+}
 export function setWrittenPhotoIds(ids: Set<number>): void {
   writtenPhotoIds = ids;
+  if (activeEmbeddingRunId > 0) {
+    writtenPhotoIdsByRun.set(activeEmbeddingRunId, ids);
+  }
 }
 export function addWrittenPhotoId(id: number): void {
   writtenPhotoIds.add(id);
+  if (activeEmbeddingRunId > 0) {
+    addWrittenPhotoIdsForRun(activeEmbeddingRunId, [id]);
+  }
 }
 export function addWrittenPhotoIds(ids: number[]): void {
   for (const id of ids) {
     writtenPhotoIds.add(id);
   }
+  if (activeEmbeddingRunId > 0) {
+    addWrittenPhotoIdsForRun(activeEmbeddingRunId, ids);
+  }
 }
 export function getWrittenPhotoIds(): Set<number> {
   return writtenPhotoIds;
+}
+export function addWrittenPhotoIdsForRun(runId: number, ids: number[]): void {
+  let runIds = writtenPhotoIdsByRun.get(runId);
+  if (!runIds) {
+    runIds = new Set();
+    writtenPhotoIdsByRun.set(runId, runIds);
+  }
+  for (const id of ids) {
+    runIds.add(id);
+  }
+  if (activeEmbeddingRunId === runId) {
+    writtenPhotoIds = runIds;
+  }
+}
+export function getWrittenPhotoIdsForRun(runId: number): Set<number> {
+  return writtenPhotoIdsByRun.get(runId) ?? new Set();
+}
+export function clearWrittenPhotoIdsForRun(runId: number): void {
+  writtenPhotoIdsByRun.delete(runId);
+  if (activeEmbeddingRunId === runId || activeEmbeddingRunId === 0) {
+    writtenPhotoIds = new Set();
+  }
+}
+export function addPendingAutoTagPhotoIds(ids: number[]): void {
+  for (const id of ids) {
+    pendingAutoTagPhotoIds.add(id);
+  }
+}
+export function removePendingAutoTagPhotoIds(ids: Iterable<number>): void {
+  for (const id of ids) {
+    pendingAutoTagPhotoIds.delete(id);
+  }
+}
+export function drainPendingAutoTagPhotoIds(): number[] {
+  const ids = [...pendingAutoTagPhotoIds];
+  pendingAutoTagPhotoIds.clear();
+  return ids;
+}
+export function getPendingAutoTagPhotoIds(): Set<number> {
+  return new Set(pendingAutoTagPhotoIds);
 }
 export function setAbortController(c: AbortController | null): void {
   abortController = c;

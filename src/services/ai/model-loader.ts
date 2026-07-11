@@ -9,10 +9,14 @@ import { disposeTensors } from "./constants";
 import type { EmbedProgress } from "./state";
 import {
   _localModelPath,
+  activeEmbeddingRunId,
+  aiControlState,
   currentProgress,
   embeddingModel,
   isEmbedding,
   isModelLoaded,
+  isPaused,
+  setAiControlState,
   setCurrentProgress,
   setEmbeddingModel,
   setIsEmbedding,
@@ -361,15 +365,20 @@ export function isAiModelLoaded(): boolean {
 }
 
 export function stopEmbedding(): void {
-  setIsEmbedding(false);
+  if (aiControlState === "idle") {
+    return;
+  }
+  setAiControlState("cancelling");
   setPoolCancelled(true);
 }
 
 /** Pause embedding: stop consuming new batches but preserve already-written data. */
 export function pauseEmbedding(): void {
-  setIsEmbedding(false);
+  if (aiControlState !== "running") {
+    return;
+  }
+  setAiControlState("pausing");
   setPoolCancelled(true);
-  setIsPaused(true);
   // Signal worker processes to abort their current batch (best-effort)
   try {
     abortAllWorkers();
@@ -380,9 +389,11 @@ export function pauseEmbedding(): void {
 
 /** Cancel embedding: stop and clean up all data written in this session. */
 export function cancelEmbedding(): void {
-  setIsEmbedding(false);
+  if (aiControlState === "idle") {
+    return;
+  }
+  setAiControlState("cancelling");
   setPoolCancelled(true);
-  setIsPaused(false);
   // Signal worker processes to abort their current batch (best-effort)
   try {
     abortAllWorkers();
@@ -393,18 +404,30 @@ export function cancelEmbedding(): void {
 
 /** Resume embedding after pause: restart from where we left off.
  *  NOTE: isEmbedding must stay false here so embedAllPhotos's entry guard passes. */
-export function resumeEmbedding(): void {
-  setIsPaused(false);
+export function resumeEmbedding(): boolean {
+  if (aiControlState !== "paused") {
+    return false;
+  }
+  setAiControlState("idle");
   setPoolCancelled(false);
+  setIsPaused(false);
+  setIsEmbedding(false);
+  return true;
 }
 
 export function getEmbeddingProgress(): EmbedProgress & {
+  controlState: typeof aiControlState;
   isActive: boolean;
   isModelLoaded: boolean;
+  isPaused: boolean;
+  runId: number;
 } {
   return {
     ...currentProgress,
+    controlState: aiControlState,
     isActive: isEmbedding,
     isModelLoaded,
+    isPaused,
+    runId: activeEmbeddingRunId,
   };
 }

@@ -3,11 +3,13 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 
 interface AiProgress {
+  controlState?: "idle" | "running" | "pausing" | "paused" | "cancelling";
   currentFile: string;
   downloadPercent?: number;
   error?: string;
   isActive: boolean;
   isModelLoaded: boolean;
+  isPaused?: boolean;
   loadingStartedAt?: number | null;
   phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
   processed: number;
@@ -18,7 +20,7 @@ interface AiProgress {
 export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<AiProgress | null>(null);
-  const [paused, setPaused] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const pollingRef = useRef(false);
 
@@ -106,45 +108,42 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     if (progress.phase === "error") {
       setLastError(progress.error || t("aiInitFailed"));
     }
-  }, [progress]);
+  }, [progress, t]);
+
+  async function runProgressMutation(action: () => Promise<unknown>) {
+    setIsMutating(true);
+    try {
+      await action();
+      const p = await fetchProgress();
+      if (p) {
+        setProgress(p);
+      } else {
+        setProgress(null);
+      }
+    } finally {
+      setIsMutating(false);
+    }
+  }
 
   async function handleStart() {
     if (disabled) {
       return;
     }
     setLastError(null);
-    await ipc.client.photos.startAiIndexing({});
-    setPaused(false);
-    // Immediately poll — the backend will have isEmbedding=true now
-    const p = await fetchProgress();
-    if (p) {
-      setProgress(p);
-    }
+    await runProgressMutation(() => ipc.client.photos.startAiIndexing({}));
   }
 
   async function handlePause() {
-    await ipc.client.photos.pauseAiIndexing({});
-    setPaused(true);
-    const p = await fetchProgress();
-    if (p) {
-      setProgress(p);
-    }
+    await runProgressMutation(() => ipc.client.photos.pauseAiIndexing({}));
   }
 
   async function handleResume() {
     setLastError(null);
-    await ipc.client.photos.resumeAiIndexing({});
-    setPaused(false);
-    const p = await fetchProgress();
-    if (p) {
-      setProgress(p);
-    }
+    await runProgressMutation(() => ipc.client.photos.resumeAiIndexing({}));
   }
 
   async function handleCancel() {
-    await ipc.client.photos.cancelAiIndexing({});
-    setPaused(false);
-    setProgress(null);
+    await runProgressMutation(() => ipc.client.photos.cancelAiIndexing({}));
   }
 
   if (progress?.phase === "error" || lastError) {
@@ -194,6 +193,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
         <button
           className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/20"
           onClick={handleStart}
+          type="button"
         >
           {t("aiRetry")}
         </button>
@@ -211,8 +211,9 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     return (
       <button
         className="mt-2 w-full rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/15 disabled:pointer-events-none disabled:opacity-40"
-        disabled={disabled}
+        disabled={disabled || isMutating}
         onClick={handleStart}
+        type="button"
       >
         {t("aiStartIndex")}
       </button>
@@ -238,7 +239,9 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
         </div>
         <button
           className="mt-2 w-full rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/20"
+          disabled={isMutating}
           onClick={handleStart}
+          type="button"
         >
           {t("aiIndexNewPhotos")}
         </button>
@@ -252,7 +255,15 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
       : progress.total > 0
         ? Math.round((progress.processed / progress.total) * 100)
         : 0;
-  const phaseLabel = paused
+  const controlState = progress.controlState ?? "idle";
+  const paused =
+    progress.isPaused ||
+    controlState === "paused" ||
+    controlState === "pausing";
+  const cancelling = controlState === "cancelling";
+  const phaseLabel = cancelling
+    ? t("cancel")
+    : paused
     ? t("aiPaused")
     : progress.phase === "repairing"
       ? t("aiRepairingIndex")
@@ -295,13 +306,17 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
             <>
               <button
                 className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/10"
+                disabled={isMutating || cancelling || controlState === "pausing"}
                 onClick={handleResume}
+                type="button"
               >
                 {t("aiResume")}
               </button>
               <button
                 className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                disabled={isMutating || cancelling}
                 onClick={handleCancel}
+                type="button"
               >
                 {t("cancel")}
               </button>
@@ -309,7 +324,9 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
           ) : (
             <button
               className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              disabled={isMutating || cancelling}
               onClick={handlePause}
+              type="button"
             >
               {t("aiPause")}
             </button>

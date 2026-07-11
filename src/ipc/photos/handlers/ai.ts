@@ -3,24 +3,30 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import {
+  activeEmbeddingRunId,
+  aiControlState,
   batchSuggestTags,
   cancelEmbedding,
   checkAiHealth,
   cleanupPartialEmbedding,
   embedAllPhotos,
+  finishEmbeddingRun,
   getAiReadiness,
   getEmbeddingProgress,
   pauseEmbedding,
   rebuildVectorDB,
   resetAllAiProcessedFlags,
   resumeEmbedding,
+  setAiControlState,
   setCurrentProgress,
-  setIsEmbedding,
   setWasAutoRepaired,
   stopEmbedding,
 } from "@/services/ai-embedder";
 
 export const startAiIndexing = os.handler(() => {
+  if (aiControlState !== "idle") {
+    return { busy: true, started: false, state: aiControlState };
+  }
   embedAllPhotos((aiProgress) => {
     const { BrowserWindow } = require("electron");
     for (const win of BrowserWindow.getAllWindows()) {
@@ -42,21 +48,29 @@ export const stopAiIndexing = os.handler(() => {
 });
 
 export const cancelAiIndexing = os.handler(async () => {
+  const runId = activeEmbeddingRunId;
+  const stateBeforeCancel = aiControlState;
   cancelEmbedding();
   // Clean up any partially embedded data from the current session.
   // This covers both the case where embedAllPhotos is still running
   // (cancel flag will trigger cleanup inside the loop) and the case
   // where it was already paused (cleanup must happen here explicitly).
-  await cleanupPartialEmbedding();
-  // Reset progress to idle so the UI shows the start button again.
-  setCurrentProgress({
-    processed: 0,
-    total: 0,
-    phase: "idle",
-    currentFile: "",
-    downloadPercent: undefined,
-  });
-  setIsEmbedding(false);
+  await cleanupPartialEmbedding(runId);
+  if (stateBeforeCancel === "paused" || stateBeforeCancel === "idle") {
+    // No embedAllPhotos loop is still alive to settle this run.
+    setCurrentProgress({
+      processed: 0,
+      total: 0,
+      phase: "idle",
+      currentFile: "",
+      downloadPercent: undefined,
+    });
+    if (runId > 0) {
+      finishEmbeddingRun(runId, "idle");
+    } else {
+      setAiControlState("idle");
+    }
+  }
   return { cancelled: true };
 });
 
@@ -66,7 +80,9 @@ export const pauseAiIndexing = os.handler(() => {
 });
 
 export const resumeAiIndexing = os.handler(() => {
-  resumeEmbedding();
+  if (!resumeEmbedding()) {
+    return { resumed: false, state: aiControlState };
+  }
   // Fire-and-forget: restart embedding
   embedAllPhotos((aiProgress) => {
     const { BrowserWindow } = require("electron");
@@ -87,11 +103,11 @@ export const getAiProgress = os.handler(() => {
   return getEmbeddingProgress();
 });
 
-export const getAiStatus = os.handler(async () => {
+export const getAiStatus = os.handler(() => {
   return getAiReadiness();
 });
 
-export const getAiHealth = os.handler(async () => {
+export const getAiHealth = os.handler(() => {
   return checkAiHealth();
 });
 
