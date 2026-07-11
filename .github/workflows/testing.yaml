@@ -15,6 +15,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --ignore-scripts
+      - name: Download Electron binary
+        run: node node_modules/electron/install.js
       - name: Build better-sqlite3 for Node 22
         run: npm rebuild better-sqlite3
       - name: Run unit tests
