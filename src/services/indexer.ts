@@ -1,7 +1,7 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import exifr from "exifr";
 import PQueue from "p-queue";
 import sharp from "sharp";
@@ -1219,7 +1219,9 @@ export function startWatching(
           const photo = db
             .select({ id: photos.id, folderId: photos.folderId })
             .from(photos)
-            .where(eq(photos.path, filePath))
+            .where(
+              and(eq(photos.path, filePath), sql`${photos.deletedAt} IS NULL`)
+            )
             .get();
           if (photo) {
             db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
@@ -1235,7 +1237,7 @@ export function startWatching(
             if (photo.folderId) {
               db.update(folders)
                 .set({
-                  photoCount: sql`photo_count - 1`,
+                  photoCount: sql`MAX(0, photo_count - 1)`,
                   lastWatcherEventAt: Date.now(),
                 })
                 .where(eq(folders.id, photo.folderId))
@@ -1334,7 +1336,9 @@ export function watchFolder(
         const photo = db
           .select({ id: photos.id, folderId: photos.folderId })
           .from(photos)
-          .where(eq(photos.path, filePath))
+          .where(
+            and(eq(photos.path, filePath), sql`${photos.deletedAt} IS NULL`)
+          )
           .get();
         if (photo) {
           db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
@@ -1350,7 +1354,7 @@ export function watchFolder(
           if (photo.folderId) {
             db.update(folders)
               .set({
-                photoCount: sql`photo_count - 1`,
+                photoCount: sql`MAX(0, photo_count - 1)`,
                 lastWatcherEventAt: Date.now(),
               })
               .where(eq(folders.id, photo.folderId))
@@ -1429,7 +1433,7 @@ export async function cleanupOrphanedRecords(): Promise<{
 
   for (const [folderId, count] of folderUpdates) {
     db.update(folders)
-      .set({ photoCount: sql`photo_count - ${count}` })
+      .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
       .where(eq(folders.id, folderId))
       .run();
   }
@@ -1484,7 +1488,7 @@ export async function cleanupOrphanedRecordsAsync(
 
   for (const [folderId, count] of folderUpdates) {
     db.update(folders)
-      .set({ photoCount: sql`photo_count - ${count}` })
+      .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
       .where(eq(folders.id, folderId))
       .run();
   }

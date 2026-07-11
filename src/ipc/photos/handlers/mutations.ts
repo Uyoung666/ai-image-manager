@@ -124,11 +124,19 @@ function performHardDelete(photoIds: number[]): void {
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const photo = db
-    .select({ path: photos.path, folderId: photos.folderId })
+    .select({
+      path: photos.path,
+      folderId: photos.folderId,
+      deletedAt: photos.deletedAt,
+    })
     .from(photos)
     .where(eq(photos.id, input.id))
     .get();
   if (photo) {
+    // Skip if already soft-deleted (idempotency guard)
+    if (photo.deletedAt !== null) {
+      return { success: true };
+    }
     db.update(photos)
       .set({ deletedAt: Date.now() })
       .where(eq(photos.id, input.id))
@@ -149,14 +157,24 @@ export const deletePhotos = os
   .input(z.object({ ids: z.array(z.number()) }))
   .handler(async ({ input }) => {
     const db = getDatabase();
+    // Only target active (non-soft-deleted) photos for idempotency
     const targetPhotos = db
       .select({ id: photos.id, folderId: photos.folderId })
       .from(photos)
-      .where(inArray(photos.id, input.ids))
+      .where(
+        and(
+          inArray(photos.id, input.ids),
+          sql`${photos.deletedAt} IS NULL`
+        )
+      )
       .all();
+    if (targetPhotos.length === 0) {
+      return { deleted: 0 };
+    }
+    const activeIds = targetPhotos.map((p) => p.id);
     db.update(photos)
       .set({ deletedAt: Date.now() })
-      .where(inArray(photos.id, input.ids))
+      .where(inArray(photos.id, activeIds))
       .run();
     const countsByFolder = new Map<number, number>();
     for (const p of targetPhotos) {
@@ -174,7 +192,7 @@ export const deletePhotos = os
         .run();
     }
     invalidateCountCache();
-    return { deleted: input.ids.length };
+    return { deleted: activeIds.length };
   });
 
 /**
@@ -663,6 +681,8 @@ export const permanentlyDeletePhotos = os
       .from(photos)
       .where(inArray(photos.id, input.ids))
       .all();
+    // Delete DB records first so watcher unlink won't double-decrement photoCount
+    performHardDelete(input.ids);
     for (const p of targetPhotos) {
       try {
         if (fs.existsSync(p.path)) {
@@ -675,7 +695,6 @@ export const permanentlyDeletePhotos = os
         );
       }
     }
-    performHardDelete(input.ids);
     invalidateCountCache();
     return { deleted: input.ids.length };
   });
@@ -692,6 +711,8 @@ export const emptyTrash = os.handler(async () => {
     invalidateStatsCache();
     return { deleted: 0 };
   }
+  // Delete DB records first so watcher unlink won't double-decrement photoCount
+  performHardDelete(ids);
   for (const p of deletedPhotos) {
     try {
       if (fs.existsSync(p.path)) {
@@ -704,7 +725,6 @@ export const emptyTrash = os.handler(async () => {
       );
     }
   }
-  performHardDelete(ids);
   invalidateCountCache();
   return { deleted: ids.length };
 });
@@ -730,9 +750,14 @@ export async function cleanupExpiredTrash(): Promise<number> {
     return 0;
   }
 
+  const ids = expiredPhotos.map((p) => p.id);
+
   console.log(
     `[TrashCleanup] Removing ${expiredPhotos.length} expired photos (older than 30 days)...`
   );
+
+  // Delete DB records first so watcher unlink won't double-decrement photoCount
+  performHardDelete(ids);
 
   for (const p of expiredPhotos) {
     try {
@@ -746,9 +771,6 @@ export async function cleanupExpiredTrash(): Promise<number> {
       );
     }
   }
-
-  const ids = expiredPhotos.map((p) => p.id);
-  performHardDelete(ids);
 
   console.log(
     `[TrashCleanup] Permanently deleted ${expiredPhotos.length} expired photos`

@@ -758,13 +758,15 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         ids: rejected.map((i) => i.photo.id),
       });
       toast.success(t("cullRejectedToTrash"));
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       onUpdate?.();
     } catch (err) {
       console.error("[handleTrashRejected] failed:", err);
     } finally {
       setDeleting(false);
     }
-  }, [rejected, t, onUpdate]);
+  }, [rejected, t, onUpdate, queryClient]);
 
   // ── Render ──
 

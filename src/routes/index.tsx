@@ -952,6 +952,7 @@ function HomePage() {
       } else {
         queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
       }
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       toast.success(t("toastDeletedCount", { count }));
     } catch {
       toast.error(t("toastDeleteFailed"));

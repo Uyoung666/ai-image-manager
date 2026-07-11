@@ -424,6 +424,8 @@ function DuplicatesPage() {
     },
     onSettled: () => {
       setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
 
@@ -464,6 +466,8 @@ function DuplicatesPage() {
         n.delete(id);
         return n;
       });
+      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
 

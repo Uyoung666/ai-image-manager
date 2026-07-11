@@ -306,6 +306,7 @@ function AlbumDetailPage() {
           : prev
       );
       queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
       toast.error(t("toastDeleteFailed"));
