@@ -58,6 +58,7 @@ export {
 export { batchSuggestTags, CANDIDATE_TAGS, suggestTags } from "./tag-suggester";
 export { embedText } from "./text-embedder";
 export {
+  backfillColorVectors,
   buildPhotoIdFilter,
   cleanupOrphanVectors,
   cleanupStaleBackups,

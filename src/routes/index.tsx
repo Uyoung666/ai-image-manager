@@ -63,6 +63,12 @@ function HomePage() {
   >(savedSearch.searchMode as "text" | "image" | "exif" | "color" | null);
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
+  const searchExpandedRef = useRef(false);
+  const lastSearchParamsRef = useRef<{
+    query: string;
+    filters?: import("@/components/SearchBar").ExifFilters;
+    colorHex?: string;
+  } | null>(null);
   const [colorHex, setColorHex] = useState<string | null>(
     savedSearch.colorHex ?? null
   );
@@ -591,8 +597,11 @@ function HomePage() {
   const handleEndReached = useCallback(() => {
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
+    } else if (isSearching && searchResults && searchResults.length >= 200 && !searchExpandedRef.current) {
+      // 搜索模式下：首次返回 200 条后，滚动到底自动加载更多
+      handleLoadMore();
     }
-  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage, searchResults, handleLoadMore]);
 
   const handleToggleFavorite = useCallback(async (id: number) => {
     const photo = photosRef.current.find((p) => p.id === id);
@@ -674,7 +683,7 @@ function HomePage() {
         shutterMin?: number;
         shutterMax?: number;
         limit: number;
-      } = { limit: 500 };
+      } = { limit: searchExpandedRef.current ? 1000 : 200 };
       if (query.trim()) {
         searchParams.query = query.trim();
       }
@@ -718,6 +727,11 @@ function HomePage() {
       }
       if (filters?.shutterMax) {
         searchParams.shutterMax = Number(filters.shutterMax);
+      }
+
+      // 保存搜索参数以支持"加载更多"
+      if (!searchExpandedRef.current) {
+        lastSearchParamsRef.current = { query, filters, colorHex: effectiveColorHex ?? undefined };
       }
 
       const result = (await ipc.client.photos.searchCompound(
@@ -996,6 +1010,15 @@ function HomePage() {
       }
     }
   }
+
+  // ── 搜索"加载更多"：用更大 limit 重新搜索 ──────────────────────────
+  const handleLoadMore = useCallback(() => {
+    const p = lastSearchParamsRef.current;
+    if (!p) return;
+    searchExpandedRef.current = true;
+    handleSearch(p.query, p.filters, p.colorHex);
+  }, []);
+
   // Keyboard shortcuts for batch operations
   // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
   useEffect(() => {
@@ -1163,6 +1186,8 @@ function HomePage() {
             setSearchResults(null);
             setParsedTimeFilter(null);
             setShowAiIndexHint(false);
+            searchExpandedRef.current = false;
+            lastSearchParamsRef.current = null;
           }}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}

@@ -231,6 +231,11 @@ export async function initVectorDB(): Promise<void> {
   // ── 初始化颜色向量表（3D RGB） ───────────────────────────────────
   await initColorTable(db);
 
+  // 后台回填已有的 dominant_colors 到 LanceDB 颜色表（不阻塞启动）
+  backfillColorVectors().catch((err) =>
+    console.warn("[AI] Color backfill failed:", err?.message)
+  );
+
   setIsVectorDBReady(true);
   scheduleVectorMaintenance();
 }
@@ -762,4 +767,94 @@ function diagLog(msg: string) {
   } catch {
     /* best-effort */
   }
+}
+
+// ── 颜色向量回填 ─────────────────────────────────────────────────────
+// 将已有 dominant_colors 但 LanceDB 中无颜色向量的照片批量回填。
+// 首次启动时自动运行，后续跳过（通过 app_settings 标记）。
+export async function backfillColorVectors(): Promise<{
+  total: number;
+  backfilled: number;
+}> {
+  if (!colorTable) {
+    return { total: 0, backfilled: 0 };
+  }
+
+  const db = getDatabase();
+
+  // 检查是否已回填
+  const marker = db
+    .select({ value: sql<string>`value` })
+    .from(sql`app_settings`)
+    .where(sql`key = 'color_vectors_backfilled'`)
+    .get() as { value: string } | undefined;
+
+  if (marker?.value === "true") {
+    return { total: 0, backfilled: 0 };
+  }
+
+  // 查询有 dominant_colors 但无 color_bucket 的照片（未处理过的旧数据）
+  const rows = db
+    .select({
+      id: photos.id,
+      dominantColors: photos.dominantColors,
+    })
+    .from(photos)
+    .where(
+      sql`${photos.deletedAt} IS NULL AND ${photos.dominantColors} IS NOT NULL AND ${photos.colorBucket} IS NULL`
+    )
+    .all();
+
+  const total = rows.length;
+  if (total === 0) {
+    // 标记完成，避免重复检查
+    try {
+      db.run(
+        sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
+      );
+    } catch { /* best-effort */ }
+    return { total: 0, backfilled: 0 };
+  }
+
+  const BATCH = 100;
+  let backfilled = 0;
+
+  for (let i = 0; i < total; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    const entries: Array<{ photoId: number; r: number; g: number; b: number }> = [];
+
+    for (const row of batch) {
+      try {
+        const palette = JSON.parse(row.dominantColors!) as Array<{
+          r: number; g: number; b: number; weight: number;
+        }>;
+        if (palette.length > 0) {
+          const { r, g, b } = palette[0];
+          entries.push({ photoId: row.id, r, g, b });
+        }
+      } catch { /* skip invalid JSON */ }
+    }
+
+    if (entries.length > 0) {
+      try {
+        await upsertColorVectors(entries);
+        backfilled += entries.length;
+      } catch (err: any) {
+        console.error(`[AI] Color backfill batch failed:`, err?.message);
+      }
+    }
+
+    // 避免长时间阻塞
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  // 标记完成
+  try {
+    db.run(
+      sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
+    );
+  } catch { /* best-effort */ }
+
+  console.log(`[AI] Color vector backfill: ${backfilled}/${total}`);
+  return { total, backfilled };
 }
