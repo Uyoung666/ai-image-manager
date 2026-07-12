@@ -69,6 +69,7 @@ const COL_WIDTH_MIN = 140;
 const COL_WIDTH_MAX = 320;
 const COL_WIDTH_DEFAULT = 220;
 const GAP = 8;
+const INITIAL_EAGER_ROWS = 2;
 
 const GRID_COL_WIDTH_KEY = "grid_column_width";
 
@@ -123,12 +124,49 @@ export const PhotoGrid = memo(
     const observerRef = useRef<ResizeObserver | null>(null);
     const targetColWidthRef = useRef(targetColWidth);
     targetColWidthRef.current = targetColWidth;
+    const metricsRef = useRef({
+      compact: false,
+      columnCount: 4,
+      width: 0,
+    });
     // selectedIds/deletingIds 通过 ref 传递，稳定 renderItem 引用。
     // 移除 deps 中的 Set 依赖 → 选中操作仅触发实际变化卡片的 memo 比较。
     const selectedIdsRef = useRef(selectedIds);
     selectedIdsRef.current = selectedIds;
     const deletingIdsRef = useRef(deletingIds);
     deletingIdsRef.current = deletingIds;
+    const groupHeaderCacheRef = useRef<{
+      headers: GroupHeader[];
+      language: string;
+      photoCount: number;
+      firstPhotoId: number | null;
+      lastPhotoId: number | null;
+      sort: SortField;
+    } | null>(null);
+
+    const applyGridMetrics = useCallback((width: number) => {
+      const nextColumnCount = Math.max(
+        MIN_COLUMNS,
+        Math.floor(width / targetColWidthRef.current)
+      );
+      const nextCompact = width < 500;
+      const prev = metricsRef.current;
+      if (prev.width !== width) {
+        metricsRef.current = { ...metricsRef.current, width };
+        setContainerWidth(width);
+      }
+      if (prev.columnCount !== nextColumnCount) {
+        metricsRef.current = {
+          ...metricsRef.current,
+          columnCount: nextColumnCount,
+        };
+        setColumnCount(nextColumnCount);
+      }
+      if (prev.compact !== nextCompact) {
+        metricsRef.current = { ...metricsRef.current, compact: nextCompact };
+        setCompact(nextCompact);
+      }
+    }, []);
 
     const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
       if (observerRef.current) {
@@ -143,25 +181,14 @@ export const PhotoGrid = memo(
       // containerWidth=0 (avoids a blank first frame while waiting for the
       // async ResizeObserver callback).
       const w = node.clientWidth;
-      setContainerWidth(w);
-      setColumnCount(
-        Math.max(MIN_COLUMNS, Math.floor(w / targetColWidthRef.current))
-      );
-      setCompact(w < 500);
+      applyGridMetrics(w);
       // ResizeObserver for subsequent size changes.
       const observer = new ResizeObserver(([entry]) => {
-        const width = entry.contentRect.width;
-        setContainerWidth(width);
-        const cols = Math.max(
-          MIN_COLUMNS,
-          Math.floor(width / targetColWidthRef.current)
-        );
-        setColumnCount(cols);
-        setCompact(width < 500);
+        applyGridMetrics(entry.contentRect.width);
       });
       observer.observe(node);
       observerRef.current = observer;
-    }, []);
+    }, [applyGridMetrics]);
 
     useEffect(() => {
       const el = containerRef.current;
@@ -172,7 +199,10 @@ export const PhotoGrid = memo(
         MIN_COLUMNS,
         Math.floor(containerWidth / targetColWidth)
       );
-      setColumnCount(cols);
+      if (metricsRef.current.columnCount !== cols) {
+        metricsRef.current = { ...metricsRef.current, columnCount: cols };
+        setColumnCount(cols);
+      }
     }, [targetColWidth, containerWidth]);
 
     // Track the single selected photo id for scroll-to behavior
@@ -239,7 +269,7 @@ export const PhotoGrid = memo(
     }, []);
 
     const renderItem = useCallback(
-      (photo: Photo) => (
+      (photo: Photo, index: number) => (
         <PhotoCard
           deleting={deletingIdsRef.current?.has(photo.id)}
           dominantColors={photo.dominantColors}
@@ -249,6 +279,7 @@ export const PhotoGrid = memo(
           id={photo.id}
           isFavorite={photo.isFavorite}
           isSelected={selectedIdsRef.current.has(photo.id)}
+          loading={index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"}
           onClick={onSelect}
           onDoubleClick={onDoubleClick}
           onToggleFavorite={onToggleFavorite}
@@ -259,20 +290,60 @@ export const PhotoGrid = memo(
           width={photo.width}
         />
       ),
-      [onSelect, onDoubleClick, onToggleFavorite, searchQuery, getDragIds]
+      [
+        onSelect,
+        onDoubleClick,
+        onToggleFavorite,
+        searchQuery,
+        getDragIds,
+        columnCount,
+      ]
     );
 
     const groupHeaders = useMemo((): GroupHeader[] => {
       if (sort !== "date" || photos.length === 0) {
+        groupHeaderCacheRef.current = null;
         return [];
       }
+
+      const firstPhotoId = photos[0]?.id ?? null;
+      const lastPhotoId = photos[photos.length - 1]?.id ?? null;
+      const cached = groupHeaderCacheRef.current;
+      if (
+        cached &&
+        cached.sort === sort &&
+        cached.language === i18n.language &&
+        cached.firstPhotoId === firstPhotoId &&
+        cached.lastPhotoId === lastPhotoId &&
+        cached.photoCount === photos.length
+      ) {
+        return cached.headers;
+      }
+
       const headers: GroupHeader[] = [];
       let lastKey = "";
+      let startIndex = 0;
+      if (
+        cached &&
+        cached.sort === sort &&
+        cached.language === i18n.language &&
+        cached.firstPhotoId === firstPhotoId &&
+        cached.photoCount < photos.length &&
+        photos[cached.photoCount - 1]?.id === cached.lastPhotoId
+      ) {
+        headers.push(...cached.headers);
+        startIndex = cached.photoCount;
+        const prev = photos[startIndex - 1];
+        if (prev?.fileDate) {
+          const d = new Date(prev.fileDate);
+          lastKey = `${d.getFullYear()}-${d.getMonth()}`;
+        }
+      }
       const dtf = new Intl.DateTimeFormat(i18n.language, {
         year: "numeric",
         month: "long",
       });
-      for (let i = 0; i < photos.length; i++) {
+      for (let i = startIndex; i < photos.length; i++) {
         const ts = photos[i].fileDate;
         if (!ts) {
           continue;
@@ -287,6 +358,14 @@ export const PhotoGrid = memo(
           });
         }
       }
+      groupHeaderCacheRef.current = {
+        headers,
+        language: i18n.language,
+        photoCount: photos.length,
+        firstPhotoId,
+        lastPhotoId,
+        sort,
+      };
       return headers;
     }, [photos, sort, i18n.language]);
 

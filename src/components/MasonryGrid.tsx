@@ -18,9 +18,17 @@ import {
   useMasonryLayout,
 } from "@/hooks/useMasonryLayout";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import { isDevRuntime, recordGalleryPerf } from "@/utils/gallery-perf";
 import { binarySearchStart } from "@/utils/masonry-utils";
 
 export type { GroupHeaderInput as GroupHeader };
+
+const SCROLL_TOP_EPSILON = 0.5;
+const HEADER_HEIGHT = 36;
+const END_REACHED_PRELOAD_MARGIN = 2000;
+const FAST_SCROLL_VELOCITY = 60;
+const VELOCITY_OVERSCAN_MULTIPLIER = 3;
+const MAX_DYNAMIC_OVERSCAN_VIEWPORTS = 4;
 
 export interface MasonryGridHandle {
   /** 立即终止蛮牛锁 rAF 循环，释放滚动控制权给用户 */
@@ -108,6 +116,11 @@ export const MasonryGrid = memo(
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrolling, setIsScrolling] = useState(false);
     const [currentTimeLabel, setCurrentTimeLabel] = useState("");
+    const scrollTopStateRef = useRef(0);
+    const viewportHeightStateRef = useRef(0);
+    const showScrollTopStateRef = useRef(false);
+    const isScrollingStateRef = useRef(false);
+    const currentTimeLabelRef = useRef("");
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
 
@@ -115,6 +128,10 @@ export const MasonryGrid = memo(
     const velocityRef = useRef(0);
     const prevScrollYRef = useRef(0);
     const lastEndReachedRef = useRef(0);
+    const endReachedLockedRef = useRef(false);
+    const endReachedUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+      null
+    );
     const END_REACHED_DEBOUNCE_MS = 400;
     const onEndReachedRef = useRef(onEndReached);
     onEndReachedRef.current = onEndReached;
@@ -314,7 +331,7 @@ export const MasonryGrid = memo(
         estimatedGlobalIndex: firstVisibleIdx,
       };
 
-      if (import.meta.env.DEV) {
+      if (isDevRuntime()) {
         console.log("📍 [Anchor Capture]", anchor);
       }
       return anchor;
@@ -358,13 +375,53 @@ export const MasonryGrid = memo(
     const headerPositionsRef = useRef(headerPositions);
     headerPositionsRef.current = headerPositions;
 
-    const HEADER_HEIGHT = 36;
+    const triggerEndReached = useCallback(
+      (velocity = 0) => {
+        if (
+          !onEndReachedRef.current ||
+          !hasMoreRef.current ||
+          isLoadingMoreRef.current ||
+          endReachedLockedRef.current
+        ) {
+          return;
+        }
+
+        const now = Date.now();
+        const effectiveDebounce =
+          velocity > FAST_SCROLL_VELOCITY
+            ? END_REACHED_DEBOUNCE_MS / 4
+            : END_REACHED_DEBOUNCE_MS;
+        if (now - lastEndReachedRef.current <= effectiveDebounce) {
+          return;
+        }
+
+        lastEndReachedRef.current = now;
+        endReachedLockedRef.current = true;
+        if (endReachedUnlockTimerRef.current) {
+          clearTimeout(endReachedUnlockTimerRef.current);
+        }
+        endReachedUnlockTimerRef.current = setTimeout(() => {
+          if (!isLoadingMoreRef.current) {
+            endReachedLockedRef.current = false;
+          }
+        }, END_REACHED_DEBOUNCE_MS);
+        onEndReachedRef.current();
+      },
+      []
+    );
+
+    useEffect(() => {
+      if (!isLoadingMore) {
+        endReachedLockedRef.current = false;
+      }
+    }, [isLoadingMore]);
 
     const handleScroll = useCallback(() => {
       if (rafRef.current) {
         return;
       }
       rafRef.current = requestAnimationFrame(() => {
+        const frameStart = performance.now();
         rafRef.current = 0;
         const el = scrollRef.current;
         if (el) {
@@ -373,14 +430,33 @@ export const MasonryGrid = memo(
           velocityRef.current = dy;
           prevScrollYRef.current = el.scrollTop;
 
-          setScrollTop(el.scrollTop);
-          setViewportHeight(el.clientHeight);
-          setShowScrollTop(el.scrollTop > el.clientHeight * 2);
-          setIsScrolling(true);
+          if (
+            Math.abs(el.scrollTop - scrollTopStateRef.current) >
+            SCROLL_TOP_EPSILON
+          ) {
+            scrollTopStateRef.current = el.scrollTop;
+            setScrollTop(el.scrollTop);
+          }
+          if (el.clientHeight !== viewportHeightStateRef.current) {
+            viewportHeightStateRef.current = el.clientHeight;
+            setViewportHeight(el.clientHeight);
+          }
+          const nextShowScrollTop = el.scrollTop > el.clientHeight * 2;
+          if (nextShowScrollTop !== showScrollTopStateRef.current) {
+            showScrollTopStateRef.current = nextShowScrollTop;
+            setShowScrollTop(nextShowScrollTop);
+          }
+          if (!isScrollingStateRef.current) {
+            isScrollingStateRef.current = true;
+            setIsScrolling(true);
+          }
           if (scrollTimerRef.current) {
             clearTimeout(scrollTimerRef.current);
           }
-          scrollTimerRef.current = setTimeout(() => setIsScrolling(false), 600);
+          scrollTimerRef.current = setTimeout(() => {
+            isScrollingStateRef.current = false;
+            setIsScrolling(false);
+          }, 600);
           const headers = headerPositionsRef.current;
           let nextLabel = "";
           if (headers.length > 0) {
@@ -394,40 +470,32 @@ export const MasonryGrid = memo(
               nextLabel = headers[0]?.label || "";
             }
           }
-          setCurrentTimeLabel((prev) =>
-            prev === nextLabel ? prev : nextLabel
-          );
+          if (currentTimeLabelRef.current !== nextLabel) {
+            currentTimeLabelRef.current = nextLabel;
+            setCurrentTimeLabel(nextLabel);
+          }
 
           // ── 速度感知预加载 ─────────────────────────────────────
           // Sentinel 穿透兜底：距底部 2000px 以内且未在加载中时主动触发
-          const PRELOAD_MARGIN = 2000;
-          const FAST_SCROLL_THRESHOLD = 60;
           const nearBottom =
-            el.scrollTop + el.clientHeight + PRELOAD_MARGIN >= el.scrollHeight;
-          if (
-            nearBottom &&
-            onEndReachedRef.current &&
-            hasMoreRef.current &&
-            !isLoadingMoreRef.current
-          ) {
-            const now = Date.now();
-            const effectiveDebounce =
-              dy > FAST_SCROLL_THRESHOLD
-                ? END_REACHED_DEBOUNCE_MS / 4
-                : END_REACHED_DEBOUNCE_MS;
-            if (now - lastEndReachedRef.current > effectiveDebounce) {
-              lastEndReachedRef.current = now;
-              onEndReachedRef.current();
-            }
+            el.scrollTop + el.clientHeight + END_REACHED_PRELOAD_MARGIN >=
+            el.scrollHeight;
+          if (nearBottom) {
+            triggerEndReached(dy);
           }
+          recordGalleryPerf(
+            "masonryScrollFrameMs",
+            performance.now() - frameStart
+          );
         }
       });
-    }, []);
+    }, [triggerEndReached]);
 
     // Sync viewportHeight before paint to avoid blank waterfall on cold start
     useLayoutEffect(() => {
       const el = scrollRef.current;
       if (el && el.clientHeight > 0) {
+        viewportHeightStateRef.current = el.clientHeight;
         setViewportHeight(el.clientHeight);
       }
     }, []);
@@ -446,6 +514,10 @@ export const MasonryGrid = memo(
         if (rafRef.current) {
           cancelAnimationFrame(rafRef.current);
           rafRef.current = 0;
+        }
+        if (endReachedUnlockTimerRef.current) {
+          clearTimeout(endReachedUnlockTimerRef.current);
+          endReachedUnlockTimerRef.current = null;
         }
         if (scrollTimerRef.current) {
           clearTimeout(scrollTimerRef.current);
@@ -490,7 +562,10 @@ export const MasonryGrid = memo(
         return;
       }
       const observer = new ResizeObserver(() => {
-        setViewportHeight(el.clientHeight);
+        if (el.clientHeight !== viewportHeightStateRef.current) {
+          viewportHeightStateRef.current = el.clientHeight;
+          setViewportHeight(el.clientHeight);
+        }
       });
       observer.observe(el);
       return () => observer.disconnect();
@@ -510,18 +585,14 @@ export const MasonryGrid = memo(
       const observer = new IntersectionObserver(
         ([entry]) => {
           if (entry.isIntersecting) {
-            const now = Date.now();
-            if (now - lastEndReachedRef.current > END_REACHED_DEBOUNCE_MS) {
-              lastEndReachedRef.current = now;
-              onEndReached!();
-            }
+            triggerEndReached();
           }
         },
         { root: scrollRef.current, rootMargin: "1000px" }
       );
       observer.observe(sentinel);
       return () => observer.disconnect();
-    }, [sentinelActive]);
+    }, [sentinelActive, triggerEndReached]);
 
     // ── 锚点调整：仅处理同路由内容器宽度变化（窗口 resize 等） ──
     // 路由切换时的恢复由 useRouteScrollRestoration + 蛮牛锁全权管理。
@@ -648,12 +719,16 @@ export const MasonryGrid = memo(
     // 高速时动态扩大缓冲区。velocityRef 是 ref 而非 state，
     // 不触发额外渲染——visibleItems 依赖 scrollTop (state)，
     // RAF 中 setScrollTop 保证 useMemo 拿到最新 velocity。
-    const FAST_SCROLL_VELOCITY = 60;
-    const VELOCITY_OVERSCAN_MULTIPLIER = 3;
-    const velocityOverscanPx =
+    const dynamicOverscanPx =
       velocityRef.current > FAST_SCROLL_VELOCITY
         ? overscanPx * VELOCITY_OVERSCAN_MULTIPLIER
         : overscanPx;
+    const maxDynamicOverscanPx =
+      viewportHeight > 0 ? viewportHeight * MAX_DYNAMIC_OVERSCAN_VIEWPORTS : 0;
+    const velocityOverscanPx =
+      maxDynamicOverscanPx > 0
+        ? Math.min(dynamicOverscanPx, maxDynamicOverscanPx)
+        : dynamicOverscanPx;
 
     // ── 可见元素计算 ──────────────────────────────────────────────
     // 关键：hasInitialPositionedRef 控制 initialScrollTop 的使用时机。
@@ -701,12 +776,13 @@ export const MasonryGrid = memo(
         }
       }
 
+      recordGalleryPerf("masonryVisibleItems", result.length);
       return result;
     }, [
       positions,
       scrollTop,
       viewportHeight,
-      overscanPx,
+      velocityOverscanPx,
       columnCount,
       initialScrollTop,
       hasInitialPositionedRef,
@@ -783,8 +859,15 @@ export const MasonryGrid = memo(
         // Only select if drag was meaningful (> 5px)
         if (maxX - minX > 5 && maxY - minY > 5) {
           const selected = new Set<number>();
-          for (let i = 0; i < positions.length; i++) {
+          const startIdx = Math.max(
+            0,
+            binarySearchStart(positions, minY) - columnCount
+          );
+          for (let i = startIdx; i < positions.length; i++) {
             const pos = positions[i];
+            if (pos.top > maxY) {
+              break;
+            }
             const itemRight = pos.left + pos.width;
             const itemBottom = pos.top + pos.height;
             if (

@@ -16,6 +16,8 @@
     "fix": "ultracite fix",
     "bump-ui": "ts-node ./scripts/bump-ui.ts",
     "perf:baseline": "node scripts/baseline-report.mjs",
+    "perf:gallery": "node scripts/gallery-perf-report.mjs",
+    "perf:gallery:auto": "node scripts/gallery-perf-auto.mjs",
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:unit": "vitest",

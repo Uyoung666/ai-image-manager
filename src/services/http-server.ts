@@ -12,6 +12,7 @@ import {
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { createLogger } from "@/utils/logger";
+import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { isSafePath } from "@/utils/path-security";
 
 const log = createLogger("http-server");
@@ -223,6 +224,7 @@ async function regenerateAndServeThumbnail(
   safePath: string,
   res: http.ServerResponse
 ): Promise<void> {
+  recordGalleryMediaStat("thumbnailRegenerate");
   try {
     const lookup = findPhotoPathByThumbnail(safePath);
     if (!lookup) {
@@ -300,6 +302,7 @@ async function handleThumbnail(
   res: http.ServerResponse
 ): Promise<void> {
   setCorsHeaders(res);
+  recordGalleryMediaStat("thumbnailRequest");
 
   // Phase A: Try to serve existing file (with integrity validation)
   let stats: fs.Stats;
@@ -336,6 +339,7 @@ async function handleThumbnail(
 
   if (stats?.isFile()) {
     // Valid file → serve
+    recordGalleryMediaStat("thumbnailHit");
     const diskExt = path.extname(safePath).toLowerCase();
     serveStaticFile(safePath, res, getMimeType(diskExt), true);
     return;

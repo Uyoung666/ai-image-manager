@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import { recordGalleryPerf } from "@/utils/gallery-perf";
 
 export interface MasonryItem {
   height: number;
@@ -131,8 +132,10 @@ export function useMasonryLayout(
   } | null>(null);
 
   return useMemo(() => {
+    const start = performance.now();
     if (containerWidth <= 0 || columnCount <= 0 || items.length === 0) {
       prevRef.current = null;
+      recordGalleryPerf("masonryLayoutMs", performance.now() - start);
       return { positions: [], totalHeight: 0, headerPositions: [] };
     }
 
@@ -200,11 +203,13 @@ export function useMasonryLayout(
         firstItemId,
       };
 
-      return {
+      const layout = {
         positions,
         totalHeight,
         headerPositions: result.headerPositions,
       };
+      recordGalleryPerf("masonryLayoutMs", performance.now() - start);
+      return layout;
     }
 
     // 全量重算
@@ -234,10 +239,12 @@ export function useMasonryLayout(
       firstItemId,
     };
 
-    return {
+    const layout = {
       positions: result.positions,
       totalHeight,
       headerPositions: result.headerPositions,
     };
+    recordGalleryPerf("masonryLayoutMs", performance.now() - start);
+    return layout;
   }, [items, containerWidth, columnCount, gap, groupHeaders]);
 }

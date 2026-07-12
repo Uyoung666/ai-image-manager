@@ -11,6 +11,7 @@ interface PhotoCardProps {
   id: number;
   isFavorite?: boolean;
   isSelected: boolean;
+  loading?: "eager" | "lazy";
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
@@ -56,6 +57,7 @@ export const PhotoCard = memo(function PhotoCard({
   id,
   path,
   thumbnailPath,
+  loading = "lazy",
   dominantColors,
   filename,
   width,
@@ -252,7 +254,8 @@ export const PhotoCard = memo(function PhotoCard({
             : "scale-[1.02] opacity-0 blur-[6px]"
         }`}
         decoding="async"
-        loading="lazy"
+        fetchPriority={loading === "eager" ? "high" : "auto"}
+        loading={loading}
         onError={() => {
           setImgError(true);
         }}
