@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface PhotoCardProps {
@@ -255,14 +256,18 @@ export const PhotoCard = memo(function PhotoCard({
         }`}
         decoding="async"
         fetchPriority={loading === "eager" ? "high" : "auto"}
+        height={height || undefined}
         loading={loading}
         onError={() => {
+          recordGalleryMediaStat("photoCardImageError");
           setImgError(true);
         }}
         onLoad={() => {
+          recordGalleryMediaStat("photoCardImageLoad");
           setImgLoaded(true);
         }}
         src={url}
+        width={width || undefined}
       />
 
       {/* Hover overlay */}

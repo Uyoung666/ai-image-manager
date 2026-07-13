@@ -4,46 +4,35 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-
 import { useTranslation } from "react-i18next";
-
+import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import {
   type GroupHeaderInput,
   useMasonryLayout,
 } from "@/hooks/useMasonryLayout";
+import {
+  type MasonryGridHandle,
+  useMasonryAnchor,
+} from "@/hooks/useMasonryAnchor";
+import { useMasonryEndReached } from "@/hooks/useMasonryEndReached";
+import { useMasonryMarquee } from "@/hooks/useMasonryMarquee";
+import {
+  HEADER_HEIGHT,
+  useMasonryVirtualWindow,
+} from "@/hooks/useMasonryVirtualWindow";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
-import { isDevRuntime, recordGalleryPerf } from "@/utils/gallery-perf";
+import { recordGalleryPerf } from "@/utils/gallery-perf";
 import { binarySearchStart } from "@/utils/masonry-utils";
 
 export type { GroupHeaderInput as GroupHeader };
+export type { MasonryGridHandle };
 
 const SCROLL_TOP_EPSILON = 0.5;
-const HEADER_HEIGHT = 36;
-const END_REACHED_PRELOAD_MARGIN = 2000;
-const FAST_SCROLL_VELOCITY = 60;
-const VELOCITY_OVERSCAN_MULTIPLIER = 3;
-const MAX_DYNAMIC_OVERSCAN_VIEWPORTS = 4;
-
-export interface MasonryGridHandle {
-  /** 立即终止蛮牛锁 rAF 循环，释放滚动控制权给用户 */
-  cancelEnforceLock(): void;
-  /** 同步获取当前视口锚点（绕过 RAF，直接读取 refs） */
-  getCurrentAnchor(): {
-    itemId: number;
-    offsetFromTop: number;
-    offsetRatio: number;
-    estimatedGlobalIndex?: number;
-  } | null;
-  readonly scrollElement: HTMLDivElement | null;
-  scrollToItem(itemId: number, offsetRatio: number): void;
-  scrollToPixel(scrollTop: number): void;
-}
 
 interface MasonryGridProps {
   className?: string;
@@ -52,12 +41,7 @@ interface MasonryGridProps {
   gap: number;
   groupHeaders?: GroupHeaderInput[];
   hasMore?: boolean;
-  /** 正在加载更多数据（对应 useInfiniteQuery 的 isFetchingNextPage） */
   isLoadingMore?: boolean;
-  /**
-   * 是否为占位数据（keepPreviousData 期间的旧缓存）。
-   * 为 true 时锁死滚动恢复和锚点调整，避免基于假数据做定位。
-   */
   isPlaceholderData?: boolean;
   items: Array<{
     id: number;
@@ -73,16 +57,8 @@ interface MasonryGridProps {
     index: number,
     style: React.CSSProperties
   ) => ReactNode;
-  /**
-   * 路由唯一标识，用于区分不同页面的滚动位置
-   * 例如: "/" | "/albums/123" | "/people/456"
-   */
   routeKey: string;
   scrollToId?: number | null;
-  /**
-   * When true, the floating "back to top" button is pushed above the
-   * SelectionActionBar (which overlays at bottom-2 with ~46px height).
-   */
   selectionActive?: boolean;
 }
 
@@ -116,29 +92,17 @@ export const MasonryGrid = memo(
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrolling, setIsScrolling] = useState(false);
     const [currentTimeLabel, setCurrentTimeLabel] = useState("");
+    const [scrollVelocity, setScrollVelocity] = useState(0);
     const scrollTopStateRef = useRef(0);
     const viewportHeightStateRef = useRef(0);
     const showScrollTopStateRef = useRef(false);
     const isScrollingStateRef = useRef(false);
     const currentTimeLabelRef = useRef("");
+    const scrollVelocityRef = useRef(0);
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
-
-    // ── 速度感知预加载 ──────────────────────────────────────────────
-    const velocityRef = useRef(0);
     const prevScrollYRef = useRef(0);
-    const lastEndReachedRef = useRef(0);
-    const endReachedLockedRef = useRef(false);
-    const endReachedUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-      null
-    );
-    const END_REACHED_DEBOUNCE_MS = 400;
-    const onEndReachedRef = useRef(onEndReached);
-    onEndReachedRef.current = onEndReached;
-    const hasMoreRef = useRef(hasMore);
-    hasMoreRef.current = hasMore;
-    const isLoadingMoreRef = useRef(isLoadingMore);
-    isLoadingMoreRef.current = isLoadingMore;
+    const routeForceUnlockRef = useRef<(() => void) | null>(null);
 
     const { positions, totalHeight, headerPositions } = useMasonryLayout(
       items,
@@ -153,193 +117,17 @@ export const MasonryGrid = memo(
       [items]
     );
 
-    const internalGridRef = useRef<MasonryGridHandle | null>(null);
+    const { getCurrentAnchor, gridRef } = useMasonryAnchor({
+      containerWidth,
+      forwardedRef: ref,
+      forceUnlockRef: routeForceUnlockRef,
+      idToIndexMap,
+      items,
+      positions,
+      scrollRef,
+    });
 
-    // ── 蛮牛锁（Active Anchor Enforcer）───────────────────────────
-    // 问题：单次 set scrollTop 在浏览器物理绘制 DOM 高度之前执行会被
-    // 静默 Clamp；ResizeObserver 触发细微宽度调整会改变 positions，
-    // 导致连续两次进出位置漂移。
-    //
-    // 方案：scrollToItem 被调用后，锁定 800ms，在这期间：
-    //   1. rAF 循环（~60fps）持续强制设置 scrollTop
-    //   2. 任何 useLayoutEffect（positions / containerWidth 变化）补刀
-    // 到期后自动解锁，让用户接管滚动。
-
-    const latestPositionsRef = useRef(positions);
-    const latestIdMapRef = useRef(idToIndexMap);
-    const latestItemsRef = useRef(items);
-    useLayoutEffect(() => {
-      latestPositionsRef.current = positions;
-      latestIdMapRef.current = idToIndexMap;
-      latestItemsRef.current = items;
-    }, [positions, idToIndexMap, items]);
-
-    // 蛮牛锁：scrollToItem 被调用后锁定 800ms，rAF 循环 + useLayoutEffect 补刀持续强制对齐
-    // 硬上限 5s：防止目标 item 被删除/永久不可见时死锁
-    const MAX_LOCK_DURATION_MS = 5000;
-    const enforceLockRef = useRef<{
-      itemId: number;
-      ratio: number;
-      expiresAt: number;
-      startedAt: number;
-    } | null>(null);
-
-    const enforceScroll = useCallback(() => {
-      const lock = enforceLockRef.current;
-      if (!lock) {
-        return;
-      }
-      const el = scrollRef.current;
-      if (!el) {
-        return;
-      }
-
-      const posList = latestPositionsRef.current;
-      const idMap = latestIdMapRef.current;
-      if (posList.length === 0 || !idMap.has(lock.itemId)) {
-        return;
-      }
-
-      const idx = idMap.get(lock.itemId)!;
-      const pos = posList[idx];
-      if (!pos) {
-        return;
-      }
-
-      // 直接通过计算好的 pos.top 设置 scrollTop。
-      // 虚拟列表会在滚动到位后自动渲染该位置的 DOM 节点 —
-      // 绝不能在此处检查 DOM 是否存在（死锁：DOM 不在视口 → 不滚动 → 永远不渲染）。
-      // 空白区域闪烁由 useScrollRestorePreloader 的预加载门控解决。
-      el.scrollTop = pos.top + pos.height * lock.ratio;
-    }, []);
-
-    useImperativeHandle(
-      ref,
-      () => {
-        const api: MasonryGridHandle = {
-          scrollToItem(itemId: number, offsetRatio: number) {
-            enforceLockRef.current = {
-              itemId,
-              ratio: offsetRatio,
-              expiresAt: Date.now() + 800,
-              startedAt: Date.now(),
-            };
-
-            // 启动 rAF 高频侦测循环（打败 Clamp + 延迟 Paint）
-            const frameLoop = () => {
-              const lock = enforceLockRef.current;
-              if (!lock) {
-                return;
-              }
-              if (Date.now() > lock.expiresAt) {
-                enforceLockRef.current = null;
-                return;
-              }
-              enforceScroll();
-              requestAnimationFrame(frameLoop);
-            };
-            requestAnimationFrame(frameLoop);
-          },
-          scrollToPixel(scrollTop: number) {
-            const el = scrollRef.current;
-            if (el) {
-              el.scrollTop = Math.max(0, scrollTop);
-            }
-          },
-          get scrollElement() {
-            return scrollRef.current;
-          },
-          cancelEnforceLock() {
-            enforceLockRef.current = null;
-          },
-          getCurrentAnchor() {
-            const el = scrollRef.current;
-            const posList = latestPositionsRef.current;
-            const curItems = latestItemsRef.current;
-            if (!el || posList.length === 0 || curItems.length === 0) {
-              return null;
-            }
-            const currentScrollTop = el.scrollTop;
-            const firstVisibleIdx = binarySearchStart(
-              posList,
-              currentScrollTop
-            );
-            if (firstVisibleIdx < 0 || firstVisibleIdx >= curItems.length) {
-              return null;
-            }
-            const pos = posList[firstVisibleIdx];
-            const item = curItems[firstVisibleIdx];
-            const offsetFromTop = currentScrollTop - pos.top;
-            const offsetRatio =
-              pos.height > 0
-                ? Math.max(0, Math.min(1, offsetFromTop / pos.height))
-                : 0;
-            return {
-              itemId: item.id,
-              offsetFromTop,
-              offsetRatio,
-              estimatedGlobalIndex: firstVisibleIdx,
-            };
-          },
-        };
-        internalGridRef.current = api;
-        return api;
-      },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [enforceScroll]
-    );
-
-    // ── 被动防御：布局重算时补刀（ResizeObserver / 图片加载等）───
-    useLayoutEffect(() => {
-      const lock = enforceLockRef.current;
-      if (lock && Date.now() < lock.expiresAt) {
-        enforceScroll();
-      }
-    }, [positions, containerWidth, enforceScroll]);
-
-    // ── 闭包免疫的锚点抓取（零依赖，全靠 refs 读取最新数据）──────
-    // 关键：useCallback([]) 空依赖，函数引用永远稳定。
-    // 所有数据从 latestPositionsRef / latestItemsRef / scrollRef 实时读取，
-    // 彻底切断 React render 周期对锚点捕获的绑架——
-    // 用户向下滑动加载了 500 张照片后，这里读到的一定是 500 条的长数组。
-    const getCurrentAnchor = useCallback(() => {
-      const el = scrollRef.current;
-      const posList = latestPositionsRef.current;
-      const curItems = latestItemsRef.current;
-      if (!el || posList.length === 0 || curItems.length === 0) {
-        return null;
-      }
-
-      const currentScrollTop = el.scrollTop;
-      const firstVisibleIdx = binarySearchStart(posList, currentScrollTop);
-      if (firstVisibleIdx < 0 || firstVisibleIdx >= curItems.length) {
-        return null;
-      }
-
-      const pos = posList[firstVisibleIdx];
-      const item = curItems[firstVisibleIdx];
-      const offsetFromTop = currentScrollTop - pos.top;
-      const offsetRatio =
-        pos.height > 0
-          ? Math.max(0, Math.min(1, offsetFromTop / pos.height))
-          : 0;
-
-      const anchor = {
-        itemId: item.id,
-        offsetFromTop,
-        offsetRatio,
-        estimatedGlobalIndex: firstVisibleIdx,
-      };
-
-      if (isDevRuntime()) {
-        console.log("📍 [Anchor Capture]", anchor);
-      }
-      return anchor;
-    }, []); // ← 空依赖！全靠 refs 读最新数据
-
-    // ── 集成路由滚动位置管理 ──────────────────────────────────────
     const restoreReady = positions.length > 0 && !isPlaceholderData;
-
     const { initialScrollTop, hasInitialPositionedRef, forceUnlock } =
       useRouteScrollRestoration(scrollRef, {
         getRouteKey: () => routeKey,
@@ -352,69 +140,36 @@ export const MasonryGrid = memo(
           return positions[idx].top;
         },
         restoreReady,
-        // 数据增长时触发重试恢复，解决 infinite scroll 内容高度不足的截断
         itemCount: items.length,
-        // 占位数据期间锁死恢复
         isPlaceholderData,
-        // 长效 Pending：编程式加载更多数据（替代 DOM 操控）
         onLoadMore: onEndReached,
         hasMore,
-        // 原子定位：通过 gridRef.scrollToItem 一次性恢复位置
-        gridRef: internalGridRef,
+        gridRef,
       });
 
-    // ── Marquee selection state ────────────────────────────────────
-    const [marquee, setMarquee] = useState<{
-      startX: number;
-      startY: number;
-      x: number;
-      y: number;
-    } | null>(null);
-    const marqueeStartScroll = useRef(0);
+    useEffect(() => {
+      routeForceUnlockRef.current = forceUnlock;
+    }, [forceUnlock]);
+
+    const { checkNearBottom } = useMasonryEndReached({
+      hasMore,
+      isLoadingMore,
+      onEndReached,
+      scrollRef,
+      sentinelRef,
+      totalHeight,
+    });
+
+    const { handleMarqueeStart, marquee } = useMasonryMarquee({
+      columnCount,
+      items,
+      onMarqueeSelect,
+      positions,
+      scrollRef,
+    });
 
     const headerPositionsRef = useRef(headerPositions);
     headerPositionsRef.current = headerPositions;
-
-    const triggerEndReached = useCallback(
-      (velocity = 0) => {
-        if (
-          !onEndReachedRef.current ||
-          !hasMoreRef.current ||
-          isLoadingMoreRef.current ||
-          endReachedLockedRef.current
-        ) {
-          return;
-        }
-
-        const now = Date.now();
-        const effectiveDebounce =
-          velocity > FAST_SCROLL_VELOCITY
-            ? END_REACHED_DEBOUNCE_MS / 4
-            : END_REACHED_DEBOUNCE_MS;
-        if (now - lastEndReachedRef.current <= effectiveDebounce) {
-          return;
-        }
-
-        lastEndReachedRef.current = now;
-        endReachedLockedRef.current = true;
-        if (endReachedUnlockTimerRef.current) {
-          clearTimeout(endReachedUnlockTimerRef.current);
-        }
-        endReachedUnlockTimerRef.current = setTimeout(() => {
-          if (!isLoadingMoreRef.current) {
-            endReachedLockedRef.current = false;
-          }
-        }, END_REACHED_DEBOUNCE_MS);
-        onEndReachedRef.current();
-      },
-      []
-    );
-
-    useEffect(() => {
-      if (!isLoadingMore) {
-        endReachedLockedRef.current = false;
-      }
-    }, [isLoadingMore]);
 
     const handleScroll = useCallback(() => {
       if (rafRef.current) {
@@ -424,74 +179,72 @@ export const MasonryGrid = memo(
         const frameStart = performance.now();
         rafRef.current = 0;
         const el = scrollRef.current;
-        if (el) {
-          // Velocity tracking (px per animation frame)
-          const dy = Math.abs(el.scrollTop - prevScrollYRef.current);
-          velocityRef.current = dy;
-          prevScrollYRef.current = el.scrollTop;
-
-          if (
-            Math.abs(el.scrollTop - scrollTopStateRef.current) >
-            SCROLL_TOP_EPSILON
-          ) {
-            scrollTopStateRef.current = el.scrollTop;
-            setScrollTop(el.scrollTop);
-          }
-          if (el.clientHeight !== viewportHeightStateRef.current) {
-            viewportHeightStateRef.current = el.clientHeight;
-            setViewportHeight(el.clientHeight);
-          }
-          const nextShowScrollTop = el.scrollTop > el.clientHeight * 2;
-          if (nextShowScrollTop !== showScrollTopStateRef.current) {
-            showScrollTopStateRef.current = nextShowScrollTop;
-            setShowScrollTop(nextShowScrollTop);
-          }
-          if (!isScrollingStateRef.current) {
-            isScrollingStateRef.current = true;
-            setIsScrolling(true);
-          }
-          if (scrollTimerRef.current) {
-            clearTimeout(scrollTimerRef.current);
-          }
-          scrollTimerRef.current = setTimeout(() => {
-            isScrollingStateRef.current = false;
-            setIsScrolling(false);
-          }, 600);
-          const headers = headerPositionsRef.current;
-          let nextLabel = "";
-          if (headers.length > 0) {
-            for (let i = headers.length - 1; i >= 0; i--) {
-              if (headers[i].top <= el.scrollTop + 100) {
-                nextLabel = headers[i].label;
-                break;
-              }
-            }
-            if (!nextLabel) {
-              nextLabel = headers[0]?.label || "";
-            }
-          }
-          if (currentTimeLabelRef.current !== nextLabel) {
-            currentTimeLabelRef.current = nextLabel;
-            setCurrentTimeLabel(nextLabel);
-          }
-
-          // ── 速度感知预加载 ─────────────────────────────────────
-          // Sentinel 穿透兜底：距底部 2000px 以内且未在加载中时主动触发
-          const nearBottom =
-            el.scrollTop + el.clientHeight + END_REACHED_PRELOAD_MARGIN >=
-            el.scrollHeight;
-          if (nearBottom) {
-            triggerEndReached(dy);
-          }
-          recordGalleryPerf(
-            "masonryScrollFrameMs",
-            performance.now() - frameStart
-          );
+        if (!el) {
+          return;
         }
-      });
-    }, [triggerEndReached]);
 
-    // Sync viewportHeight before paint to avoid blank waterfall on cold start
+        const dy = Math.abs(el.scrollTop - prevScrollYRef.current);
+        prevScrollYRef.current = el.scrollTop;
+        if (Math.abs(dy - scrollVelocityRef.current) > SCROLL_TOP_EPSILON) {
+          scrollVelocityRef.current = dy;
+          setScrollVelocity(dy);
+        }
+
+        if (
+          Math.abs(el.scrollTop - scrollTopStateRef.current) >
+          SCROLL_TOP_EPSILON
+        ) {
+          scrollTopStateRef.current = el.scrollTop;
+          setScrollTop(el.scrollTop);
+        }
+        if (el.clientHeight !== viewportHeightStateRef.current) {
+          viewportHeightStateRef.current = el.clientHeight;
+          setViewportHeight(el.clientHeight);
+        }
+
+        const nextShowScrollTop = el.scrollTop > el.clientHeight * 2;
+        if (nextShowScrollTop !== showScrollTopStateRef.current) {
+          showScrollTopStateRef.current = nextShowScrollTop;
+          setShowScrollTop(nextShowScrollTop);
+        }
+        if (!isScrollingStateRef.current) {
+          isScrollingStateRef.current = true;
+          setIsScrolling(true);
+        }
+        if (scrollTimerRef.current) {
+          clearTimeout(scrollTimerRef.current);
+        }
+        scrollTimerRef.current = setTimeout(() => {
+          isScrollingStateRef.current = false;
+          setIsScrolling(false);
+        }, 600);
+
+        const headers = headerPositionsRef.current;
+        let nextLabel = "";
+        if (headers.length > 0) {
+          for (let i = headers.length - 1; i >= 0; i--) {
+            if (headers[i].top <= el.scrollTop + 100) {
+              nextLabel = headers[i].label;
+              break;
+            }
+          }
+          if (!nextLabel) {
+            nextLabel = headers[0]?.label || "";
+          }
+        }
+        if (currentTimeLabelRef.current !== nextLabel) {
+          currentTimeLabelRef.current = nextLabel;
+          setCurrentTimeLabel(nextLabel);
+        }
+
+        checkNearBottom(dy);
+        recordGalleryPerf(
+          "masonryScrollFrameMs",
+          performance.now() - frameStart
+        );
+      });
+    }, [checkNearBottom]);
+
     useLayoutEffect(() => {
       const el = scrollRef.current;
       if (el && el.clientHeight > 0) {
@@ -515,46 +268,12 @@ export const MasonryGrid = memo(
           cancelAnimationFrame(rafRef.current);
           rafRef.current = 0;
         }
-        if (endReachedUnlockTimerRef.current) {
-          clearTimeout(endReachedUnlockTimerRef.current);
-          endReachedUnlockTimerRef.current = null;
-        }
         if (scrollTimerRef.current) {
           clearTimeout(scrollTimerRef.current);
           scrollTimerRef.current = null;
         }
       };
     }, []);
-
-    // ── 用户绝对主权熔断 ─────────────────────────────────────────
-    // 任何用户手动操作（滚轮/触摸/键盘）立刻砸碎所有锁。
-    // 废弃 { once: true }：持久监听，每次交互均触发 forceUnlock。
-    // 锁已清除后 forceUnlock 本质是 no-op，开销可忽略。
-    useEffect(() => {
-      const el = scrollRef.current;
-      if (!el) {
-        return;
-      }
-
-      const handleUserIntervention = () => {
-        if (enforceLockRef.current) {
-          enforceLockRef.current = null;
-        }
-        forceUnlock();
-      };
-
-      el.addEventListener("wheel", handleUserIntervention, { passive: true });
-      el.addEventListener("touchstart", handleUserIntervention, {
-        passive: true,
-      });
-      el.addEventListener("keydown", handleUserIntervention, { passive: true });
-
-      return () => {
-        el.removeEventListener("wheel", handleUserIntervention);
-        el.removeEventListener("touchstart", handleUserIntervention);
-        el.removeEventListener("keydown", handleUserIntervention);
-      };
-    }, [forceUnlock, scrollRef]);
 
     useEffect(() => {
       const el = scrollRef.current;
@@ -571,34 +290,6 @@ export const MasonryGrid = memo(
       return () => observer.disconnect();
     }, []);
 
-    // ── Sentinel Observer ────────────────────────────────────────────
-    // rootMargin: 1000px 让预加载在距视口还很远时就开始；
-    // 配合 scroll handler 中的速度感知兜底，高速滚动时也能提前触发
-    const sentinelActive = !!onEndReached && totalHeight > 0;
-
-    useEffect(() => {
-      const sentinel = sentinelRef.current;
-      if (!sentinel) {
-        return;
-      }
-
-      const observer = new IntersectionObserver(
-        ([entry]) => {
-          if (entry.isIntersecting) {
-            triggerEndReached();
-          }
-        },
-        { root: scrollRef.current, rootMargin: "1000px" }
-      );
-      observer.observe(sentinel);
-      return () => observer.disconnect();
-    }, [sentinelActive, triggerEndReached]);
-
-    // ── 锚点调整：仅处理同路由内容器宽度变化（窗口 resize 等） ──
-    // 路由切换时的恢复由 useRouteScrollRestoration + 蛮牛锁全权管理。
-    // 此 effect 的唯一合法触发条件：containerWidth 实质性变化。
-    // 无限滚动（items 增长 / positions 重算）绝不触发——彻底消灭
-    // "fetchNextPage 导致 scrollTop 被拽回旧锚点" 的渲染震荡回归 Bug。
     const prevPositionsRef = useRef(positions);
     const prevScrollToIdRef = useRef(scrollToId);
     const prevRouteKeyRef = useRef(routeKey);
@@ -618,12 +309,7 @@ export const MasonryGrid = memo(
         return;
       }
       const el = scrollRef.current;
-      if (!el) {
-        return;
-      }
-
-      // 路由切换 → 由 useRouteScrollRestoration 管理，此处跳过
-      if (prevRouteKey !== routeKey) {
+      if (!el || prevRouteKey !== routeKey) {
         return;
       }
 
@@ -632,7 +318,6 @@ export const MasonryGrid = memo(
       const widthChanged =
         containerWidth !== prevWidth && containerWidth > 0 && prevWidth > 0;
 
-      // ── 场景 1: scrollToId 导航 ──────────────────────────────
       if (scrollToId != null) {
         const shouldScroll =
           scrollToIdChanged || (positionsChanged && widthChanged);
@@ -655,13 +340,7 @@ export const MasonryGrid = memo(
         return;
       }
 
-      // ── 场景 2: 布局稳定（仅当容器宽度实质性变化时） ────────
-      // 严格门闩：非宽度变化 → 跳过（屏蔽 fetchNextPage 等引发的
-      // positions 重算对 scrollTop 的任何干扰）
-      if (!widthChanged) {
-        return;
-      }
-      if (!positionsChanged || prevPositions.length === 0) {
+      if (!(widthChanged && positionsChanged && prevPositions.length > 0)) {
         return;
       }
 
@@ -670,7 +349,6 @@ export const MasonryGrid = memo(
         return;
       }
 
-      // 找到旧布局中视口顶部的元素，保持其在视口中的位置
       let anchorIdx = -1;
       let anchorOffset = 0;
       for (let i = 0; i < prevPositions.length; i++) {
@@ -691,208 +369,20 @@ export const MasonryGrid = memo(
       }
     }, [positions, scrollToId, routeKey, containerWidth, idToIndexMap]);
 
-    // ── Overscan 计算 ──────────────────────────────────────────────
-    const overscanPx = useMemo(() => {
-      if (positions.length === 0) {
-        return 400;
-      }
-      if (positions.length <= columnCount * 10) {
-        const avgHeight =
-          positions.reduce((sum, p) => sum + p.height, 0) / positions.length;
-        return avgHeight * overscan;
-      }
-      const sampleSize = columnCount * 6;
-      const step = Math.floor(positions.length / sampleSize);
-      let sum = 0;
-      let count = 0;
-      for (let i = 0; i < positions.length; i += step) {
-        sum += positions[i].height;
-        count++;
-      }
-      return (sum / count) * overscan;
-    }, [positions, overscan, columnCount]);
-
-    // ── 速度感知 Overscan 倍增 ────────────────────────────────────
-    // 问题：快速滚动时 overscan(3×平均高度 ≈ 600px) 不足以覆盖单帧
-    // 跨度（可达 2000+ px），导致可视区边缘出现空白。
-    // 方案：读取 velocityRef（与 scrollTop 在同一 RAF 回调中更新），
-    // 高速时动态扩大缓冲区。velocityRef 是 ref 而非 state，
-    // 不触发额外渲染——visibleItems 依赖 scrollTop (state)，
-    // RAF 中 setScrollTop 保证 useMemo 拿到最新 velocity。
-    const dynamicOverscanPx =
-      velocityRef.current > FAST_SCROLL_VELOCITY
-        ? overscanPx * VELOCITY_OVERSCAN_MULTIPLIER
-        : overscanPx;
-    const maxDynamicOverscanPx =
-      viewportHeight > 0 ? viewportHeight * MAX_DYNAMIC_OVERSCAN_VIEWPORTS : 0;
-    const velocityOverscanPx =
-      maxDynamicOverscanPx > 0
-        ? Math.min(dynamicOverscanPx, maxDynamicOverscanPx)
-        : dynamicOverscanPx;
-
-    // ── 可见元素计算 ──────────────────────────────────────────────
-    // 关键：hasInitialPositionedRef 控制 initialScrollTop 的使用时机。
-    // - 首次定位（刚挂载或 routeKey 切换）：使用 initialScrollTop（包含
-    //   render 阶段预读的保存位置或显式 0）。
-    // - 定位完成后：使用 DOM scrollTop（用户实时滚动位置）。
-    const visibleItems = useMemo(() => {
-      if (positions.length === 0) {
-        return [];
-      }
-
-      const effectiveScrollTop = hasInitialPositionedRef.current
-        ? (scrollRef.current?.scrollTop ?? scrollTop)
-        : initialScrollTop;
-
-      const effectiveHeight =
-        viewportHeight > 0
-          ? viewportHeight
-          : (scrollRef.current?.clientHeight ?? 0);
-      const top = effectiveScrollTop - velocityOverscanPx;
-      const bottom = effectiveScrollTop + effectiveHeight + velocityOverscanPx;
-
-      const startIdx = Math.max(
-        0,
-        binarySearchStart(positions, top) - columnCount
-      );
-      const result: Array<{ index: number; style: React.CSSProperties }> = [];
-
-      for (let i = startIdx; i < positions.length; i++) {
-        const pos = positions[i];
-        if (pos.top > bottom) {
-          break;
-        }
-        if (pos.top + pos.height >= top) {
-          result.push({
-            index: i,
-            style: {
-              position: "absolute",
-              top: pos.top,
-              left: pos.left,
-              width: pos.width,
-              height: pos.height,
-            },
-          });
-        }
-      }
-
-      recordGalleryPerf("masonryVisibleItems", result.length);
-      return result;
-    }, [
-      positions,
-      scrollTop,
-      viewportHeight,
-      velocityOverscanPx,
+    const { visibleHeaders, visibleItems } = useMasonryVirtualWindow({
       columnCount,
-      initialScrollTop,
       hasInitialPositionedRef,
-    ]);
+      headerPositions,
+      initialScrollTop,
+      overscan,
+      positions,
+      scrollRef,
+      scrollTop,
+      velocity: scrollVelocity,
+      viewportHeight,
+    });
 
-    const visibleHeaders = useMemo(() => {
-      if (headerPositions.length === 0) {
-        return [];
-      }
-      const effectiveHeight =
-        viewportHeight > 0
-          ? viewportHeight
-          : (scrollRef.current?.clientHeight ?? 0);
-      const top = scrollTop - overscanPx;
-      const bottom = scrollTop + effectiveHeight + overscanPx;
-      return headerPositions.filter(
-        (h) => h.top + HEADER_HEIGHT >= top && h.top <= bottom
-      );
-    }, [headerPositions, scrollTop, viewportHeight, overscanPx]);
-
-    // ── Marquee selection handlers ─────────────────────────────────
-    const handleMarqueeStart = useCallback(
-      (e: React.MouseEvent) => {
-        if (!onMarqueeSelect) {
-          return;
-        }
-        if (e.button !== 0) {
-          return;
-        }
-        // Only start marquee on empty space (not on a photo card)
-        const target = e.target as HTMLElement;
-        if (target.closest("[data-photo-id]")) {
-          return;
-        }
-
-        const scrollEl = scrollRef.current;
-        if (!scrollEl) {
-          return;
-        }
-        const rect = scrollEl.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top + scrollEl.scrollTop;
-        marqueeStartScroll.current = scrollEl.scrollTop;
-        setMarquee({ startX: x, startY: y, x, y });
-      },
-      [onMarqueeSelect]
-    );
-
-    useEffect(() => {
-      if (!(marquee && onMarqueeSelect)) {
-        return;
-      }
-      const scrollEl = scrollRef.current;
-      if (!scrollEl) {
-        return;
-      }
-
-      function handleMouseMove(e: MouseEvent) {
-        const rect = scrollEl!.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top + scrollEl!.scrollTop;
-        setMarquee((prev) => (prev ? { ...prev, x, y } : null));
-      }
-
-      function handleMouseUp() {
-        if (!marquee) {
-          return;
-        }
-        const minX = Math.min(marquee.startX, marquee.x);
-        const maxX = Math.max(marquee.startX, marquee.x);
-        const minY = Math.min(marquee.startY, marquee.y);
-        const maxY = Math.max(marquee.startY, marquee.y);
-
-        // Only select if drag was meaningful (> 5px)
-        if (maxX - minX > 5 && maxY - minY > 5) {
-          const selected = new Set<number>();
-          const startIdx = Math.max(
-            0,
-            binarySearchStart(positions, minY) - columnCount
-          );
-          for (let i = startIdx; i < positions.length; i++) {
-            const pos = positions[i];
-            if (pos.top > maxY) {
-              break;
-            }
-            const itemRight = pos.left + pos.width;
-            const itemBottom = pos.top + pos.height;
-            if (
-              pos.left < maxX &&
-              itemRight > minX &&
-              pos.top < maxY &&
-              itemBottom > minY
-            ) {
-              selected.add(items[i].id);
-            }
-          }
-          onMarqueeSelect!(selected);
-        }
-        setMarquee(null);
-      }
-
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-    }, [marquee, positions, items, onMarqueeSelect]);
-
-    const scrollToTop = (e: React.MouseEvent) => {
+    const scrollToTop = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
       const el = scrollRef.current;
       if (!el) {
@@ -903,13 +393,11 @@ export const MasonryGrid = memo(
         top: 0,
         behavior: distance > el.clientHeight * 4 ? "auto" : "smooth",
       });
-    };
+    }, []);
 
     const layoutReady = containerWidth > 0 && columnCount > 0;
-
-    // ── 底部骨架屏：isFetchingNextPage 时在列表底部显示占位卡片 ──
-    const SKELETON_ASPECTS = [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3];
     const bottomSkeletons = useMemo(() => {
+      const skeletonAspects = [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3];
       if (!(isLoadingMore && layoutReady) || positions.length === 0) {
         return [];
       }
@@ -931,8 +419,7 @@ export const MasonryGrid = memo(
       const baseTop = Math.max(...colBottoms) + gap;
       const colWidth = (containerWidth - (columnCount - 1) * gap) / columnCount;
       return Array.from({ length: columnCount }, (_, i) => {
-        const skelHeight =
-          colWidth / SKELETON_ASPECTS[i % SKELETON_ASPECTS.length];
+        const skelHeight = colWidth / skeletonAspects[i % skeletonAspects.length];
         return {
           index: i,
           style: {
@@ -997,7 +484,6 @@ export const MasonryGrid = memo(
                   {renderItem(items[index], index, style)}
                 </div>
               ))}
-              {/* 底部加载骨架屏 — 仅在 isFetchingNextPage 时渲染 */}
               {bottomSkeletons.map((sk) => (
                 <div key={`skel-${sk.index}`} style={sk.style}>
                   <div
@@ -1033,29 +519,12 @@ export const MasonryGrid = memo(
             </div>
           )}
         </div>
-        <button
-          aria-hidden={!showScrollTop}
-          aria-label={t("backToTop")}
-          data-text={t("backToTop")}
-          className={`scroll-to-top-btn absolute right-4 z-40 focus-visible:ring-2 focus-visible:ring-ring/50 ${
-            selectionActive ? "bottom-[92px]" : "bottom-11"
-          } ${
-            showScrollTop
-              ? "scale-100 opacity-100"
-              : "pointer-events-none scale-75 opacity-0"
-          }`}
+        <MasonryBackToTop
+          label={t("backToTop")}
           onClick={scrollToTop}
-          tabIndex={showScrollTop ? 0 : -1}
-        >
-          <svg
-            className="scroll-to-top-icon"
-            viewBox="0 0 384 512"
-          >
-            <path
-              d="M214.6 41.4c-12.5-12.5-32.8-12.5-45.3 0l-160 160c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L160 141.2V448c0 17.7 14.3 32 32 32s32-14.3 32-32V141.2L329.4 246.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3l-160-160z"
-            />
-          </svg>
-        </button>
+          selectionActive={selectionActive}
+          show={showScrollTop}
+        />
         {isScrolling && currentTimeLabel && headerPositions.length > 1 && (
           <div className="glass-surface pointer-events-none absolute top-10 right-4 z-40 rounded-[6px] px-3 py-1.5 font-medium text-[12px] text-foreground shadow-lg ring-1 ring-border">
             {currentTimeLabel}
@@ -1063,10 +532,8 @@ export const MasonryGrid = memo(
         )}
       </div>
     );
-  }
-),
-(prevProps, nextProps) => {
-  // 仅比较影响渲染的核心 props，跳过回调函数（由父组件 useCallback 稳定化）
+  }),
+  (prevProps, nextProps) => {
   if (prevProps.items !== nextProps.items) return false;
   if (prevProps.groupHeaders !== nextProps.groupHeaders) return false;
   if (prevProps.containerWidth !== nextProps.containerWidth) return false;
@@ -1078,5 +545,6 @@ export const MasonryGrid = memo(
   if (prevProps.selectionActive !== nextProps.selectionActive) return false;
   if (prevProps.scrollToId !== nextProps.scrollToId) return false;
   if (prevProps.routeKey !== nextProps.routeKey) return false;
-  return true;
-});
+    return true;
+  }
+);
