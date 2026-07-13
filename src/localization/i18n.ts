@@ -693,6 +693,7 @@ i18n.use(initReactI18next).init({
 
         // Selection / sort / status
         selectedPhotos: "已选 {{count}} 张",
+        moreActions: "更多",
         favorite: "收藏",
         unfavorite: "取消收藏",
         addToAlbum: "添加到相册",
@@ -1858,6 +1859,7 @@ i18n.use(initReactI18next).init({
 
         // Selection / sort / status
         selectedPhotos: "{{count}} selected",
+        moreActions: "More",
         favorite: "Favorite",
         unfavorite: "Unfavorite",
         addToAlbum: "Add to Album",

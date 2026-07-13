@@ -1,6 +1,7 @@
 import {
   CloudUpload,
   Download,
+  Ellipsis,
   FolderPlus,
   Heart,
   ImageIcon,
@@ -10,22 +11,29 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+
+type ActionHandler = () => void | Promise<void>;
 
 interface SelectionActionBarProps {
   allFavorite?: boolean;
-  onAddToAlbum?: () => void;
-  onClearSelection: () => void;
-  onConvert?: () => void;
-  onDelete?: () => void;
-  onExport?: () => void;
-  onRename?: () => void;
-  onShare?: () => void;
-  onStartCull?: () => void;
-  onToggleFavorite?: () => void;
-  onUploadToCloud?: () => void;
+  onAddToAlbum?: ActionHandler;
+  onClearSelection: ActionHandler;
+  onConvert?: ActionHandler;
+  onDelete?: ActionHandler;
+  onExport?: ActionHandler;
+  onRename?: ActionHandler;
+  onShare?: ActionHandler;
+  onStartCull?: ActionHandler;
+  onToggleFavorite?: ActionHandler;
+  onUploadToCloud?: ActionHandler;
   selectedCount: number;
 }
 
@@ -47,6 +55,8 @@ export function SelectionActionBar({
   const [animating, setAnimating] = useState(false);
   const [visible, setVisible] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const executingRef = useRef<string | null>(null);
   const mountedRef = useRef(selectedCount > 0);
 
   useEffect(() => {
@@ -57,16 +67,29 @@ export function SelectionActionBar({
         requestAnimationFrame(() => setVisible(true));
       });
     } else {
+      setMoreOpen(false);
       setVisible(false);
     }
   }, [selectedCount]);
 
-  function wrapAction(key: string, handler: () => void): () => void {
+  function wrapAction(
+    key: string,
+    handler: ActionHandler,
+    options?: { closeMore?: boolean }
+  ): () => void {
     return async () => {
+      if (executingRef.current !== null) {
+        return;
+      }
+      if (options?.closeMore) {
+        setMoreOpen(false);
+      }
+      executingRef.current = key;
       setExecuting(key);
       try {
         await handler();
       } finally {
+        executingRef.current = null;
         setExecuting(null);
       }
     };
@@ -78,7 +101,7 @@ export function SelectionActionBar({
 
   return (
     <div
-      className={`pointer-events-none absolute right-0 bottom-9 left-0 z-40 flex items-center justify-center px-4 transition-all duration-200 ease-out ${
+      className={`selection-action-layer pointer-events-none absolute right-0 left-0 z-40 flex items-center justify-center px-4 transition-all duration-200 ease-out ${
         visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
       }`}
       onTransitionEnd={() => {
@@ -97,6 +120,7 @@ export function SelectionActionBar({
           <>
             <div className="selection-menu-divider" />
             <MenuAction
+              disabled={executing !== null}
               executing={executing === "favorite"}
               icon={
                 <Heart
@@ -105,61 +129,89 @@ export function SelectionActionBar({
                 />
               }
               label={allFavorite ? t("unfavorite") : t("favorite")}
-              onClick={onToggleFavorite}
+              onClick={wrapAction("favorite", onToggleFavorite)}
             />
           </>
         )}
         {onAddToAlbum && (
           <MenuAction
+            disabled={executing !== null}
+            executing={executing === "album"}
             icon={<FolderPlus size={18} />}
             label={t("addToAlbum")}
-            onClick={onAddToAlbum}
+            onClick={wrapAction("album", onAddToAlbum)}
           />
-        )}
-        {onStartCull && (
-          <>
-            <div className="selection-menu-divider" />
-            <MenuAction
-              icon={<Swords size={18} />}
-              label={t("cullStart")}
-              onClick={onStartCull}
-            />
-          </>
         )}
         {onExport && (
           <MenuAction
+            disabled={executing !== null}
+            executing={executing === "export"}
             icon={<Download size={18} />}
             label={t("export")}
-            onClick={onExport}
+            onClick={wrapAction("export", onExport)}
           />
         )}
-        {onUploadToCloud && (
-          <MenuAction
-            icon={<CloudUpload size={18} />}
-            label={t("upload")}
-            onClick={onUploadToCloud}
-          />
-        )}
-        {onShare && (
-          <MenuAction
-            icon={<Share2 size={18} />}
-            label={t("share")}
-            onClick={onShare}
-          />
-        )}
-        {onRename && (
-          <MenuAction
-            icon={<Pencil size={18} />}
-            label={t("rename")}
-            onClick={onRename}
-          />
-        )}
-        {onConvert && (
-          <MenuAction
-            icon={<ImageIcon size={18} />}
-            label={t("convertFormat")}
-            onClick={onConvert}
-          />
+
+        {(onStartCull ||
+          onUploadToCloud ||
+          onShare ||
+          onRename ||
+          onConvert) && (
+          <MoreActions
+            disabled={executing !== null}
+            executing={executing}
+            label={t("moreActions")}
+            onOpenChange={setMoreOpen}
+            open={moreOpen}
+          >
+            {onStartCull && (
+              <MoreAction
+                disabled={executing !== null}
+                executing={executing === "cull"}
+                icon={<Swords size={16} />}
+                label={t("cullStart")}
+                onClick={wrapAction("cull", onStartCull, { closeMore: true })}
+              />
+            )}
+            {onUploadToCloud && (
+              <MoreAction
+                disabled={executing !== null}
+                executing={executing === "upload"}
+                icon={<CloudUpload size={16} />}
+                label={t("cloudUploadTitle")}
+                onClick={wrapAction("upload", onUploadToCloud, {
+                  closeMore: true,
+                })}
+              />
+            )}
+            {onShare && (
+              <MoreAction
+                disabled={executing !== null}
+                executing={executing === "share"}
+                icon={<Share2 size={16} />}
+                label={t("generateSharePage")}
+                onClick={wrapAction("share", onShare, { closeMore: true })}
+              />
+            )}
+            {onRename && (
+              <MoreAction
+                disabled={executing !== null}
+                executing={executing === "rename"}
+                icon={<Pencil size={16} />}
+                label={t("rename")}
+                onClick={wrapAction("rename", onRename, { closeMore: true })}
+              />
+            )}
+            {onConvert && (
+              <MoreAction
+                disabled={executing !== null}
+                executing={executing === "convert"}
+                icon={<ImageIcon size={16} />}
+                label={t("convertFormat")}
+                onClick={wrapAction("convert", onConvert, { closeMore: true })}
+              />
+            )}
+          </MoreActions>
         )}
 
         {onDelete && (
@@ -181,17 +233,98 @@ export function SelectionActionBar({
 
         <button
           className="selection-menu-link selection-menu-link-edge"
-          onClick={onClearSelection}
+          disabled={executing !== null}
+          onClick={wrapAction("clear", onClearSelection)}
           title={t("clearSelectionTitle")}
           type="button"
         >
           <span className="selection-menu-icon">
-            <X size={18} />
+            {executing === "clear" ? (
+              <LoadingSpinner size="sm" variant="inherit" />
+            ) : (
+              <X size={18} />
+            )}
           </span>
           <span className="selection-menu-title">{t("clearSelection")}</span>
         </button>
       </div>
     </div>
+  );
+}
+
+function MoreActions({
+  children,
+  disabled,
+  executing,
+  label,
+  onOpenChange,
+  open,
+}: {
+  children: ReactNode;
+  disabled: boolean;
+  executing: string | null;
+  label: string;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  return (
+    <Popover onOpenChange={onOpenChange} open={open}>
+      <PopoverTrigger asChild>
+        <button
+          aria-expanded={open}
+          className="selection-menu-link"
+          disabled={disabled}
+          title={label}
+          type="button"
+        >
+          <span className="selection-menu-icon">
+            {executing && executing !== "delete" && executing !== "clear" ? (
+              <LoadingSpinner size="sm" variant="inherit" />
+            ) : (
+              <Ellipsis size={18} />
+            )}
+          </span>
+          <span className="selection-menu-title">{label}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="center"
+        className="selection-more-menu w-48 gap-0 p-1.5"
+        side="top"
+        sideOffset={10}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function MoreAction({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+  executing = false,
+}: {
+  disabled?: boolean;
+  executing?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="selection-more-menu-item"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      <span className="selection-more-menu-icon">
+        {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 
@@ -208,7 +341,7 @@ function MenuAction({
   disabled?: boolean;
   edge?: boolean;
   executing?: boolean;
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   onClick: () => void;
 }) {

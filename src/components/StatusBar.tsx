@@ -10,7 +10,6 @@ interface StatusBarProps {
 
 export function StatusBar({
   totalPhotos,
-  selectedCount,
   aiStatus,
   className,
 }: StatusBarProps) {
@@ -48,11 +47,6 @@ export function StatusBar({
         <span>
           {t("totalPhotosStatus", { count: totalPhotos.toLocaleString() })}
         </span>
-        {selectedCount > 0 && (
-          <span className="text-foreground">
-            {t("selectedPhotos", { count: selectedCount })}
-          </span>
-        )}
       </div>
       <div className={`flex items-center gap-1.5 ${aiColor}`}>
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
