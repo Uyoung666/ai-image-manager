@@ -1,5 +1,7 @@
+import { CheckCircle2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 
@@ -210,10 +212,15 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   async function handleSaveProxy() {
-    await ipc.client.app.setUpdateProxy({ proxy });
-    setProxySaved(true);
-    setProxyResult(undefined);
-    setTimeout(() => setProxySaved(false), 2000);
+    try {
+      await ipc.client.app.setUpdateProxy({ proxy });
+      setProxySaved(true);
+      setProxyResult(undefined);
+      toast.success(t("updateSaved"));
+      setTimeout(() => setProxySaved(false), 2000);
+    } catch {
+      toast.error(t("saveFailed"));
+    }
   }
 
   async function handleTestProxy() {
@@ -235,8 +242,14 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         bytes: r.bytes,
         bytesPerSecond: r.bytesPerSecond,
       });
+      if (r.ok) {
+        toast.success(t("updateProxyTestOk", { latency: r.latency ?? "?" }));
+      } else {
+        toast.error(t("updateProxyTestFail"));
+      }
     } catch {
       setProxyResult({ ok: false, error: "IPC error" });
+      toast.error(t("updateProxyTestFail"));
     } finally {
       setProxyTesting(false);
     }
@@ -278,7 +291,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {phase === "up-to-date" && (
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-green-600">✓</span>
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
                 <span className="text-[13px] text-muted-foreground">
                   {t("updateUpToDate")}
                 </span>
@@ -314,7 +327,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {phase === "downloaded" && (
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-green-600">✓</span>
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
                 <span className="text-[13px] text-muted-foreground">
                   {t("updateDownloadedStatus", { version: updateVersion })}
                 </span>
@@ -348,7 +361,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {phase === "error" && (
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[13px] text-destructive">✗</span>
+                <XCircle className="h-3.5 w-3.5 text-destructive" />
                 <span className="text-[13px] text-destructive">
                   {errorMsg || t("updateError")}
                 </span>

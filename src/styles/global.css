@@ -394,6 +394,12 @@
   animation: page-enter 200ms ease-out both;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-enter {
+    animation: none;
+  }
+}
+
 /* Thumbnail shimmer loading animation */
 @keyframes shimmer {
   0% {

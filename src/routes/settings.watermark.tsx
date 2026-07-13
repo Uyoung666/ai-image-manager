@@ -15,6 +15,17 @@ interface WatermarkSettings extends WatermarkPreviewSettings {
   wmY?: number; // legacy
 }
 
+interface PhotoListItem {
+  height?: number;
+  path?: string;
+  width?: number;
+}
+
+interface PhotoListResult {
+  items?: PhotoListItem[];
+  pages?: Array<{ items?: PhotoListItem[] }>;
+}
+
 const DEFAULT_WM: WatermarkSettings = {
   enabled: false,
   text: "",
@@ -27,6 +38,8 @@ const DEFAULT_WM: WatermarkSettings = {
 };
 
 // Module-level cache — survives page navigation so re-entry shows preview immediately
+const PATH_SEPARATOR_RE = /[\\/]/;
+
 let cachedSamplePhoto = "";
 
 function WatermarkSettingsPage() {
@@ -44,9 +57,12 @@ function WatermarkSettingsPage() {
   useEffect(() => {
     ipc.client.photos
       .getWatermarkSettings({})
-      .then((result: any) => {
+      .then((result) => {
         if (result) {
-          const w = { ...DEFAULT_WM, ...result };
+          const w = {
+            ...DEFAULT_WM,
+            ...(result as Partial<WatermarkSettings>),
+          };
           // Migrate old wmX/wmY → anchor
           if (!w.anchor && typeof w.wmX === "number") {
             w.anchor = "bottomRight";
@@ -90,17 +106,20 @@ function WatermarkSettingsPage() {
     } else {
       ipc.client.photos
         .listPhotos({ sort: "date", order: "desc", limit: 30 })
-        .then((r: any) => {
-          const photos = r?.pages?.[0]?.items || r?.items || [];
+        .then((r) => {
+          const result = r as PhotoListResult;
+          const photos = result.pages?.[0]?.items || result.items || [];
           const horizontal = photos.find(
-            (p: any) => p.width && p.height && p.width >= p.height
+            (p) => p.width && p.height && p.width >= p.height
           );
           if (horizontal?.path) {
             cachedSamplePhoto = horizontal.path;
             setSamplePhoto(horizontal.path);
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          /* ignore sample preview load failures */
+        });
     }
   }, []);
 
@@ -140,14 +159,16 @@ function WatermarkSettingsPage() {
         clearTimeout(wmSaveTimerRef.current);
         ipc.client.photos
           .setWatermarkSettings(wmLatestRef.current)
-          .catch(() => {});
+          .catch(() => {
+            /* ignore pending save failures during navigation */
+          });
       }
     };
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
-      <section className="space-y-3">
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <section className="mx-auto w-full max-w-[1040px] space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-[14px] text-foreground">
             {t("watermarkSettings")}
@@ -160,26 +181,41 @@ function WatermarkSettingsPage() {
           />
         </div>
 
-        {/* Preview (always visible, dimmed when disabled) */}
-        <div className={wm.enabled ? "" : "pointer-events-none opacity-30"}>
-          <WatermarkPreview
-            onSettingsChange={(patch) =>
-              setWm((prev) => ({ ...prev, ...patch }))
-            }
-            samplePhotoPath={samplePhoto}
-            wm={wm}
-          />
-        </div>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_360px] lg:items-start">
+          <div className="relative lg:sticky lg:top-6">
+            <WatermarkPreview
+              onSettingsChange={(patch) =>
+                setWm((prev) => ({ ...prev, ...patch }))
+              }
+              samplePhotoPath={samplePhoto}
+              wm={wm}
+            />
+            {!wm.enabled && (
+              <div className="absolute inset-0 flex cursor-not-allowed items-center justify-center rounded-[8px] bg-background/45 backdrop-blur-[1px]">
+                <span className="rounded-[6px] bg-background/90 px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm">
+                  {t("watermarkDisabled")}
+                </span>
+              </div>
+            )}
+          </div>
 
-        {wm.enabled && (
-          <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+          <fieldset
+            className={`space-y-3 rounded-[8px] border border-border bg-secondary p-4 transition-opacity disabled:cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_button:disabled]:opacity-50 [&_input:disabled]:cursor-not-allowed [&_input:disabled]:opacity-60 ${
+              wm.enabled ? "" : "opacity-60"
+            }`}
+            disabled={!wm.enabled}
+          >
             {/* Margin slider */}
             <div>
-              <label className="mb-1 block text-[11px] text-muted-foreground/70">
+              <label
+                className="mb-1 block text-[11px] text-muted-foreground/70"
+                htmlFor="watermark-margin"
+              >
                 {t("watermarkMargin", { value: wm.margin })}
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                id="watermark-margin"
                 max={15}
                 min={2}
                 onChange={(e) =>
@@ -196,11 +232,15 @@ function WatermarkSettingsPage() {
 
             {/* Text watermark */}
             <div className="border-border border-t pt-3">
-              <label className="mb-1 block text-[11px] text-muted-foreground/70">
+              <label
+                className="mb-1 block text-[11px] text-muted-foreground/70"
+                htmlFor="watermark-text"
+              >
                 {t("watermarkText")}
               </label>
               <input
                 className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                id="watermark-text"
                 onChange={(e) =>
                   setWm((prev) => ({ ...prev, text: e.target.value }))
                 }
@@ -211,9 +251,9 @@ function WatermarkSettingsPage() {
 
             {/* Image watermark */}
             <div className="border-border border-t pt-3">
-              <label className="mb-1 block text-[11px] text-muted-foreground/70">
+              <div className="mb-1 block text-[11px] text-muted-foreground/70">
                 {t("watermarkImage")}
-              </label>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-[6px] border border-input px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
@@ -228,9 +268,10 @@ function WatermarkSettingsPage() {
                         ],
                       })) as { path?: string };
                       if (result?.path) {
+                        const imagePath = result.path;
                         setWm((prev) => ({
                           ...prev,
-                          imagePath: result.path!,
+                          imagePath,
                         }));
                       }
                     } catch {
@@ -243,7 +284,7 @@ function WatermarkSettingsPage() {
                 </button>
                 {wm.imagePath && (
                   <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
-                    {wm.imagePath.split(/[\\/]/).pop()}
+                    {wm.imagePath.split(PATH_SEPARATOR_RE).pop()}
                   </span>
                 )}
                 {wm.imagePath && (
@@ -262,7 +303,12 @@ function WatermarkSettingsPage() {
 
             {/* Size slider */}
             <div className="border-border border-t pt-3">
-              <label className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground/70">
+              <label
+                className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground/70"
+                htmlFor={
+                  wm.imagePath ? "watermark-image-scale" : "watermark-font-size"
+                }
+              >
                 <span>
                   {wm.imagePath
                     ? t("watermarkImageScale", { value: wm.imageScale })
@@ -275,6 +321,7 @@ function WatermarkSettingsPage() {
               {wm.imagePath ? (
                 <input
                   className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                  id="watermark-image-scale"
                   max={50}
                   min={5}
                   onChange={(e) =>
@@ -290,6 +337,7 @@ function WatermarkSettingsPage() {
               ) : (
                 <input
                   className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                  id="watermark-font-size"
                   max={72}
                   min={12}
                   onChange={(e) =>
@@ -307,11 +355,15 @@ function WatermarkSettingsPage() {
 
             {/* Opacity */}
             <div className="border-border border-t pt-3">
-              <label className="mb-1 block text-[11px] text-muted-foreground/70">
+              <label
+                className="mb-1 block text-[11px] text-muted-foreground/70"
+                htmlFor="watermark-opacity"
+              >
                 {t("watermarkOpacity", { value: wm.opacity })}
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                id="watermark-opacity"
                 max={100}
                 min={10}
                 onChange={(e) =>
@@ -325,8 +377,8 @@ function WatermarkSettingsPage() {
                 value={wm.opacity}
               />
             </div>
-          </div>
-        )}
+          </fieldset>
+        </div>
       </section>
     </div>
   );

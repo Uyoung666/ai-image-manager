@@ -1,7 +1,16 @@
-﻿import { Cloud, Link2, Trash2 } from "lucide-react";
+import { Cloud, Link2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ipc } from "@/ipc/manager";
 
 interface CloudConfig {
@@ -17,6 +26,20 @@ const PROVIDER_LABELS: Record<string, string> = {
   webdav: "WebDAV",
   s3: "Amazon S3",
 };
+
+function ConfigSkeleton() {
+  return (
+    <div className="space-y-2 border-border border-t pt-3">
+      {[0, 1].map((item) => (
+        <div className="flex items-center gap-3" key={item}>
+          <div className="h-3 w-3 rounded bg-muted-foreground/10" />
+          <div className="h-3 flex-1 rounded bg-muted-foreground/10" />
+          <div className="h-5 w-14 rounded bg-muted-foreground/10" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function CloudConfigPanel() {
   const { t } = useTranslation();
@@ -46,16 +69,18 @@ export function CloudConfigPanel() {
       const result = await ipc.client.cloud.listCloudConfigs({});
       setConfigs(result as CloudConfig[]);
     } catch {
-      /* ignore */
+      toast.error(t("cloudLoadFailed"));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadConfigs();
   }, [loadConfigs]);
 
   function resetForm() {
+    setProvider("webdav");
     setName("");
     setUrl("");
     setUsername("");
@@ -85,15 +110,13 @@ export function CloudConfigPanel() {
       });
       resetForm();
       setShowAdd(false);
-      loadConfigs();
+      await loadConfigs();
+      toast.success(t("cloudConfigSaved"));
     } catch {
-      /* ignore */
+      toast.error(t("cloudConfigSaveFailed"));
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-  }
-
-  async function handleDelete(id: number) {
-    setDeleteConfirmId(id);
   }
 
   async function confirmDelete() {
@@ -103,9 +126,10 @@ export function CloudConfigPanel() {
     try {
       await ipc.client.cloud.deleteCloudConfig({ id: deleteConfirmId });
       setDeleteConfirmId(null);
-      loadConfigs();
+      await loadConfigs();
+      toast.success(t("cloudConfigDeleted"));
     } catch {
-      /* ignore */
+      toast.error(t("cloudConfigDeleteFailed"));
     }
   }
 
@@ -121,30 +145,26 @@ export function CloudConfigPanel() {
         latencyMs?: number;
         error?: string;
       };
+      const message = result.success
+        ? t("cloudConnectionSuccess", { latency: result.latencyMs })
+        : t("cloudConnectionFailed", {
+            error: result.error || t("cloudUnknownError"),
+          });
+      setTestStates((prev) => ({
+        ...prev,
+        [id]: { result: message, success: result.success },
+      }));
       if (result.success) {
-        setTestStates((prev) => ({
-          ...prev,
-          [id]: {
-            result: t("cloudConnectionSuccess", { latency: result.latencyMs }),
-            success: true,
-          },
-        }));
+        toast.success(message);
       } else {
-        setTestStates((prev) => ({
-          ...prev,
-          [id]: {
-            result: t("cloudConnectionFailed", {
-              error: result.error || t("cloudUnknownError"),
-            }),
-            success: false,
-          },
-        }));
+        toast.error(message);
       }
     } catch {
       setTestStates((prev) => ({
         ...prev,
         [id]: { result: t("cloudTestException"), success: false },
       }));
+      toast.error(t("cloudTestException"));
     }
     setTestingId(null);
     setTimeout(() => {
@@ -171,127 +191,131 @@ export function CloudConfigPanel() {
             resetForm();
             setShowAdd(true);
           }}
+          type="button"
         >
           {t("cloudAddConfig")}
         </button>
       </div>
 
-      {/* Add form */}
-      {showAdd && (
-        <div className="space-y-2.5 border-border border-t pt-3">
-          {/* Row 1: Provider + Name */}
-          <div className="flex gap-2">
-            <select
-              className="h-8 shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none focus:border-primary"
-              onChange={(e) => setProvider(e.target.value as "webdav" | "s3")}
-              value={provider}
-            >
-              <option value="webdav">WebDAV</option>
-              <option value="s3">Amazon S3</option>
-            </select>
-            <input
-              className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t("cloudConfigNamePlaceholder")}
-              value={name}
-            />
+      <Dialog onOpenChange={setShowAdd} open={showAdd}>
+        <DialogContent size="lg">
+          <DialogHeader>
+            <DialogTitle>{t("cloudAddConfig")}</DialogTitle>
+            <DialogDescription>{t("cloudAddConfigHint")}</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2.5">
+            <div className="flex gap-2 max-sm:flex-col">
+              <select
+                className="h-8 shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none focus:border-primary"
+                onChange={(e) => setProvider(e.target.value as "webdav" | "s3")}
+                value={provider}
+              >
+                <option value="webdav">WebDAV</option>
+                <option value="s3">Amazon S3</option>
+              </select>
+              <input
+                className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t("cloudConfigNamePlaceholder")}
+                value={name}
+              />
+            </div>
+
+            {provider === "webdav" ? (
+              <>
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="WebDAV URL"
+                  value={url}
+                />
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("username")}
+                  value={username}
+                />
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={t("password")}
+                  type="password"
+                  value={password}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setEndpoint(e.target.value)}
+                  placeholder="Endpoint URL"
+                  value={endpoint}
+                />
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setAccessKey(e.target.value)}
+                  placeholder="Access Key"
+                  value={accessKey}
+                />
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setSecretKey(e.target.value)}
+                  placeholder="Secret Key"
+                  type="password"
+                  value={secretKey}
+                />
+                <div className="flex gap-2 max-sm:flex-col">
+                  <input
+                    className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                    onChange={(e) => setBucket(e.target.value)}
+                    placeholder="Bucket"
+                    value={bucket}
+                  />
+                  <input
+                    className="h-8 w-[45%] shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary max-sm:w-full"
+                    onChange={(e) => setRegion(e.target.value)}
+                    placeholder="Region"
+                    value={region}
+                  />
+                </div>
+                <input
+                  className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                  onChange={(e) => setPublicBase(e.target.value)}
+                  placeholder="Public Base URL (e.g. https://img.example.cn)"
+                  value={publicBase}
+                />
+              </>
+            )}
           </div>
 
-          {provider === "webdav" ? (
-            <>
-              {/* WebDAV URL */}
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="WebDAV URL"
-                value={url}
-              />
-              {/* Username */}
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={t("username")}
-                value={username}
-              />
-              {/* Password */}
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={t("password")}
-                type="password"
-                value={password}
-              />
-            </>
-          ) : (
-            <>
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setEndpoint(e.target.value)}
-                placeholder="Endpoint URL"
-                value={endpoint}
-              />
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setAccessKey(e.target.value)}
-                placeholder="Access Key"
-                value={accessKey}
-              />
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setSecretKey(e.target.value)}
-                placeholder="Secret Key"
-                type="password"
-                value={secretKey}
-              />
-              {/* Bucket + Region side by side — short values, won't overflow */}
-              <div className="flex gap-2">
-                <input
-                  className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                  onChange={(e) => setBucket(e.target.value)}
-                  placeholder="Bucket"
-                  value={bucket}
-                />
-                <input
-                  className="h-8 w-[45%] shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                  onChange={(e) => setRegion(e.target.value)}
-                  placeholder="Region"
-                  value={region}
-                />
-              </div>
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                onChange={(e) => setPublicBase(e.target.value)}
-                placeholder="Public Base URL (e.g. https://img.example.cn)"
-                value={publicBase}
-              />
-            </>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex gap-2 pt-0.5">
+          <DialogFooter>
+            <button
+              className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setShowAdd(false)}
+              type="button"
+            >
+              {t("cancel")}
+            </button>
             <button
               className="rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
               disabled={!name.trim() || saving}
               onClick={handleSave}
+              type="button"
             >
-              {t("save")}
+              {saving ? t("saving") : t("save")}
             </button>
-            <button
-              className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setShowAdd(false)}
-            >
-              {t("cancel")}
-            </button>
-          </div>
-        </div>
-      )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Existing configs */}
+      {loading && <ConfigSkeleton />}
+
       {!loading && configs.length > 0 && (
         <div className="space-y-1 border-border border-t pt-3">
           {configs.map((cfg) => (
             <div
-              className="flex items-center justify-between gap-2 rounded-[4px] py-1"
+              className="flex items-center justify-between gap-2 rounded-[6px] px-1 py-1.5 hover:bg-foreground/5"
               key={cfg.id}
             >
               <div className="flex min-w-0 items-center gap-2">
@@ -299,28 +323,36 @@ export function CloudConfigPanel() {
                 <span className="truncate text-[12px] text-foreground">
                   {cfg.name}
                 </span>
-                <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                <span className="shrink-0 rounded-[4px] bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground/70">
                   {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {testStates[cfg.id] && (
                   <span
-                    className={`shrink-0 text-[10px] ${testStates[cfg.id].success ? "text-[#46a758]" : "text-[#e5484d]"}`}
+                    className={`max-w-[180px] truncate text-[10px] ${
+                      testStates[cfg.id].success
+                        ? "text-[#46a758]"
+                        : "text-[#e5484d]"
+                    }`}
+                    title={testStates[cfg.id].result}
                   >
                     {testStates[cfg.id].result}
                   </span>
                 )}
                 <button
-                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
                   disabled={testingId !== null}
                   onClick={() => handleTestConnection(cfg.id)}
+                  type="button"
                 >
-                  {t("test")}
+                  {testingId === cfg.id ? t("cloudTesting") : t("test")}
                 </button>
                 <button
-                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-[#e5484d]"
-                  onClick={() => handleDelete(cfg.id)}
+                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-[#e5484d]"
+                  onClick={() => setDeleteConfirmId(cfg.id)}
+                  title={t("delete")}
+                  type="button"
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -330,8 +362,8 @@ export function CloudConfigPanel() {
         </div>
       )}
 
-      {!loading && configs.length === 0 && !showAdd && (
-        <p className="text-[11px] text-muted-foreground/70">
+      {!loading && configs.length === 0 && (
+        <p className="border-border border-t pt-3 text-[11px] text-muted-foreground/70">
           {t("cloudNoConfigShort")}
         </p>
       )}

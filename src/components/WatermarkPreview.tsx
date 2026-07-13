@@ -33,7 +33,7 @@ interface Props {
   wm: WatermarkPreviewSettings;
 }
 
-const ANCHORS: { label: string; anchor: WmAnchor }[] = [
+const ANCHORS: { label?: string; anchor: WmAnchor }[] = [
   { label: "↖", anchor: "topLeft" },
   { label: "↑", anchor: "topCenter" },
   { label: "↗", anchor: "topRight" },
@@ -44,6 +44,32 @@ const ANCHORS: { label: string; anchor: WmAnchor }[] = [
   { label: "↓", anchor: "bottomCenter" },
   { label: "↘", anchor: "bottomRight" },
 ];
+
+function AnchorGlyph({
+  active,
+  anchor,
+}: {
+  active: boolean;
+  anchor: WmAnchor;
+}) {
+  const index = ANCHORS.findIndex((item) => item.anchor === anchor);
+  return (
+    <span className="grid grid-cols-3 gap-[2px]">
+      {ANCHORS.map((item, itemIndex) => {
+        let dotClass = "bg-muted-foreground/20";
+        if (itemIndex === index) {
+          dotClass = active ? "bg-primary" : "bg-muted-foreground";
+        }
+        return (
+          <span
+            className={`h-1.5 w-1.5 rounded-full transition-colors ${dotClass}`}
+            key={item.anchor}
+          />
+        );
+      })}
+    </span>
+  );
+}
 
 // Calculate watermark pixel position from anchor + margin.
 // Margin is % of short edge — consistent visual gap across aspect ratios.
@@ -404,17 +430,25 @@ export function WatermarkPreview({
   }
 
   function handleMouseDown(e: React.MouseEvent) {
+    if (!wm.enabled) {
+      return;
+    }
     setDragging(true);
     dragToAnchor(e.clientX, e.clientY);
   }
   function handleMouseMove(e: React.MouseEvent) {
-    if (!dragging) {
+    if (!(wm.enabled && dragging)) {
       return;
     }
     dragToAnchor(e.clientX, e.clientY);
   }
   function handleMouseUp() {
     setDragging(false);
+  }
+
+  let canvasCursorClass = "cursor-not-allowed";
+  if (wm.enabled) {
+    canvasCursorClass = dragging ? "cursor-grabbing" : "cursor-grab";
   }
 
   return (
@@ -425,7 +459,7 @@ export function WatermarkPreview({
         style={{ aspectRatio: "16 / 10" }}
       >
         <canvas
-          className={`h-full w-full ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+          className={`h-full w-full ${canvasCursorClass}`}
           onMouseDown={handleMouseDown}
           onMouseLeave={handleMouseUp}
           onMouseMove={handleMouseMove}
@@ -433,6 +467,11 @@ export function WatermarkPreview({
           ref={canvasRef}
           style={{ display: "block" }}
         />
+        {!dragging && (
+          <div className="pointer-events-none absolute top-2 right-2 rounded-[4px] bg-background/70 px-2 py-0.5 text-[10px] text-foreground/70 backdrop-blur-sm">
+            {t("orDragPreview")}
+          </div>
+        )}
         {dragging && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="rounded-[4px] bg-primary/80 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm">
@@ -450,17 +489,18 @@ export function WatermarkPreview({
         <div className="grid grid-cols-3 gap-0.5">
           {ANCHORS.map((a) => (
             <button
-              className={`flex h-6 w-6 items-center justify-center rounded-[4px] text-[12px] transition-colors ${
+              className={`flex h-6 w-6 items-center justify-center rounded-[4px] text-[12px] transition-all ${
                 wm.anchor === a.anchor
-                  ? "bg-primary/20 text-primary"
+                  ? "scale-105 bg-primary/20 text-primary ring-1 ring-primary/30"
                   : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              }`}
+              } disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}
+              disabled={!wm.enabled}
               key={a.anchor}
               onClick={() => onSettingsChange({ anchor: a.anchor })}
               title={t(`anchor_${a.anchor}`)}
               type="button"
             >
-              {a.label}
+              <AnchorGlyph active={wm.anchor === a.anchor} anchor={a.anchor} />
             </button>
           ))}
         </div>

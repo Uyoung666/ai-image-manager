@@ -1,3 +1,4 @@
+import { CheckCircle2, MinusCircle, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -33,26 +34,20 @@ type GpuCapabilityResponse = GpuDetectedInfo;
 
 function FeatureStatusRow({
   active,
-  check,
   label,
 }: {
   active: boolean;
-  check: string;
   label: string;
 }) {
   const { t } = useTranslation();
   const statusKey = active ? "gpuStatusActive" : "gpuStatusInactive";
   return (
     <div className="flex items-center gap-2 text-[11px]">
-      <span
-        className={
-          active
-            ? "text-green-600 dark:text-green-400"
-            : "text-muted-foreground/50"
-        }
-      >
-        {check}
-      </span>
+      {active ? (
+        <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+      ) : (
+        <MinusCircle className="h-3 w-3 text-muted-foreground/45" />
+      )}
       <span className="text-muted-foreground/70">{label}</span>
       <span className="text-muted-foreground/40">{t(statusKey)}</span>
     </div>
@@ -93,9 +88,7 @@ function DetectionStatusLine({
     return (
       <div>
         <div className="flex items-center gap-2">
-          <span className="text-[12px] text-green-600 dark:text-green-400">
-            ✓
-          </span>
+          <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
           <span className="text-[12px] text-muted-foreground">
             {t("gpuDetectedOk")}
           </span>
@@ -113,7 +106,7 @@ function DetectionStatusLine({
     return (
       <div>
         <div className="flex items-center gap-2">
-          <span className="text-[12px] text-muted-foreground/50">✗</span>
+          <MinusCircle className="h-3.5 w-3.5 text-muted-foreground/50" />
           <span className="text-[12px] text-muted-foreground">
             {t("gpuDetectedUnsupported")}
           </span>
@@ -131,7 +124,7 @@ function DetectionStatusLine({
   return (
     <div>
       <div className="flex items-center gap-2">
-        <span className="text-[12px] text-destructive">✗</span>
+        <XCircle className="h-3.5 w-3.5 text-destructive" />
         <span className="text-[12px] text-destructive">
           {t("gpuDetectedError")}
         </span>
@@ -182,7 +175,8 @@ export function GpuSettingsCard({
   // ── Load saved state on mount ──────────────────────────────────────
 
   useEffect(() => {
-    ipc.client.settings.getGpuSettings({}).then((r: GpuSettingsResponse) => {
+    ipc.client.settings.getGpuSettings({}).then((value) => {
+      const r = value as unknown as GpuSettingsResponse;
       setEnabled(r.enabled);
       if (r.detected) {
         setDetectedInfo(r.detected);
@@ -279,13 +273,9 @@ export function GpuSettingsCard({
 
         {/* Feature status */}
         <div className="space-y-1.5 border-border border-t pt-3">
-          <FeatureStatusRow
-            active={gpuActive}
-            check={gpuActive ? "✓" : "—"}
-            label={t("gpuStatusFace")}
-          />
+          <FeatureStatusRow active={gpuActive} label={t("gpuStatusFace")} />
           <div className="flex items-center gap-2 text-[11px]">
-            <span className="text-muted-foreground/50">—</span>
+            <MinusCircle className="h-3 w-3 text-muted-foreground/45" />
             <span className="text-muted-foreground/70">
               {t("gpuStatusEmbed")}
             </span>

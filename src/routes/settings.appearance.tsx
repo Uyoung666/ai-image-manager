@@ -3,12 +3,17 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import LangToggle from "@/components/lang-toggle";
+import { SettingRow } from "@/components/settings/setting-row";
 import ToggleTheme from "@/components/toggle-theme";
 import { Switch } from "@/components/ui/switch";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
+
+interface OpenAtLoginResult {
+  openAtLogin?: boolean;
+}
 
 function AppearanceSettingsPage() {
   const { t } = useTranslation();
@@ -26,10 +31,18 @@ function AppearanceSettingsPage() {
 
   useEffect(() => {
     getCurrentTheme().then(setThemeMode);
-    ipc.client.settings.getOpenAtLogin({}).then((r: any) => {
-      setOpenAtLogin(r?.openAtLogin ?? false);
+    ipc.client.settings.getOpenAtLogin({}).then((r) => {
+      const result = r as OpenAtLoginResult;
+      setOpenAtLogin(result.openAtLogin ?? false);
     });
   }, []);
+
+  let themeDescription = t("themeSystem");
+  if (themeMode === "dark") {
+    themeDescription = t("themeDark");
+  } else if (themeMode === "light") {
+    themeDescription = t("themeLight");
+  }
 
   function handleOpenAtLoginToggle() {
     const next = !openAtLogin;
@@ -50,68 +63,41 @@ function AppearanceSettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
-      <section className="space-y-3">
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <section className="mx-auto w-full max-w-[820px] space-y-3">
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("settingsAppearance")}
         </h2>
         <div className="rounded-[8px] border border-border bg-secondary p-4">
-          {/* Theme */}
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-[13px] text-muted-foreground">
-                {t("settingsTheme")}
-              </span>
-              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                {themeMode === "dark"
-                  ? t("themeDark")
-                  : themeMode === "light"
-                    ? t("themeLight")
-                    : t("themeSystem")}
-              </p>
-            </div>
-            <ToggleTheme onChange={setThemeMode} />
-          </div>
+          <SettingRow
+            action={<ToggleTheme onChange={setThemeMode} />}
+            description={themeDescription}
+            title={t("settingsTheme")}
+          />
 
-          {/* Language */}
-          <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
-            <span className="text-[13px] text-muted-foreground">
-              {t("settingsLanguage")}
-            </span>
-            <LangToggle />
-          </div>
+          <SettingRow action={<LangToggle />} title={t("settingsLanguage")} />
 
-          {/* Open at login */}
-          <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
-            <div>
-              <span className="text-[13px] text-muted-foreground">
-                {t("openAtLogin")}
-              </span>
-              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                {t("openAtLoginHint")}
-              </p>
-            </div>
-            <Switch
-              checked={openAtLogin}
-              onCheckedChange={handleOpenAtLoginToggle}
-            />
-          </div>
+          <SettingRow
+            action={
+              <Switch
+                checked={openAtLogin}
+                onCheckedChange={handleOpenAtLoginToggle}
+              />
+            }
+            description={t("openAtLoginHint")}
+            title={t("openAtLogin")}
+          />
 
-          {/* Sidebar default state */}
-          <div className="mt-3 flex items-center justify-between border-border border-t pt-3">
-            <div>
-              <span className="text-[13px] text-muted-foreground">
-                {t("sidebarDefaultCollapsed")}
-              </span>
-              <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-                {t("sidebarDefaultCollapsedHint")}
-              </p>
-            </div>
-            <Switch
-              checked={sidebarCollapsed}
-              onCheckedChange={handleSidebarCollapsedToggle}
-            />
-          </div>
+          <SettingRow
+            action={
+              <Switch
+                checked={sidebarCollapsed}
+                onCheckedChange={handleSidebarCollapsedToggle}
+              />
+            }
+            description={t("sidebarDefaultCollapsedHint")}
+            title={t("sidebarDefaultCollapsed")}
+          />
         </div>
       </section>
     </div>

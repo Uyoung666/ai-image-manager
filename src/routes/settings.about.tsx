@@ -78,7 +78,7 @@ function AboutSettingsPage() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
       <ConfettiOverlay
         active={confettiActive}
         onDone={handleConfettiDone}
@@ -86,7 +86,7 @@ function AboutSettingsPage() {
       />
       <SignatureOverlay active={signatureActive} onDone={handleSignatureDone} />
 
-      <div className="space-y-6">
+      <div className="mx-auto w-full max-w-[820px] space-y-6">
         {/* App info */}
         <section className="space-y-3">
           <h2 className="font-semibold text-[14px] text-foreground">

@@ -2,6 +2,24 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/ipc/manager";
 
+interface DataPathInfo {
+  isDefault: boolean;
+  path: string;
+}
+
+interface FolderDialogResult {
+  path?: string;
+}
+
+interface DataPathResult {
+  cleaned?: number;
+  cleanupErrors?: string[];
+  copied?: number;
+  error?: string;
+  errors?: string[];
+  ok: boolean;
+}
+
 export function DataDirSection() {
   const { t } = useTranslation();
   const [dataPath, setDataPathState] = useState("");
@@ -17,8 +35,9 @@ export function DataDirSection() {
 
   useEffect(() => {
     ipc.client.settings.getDataPathInfo({}).then((r) => {
-      setDataPathState((r as any).path);
-      setIsDefault((r as any).isDefault);
+      const info = r as DataPathInfo;
+      setDataPathState(info.path);
+      setIsDefault(info.isDefault);
     });
   }, []);
 
@@ -88,11 +107,13 @@ export function DataDirSection() {
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [t]);
 
   async function handleChangeDir() {
-    const result = await ipc.client.shell.openFolderDialog({});
-    const newPath = (result as any).path;
+    const result = (await ipc.client.shell.openFolderDialog(
+      {}
+    )) as FolderDialogResult;
+    const newPath = result.path;
     if (!newPath) {
       return;
     }
@@ -101,25 +122,27 @@ export function DataDirSection() {
     setMigrating(true);
     setRestarting(false);
     const setResult = await ipc.client.settings.setDataPath({ newPath });
-    const data = setResult as any;
+    const data = setResult as DataPathResult;
     setMigrating(false);
     if (data.ok) {
       const parts = [t("dataMigratedTo", { path: newPath })];
-      if (data.copied > 0) {
+      if ((data.copied ?? 0) > 0) {
         parts.push(t("dataMigratedDirs", { count: data.copied }));
       }
-      if (data.cleaned > 0) {
+      if ((data.cleaned ?? 0) > 0) {
         parts.push(t("cleanedOldDirs", { count: data.cleaned }));
       }
-      if (data.errors?.length > 0) {
+      const errors = data.errors ?? [];
+      const cleanupErrors = data.cleanupErrors ?? [];
+      if (errors.length > 0) {
         parts.push(
-          t("dataMigrationPartialFailed", { errors: data.errors.join("; ") })
+          t("dataMigrationPartialFailed", { errors: errors.join("; ") })
         );
       }
-      if (data.cleanupErrors?.length > 0) {
+      if (cleanupErrors.length > 0) {
         parts.push(
           t("cleanupOldDataPartialFailed", {
-            errors: data.cleanupErrors.join("; "),
+            errors: cleanupErrors.join("; "),
           })
         );
       }
@@ -143,9 +166,15 @@ export function DataDirSection() {
     progress && progress.total > 0
       ? Math.min(100, Math.round((progress.current / progress.total) * 100))
       : 0;
+  let buttonLabel = t("chooseDirectory");
+  if (restarting) {
+    buttonLabel = t("refreshing");
+  } else if (migrating) {
+    buttonLabel = t("migrating");
+  }
 
   return (
-    <section className="space-y-3">
+    <section className="mx-auto w-full max-w-[820px] space-y-3">
       <h2 className="font-semibold text-[14px] text-foreground">
         {t("dataDirectory")}
       </h2>
@@ -166,12 +195,9 @@ export function DataDirSection() {
             className="rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={restarting || migrating}
             onClick={handleChangeDir}
+            type="button"
           >
-            {restarting
-              ? t("refreshing")
-              : migrating
-                ? t("migrating")
-                : t("chooseDirectory")}
+            {buttonLabel}
           </button>
           {progress && (
             <div className="mt-3 space-y-1.5">

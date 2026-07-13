@@ -8,8 +8,10 @@ function AccelerationSettingsPage() {
   useRouteScrollRestoration(scrollRef);
 
   return (
-    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
-      <GpuSettingsCard />
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <div className="mx-auto w-full max-w-[820px]">
+        <GpuSettingsCard />
+      </div>
     </div>
   );
 }

@@ -10,8 +10,8 @@ function CloudSyncSettingsPage() {
   useRouteScrollRestoration(scrollRef);
 
   return (
-    <div className="h-full overflow-y-auto p-6" ref={scrollRef}>
-      <section className="space-y-3">
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <section className="mx-auto w-full max-w-[820px] space-y-3">
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("cloudSync")}
         </h2>

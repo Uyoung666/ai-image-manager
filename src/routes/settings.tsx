@@ -17,12 +17,15 @@ function SettingsLayout() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center gap-4 border-border border-b px-6 py-4">
+      <div className="flex items-center gap-4 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
         <button
-          className="text-muted-foreground hover:text-foreground"
+          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
           onClick={() => navigate({ to: "/" })}
+          title={t("settingsBackHome")}
+          type="button"
         >
           <ArrowLeft className="h-5 w-5" />
+          <span className="sr-only">{t("settingsBackHome")}</span>
         </button>
         <h1 className="font-semibold text-[18px] text-foreground">
           {t("settingsTitle")}
@@ -33,7 +36,7 @@ function SettingsLayout() {
       <div className="flex min-h-0 flex-1">
         <SettingsSidebar />
         <div className="min-h-0 flex-1 overflow-hidden" key={location.pathname}>
-          <div className="h-full animate-page-enter">
+          <div className="h-full animate-page-enter motion-reduce:animate-none">
             <Outlet />
           </div>
         </div>
