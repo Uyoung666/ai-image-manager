@@ -153,17 +153,22 @@ export const MasonryGrid = memo(
     });
 
     const restoreReady = positions.length > 0 && !isPlaceholderData;
+    const getRouteKey = useCallback(() => routeKey, [routeKey]);
+    const restoreFromAnchor = useCallback(
+      (anchorItemId: number) => {
+        const idx = idToIndexMap.get(anchorItemId);
+        if (idx === undefined || !positions[idx]) {
+          return null;
+        }
+        return positions[idx].top;
+      },
+      [idToIndexMap, positions]
+    );
     const { initialScrollTop, hasInitialPositionedRef, forceUnlock } =
       useRouteScrollRestoration(scrollRef, {
-        getRouteKey: () => routeKey,
+        getRouteKey,
         getCurrentAnchor,
-        restoreFromAnchor: (anchorItemId: number) => {
-          const idx = idToIndexMap.get(anchorItemId);
-          if (idx === undefined || !positions[idx]) {
-            return null;
-          }
-          return positions[idx].top;
-        },
+        restoreFromAnchor,
         restoreReady,
         itemCount: items.length,
         isPlaceholderData,

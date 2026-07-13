@@ -18,6 +18,7 @@ function advanceTime(ms: number) {
 describe("ScrollPositionContext", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    (window as Window & { __scrollLog?: unknown[] }).__scrollLog = undefined;
     vi.useFakeTimers();
     // Set a fixed "now" time so expiry checks are deterministic
     vi.setSystemTime(new Date("2026-06-10T12:00:00Z"));
@@ -50,6 +51,7 @@ describe("ScrollPositionContext", () => {
 
       act(() => {
         result.current.saveScrollPosition("home", 1234);
+        advanceTime(300);
       });
 
       const stored = sessionStorage.getItem("scroll_position_home");
@@ -69,6 +71,7 @@ describe("ScrollPositionContext", () => {
       expect(() => {
         act(() => {
           result.current.saveScrollPosition("home", 500);
+          advanceTime(300);
         });
       }).not.toThrow();
 
@@ -77,6 +80,25 @@ describe("ScrollPositionContext", () => {
       expect(saved).not.toBeNull();
 
       sessionStorage.setItem = originalSetItem;
+    });
+
+    it("should keep scroll diagnostics disabled by default", () => {
+      const warnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const { result } = renderHook(() => useScrollPosition(), { wrapper });
+
+      act(() => {
+        for (let i = 0; i < 600; i++) {
+          result.current.saveScrollPosition("home", i);
+        }
+      });
+
+      expect(
+        (window as Window & { __scrollLog?: unknown[] }).__scrollLog
+      ).toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 
@@ -150,6 +172,7 @@ describe("ScrollPositionContext", () => {
 
       act(() => {
         result.current.saveScrollPosition("home", 500);
+        advanceTime(300);
       });
       expect(sessionStorage.getItem("scroll_position_home")).not.toBeNull();
 
@@ -177,6 +200,7 @@ describe("ScrollPositionContext", () => {
 
       act(() => {
         result.current.clearAllScrollPositions();
+        advanceTime(300);
       });
 
       expect(sessionStorage.getItem("scroll_position_home")).toBeNull();
@@ -184,6 +208,28 @@ describe("ScrollPositionContext", () => {
       expect(sessionStorage.getItem("scroll_position_trash")).toBeNull();
       // Unrelated keys should not be touched
       expect(sessionStorage.getItem("other_key")).toBe("value");
+    });
+  });
+
+  describe("markRouteDirty", () => {
+    it("should not let a pending save restore a stale anchor", () => {
+      const { result } = renderHook(() => useScrollPosition(), { wrapper });
+
+      act(() => {
+        result.current.saveScrollPosition("home", 500, {
+          itemId: 42,
+          offsetFromTop: 10,
+          offsetRatio: 0.1,
+          timestamp: Date.now(),
+        });
+        result.current.markRouteDirty("home");
+        advanceTime(300);
+      });
+
+      const stored = sessionStorage.getItem("scroll_position_home");
+      expect(stored).not.toBeNull();
+      expect(JSON.parse(stored ?? "{}").anchor).toBeUndefined();
+      expect(result.current.getScrollPosition("home")?.anchor).toBeUndefined();
     });
   });
 
@@ -204,7 +250,11 @@ describe("ScrollPositionContext", () => {
       // After saving route-30 (31st entry), LRU evicts route-0 (oldest)
       // from BOTH memory AND sessionStorage.
       vi.setSystemTime(now + 31 * 1000);
+      act(() => {
+        advanceTime(300);
+      });
       expect(result.current.getScrollPosition("route-0")).toBeNull();
+      expect(sessionStorage.getItem("scroll_position_route-0")).toBeNull();
       // route-30 should definitely exist
       expect(result.current.getScrollPosition("route-30")).not.toBeNull();
     });

@@ -10,15 +10,26 @@ import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 
 // ── 内存日志缓冲区 ──────────────────────────────────────────
 const MAX_LOG_ENTRIES = 500;
+const SCROLL_DEBUG_ENABLED = (() => {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem("DEV_SCROLL_DEBUG") === "true";
+  } catch {
+    return false;
+  }
+})();
+
 function debugLog(label: string, detail?: unknown) {
+  if (!SCROLL_DEBUG_ENABLED) {
+    return;
+  }
   const entry = { ts: Date.now(), label, detail };
   const buf = ((window as any).__scrollLog = (window as any).__scrollLog || []);
   buf.push(entry);
   if (buf.length > MAX_LOG_ENTRIES) {
     buf.shift();
-  }
-  if (!import.meta.env.DEV) {
-    return;
   }
   try {
     if (detail === undefined) {
@@ -101,9 +112,12 @@ export function useRouteScrollRestoration(
     instanceIdRef.current = ++globalInstanceCounter;
   }
   const iid = instanceIdRef.current;
-  const logId = (label: string, detail?: unknown) => {
-    debugLog(label, { iid, ...((detail as object) || {}) });
-  };
+  const logId = useCallback(
+    (label: string, detail?: unknown) => {
+      debugLog(label, { iid, ...((detail as object) || {}) });
+    },
+    [iid]
+  );
 
   useEffect(() => {
     logId("MOUNTED", {
@@ -468,12 +482,14 @@ export function useRouteScrollRestoration(
         // 固化 Key：记录此次写入使用的 routeKey
         lastSaveRouteKeyRef.current = routeKey;
 
-        debugLog("RAF save: executing", {
-          routeKey,
-          scrollTop,
-          anchorId: anchor?.itemId ?? null,
-          offsetRatio: anchor?.offsetRatio,
-        });
+        if (SCROLL_DEBUG_ENABLED) {
+          debugLog("RAF save: executing", {
+            routeKey,
+            scrollTop,
+            anchorId: anchor?.itemId ?? null,
+            offsetRatio: anchor?.offsetRatio,
+          });
+        }
         scrollPosition.saveScrollPosition(
           routeKey,
           scrollTop,

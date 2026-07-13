@@ -279,29 +279,42 @@ export const PhotoGrid = memo(
         index: number,
         _style: React.CSSProperties,
         options: { renderImage: boolean }
-      ) => (
-        <PhotoCard
-          deleting={deletingIdsRef.current?.has(photo.id)}
-          dominantColors={photo.dominantColors}
-          filename={photo.filename}
-          getDragIds={getDragIds}
-          height={photo.height}
-          id={photo.id}
-          isFavorite={photo.isFavorite}
-          isSelected={selectedIdsRef.current.has(photo.id)}
-          loading={index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"}
-          onClick={onSelect}
-          onDoubleClick={onDoubleClick}
-          onToggleFavorite={onToggleFavorite}
-          path={photo.path}
-          renderImage={options.renderImage}
-          searchQuery={searchQuery}
-          similarity={photo.similarity}
-          thumbnailSmallPath={photo.thumbnailSmallPath}
-          thumbnailPath={photo.thumbnailPath}
-          width={photo.width}
-        />
-      ),
+      ) => {
+        if (!options.renderImage) {
+          return (
+            <div
+              aria-hidden="true"
+              className="h-full w-full overflow-hidden rounded-[8px] bg-muted"
+              data-photo-id={photo.id}
+              data-photo-path={photo.path}
+            />
+          );
+        }
+        return (
+          <PhotoCard
+            deleting={deletingIdsRef.current?.has(photo.id)}
+            dominantColors={photo.dominantColors}
+            filename={photo.filename}
+            getDragIds={getDragIds}
+            height={photo.height}
+            id={photo.id}
+            isFavorite={photo.isFavorite}
+            isSelected={selectedIdsRef.current.has(photo.id)}
+            loading={
+              index < columnCount * INITIAL_EAGER_ROWS ? "eager" : "lazy"
+            }
+            onClick={onSelect}
+            onDoubleClick={onDoubleClick}
+            onToggleFavorite={onToggleFavorite}
+            path={photo.path}
+            searchQuery={searchQuery}
+            similarity={photo.similarity}
+            thumbnailSmallPath={photo.thumbnailSmallPath}
+            thumbnailPath={photo.thumbnailPath}
+            width={photo.width}
+          />
+        );
+      },
       [
         onSelect,
         onDoubleClick,

@@ -7,6 +7,7 @@ import {
   getVisibleMasonryHeaders,
   getVisibleMasonryItems,
 } from "@/hooks/useMasonryVirtualWindow";
+import { buildMasonryVisibilityIndex } from "@/utils/masonry-utils";
 
 function makePositions(count: number): MasonryItem[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -14,6 +15,18 @@ function makePositions(count: number): MasonryItem[] {
     left: (i % 3) * 110,
     width: 100,
     height: 90,
+  }));
+}
+
+function makeSixColumnPositions(count: number): MasonryItem[] {
+  const columnCount = 6;
+  const itemSize = 220;
+  const gap = 8;
+  return Array.from({ length: count }, (_, i) => ({
+    top: Math.floor(i / columnCount) * (itemSize + gap),
+    left: (i % columnCount) * (itemSize + gap),
+    width: itemSize,
+    height: itemSize,
   }));
 }
 
@@ -35,8 +48,52 @@ describe("masonry virtual window helpers", () => {
   });
 
   it("clamps dynamic overscan by viewport height", () => {
-    expect(clampDynamicOverscanPx(500, 180, 300)).toBe(1200);
+    expect(clampDynamicOverscanPx(500, 180, 300)).toBe(600);
     expect(clampDynamicOverscanPx(500, 180, 0)).toBe(1500);
+  });
+
+  it("caps very-fast six-column windows for large galleries", () => {
+    const viewportHeight = 900;
+    const rowStride = 228;
+    const peakMountedCounts = [200, 300, 1600].map((count) => {
+      const positions = makeSixColumnPositions(count);
+      const visibilityIndex = buildMasonryVisibilityIndex(positions);
+      const overscanPx = estimateOverscanPx(positions, 5, 6);
+      const velocityOverscanPx = clampDynamicOverscanPx(
+        overscanPx,
+        180,
+        viewportHeight
+      );
+      const lastPosition = positions.at(-1);
+      if (!lastPosition) {
+        return 0;
+      }
+      const totalHeight = lastPosition.top + lastPosition.height;
+      const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
+      let peakMounted = 0;
+
+      for (
+        let scrollTop = 0;
+        scrollTop <= maxScrollTop;
+        scrollTop += rowStride
+      ) {
+        peakMounted = Math.max(
+          peakMounted,
+          getVisibleMasonryItems(
+            positions,
+            scrollTop,
+            viewportHeight,
+            velocityOverscanPx,
+            visibilityIndex
+          ).length
+        );
+      }
+
+      return peakMounted;
+    });
+
+    expect(Math.max(...peakMountedCounts)).toBeLessThanOrEqual(132);
+    expect(peakMountedCounts[0]).toBeLessThan(200);
   });
 
   it("returns visible items with overscan", () => {

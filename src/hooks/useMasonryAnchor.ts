@@ -8,7 +8,6 @@ import {
   useRef,
 } from "react";
 import type { MasonryItem } from "@/hooks/useMasonryLayout";
-import { isDevRuntime } from "@/utils/gallery-perf";
 import { binarySearchVisibilityStart } from "@/utils/masonry-utils";
 
 export interface MasonryAnchor {
@@ -119,9 +118,6 @@ export function useMasonryAnchor<T extends { id: number }>({
       estimatedGlobalIndex: firstVisibleIdx,
     };
 
-    if (isDevRuntime()) {
-      console.log("📍 [Anchor Capture]", anchor);
-    }
     return anchor;
   }, [scrollRef]);
 

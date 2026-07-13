@@ -102,9 +102,9 @@ describe("useRouteScrollRestoration", () => {
       // Directly call saveScrollPosition
       act(() => {
         result.current.saveScrollPosition("test-direct-debounce", 600);
+        vi.advanceTimersByTime(300);
       });
 
-      // Since first call has huge elapsed time, flush happens immediately
       const stored = sessionStorage.getItem(
         "scroll_position_test-direct-debounce"
       );
@@ -215,7 +215,7 @@ describe("useRouteScrollRestoration", () => {
           }),
         {
           wrapper,
-          initialProps: { itemCount: 10 },
+          initialProps: { itemCount: 100 },
         }
       );
 
@@ -224,13 +224,18 @@ describe("useRouteScrollRestoration", () => {
 
       // Simulate normal user scrolling (not a restore)
       Object.defineProperty(el, "scrollTop", { value: 100, writable: true });
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+      setItemSpy.mockClear();
 
       // Grow itemCount (simulate infinite scroll from natural scrolling)
-      rerender({ itemCount: 20 });
+      rerender({ itemCount: 200 });
+      rerender({ itemCount: 300 });
 
       // Should NOT re-restore — user was scrolling naturally, itemCount
       // growth from fetchNextPage must not drag them back to saved position.
       expect(el.scrollTop).toBe(100);
+      expect(setItemSpy).not.toHaveBeenCalled();
+      setItemSpy.mockRestore();
     });
   });
 

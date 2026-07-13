@@ -40,8 +40,6 @@ import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
-import { preloadImagesWithConcurrency } from "@/utils/image-preloader";
-import { toLocalMediaUrl } from "@/utils/local-media-url";
 import {
   loadSortField,
   loadSortOrder,
@@ -343,59 +341,10 @@ function HomePage() {
     recordGalleryPerf("galleryLoadedPageCount", photosData?.pages.length ?? 0);
   }, [pagedPhotos.length, photosData?.pages.length]);
 
-  // ── 缩略图预加载（视口优先级排序 + 并发限流 + 追踪上限防内存泄露）───
-  // 问题：FIFO 顺序导致可见区域图片被排到队尾，快速滚动时首屏白屏。
-  // 方案：获取当前视口锚点索引，按距离视口的远近升序排列 newUrls，
-  // 只预加载靠近视口的一小段，避免分页追加时挤占可见图片解码。
-  const MAX_PRELOAD_TRACKED = 500;
-  const MAX_PAGE_PRELOAD_URLS = 36;
-  const PAGE_PRELOAD_CONCURRENCY = 4;
   const THUMBNAIL_BACKFILL_BATCH_SIZE = 4;
   const THUMBNAIL_BACKFILL_DELAY_MS = 6000;
   const THUMBNAIL_BACKFILL_IDLE_TIMEOUT_MS = 4000;
-  const preloadedRef = useRef<Set<string>>(new Set());
   const thumbnailBackfillQueuedRef = useRef<Set<number>>(new Set());
-  useEffect(() => {
-    const newEntries: Array<{ url: string; idx: number }> = [];
-    for (let i = 0; i < pagedPhotos.length; i++) {
-      const photo = pagedPhotos[i];
-      const filePath = photo.thumbnailPath;
-      if (!filePath) {
-        continue;
-      }
-      if (!preloadedRef.current.has(filePath)) {
-        if (preloadedRef.current.size >= MAX_PRELOAD_TRACKED) {
-          const oldest = preloadedRef.current.values().next().value;
-          if (oldest) {
-            preloadedRef.current.delete(oldest);
-          }
-        }
-        preloadedRef.current.add(filePath);
-        newEntries.push({ url: toLocalMediaUrl(filePath), idx: i });
-      }
-    }
-    if (newEntries.length > 0) {
-      // ── 视口优先级排序 ──────────────────────────────────
-      // 获取当前可见区域的第一个 item 索引，作为距离计算锚点。
-      // gridRef 未挂载时降级为 FIFO（保持原有行为）。
-      const anchor = gridRef.current?.getCurrentAnchor();
-      const visibleStartIdx = anchor?.estimatedGlobalIndex ?? -1;
-
-      if (visibleStartIdx >= 0 && newEntries.length > 1) {
-        // 按距离视口的远近升序排列
-        newEntries.sort(
-          (a, b) =>
-            Math.abs(a.idx - visibleStartIdx) -
-            Math.abs(b.idx - visibleStartIdx)
-        );
-      }
-      const preloadUrls = newEntries
-        .slice(0, MAX_PAGE_PRELOAD_URLS)
-        .map((e) => e.url);
-      recordGalleryPerf("galleryPreloadQueuedUrls", preloadUrls.length);
-      preloadImagesWithConcurrency(preloadUrls, PAGE_PRELOAD_CONCURRENCY);
-    }
-  }, [pagedPhotos]);
 
   // Active photo list: search results or paginated query.
   // `rawPhotos` is the real-time array; `photos` is deferred to avoid

@@ -12,7 +12,7 @@ import {
 export const HEADER_HEIGHT = 36;
 export const FAST_SCROLL_VELOCITY = 60;
 export const VERY_FAST_SCROLL_VELOCITY = 180;
-export const MAX_DYNAMIC_OVERSCAN_VIEWPORTS = 4;
+export const MAX_DYNAMIC_OVERSCAN_VIEWPORTS = 2;
 
 export interface VisibleMasonryItem {
   index: number;

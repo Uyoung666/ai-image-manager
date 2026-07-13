@@ -9,15 +9,26 @@ import {
 
 // ── 内存日志缓冲区（绕过 Electron console 重定向） ──────────
 const MAX_LOG_ENTRIES = 500;
+const SCROLL_DEBUG_ENABLED = (() => {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem("DEV_SCROLL_DEBUG") === "true";
+  } catch {
+    return false;
+  }
+})();
+
 function debugLog(label: string, detail?: unknown) {
+  if (!SCROLL_DEBUG_ENABLED) {
+    return;
+  }
   const entry = { ts: Date.now(), label, detail };
   const buf = ((window as any).__scrollLog = (window as any).__scrollLog || []);
   buf.push(entry);
   if (buf.length > MAX_LOG_ENTRIES) {
     buf.shift();
-  }
-  if (!import.meta.env.DEV) {
-    return;
   }
   try {
     if (detail === undefined) {
@@ -128,6 +139,8 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
   // 使用 useRef 而非 useState 避免不必要的 re-render
   // 滚动位置是 UI 副作用，不需要触发组件更新
   const positionsRef = useRef<Map<string, ScrollPosition>>(new Map());
+  const pendingWritesRef = useRef<Map<string, ScrollPosition>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // LRU 策略：删除最旧的条目（同时清理 sessionStorage）
   const ensureCacheLimit = useCallback(() => {
@@ -144,6 +157,7 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
       }
       if (oldestKey) {
         positions.delete(oldestKey);
+        pendingWritesRef.current.delete(oldestKey);
         try {
           sessionStorage.removeItem(`scroll_position_${oldestKey}`);
         } catch {
@@ -158,13 +172,8 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
   // （~0.5-5ms/次），快速滚动时每秒 60 次会明显卡顿。
   // 解决方案：先写内存 Map（瞬时），然后 debounce 批量写 sessionStorage，
   // 配合 scrollend 事件兜底确保最终一致性。
-  const pendingWritesRef = useRef<Map<string, ScrollPosition>>(new Map());
-  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFlushRef = useRef(0);
-
   const doFlush = useCallback(() => {
     flushTimerRef.current = null;
-    lastFlushRef.current = Date.now();
     const pending = pendingWritesRef.current;
     pendingWritesRef.current = new Map();
 
@@ -180,19 +189,13 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // 300ms debounce：短时间内的多次写入合并为一次 batch
+  // 300ms trailing debounce：连续滚动期间只更新内存，停止后再批量持久化。
+  // scrollend 和卸载 cleanup 仍会立即 flush，确保最终位置不丢失。
   const scheduleFlush = useCallback(() => {
-    const now = Date.now();
-    const elapsed = now - lastFlushRef.current;
-
-    if (elapsed >= 300) {
-      if (flushTimerRef.current) {
-        clearTimeout(flushTimerRef.current);
-      }
-      doFlush();
-    } else if (!flushTimerRef.current) {
-      flushTimerRef.current = setTimeout(doFlush, 300 - elapsed);
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
     }
+    flushTimerRef.current = setTimeout(doFlush, 300);
   }, [doFlush]);
 
   const flushPendingWrites = useCallback(() => {
@@ -205,14 +208,15 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
 
   const saveScrollPosition = useCallback(
     (routeKey: string, scrollTop: number, anchor?: ScrollAnchor) => {
-      // ── LOG_SAVE: 每一次写入 sessionStorage 的完整快照 ──
-      debugLog("LOG_SAVE", {
-        routeKey,
-        scrollTop,
-        anchorId: anchor?.itemId ?? null,
-        anchorOffset: anchor?.offsetFromTop ?? null,
-        stack: new Error().stack?.split("\n").slice(2, 4).join(" ← "),
-      });
+      if (SCROLL_DEBUG_ENABLED) {
+        debugLog("LOG_SAVE", {
+          routeKey,
+          scrollTop,
+          anchorId: anchor?.itemId ?? null,
+          anchorOffset: anchor?.offsetFromTop ?? null,
+          stack: new Error().stack?.split("\n").slice(2, 4).join(" ← "),
+        });
+      }
 
       ensureCacheLimit();
 
@@ -348,6 +352,11 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
 
   const clearScrollPosition = useCallback((routeKey: string) => {
     positionsRef.current.delete(routeKey);
+    pendingWritesRef.current.delete(routeKey);
+    if (pendingWritesRef.current.size === 0 && flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
     try {
       sessionStorage.removeItem(`scroll_position_${routeKey}`);
     } catch {
@@ -357,6 +366,11 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
 
   const clearAllScrollPositions = useCallback(() => {
     positionsRef.current.clear();
+    pendingWritesRef.current.clear();
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
     // 清理 sessionStorage 中的所有滚动位置
     try {
       const keysToRemove: string[] = [];
@@ -378,19 +392,19 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
     // 不清除位置，只标记锚点为 null，下次恢复时走像素 fallback
     const existing = positionsRef.current.get(routeKey);
     if (existing && existing.anchor) {
-      positionsRef.current.set(routeKey, {
+      const dirtyPosition = {
         ...existing,
         anchor: undefined,
         timestamp: Date.now(),
-      });
+      };
+      positionsRef.current.set(routeKey, dirtyPosition);
+      if (pendingWritesRef.current.has(routeKey)) {
+        pendingWritesRef.current.set(routeKey, dirtyPosition);
+      }
       try {
         sessionStorage.setItem(
           `scroll_position_${routeKey}`,
-          JSON.stringify({
-            ...existing,
-            anchor: undefined,
-            timestamp: Date.now(),
-          })
+          JSON.stringify(dirtyPosition)
         );
       } catch {
         /* ignore */
