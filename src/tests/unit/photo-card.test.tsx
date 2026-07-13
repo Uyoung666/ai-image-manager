@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoCard } from "@/components/PhotoCard";
 
 describe("PhotoCard", () => {
@@ -14,6 +14,16 @@ describe("PhotoCard", () => {
     thumbnailPath: null as string | null,
     width: 4000,
   };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    baseProps.onClick.mockClear();
+    baseProps.onDoubleClick.mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("does not render image element without thumbnailPath", () => {
     const { container } = render(<PhotoCard {...baseProps} />);
@@ -31,7 +41,7 @@ describe("PhotoCard", () => {
     expect(screen.getByText("4000 × 3000")).toBeInTheDocument();
   });
 
-  it("calls onClick when clicked", () => {
+  it("calls onClick after the double-click window expires", () => {
     render(<PhotoCard {...baseProps} />);
     const card = screen.getByText("test-photo.jpg").closest("[class*='group']");
     expect(card).not.toBeNull();
@@ -39,7 +49,26 @@ describe("PhotoCard", () => {
       return;
     }
     fireEvent.click(card);
+    expect(baseProps.onClick).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
     expect(baseProps.onClick).toHaveBeenCalled();
+  });
+
+  it("cancels the pending single click when double-clicked", () => {
+    render(<PhotoCard {...baseProps} />);
+    const card = screen.getByText("test-photo.jpg").closest("[class*='group']");
+    expect(card).not.toBeNull();
+    if (!card) {
+      return;
+    }
+
+    fireEvent.click(card, { detail: 1 });
+    fireEvent.click(card, { detail: 2 });
+    fireEvent.doubleClick(card);
+    vi.advanceTimersByTime(250);
+
+    expect(baseProps.onClick).not.toHaveBeenCalled();
+    expect(baseProps.onDoubleClick).toHaveBeenCalledTimes(1);
   });
 
   it("shows selection indicator when selected", () => {

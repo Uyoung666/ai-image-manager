@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -36,6 +36,8 @@ interface PhotoCardImageProps {
   url: string;
   width: number;
 }
+
+const SINGLE_CLICK_DELAY_MS = 250;
 
 /**
  * 向后兼容的无操作函数。
@@ -166,6 +168,16 @@ export const PhotoCard = memo(function PhotoCard({
 
   // ── 事件处理 ──────────────────────────────────────────────────────
   const starRef = useRef<HTMLButtonElement>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingClick = useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelPendingClick, [cancelPendingClick]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
@@ -195,14 +207,19 @@ export const PhotoCard = memo(function PhotoCard({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      onClick(id, e);
+      cancelPendingClick();
+      clickTimerRef.current = setTimeout(() => {
+        clickTimerRef.current = null;
+        onClick(id, e);
+      }, SINGLE_CLICK_DELAY_MS);
     },
-    [id, onClick]
+    [cancelPendingClick, id, onClick]
   );
 
   const handleDoubleClick = useCallback(() => {
+    cancelPendingClick();
     onDoubleClick(id);
-  }, [id, onDoubleClick]);
+  }, [cancelPendingClick, id, onDoubleClick]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -362,54 +362,55 @@ export const MasonryGrid = memo(
       const widthChanged =
         containerWidth !== prevWidth && containerWidth > 0 && prevWidth > 0;
 
-      if (scrollToId != null) {
-        const shouldScroll =
-          scrollToIdChanged || (positionsChanged && widthChanged);
-        if (shouldScroll) {
-          const idx = idToIndexMap.get(scrollToId);
-          if (idx !== undefined && positions[idx]) {
-            const pos = positions[idx];
-            const itemTop = pos.top;
-            const itemBottom = pos.top + pos.height;
-            const viewTop = el.scrollTop;
-            const viewBottom = el.scrollTop + el.clientHeight;
-            if (itemTop < viewTop || itemBottom > viewBottom) {
-              el.scrollTop = Math.max(
-                0,
-                itemTop - (el.clientHeight - pos.height) / 2
-              );
-            }
+      const syncScrollTopBeforePaint = (nextScrollTop: number) => {
+        const next = Math.max(0, nextScrollTop);
+        el.scrollTop = next;
+        prevScrollYRef.current = next;
+        scrollTopStateRef.current = next;
+        setScrollTop(next);
+      };
+
+      if (widthChanged && positionsChanged && prevPositions.length > 0) {
+        const currentScrollTop = el.scrollTop;
+        if (currentScrollTop <= 0) {
+          return;
+        }
+
+        let anchorIdx = -1;
+        let anchorOffset = 0;
+        for (let i = 0; i < prevPositions.length; i++) {
+          const p = prevPositions[i];
+          if (p.top + p.height > currentScrollTop) {
+            anchorIdx = i;
+            anchorOffset = p.top - currentScrollTop;
+            break;
           }
         }
-        return;
-      }
-
-      if (!(widthChanged && positionsChanged && prevPositions.length > 0)) {
-        return;
-      }
-
-      const currentScrollTop = el.scrollTop;
-      if (currentScrollTop <= 0) {
-        return;
-      }
-
-      let anchorIdx = -1;
-      let anchorOffset = 0;
-      for (let i = 0; i < prevPositions.length; i++) {
-        const p = prevPositions[i];
-        if (p.top + p.height > currentScrollTop) {
-          anchorIdx = i;
-          anchorOffset = p.top - currentScrollTop;
-          break;
+        if (anchorIdx < 0 || !positions[anchorIdx]) {
+          return;
         }
-      }
-      if (anchorIdx < 0 || !positions[anchorIdx]) {
+
+        const newTop = positions[anchorIdx].top - anchorOffset;
+        if (Math.abs(newTop - currentScrollTop) > 1) {
+          syncScrollTopBeforePaint(newTop);
+        }
         return;
       }
 
-      const newTop = positions[anchorIdx].top - anchorOffset;
-      if (Math.abs(newTop - currentScrollTop) > 1) {
-        el.scrollTop = Math.max(0, newTop);
+      if (scrollToId != null && scrollToIdChanged) {
+        const idx = idToIndexMap.get(scrollToId);
+        if (idx !== undefined && positions[idx]) {
+          const pos = positions[idx];
+          const itemTop = pos.top;
+          const itemBottom = pos.top + pos.height;
+          const viewTop = el.scrollTop;
+          const viewBottom = el.scrollTop + el.clientHeight;
+          if (itemTop < viewTop || itemBottom > viewBottom) {
+            syncScrollTopBeforePaint(
+              itemTop - (el.clientHeight - pos.height) / 2
+            );
+          }
+        }
       }
     }, [positions, scrollToId, routeKey, containerWidth, idToIndexMap]);
 

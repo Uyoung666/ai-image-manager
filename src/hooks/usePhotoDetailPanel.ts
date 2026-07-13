@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 
 interface Photo {
@@ -56,7 +56,7 @@ export function usePhotoDetailPanel(
   //
   // 注意：detailDismissed 和 detailPhoto 不在依赖数组中。
   // 它们由本 effect 输出（setState），通过 ref 解耦避免循环。
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (selectedIds.size === 1) {
       const id = selectedIds.values().next().value as number;
       if (id !== prevSelectedIdRef.current) {

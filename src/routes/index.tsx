@@ -1488,13 +1488,7 @@ function HomePage() {
       {lightboxIndex >= 0 && (
         <PhotoLightbox
           index={lightboxIndex}
-          onClose={(currentIndex) => {
-            setLightboxIndex(-1);
-            if (currentIndex >= 0 && currentIndex < photos.length) {
-              const photo = photos[currentIndex];
-              handleKeyboardSelect(photo.id);
-            }
-          }}
+          onClose={() => setLightboxIndex(-1)}
           open={lightboxIndex >= 0}
           photos={photos}
         />

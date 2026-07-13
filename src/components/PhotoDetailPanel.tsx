@@ -6,7 +6,13 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -22,6 +28,7 @@ interface PhotoDetail {
   height: number;
   id: number;
   path: string;
+  thumbnailPath?: string | null;
   width: number;
 }
 
@@ -115,6 +122,7 @@ export function PhotoDetailPanel({
     confidence: number;
   }> | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [loadedPreviewId, setLoadedPreviewId] = useState<number | null>(null);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
   const [resizing, setResizing] = useState(false);
   const resizeStartX = useRef(0);
@@ -130,14 +138,13 @@ export function PhotoDetailPanel({
   }
 
   const displayPhoto = photo ?? lastPhotoRef.current;
+  const hasPhoto = Boolean(photo);
 
-  useEffect(() => {
-    if (photo) {
-      requestAnimationFrame(() => setVisible(true));
-    } else {
-      setVisible(false);
-    }
-  }, [!!photo]);
+  // Commit the panel width before paint so the masonry grid never shows an
+  // intermediate full-width frame while the detail panel is opening.
+  useLayoutEffect(() => {
+    setVisible(hasPhoto);
+  }, [hasPhoto]);
 
   useEffect(() => {
     const cached = photo ? suggestionCache.get(photo.id) : undefined;
@@ -478,11 +485,21 @@ export function PhotoDetailPanel({
 
         {/* Preview image */}
         <div className="border-border border-b bg-background p-4">
-          <div className="flex items-center justify-center overflow-hidden rounded-[6px] bg-muted">
+          <div className="flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted">
             <img
               alt={displayPhoto.filename}
-              className="max-h-[200px] object-contain"
-              src={toLocalMediaUrl(displayPhoto.path)}
+              className={`max-h-full max-w-full object-contain transition-opacity duration-150 ${
+                loadedPreviewId === displayPhoto.id
+                  ? "opacity-100"
+                  : "opacity-0"
+              }`}
+              height={displayPhoto.height || undefined}
+              key={displayPhoto.id}
+              onLoad={() => setLoadedPreviewId(displayPhoto.id)}
+              src={toLocalMediaUrl(
+                displayPhoto.thumbnailPath ?? displayPhoto.path
+              )}
+              width={displayPhoto.width || undefined}
             />
           </div>
         </div>
