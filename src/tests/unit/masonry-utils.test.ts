@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { binarySearchStart } from "@/utils/masonry-utils";
+import {
+  binarySearchStart,
+  binarySearchVisibilityStart,
+  buildMasonryVisibilityIndex,
+} from "@/utils/masonry-utils";
 
 describe("binarySearchStart", () => {
   it("should return 0 for empty array", () => {
@@ -72,5 +76,36 @@ describe("binarySearchStart", () => {
     expect(binarySearchStart(positions, 0)).toBe(0);
     expect(binarySearchStart(positions, 30)).toBe(0);
     expect(binarySearchStart(positions, 61)).toBe(1);
+  });
+});
+
+describe("masonry visibility index", () => {
+  it("stays monotonic when item bottoms are not monotonic", () => {
+    const positions = [
+      { top: 0, height: 500 },
+      { top: 0, height: 100 },
+      { top: 110, height: 100 },
+      { top: 220, height: 100 },
+      { top: 330, height: 100 },
+    ];
+    const index = buildMasonryVisibilityIndex(positions);
+
+    expect(index).toEqual([500, 500, 500, 500, 500]);
+    expect(binarySearchVisibilityStart(index, 400)).toBe(0);
+    expect(binarySearchVisibilityStart(index, 501)).toBe(positions.length);
+  });
+
+  it("extends an existing index for paginated layouts", () => {
+    const first = buildMasonryVisibilityIndex([{ top: 0, height: 100 }]);
+    const next = buildMasonryVisibilityIndex(
+      [
+        { top: 110, height: 80 },
+        { top: 200, height: 120 },
+      ],
+      first
+    );
+
+    expect(next).toEqual([100, 190, 320]);
+    expect(first).toEqual([100]);
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MasonryItem } from "@/hooks/useMasonryLayout";
 import {
   clampDynamicOverscanPx,
   estimateOverscanPx,
@@ -6,7 +7,6 @@ import {
   getVisibleMasonryHeaders,
   getVisibleMasonryItems,
 } from "@/hooks/useMasonryVirtualWindow";
-import type { MasonryItem } from "@/hooks/useMasonryLayout";
 
 function makePositions(count: number): MasonryItem[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -40,13 +40,27 @@ describe("masonry virtual window helpers", () => {
   });
 
   it("returns visible items with overscan", () => {
-    const visible = getVisibleMasonryItems(makePositions(10), 250, 200, 50, 3);
+    const visible = getVisibleMasonryItems(makePositions(10), 250, 200, 50);
     expect(visible.map((item) => item.index)).toEqual([2, 3, 4, 5]);
     expect(visible[0].style).toMatchObject({
       position: "absolute",
       top: 200,
       width: 100,
     });
+  });
+
+  it("keeps a tall earlier card that still intersects the viewport", () => {
+    const positions: MasonryItem[] = [
+      { top: 0, left: 0, width: 100, height: 500 },
+      { top: 0, left: 110, width: 100, height: 100 },
+      { top: 110, left: 110, width: 100, height: 100 },
+      { top: 220, left: 110, width: 100, height: 100 },
+      { top: 330, left: 110, width: 100, height: 100 },
+    ];
+
+    expect(
+      getVisibleMasonryItems(positions, 400, 50, 0).map((item) => item.index)
+    ).toEqual([0, 4]);
   });
 
   it("returns visible headers with header height included", () => {

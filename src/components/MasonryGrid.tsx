@@ -28,7 +28,6 @@ import {
 } from "@/hooks/useMasonryVirtualWindow";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
-import { binarySearchStart } from "@/utils/masonry-utils";
 
 export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
@@ -70,6 +69,7 @@ interface MasonryGridProps {
   hasMore?: boolean;
   isLoadingMore?: boolean;
   isPlaceholderData?: boolean;
+  itemStateVersion?: unknown;
   items: Array<{
     id: number;
     width: number;
@@ -98,7 +98,7 @@ export const MasonryGrid = memo(
       columnCount,
       gap,
       groupHeaders,
-      overscan = 10,
+      overscan = 5,
       renderItem,
       onEndReached,
       hasMore = false,
@@ -133,13 +133,8 @@ export const MasonryGrid = memo(
     const prevScrollYRef = useRef(0);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
 
-    const { positions, totalHeight, headerPositions } = useMasonryLayout(
-      items,
-      containerWidth,
-      columnCount,
-      gap,
-      groupHeaders
-    );
+    const { positions, totalHeight, headerPositions, visibilityIndex } =
+      useMasonryLayout(items, containerWidth, columnCount, gap, groupHeaders);
 
     const idToIndexMap = useMemo(
       () => new Map(items.map((item, i) => [item.id, i])),
@@ -154,6 +149,7 @@ export const MasonryGrid = memo(
       items,
       positions,
       scrollRef,
+      visibilityIndex,
     });
 
     const restoreReady = positions.length > 0 && !isPlaceholderData;
@@ -190,11 +186,11 @@ export const MasonryGrid = memo(
     });
 
     const { handleMarqueeStart, marquee } = useMasonryMarquee({
-      columnCount,
       items,
       onMarqueeSelect,
       positions,
       scrollRef,
+      visibilityIndex,
     });
 
     const headerPositionsRef = useRef(headerPositions);
@@ -246,8 +242,16 @@ export const MasonryGrid = memo(
         scrollTimerRef.current = setTimeout(() => {
           isScrollingStateRef.current = false;
           setIsScrolling(false);
-          const latest = scrollRef.current?.scrollTop ?? scrollTopStateRef.current;
-          if (Math.abs(latest - scrollTopStateRef.current) > SCROLL_TOP_EPSILON) {
+          if (scrollOverscanMultiplierRef.current !== 1) {
+            scrollOverscanMultiplierRef.current = 1;
+            scrollVelocityRef.current = 0;
+            setScrollVelocity(0);
+          }
+          const latest =
+            scrollRef.current?.scrollTop ?? scrollTopStateRef.current;
+          if (
+            Math.abs(latest - scrollTopStateRef.current) > SCROLL_TOP_EPSILON
+          ) {
             scrollTopStateRef.current = latest;
             setScrollTop(latest);
             recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
@@ -414,6 +418,7 @@ export const MasonryGrid = memo(
       scrollRef,
       scrollTop,
       velocity: scrollVelocity,
+      visibilityIndex,
       viewportHeight,
     });
 
@@ -585,19 +590,17 @@ export const MasonryGrid = memo(
       </div>
     );
   }),
-  (prevProps, nextProps) => {
-    if (prevProps.items !== nextProps.items) return false;
-    if (prevProps.groupHeaders !== nextProps.groupHeaders) return false;
-    if (prevProps.containerWidth !== nextProps.containerWidth) return false;
-    if (prevProps.columnCount !== nextProps.columnCount) return false;
-    if (prevProps.gap !== nextProps.gap) return false;
-    if (prevProps.isLoadingMore !== nextProps.isLoadingMore) return false;
-    if (prevProps.hasMore !== nextProps.hasMore) return false;
-    if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData)
-      return false;
-    if (prevProps.selectionActive !== nextProps.selectionActive) return false;
-    if (prevProps.scrollToId !== nextProps.scrollToId) return false;
-    if (prevProps.routeKey !== nextProps.routeKey) return false;
-    return true;
-  }
+  (prevProps, nextProps) =>
+    prevProps.items === nextProps.items &&
+    prevProps.groupHeaders === nextProps.groupHeaders &&
+    prevProps.containerWidth === nextProps.containerWidth &&
+    prevProps.columnCount === nextProps.columnCount &&
+    prevProps.gap === nextProps.gap &&
+    prevProps.isLoadingMore === nextProps.isLoadingMore &&
+    prevProps.hasMore === nextProps.hasMore &&
+    prevProps.isPlaceholderData === nextProps.isPlaceholderData &&
+    prevProps.itemStateVersion === nextProps.itemStateVersion &&
+    prevProps.selectionActive === nextProps.selectionActive &&
+    prevProps.scrollToId === nextProps.scrollToId &&
+    prevProps.routeKey === nextProps.routeKey
 );

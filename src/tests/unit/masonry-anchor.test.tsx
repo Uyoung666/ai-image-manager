@@ -3,6 +3,7 @@ import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMasonryAnchor } from "@/hooks/useMasonryAnchor";
 import type { MasonryItem } from "@/hooks/useMasonryLayout";
+import { buildMasonryVisibilityIndex } from "@/utils/masonry-utils";
 
 function createScrollElement() {
   const el = document.createElement("div");
@@ -45,6 +46,7 @@ describe("useMasonryAnchor", () => {
         items,
         positions,
         scrollRef: { current: el },
+        visibilityIndex: buildMasonryVisibilityIndex(positions),
       })
     );
 
@@ -53,6 +55,43 @@ describe("useMasonryAnchor", () => {
       offsetFromTop: 50,
       offsetRatio: 0.25,
       estimatedGlobalIndex: 1,
+    });
+  });
+
+  it("captures a tall earlier card that still crosses the viewport", () => {
+    const el = createScrollElement();
+    el.scrollTop = 400;
+    const forwardedRef = createRef<any>();
+    const tallPositions: MasonryItem[] = [
+      { top: 0, left: 0, width: 100, height: 500 },
+      { top: 0, left: 110, width: 100, height: 100 },
+      { top: 110, left: 110, width: 100, height: 100 },
+      { top: 220, left: 110, width: 100, height: 100 },
+      { top: 330, left: 110, width: 100, height: 100 },
+    ];
+    const tallItems = tallPositions.map((position, index) => ({
+      ...position,
+      id: index + 1,
+    }));
+
+    const { result } = renderHook(() =>
+      useMasonryAnchor({
+        containerWidth: 300,
+        forwardedRef,
+        forceUnlockRef: { current: null },
+        idToIndexMap: new Map(tallItems.map((item, i) => [item.id, i])),
+        items: tallItems,
+        positions: tallPositions,
+        scrollRef: { current: el },
+        visibilityIndex: buildMasonryVisibilityIndex(tallPositions),
+      })
+    );
+
+    expect(result.current.getCurrentAnchor()).toMatchObject({
+      itemId: 1,
+      offsetFromTop: 400,
+      offsetRatio: 0.8,
+      estimatedGlobalIndex: 0,
     });
   });
 
@@ -70,6 +109,7 @@ describe("useMasonryAnchor", () => {
         items,
         positions,
         scrollRef: { current: el },
+        visibilityIndex: buildMasonryVisibilityIndex(positions),
       })
     );
 

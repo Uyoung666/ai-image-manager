@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { MasonryItem } from "@/hooks/useMasonryLayout";
 import { isDevRuntime } from "@/utils/gallery-perf";
-import { binarySearchStart } from "@/utils/masonry-utils";
+import { binarySearchVisibilityStart } from "@/utils/masonry-utils";
 
 export interface MasonryAnchor {
   itemId: number;
@@ -34,6 +34,7 @@ interface UseMasonryAnchorOptions<T extends { id: number }> {
   items: T[];
   positions: MasonryItem[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  visibilityIndex: number[];
 }
 
 const ENFORCE_LOCK_MS = 800;
@@ -46,6 +47,7 @@ export function useMasonryAnchor<T extends { id: number }>({
   items,
   positions,
   scrollRef,
+  visibilityIndex,
 }: UseMasonryAnchorOptions<T>): {
   getCurrentAnchor: () => MasonryAnchor | null;
   gridRef: RefObject<MasonryGridHandle | null>;
@@ -53,6 +55,7 @@ export function useMasonryAnchor<T extends { id: number }>({
   const latestPositionsRef = useRef(positions);
   const latestIdMapRef = useRef(idToIndexMap);
   const latestItemsRef = useRef(items);
+  const latestVisibilityIndexRef = useRef(visibilityIndex);
   const gridRef = useRef<MasonryGridHandle | null>(null);
   const enforceLockRef = useRef<{
     itemId: number;
@@ -64,7 +67,8 @@ export function useMasonryAnchor<T extends { id: number }>({
     latestPositionsRef.current = positions;
     latestIdMapRef.current = idToIndexMap;
     latestItemsRef.current = items;
-  }, [positions, idToIndexMap, items]);
+    latestVisibilityIndexRef.current = visibilityIndex;
+  }, [positions, idToIndexMap, items, visibilityIndex]);
 
   const enforceScroll = useCallback(() => {
     const lock = enforceLockRef.current;
@@ -92,7 +96,10 @@ export function useMasonryAnchor<T extends { id: number }>({
     }
 
     const currentScrollTop = el.scrollTop;
-    const firstVisibleIdx = binarySearchStart(posList, currentScrollTop);
+    const firstVisibleIdx = binarySearchVisibilityStart(
+      latestVisibilityIndexRef.current,
+      currentScrollTop
+    );
     if (firstVisibleIdx < 0 || firstVisibleIdx >= curItems.length) {
       return null;
     }

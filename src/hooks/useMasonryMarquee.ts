@@ -6,7 +6,10 @@ import {
   useState,
 } from "react";
 import type { MasonryItem } from "@/hooks/useMasonryLayout";
-import { binarySearchStart } from "@/utils/masonry-utils";
+import {
+  binarySearchVisibilityStart,
+  buildMasonryVisibilityIndex,
+} from "@/utils/masonry-utils";
 
 export interface MasonryMarqueeState {
   startX: number;
@@ -19,7 +22,7 @@ export function collectMarqueeSelection<T extends { id: number }>(
   marquee: MasonryMarqueeState,
   positions: MasonryItem[],
   items: T[],
-  columnCount: number
+  visibilityIndex?: number[]
 ): Set<number> {
   const minX = Math.min(marquee.startX, marquee.x);
   const maxX = Math.max(marquee.startX, marquee.x);
@@ -31,7 +34,11 @@ export function collectMarqueeSelection<T extends { id: number }>(
     return selected;
   }
 
-  const startIdx = Math.max(0, binarySearchStart(positions, minY) - columnCount);
+  const indexedBottoms =
+    visibilityIndex?.length === positions.length
+      ? visibilityIndex
+      : buildMasonryVisibilityIndex(positions);
+  const startIdx = binarySearchVisibilityStart(indexedBottoms, minY);
   for (let i = startIdx; i < positions.length; i++) {
     const pos = positions[i];
     if (pos.top > maxY) {
@@ -56,19 +63,19 @@ export function collectMarqueeSelection<T extends { id: number }>(
 }
 
 interface UseMasonryMarqueeOptions<T extends { id: number }> {
-  columnCount: number;
   items: T[];
   onMarqueeSelect?: (ids: Set<number>) => void;
   positions: MasonryItem[];
   scrollRef: RefObject<HTMLDivElement | null>;
+  visibilityIndex: number[];
 }
 
 export function useMasonryMarquee<T extends { id: number }>({
-  columnCount,
   items,
   onMarqueeSelect,
   positions,
   scrollRef,
+  visibilityIndex,
 }: UseMasonryMarqueeOptions<T>): {
   handleMarqueeStart: (e: ReactMouseEvent) => void;
   marquee: MasonryMarqueeState | null;
@@ -120,7 +127,7 @@ export function useMasonryMarquee<T extends { id: number }>({
         currentMarquee,
         positions,
         items,
-        columnCount
+        visibilityIndex
       );
       if (selected.size > 0) {
         currentSelectMarquee(selected);
@@ -134,7 +141,14 @@ export function useMasonryMarquee<T extends { id: number }>({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [columnCount, items, marquee, onMarqueeSelect, positions, scrollRef]);
+  }, [
+    items,
+    marquee,
+    onMarqueeSelect,
+    positions,
+    scrollRef,
+    visibilityIndex,
+  ]);
 
   return { handleMarqueeStart, marquee };
 }

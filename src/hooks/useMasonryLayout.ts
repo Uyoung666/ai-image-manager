@@ -1,5 +1,6 @@
 import { useMemo, useRef } from "react";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
+import { buildMasonryVisibilityIndex } from "@/utils/masonry-utils";
 
 export interface MasonryItem {
   height: number;
@@ -17,6 +18,7 @@ export interface MasonryLayout {
   headerPositions: HeaderPosition[];
   positions: MasonryItem[];
   totalHeight: number;
+  visibilityIndex: number[];
 }
 
 export interface GroupHeaderInput {
@@ -38,11 +40,13 @@ function computeLayout(
   groupHeaders: GroupHeaderInput[] | undefined,
   startIndex: number,
   initialColumnHeights?: number[],
-  existingHeaders?: HeaderPosition[]
+  existingHeaders?: HeaderPosition[],
+  existingVisibilityIndex?: number[]
 ): {
   positions: MasonryItem[];
   columnHeights: number[];
   headerPositions: HeaderPosition[];
+  visibilityIndex: number[];
 } {
   const HEADER_HEIGHT = 36;
   const positions: MasonryItem[] = [];
@@ -109,8 +113,17 @@ function computeLayout(
   const allHeaderPositions = existingHeaders
     ? [...existingHeaders, ...headerPositions]
     : headerPositions;
+  const visibilityIndex = buildMasonryVisibilityIndex(
+    positions,
+    existingVisibilityIndex
+  );
 
-  return { positions, columnHeights, headerPositions: allHeaderPositions };
+  return {
+    positions,
+    columnHeights,
+    headerPositions: allHeaderPositions,
+    visibilityIndex,
+  };
 }
 
 export function useMasonryLayout(
@@ -129,6 +142,7 @@ export function useMasonryLayout(
     colWidth: number;
     columnCount: number;
     firstItemId: number | null;
+    visibilityIndex: number[];
   } | null>(null);
 
   return useMemo(() => {
@@ -136,7 +150,12 @@ export function useMasonryLayout(
     if (containerWidth <= 0 || columnCount <= 0 || items.length === 0) {
       prevRef.current = null;
       recordGalleryPerf("masonryLayoutMs", performance.now() - start);
-      return { positions: [], totalHeight: 0, headerPositions: [] };
+      return {
+        positions: [],
+        totalHeight: 0,
+        headerPositions: [],
+        visibilityIndex: [],
+      };
     }
 
     const colWidth = (containerWidth - (columnCount - 1) * gap) / columnCount;
@@ -181,7 +200,8 @@ export function useMasonryLayout(
         newHeaders,
         prev.itemCount,
         [...prev.columnHeights],
-        prev.headerPositions
+        prev.headerPositions,
+        prev.visibilityIndex
       );
 
       const positions = [...prev.positions, ...result.positions];
@@ -201,12 +221,14 @@ export function useMasonryLayout(
         colWidth,
         columnCount,
         firstItemId,
+        visibilityIndex: result.visibilityIndex,
       };
 
       const layout = {
         positions,
         totalHeight,
         headerPositions: result.headerPositions,
+        visibilityIndex: result.visibilityIndex,
       };
       recordGalleryPerf("masonryLayoutMs", performance.now() - start);
       return layout;
@@ -237,12 +259,14 @@ export function useMasonryLayout(
       colWidth,
       columnCount,
       firstItemId,
+      visibilityIndex: result.visibilityIndex,
     };
 
     const layout = {
       positions: result.positions,
       totalHeight,
       headerPositions: result.headerPositions,
+      visibilityIndex: result.visibilityIndex,
     };
     recordGalleryPerf("masonryLayoutMs", performance.now() - start);
     return layout;

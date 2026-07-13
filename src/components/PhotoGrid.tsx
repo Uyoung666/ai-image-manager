@@ -136,6 +136,10 @@ export const PhotoGrid = memo(
     selectedIdsRef.current = selectedIds;
     const deletingIdsRef = useRef(deletingIds);
     deletingIdsRef.current = deletingIds;
+    const itemStateVersion = useMemo(
+      () => ({ deletingIds, selectedIds }),
+      [deletingIds, selectedIds]
+    );
     const groupHeaderCacheRef = useRef<{
       headers: GroupHeader[];
       language: string;
@@ -531,6 +535,7 @@ export const PhotoGrid = memo(
             hasMore={hasMore}
             isLoadingMore={isLoadingMore}
             isPlaceholderData={isPlaceholderData}
+            itemStateVersion={itemStateVersion}
             items={photos}
             onEndReached={onEndReached}
             onMarqueeSelect={onMarqueeSelect}
@@ -562,6 +567,9 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.selectedIds !== nextProps.selectedIds) {
+      return false;
+    }
+    if (prevProps.deletingIds !== nextProps.deletingIds) {
       return false;
     }
     if (prevProps.routeKey !== nextProps.routeKey) {

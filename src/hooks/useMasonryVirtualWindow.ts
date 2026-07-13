@@ -4,7 +4,10 @@ import type {
   MasonryItem,
 } from "@/hooks/useMasonryLayout";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
-import { binarySearchStart } from "@/utils/masonry-utils";
+import {
+  binarySearchVisibilityStart,
+  buildMasonryVisibilityIndex,
+} from "@/utils/masonry-utils";
 
 export const HEADER_HEIGHT = 36;
 export const FAST_SCROLL_VELOCITY = 60;
@@ -66,14 +69,18 @@ export function getVisibleMasonryItems(
   scrollTop: number,
   viewportHeight: number,
   overscanPx: number,
-  columnCount: number
+  visibilityIndex?: number[]
 ): VisibleMasonryItem[] {
   if (positions.length === 0) {
     return [];
   }
   const top = scrollTop - overscanPx;
   const bottom = scrollTop + viewportHeight + overscanPx;
-  const startIdx = Math.max(0, binarySearchStart(positions, top) - columnCount);
+  const indexedBottoms =
+    visibilityIndex?.length === positions.length
+      ? visibilityIndex
+      : buildMasonryVisibilityIndex(positions);
+  const startIdx = binarySearchVisibilityStart(indexedBottoms, top);
   const result: VisibleMasonryItem[] = [];
 
   for (let i = startIdx; i < positions.length; i++) {
@@ -124,6 +131,7 @@ interface UseMasonryVirtualWindowOptions {
   scrollTop: number;
   velocity: number;
   viewportHeight: number;
+  visibilityIndex: number[];
 }
 
 export function useMasonryVirtualWindow({
@@ -136,6 +144,7 @@ export function useMasonryVirtualWindow({
   scrollRef,
   scrollTop,
   velocity,
+  visibilityIndex,
   viewportHeight,
 }: UseMasonryVirtualWindowOptions): {
   overscanPx: number;
@@ -165,7 +174,7 @@ export function useMasonryVirtualWindow({
       effectiveScrollTop,
       effectiveHeight,
       velocityOverscanPx,
-      columnCount
+      visibilityIndex
     );
     recordGalleryPerf("masonryVisibleItems", result.length);
     recordGalleryPerf(
@@ -182,6 +191,7 @@ export function useMasonryVirtualWindow({
     scrollTop,
     velocity,
     velocityOverscanPx,
+    visibilityIndex,
     viewportHeight,
   ]);
 
