@@ -10,6 +10,7 @@ export interface Photo {
   path: string;
   score?: number;
   similarity?: number;
+  thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
   width: number;
 }

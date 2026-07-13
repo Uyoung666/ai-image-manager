@@ -39,6 +39,7 @@ import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
+import { recordGalleryPerf } from "@/utils/gallery-perf";
 import { preloadImagesWithConcurrency } from "@/utils/image-preloader";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 import {
@@ -337,17 +338,31 @@ function HomePage() {
   );
   const totalFromQuery = photosData?.pages[0]?.total ?? 0;
 
+  useEffect(() => {
+    recordGalleryPerf("galleryPagedPhotoCount", pagedPhotos.length);
+    recordGalleryPerf("galleryLoadedPageCount", photosData?.pages.length ?? 0);
+  }, [pagedPhotos.length, photosData?.pages.length]);
+
   // ── 缩略图预加载（视口优先级排序 + 并发限流 + 追踪上限防内存泄露）───
   // 问题：FIFO 顺序导致可见区域图片被排到队尾，快速滚动时首屏白屏。
   // 方案：获取当前视口锚点索引，按距离视口的远近升序排列 newUrls，
-  // 确保离用户最近的图片优先进入 12 个并发加载槽。
+  // 只预加载靠近视口的一小段，避免分页追加时挤占可见图片解码。
   const MAX_PRELOAD_TRACKED = 500;
+  const MAX_PAGE_PRELOAD_URLS = 36;
+  const PAGE_PRELOAD_CONCURRENCY = 4;
+  const THUMBNAIL_BACKFILL_BATCH_SIZE = 4;
+  const THUMBNAIL_BACKFILL_DELAY_MS = 6000;
+  const THUMBNAIL_BACKFILL_IDLE_TIMEOUT_MS = 4000;
   const preloadedRef = useRef<Set<string>>(new Set());
+  const thumbnailBackfillQueuedRef = useRef<Set<number>>(new Set());
   useEffect(() => {
     const newEntries: Array<{ url: string; idx: number }> = [];
     for (let i = 0; i < pagedPhotos.length; i++) {
       const photo = pagedPhotos[i];
-      const filePath = photo.thumbnailPath ?? photo.path;
+      const filePath = photo.thumbnailPath;
+      if (!filePath) {
+        continue;
+      }
       if (!preloadedRef.current.has(filePath)) {
         if (preloadedRef.current.size >= MAX_PRELOAD_TRACKED) {
           const oldest = preloadedRef.current.values().next().value;
@@ -374,10 +389,11 @@ function HomePage() {
             Math.abs(b.idx - visibleStartIdx)
         );
       }
-      preloadImagesWithConcurrency(
-        newEntries.map((e) => e.url),
-        12
-      );
+      const preloadUrls = newEntries
+        .slice(0, MAX_PAGE_PRELOAD_URLS)
+        .map((e) => e.url);
+      recordGalleryPerf("galleryPreloadQueuedUrls", preloadUrls.length);
+      preloadImagesWithConcurrency(preloadUrls, PAGE_PRELOAD_CONCURRENCY);
     }
   }, [pagedPhotos]);
 
@@ -394,6 +410,124 @@ function HomePage() {
   prevIsSearching.current = isSearching;
   const photosRef = useRef(rawPhotos);
   photosRef.current = rawPhotos;
+
+  useEffect(() => {
+    const missingIds: number[] = [];
+    for (const photo of rawPhotos) {
+      if (
+        photo.thumbnailPath ||
+        thumbnailBackfillQueuedRef.current.has(photo.id)
+      ) {
+        continue;
+      }
+      thumbnailBackfillQueuedRef.current.add(photo.id);
+      missingIds.push(photo.id);
+      if (missingIds.length >= THUMBNAIL_BACKFILL_BATCH_SIZE) {
+        break;
+      }
+    }
+    if (missingIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    let idleHandle: number | null = null;
+    const runBackfill = () => {
+      recordGalleryPerf("thumbnailBackfillQueuedIds", missingIds.length);
+      ipc.client.photos
+        .backfillMissingThumbnails({
+          ids: missingIds,
+          limit: THUMBNAIL_BACKFILL_BATCH_SIZE,
+        })
+        .then((result) => {
+          if (cancelled) {
+            return;
+          }
+          const updated = result.updated ?? [];
+          recordGalleryPerf("thumbnailBackfillUpdated", updated.length);
+          if (updated.length === 0) {
+            return;
+          }
+          const thumbnailPathById = new Map(
+            updated.map((item) => [item.id, item])
+          );
+          setSearchResults(
+            (current) =>
+              current?.map((photo) => {
+                const updatedPhoto = thumbnailPathById.get(photo.id);
+                return updatedPhoto
+                  ? {
+                      ...photo,
+                      thumbnailPath: updatedPhoto.thumbnailPath,
+                      thumbnailSmallPath: updatedPhoto.thumbnailSmallPath,
+                    }
+                  : photo;
+              }) ?? current
+          );
+          queryClient.setQueriesData({ queryKey: ["photos"] }, (data: any) => {
+            if (!data?.pages) {
+              return data;
+            }
+            let changed = false;
+            const pages = data.pages.map((page: any) => ({
+              ...page,
+              items: page.items.map((photo: Photo) => {
+                const updatedPhoto = thumbnailPathById.get(photo.id);
+                if (!updatedPhoto) {
+                  return photo;
+                }
+                changed = true;
+                return {
+                  ...photo,
+                  thumbnailPath: updatedPhoto.thumbnailPath,
+                  thumbnailSmallPath: updatedPhoto.thumbnailSmallPath,
+                };
+              }),
+            }));
+            return changed ? { ...data, pages } : data;
+          });
+        })
+        .catch(() => {
+          for (const id of missingIds) {
+            thumbnailBackfillQueuedRef.current.delete(id);
+          }
+        });
+    };
+    const timer = window.setTimeout(() => {
+      const idleWindow = window as Window & {
+        cancelIdleCallback?: (handle: number) => void;
+        requestIdleCallback?: (
+          callback: () => void,
+          options?: { timeout: number }
+        ) => number;
+      };
+      if (idleWindow.requestIdleCallback) {
+        idleHandle = idleWindow.requestIdleCallback(runBackfill, {
+          timeout: THUMBNAIL_BACKFILL_IDLE_TIMEOUT_MS,
+        });
+      } else {
+        idleHandle = window.setTimeout(runBackfill, 1000);
+      }
+    }, THUMBNAIL_BACKFILL_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (idleHandle !== null) {
+        const idleWindow = window as Window & {
+          cancelIdleCallback?: (handle: number) => void;
+        };
+        if (idleWindow.cancelIdleCallback) {
+          idleWindow.cancelIdleCallback(idleHandle);
+        } else {
+          window.clearTimeout(idleHandle);
+        }
+      }
+      for (const id of missingIds) {
+        thumbnailBackfillQueuedRef.current.delete(id);
+      }
+    };
+  }, [rawPhotos]);
 
   // 持久化搜索状态 + 挂载时自动重新搜索
   const searchStateRef = useRef({ searchQuery, searchMode, colorHex });
@@ -499,6 +633,7 @@ function HomePage() {
       !isFetchingNextPage &&
       !isSearching
     ) {
+      recordGalleryPerf("scrollRestoreFetchNextPageAtItems", pagedPhotos.length);
       fetchNextPage();
     }
   }, [
@@ -506,6 +641,7 @@ function HomePage() {
     hasNextPage,
     isFetchingNextPage,
     isSearching,
+    pagedPhotos.length,
     fetchNextPage,
   ]);
 

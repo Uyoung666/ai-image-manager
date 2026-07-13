@@ -17,9 +17,23 @@ interface PhotoCardProps {
   onDoubleClick: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   path: string;
+  renderImage?: boolean;
   searchQuery?: string;
   similarity?: number;
+  thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
+  width: number;
+}
+
+interface PhotoCardImageProps {
+  filename: string;
+  hasThumbnail: boolean;
+  height: number;
+  loading: "eager" | "lazy";
+  onError: () => void;
+  renderImage: boolean;
+  srcSet?: string;
+  url: string;
   width: number;
 }
 
@@ -54,10 +68,47 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   );
 }
 
+function PhotoCardImage({
+  filename,
+  hasThumbnail,
+  height,
+  loading,
+  onError,
+  renderImage,
+  srcSet,
+  url,
+  width,
+}: PhotoCardImageProps) {
+  if (!(hasThumbnail && renderImage)) {
+    return (
+      <div className="absolute inset-0 bg-muted/70">
+        <div className="absolute inset-0 bg-gradient-to-br from-foreground/[0.03] to-transparent" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      alt={filename}
+      className="h-full w-full object-cover"
+      decoding="async"
+      fetchPriority={loading === "eager" ? "high" : "auto"}
+      height={height || undefined}
+      loading={loading}
+      onError={onError}
+      sizes="(max-width: 900px) 160px, 220px"
+      src={url}
+      srcSet={srcSet}
+      width={width || undefined}
+    />
+  );
+}
+
 export const PhotoCard = memo(function PhotoCard({
   id,
   path,
   thumbnailPath,
+  thumbnailSmallPath,
   loading = "lazy",
   dominantColors,
   filename,
@@ -69,28 +120,31 @@ export const PhotoCard = memo(function PhotoCard({
   deleting,
   searchQuery,
   similarity,
+  renderImage = true,
   onClick,
   onDoubleClick,
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
+  const hasThumbnail = Boolean(thumbnailPath);
 
   // ── URL 计算 ──────────────────────────────────────────────────────
   // toLocalMediaUrl 现在是同步函数（端口由 preload 在窗口创建时注入），
   // URL 在组件生命周期内稳定不变。
   const [retryCount, setRetryCount] = useState(0);
-  const url = useMemo(
-    () => {
-      const base = thumbnailPath ? toLocalMediaUrl(thumbnailPath) : toLocalMediaUrl(path);
-      return retryCount > 0 ? `${base}?retry=${retryCount}` : base;
-    },
-    [thumbnailPath, path, retryCount]
-  );
+  const url = useMemo(() => {
+    const base = thumbnailPath ? toLocalMediaUrl(thumbnailPath) : "";
+    return retryCount > 0 ? `${base}?retry=${retryCount}` : base;
+  }, [thumbnailPath, retryCount]);
+  const srcSet = useMemo(() => {
+    if (!(thumbnailSmallPath && thumbnailPath)) {
+      return undefined;
+    }
+    const smallUrl = toLocalMediaUrl(thumbnailSmallPath);
+    const mediumUrl = toLocalMediaUrl(thumbnailPath);
+    return `${smallUrl} 256w, ${mediumUrl} 512w`;
+  }, [thumbnailSmallPath, thumbnailPath]);
 
-  // ── 原生图片加载状态 ──────────────────────────────────────────────
-  // 完全依赖浏览器 <img> 的 onLoad / onError 回调，
-  // 不再维护自定义 LRU 缓存、Blob URL 池或预加载状态机。
-  const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   // ── 主色提取 ──────────────────────────────────────────────────────
@@ -163,9 +217,29 @@ export const PhotoCard = memo(function PhotoCard({
     [id, onClick, onDoubleClick]
   );
 
+  const handleImageError = useCallback(() => {
+    recordGalleryMediaStat("photoCardImageError");
+    setImgError(true);
+  }, []);
+
   // Clamp extreme aspect ratios for visual consistency
   const rawAspect = width && height ? width / height : 4 / 3;
   const aspectRatio = Math.max(0.6, Math.min(rawAspect, 3.0));
+
+  if (!renderImage) {
+    return (
+      <div
+        aria-hidden="true"
+        className="relative w-full overflow-hidden rounded-[8px] bg-muted"
+        data-photo-id={id}
+        data-photo-path={path}
+        style={{
+          aspectRatio,
+          ...(bgColor ? { backgroundColor: bgColor } : {}),
+        }}
+      />
+    );
+  }
 
   // ── 错误状态 ──────────────────────────────────────────────────────
   if (imgError) {
@@ -196,7 +270,6 @@ export const PhotoCard = memo(function PhotoCard({
           onClick={(e) => {
             e.stopPropagation();
             setImgError(false);
-            setImgLoaded(false);
             setRetryCount((c) => c + 1);
           }}
           type="button"
@@ -234,40 +307,16 @@ export const PhotoCard = memo(function PhotoCard({
       }}
       tabIndex={-1}
     >
-      {/* 骨架屏：图片未加载完成前显示 shimmer 动画 */}
-      {!imgLoaded && (
-        <div className="absolute inset-0 animate-shimmer bg-muted">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent" />
-        </div>
-      )}
-
-      {/*
-        原生 <img> — 浏览器内核全面接管：
-        - loading="lazy"：视口感知的延迟加载
-        - decoding="async"：异步解码，不阻塞主线程
-        - 纹理上传、GPU 解码、内存释放全部由 Chromium 管理
-      */}
-      <img
-        alt={filename}
-        className={`h-full w-full object-cover transition-all duration-300 ease-out group-hover:scale-105 ${
-          imgLoaded
-            ? "scale-100 opacity-100 blur-0"
-            : "scale-[1.02] opacity-0 blur-[6px]"
-        }`}
-        decoding="async"
-        fetchPriority={loading === "eager" ? "high" : "auto"}
-        height={height || undefined}
+      <PhotoCardImage
+        filename={filename}
+        hasThumbnail={hasThumbnail}
+        height={height}
         loading={loading}
-        onError={() => {
-          recordGalleryMediaStat("photoCardImageError");
-          setImgError(true);
-        }}
-        onLoad={() => {
-          recordGalleryMediaStat("photoCardImageLoad");
-          setImgLoaded(true);
-        }}
-        src={url}
-        width={width || undefined}
+        onError={handleImageError}
+        renderImage={renderImage}
+        srcSet={srcSet}
+        url={url}
+        width={width}
       />
 
       {/* Hover overlay */}

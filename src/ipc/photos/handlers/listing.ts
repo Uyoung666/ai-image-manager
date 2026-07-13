@@ -452,7 +452,14 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     }
     totalCache.set(countCacheKey, { value: total, timestamp: Date.now() });
   }
-  const items = query.limit(limit).offset(offset).all();
+  const items = query
+    .limit(limit)
+    .offset(offset)
+    .all()
+    .map((photo) => ({
+      ...photo,
+      thumbnailSmallPath: null,
+    }));
 
   return { items, total, offset, limit };
 });

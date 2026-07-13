@@ -12,16 +12,17 @@ import {
 import { useTranslation } from "react-i18next";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import {
-  type GroupHeaderInput,
-  useMasonryLayout,
-} from "@/hooks/useMasonryLayout";
-import {
   type MasonryGridHandle,
   useMasonryAnchor,
 } from "@/hooks/useMasonryAnchor";
 import { useMasonryEndReached } from "@/hooks/useMasonryEndReached";
+import {
+  type GroupHeaderInput,
+  useMasonryLayout,
+} from "@/hooks/useMasonryLayout";
 import { useMasonryMarquee } from "@/hooks/useMasonryMarquee";
 import {
+  getVelocityOverscanMultiplier,
   HEADER_HEIGHT,
   useMasonryVirtualWindow,
 } from "@/hooks/useMasonryVirtualWindow";
@@ -29,10 +30,36 @@ import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import { binarySearchStart } from "@/utils/masonry-utils";
 
-export type { GroupHeaderInput as GroupHeader };
-export type { MasonryGridHandle };
+export type { GroupHeaderInput as GroupHeader, MasonryGridHandle };
 
 const SCROLL_TOP_EPSILON = 0.5;
+const SCROLL_RENDER_STEP_PX = 96;
+const IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE = 1;
+const IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER = 2;
+
+export function shouldRenderItemImage(
+  style: React.CSSProperties,
+  scrollTop: number,
+  viewportHeight: number
+): boolean {
+  if (viewportHeight <= 0) {
+    return true;
+  }
+  const itemTop = Number(style.top) || 0;
+  const itemHeight = Number(style.height) || 0;
+  const imageTop =
+    scrollTop - viewportHeight * IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE;
+  const imageBottom =
+    scrollTop + viewportHeight * IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER;
+  return itemTop + itemHeight >= imageTop && itemTop <= imageBottom;
+}
+
+export function shouldUpdateScrollRenderTop(
+  currentScrollTop: number,
+  renderedScrollTop: number
+): boolean {
+  return Math.abs(currentScrollTop - renderedScrollTop) >= SCROLL_RENDER_STEP_PX;
+}
 
 interface MasonryGridProps {
   className?: string;
@@ -55,7 +82,8 @@ interface MasonryGridProps {
   renderItem: (
     item: any,
     index: number,
-    style: React.CSSProperties
+    style: React.CSSProperties,
+    options: { renderImage: boolean }
   ) => ReactNode;
   routeKey: string;
   scrollToId?: number | null;
@@ -99,6 +127,7 @@ export const MasonryGrid = memo(
     const isScrollingStateRef = useRef(false);
     const currentTimeLabelRef = useRef("");
     const scrollVelocityRef = useRef(0);
+    const scrollOverscanMultiplierRef = useRef(1);
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
@@ -185,17 +214,17 @@ export const MasonryGrid = memo(
 
         const dy = Math.abs(el.scrollTop - prevScrollYRef.current);
         prevScrollYRef.current = el.scrollTop;
-        if (Math.abs(dy - scrollVelocityRef.current) > SCROLL_TOP_EPSILON) {
+        const nextOverscanMultiplier = getVelocityOverscanMultiplier(dy);
+        if (nextOverscanMultiplier !== scrollOverscanMultiplierRef.current) {
+          scrollOverscanMultiplierRef.current = nextOverscanMultiplier;
           scrollVelocityRef.current = dy;
           setScrollVelocity(dy);
         }
 
-        if (
-          Math.abs(el.scrollTop - scrollTopStateRef.current) >
-          SCROLL_TOP_EPSILON
-        ) {
+        if (shouldUpdateScrollRenderTop(el.scrollTop, scrollTopStateRef.current)) {
           scrollTopStateRef.current = el.scrollTop;
           setScrollTop(el.scrollTop);
+          recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
         }
         if (el.clientHeight !== viewportHeightStateRef.current) {
           viewportHeightStateRef.current = el.clientHeight;
@@ -217,6 +246,12 @@ export const MasonryGrid = memo(
         scrollTimerRef.current = setTimeout(() => {
           isScrollingStateRef.current = false;
           setIsScrolling(false);
+          const latest = scrollRef.current?.scrollTop ?? scrollTopStateRef.current;
+          if (Math.abs(latest - scrollTopStateRef.current) > SCROLL_TOP_EPSILON) {
+            scrollTopStateRef.current = latest;
+            setScrollTop(latest);
+            recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
+          }
         }, 600);
 
         const headers = headerPositionsRef.current;
@@ -382,6 +417,16 @@ export const MasonryGrid = memo(
       viewportHeight,
     });
 
+    useEffect(() => {
+      let renderImageCount = 0;
+      for (const { style } of visibleItems) {
+        if (shouldRenderItemImage(style, scrollTop, viewportHeight)) {
+          renderImageCount++;
+        }
+      }
+      recordGalleryPerf("masonryImageItems", renderImageCount);
+    }, [visibleItems, scrollTop, viewportHeight]);
+
     const scrollToTop = useCallback((e: React.MouseEvent) => {
       e.stopPropagation();
       const el = scrollRef.current;
@@ -419,7 +464,8 @@ export const MasonryGrid = memo(
       const baseTop = Math.max(...colBottoms) + gap;
       const colWidth = (containerWidth - (columnCount - 1) * gap) / columnCount;
       return Array.from({ length: columnCount }, (_, i) => {
-        const skelHeight = colWidth / skeletonAspects[i % skeletonAspects.length];
+        const skelHeight =
+          colWidth / skeletonAspects[i % skeletonAspects.length];
         return {
           index: i,
           style: {
@@ -481,7 +527,13 @@ export const MasonryGrid = memo(
               ))}
               {visibleItems.map(({ index, style }) => (
                 <div key={items[index].id} style={style}>
-                  {renderItem(items[index], index, style)}
+                  {renderItem(items[index], index, style, {
+                    renderImage: shouldRenderItemImage(
+                      style,
+                      scrollTop,
+                      viewportHeight
+                    ),
+                  })}
                 </div>
               ))}
               {bottomSkeletons.map((sk) => (
@@ -534,17 +586,18 @@ export const MasonryGrid = memo(
     );
   }),
   (prevProps, nextProps) => {
-  if (prevProps.items !== nextProps.items) return false;
-  if (prevProps.groupHeaders !== nextProps.groupHeaders) return false;
-  if (prevProps.containerWidth !== nextProps.containerWidth) return false;
-  if (prevProps.columnCount !== nextProps.columnCount) return false;
-  if (prevProps.gap !== nextProps.gap) return false;
-  if (prevProps.isLoadingMore !== nextProps.isLoadingMore) return false;
-  if (prevProps.hasMore !== nextProps.hasMore) return false;
-  if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData) return false;
-  if (prevProps.selectionActive !== nextProps.selectionActive) return false;
-  if (prevProps.scrollToId !== nextProps.scrollToId) return false;
-  if (prevProps.routeKey !== nextProps.routeKey) return false;
+    if (prevProps.items !== nextProps.items) return false;
+    if (prevProps.groupHeaders !== nextProps.groupHeaders) return false;
+    if (prevProps.containerWidth !== nextProps.containerWidth) return false;
+    if (prevProps.columnCount !== nextProps.columnCount) return false;
+    if (prevProps.gap !== nextProps.gap) return false;
+    if (prevProps.isLoadingMore !== nextProps.isLoadingMore) return false;
+    if (prevProps.hasMore !== nextProps.hasMore) return false;
+    if (prevProps.isPlaceholderData !== nextProps.isPlaceholderData)
+      return false;
+    if (prevProps.selectionActive !== nextProps.selectionActive) return false;
+    if (prevProps.scrollToId !== nextProps.scrollToId) return false;
+    if (prevProps.routeKey !== nextProps.routeKey) return false;
     return true;
   }
 );

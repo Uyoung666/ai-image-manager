@@ -13,6 +13,16 @@
 const DEFAULT_CONCURRENCY = 12;
 const SINGLE_TIMEOUT_MS = 8000;
 
+interface PreloadTask {
+  resolve: (result: "loaded" | "failed") => void;
+  url: string;
+}
+
+const queuedOrLoading = new Set<string>();
+const pendingQueue: PreloadTask[] = [];
+let activeLoads = 0;
+let globalConcurrency = DEFAULT_CONCURRENCY;
+
 /**
  * 加载单张图片，返回 Promise。
  * 超时或失败均视为完成（不阻塞队列），以 loaded/failed 统计区分。
@@ -43,6 +53,21 @@ function loadOne(url: string, timeoutMs: number): Promise<"loaded" | "failed"> {
   });
 }
 
+function pumpQueue() {
+  while (activeLoads < globalConcurrency && pendingQueue.length > 0) {
+    const task = pendingQueue.shift()!;
+    activeLoads++;
+    loadOne(task.url, SINGLE_TIMEOUT_MS)
+      .then(task.resolve)
+      .catch(() => task.resolve("failed"))
+      .finally(() => {
+        activeLoads--;
+        queuedOrLoading.delete(task.url);
+        pumpQueue();
+      });
+  }
+}
+
 /**
  * 并发控制批量预加载。
  *
@@ -58,24 +83,29 @@ export async function preloadImagesWithConcurrency(
     return { loaded: 0, failed: 0 };
   }
 
-  let loaded = 0;
-  let failed = 0;
-  const queue = [...urls];
+  globalConcurrency = Math.max(1, Math.min(globalConcurrency, concurrency));
+  const tasks: Array<Promise<"loaded" | "failed">> = [];
 
-  async function worker() {
-    while (queue.length > 0) {
-      const url = queue.shift()!;
-      const result = await loadOne(url, SINGLE_TIMEOUT_MS);
-      if (result === "loaded") {
-        loaded++;
-      } else {
-        failed++;
-      }
+  for (const url of urls) {
+    if (queuedOrLoading.has(url)) {
+      continue;
     }
+    queuedOrLoading.add(url);
+    tasks.push(
+      new Promise<"loaded" | "failed">((resolve) => {
+        pendingQueue.push({ resolve, url });
+      })
+    );
   }
 
-  const workerCount = Math.min(concurrency, urls.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (tasks.length === 0) {
+    return { loaded: 0, failed: 0 };
+  }
+
+  pumpQueue();
+  const results = await Promise.all(tasks);
+  const loaded = results.filter((result) => result === "loaded").length;
+  const failed = results.length - loaded;
 
   return { loaded, failed };
 }

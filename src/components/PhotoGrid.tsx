@@ -18,6 +18,7 @@ interface Photo {
   isIndexed: boolean;
   path: string;
   similarity?: number;
+  thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
   width: number;
 }
@@ -269,7 +270,12 @@ export const PhotoGrid = memo(
     }, []);
 
     const renderItem = useCallback(
-      (photo: Photo, index: number) => (
+      (
+        photo: Photo,
+        index: number,
+        _style: React.CSSProperties,
+        options: { renderImage: boolean }
+      ) => (
         <PhotoCard
           deleting={deletingIdsRef.current?.has(photo.id)}
           dominantColors={photo.dominantColors}
@@ -284,8 +290,10 @@ export const PhotoGrid = memo(
           onDoubleClick={onDoubleClick}
           onToggleFavorite={onToggleFavorite}
           path={photo.path}
+          renderImage={options.renderImage}
           searchQuery={searchQuery}
           similarity={photo.similarity}
+          thumbnailSmallPath={photo.thumbnailSmallPath}
           thumbnailPath={photo.thumbnailPath}
           width={photo.width}
         />

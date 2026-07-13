@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import { recordGalleryPerf } from "@/utils/gallery-perf";
 
 /** 预加载超时（毫秒），超时后强制 ready，走降级像素恢复路径 */
 const PRELOAD_TIMEOUT_MS = 1500;
 
 /** 额外预加载的页数余量，防止 estimatedGlobalIndex 微小偏差 */
-const PRELOAD_PAGE_MARGIN = 2;
+const PRELOAD_PAGE_MARGIN = 1;
+
+export function calculateScrollRestorePagesNeeded(
+  estimatedIndex: number,
+  pageSize: number
+): number {
+  const safePageSize = Math.max(1, pageSize);
+  const targetPage = Math.floor(Math.max(0, estimatedIndex) / safePageSize);
+  const pageMargin = targetPage <= 0 ? 0 : PRELOAD_PAGE_MARGIN;
+  return Math.max(1, targetPage + 1 + pageMargin);
+}
 
 export type PreloadState = "idle" | "preloading" | "ready";
 
@@ -90,11 +101,12 @@ export function useScrollRestorePreloader({
 
     // 计算需要的页数
     const anchor = saved.anchor!;
-    const targetPage = Math.floor(estimatedIndex / pageSize);
-    const needed = Math.max(1, targetPage + 1 + PRELOAD_PAGE_MARGIN);
+    const needed = calculateScrollRestorePagesNeeded(estimatedIndex, pageSize);
     pagesNeededRef.current = needed;
 
     const currentPages = Math.ceil(currentItemCount / pageSize) || 1;
+    recordGalleryPerf("scrollRestorePagesNeeded", needed);
+    recordGalleryPerf("scrollRestoreCurrentPages", currentPages);
 
     if (currentPages >= needed) {
       // 已有足够数据 → 直接 ready
@@ -139,6 +151,7 @@ export function useScrollRestorePreloader({
     }
 
     const currentPages = Math.ceil(currentItemCount / pageSize) || 1;
+    recordGalleryPerf("scrollRestoreCurrentPages", currentPages);
     if (currentPages >= pagesNeededRef.current) {
       // 已加载足够页数 → ready
       clearPreloadTimeout();

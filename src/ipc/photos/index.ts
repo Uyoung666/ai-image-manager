@@ -27,6 +27,7 @@ import {
   stopScanning,
 } from "./handlers/listing";
 import {
+  backfillMissingThumbnails,
   cleanOrphanThumbnails,
   cleanupOrphanPhotos,
   clearThumbCache,
@@ -68,6 +69,7 @@ import {
 
 export const photos = {
   addTag,
+  backfillMissingThumbnails,
   batchGenerateTags,
   cancelAiIndexing,
   cancelQueuedImports: cancelQueuedImports_h,

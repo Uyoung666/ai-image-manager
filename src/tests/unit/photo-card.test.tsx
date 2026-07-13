@@ -15,11 +15,10 @@ describe("PhotoCard", () => {
     width: 4000,
   };
 
-  it("renders image element", () => {
+  it("does not render image element without thumbnailPath", () => {
     const { container } = render(<PhotoCard {...baseProps} />);
     const img = container.querySelector("img");
-    expect(img).toBeInTheDocument();
-    expect(img?.alt).toBe("test-photo.jpg");
+    expect(img).not.toBeInTheDocument();
   });
 
   it("renders filename in overlay", () => {
@@ -35,7 +34,11 @@ describe("PhotoCard", () => {
   it("calls onClick when clicked", () => {
     render(<PhotoCard {...baseProps} />);
     const card = screen.getByText("test-photo.jpg").closest("[class*='group']");
-    fireEvent.click(card!);
+    expect(card).not.toBeNull();
+    if (!card) {
+      return;
+    }
+    fireEvent.click(card);
     expect(baseProps.onClick).toHaveBeenCalled();
   });
 
@@ -49,11 +52,27 @@ describe("PhotoCard", () => {
     render(
       <PhotoCard
         {...baseProps}
+        thumbnailSmallPath="C:/AppData/thumbnails/small123.webp"
         thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
       />
     );
     const img = document.querySelector("img");
+    expect(img?.alt).toBe("test-photo.jpg");
     expect(img?.src).toContain("local-media://");
+    expect(img?.srcset).toContain("256w");
+    expect(img?.srcset).toContain("512w");
+  });
+
+  it("does not render image element when renderImage is false", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        renderImage={false}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+    const img = document.querySelector("img");
+    expect(img).not.toBeInTheDocument();
   });
 
   it("highlights search query in text", () => {

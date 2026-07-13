@@ -565,6 +565,71 @@ export const cleanOrphanThumbnails = os.handler(async () => {
   return await cleanOrphanThumbnailsService();
 });
 
+export const backfillMissingThumbnails = os
+  .input(
+    z.object({
+      ids: z.array(z.number()).max(200),
+      limit: z.number().min(1).max(50).default(24),
+    })
+  )
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const uniqueIds = [...new Set(input.ids)].slice(0, input.limit);
+    if (uniqueIds.length === 0) {
+      return { checked: 0, generated: 0, failed: 0 };
+    }
+
+    const candidates = db
+      .select({ id: photos.id, path: photos.path })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.id, uniqueIds),
+          isNull(photos.deletedAt),
+          isNull(photos.thumbnailPath)
+        )
+      )
+      .all();
+
+    let generated = 0;
+    let failed = 0;
+    const updated: Array<{
+      id: number;
+      thumbnailPath: string;
+      thumbnailSmallPath: string | null;
+    }> = [];
+    for (const photo of candidates) {
+      try {
+        if (!fs.existsSync(photo.path)) {
+          failed++;
+          continue;
+        }
+        const result = await generateThumbnail(photo.path, "md");
+        db.update(photos)
+          .set({ thumbnailPath: result.thumbnailPath })
+          .where(eq(photos.id, photo.id))
+          .run();
+        generated++;
+        updated.push({
+          id: photo.id,
+          thumbnailPath: result.thumbnailPath,
+          thumbnailSmallPath: null,
+        });
+      } catch (err) {
+        failed++;
+        console.warn(
+          `[ThumbnailBackfill] Failed for photo ${photo.id}: ${(err as Error)?.message ?? String(err)}`
+        );
+      }
+    }
+
+    if (generated > 0) {
+      invalidateStatsCache();
+    }
+
+    return { checked: candidates.length, generated, failed, updated };
+  });
+
 export const toggleFavorite = os
   .input(z.object({ ids: z.array(z.number()), favorite: z.boolean() }))
   .handler(async ({ input }) => {
