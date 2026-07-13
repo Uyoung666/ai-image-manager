@@ -225,7 +225,7 @@ export const SearchBar = memo(
     const recentSuggestions = useMemo<SearchSuggestion[]>(
       () =>
         history
-          .slice(0, 8)
+          .slice(0, 5)
           .map((text) => ({ type: "history", text })),
       [history]
     );
@@ -749,6 +749,8 @@ export const SearchBar = memo(
               </>
             )}
             <button
+              aria-expanded={showFilters}
+              aria-label={t("exifFilterTitle")}
               className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
                 showFilters || hasActiveFilters
                   ? "bg-primary/10 text-primary"
@@ -950,16 +952,34 @@ export const SearchBar = memo(
           {/* Filter panel */}
           {showFilters && (
             <div
-              className="mt-2 rounded-[8px] border border-border bg-secondary p-3"
+              className="absolute top-full right-4 z-[70] mt-2 max-h-[calc(100vh-170px)] w-[min(900px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-border bg-popover p-4 shadow-2xl ring-1 ring-foreground/5"
               onKeyDown={handleFilterKeyDown}
             >
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold text-[14px] text-foreground">
+                    {t("exifFilterTitle")}
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    {t("enterToSearch")}
+                  </p>
+                </div>
+                <button
+                  aria-label={t("close")}
+                  className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                  onClick={() => setShowFilters(false)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
               <FilterBreadcrumb
                 filters={filters}
                 getFilterLabel={getFilterLabel}
                 onClearAll={clearFilters}
                 onRemoveFilter={(key) => updateFilter(key, "", true)}
               />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                 {/* Date range */}
                 <div>
                   <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
@@ -1383,7 +1403,7 @@ export const SearchBar = memo(
         {/* Search suggestions dropdown */}
         {showSuggestionPanel && (
           <div
-            className="absolute top-full right-4 left-4 z-[60] mt-1 overflow-hidden rounded-[8px] border border-border bg-popover outline-none ring-1 ring-foreground/5"
+            className="absolute top-full left-4 z-[60] mt-1 max-h-[min(440px,calc(100vh-150px))] w-[min(960px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
             id="search-suggestions-listbox"
             role="listbox"
             onBlur={(e) => {

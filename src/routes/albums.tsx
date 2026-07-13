@@ -5,7 +5,7 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import { ArrowLeft, Sparkles, Zap } from "lucide-react";
+import { ArrowLeft, FolderPlus, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -25,6 +25,14 @@ interface AlbumInfo {
   isSmart: boolean;
   name: string;
 }
+
+const ALBUM_SKELETON_KEYS = [
+  "album-skeleton-1",
+  "album-skeleton-2",
+  "album-skeleton-3",
+  "album-skeleton-4",
+  "album-skeleton-5",
+];
 
 function AlbumsPage() {
   const { t, i18n } = useTranslation();
@@ -175,11 +183,11 @@ function AlbumsPage() {
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
         {loading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,340px))] gap-5">
+            {ALBUM_SKELETON_KEYS.map((key) => (
               <div
-                className="aspect-[4/3] animate-pulse rounded-[8px] bg-card"
-                key={i}
+                className="aspect-[16/12] animate-pulse rounded-[10px] bg-card"
+                key={key}
               />
             ))}
           </div>
@@ -214,10 +222,10 @@ function AlbumsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,340px))] gap-5">
             {albums.map((album) => (
               <Link
-                className={`group overflow-hidden rounded-[8px] bg-card transition-colors hover:border-primary/30 ${
+                className={`group overflow-hidden rounded-[10px] bg-card shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md ${
                   album.isSmart
                     ? "border border-primary/20"
                     : "border border-border"
@@ -226,12 +234,16 @@ function AlbumsPage() {
                 params={{ albumId: album.id.toString() }}
                 to="/albums/$albumId"
               >
-                <div className="aspect-[4/3] bg-muted">
+                <div className="aspect-[16/10] overflow-hidden bg-muted">
                   {album.coverPhotoId && covers.has(album.coverPhotoId) ? (
                     <img
                       alt={album.name}
-                      className="h-full w-full object-cover"
-                      src={toLocalMediaUrl(covers.get(album.coverPhotoId)!)}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+                      height={400}
+                      src={toLocalMediaUrl(
+                        covers.get(album.coverPhotoId) ?? ""
+                      )}
+                      width={640}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -263,7 +275,7 @@ function AlbumsPage() {
                     </div>
                   )}
                 </div>
-                <div className="p-3">
+                <div className="p-4">
                   <div className="flex items-center gap-1.5">
                     {album.isSmart && <Zap className="h-3 w-3 text-primary" />}
                     <h3 className="truncate font-medium text-[14px] text-foreground">
@@ -271,11 +283,11 @@ function AlbumsPage() {
                     </h3>
                   </div>
                   {album.description && (
-                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground/70">
+                    <p className="mt-1 truncate text-[12px] text-muted-foreground">
                       {album.description}
                     </p>
                   )}
-                  <p className="mt-1 text-[10px] text-muted-foreground/70">
+                  <p className="mt-2 text-[11px] text-muted-foreground">
                     {album.isSmart
                       ? t("smartAlbum")
                       : new Date(album.createdAt).toLocaleDateString(
@@ -285,6 +297,23 @@ function AlbumsPage() {
                 </div>
               </Link>
             ))}
+            <button
+              className="group flex min-h-[260px] flex-col items-center justify-center gap-3 rounded-[10px] border border-border border-dashed bg-secondary/40 text-center transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm"
+              onClick={() => setShowCreate(true)}
+              type="button"
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform group-hover:scale-105">
+                <FolderPlus className="h-5 w-5" />
+              </span>
+              <span>
+                <span className="block font-medium text-[14px] text-foreground">
+                  {t("albumNew")}
+                </span>
+                <span className="mt-1 block text-[12px] text-muted-foreground">
+                  {t("albumNewHint")}
+                </span>
+              </span>
+            </button>
           </div>
         )}
       </div>

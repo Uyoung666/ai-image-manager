@@ -9,13 +9,21 @@ import {
   ArrowLeft,
   Check,
   Merge,
+  Pencil,
   Play,
   RefreshCw,
   Trash2,
   User,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -225,18 +233,34 @@ const PersonCard = memo(function PersonCard({
         </div>
       )}
       {!selectMode && (
-        <button
-          className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-[4px] bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onDelete(identity.id, identity.name);
-          }}
-          title={t("deletePerson")}
-          type="button"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <button
+            aria-label={t("renamePerson")}
+            className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-primary"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onStartEdit(identity.id, identity.name);
+            }}
+            title={t("renamePerson")}
+            type="button"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            aria-label={t("deletePerson")}
+            className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-destructive"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete(identity.id, identity.name);
+            }}
+            title={t("deletePerson")}
+            type="button"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -441,7 +465,24 @@ function PeoplePage() {
   // Inline rename state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameInput, setNameInput] = useState("");
+  const [personFilter, setPersonFilter] = useState<
+    "all" | "unnamed" | "named"
+  >("all");
   const composingRef = useRef(false);
+
+  const unnamedCount = useMemo(
+    () => identities.filter((identity) => !identity.name?.trim()).length,
+    [identities]
+  );
+  const filteredIdentities = useMemo(() => {
+    if (personFilter === "unnamed") {
+      return identities.filter((identity) => !identity.name?.trim());
+    }
+    if (personFilter === "named") {
+      return identities.filter((identity) => identity.name?.trim());
+    }
+    return identities;
+  }, [identities, personFilter]);
 
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -671,9 +712,48 @@ function PeoplePage() {
 
       {/* Grid area */}
       <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
+        {showContent && identities.length > 0 && (
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div className="inline-flex rounded-[8px] border border-border bg-secondary p-1">
+              {(
+                [
+                  ["all", t("peopleAll"), identities.length],
+                  ["unnamed", t("peopleNeedsName"), unnamedCount],
+                  [
+                    "named",
+                    t("peopleNamed"),
+                    identities.length - unnamedCount,
+                  ],
+                ] as const
+              ).map(([value, label, count]) => (
+                <button
+                  aria-pressed={personFilter === value}
+                  className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+                    personFilter === value
+                      ? "bg-card font-medium text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  key={value}
+                  onClick={() => setPersonFilter(value)}
+                  type="button"
+                >
+                  {label}
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">
+                    {count}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {unnamedCount > 0 && (
+              <p className="text-[12px] text-muted-foreground">
+                {t("peopleNeedsNameHint", { count: unnamedCount })}
+              </p>
+            )}
+          </div>
+        )}
         {/* 加载骨架屏：填满视口的卡片矩阵 */}
         {isLoading && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
             {Array.from({ length: skeletonCount }).map((_, i) => (
               <SkeletonCard key={`skel-${i}`} />
             ))}
@@ -718,8 +798,8 @@ function PeoplePage() {
 
         {/* 人物卡片网格 */}
         {showContent && identities.length > 0 && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
-            {identities.map((identity) => (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
+            {filteredIdentities.map((identity) => (
               <PersonCard
                 composingRef={composingRef}
                 editingId={editingId}

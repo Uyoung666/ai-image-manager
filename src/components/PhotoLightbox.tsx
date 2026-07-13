@@ -367,6 +367,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const toolbarButtons = useMemo(() => [
     <button
       aria-label={t("photoDetail")}
+      aria-pressed={infoPanelVisible}
       className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="info-panel"
       onClick={() => setInfoPanelVisible((v) => !v)}
@@ -381,7 +382,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     </button>,
     <button
       aria-label={t("rotateLeft")}
-      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      className="ml-1 flex items-center justify-center rounded-[6px] border-white/15 border-l py-2 pr-2 pl-3 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="rotate-left"
       onClick={() => setRotation((prev) => (prev - 90) % 360)}
       title={t("rotateLeft")}
@@ -405,7 +406,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     </button>,
     <button
       aria-label={playing ? t("pause") : t("play")}
-      className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+      aria-pressed={playing}
+      className="ml-1 flex items-center justify-center rounded-[6px] border-white/15 border-l py-2 pr-2 pl-3 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="slideshow-play"
       onClick={togglePlay}
       title={playing ? t("pauseSlideshow") : t("playSlideshow")}
@@ -434,7 +436,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     </button>,
     "fullscreen",
     "close",
-  ], [t, playing, currentDelayLabel, togglePlay, cycleDelay]);
+  ], [
+    t,
+    playing,
+    infoPanelVisible,
+    currentDelayLabel,
+    togglePlay,
+    cycleDelay,
+  ]);
 
   // 当旋转90度或270度时需要调整容器尺寸以适应屏幕
   const isRotated90or270 = rotation % 180 !== 0;
@@ -454,7 +463,16 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
     return {
       container: { backgroundColor: "rgba(0, 0, 0, 0.94)" },
-      toolbar: { padding: "8px 12px", ...overlayStyle },
+      toolbar: {
+        margin: "10px",
+        padding: "4px 6px",
+        background: "rgba(12, 12, 14, 0.62)",
+        border: "1px solid rgba(255, 255, 255, 0.1)",
+        borderRadius: "10px",
+        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.28)",
+        backdropFilter: "blur(14px) saturate(1.2)",
+        ...overlayStyle,
+      },
       slide: {
         padding: "0 60px",
         // 旋转90/270度时增加额外空间以防止溢出

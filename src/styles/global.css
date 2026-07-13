@@ -17,8 +17,8 @@
 
   /* 前景 / 文本 */
   --foreground: #f7f8f8;
-  --foreground-secondary: #a1a1aa;
-  --foreground-tertiary: #6b6b75;
+  --foreground-secondary: #b4b4bd;
+  --foreground-tertiary: #85858f;
 
   /* 强调色 */
   --primary: #5e6ad2;
@@ -101,15 +101,15 @@
 
 /* Light Theme */
 .light {
-  --background: #fcfcfc;
-  --background-secondary: #f5f5f5;
+  --background: #fbfbfc;
+  --background-secondary: #f3f3f5;
   --surface: #ffffff;
-  --surface-hover: #f5f5f5;
-  --surface-elevated: #ebebeb;
+  --surface-hover: #f1f1f3;
+  --surface-elevated: #e8e8ec;
 
   --foreground: #1a1a1a;
-  --foreground-secondary: #52525b;
-  --foreground-tertiary: #71717a;
+  --foreground-secondary: #3f3f46;
+  --foreground-tertiary: #5f5f69;
 
   --primary: #5e6ad2;
   --primary-foreground: #ffffff;
@@ -119,8 +119,8 @@
   --warning: #d4920a;
   --danger: #e5484d;
 
-  --border-subtle: #e5e5e5;
-  --border-default: #d0d0d0;
+  --border-subtle: #dedee3;
+  --border-default: #c9c9d0;
 
   --card: var(--surface);
   --card-foreground: var(--foreground);
@@ -128,9 +128,9 @@
   --popover-foreground: var(--foreground);
   --secondary: var(--background-secondary);
   --secondary-foreground: var(--foreground);
-  --muted: #f5f5f5;
+  --muted: #f1f1f3;
   --muted-foreground: var(--foreground-secondary);
-  --skeleton: #ebebeb;
+  --skeleton: #e8e8ec;
   --accent: var(--primary);
   --accent-foreground: var(--primary-foreground);
   --destructive: var(--danger);
@@ -157,7 +157,7 @@
     0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.06);
   --shadow-2xl-val: 0 25px 50px -12px rgb(0 0 0 / 0.12);
 
-  --sidebar: #fafafa;
+  --sidebar: #f8f8fa;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);

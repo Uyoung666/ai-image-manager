@@ -839,6 +839,7 @@ i18n.use(initReactI18next).init({
         quickPreviewHelp:
           "Space / Esc 关闭 · ← → 切换 · R 旋转 · 滚轮缩放 · 双击还原",
         albumsCount: "{{count}} 个相册",
+        albumNewHint: "创建一个手动整理的照片集合",
         smartAlbum: "智能相册",
         albumDescriptionPlaceholder: "描述 (可选)",
         noAlbumsTitle: "还没有相册",
@@ -888,6 +889,11 @@ i18n.use(initReactI18next).init({
         noPeopleTitle: "还没有检测到人物",
         noPeopleDescription: '点击"开始人脸检测"来分析照片中的人物',
         unnamedPerson: "未命名",
+        peopleAll: "全部人物",
+        peopleNeedsName: "待命名",
+        peopleNamed: "已命名",
+        peopleNeedsNameHint: "还有 {{count}} 个人物等待命名",
+        renamePerson: "命名人物",
         deletePerson: "删除此人物",
         deletePersonTitle: "确认删除人物",
         deletePersonDescription: '将删除人物"{{name}}"，此操作不可撤销。',
@@ -1987,6 +1993,7 @@ i18n.use(initReactI18next).init({
         quickPreviewHelp:
           "Space / Esc to close · ← → to switch · R to rotate · Wheel to zoom · Double-click to reset",
         albumsCount: "{{count}} albums",
+        albumNewHint: "Create a collection to organize manually",
         smartAlbum: "Smart Album",
         albumDescriptionPlaceholder: "Description (optional)",
         noAlbumsTitle: "No albums yet",
@@ -2038,6 +2045,11 @@ i18n.use(initReactI18next).init({
         noPeopleDescription:
           'Click "Start Face Detection" to analyze people in your photos',
         unnamedPerson: "Unnamed",
+        peopleAll: "All people",
+        peopleNeedsName: "Needs a name",
+        peopleNamed: "Named",
+        peopleNeedsNameHint: "{{count}} people are waiting to be named",
+        renamePerson: "Name person",
         deletePerson: "Delete this person",
         deletePersonTitle: "Confirm Person Deletion",
         deletePersonDescription:
