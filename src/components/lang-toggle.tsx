@@ -30,7 +30,15 @@ export default function LangToggle() {
           text-align: center;
         }
         .lang-radio-group .lang-radio input {
-          display: none;
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
         }
         .lang-radio-group .lang-radio .lang-name {
           display: flex;
@@ -54,6 +62,10 @@ export default function LangToggle() {
           position: relative;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
           animation: lang-select 0.3s ease;
+        }
+        .lang-radio-group .lang-radio input:focus-visible + .lang-name {
+          outline: 2px solid var(--ring);
+          outline-offset: 2px;
         }
         @keyframes lang-select {
           0% {
@@ -100,6 +112,15 @@ export default function LangToggle() {
           100% {
             opacity: 0;
             transform: translateX(-50%) translateY(var(--direction));
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .lang-radio-group .lang-radio .lang-name,
+          .lang-radio-group .lang-radio input:checked + .lang-name,
+          .lang-radio-group .lang-radio input:checked + .lang-name::before,
+          .lang-radio-group .lang-radio input:checked + .lang-name::after {
+            animation: none;
+            transition: none;
           }
         }
       `}</style>

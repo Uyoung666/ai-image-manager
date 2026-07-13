@@ -121,6 +121,11 @@ export function OnboardingOverlay() {
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [gpuDetected, setGpuDetected] = useState(false);
+  const [gpuEnabled, setGpuEnabled] = useState(false);
+  const [gpuSettingsReady, setGpuSettingsReady] = useState(false);
+  const [isConfiguringGpu, setIsConfiguringGpu] = useState(false);
+  const [isSavingGpu, setIsSavingGpu] = useState(false);
+  const [gpuSaveError, setGpuSaveError] = useState<string | null>(null);
 
   // ── 开发开关 ────────────────────────────────────────────────────
 
@@ -208,7 +213,7 @@ export function OnboardingOverlay() {
     }
     ipc.client.settings
       .getGpuSettings({})
-      .then((r: any) => {
+      .then((r) => {
         if (r?.detected?.dmlAvailable) {
           setGpuDetected(true);
         }
@@ -275,14 +280,14 @@ export function OnboardingOverlay() {
       initialPageParam: 0,
       staleTime: 30_000,
     });
-  }, [currentStep]);
+  }, [currentStep, setPreRenderContent]);
 
   // ── Handlers ──────────────────────────────────────────────────
 
   const handleChangeDirectory = useCallback(async () => {
     try {
       const result = await ipc.client.shell.openFolderDialog({});
-      const newPath = (result as any).path;
+      const newPath = (result as { path?: string }).path;
       if (!newPath) {
         return;
       }
@@ -290,7 +295,12 @@ export function OnboardingOverlay() {
       setIsMigrating(true);
       setMigrationError(null);
 
-      await ipc.client.settings.setDataPath({ newPath });
+      const migration = (await ipc.client.settings.setDataPath({
+        newPath,
+      })) as { error?: string; ok: boolean };
+      if (!migration.ok) {
+        throw new Error(migration.error || t("dataPathSetFailed"));
+      }
       setDataPath(newPath);
     } catch (err) {
       setMigrationError(
@@ -302,6 +312,27 @@ export function OnboardingOverlay() {
       setIsMigrating(false);
     }
   }, [t]);
+
+  const handleGpuSettingsLoaded = useCallback(() => {
+    setGpuSettingsReady(true);
+  }, []);
+
+  const handleGpuContinue = useCallback(async () => {
+    setIsSavingGpu(true);
+    setGpuSaveError(null);
+    try {
+      await ipc.client.settings.setGpuSettings({ enabled: gpuEnabled });
+      goToStep(3);
+    } catch (err) {
+      setGpuSaveError(
+        t("onboardingErrorGpuSave", {
+          error: (err as Error).message ?? String(err),
+        })
+      );
+    } finally {
+      setIsSavingGpu(false);
+    }
+  }, [goToStep, gpuEnabled, t]);
 
   const handleFinish = useCallback(async () => {
     setExiting(true);
@@ -336,7 +367,7 @@ export function OnboardingOverlay() {
 
   return (
     <div
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background ${overlayAnimClass}`}
+      className={`onboarding-overlay fixed inset-0 z-[100] flex flex-col items-center overflow-y-auto bg-background py-24 ${overlayAnimClass}`}
       onAnimationEnd={(e) => {
         if (exiting && e.currentTarget === e.target) {
           handleExitAnimationEnd();
@@ -401,7 +432,10 @@ export function OnboardingOverlay() {
                 )}
 
                 {migrationError && (
-                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
+                  <div
+                    aria-live="polite"
+                    className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
+                  >
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>{migrationError}</span>
                   </div>
@@ -436,8 +470,24 @@ export function OnboardingOverlay() {
 
               {/* GPU card — title hidden, onboarding has its own */}
               <div className="w-full [&_h2]:hidden">
-                <GpuSettingsCard hideTitle />
+                <GpuSettingsCard
+                  hideSaveButton
+                  hideTitle
+                  onBusyChange={setIsConfiguringGpu}
+                  onEnabledChange={setGpuEnabled}
+                  onLoaded={handleGpuSettingsLoaded}
+                />
               </div>
+
+              {gpuSaveError && (
+                <div
+                  aria-live="polite"
+                  className="flex w-full items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{gpuSaveError}</span>
+                </div>
+              )}
 
               <div className="flex w-full items-center justify-between gap-3">
                 <button
@@ -448,12 +498,25 @@ export function OnboardingOverlay() {
                   {t("onboardingBack")}
                 </button>
                 <button
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97]"
-                  onClick={() => goToStep(3)}
+                  aria-busy={isSavingGpu}
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
+                  disabled={
+                    !gpuSettingsReady || isConfiguringGpu || isSavingGpu
+                  }
+                  onClick={handleGpuContinue}
                   type="button"
                 >
-                  {t("onboardingContinue")}
-                  <ArrowRight className="h-4 w-4" />
+                  {isSavingGpu ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      {t("saving")}
+                    </>
+                  ) : (
+                    <>
+                      {t("onboardingSaveContinue")}
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -503,7 +566,7 @@ export function OnboardingOverlay() {
       </div>
 
       {/* Language toggle — bottom right, subtle */}
-      <div className="absolute right-6 bottom-6 opacity-30 transition-opacity duration-300 hover:opacity-100">
+      <div className="fixed right-4 bottom-4 opacity-70 transition-opacity duration-300 focus-within:opacity-100 hover:opacity-100 sm:right-6 sm:bottom-6">
         <LangToggle />
       </div>
     </div>

@@ -115,9 +115,9 @@ i18n.use(initReactI18next).init({
 
         // Welcome / Onboarding
         welcomeTitle: "欢迎使用 AI 图片管理器",
-        welcomeStep1: "1. 点击左侧「添加文件夹」选择你的照片目录",
-        welcomeStep2: "2. 等待扫描完成，照片将出现在这里",
-        welcomeStep3: "3. 点击「AI 智能索引」启用自然语言搜索",
+        welcomeStep1: "选择一个照片文件夹开始整理",
+        welcomeStep2: "等待扫描完成，照片将出现在这里",
+        welcomeStep3: "点击「AI 智能索引」启用自然语言搜索",
         welcomeTip: "💡 提示: 所有处理都在本地完成，不会上传任何数据",
 
         // Folder scanning
@@ -1145,8 +1145,11 @@ i18n.use(initReactI18next).init({
         onboardingStep3Start: "开始使用",
         onboardingStep3Starting: "正在开启...",
         onboardingContinue: "继续",
+        onboardingSaveContinue: "保存并继续",
         onboardingBack: "返回",
+        onboardingStepProgress: "第 {{current}} 步，共 {{total}} 步",
         onboardingErrorMigration: "数据迁移失败：{{error}}",
+        onboardingErrorGpuSave: "GPU 设置保存失败：{{error}}",
 
         // Common
         loading: "加载中…",
@@ -1243,11 +1246,10 @@ i18n.use(initReactI18next).init({
         loadingPhotos: "Loading photos...",
 
         welcomeTitle: "Welcome to AI Image Manager",
-        welcomeStep1: "1. Click 'Add Folder' to select your photo directory",
-        welcomeStep2:
-          "2. Wait for scanning to complete, photos will appear here",
+        welcomeStep1: "Choose a photo folder to get started",
+        welcomeStep2: "Wait for scanning to complete, photos will appear here",
         welcomeStep3:
-          "3. Click 'AI Smart Index' to enable natural language search",
+          "Click 'AI Smart Index' to enable natural language search",
         welcomeTip:
           "Tip: All processing is done locally. No data is ever uploaded.",
 
@@ -2335,8 +2337,11 @@ i18n.use(initReactI18next).init({
         onboardingStep3Start: "Get Started",
         onboardingStep3Starting: "Starting...",
         onboardingContinue: "Continue",
+        onboardingSaveContinue: "Save and Continue",
         onboardingBack: "Back",
+        onboardingStepProgress: "Step {{current}} of {{total}}",
         onboardingErrorMigration: "Data migration failed: {{error}}",
+        onboardingErrorGpuSave: "Failed to save GPU settings: {{error}}",
 
         // Common
         loading: "Loading...",

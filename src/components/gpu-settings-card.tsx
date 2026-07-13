@@ -158,8 +158,16 @@ function getDetectButtonLabel(
 
 export function GpuSettingsCard({
   hideTitle = false,
+  hideSaveButton = false,
+  onBusyChange,
+  onEnabledChange,
+  onLoaded,
 }: {
   hideTitle?: boolean;
+  hideSaveButton?: boolean;
+  onBusyChange?: (busy: boolean) => void;
+  onEnabledChange?: (enabled: boolean) => void;
+  onLoaded?: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -175,28 +183,39 @@ export function GpuSettingsCard({
   // ── Load saved state on mount ──────────────────────────────────────
 
   useEffect(() => {
-    ipc.client.settings.getGpuSettings({}).then((value) => {
-      const r = value as unknown as GpuSettingsResponse;
-      setEnabled(r.enabled);
-      if (r.detected) {
-        setDetectedInfo(r.detected);
-        setDetectPhase(
-          r.detected.dmlAvailable ? "detected-ok" : "detected-unsupported"
-        );
-        if (r.detected.error) {
-          setDetectError(r.detected.error);
+    ipc.client.settings
+      .getGpuSettings({})
+      .then((value) => {
+        const r = value as unknown as GpuSettingsResponse;
+        setEnabled(r.enabled);
+        onEnabledChange?.(r.enabled);
+        if (r.detected) {
+          setDetectedInfo(r.detected);
+          setDetectPhase(
+            r.detected.dmlAvailable ? "detected-ok" : "detected-unsupported"
+          );
+          if (r.detected.error) {
+            setDetectError(r.detected.error);
+          }
+        } else {
+          setDetectPhase("idle");
         }
-      } else {
-        setDetectPhase("idle");
-      }
-    });
-  }, []);
+      })
+      .catch((err: unknown) => {
+        setDetectPhase("detected-error");
+        setDetectError(
+          (err as { message?: string })?.message || t("gpuDetectedError")
+        );
+      })
+      .finally(() => onLoaded?.());
+  }, [onEnabledChange, onLoaded, t]);
 
   // ── GPU detection ──────────────────────────────────────────────────
 
   const handleDetect = useCallback(async () => {
     setDetectPhase("checking");
     setDetectError("");
+    onBusyChange?.(true);
     try {
       const result = (await ipc.client.settings.checkGpuCapability(
         {}
@@ -206,6 +225,7 @@ export function GpuSettingsCard({
         setDetectPhase("detected-ok");
         if (!enabled) {
           setEnabled(true);
+          onEnabledChange?.(true);
         }
       } else {
         setDetectPhase("detected-unsupported");
@@ -218,14 +238,17 @@ export function GpuSettingsCard({
       setDetectError(
         (err as { message?: string })?.message || t("gpuDetectedError")
       );
+    } finally {
+      onBusyChange?.(false);
     }
-  }, [enabled, t]);
+  }, [enabled, onBusyChange, onEnabledChange, t]);
 
   // ── Save ───────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaveStatus(t("saving"));
+    onBusyChange?.(true);
     try {
       await ipc.client.settings.setGpuSettings({ enabled });
       setSaveStatus(t("gpuSaved"));
@@ -233,11 +256,21 @@ export function GpuSettingsCard({
     } catch {
       setSaveStatus(t("saveFailed"));
       setEnabled(!enabled);
+      onEnabledChange?.(!enabled);
       setTimeout(() => setSaveStatus(""), 3000);
     } finally {
       setSaving(false);
+      onBusyChange?.(false);
     }
-  }, [enabled, t]);
+  }, [enabled, onBusyChange, onEnabledChange, t]);
+
+  const handleEnabledChange = useCallback(
+    (nextEnabled: boolean) => {
+      setEnabled(nextEnabled);
+      onEnabledChange?.(nextEnabled);
+    },
+    [onEnabledChange]
+  );
 
   const gpuActive = enabled && detectPhase === "detected-ok";
 
@@ -267,7 +300,7 @@ export function GpuSettingsCard({
           <Switch
             checked={enabled}
             disabled={detectPhase === "checking"}
-            onCheckedChange={setEnabled}
+            onCheckedChange={handleEnabledChange}
           />
         </div>
 
@@ -308,14 +341,16 @@ export function GpuSettingsCard({
             >
               {getDetectButtonLabel(detectPhase, t)}
             </button>
-            <button
-              className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-              disabled={saving}
-              onClick={handleSave}
-              type="button"
-            >
-              {saveStatus || t("save")}
-            </button>
+            {!hideSaveButton && (
+              <button
+                className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                disabled={saving}
+                onClick={handleSave}
+                type="button"
+              >
+                {saveStatus || t("save")}
+              </button>
+            )}
           </div>
         </div>
       </div>

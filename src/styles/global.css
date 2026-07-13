@@ -640,6 +640,16 @@
   animation: onboarding-exit 400ms ease-out both;
 }
 
+.onboarding-overlay {
+  justify-content: safe center;
+}
+
+.onboarding-overlay button:focus-visible,
+.welcome-empty-state button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 /* ── 引导步骤过渡动画 ────────────────────────────── */
 @keyframes step-enter {
   from {
@@ -705,6 +715,22 @@
 
 .animate-btn-glow {
   animation: btn-glow 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-onboarding-exit,
+  .animate-step-enter {
+    animation-duration: 1ms;
+  }
+
+  .animate-hero-float,
+  .animate-btn-glow {
+    animation: none;
+  }
+
+  .onboarding-dot {
+    transition: none;
+  }
 }
 
 /* ── 照片切换淡入动画 (甄选模式用) ── */
@@ -1270,7 +1296,15 @@
 }
 
 .custom-switch input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
 }
 
 .custom-switch svg {
@@ -1359,6 +1393,11 @@
 .custom-switch input:checked + .custom-switch-slider .custom-switch-circle {
   left: calc(100% - var(--cs-circle-diameter) - var(--cs-offset));
   box-shadow: var(--cs-circle-checked-shadow);
+}
+
+.custom-switch input:focus-visible + .custom-switch-slider {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* ── GitHub 3D 翻转按钮 ──────────────────────────── */

@@ -10,7 +10,7 @@ export function Welcome({ onAddFolder, disabled }: WelcomeProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="flex flex-1 items-center justify-center p-8">
+    <div className="welcome-empty-state flex flex-1 items-center justify-center p-8">
       <div className="flex max-w-[420px] flex-col items-center space-y-8 text-center">
         {/* Icon */}
         <div className="flex h-20 w-20 items-center justify-center rounded-[12px] bg-card">
@@ -49,6 +49,7 @@ export function Welcome({ onAddFolder, disabled }: WelcomeProps) {
           className="inline-flex items-center gap-2 rounded-[6px] bg-primary px-5 py-2.5 font-medium text-[14px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           disabled={disabled}
           onClick={onAddFolder}
+          type="button"
         >
           <FolderOpen className="h-4 w-4" />
           {t("sidebarAddFolder")}

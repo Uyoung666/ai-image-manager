@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 interface StepIndicatorProps {
   currentStep: number;
   totalSteps: number;
@@ -10,10 +12,17 @@ interface StepIndicatorProps {
  * - 未完成步骤：灰色低透明度
  */
 export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
+  const { t } = useTranslation();
+
   return (
     <div
-      aria-label={`Step ${currentStep} of ${totalSteps}`}
+      aria-label={t("onboardingStepProgress", {
+        current: currentStep,
+        total: totalSteps,
+      })}
+      aria-live="polite"
       className="flex items-center justify-center gap-2"
+      role="status"
     >
       {Array.from({ length: totalSteps }, (_, i) => {
         const step = i + 1;
@@ -22,6 +31,7 @@ export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
 
         return (
           <div
+            aria-hidden="true"
             className={`onboarding-dot ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
             key={step}
           />
