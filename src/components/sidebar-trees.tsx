@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getTagDisplayName } from "@/localization/tag-display";
 import type { Folder as FolderType } from "@/types/photo";
+import { FolderBadge } from "./FolderBadge";
 
 export interface TagInfo {
   color: string | null;
@@ -405,6 +406,7 @@ export function FolderTree({
               …
             </span>
           )}
+          <FolderBadge folder={node.folder} />
           <span className="min-w-0 flex-1 truncate">
             {node.folder.displayName}
           </span>

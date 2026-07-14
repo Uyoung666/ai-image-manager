@@ -3,9 +3,9 @@ import {
   Album,
   ChevronDown,
   CircleHelp,
-  Folder,
   Images,
   LayoutDashboard,
+  Paintbrush,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -42,6 +42,8 @@ import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Folder as FolderType } from "@/types/photo";
 import { AiProgressBar } from "./AiProgressBar";
+import { FolderAppearanceDialog } from "./FolderAppearanceDialog";
+import { FolderBadge } from "./FolderBadge";
 import {
   buildFolderTree,
   buildTagTree,
@@ -123,6 +125,9 @@ export function Sidebar({
     x: number;
     y: number;
   } | null>(null);
+  const [appearanceFolderId, setAppearanceFolderId] = useState<number | null>(
+    null
+  );
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [tagSearch, setTagSearch] = useState("");
   const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
@@ -637,6 +642,8 @@ export function Sidebar({
   }, [onToggleCollapse]);
 
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const appearanceFolder =
+    folders.find((folder) => folder.id === appearanceFolderId) ?? null;
   const activeRootFolderId = useMemo(
     () => findRootFolderId(folders, activeFolderId),
     [activeFolderId, folders]
@@ -750,9 +757,9 @@ export function Sidebar({
                   onDragLeave={handleFolderDragLeave}
                   onDragOver={(e) => handleFolderDragOver(e, folder.id)}
                   onDrop={(e) => handleFolderDrop(e, folder.id)}
-                  title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickDelete")}`}
+                  title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickFolderActions")}`}
                 >
-                  <Folder className="h-4 w-4" />
+                  <FolderBadge className="h-[22px] w-[22px]" folder={folder} />
                 </button>
               ))}
 
@@ -1718,13 +1725,24 @@ export function Sidebar({
           ref={ctxRef}
           style={{
             left: Math.min(folderCtx.x, window.innerWidth - 160),
-            top: Math.min(folderCtx.y, window.innerHeight - 100),
+            top: Math.min(folderCtx.y, window.innerHeight - 140),
           }}
         >
           <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {folderCtx.displayName}
           </div>
           <div className="mx-2 my-1 border-border border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+            onClick={() => {
+              setAppearanceFolderId(folderCtx.folderId);
+              closeCtx();
+            }}
+            type="button"
+          >
+            <Paintbrush className="h-3.5 w-3.5" />
+            {t("customizeFolderAppearance")}
+          </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
             onClick={() => {
@@ -1737,6 +1755,33 @@ export function Sidebar({
           </button>
         </div>
       )}
+
+      <FolderAppearanceDialog
+        folder={appearanceFolder}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAppearanceFolderId(null);
+          }
+        }}
+        onSave={async ({ color, icon }) => {
+          if (appearanceFolderId === null) {
+            return;
+          }
+          try {
+            await ipc.client.photos.updateFolderAppearance({
+              color,
+              icon,
+              id: appearanceFolderId,
+            });
+            await queryClient.invalidateQueries({ queryKey: ["folders"] });
+            toast.success(t("folderAppearanceSaved"));
+            setAppearanceFolderId(null);
+          } catch {
+            toast.error(t("folderAppearanceSaveFailed"));
+            throw new Error("Failed to save folder appearance");
+          }
+        }}
+      />
 
       {/* Tag context menu */}
       {tagCtx && (

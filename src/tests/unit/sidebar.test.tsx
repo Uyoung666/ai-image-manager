@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
 
 const PHOTOS_TITLE_PATTERN = /Photos/;
+const { updateFolderAppearanceMock } = vi.hoisted(() => ({
+  updateFolderAppearanceMock: vi.fn(),
+}));
+
+vi.mock("@/ipc/manager", () => ({
+  ipc: {
+    client: {
+      photos: {
+        getTags: vi.fn(() => new Promise(() => undefined)),
+        updateFolderAppearance: updateFolderAppearanceMock,
+      },
+    },
+  },
+}));
 
 // Mock react-router navigation
 vi.mock("@tanstack/react-router", () => ({
@@ -112,7 +126,7 @@ describe("Sidebar", () => {
     expect(await screen.findByText("Travel")).toBeInTheDocument();
   });
 
-  it("keeps folder icons in the collapsed sidebar", () => {
+  it("keeps folder badges in the collapsed sidebar", () => {
     render(
       <Sidebar
         {...baseProps}
@@ -130,8 +144,110 @@ describe("Sidebar", () => {
     );
 
     expect(
+      screen
+        .getByTitle(PHOTOS_TITLE_PATTERN)
+        .querySelector('[data-folder-badge="true"]')
+    ).not.toBeNull();
+  });
+
+  it("renders a custom folder icon in both sidebar modes", () => {
+    const folder = {
+      appearanceColor: "#DC2626",
+      appearanceIcon: "camera" as const,
+      displayName: "Photos",
+      id: 1,
+      parentId: null,
+      path: "C:/Photos",
+      photoCount: 500,
+    };
+    const { rerender } = render(
+      <Sidebar {...baseProps} collapsed folders={[folder]} />
+    );
+    expect(
       screen.getByTitle(PHOTOS_TITLE_PATTERN).querySelector("svg")
     ).not.toBeNull();
+
+    rerender(<Sidebar {...baseProps} folders={[folder]} />);
+    expect(
+      screen.getByText("Photos").closest("button")?.querySelector("svg")
+    ).not.toBeNull();
+  });
+
+  it("saves a customized folder appearance from the context menu", async () => {
+    updateFolderAppearanceMock.mockResolvedValue({
+      appearanceColor: "#5E6AD2",
+      appearanceIcon: "folder",
+      id: 1,
+    });
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.contextMenu(
+      screen.getByText("Photos").closest("button") as Element
+    );
+    fireEvent.click(screen.getByText("自定义外观"));
+    fireEvent.click(screen.getByLabelText("使用 folder 图标"));
+    fireEvent.click(screen.getByLabelText("#5E6AD2"));
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(updateFolderAppearanceMock).toHaveBeenCalledWith({
+        color: "#5E6AD2",
+        icon: "folder",
+        id: 1,
+      })
+    );
+  });
+
+  it("resets a customized folder appearance to automatic values", async () => {
+    updateFolderAppearanceMock.mockResolvedValue({
+      appearanceColor: null,
+      appearanceIcon: null,
+      id: 1,
+    });
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            appearanceColor: "#DC2626",
+            appearanceIcon: "camera",
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.contextMenu(
+      screen.getByText("Photos").closest("button") as Element
+    );
+    fireEvent.click(screen.getByText("自定义外观"));
+    fireEvent.click(screen.getByText("恢复自动样式"));
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(updateFolderAppearanceMock).toHaveBeenCalledWith({
+        color: null,
+        icon: null,
+        id: 1,
+      })
+    );
   });
 
   it("shows only root folders in the collapsed sidebar", () => {

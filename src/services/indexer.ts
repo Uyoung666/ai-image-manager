@@ -738,6 +738,8 @@ export async function scanFolder(
       id: result.insertedId,
       path: resolvedPath,
       displayName: path.basename(resolvedPath),
+      appearanceColor: null,
+      appearanceIcon: null,
       parentId: null,
       photoCount: 0,
       lastScannedAt: null,

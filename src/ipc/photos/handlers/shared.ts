@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  FOLDER_APPEARANCE_ICONS,
+  HEX_COLOR_PATTERN,
+} from "@/lib/folder-appearance";
 import type { ScoringOptions } from "@/services/ai/query-parser";
 
 export const FolderSchema = z.object({ path: z.string().min(1) });
@@ -23,6 +27,11 @@ export const ListSchema = z.object({
   limit: z.number().optional().default(100),
 });
 export const IdSchema = z.object({ id: z.number() });
+export const FolderAppearanceSchema = z.object({
+  id: z.number(),
+  color: z.string().regex(HEX_COLOR_PATTERN).nullable(),
+  icon: z.enum(FOLDER_APPEARANCE_ICONS).nullable(),
+});
 
 export function applyTimeDecay<
   T extends { similarity: number; fileDate?: number | null },

@@ -13,6 +13,8 @@ export const folders = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     path: text("path").notNull().unique(),
     displayName: text("display_name").notNull(),
+    appearanceColor: text("appearance_color"),
+    appearanceIcon: text("appearance_icon"),
     parentId: integer("parent_id"),
     photoCount: integer("photo_count").notNull().default(0),
     lastScannedAt: integer("last_scanned_at"),

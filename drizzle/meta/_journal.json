@@ -225,6 +225,13 @@
       "when": 1786500000002,
       "tag": "0031_add_color_bucket",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1786500000003,
+      "tag": "0032_familiar_bulldozer",
+      "breakpoints": true
     }
   ]
 }

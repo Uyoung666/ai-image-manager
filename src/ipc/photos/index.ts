@@ -25,6 +25,7 @@ import {
   listPhotos,
   scanFolder,
   stopScanning,
+  updateFolderAppearance,
 } from "./handlers/listing";
 import {
   backfillMissingThumbnails,
@@ -126,5 +127,6 @@ export const photos = {
   stopScanning,
   suggestTags,
   toggleFavorite,
+  updateFolderAppearance,
   generateAndUploadShare,
 };

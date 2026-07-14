@@ -24,7 +24,12 @@ import {
   getImportQueueStatus,
 } from "@/services/import-queue";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
-import { FolderSchema, IdSchema, ListSchema } from "./shared";
+import {
+  FolderAppearanceSchema,
+  FolderSchema,
+  IdSchema,
+  ListSchema,
+} from "./shared";
 
 function logIpcError(handlerName: string, err: unknown): void {
   try {
@@ -135,6 +140,26 @@ export const getFolders = os.handler(() => {
     totalPhotoCount: computeRecursive(f.id),
   }));
 });
+
+export const updateFolderAppearance = os
+  .input(FolderAppearanceSchema)
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const updated = db
+      .update(folders)
+      .set({ appearanceColor: input.color, appearanceIcon: input.icon })
+      .where(eq(folders.id, input.id))
+      .returning({
+        appearanceColor: folders.appearanceColor,
+        appearanceIcon: folders.appearanceIcon,
+        id: folders.id,
+      })
+      .get();
+    if (!updated) {
+      throw new Error("Folder not found");
+    }
+    return updated;
+  });
 
 export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();

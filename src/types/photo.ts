@@ -16,6 +16,8 @@ export interface Photo {
 }
 
 export interface Folder {
+  appearanceColor?: string | null;
+  appearanceIcon?: FolderAppearanceIcon | null;
   displayName: string;
   id: number;
   parentId: number | null;
@@ -23,6 +25,9 @@ export interface Folder {
   photoCount: number;
   totalPhotoCount?: number;
 }
+
+export type FolderAppearanceIcon =
+  import("@/lib/folder-appearance").FolderAppearanceIcon;
 
 export interface PhotoListResponse {
   items: Photo[];

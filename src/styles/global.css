@@ -360,6 +360,16 @@
   box-shadow: inset 3px 0 0 0 var(--primary);
 }
 
+/* 文件夹身份色：在深浅主题中向高对比色收敛，保留用户选择的色相。 */
+.folder-badge {
+  color: color-mix(in srgb, var(--folder-badge-color) 72%, white);
+  background: color-mix(in srgb, var(--folder-badge-color) 20%, transparent);
+}
+
+.light .folder-badge {
+  color: color-mix(in srgb, var(--folder-badge-color) 72%, black);
+}
+
 /* ── 侧边栏渐变 — 顶部到底部逐渐加深 ── */
 .sidebar-bg {
   background: linear-gradient(
