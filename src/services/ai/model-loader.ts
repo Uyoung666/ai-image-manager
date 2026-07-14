@@ -276,11 +276,23 @@ export async function ensureLocalModel(): Promise<string> {
   throw new Error("Model not found in dev paths");
 }
 
-export async function loadModel(): Promise<void> {
+let modelLoadPromise: Promise<void> | null = null;
+
+export function loadModel(): Promise<void> {
   if (isModelLoaded && embeddingModel) {
-    return;
+    return Promise.resolve();
   }
 
+  if (!modelLoadPromise) {
+    modelLoadPromise = initializeModel().finally(() => {
+      modelLoadPromise = null;
+    });
+  }
+
+  return modelLoadPromise;
+}
+
+async function initializeModel(): Promise<void> {
   if (!_localModelPath) {
     setLocalModelPath(await ensureLocalModel());
   }
@@ -327,6 +339,36 @@ export async function loadModel(): Promise<void> {
     quantized: true,
   });
 
+  const embedTexts = async (texts: string[]): Promise<number[][]> => {
+    if (texts.length === 0) {
+      return [];
+    }
+
+    const inputs = await tokenizer(texts, {
+      padding: true,
+      truncation: true,
+    });
+    const output = await textModel(inputs);
+    try {
+      const { text_embeds: textEmbeds } = output;
+      const data = Array.from(textEmbeds.data as Float32Array);
+      const vectorSize = data.length / texts.length;
+      if (!Number.isInteger(vectorSize) || vectorSize <= 0) {
+        throw new Error("CLIP 文本向量维度无效");
+      }
+
+      return texts.map((_, index) => {
+        const vec = data.slice(index * vectorSize, (index + 1) * vectorSize);
+        const norm = Math.sqrt(
+          vec.reduce((sum: number, value: number) => sum + value * value, 0)
+        );
+        return vec.map((value: number) => value / (norm || 1));
+      });
+    } finally {
+      disposeTensors(output);
+    }
+  };
+
   setEmbeddingModel({
     // embedImage is intentionally NOT provided here — image embedding goes
     // through embedImageInWorker() to keep the WASM heap within limits.
@@ -336,22 +378,10 @@ export async function loadModel(): Promise<void> {
       );
     },
     embedText: async (text: string) => {
-      const inputs = await tokenizer([text], {
-        padding: true,
-        truncation: true,
-      });
-      const output = await textModel(inputs);
-      try {
-        const { text_embeds } = output;
-        const vec = Array.from(text_embeds.data as Float32Array);
-        const norm = Math.sqrt(
-          vec.reduce((s: number, v: number) => s + v * v, 0)
-        );
-        return vec.map((v: number) => v / (norm || 1));
-      } finally {
-        disposeTensors(output);
-      }
+      const [vector] = await embedTexts([text]);
+      return vector;
     },
+    embedTexts,
   });
 
   setIsModelLoaded(true);

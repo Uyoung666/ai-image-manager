@@ -247,9 +247,13 @@ function runEmbedBatch(
  * Clean up partially embedded data when user cancels AI indexing.
  * Follows the same pattern as scan cancellation cleanup in listing.ts.
  */
-export async function cleanupPartialEmbedding(runId = activeEmbeddingRunId): Promise<void> {
+export async function cleanupPartialEmbedding(
+  runId = activeEmbeddingRunId
+): Promise<void> {
   const ids =
-    runId > 0 ? [...getWrittenPhotoIdsForRun(runId)] : [...getWrittenPhotoIds()];
+    runId > 0
+      ? [...getWrittenPhotoIdsForRun(runId)]
+      : [...getWrittenPhotoIds()];
   if (ids.length === 0) {
     if (runId > 0) {
       clearWrittenPhotoIdsForRun(runId);
@@ -465,11 +469,9 @@ export async function embedAllPhotos(
         .where(sql`${photos.deletedAt} IS NOT NULL`)
         .all()
         .map((p) => p.id);
-      if (softDeletedIds.length > 0) {
-        const removed = await cleanupOrphanVectors(softDeletedIds);
-        if (removed > 0) {
-          vectorCount -= removed;
-        }
+      const removed = await cleanupOrphanVectors(softDeletedIds);
+      if (removed > 0) {
+        vectorCount = await photoTable.countRows();
       }
     }
 
@@ -522,12 +524,45 @@ export async function embedAllPhotos(
     let processed = 0;
     const successfulIds: number[] = [];
 
-    async function persistEmbedResults(results: EmbedResult[]): Promise<number> {
+    if (total === 0) {
+      setCurrentProgress({
+        processed: totalPhotos > 0 ? processedCount : 0,
+        total: totalPhotos > 0 ? processedCount : 0,
+        phase: totalPhotos > 0 ? "complete" : "idle",
+        currentFile: "",
+        downloadPercent: undefined,
+        loadingStartedAt: null,
+      });
+      onProgress?.(currentProgress);
+      console.log("[AI] No photos need embedding; worker pool startup skipped");
+      finishRun("idle");
+      return 0;
+    }
+
+    async function persistEmbedResults(
+      results: EmbedResult[]
+    ): Promise<number> {
       if (!isRunWritable(runId)) {
         return 0;
       }
-      const successResults = results.filter(
+      const candidateResults = results.filter(
         (r) => r.vector && r.vector.length > 0
+      );
+      const candidateIds = candidateResults.map((result) => result.id);
+      const activeIds = new Set(
+        candidateIds.length > 0
+          ? db
+              .select({ id: photos.id })
+              .from(photos)
+              .where(
+                sql`${photos.id} IN (${sql.raw(candidateIds.join(","))}) AND ${photos.deletedAt} IS NULL`
+              )
+              .all()
+              .map((row) => row.id)
+          : []
+      );
+      const successResults = candidateResults.filter((result) =>
+        activeIds.has(result.id)
       );
       if (!(successResults.length > 0 && photoTable)) {
         return 0;
@@ -568,11 +603,34 @@ export async function embedAllPhotos(
         return 0;
       }
 
-      batchUpdatePhotoStatus(db, batchIds);
-      addWrittenPhotoIdsForRun(runId, batchIds);
-      addPendingAutoTagPhotoIds(batchIds);
-      successfulIds.push(...batchIds);
-      return successResults.length;
+      const stillActiveIds = new Set(
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(
+            sql`${photos.id} IN (${sql.raw(batchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
+          )
+          .all()
+          .map((row) => row.id)
+      );
+      const removedDuringWrite = batchIds.filter(
+        (photoId) => !stillActiveIds.has(photoId)
+      );
+      if (removedDuringWrite.length > 0) {
+        await deletePhotoVectors(removedDuringWrite);
+      }
+      const persistedIds = batchIds.filter((photoId) =>
+        stillActiveIds.has(photoId)
+      );
+      if (persistedIds.length === 0) {
+        return 0;
+      }
+
+      batchUpdatePhotoStatus(db, persistedIds);
+      addWrittenPhotoIdsForRun(runId, persistedIds);
+      addPendingAutoTagPhotoIds(persistedIds);
+      successfulIds.push(...persistedIds);
+      return persistedIds.length;
     }
 
     console.log(`[AI] Starting embedding for ${total} photos via Worker Pool`);
@@ -692,7 +750,10 @@ export async function embedAllPhotos(
       }
 
       // After pool completes (or stops due to cancel): check for cancellation
-      if (isCurrentEmbeddingRun(runId) && getAiControlState() === "cancelling") {
+      if (
+        isCurrentEmbeddingRun(runId) &&
+        getAiControlState() === "cancelling"
+      ) {
         console.log("[AI] Embedding cancelled by user, cleaning up...");
         await cleanupPartialEmbedding(runId);
         setCurrentProgress({
@@ -748,8 +809,24 @@ export async function embedAllPhotos(
           if (!isRunWritable(runId)) {
             return 0;
           }
-          const successBatch = results.filter(
+          const candidateBatch = results.filter(
             (r) => r.vector && r.vector.length > 0
+          );
+          const candidateIds = candidateBatch.map((result) => result.id);
+          const activeIds = new Set(
+            candidateIds.length > 0
+              ? db
+                  .select({ id: photos.id })
+                  .from(photos)
+                  .where(
+                    sql`${photos.id} IN (${sql.raw(candidateIds.join(","))}) AND ${photos.deletedAt} IS NULL`
+                  )
+                  .all()
+                  .map((row) => row.id)
+              : []
+          );
+          const successBatch = candidateBatch.filter((result) =>
+            activeIds.has(result.id)
           );
 
           if (successBatch.length > 0) {
@@ -784,12 +861,35 @@ export async function embedAllPhotos(
               return 0;
             }
 
-            batchUpdatePhotoStatus(db, ids);
+            const stillActiveIds = new Set(
+              db
+                .select({ id: photos.id })
+                .from(photos)
+                .where(
+                  sql`${photos.id} IN (${sql.raw(ids.join(","))}) AND ${photos.deletedAt} IS NULL`
+                )
+                .all()
+                .map((row) => row.id)
+            );
+            const removedDuringWrite = ids.filter(
+              (photoId) => !stillActiveIds.has(photoId)
+            );
+            if (removedDuringWrite.length > 0) {
+              await deletePhotoVectors(removedDuringWrite);
+            }
+            const persistedIds = ids.filter((photoId) =>
+              stillActiveIds.has(photoId)
+            );
+            if (persistedIds.length === 0) {
+              return 0;
+            }
+
+            batchUpdatePhotoStatus(db, persistedIds);
             // Track written IDs for potential cancel cleanup
-            addWrittenPhotoIdsForRun(runId, ids);
-            addPendingAutoTagPhotoIds(ids);
-            successfulIds.push(...ids);
-            return successBatch.length;
+            addWrittenPhotoIdsForRun(runId, persistedIds);
+            addPendingAutoTagPhotoIds(persistedIds);
+            successfulIds.push(...persistedIds);
+            return persistedIds.length;
           }
           return 0;
         } catch (err: any) {

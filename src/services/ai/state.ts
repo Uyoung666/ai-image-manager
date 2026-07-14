@@ -25,6 +25,7 @@ export type AiControlState =
 export interface EmbeddingModel {
   embedImage: (imagePath: string) => Promise<number[]>;
   embedText: (text: string) => Promise<number[]>;
+  embedTexts?: (texts: string[]) => Promise<number[][]>;
 }
 
 export let vectordb: any = null;

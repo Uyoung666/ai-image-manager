@@ -21,7 +21,12 @@ export {
   generateSearchPrompts,
   parseChineseQuery,
 } from "./query-parser";
-export { searchByImage, searchByText } from "./search";
+export {
+  isAiSearchReady,
+  searchByImage,
+  searchByText,
+  warmupAiSearch,
+} from "./search";
 export type { EmbedProgress, EmbedProgressCallback } from "./state";
 export {
   activeEmbeddingRunId,

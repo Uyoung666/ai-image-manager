@@ -8,7 +8,7 @@ import {
   Int32,
   Schema,
 } from "apache-arrow";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { appSettings, photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
@@ -24,6 +24,7 @@ import {
   setWasAutoRepaired,
   vectordb,
 } from "./state";
+import { planVectorReconciliation } from "./vector-reconciliation";
 
 // ── 向量数据库定期维护 ──────────────────────────────────────────────
 // 数据追加后 LanceDB 产生碎片和旧版本文件，定期压缩清理释放磁盘空间。
@@ -83,11 +84,23 @@ function clearVectorMaintenance(): void {
   }
 }
 
-export async function initVectorDB(): Promise<void> {
+let vectorDbInitPromise: Promise<void> | null = null;
+
+export function initVectorDB(): Promise<void> {
   if (isVectorDBReady && vectordb && photoTable) {
-    return;
+    return Promise.resolve();
   }
 
+  if (!vectorDbInitPromise) {
+    vectorDbInitPromise = initializeVectorDB().finally(() => {
+      vectorDbInitPromise = null;
+    });
+  }
+
+  return vectorDbInitPromise;
+}
+
+async function initializeVectorDB(): Promise<void> {
   // 清理上次重建残留的 .bak 目录
   await cleanupStaleBackups();
 
@@ -255,7 +268,11 @@ export function buildPhotoIdFilter(ids: number[]): string {
   return `photo_id IN (${validated.join(", ")})`;
 }
 
-/** 清理孤儿向量：删除 photo_id 在 SQLite 中不存在或已软删除条目对应的向量 */
+/**
+ * 清理孤儿和重复向量。
+ * - SQLite 中不存在或已软删除的 photo_id：直接删除
+ * - 同一有效 photo_id 存在多条向量：删除全部旧向量，并把照片重新排队嵌入
+ */
 export async function cleanupOrphanVectors(
   softDeletedIds: number[]
 ): Promise<number> {
@@ -264,23 +281,49 @@ export async function cleanupOrphanVectors(
   }
   let deleted = 0;
   try {
-    const allRows = (await photoTable.query().toArray()) as Record<
-      string,
-      unknown
-    >[];
-    const orphanIds = new Set(softDeletedIds);
-    const toDelete: number[] = [];
-    for (const row of allRows) {
-      const pid = row.photo_id as number;
-      if (pid != null && orphanIds.has(pid)) {
-        toDelete.push(pid);
+    const allRows = (await photoTable
+      .query()
+      .select(["photo_id"])
+      .toArray()) as Array<{ photo_id: number }>;
+    const db = getDatabase();
+    const validIds = new Set(
+      db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(isNull(photos.deletedAt))
+        .all()
+        .map((row) => row.id)
+    );
+    const { duplicateIds, orphanIds } = planVectorReconciliation(
+      allRows.map((row) => row.photo_id),
+      validIds,
+      softDeletedIds
+    );
+    const idsToDelete = [...new Set([...orphanIds, ...duplicateIds])];
+    const CHUNK_SIZE = 500;
+
+    for (let index = 0; index < idsToDelete.length; index += CHUNK_SIZE) {
+      await photoTable.delete(
+        buildPhotoIdFilter(idsToDelete.slice(index, index + CHUNK_SIZE))
+      );
+    }
+
+    if (duplicateIds.length > 0) {
+      for (let index = 0; index < duplicateIds.length; index += CHUNK_SIZE) {
+        db.update(photos)
+          .set({ isAiProcessed: false })
+          .where(
+            inArray(photos.id, duplicateIds.slice(index, index + CHUNK_SIZE))
+          )
+          .run();
       }
     }
-    if (toDelete.length > 0) {
-      await photoTable.delete(buildPhotoIdFilter(toDelete));
-      deleted = toDelete.length;
+
+    if (idsToDelete.length > 0) {
+      const remainingRows = await photoTable.countRows();
+      deleted = Math.max(0, allRows.length - remainingRows);
       console.log(
-        `[AI] Cleaned up ${deleted} orphan vectors (soft-deleted photos)`
+        `[AI] Vector reconciliation: removed ${deleted} rows (${orphanIds.length} orphan photo IDs, ${duplicateIds.length} duplicate photo IDs re-queued)`
       );
     }
   } catch (err: any) {
@@ -290,14 +333,31 @@ export async function cleanupOrphanVectors(
 }
 
 export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
-  if (!(isVectorDBReady && photoTable) || photoIds.length === 0) {
+  if (photoIds.length === 0) {
     return;
   }
+
   try {
-    await photoTable.delete(buildPhotoIdFilter(photoIds));
-    console.log(`[AI] Deleted ${photoIds.length} vectors from LanceDB`);
+    if (!(isVectorDBReady && photoTable)) {
+      await initVectorDB();
+    }
+    if (!photoTable) {
+      throw new Error("vector database is not available");
+    }
+
+    const uniqueIds = [...new Set(photoIds)];
+    const CHUNK_SIZE = 500;
+    for (let index = 0; index < uniqueIds.length; index += CHUNK_SIZE) {
+      await photoTable.delete(
+        buildPhotoIdFilter(uniqueIds.slice(index, index + CHUNK_SIZE))
+      );
+    }
+    console.log(
+      `[AI] Deleted vectors for ${uniqueIds.length} photos from LanceDB`
+    );
   } catch (err: any) {
     console.error("[AI] Failed to delete vectors:", err?.message);
+    throw err;
   }
 }
 
@@ -661,7 +721,9 @@ async function initColorTable(db: any): Promise<void> {
 
     const table = await db.createEmptyTable(COLOR_TABLE_NAME, schema);
     setColorTable(table);
-    console.log("[AI] Created color_embeddings table (FixedSizeList<Float32>[3])");
+    console.log(
+      "[AI] Created color_embeddings table (FixedSizeList<Float32>[3])"
+    );
   } catch (err: any) {
     console.warn("[AI] Color table init skipped:", err?.message);
     // 非关键路径：颜色搜索降级为 SQLite UDF
@@ -682,11 +744,12 @@ export async function upsertColorVector(
     // 删除旧记录（如果存在）
     await colorTable.delete(`photo_id = ${photoId}`);
     // 写入新记录
-    await colorTable.add([
-      { photo_id: photoId, vector: [r, g, b] },
-    ]);
+    await colorTable.add([{ photo_id: photoId, vector: [r, g, b] }]);
   } catch (err: any) {
-    console.error(`[AI] Upsert color vector failed for photo ${photoId}:`, err?.message);
+    console.error(
+      `[AI] Upsert color vector failed for photo ${photoId}:`,
+      err?.message
+    );
   }
 }
 
@@ -724,8 +787,9 @@ export async function searchByColorVector(
     return null;
   }
   try {
-    const targetVector = Array.from({ length: COLOR_VECTOR_DIM }, (_, i) =>
-      [r, g, b][i]
+    const targetVector = Array.from(
+      { length: COLOR_VECTOR_DIM },
+      (_, i) => [r, g, b][i]
     );
     const rawResults = (await colorTable
       .vectorSearch(targetVector)
@@ -820,7 +884,9 @@ export async function backfillColorVectors(): Promise<{
       db.run(
         sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
       );
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
     return { total: 0, backfilled: 0 };
   }
 
@@ -829,18 +895,24 @@ export async function backfillColorVectors(): Promise<{
 
   for (let i = 0; i < total; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    const entries: Array<{ photoId: number; r: number; g: number; b: number }> = [];
+    const entries: Array<{ photoId: number; r: number; g: number; b: number }> =
+      [];
 
     for (const row of batch) {
       try {
         const palette = JSON.parse(row.dominantColors!) as Array<{
-          r: number; g: number; b: number; weight: number;
+          r: number;
+          g: number;
+          b: number;
+          weight: number;
         }>;
         if (palette.length > 0) {
           const { r, g, b } = palette[0];
           entries.push({ photoId: row.id, r, g, b });
         }
-      } catch { /* skip invalid JSON */ }
+      } catch {
+        /* skip invalid JSON */
+      }
     }
 
     if (entries.length > 0) {
@@ -861,7 +933,9 @@ export async function backfillColorVectors(): Promise<{
     db.run(
       sql`INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('color_vectors_backfilled', 'true', ${Date.now()})`
     );
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 
   console.log(`[AI] Color vector backfill: ${backfilled}/${total}`);
   return { total, backfilled };

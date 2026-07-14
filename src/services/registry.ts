@@ -10,6 +10,7 @@ import {
   setIsModelLoaded,
   setLocalModelPath,
   stopEmbedding,
+  warmupAiSearch,
   wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
@@ -349,6 +350,9 @@ registry.register({
   level: ServiceLevel.Optional,
   start: async () => {
     await loadModel();
+    warmupAiSearch().catch((err) => {
+      console.warn("[Registry] AI search warmup failed:", err?.message);
+    });
   },
   stop: async () => {
     stopEmbedding();

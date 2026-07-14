@@ -30,6 +30,7 @@ import {
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
+  isAiSearchReady,
 } from "@/services/ai-embedder";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
@@ -80,7 +81,8 @@ const CHINESE_CHAR_RE = /[一-鿿]/;
 const GLOB_WILDCARD_RE = /[*?[]/;
 
 // ── 熔断与超时配置 ──────────────────────────────────────────────────
-const LANCEDB_TIMEOUT_MS = 2000; // LanceDB 向量检索硬超时
+const AI_SEARCH_TIMEOUT_MS = 2000;
+const AI_SEARCH_COLD_TIMEOUT_MS = 10_000;
 const COLOR_VECTOR_TIMEOUT_MS = 250;
 const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
@@ -673,11 +675,19 @@ export const searchCompound = os
 
       // ── 四路并行召回（Promise.allSettled + 硬超时） ─────────────────
       // 替代脆弱的 Promise.all：单路故障不影响其他路结果。
-      // LanceDB 有 2000ms 硬超时，SQLite 依赖 busy_timeout=5000ms。
+      // 已预热的语义搜索限制为 2s；冷启动允许 10s 完成模型和数据库初始化。
 
+      const aiSearchWasReady = isAiSearchReady();
+      const aiSearchTimeoutMs = aiSearchWasReady
+        ? AI_SEARCH_TIMEOUT_MS
+        : AI_SEARCH_COLD_TIMEOUT_MS;
       const settled = await Promise.allSettled([
-        // 路 1：LanceDB CLIP 向量搜索（2000ms 超时熔断）
-        withTimeout(aiSearchByText(q, 200), LANCEDB_TIMEOUT_MS, "LanceDB"),
+        // 路 1：CLIP 文本推理 + LanceDB 向量召回
+        withTimeout(
+          aiSearchByText(q, 200),
+          aiSearchTimeoutMs,
+          aiSearchWasReady ? "AI semantic search" : "AI semantic search warmup"
+        ),
         // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
         db
           .select({ id: photos.id })
@@ -764,7 +774,7 @@ export const searchCompound = os
 
       if (settled[0].status === "rejected") {
         console.warn(
-          `[Search] LanceDB recall degraded: ${settled[0].reason?.message ?? "timeout"}. Proceeding with SQLite-only results.`
+          `[Search] AI semantic recall degraded: ${settled[0].reason?.message ?? "timeout"}. Proceeding with SQLite-only results.`
         );
       }
       if (settled[1].status === "rejected") {

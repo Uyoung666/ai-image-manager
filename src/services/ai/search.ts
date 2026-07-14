@@ -133,13 +133,14 @@ function adaptiveThreshold(coverage: number): number {
 async function fallbackSearch(
   queryVector: number[],
   limit: number,
-  maxDistance = 0.75
+  maxDistance = 0.75,
+  knownRowCount?: number
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!photoTable) {
     return [];
   }
 
-  const rowCount = await photoTable.countRows();
+  const rowCount = knownRowCount ?? (await photoTable.countRows());
 
   console.log(
     `[AI] Library (${rowCount} rows), attempting paginated brute-force`
@@ -207,24 +208,20 @@ async function fallbackSearch(
     }));
 }
 
-async function singleVectorSearch(
-  text: string,
+interface SearchTimings {
+  embedMs: number;
+  vectorMs: number;
+}
+
+async function searchVector(
+  queryVector: number[],
   limit: number,
-  maxCosineDistance = 0.75
+  maxCosineDistance: number,
+  rowCount: number
 ): Promise<Array<{ photoId: number; similarity: number }>> {
-  if (!(embeddingModel && photoTable)) {
+  if (!photoTable) {
     return [];
   }
-
-  let queryVector: number[];
-  try {
-    queryVector = await embeddingModel.embedText(text);
-  } catch (err: any) {
-    console.error("[AI] embedText failed:", err?.message);
-    return [];
-  }
-
-  const rowCount = await photoTable.countRows();
   const adaptiveRefine = Math.min(
     10,
     Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
@@ -243,7 +240,7 @@ async function singleVectorSearch(
   }
 
   if (rawResults.length === 0) {
-    return fallbackSearch(queryVector, limit, maxCosineDistance);
+    return fallbackSearch(queryVector, limit, maxCosineDistance, rowCount);
   }
 
   const filtered = rawResults.filter(
@@ -267,14 +264,138 @@ async function singleVectorSearch(
   });
 }
 
+interface EmbeddingCacheEntry {
+  timestamp: number;
+  vector: number[];
+}
+
+const textEmbeddingCache = new Map<string, EmbeddingCacheEntry>();
+const EMBEDDING_CACHE_TTL = 10 * 60 * 1000;
+const MAX_EMBEDDING_CACHE = 100;
+let embeddingCacheModel: typeof embeddingModel = null;
+
+function getCachedEmbedding(text: string): number[] | null {
+  const entry = textEmbeddingCache.get(text);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.timestamp > EMBEDDING_CACHE_TTL) {
+    textEmbeddingCache.delete(text);
+    return null;
+  }
+  textEmbeddingCache.delete(text);
+  textEmbeddingCache.set(text, entry);
+  return entry.vector;
+}
+
+function setCachedEmbedding(text: string, vector: number[]): void {
+  if (textEmbeddingCache.size >= MAX_EMBEDDING_CACHE) {
+    const lru = textEmbeddingCache.keys().next().value;
+    if (lru !== undefined) {
+      textEmbeddingCache.delete(lru);
+    }
+  }
+  textEmbeddingCache.delete(text);
+  textEmbeddingCache.set(text, { timestamp: Date.now(), vector });
+}
+
+async function embedSearchTexts(
+  texts: string[],
+  timings: SearchTimings
+): Promise<number[][]> {
+  if (!embeddingModel) {
+    return [];
+  }
+  if (embeddingCacheModel !== embeddingModel) {
+    textEmbeddingCache.clear();
+    embeddingCacheModel = embeddingModel;
+  }
+
+  const vectors: Array<number[] | null> = texts.map((text) =>
+    getCachedEmbedding(text)
+  );
+  const missing = texts
+    .map((text, index) => ({ index, text }))
+    .filter(({ index }) => vectors[index] === null);
+
+  if (missing.length > 0) {
+    const startedAt = Date.now();
+    const generated = embeddingModel.embedTexts
+      ? await embeddingModel.embedTexts(missing.map(({ text }) => text))
+      : await (async () => {
+          const sequential: number[][] = [];
+          for (const { text } of missing) {
+            sequential.push(await embeddingModel.embedText(text));
+          }
+          return sequential;
+        })();
+    timings.embedMs += Date.now() - startedAt;
+    if (generated.length !== missing.length) {
+      throw new Error("CLIP 批量文本向量数量不匹配");
+    }
+
+    for (let index = 0; index < missing.length; index++) {
+      const item = missing[index];
+      const vector = generated[index];
+      vectors[item.index] = vector;
+      setCachedEmbedding(item.text, vector);
+    }
+  }
+
+  return vectors.filter((vector): vector is number[] => vector !== null);
+}
+
+async function singleVectorSearch(
+  text: string,
+  limit: number,
+  maxCosineDistance = 0.75,
+  timings: SearchTimings = { embedMs: 0, vectorMs: 0 }
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!(embeddingModel && photoTable)) {
+    return [];
+  }
+
+  try {
+    const [queryVector] = await embedSearchTexts([text], timings);
+    if (!queryVector) {
+      return [];
+    }
+    const vectorStartedAt = Date.now();
+    const rowCount = await photoTable.countRows();
+    const results = await searchVector(
+      queryVector,
+      limit,
+      maxCosineDistance,
+      rowCount
+    );
+    timings.vectorMs += Date.now() - vectorStartedAt;
+    return results;
+  } catch (err: any) {
+    console.error("[AI] text vector search failed:", err?.message);
+    return [];
+  }
+}
+
 async function multiPromptSearch(
   prompts: string[],
   limit: number,
-  maxCosineDistance = 0.75
+  maxCosineDistance = 0.75,
+  timings: SearchTimings = { embedMs: 0, vectorMs: 0 }
 ): Promise<Array<{ photoId: number; similarity: number }>> {
+  if (!(embeddingModel && photoTable)) {
+    return [];
+  }
+
+  const vectors = await embedSearchTexts(prompts, timings);
+  const vectorStartedAt = Date.now();
+  const rowCount = await photoTable.countRows();
+  const candidateLimit = Math.min(limit * 2, 200);
   const resultSets = await Promise.all(
-    prompts.map((p) => singleVectorSearch(p, limit * 2, maxCosineDistance))
+    vectors.map((vector) =>
+      searchVector(vector, candidateLimit, maxCosineDistance, rowCount)
+    )
   );
+  timings.vectorMs += Date.now() - vectorStartedAt;
 
   const weights = [1.0, 0.7, 0.5];
   const k = 60;
@@ -306,8 +427,25 @@ interface SearchCacheEntry {
   timestamp: number;
 }
 const textSearchCache = new Map<string, SearchCacheEntry>();
+const pendingTextSearches = new Map<
+  string,
+  Promise<Array<{ photoId: number; similarity: number }>>
+>();
 const SEARCH_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 const MAX_SEARCH_CACHE = 30;
+let warmedModel: typeof embeddingModel = null;
+let warmedTable: typeof photoTable = null;
+let searchCacheModel: typeof embeddingModel = null;
+let searchCacheTable: typeof photoTable = null;
+
+export function isAiSearchReady(): boolean {
+  return (
+    embeddingModel !== null &&
+    photoTable !== null &&
+    warmedModel === embeddingModel &&
+    warmedTable === photoTable
+  );
+}
 
 function getCachedSearch(
   cacheKey: string
@@ -348,13 +486,48 @@ export async function searchByText(
     return [];
   }
 
-  // TTL cache check — avoids redundant CLIP inference + LanceDB search
   const cacheKey = `${query.trim()}_${limit}`;
+  const pending = pendingTextSearches.get(cacheKey);
+  if (pending) {
+    console.log(`[AI] searchByText IN-FLIGHT HIT: "${query}" limit=${limit}`);
+    return pending;
+  }
+
+  if (
+    searchCacheModel !== embeddingModel ||
+    searchCacheTable !== photoTable
+  ) {
+    textSearchCache.clear();
+    searchCacheModel = embeddingModel;
+    searchCacheTable = photoTable;
+  }
+
+  // TTL cache check — avoids redundant CLIP inference + LanceDB search
   const cached = getCachedSearch(cacheKey);
   if (cached) {
     console.log(`[AI] searchByText CACHE HIT: "${query}" limit=${limit}`);
     return cached;
   }
+
+  const searchPromise = performTextSearch(query, limit, cacheKey);
+  pendingTextSearches.set(cacheKey, searchPromise);
+  try {
+    return await searchPromise;
+  } finally {
+    if (pendingTextSearches.get(cacheKey) === searchPromise) {
+      pendingTextSearches.delete(cacheKey);
+    }
+  }
+}
+
+async function performTextSearch(
+  query: string,
+  limit: number,
+  cacheKey: string
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  const totalStartedAt = Date.now();
+  const timings: SearchTimings = { embedMs: 0, vectorMs: 0 };
+  const initStartedAt = Date.now();
 
   try {
     await loadModel();
@@ -364,6 +537,7 @@ export async function searchByText(
   }
 
   await initVectorDB();
+  const initMs = Date.now() - initStartedAt;
 
   if (!(embeddingModel && photoTable)) {
     console.warn("[AI] searchByText: AI not initialized");
@@ -372,6 +546,8 @@ export async function searchByText(
 
   const hasChinese = /[一-鿿]/.test(query);
   let results: Array<{ photoId: number; similarity: number }>;
+  const parseStartedAt = Date.now();
+  let parseMs = 0;
 
   if (hasChinese) {
     const parsed = parseChineseQuery(query);
@@ -379,26 +555,70 @@ export async function searchByText(
     const threshold = adaptiveThreshold(coverage);
     // 始终将原始 query 传入 generateSearchPrompts 作为 Zero-Shot 兜底
     const prompts = generateSearchPrompts(parsed, query);
+    parseMs = Date.now() - parseStartedAt;
 
     console.log(
       `[AI] searchByText: "${query}" → coverage=${(coverage * 100).toFixed(0)}% threshold=${threshold.toFixed(2)} prompts=${prompts.length}: ${JSON.stringify(prompts)}`
     );
 
     if (prompts.length > 0) {
-      results = await multiPromptSearch(prompts, limit, threshold);
+      results = await multiPromptSearch(prompts, limit, threshold, timings);
     } else {
       // 极端情况：连 raw query 都没有生成 prompt（query 被完全过滤为空白）
-      results = await singleVectorSearch(query, limit, threshold);
+      results = await singleVectorSearch(query, limit, threshold, timings);
     }
   } else {
     // English query: single prompt
     const searchText = `a photo of ${query.trim()}`;
+    parseMs = Date.now() - parseStartedAt;
     console.log(`[AI] searchByText: en query → "${searchText}"`);
-    results = await singleVectorSearch(searchText, limit);
+    results = await singleVectorSearch(searchText, limit, 0.75, timings);
   }
 
   setCachedSearch(cacheKey, results);
+  searchCacheModel = embeddingModel;
+  searchCacheTable = photoTable;
+  warmedModel = embeddingModel;
+  warmedTable = photoTable;
+  console.log(
+    `[AI] searchByText timing: init=${initMs}ms parse=${parseMs}ms embed=${timings.embedMs}ms vector=${timings.vectorMs}ms total=${Date.now() - totalStartedAt}ms`
+  );
   return results;
+}
+
+let warmupPromise: Promise<void> | null = null;
+
+export function warmupAiSearch(): Promise<void> {
+  if (!warmupPromise) {
+    warmupPromise = (async () => {
+      const startedAt = Date.now();
+      await loadModel();
+      await initVectorDB();
+      if (!(embeddingModel && photoTable)) {
+        return;
+      }
+
+      const timings: SearchTimings = { embedMs: 0, vectorMs: 0 };
+      const [vector] = await embedSearchTexts(["a photo"], timings);
+      const rowCount = await photoTable.countRows();
+      if (vector && rowCount > 0) {
+        await photoTable
+          .vectorSearch(vector)
+          .distanceType("cosine")
+          .limit(1)
+          .toArray();
+      }
+      warmedModel = embeddingModel;
+      warmedTable = photoTable;
+      console.log(
+        `[AI] Semantic search warmup completed in ${Date.now() - startedAt}ms`
+      );
+    })().finally(() => {
+      warmupPromise = null;
+    });
+  }
+
+  return warmupPromise;
 }
 
 export async function searchByImage(

@@ -226,9 +226,11 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     deletePhotoThumbnails(p);
   }
   if (allPhotoIds.length > 0) {
-    deletePhotoVectors(allPhotoIds).catch((err) =>
-      console.error("[AI] deleteFolder vector cleanup failed:", err)
-    );
+    try {
+      await deletePhotoVectors(allPhotoIds);
+    } catch (err) {
+      console.error("[AI] deleteFolder vector cleanup failed:", err);
+    }
   }
 
   // 6) Reload folder matcher so watchers pick up the change

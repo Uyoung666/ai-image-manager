@@ -13,10 +13,7 @@ import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
 import { extractRawPreview, isRawFile } from "./raw-preview";
-import {
-  deletePhotoThumbnails,
-  generateThumbnail,
-} from "./thumbnailer";
+import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
 const log = createLogger("indexer");
 
@@ -1076,6 +1073,7 @@ export async function scanFolder(
   }
 
   // Clean up photos whose files no longer exist on disk — check all folders
+  const stalePhotoIds: number[] = [];
   for (const [dirPath, fid] of dirToFolderId) {
     const dbPhotos = db
       .select({ id: photos.id, path: photos.path })
@@ -1086,6 +1084,7 @@ export async function scanFolder(
       if (!fs.existsSync(p.path)) {
         db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
         db.delete(photos).where(eq(photos.id, p.id)).run();
+        stalePhotoIds.push(p.id);
         const idx = photoIds.indexOf(p.id);
         if (idx >= 0) {
           photoIds.splice(idx, 1);
@@ -1098,6 +1097,11 @@ export async function scanFolder(
       }
     }
   }
+  if (stalePhotoIds.length > 0) {
+    await deletePhotoVectors(stalePhotoIds).catch((err) => {
+      log.warn({ err }, "Failed to remove stale photo vectors");
+    });
+  }
 
   const folderIds = Array.from(new Set(dirToFolderId.values()));
   const folderPhotoCounts = new Map<number, number>();
@@ -1108,12 +1112,7 @@ export async function scanFolder(
         folderId: photos.folderId,
       })
       .from(photos)
-      .where(
-        and(
-          inArray(photos.folderId, folderIds),
-          isNull(photos.deletedAt)
-        )
-      )
+      .where(and(inArray(photos.folderId, folderIds), isNull(photos.deletedAt)))
       .groupBy(photos.folderId)
       .all();
 
@@ -1417,6 +1416,7 @@ export async function cleanupOrphanedRecords(): Promise<{
     .all();
 
   let removed = 0;
+  const removedPhotoIds: number[] = [];
   const folderUpdates = new Map<number, number>();
 
   for (const photo of allPhotos) {
@@ -1426,6 +1426,7 @@ export async function cleanupOrphanedRecords(): Promise<{
 
       db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
       db.delete(photos).where(eq(photos.id, photo.id)).run();
+      removedPhotoIds.push(photo.id);
 
       if (photo.folderId) {
         folderUpdates.set(
@@ -1436,6 +1437,12 @@ export async function cleanupOrphanedRecords(): Promise<{
 
       removed++;
     }
+  }
+
+  if (removedPhotoIds.length > 0) {
+    await deletePhotoVectors(removedPhotoIds).catch((err) => {
+      log.warn({ err }, "Failed to remove orphaned photo vectors");
+    });
   }
 
   for (const [folderId, count] of folderUpdates) {
@@ -1462,6 +1469,7 @@ export async function cleanupOrphanedRecordsAsync(
     .all();
 
   let removed = 0;
+  const removedPhotoIds: number[] = [];
   const folderUpdates = new Map<number, number>();
   const BATCH_SIZE = 200;
 
@@ -1474,6 +1482,7 @@ export async function cleanupOrphanedRecordsAsync(
 
         db.delete(exifData).where(eq(exifData.photoId, photo.id)).run();
         db.delete(photos).where(eq(photos.id, photo.id)).run();
+        removedPhotoIds.push(photo.id);
 
         if (photo.folderId) {
           folderUpdates.set(
@@ -1491,6 +1500,12 @@ export async function cleanupOrphanedRecordsAsync(
       removed,
       allPhotos.length
     );
+  }
+
+  if (removedPhotoIds.length > 0) {
+    await deletePhotoVectors(removedPhotoIds).catch((err) => {
+      log.warn({ err }, "Failed to remove orphaned photo vectors");
+    });
   }
 
   for (const [folderId, count] of folderUpdates) {
