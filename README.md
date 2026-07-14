@@ -6,7 +6,7 @@
 
 网址：https://ai-image-manager.uyoungvision.cn
 
-[![Version](https://img.shields.io/badge/version-1.3.4-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
@@ -19,9 +19,9 @@
 
 从 [Releases](https://github.com/Uyoung666/ai-image-manager/releases) 下载最新版本。Release 中包含操作演示视频。
 
-**安装版（推荐）：** `AI Image Manager-1.3.4 Setup.exe` — 安装到系统默认位置，创建快捷方式，支持自动更新。
+**安装版（推荐）：** `AI Image Manager-1.4.0 Setup.exe` — 安装到系统默认位置，创建快捷方式，支持自动更新。
 
-**便携版：** `AI Image Manager-win32-x64-1.3.4.zip` — 解压即用，不写注册表。
+**便携版：** `AI Image Manager-win32-x64-1.4.0.zip` — 解压即用，不写注册表。
 
 ---
 
@@ -29,7 +29,7 @@
 
 ### 浏览与灯箱
 
-瀑布流虚拟滚动，10 万+ 照片 60fps 流畅浏览。时间线分组、文件夹树、类 QuickLook 快速预览、全屏灯箱幻灯片。
+瀑布流虚拟滚动，10 万+ 照片 60fps 流畅浏览。时间线分组、层级文件夹树、自定义文件夹徽标、类 QuickLook 快速预览、全屏灯箱幻灯片。
 
 | ![首页](screenshots/01-home.png) | ![预览](screenshots/04-lightbox-preview.png) |
 |:---:|:---:|
@@ -39,7 +39,7 @@
 
 ### AI 搜索
 
-中英文自然语言搜索 — *"去年秋天在海边拍的日落"*。以图搜图。关键词 + 时间范围 + EXIF 条件组合筛选。
+中英文自然语言搜索 — *"去年秋天在海边拍的日落"*。以图搜图。文件名通配符搜索。关键词 + 时间范围 + EXIF 条件组合筛选。
 
 **`Ctrl+K` 聚光灯搜索** — 命令面板式全局搜索，覆盖照片、标签、相册、人物和导航。支持拼音首字母匹配，键盘全程导航。
 
@@ -80,6 +80,7 @@ ONNX 人脸检测 + 特征提取，自动聚类身份，支持合并/拆分/重�
 - **AI 自动标签** — 136 个候选标签，9 大类别（场景/人物/动物/物体/风格/天气...）
 - **批量操作** — 重命名、格式转换、尺寸调整、水印
 - **云端分享** — WebDAV / S3 上传，独立 HTML 分享页面
+- **文件夹外观** — 为常用文件夹设置颜色和图标徽标，层级数量统计保持一致
 - **原生交互** — 拖拽导入、右键上下文菜单、选框批量选择、剪贴板图片复制
 - **滚动恢复** — 浏览中前进/后退自动恢复精确的滚动位置
 - **系统集成** — 托盘驻留、全局快捷键、开机自启、发送到、软删除 30 天回收站

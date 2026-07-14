@@ -4,7 +4,7 @@
 
 Index folders in-place. Semantic search, smart albums, face recognition, photo culling, deduplication, cloud sharing — all running locally on your machine.
 
-[![Version](https://img.shields.io/badge/version-1.3.4-blue)](#)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue)](#)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078d7)](#)
 
@@ -17,9 +17,9 @@ Index folders in-place. Semantic search, smart albums, face recognition, photo c
 
 Get the latest version from [Releases](https://github.com/Uyoung666/ai-image-manager/releases). Each release includes a demo video.
 
-**Installer (Recommended):** `AI Image Manager-1.3.4 Setup.exe` — installs to `%LocalAppData%`, creates shortcuts, auto-updates.
+**Installer (Recommended):** `AI Image Manager-1.4.0 Setup.exe` — installs to `%LocalAppData%`, creates shortcuts, auto-updates.
 
-**Portable:** `AI Image Manager-win32-x64-1.3.4.zip` — extract anywhere, run directly, no registry writes.
+**Portable:** `AI Image Manager-win32-x64-1.4.0.zip` — extract anywhere, run directly, no registry writes.
 
 ---
 
@@ -27,7 +27,7 @@ Get the latest version from [Releases](https://github.com/Uyoung666/ai-image-man
 
 ### Browsing & Lightbox
 
-Virtual-scrolled masonry layout, 60fps with 100K+ photos. Timeline grouping, folder tree, QuickLook-style preview, fullscreen lightbox with slideshow.
+Virtual-scrolled masonry layout, 60fps with 100K+ photos. Timeline grouping, hierarchical folder tree, custom folder badges, QuickLook-style preview, fullscreen lightbox with slideshow.
 
 | ![Home](screenshots/01-home.png) | ![Lightbox](screenshots/04-lightbox-preview.png) |
 |:---:|:---:|
@@ -37,7 +37,7 @@ Virtual-scrolled masonry layout, 60fps with 100K+ photos. Timeline grouping, fol
 
 ### AI Search
 
-Natural language queries in Chinese or English — *"sunset at the beach last autumn"*. Reverse image search. Compound filtering with keywords, time range, and EXIF conditions.
+Natural language queries in Chinese or English — *"sunset at the beach last autumn"*. Reverse image search. Filename wildcard search. Compound filtering with keywords, time range, and EXIF conditions.
 
 **`Ctrl+K` Spotlight Search** — command-palette overlay for global search across photos, tags, albums, people, and navigation. Pinyin initial matching, full keyboard navigation.
 
@@ -78,6 +78,7 @@ ONNX-based detection and feature extraction. Automatic identity clustering, merg
 - **AI Auto-Tagging** — 136 tags across 9 categories (scene, people, animals, objects, style, weather...)
 - **Batch Operations** — rename, format-convert, resize, watermark
 - **Cloud Sharing** — WebDAV / S3 upload, standalone HTML share pages
+- **Folder Appearance** — assign colors and icon badges to frequently used folders, with consistent hierarchical counts
 - **Native Interactions** — drag-drop import, right-click context menus, marquee selection, clipboard copy
 - **Scroll Restoration** — precise scroll position remembered across navigation (back/forward)
 - **System Tray** — global shortcuts, auto-start, Send-To integration, soft-delete with 30-day trash
