@@ -1,6 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
+
+const PHOTOS_TITLE_PATTERN = /Photos/;
 
 // Mock react-router navigation
 vi.mock("@tanstack/react-router", () => ({
@@ -79,6 +81,118 @@ describe("Sidebar", () => {
     render(<Sidebar {...folderProps} />);
     expect(screen.getByText("Photos")).toBeInTheDocument();
     expect(screen.getByText("Travel")).toBeInTheDocument();
+    expect(
+      screen.getByText("Photos").closest("button")?.querySelector("svg")
+    ).toBeNull();
+  });
+
+  it("expands a nested folder tree on initial load", async () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            displayName: "Photos",
+            photoCount: 0,
+          },
+          {
+            id: 2,
+            parentId: 1,
+            path: "C:/Photos/Travel",
+            displayName: "Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    expect(await screen.findByText("Travel")).toBeInTheDocument();
+  });
+
+  it("keeps folder icons in the collapsed sidebar", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        collapsed
+        folders={[
+          {
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            displayName: "Photos",
+            photoCount: 500,
+          },
+        ]}
+      />
+    );
+
+    expect(
+      screen.getByTitle(PHOTOS_TITLE_PATTERN).querySelector("svg")
+    ).not.toBeNull();
+  });
+
+  it("shows only root folders in the collapsed sidebar", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        collapsed
+        folders={[
+          {
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            displayName: "Photos",
+            photoCount: 0,
+          },
+          {
+            id: 2,
+            parentId: 1,
+            path: "C:/Photos/Travel",
+            displayName: "Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTitle(PHOTOS_TITLE_PATTERN)).toBeInTheDocument();
+    expect(screen.queryByTitle("Travel")).not.toBeInTheDocument();
+  });
+
+  it("supports keyboard navigation and selection in the folder tree", async () => {
+    const onSelectFolder = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            id: 1,
+            parentId: null,
+            path: "C:/Alpha",
+            displayName: "Alpha",
+            photoCount: 10,
+          },
+          {
+            id: 2,
+            parentId: null,
+            path: "C:/Beta",
+            displayName: "Beta",
+            photoCount: 20,
+          },
+        ]}
+        onSelectFolder={onSelectFolder}
+      />
+    );
+    const items = screen.getAllByRole("treeitem");
+    items[0].focus();
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+
+    await waitFor(() => expect(items[1]).toHaveFocus());
+    fireEvent.keyDown(items[1], { key: "Enter" });
+    expect(onSelectFolder).toHaveBeenCalledWith(2);
   });
 
   it("highlights active folder", () => {

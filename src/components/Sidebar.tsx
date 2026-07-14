@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -45,12 +45,34 @@ import { AiProgressBar } from "./AiProgressBar";
 import {
   buildFolderTree,
   buildTagTree,
-  renderFolderTree,
+  FolderTree,
   renderTagTree,
   type TagInfo,
 } from "./sidebar-trees";
 
 export type ImportPhase = "idle" | "scanning" | "embedding";
+
+function findRootFolderId(
+  folders: FolderType[],
+  activeFolderId: number | null
+): number | null {
+  if (activeFolderId === null) {
+    return null;
+  }
+  const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
+  const visited = new Set<number>();
+  let current = folderMap.get(activeFolderId);
+  while (
+    current?.parentId !== null &&
+    current?.parentId !== undefined &&
+    !visited.has(current.id)
+  ) {
+    visited.add(current.id);
+    current = folderMap.get(current.parentId);
+  }
+  return current?.id ?? activeFolderId;
+}
+
 interface SidebarProps {
   activeFolderId: number | null;
   activeTagIds: number[];
@@ -614,21 +636,37 @@ export function Sidebar({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onToggleCollapse]);
 
-  const folderTree = buildFolderTree(folders);
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const activeRootFolderId = useMemo(
+    () => findRootFolderId(folders, activeFolderId),
+    [activeFolderId, folders]
+  );
 
-  // Auto-expand root-level parent folders on first load
-  const prevFolderCount = useRef(folders.length);
+  // Auto-expand each root parent once without overwriting the user's choices.
+  const autoExpandedFolderIdsRef = useRef(new Set<number>());
   useEffect(() => {
-    if (folders.length !== prevFolderCount.current) {
-      prevFolderCount.current = folders.length;
-      const rootsWithChildren = folderTree
-        .filter((n) => n.children.length > 0)
-        .map((n) => n.folder.id);
-      if (rootsWithChildren.length > 0) {
-        setExpandedFolderIds(new Set(rootsWithChildren));
-      }
+    const newRootParents = folderTree
+      .filter(
+        (node) =>
+          node.children.length > 0 &&
+          !autoExpandedFolderIdsRef.current.has(node.folder.id)
+      )
+      .map((node) => node.folder.id);
+    if (newRootParents.length === 0) {
+      return;
     }
-  }, [folders.length, folderTree.filter]);
+
+    for (const id of newRootParents) {
+      autoExpandedFolderIdsRef.current.add(id);
+    }
+    setExpandedFolderIds((previous) => {
+      const next = new Set(previous);
+      for (const id of newRootParents) {
+        next.add(id);
+      }
+      return next;
+    });
+  }, [folderTree]);
 
   function handleFolderContextMenu(
     e: React.MouseEvent,
@@ -645,7 +683,7 @@ export function Sidebar({
     <>
       <div
         className={`sidebar-bg flex h-full flex-col overflow-hidden border-sidebar-border border-r ${
-          collapsed ? "w-12" : "w-[240px]"
+          collapsed ? "w-12" : "w-[clamp(240px,20vw,300px)]"
         }`}
         onDragOver={handleSidebarDragOver}
         onDrop={handleSidebarDrop}
@@ -695,12 +733,12 @@ export function Sidebar({
                 </button>
               )}
 
-              {folders.map((folder) => (
+              {folderTree.map(({ folder }) => (
                 <button
                   className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     dragOverFolderId === folder.id
                       ? "bg-primary/20 text-primary ring-1 ring-primary/50"
-                      : activeFolderId === folder.id
+                      : activeRootFolderId === folder.id
                         ? "nav-item-active bg-primary/15 text-primary"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   }`}
@@ -1072,7 +1110,7 @@ export function Sidebar({
             </div>
           </div>
         ) : (
-          <div className="flex h-full w-[240px] select-none flex-col">
+          <div className="flex h-full w-[clamp(240px,20vw,300px)] select-none flex-col">
             {/* Header */}
             <div className="flex items-center justify-between border-border border-b px-4 py-3">
               <div>
@@ -1222,17 +1260,24 @@ export function Sidebar({
                   </button>
                 </div>
                 {!foldersCollapsed && (
-                  <div className="flex-1 overflow-y-auto">
+                  <div className="flex min-h-0 flex-1 flex-col">
                     {folderTree.length === 0 ? (
                       <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
                         {t("sidebarNoFolders")}
                       </p>
                     ) : (
-                      renderFolderTree(
-                        folderTree,
-                        0,
-                        expandedFolderIds,
-                        (id) => {
+                      <FolderTree
+                        activeId={activeFolderId}
+                        dragOverId={dragOverFolderId}
+                        expandedIds={expandedFolderIds}
+                        label={t("sidebarFolders")}
+                        nodes={folderTree}
+                        onContextMenu={handleFolderContextMenu}
+                        onDragLeave={handleFolderDragLeave}
+                        onDragOver={handleFolderDragOver}
+                        onDrop={handleFolderDrop}
+                        onSelect={onSelectFolder}
+                        onToggle={(id) => {
                           const next = new Set(expandedFolderIds);
                           if (next.has(id)) {
                             next.delete(id);
@@ -1240,15 +1285,8 @@ export function Sidebar({
                             next.add(id);
                           }
                           setExpandedFolderIds(next);
-                        },
-                        activeFolderId,
-                        onSelectFolder,
-                        handleFolderContextMenu,
-                        dragOverFolderId,
-                        handleFolderDragOver,
-                        handleFolderDragLeave,
-                        handleFolderDrop
-                      )
+                        }}
+                      />
                     )}
                   </div>
                 )}
