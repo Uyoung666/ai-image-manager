@@ -81,8 +81,8 @@ describe("folder tree helpers", () => {
     renderFolderTree(folders, new Set(folders.map((folder) => folder.id)));
 
     const deepestItem = screen.getByText("Level 8").closest("button");
-    expect(deepestItem).toHaveTextContent("…");
-    expect(deepestItem).toHaveAttribute("title", "C:/Level 8-8");
+    expect(deepestItem).toHaveTextContent("...");
+    expect(deepestItem).toHaveAttribute("aria-label", "C:/Level 8-8");
   });
 
   it("draws branch elbows and stops the guide at the last sibling", () => {

@@ -16,6 +16,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { getDateLocale } from "@/utils/date-locale";
@@ -458,20 +463,32 @@ export function PhotoDetailPanel({
           <div className="flex items-center gap-1">
             {onNavigate && (
               <>
-                <button
-                  className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  onClick={() => onNavigate("prev")}
-                  title={t("previousPhoto")}
-                >
-                  <ChevronUp className="h-4 w-4" />
-                </button>
-                <button
-                  className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  onClick={() => onNavigate("next")}
-                  title={t("nextPhoto")}
-                >
-                  <ChevronDown className="h-4 w-4" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("previousPhoto")}
+                      className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      onClick={() => onNavigate("prev")}
+                      type="button"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("previousPhoto")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("nextPhoto")}
+                      className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      onClick={() => onNavigate("next")}
+                      type="button"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("nextPhoto")}</TooltipContent>
+                </Tooltip>
               </>
             )}
             <button
@@ -538,47 +555,67 @@ export function PhotoDetailPanel({
                     className="group relative flex items-center gap-0.5"
                     key={tag.id}
                   >
-                    <button
-                      className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] text-white/90 ${
-                        unconfirmed
-                          ? "border border-white/30 border-dashed bg-white/5"
-                          : "hover:opacity-80"
-                      }`}
-                      onClick={() =>
-                        unconfirmed
-                          ? handleConfirmTag(tag.id)
-                          : handleRemoveTag(tag.id)
-                      }
-                      style={
-                        unconfirmed
-                          ? undefined
-                          : { background: tag.color || "var(--primary)" }
-                      }
-                      title={
-                        unconfirmed
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={
+                            unconfirmed
+                              ? t("aiSuggestionConfirm", {
+                                  confidence: tag.confidence
+                                    ? `${Math.round(tag.confidence * 100)}%`
+                                    : "",
+                                })
+                              : t("clickToRemove")
+                          }
+                          className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] text-white/90 ${
+                            unconfirmed
+                              ? "border border-white/30 border-dashed bg-white/5"
+                              : "hover:opacity-80"
+                          }`}
+                          onClick={() =>
+                            unconfirmed
+                              ? handleConfirmTag(tag.id)
+                              : handleRemoveTag(tag.id)
+                          }
+                          style={
+                            unconfirmed
+                              ? undefined
+                              : { background: tag.color || "var(--primary)" }
+                          }
+                          type="button"
+                        >
+                          {getTagDisplayName(tag.name, i18n.language)}
+                          {unconfirmed ? (
+                            <span className="ml-0.5 text-[10px] opacity-60">?</span>
+                          ) : (
+                            <X className="h-2.5 w-2.5 opacity-60" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {unconfirmed
                           ? t("aiSuggestionConfirm", {
                               confidence: tag.confidence
                                 ? `${Math.round(tag.confidence * 100)}%`
                                 : "",
                             })
-                          : t("clickToRemove")
-                      }
-                    >
-                      {getTagDisplayName(tag.name, i18n.language)}
-                      {unconfirmed ? (
-                        <span className="ml-0.5 text-[10px] opacity-60">?</span>
-                      ) : (
-                        <X className="h-2.5 w-2.5 opacity-60" />
-                      )}
-                    </button>
+                          : t("clickToRemove")}
+                      </TooltipContent>
+                    </Tooltip>
                     {unconfirmed && (
-                      <button
-                        className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-muted-foreground/70 opacity-0 transition-opacity hover:bg-destructive hover:text-white group-hover:opacity-100"
-                        onClick={() => handleRemoveTag(tag.id)}
-                        title={t("remove")}
-                      >
-                        <X className="h-2 w-2" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            aria-label={t("remove")}
+                            className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-muted text-muted-foreground/70 opacity-0 transition-opacity hover:bg-destructive hover:text-white group-hover:opacity-100"
+                            onClick={() => handleRemoveTag(tag.id)}
+                            type="button"
+                          >
+                            <X className="h-2 w-2" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("remove")}</TooltipContent>
+                      </Tooltip>
                     )}
                   </span>
                 );
@@ -677,26 +714,35 @@ export function PhotoDetailPanel({
                     allTags.find((t) => t.name === s.tag)?.id ?? -1
                   );
                   return (
-                    <button
-                      className={`rounded-[4px] px-1.5 py-0.5 text-[11px] transition-opacity hover:opacity-80 ${alreadyApplied ? "cursor-default opacity-30" : ""}`}
-                      disabled={alreadyApplied}
-                      key={s.tag}
-                      onClick={() => handleApplySuggestion(s.tag)}
-                      title={t("confidence", {
-                        value: Math.round(s.confidence * 100),
-                      })}
-                    >
-                      <span
-                        className="rounded-[4px] px-1 py-0.5"
-                        style={{
-                          background: alreadyApplied
-                            ? "rgba(255,255,255,0.08)"
-                            : `rgba(94,106,210,${0.3 + s.confidence * 0.6})`,
-                        }}
-                      >
-                        {getTagDisplayName(s.tag, i18n.language)}
-                      </span>
-                    </button>
+                    <Tooltip key={s.tag}>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={t("confidence", {
+                            value: Math.round(s.confidence * 100),
+                          })}
+                          className={`rounded-[4px] px-1.5 py-0.5 text-[11px] transition-opacity hover:opacity-80 ${alreadyApplied ? "cursor-default opacity-30" : ""}`}
+                          disabled={alreadyApplied}
+                          onClick={() => handleApplySuggestion(s.tag)}
+                          type="button"
+                        >
+                          <span
+                            className="rounded-[4px] px-1 py-0.5"
+                            style={{
+                              background: alreadyApplied
+                                ? "rgba(255,255,255,0.08)"
+                                : `rgba(94,106,210,${0.3 + s.confidence * 0.6})`,
+                            }}
+                          >
+                            {getTagDisplayName(s.tag, i18n.language)}
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t("confidence", {
+                          value: Math.round(s.confidence * 100),
+                        })}
+                      </TooltipContent>
+                    </Tooltip>
                   );
                 })}
               </div>

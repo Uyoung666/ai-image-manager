@@ -8,6 +8,11 @@ import {
 import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SettingsSidebar } from "@/components/settings/SettingsSidebar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 function SettingsLayout() {
   const { t } = useTranslation();
@@ -18,15 +23,19 @@ function SettingsLayout() {
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex items-center gap-4 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
-          onClick={() => navigate({ to: "/" })}
-          title={t("settingsBackHome")}
-          type="button"
-        >
-          <ArrowLeft className="h-5 w-5" />
-          <span className="sr-only">{t("settingsBackHome")}</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+              onClick={() => navigate({ to: "/" })}
+              type="button"
+            >
+              <ArrowLeft className="h-5 w-5" />
+              <span className="sr-only">{t("settingsBackHome")}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("settingsBackHome")}</TooltipContent>
+        </Tooltip>
         <h1 className="font-semibold text-[18px] text-foreground">
           {t("settingsTitle")}
         </h1>

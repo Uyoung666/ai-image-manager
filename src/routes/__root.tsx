@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import BaseLayout from "@/layouts/base-layout";
 
 function RouteSuspense() {
@@ -15,13 +16,15 @@ function RouteSuspense() {
 
 function Root() {
   return (
-    <BaseLayout>
-      <ErrorBoundary>
-        <Suspense fallback={<RouteSuspense />}>
-          <Outlet />
-        </Suspense>
-      </ErrorBoundary>
-    </BaseLayout>
+    <TooltipProvider>
+      <BaseLayout>
+        <ErrorBoundary>
+          <Suspense fallback={<RouteSuspense />}>
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
+      </BaseLayout>
+    </TooltipProvider>
   );
 }
 
@@ -57,6 +60,7 @@ function RootError() {
       <button
         className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/20"
         onClick={() => window.location.reload()}
+        type="button"
       >
         {t("refresh")}
       </button>

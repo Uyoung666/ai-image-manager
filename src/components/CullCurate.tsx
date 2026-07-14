@@ -23,6 +23,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ZoomableImage } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
@@ -462,15 +467,22 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           })}
         </span>
         <div className="flex items-center gap-2">
-          <button
-            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => {
-              shortcutsOpenRef.current = true;
-              setShortcutsOpen(true);
-            }}
-          >
-            <HelpCircle className="h-3 w-3" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("keyboardHelpTitle")}
+                className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => {
+                  shortcutsOpenRef.current = true;
+                  setShortcutsOpen(true);
+                }}
+                type="button"
+              >
+                <HelpCircle className="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("keyboardHelpTitle")}</TooltipContent>
+          </Tooltip>
           <button
             className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={isSubmitting}

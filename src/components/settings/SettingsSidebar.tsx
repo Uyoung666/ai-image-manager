@@ -12,6 +12,11 @@ import {
 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface NavItem {
   groupKey: string;
@@ -142,15 +147,19 @@ export function SettingsSidebar() {
           value={query}
         />
         {query && (
-          <button
-            className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
-            onClick={() => setQuery("")}
-            title={t("clearSearch")}
-            type="button"
-          >
-            <X className="h-3 w-3" />
-            <span className="sr-only">{t("clearSearch")}</span>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
+                onClick={() => setQuery("")}
+                type="button"
+              >
+                <X className="h-3 w-3" />
+                <span className="sr-only">{t("clearSearch")}</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("clearSearch")}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -178,25 +187,28 @@ export function SettingsSidebar() {
             const isActive = location.pathname === item.to;
             const label = t(item.labelKey);
             return (
-              <button
-                className={`flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[760px]:h-9 max-[760px]:w-9 max-[760px]:justify-center max-[760px]:px-0 ${
-                  isActive
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                key={item.to}
-                onClick={() => {
-                  navigate({ to: item.to });
-                  setQuery("");
-                }}
-                title={label}
-                type="button"
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 truncate max-[760px]:hidden">
-                  <HighlightLabel label={label} query={query} />
-                </span>
-              </button>
+              <Tooltip key={item.to}>
+                <TooltipTrigger asChild>
+                  <button
+                    className={`flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[760px]:h-9 max-[760px]:w-9 max-[760px]:justify-center max-[760px]:px-0 ${
+                      isActive
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      navigate({ to: item.to });
+                      setQuery("");
+                    }}
+                    type="button"
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate max-[760px]:hidden">
+                      <HighlightLabel label={label} query={query} />
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
             );
           })}
         </Fragment>

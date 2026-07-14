@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatedGitHubButton } from "@/components/animated-github-button";
 import { AnimatedNameLoader } from "@/components/animated-name-loader";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ConfettiOverlay } from "@/components/ConfettiOverlay";
 import { SignatureOverlay } from "@/components/SignatureOverlay";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -97,17 +102,22 @@ function AboutSettingsPage() {
               <span className="text-[13px] text-muted-foreground">
                 {t("settingsVersion")}
               </span>
-              <button
-                className="group relative flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] text-foreground transition-colors hover:bg-foreground/5"
-                onClick={handleVersionClick}
-                title={t("settingsVersion")}
-                type="button"
-              >
-                <span className="select-none">{appVersion || "..."}</span>
-                {easterEggFound && (
-                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                )}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("settingsVersion")}
+                    className="group relative flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] text-foreground transition-colors hover:bg-foreground/5"
+                    onClick={handleVersionClick}
+                    type="button"
+                  >
+                    <span className="select-none">{appVersion || "..."}</span>
+                    {easterEggFound && (
+                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("settingsVersion")}</TooltipContent>
+              </Tooltip>
             </div>
 
             {/* License */}

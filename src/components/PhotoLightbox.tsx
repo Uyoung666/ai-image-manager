@@ -371,7 +371,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="info-panel"
       onClick={() => setInfoPanelVisible((v) => !v)}
-      title={t("photoDetail")}
       type="button"
     >
       <svg fill="none" height="20" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" width="20">
@@ -385,7 +384,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       className="ml-1 flex items-center justify-center rounded-[6px] border-white/15 border-l py-2 pr-2 pl-3 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="rotate-left"
       onClick={() => setRotation((prev) => (prev - 90) % 360)}
-      title={t("rotateLeft")}
       type="button"
     >
       <svg fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
@@ -397,7 +395,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       className="flex items-center justify-center rounded-[6px] p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="rotate-right"
       onClick={() => setRotation((prev) => (prev + 90) % 360)}
-      title={t("rotateRight")}
       type="button"
     >
       <svg fill="none" height="20" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="20">
@@ -410,7 +407,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       className="ml-1 flex items-center justify-center rounded-[6px] border-white/15 border-l py-2 pr-2 pl-3 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="slideshow-play"
       onClick={togglePlay}
-      title={playing ? t("pauseSlideshow") : t("playSlideshow")}
       type="button"
     >
       {playing ? (
@@ -429,7 +425,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       className="flex items-center justify-center rounded-[6px] px-2 py-2 font-medium text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white"
       key="slideshow-delay"
       onClick={cycleDelay}
-      title={t("switchInterval")}
       type="button"
     >
       {currentDelayLabel}

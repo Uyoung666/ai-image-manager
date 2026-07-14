@@ -37,6 +37,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
@@ -53,6 +58,21 @@ import {
 } from "./sidebar-trees";
 
 export type ImportPhase = "idle" | "scanning" | "embedding";
+
+function SidebarTooltip({
+  children,
+  content,
+}: {
+  children: React.ReactElement;
+  content: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{content}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 function findRootFolderId(
   folders: FolderType[],
@@ -697,70 +717,94 @@ export function Sidebar({
       >
         {collapsed ? (
           <div className="flex h-full w-12 flex-col items-center py-3">
-            <button
-              className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-              onClick={onToggleCollapse}
-              title={t("expandSidebar")}
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </button>
+            <SidebarTooltip content={t("expandSidebar")}>
+              <button
+                aria-label={t("expandSidebar")}
+                className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={onToggleCollapse}
+                type="button"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            </SidebarTooltip>
 
             <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  activeFolderId === null && !favoriteActive
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => {
-                  onToggleTag?.(null);
-                  onSelectFolder(null);
-                }}
-                title={t("sidebarAllPhotos")}
-              >
-                <Images className="h-4 w-4" />
-              </button>
-
-              {onSelectFavorites && (
+              <SidebarTooltip content={t("sidebarAllPhotos")}>
                 <button
+                  aria-label={t("sidebarAllPhotos")}
                   className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    favoriteActive
+                    activeFolderId === null && !favoriteActive
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   }`}
                   onClick={() => {
-                    if (favoriteActive) {
-                      return;
-                    }
-                    onSelectFavorites?.();
+                    onToggleTag?.(null);
+                    onSelectFolder(null);
                   }}
-                  title={t("favorite")}
+                  type="button"
                 >
-                  <Star className="h-4 w-4" />
+                  <Images className="h-4 w-4" />
                 </button>
+              </SidebarTooltip>
+
+              {onSelectFavorites && (
+                <SidebarTooltip content={t("favorite")}>
+                  <button
+                    aria-label={t("favorite")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                      favoriteActive
+                        ? "nav-item-active bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      if (favoriteActive) {
+                        return;
+                      }
+                      onSelectFavorites?.();
+                    }}
+                    type="button"
+                  >
+                    <Star className="h-4 w-4" />
+                  </button>
+                </SidebarTooltip>
               )}
 
               {folderTree.map(({ folder }) => (
-                <button
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    dragOverFolderId === folder.id
-                      ? "bg-primary/20 text-primary ring-1 ring-primary/50"
-                      : activeRootFolderId === folder.id
-                        ? "nav-item-active bg-primary/15 text-primary"
-                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
+                <SidebarTooltip
                   key={folder.id}
-                  onClick={() => onSelectFolder(folder.id)}
-                  onContextMenu={(e) =>
-                    handleFolderContextMenu(e, folder.id, folder.displayName)
+                  content={
+                    <>
+                      <div className="font-medium">{folder.displayName}</div>
+                      <div className="text-muted-foreground">
+                        {folder.totalPhotoCount ?? folder.photoCount}
+                      </div>
+                      <div className="text-muted-foreground">
+                        {t("rightClickFolderActions")}
+                      </div>
+                    </>
                   }
-                  onDragLeave={handleFolderDragLeave}
-                  onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-                  onDrop={(e) => handleFolderDrop(e, folder.id)}
-                  title={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})\n${t("rightClickFolderActions")}`}
                 >
-                  <FolderBadge className="h-[22px] w-[22px]" folder={folder} />
-                </button>
+                  <button
+                    aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                      dragOverFolderId === folder.id
+                        ? "bg-primary/20 text-primary ring-1 ring-primary/50"
+                        : activeRootFolderId === folder.id
+                          ? "nav-item-active bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    }`}
+                    onClick={() => onSelectFolder(folder.id)}
+                    onContextMenu={(e) =>
+                      handleFolderContextMenu(e, folder.id, folder.displayName)
+                    }
+                    onDragLeave={handleFolderDragLeave}
+                    onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                    onDrop={(e) => handleFolderDrop(e, folder.id)}
+                    type="button"
+                  >
+                    <FolderBadge className="h-[22px] w-[22px]" folder={folder} />
+                  </button>
+                </SidebarTooltip>
               ))}
 
               {/* Tags popover — available when collapsed */}
@@ -773,7 +817,7 @@ export function Sidebar({
                           ? "nav-item-active bg-primary/15 text-primary"
                           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                       }`}
-                      title={t("sidebarTags")}
+                      type="button"
                     >
                       <Tag className="h-4 w-4" />
                     </button>
@@ -1000,120 +1044,147 @@ export function Sidebar({
             </div>
 
             <div className="flex flex-col items-center gap-1 px-1.5">
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-                onClick={() => onAddFolder()}
-                title={t("sidebarAddFolder")}
-              >
-                {importPhase === "idle" ? (
-                  <Plus className="h-4 w-4" />
-                ) : (
-                  <LoadingSpinner size="sm" variant="inherit" />
-                )}
-              </button>
+              <SidebarTooltip content={t("sidebarAddFolder")}>
+                  <button
+                    aria-label={t("sidebarAddFolder")}
+                    className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                  onClick={() => onAddFolder()}
+                  type="button"
+                >
+                  {importPhase === "idle" ? (
+                    <Plus className="h-4 w-4" />
+                  ) : (
+                    <LoadingSpinner size="sm" variant="inherit" />
+                  )}
+                </button>
+              </SidebarTooltip>
 
               {/* Content group */}
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname === "/dashboard"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/dashboard" })}
-                title={t("sidebarDashboard")}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("sidebarDashboard")}>
+                  <button
+                    aria-label={t("sidebarDashboard")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname === "/dashboard"
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/dashboard" })}
+                  type="button"
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname.startsWith("/albums")
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/albums" as const })}
-                title={t("sidebarAlbums")}
-              >
-                <Album className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("sidebarAlbums")}>
+                  <button
+                    aria-label={t("sidebarAlbums")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname.startsWith("/albums")
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/albums" as const })}
+                  type="button"
+                >
+                  <Album className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname === "/people"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/people" })}
-                title={t("people")}
-              >
-                <Users className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("people")}>
+                  <button
+                    aria-label={t("people")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname === "/people"
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/people" })}
+                  type="button"
+                >
+                  <Users className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
               <div className="my-0.5 w-4 border-border border-t" />
 
               {/* Tool group */}
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname === "/duplicates"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/duplicates" })}
-                title={t("duplicates")}
-              >
-                <ScanSearch className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("duplicates")}>
+                  <button
+                    aria-label={t("duplicates")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname === "/duplicates"
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/duplicates" })}
+                  type="button"
+                >
+                  <ScanSearch className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname.startsWith("/cull")
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/cull" })}
-                title={t("cull")}
-              >
-                <Swords className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("cull")}>
+                  <button
+                    aria-label={t("cull")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname.startsWith("/cull")
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/cull" })}
+                  type="button"
+                >
+                  <Swords className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname === "/trash"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/trash" })}
-                title={t("trash")}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("trash")}>
+                  <button
+                    aria-label={t("trash")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname === "/trash"
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/trash" })}
+                  type="button"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
               <div className="my-0.5 w-4 border-border border-t" />
 
               {/* System group */}
-              <button
-                className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                  location.pathname.startsWith("/settings")
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/settings" })}
-                title={t("sidebarSettings")}
-              >
-                <Settings className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("sidebarSettings")}>
+                  <button
+                    aria-label={t("sidebarSettings")}
+                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                    location.pathname.startsWith("/settings")
+                      ? "nav-item-active bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  }`}
+                  onClick={() => navigate({ to: "/settings" })}
+                  type="button"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
 
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-                onClick={() =>
-                  document.dispatchEvent(
-                    new KeyboardEvent("keydown", { key: "?" })
-                  )
-                }
-                title={t("keyboardHelpTitle")}
-              >
-                <CircleHelp className="h-4 w-4" />
-              </button>
+              <SidebarTooltip content={t("keyboardHelpTitle")}>
+                  <button
+                    aria-label={t("keyboardHelpTitle")}
+                    className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                  onClick={() =>
+                    document.dispatchEvent(
+                      new KeyboardEvent("keydown", { key: "?" })
+                    )
+                  }
+                  type="button"
+                >
+                  <CircleHelp className="h-4 w-4" />
+                </button>
+              </SidebarTooltip>
             </div>
           </div>
         ) : (
@@ -1128,7 +1199,6 @@ export function Sidebar({
                       "https://ai-image-manager.uyoungvision.cn/"
                     );
                   }}
-                  title="访问项目网站"
                   type="button"
                 >
                   {t("appName")}
@@ -1138,24 +1208,36 @@ export function Sidebar({
                 </p>
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-                  onClick={() =>
-                    document.dispatchEvent(
-                      new KeyboardEvent("keydown", { key: "?" })
-                    )
-                  }
-                  title={t("keyboardHelpTitle")}
-                >
-                  <CircleHelp className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-                  onClick={onToggleCollapse}
-                  title={t("collapseSidebar")}
-                >
-                  <PanelLeftClose className="h-4 w-4" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("keyboardHelpTitle")}
+                      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                      onClick={() =>
+                        document.dispatchEvent(
+                          new KeyboardEvent("keydown", { key: "?" })
+                        )
+                      }
+                      type="button"
+                    >
+                      <CircleHelp className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("keyboardHelpTitle")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("collapseSidebar")}
+                      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+                      onClick={onToggleCollapse}
+                      type="button"
+                    >
+                      <PanelLeftClose className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("collapseSidebar")}</TooltipContent>
+                </Tooltip>
               </div>
             </div>
 
@@ -1250,21 +1332,27 @@ export function Sidebar({
                       className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
                     />
                   </button>
-                  <button
-                    className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
-                    disabled={importPhase !== "idle"}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAddFolder();
-                    }}
-                    title={t("sidebarAddFolder")}
-                  >
-                    {importPhase === "idle" ? (
-                      <Plus className="h-3 w-3" />
-                    ) : (
-                      <LoadingSpinner size="xs" variant="inherit" />
-                    )}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("sidebarAddFolder")}
+                        className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
+                        disabled={importPhase !== "idle"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddFolder();
+                        }}
+                        type="button"
+                      >
+                        {importPhase === "idle" ? (
+                          <Plus className="h-3 w-3" />
+                        ) : (
+                          <LoadingSpinner size="xs" variant="inherit" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("sidebarAddFolder")}</TooltipContent>
+                  </Tooltip>
                 </div>
                 {!foldersCollapsed && (
                   <div className="flex min-h-0 flex-1 flex-col">

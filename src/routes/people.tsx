@@ -29,6 +29,11 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { RouteError } from "@/components/RouteError";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -234,32 +239,40 @@ const PersonCard = memo(function PersonCard({
       )}
       {!selectMode && (
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-          <button
-            aria-label={t("renamePerson")}
-            className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-primary"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onStartEdit(identity.id, identity.name);
-            }}
-            title={t("renamePerson")}
-            type="button"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            aria-label={t("deletePerson")}
-            className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-destructive"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onDelete(identity.id, identity.name);
-            }}
-            title={t("deletePerson")}
-            type="button"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("renamePerson")}
+                className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-primary"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStartEdit(identity.id, identity.name);
+                }}
+                type="button"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("renamePerson")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("deletePerson")}
+                className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-black/65 text-white transition-colors hover:bg-destructive"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDelete(identity.id, identity.name);
+                }}
+                type="button"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("deletePerson")}</TooltipContent>
+          </Tooltip>
         </div>
       )}
     </div>
@@ -616,6 +629,7 @@ function PeoplePage() {
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
+            type="button"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -640,57 +654,79 @@ function PeoplePage() {
                 className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={selected.size < 2}
                 onClick={handleMerge}
+                type="button"
               >
                 <Merge className="h-3.5 w-3.5" />
                 {t("mergeAsSamePerson")}
               </button>
-              <button
-                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-                onClick={exitSelectMode}
-                title={t("clearSelection")}
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                    onClick={exitSelectMode}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("clearSelection")}</TooltipContent>
+              </Tooltip>
             </>
           ) : (
             <>
               {identities.length > 1 && (
-                <button
-                  className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                  disabled={detecting}
-                  onClick={() => setSelectMode(true)}
-                  title={t("mergePeopleHint")}
-                >
-                  <Merge className="h-3.5 w-3.5" />
-                  {t("mergePeople")}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                      disabled={detecting}
+                      onClick={() => setSelectMode(true)}
+                      type="button"
+                    >
+                      <Merge className="h-3.5 w-3.5" />
+                      {t("mergePeople")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("mergePeopleHint")}</TooltipContent>
+                </Tooltip>
               )}
               {identities.length > 0 && (
                 <>
-                  <button
-                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                    disabled={detecting}
-                    onClick={handleRecluster}
-                    title={t("reclusterFacesHint")}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    {t("reclusterFaces")}
-                  </button>
-                  <button
-                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                    disabled={detecting}
-                    onClick={() => handleStartDetection(true)}
-                    title={t("rescanFacesHint")}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    {t("rescan")}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                        disabled={detecting}
+                        onClick={handleRecluster}
+                        type="button"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        {t("reclusterFaces")}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("reclusterFacesHint")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                        disabled={detecting}
+                        onClick={() => handleStartDetection(true)}
+                        type="button"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        {t("rescan")}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("rescanFacesHint")}</TooltipContent>
+                  </Tooltip>
                 </>
               )}
               <button
                 className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={detecting}
                 onClick={() => handleStartDetection(false)}
+                type="button"
               >
                 <Play className="h-3.5 w-3.5" />
                 {detecting ? t("faceDetecting") : t("startFaceDetection")}
@@ -772,6 +808,7 @@ function PeoplePage() {
                   queryKey: ["faces", "identities"],
                 })
               }
+              type="button"
             >
               {t("retry")}
             </button>
@@ -790,6 +827,7 @@ function PeoplePage() {
               className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               disabled={detecting}
               onClick={() => handleStartDetection(false)}
+              type="button"
             >
               {t("startFaceDetectionShort")}
             </button>

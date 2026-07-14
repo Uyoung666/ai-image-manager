@@ -256,23 +256,23 @@ export function QuickPreview({
         </div>
         <div className="mt-2 flex items-center gap-2">
           <button
+            aria-label={t("rotateLeft")}
             className="rounded-[6px] bg-white/10 px-2 py-1 text-[11px] text-white/70 hover:bg-white/20 hover:text-white"
             onClick={(e) => {
               e.stopPropagation();
               setRotation((prev) => (prev - 90) % 360);
             }}
-            title={t("rotateLeft")}
             type="button"
           >
             ↶
           </button>
           <button
+            aria-label={t("rotateRight")}
             className="rounded-[6px] bg-white/10 px-2 py-1 text-[11px] text-white/70 hover:bg-white/20 hover:text-white"
             onClick={(e) => {
               e.stopPropagation();
               setRotation((prev) => (prev + 90) % 360);
             }}
-            title={t("rotateRight")}
             type="button"
           >
             ↷

@@ -10,6 +10,11 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { hexToColorName } from "@/utils/color-name";
 import {
@@ -732,45 +737,53 @@ export const SearchBar = memo(
                   ref={fileInputRef}
                   type="file"
                 />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("searchModeImage")}
+                      className={`flex h-9 items-center justify-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors ${
+                        imageSearchActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      <ImageUp className="h-4 w-4" />
+                      <span>{t("searchModeImage")}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("imageSearchTitle")}</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <button
-                  aria-label={t("searchModeImage")}
-                  className={`flex h-9 items-center justify-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors ${
-                    imageSearchActive
+                  aria-expanded={showFilters}
+                  aria-label={t("exifFilterTitle")}
+                  className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
+                    showFilters || hasActiveFilters
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                   }`}
-                  onClick={() => fileInputRef.current?.click()}
-                  title={t("imageSearchTitle")}
+                  onClick={() => {
+                    setShowFilters((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setShowSuggestions(false);
+                        setSuggestionIndex(-1);
+                      }
+                      return next;
+                    });
+                  }}
                   type="button"
                 >
-                  <ImageUp className="h-4 w-4" />
-                  <span>{t("searchModeImage")}</span>
+                  <Filter className="h-4 w-4" />
                 </button>
-              </>
-            )}
-            <button
-              aria-expanded={showFilters}
-              aria-label={t("exifFilterTitle")}
-              className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
-                showFilters || hasActiveFilters
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-              }`}
-              onClick={() => {
-                setShowFilters((prev) => {
-                  const next = !prev;
-                  if (next) {
-                    setShowSuggestions(false);
-                    setSuggestionIndex(-1);
-                  }
-                  return next;
-                });
-              }}
-              title={t("exifFilterTitle")}
-              type="button"
-            >
-              <Filter className="h-4 w-4" />
-            </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("exifFilterTitle")}</TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Time quick presets */}

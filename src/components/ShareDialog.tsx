@@ -11,6 +11,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 
@@ -152,22 +157,32 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
                   readOnly
                   value={result.url}
                 />
-                <button
-                  className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  onClick={handleCopyUrl}
-                  title={t("copyLink")}
-                  type="button"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  onClick={() => openExternalLink(result.url)}
-                  title={t("openInBrowser")}
-                  type="button"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("copyLink")}
+                      className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      onClick={handleCopyUrl}
+                      type="button"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("copyLink")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("openInBrowser")}
+                      className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-input text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      onClick={() => openExternalLink(result.url)}
+                      type="button"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("openInBrowser")}</TooltipContent>
+                </Tooltip>
               </div>
             </div>
             <DialogFooter>

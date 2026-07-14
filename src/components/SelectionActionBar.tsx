@@ -235,7 +235,6 @@ export function SelectionActionBar({
           className="selection-menu-link selection-menu-link-edge"
           disabled={executing !== null}
           onClick={wrapAction("clear", onClearSelection)}
-          title={t("clearSelectionTitle")}
           type="button"
         >
           <span className="selection-menu-icon">
@@ -274,7 +273,6 @@ function MoreActions({
           aria-expanded={open}
           className="selection-menu-link"
           disabled={disabled}
-          title={label}
           type="button"
         >
           <span className="selection-menu-icon">
@@ -317,7 +315,6 @@ function MoreAction({
       className="selection-more-menu-item"
       disabled={disabled}
       onClick={onClick}
-      title={label}
       type="button"
     >
       <span className="selection-more-menu-icon">
@@ -358,7 +355,6 @@ function MenuAction({
       className={className}
       disabled={disabled}
       onClick={onClick}
-      title={label}
       type="button"
     >
       <span className="selection-menu-icon">

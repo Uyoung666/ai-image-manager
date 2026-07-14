@@ -64,7 +64,7 @@ describe("Sidebar", () => {
 
   it("shows Add Folder button", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByTitle("添加文件夹")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加文件夹" })).toBeInTheDocument();
   });
 
   it("shows all photos button", () => {
@@ -145,7 +145,7 @@ describe("Sidebar", () => {
 
     expect(
       screen
-        .getByTitle(PHOTOS_TITLE_PATTERN)
+        .getByRole("button", { name: PHOTOS_TITLE_PATTERN })
         .querySelector('[data-folder-badge="true"]')
     ).not.toBeNull();
   });
@@ -164,7 +164,7 @@ describe("Sidebar", () => {
       <Sidebar {...baseProps} collapsed folders={[folder]} />
     );
     expect(
-      screen.getByTitle(PHOTOS_TITLE_PATTERN).querySelector("svg")
+      screen.getByRole("button", { name: PHOTOS_TITLE_PATTERN }).querySelector("svg")
     ).not.toBeNull();
 
     rerender(<Sidebar {...baseProps} folders={[folder]} />);
@@ -274,8 +274,10 @@ describe("Sidebar", () => {
       />
     );
 
-    expect(screen.getByTitle(PHOTOS_TITLE_PATTERN)).toBeInTheDocument();
-    expect(screen.queryByTitle("Travel")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: PHOTOS_TITLE_PATTERN })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Travel/ })).not.toBeInTheDocument();
   });
 
   it("supports keyboard navigation and selection in the folder tree", async () => {

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   Area,
@@ -21,7 +22,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { createPortal } from "react-dom";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import {
   buildApertureChartData,
@@ -33,6 +33,11 @@ interface ChartClickState {
   activePayload?: { payload: Record<string, unknown> }[];
 }
 
+import {
+  Tooltip as AppTooltip,
+  TooltipContent as AppTooltipContent,
+  TooltipTrigger as AppTooltipTrigger,
+} from "@/components/ui/tooltip";
 import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
 import { ipc } from "@/ipc/manager";
 
@@ -500,25 +505,36 @@ function DashboardPage() {
             <h2 className="font-semibold text-[16px] text-foreground">
               {t("geoMap")}
             </h2>
-            <button
-              aria-expanded={mapExpanded}
-              className="flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              onClick={() => setMapExpanded((v) => !v)}
-              title={t("expandMap")}
-            >
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4 transition-transform"
-                style={{ transform: mapExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>{t("expandMap")}</span>
-            </button>
+            <AppTooltip>
+              <AppTooltipTrigger asChild>
+                <button
+                  aria-expanded={mapExpanded}
+                  className="flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={() => setMapExpanded((v) => !v)}
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="h-4 w-4 transition-transform"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    style={{
+                      transform: mapExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                    }}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="m6 9 6 6 6-6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span>{t("expandMap")}</span>
+                </button>
+              </AppTooltipTrigger>
+              <AppTooltipContent>{t("expandMap")}</AppTooltipContent>
+            </AppTooltip>
           </div>
           {mapExpanded && (
             <div className="mt-4">
@@ -587,21 +603,25 @@ function DashboardPage() {
                   </h3>
                   <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
                     {colorData.globalPalette.map((c, i) => (
-                      <button
-                        aria-label={`${c.hex}, ${Math.round(c.weight * 100)}%`}
-                        className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                        key={i}
-                        onClick={() =>
-                          drillToHome({
-                            colorHex: c.hex.replace("#", ""),
-                          })
-                        }
-                        style={{
-                          width: `${Math.max(c.weight * 100, 1.5)}%`,
-                          backgroundColor: c.hex,
-                        }}
-                        title={`${c.hex} — ${Math.round(c.weight * 100)}%`}
-                      />
+                      <AppTooltip key={i}>
+                        <AppTooltipTrigger asChild>
+                          <button
+                            aria-label={`${c.hex}, ${Math.round(c.weight * 100)}%`}
+                            className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            onClick={() =>
+                              drillToHome({
+                                colorHex: c.hex.replace("#", ""),
+                              })
+                            }
+                            style={{
+                              width: `${Math.max(c.weight * 100, 1.5)}%`,
+                              backgroundColor: c.hex,
+                            }}
+                            type="button"
+                          />
+                        </AppTooltipTrigger>
+                        <AppTooltipContent>{`${c.hex} — ${Math.round(c.weight * 100)}%`}</AppTooltipContent>
+                      </AppTooltip>
                     ))}
                   </div>
                 </div>
@@ -623,21 +643,25 @@ function DashboardPage() {
                             const ratio = h.count / maxHue;
                             const opacity = 0.12 + ratio * 0.88;
                             return (
-                              <button
-                                aria-label={`${getHueLabel(h.hueRange[0])}: ${h.count}`}
-                                className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                                key={h.hueRange[0]}
-                                onClick={() =>
-                                  drillToHome({
-                                    colorHex: h.hex.replace("#", ""),
-                                  })
-                                }
-                                style={{
-                                  backgroundColor: h.hex,
-                                  opacity,
-                                }}
-                                title={`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}
-                              />
+                              <AppTooltip key={h.hueRange[0]}>
+                                <AppTooltipTrigger asChild>
+                                  <button
+                                    aria-label={`${getHueLabel(h.hueRange[0])}: ${h.count}`}
+                                    className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                                    onClick={() =>
+                                      drillToHome({
+                                        colorHex: h.hex.replace("#", ""),
+                                      })
+                                    }
+                                    style={{
+                                      backgroundColor: h.hex,
+                                      opacity,
+                                    }}
+                                    type="button"
+                                  />
+                                </AppTooltipTrigger>
+                                <AppTooltipContent>{`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}</AppTooltipContent>
+                              </AppTooltip>
                             );
                           })}
                         </div>
@@ -1078,7 +1102,7 @@ function PortalTooltip({
 
   return createPortal(
     <div
-      className="pointer-events-none rounded-[6px] border border-border bg-popover px-3 py-2 text-[12px] text-foreground shadow-md"
+      className="surface-elevated pointer-events-none rounded-[6px] border border-border bg-popover px-3 py-2 text-[12px] text-popover-foreground shadow-md ring-1 ring-foreground/10"
       style={{
         left: pos.x + 12,
         position: "fixed",

@@ -16,6 +16,11 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -666,31 +671,44 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
         </span>
         <div className="flex items-center gap-2">
           {sameRatio && (
-            <button
-              className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => {
-                setSyncZoom((v) => !v);
-                setSyncState(null);
-                syncStateRef.current = null;
-              }}
-              title={t("cullSyncZoomDesc")}
-            >
-              {syncZoom ? (
-                <Link className="h-3 w-3" />
-              ) : (
-                <Unlink className="h-3 w-3" />
-              )}
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={t("cullSyncZoomDesc")}
+                  className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => {
+                    setSyncZoom((v) => !v);
+                    setSyncState(null);
+                    syncStateRef.current = null;
+                  }}
+                  type="button"
+                >
+                  {syncZoom ? (
+                    <Link className="h-3 w-3" />
+                  ) : (
+                    <Unlink className="h-3 w-3" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("cullSyncZoomDesc")}</TooltipContent>
+            </Tooltip>
           )}
-          <button
-            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => {
-              shortcutsOpenRef.current = true;
-              setShortcutsOpen(true);
-            }}
-          >
-            <HelpCircle className="h-3 w-3" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("keyboardHelpTitle")}
+                className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => {
+                  shortcutsOpenRef.current = true;
+                  setShortcutsOpen(true);
+                }}
+                type="button"
+              >
+                <HelpCircle className="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("keyboardHelpTitle")}</TooltipContent>
+          </Tooltip>
           <button
             className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={isSubmitting}

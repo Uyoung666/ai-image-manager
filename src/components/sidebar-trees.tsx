@@ -6,6 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getTagDisplayName } from "@/localization/tag-display";
 import type { Folder as FolderType } from "@/types/photo";
 import { FolderBadge } from "./FolderBadge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export interface TagInfo {
   color: string | null;
@@ -377,43 +382,48 @@ export function FolderTree({
             </button>
           )}
         </div>
-        <button
-          aria-expanded={hasChildren ? isExpanded : undefined}
-          aria-level={depth + 1}
-          aria-selected={isActive}
-          className={`${getTreeRowClassName({
-            activeClassName: "nav-item-active bg-primary/15 text-primary",
-            isActive,
-            isDragOver,
-          })} px-2.5 py-1.5 text-[13px]`}
-          data-folder-id={node.folder.id}
-          onClick={() => onSelect(node.folder.id)}
-          onContextMenu={(event) =>
-            onContextMenu(event, node.folder.id, node.folder.displayName)
-          }
-          onDragLeave={onDragLeave}
-          onDragOver={(event) => onDragOver(event, node.folder.id)}
-          onDrop={(event) => onDrop(event, node.folder.id)}
-          onFocus={() => setFocusedId(node.folder.id)}
-          onKeyDown={(event) => handleKeyDown(event, index)}
-          role="treeitem"
-          tabIndex={focusedId === node.folder.id ? 0 : -1}
-          title={node.folder.path}
-          type="button"
-        >
-          {depth > MAX_VISIBLE_FOLDER_DEPTH && (
-            <span aria-hidden="true" className="text-muted-foreground/50">
-              …
-            </span>
-          )}
-          <FolderBadge folder={node.folder} />
-          <span className="min-w-0 flex-1 truncate">
-            {node.folder.displayName}
-          </span>
-          <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
-            {node.folder.totalPhotoCount ?? node.folder.photoCount}
-          </span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-expanded={hasChildren ? isExpanded : undefined}
+              aria-label={node.folder.path}
+              aria-level={depth + 1}
+              aria-selected={isActive}
+              className={`${getTreeRowClassName({
+                activeClassName: "nav-item-active bg-primary/15 text-primary",
+                isActive,
+                isDragOver,
+              })} px-2.5 py-1.5 text-[13px]`}
+              data-folder-id={node.folder.id}
+              onClick={() => onSelect(node.folder.id)}
+              onContextMenu={(event) =>
+                onContextMenu(event, node.folder.id, node.folder.displayName)
+              }
+              onDragLeave={onDragLeave}
+              onDragOver={(event) => onDragOver(event, node.folder.id)}
+              onDrop={(event) => onDrop(event, node.folder.id)}
+              onFocus={() => setFocusedId(node.folder.id)}
+              onKeyDown={(event) => handleKeyDown(event, index)}
+              role="treeitem"
+              tabIndex={focusedId === node.folder.id ? 0 : -1}
+              type="button"
+            >
+              {depth > MAX_VISIBLE_FOLDER_DEPTH && (
+                <span aria-hidden="true" className="text-muted-foreground/50">
+                  ...
+                </span>
+              )}
+              <FolderBadge folder={node.folder} />
+              <span className="min-w-0 flex-1 truncate">
+                {node.folder.displayName}
+              </span>
+              <span className="ml-1 flex-shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+                {node.folder.totalPhotoCount ?? node.folder.photoCount}
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{node.folder.path}</TooltipContent>
+        </Tooltip>
       </div>
     );
   }
@@ -579,3 +589,4 @@ export function renderTagTree(
       : [row];
   });
 }
+
