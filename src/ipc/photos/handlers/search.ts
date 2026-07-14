@@ -35,6 +35,10 @@ import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import { rerankWithCLIPScore } from "@/services/rerank";
 import {
+  hydrateColorSearchResults,
+  mergeColorSearchRanks,
+} from "@/utils/color-search";
+import {
   applyTimeDecay,
   CompoundSearchSchema,
   ImageSearchSchema,
@@ -77,6 +81,7 @@ const GLOB_WILDCARD_RE = /[*?[]/;
 
 // ── 熔断与超时配置 ──────────────────────────────────────────────────
 const LANCEDB_TIMEOUT_MS = 2000; // LanceDB 向量检索硬超时
+const COLOR_VECTOR_TIMEOUT_MS = 250;
 const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
 // ── Hue bucket helper ──────────────────────────────────────────────────
@@ -356,151 +361,124 @@ export const searchCompound = os
         // Remove duplicates (when 36 wraps around)
         const buckets = [...new Set(candidateBuckets)].sort();
 
-        const sqlitePromise = (async () => {
-          const exifActive =
-            dateFrom ||
-            dateTo ||
-            cameraModel ||
-            lensModel ||
-            focalMin !== undefined ||
-            focalMax !== undefined ||
-            apertureMin !== undefined ||
-            apertureMax !== undefined ||
-            isoMin !== undefined ||
-            isoMax !== undefined ||
-            shutterMin !== undefined ||
-            shutterMax !== undefined;
+        const exifActive =
+          dateFrom ||
+          dateTo ||
+          cameraModel ||
+          lensModel ||
+          focalMin !== undefined ||
+          focalMax !== undefined ||
+          apertureMin !== undefined ||
+          apertureMax !== undefined ||
+          isoMin !== undefined ||
+          isoMax !== undefined ||
+          shutterMin !== undefined ||
+          shutterMax !== undefined;
 
-          let colorSQL = sql``;
-          if (exifActive) {
-            const conditions: SQL[] = [];
-            conditions.push(sql`p.deleted_at IS NULL`);
-            conditions.push(sql`p.dominant_colors IS NOT NULL`);
-            // Hue bucket pre-filter: dramatically reduces rows scanned by UDF
-            conditions.push(
-              sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`
-            );
-            if (dateFrom) {
-              conditions.push(sql`e.date_taken >= ${dateFrom}`);
-            }
-            if (dateTo) {
-              conditions.push(sql`e.date_taken <= ${dateTo}`);
-            }
-            if (cameraModel) {
-              conditions.push(
-                sql`e.camera_model LIKE ${"%" + cameraModel + "%"}`
-              );
-            }
-            if (lensModel) {
-              conditions.push(sql`e.lens_model LIKE ${"%" + lensModel + "%"}`);
-            }
-            if (focalMin !== undefined) {
-              conditions.push(sql`CAST(e.focal_length AS REAL) >= ${focalMin}`);
-            }
-            if (focalMax !== undefined) {
-              conditions.push(sql`CAST(e.focal_length AS REAL) <= ${focalMax}`);
-            }
-            if (apertureMin !== undefined) {
-              conditions.push(sql`e.aperture >= ${apertureMin}`);
-            }
-            if (apertureMax !== undefined) {
-              conditions.push(sql`e.aperture <= ${apertureMax}`);
-            }
-            if (isoMin !== undefined) {
-              conditions.push(sql`e.iso >= ${isoMin}`);
-            }
-            if (isoMax !== undefined) {
-              conditions.push(sql`e.iso <= ${isoMax}`);
-            }
-            if (shutterMin !== undefined) {
-              conditions.push(
-                sql`CAST(e.shutter_speed AS REAL) >= ${shutterMin}`
-              );
-            }
-            if (shutterMax !== undefined) {
-              conditions.push(
-                sql`CAST(e.shutter_speed AS REAL) <= ${shutterMax}`
-              );
-            }
+        const conditions: SQL[] = [
+          sql`p.deleted_at IS NULL`,
+          sql`p.dominant_colors IS NOT NULL`,
+          sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`,
+        ];
+        if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
+        if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
+        if (cameraModel) {
+          conditions.push(sql`e.camera_model LIKE ${`%${cameraModel}%`}`);
+        }
+        if (lensModel) {
+          conditions.push(sql`e.lens_model LIKE ${`%${lensModel}%`}`);
+        }
+        if (focalMin !== undefined) {
+          conditions.push(sql`e.focal_length_num >= ${focalMin}`);
+        }
+        if (focalMax !== undefined) {
+          conditions.push(sql`e.focal_length_num <= ${focalMax}`);
+        }
+        if (apertureMin !== undefined) {
+          conditions.push(sql`e.aperture >= ${apertureMin}`);
+        }
+        if (apertureMax !== undefined) {
+          conditions.push(sql`e.aperture <= ${apertureMax}`);
+        }
+        if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
+        if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
+        if (shutterMin !== undefined) {
+          conditions.push(sql`e.shutter_speed_num >= ${shutterMin}`);
+        }
+        if (shutterMax !== undefined) {
+          conditions.push(sql`e.shutter_speed_num <= ${shutterMax}`);
+        }
 
-            colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+        const candidateSql = exifActive
+          ? sql`SELECT p.id, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
                 FROM photos p
                 JOIN exif_data e ON e.photo_id = p.id
-                WHERE ${and(...conditions)}
-                  AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
-                ORDER BY dist ASC
-                LIMIT ${limit}`;
-          } else {
-            colorSQL = sql`SELECT p.*, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
+                WHERE ${and(...conditions)}`
+          : sql`SELECT p.id, closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) AS dist
                 FROM photos p
-                WHERE p.deleted_at IS NULL AND p.dominant_colors IS NOT NULL
-                  AND (p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))
-                  AND closest_color_dist(${rgb.r}, ${rgb.g}, ${rgb.b}, p.dominant_colors) < 10000
-                ORDER BY dist ASC
-                LIMIT ${limit}`;
-          }
-          return db.all(colorSQL) as Array<
-            Record<string, unknown> & { dist: number }
-          >;
-        })();
+                WHERE ${and(...conditions)}`;
+        const sqliteResults = db.all(
+          sql`WITH color_candidates AS MATERIALIZED (${candidateSql})
+              SELECT id, dist FROM color_candidates
+              WHERE dist < 10000
+              ORDER BY dist ASC
+              LIMIT ${limit}`
+        ) as Array<{ dist: number; id: number }>;
 
-        const lancePromise = (async () => {
+        let lanceResults: Array<{ distance: number; photoId: number }> = [];
+        if (sqliteResults.length < limit) {
           try {
-            const { searchByColorVector } = await import(
-              "@/services/ai/vector-db"
+            lanceResults = await withTimeout(
+              (async () => {
+                const { searchByColorVector } = await import(
+                  "@/services/ai/vector-db"
+                );
+                const results = await searchByColorVector(
+                  rgb.r,
+                  rgb.g,
+                  rgb.b,
+                  limit
+                );
+                return (results ?? []).filter((result) => result.distance < 10_000);
+              })(),
+              COLOR_VECTOR_TIMEOUT_MS,
+              "ColorVector"
             );
-            const results = await searchByColorVector(
-              rgb.r,
-              rgb.g,
-              rgb.b,
-              limit
-            );
-            // 距离阈值：RGB 欧氏距离 < 10000（与 SQLite UDF 一致）
-            return (results ?? []).filter((r) => r.distance < 10_000);
           } catch {
-            return [];
-          }
-        })();
-
-        const [sqliteResults, lanceResults] = await Promise.all([
-          sqlitePromise,
-          lancePromise,
-        ]);
-
-        // 合并去重：LanceDB 结果作为补充，不影响 SQLite 的准确性
-        const seenIds = new Set<number>();
-        const merged: Array<Record<string, unknown> & { dist: number }> = [];
-
-        for (const r of sqliteResults) {
-          seenIds.add(r.id as number);
-          merged.push(r);
-        }
-        for (const r of lanceResults) {
-          if (!seenIds.has(r.photoId)) {
-            // LanceDB 结果补充到列表末尾（距离通常比 SQLite 大）
-            merged.push({
-              id: r.photoId,
-              dist: r.distance,
-            } as any);
-            seenIds.add(r.photoId);
+            // SQLite is authoritative; vector search is only a fast supplement.
           }
         }
 
-        const photoList = merged.map((r) => ({
-          ...r,
-          id: r.id as number,
-          similarity:
-            Math.round(
-              (1 / (1 + Math.sqrt((r.dist as number) || 0))) * 10_000
-            ) / 10_000,
-        }));
+        const ranks = mergeColorSearchRanks(
+          sqliteResults.map((result) => ({
+            photoId: result.id,
+            distance: result.dist,
+          })),
+          lanceResults,
+          limit
+        );
+        const rankedIds = ranks.map((rank) => rank.photoId);
+        const typedPhotos =
+          rankedIds.length === 0
+            ? []
+            : db
+                .select(SEARCH_PHOTO_COLUMNS)
+                .from(photos)
+                .where(
+                  and(
+                    isNull(photos.deletedAt),
+                    inArray(photos.id, rankedIds)
+                  )
+                )
+                .all();
+        const photoList = hydrateColorSearchResults(ranks, typedPhotos);
 
         console.log(
           `[Search] Color #${effectiveColorHex}: SQLite=${sqliteResults.length} LanceDB=${lanceResults.length} merged=${photoList.length}`
         );
 
         return {
-          results: photoList as any,
+          results: photoList,
           total: photoList.length,
           searchMode: "color" as const,
         };

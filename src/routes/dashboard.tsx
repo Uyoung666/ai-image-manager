@@ -23,6 +23,11 @@ import {
 } from "recharts";
 import { createPortal } from "react-dom";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import {
+  buildApertureChartData,
+  buildFocalChartData,
+  buildRangeSearchParams,
+} from "@/utils/dashboard-data";
 
 interface ChartClickState {
   activePayload?: { payload: Record<string, unknown> }[];
@@ -49,6 +54,8 @@ interface ApertureStat {
 }
 interface BucketStat {
   count: number;
+  max?: number;
+  min?: number;
   period?: string;
   range?: string;
 }
@@ -117,18 +124,6 @@ const chartTooltipStyle = {
   labelStyle: { color: "var(--popover-foreground)", fontWeight: 600 },
 };
 
-// Focal length to range mapping: "85" → { min: 75, max: 95 }
-function focalToRange(focalRaw: string): { min: number; max: number } | null {
-  const n = Number.parseFloat(focalRaw);
-  if (Number.isNaN(n) || n <= 0) {
-    return null;
-  }
-  // Round to nearest 5mm bucket
-  const bucket = Math.round(n / 5) * 5;
-  const half = bucket >= 50 ? 10 : 3;
-  return { min: bucket - half, max: bucket + half };
-}
-
 function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -159,17 +154,18 @@ function DashboardPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "dashboard" });
 
-  // ── TanStack Query: single IPC call merges stats + colors ──────────
+  // Load core statistics first; heavier colors and map points are progressive.
   const {
     data: rawData,
     isLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: ["dashboard"],
+    queryKey: ["dashboard", "stats"],
     queryFn: async () => {
       const result = (await ipc.client.photos.getStats({
-        includeColors: true,
+        includeColors: false,
+        includeGeo: false,
       })) as DashboardData & { colorDistribution?: ColorDistributionUI | null };
       return result;
     },
@@ -178,12 +174,22 @@ function DashboardPage() {
 
   // React 19: defer chart recalc to keep page responsive
   const data = useDeferredValue(rawData ?? null);
-  const colorData = (rawData as any)?.colorDistribution ?? null;
-
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
   const [mapExpanded, setMapExpanded] = useState(false);
   const [colorVisible, setColorVisible] = useState(false);
   const colorRef = useRef<HTMLDivElement | null>(null);
+  const { data: colorData = null, isPending: colorIsLoading } = useQuery({
+    queryKey: ["dashboard", "colors"],
+    queryFn: () => ipc.client.photos.getColorDistribution(),
+    enabled: rawData !== undefined && colorVisible,
+    staleTime: 30_000,
+  });
+  const { data: mapLocations = [], isLoading: mapIsLoading } = useQuery({
+    queryKey: ["dashboard", "geo-locations"],
+    queryFn: () => ipc.client.photos.getGeoLocations(),
+    enabled: mapExpanded,
+    staleTime: 30_000,
+  });
 
   // Map source setting (lightweight, loaded once)
   useEffect(() => {
@@ -194,7 +200,9 @@ function DashboardPage() {
           setMapSource("online");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Keep the offline default when the persisted setting is unavailable.
+      });
   }, []);
 
   // Auto-refresh dashboard when background import queue finishes
@@ -216,7 +224,7 @@ function DashboardPage() {
   // IntersectionObserver: entrance animation when color section scrolls into view
   useEffect(() => {
     const el = colorRef.current;
-    if (!(el && colorData)) {
+    if (!el) {
       return;
     }
     const rect = el.getBoundingClientRect();
@@ -235,13 +243,15 @@ function DashboardPage() {
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [colorData]);
+  }, [isLoading]);
 
   const handleMapSourceChange = useCallback((source: "offline" | "online") => {
     setMapSource(source);
     ipc.client.settings
       .setAppSetting({ key: "mapSource", value: source })
-      .catch(() => {});
+      .catch(() => {
+        // The in-memory selection remains usable if persistence fails.
+      });
   }, []);
 
   const drillToHome = useCallback(
@@ -271,104 +281,24 @@ function DashboardPage() {
     [data?.lensStats]
   );
 
-  // Format focal length label cleanly: strip trailing ".0", append "mm",
-  // and defend against any remaining precision artifacts from the database.
-  function formatFocalLabel(raw: string): string {
-    const n = Number.parseFloat(raw);
-    if (!Number.isNaN(n) && n > 0) {
-      // toFixed(1) → strip trailing ".0" for whole-number focal lengths
-      return `${n.toFixed(1).replace(/\.0$/, "")}mm`;
-    }
-    return `${raw}mm`;
-  }
-
   const focalData = useMemo(
-    () =>
-      (data?.focalStats || [])
-        .filter((f) => f.focalLength)
-        .map((f) => {
-          const range = focalToRange(f.focalLength);
-          return {
-            name: formatFocalLabel(f.focalLength),
-            count: f.count,
-            focalMin: range?.min,
-            focalMax: range?.max,
-          };
-        })
-        .sort((a, b) => {
-          const na = Number.parseFloat(a.name);
-          const nb = Number.parseFloat(b.name);
-          if (!(Number.isNaN(na) || Number.isNaN(nb))) {
-            return na - nb;
-          }
-          return 0;
-        })
-        .slice(0, 12),
+    () => buildFocalChartData(data?.focalStats || []),
     [data?.focalStats]
   );
 
-  // Standard aperture stops for binning near-identical values.
-  // Covers common 1/3-stop increments from f/1.0 to f/32.
-  const STANDARD_APERTURES = [
-    1.0, 1.1, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.5, 2.8, 3.2, 3.5, 4.0, 4.5,
-    5.0, 5.6, 6.3, 7.1, 8.0, 9.0, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32,
-  ];
-
-  // Snap an aperture value to the nearest standard stop within tolerance.
-  // Tolerance is 6% of the standard stop value — enough to absorb float
-  // artifacts while not merging genuinely different apertures.
-  function snapToStandardAperture(raw: number): number {
-    const tol = raw * 0.06;
-    let best = raw;
-    let bestDist = Number.POSITIVE_INFINITY;
-    for (const std of STANDARD_APERTURES) {
-      const dist = Math.abs(std - raw);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = std;
-      }
-    }
-    return bestDist <= tol ? best : raw;
-  }
-
-  // Format aperture label cleanly: e.g. "f/2.8", "f/4", "f/5.6"
-  function formatApertureLabel(value: number): string {
-    const snapped = snapToStandardAperture(value);
-    // Round to 1 decimal, strip trailing ".0"
-    const clean = snapped.toFixed(1).replace(/\.0$/, "");
-    return `f/${clean}`;
-  }
-
   const apertureData = useMemo(
-    () =>
-      (data?.apertureStats || [])
-        .filter((a) => a.aperture)
-        .map((a) => {
-          const snapped = snapToStandardAperture(a.aperture);
-          return {
-            name: formatApertureLabel(a.aperture),
-            count: a.count,
-            // Drill-down range: ±1/3 stop around the snapped value
-            apertureMin: (snapped * 0.89).toFixed(1),
-            apertureMax: (snapped * 1.12).toFixed(1),
-          };
-        })
-        .slice(0, 10),
+    () => buildApertureChartData(data?.apertureStats || []),
     [data?.apertureStats]
   );
 
   const isoData = useMemo(
     () =>
-      (data?.isoDistribution || []).map((b) => {
-        // Parse "100-400" → { min: 100, max: 400 }
-        const parts = b.range?.split("-");
-        return {
-          name: b.range || "",
-          count: b.count,
-          isoMin: parts?.[0],
-          isoMax: parts?.[1],
-        };
-      }),
+      (data?.isoDistribution || []).map((bucket) => ({
+        name: bucket.range || "",
+        count: bucket.count,
+        isoMin: bucket.min,
+        isoMax: bucket.max,
+      })),
     [data?.isoDistribution]
   );
 
@@ -383,39 +313,12 @@ function DashboardPage() {
 
   const shutterData = useMemo(
     () =>
-      (data?.shutterSpeedDistribution || []).map((b) => {
-        const parts = b.range?.split("-");
-        const getApproxSeconds = (label: string): number | undefined => {
-          if (label.startsWith(">")) {
-            // ">1/1000s" → 1/2000 as representative
-            const m = label.match(/>1\/(\d+)s/);
-            if (m) {
-              return 0.5 / Number.parseFloat(m[1]);
-            }
-          }
-          if (label.startsWith("<")) {
-            // "<1/30s" → 1/15 as representative
-            const m = label.match(/<1\/(\d+)s/);
-            if (m) {
-              return 2 / Number.parseFloat(m[1]);
-            }
-          }
-          const m = label.match(/1\/(\d+)s-1\/(\d+)s/);
-          if (m) {
-            const lo = Number.parseFloat(m[1]);
-            const hi = Number.parseFloat(m[2]);
-            return (1 / lo + 1 / hi) / 2;
-          }
-          return undefined;
-        };
-        const approxSec = getApproxSeconds(b.range || "");
-        return {
-          name: b.range || "",
-          count: b.count,
-          shutterMin: approxSec === undefined ? undefined : approxSec * 0.7,
-          shutterMax: approxSec === undefined ? undefined : approxSec * 1.3,
-        };
-      }),
+      (data?.shutterSpeedDistribution || []).map((bucket) => ({
+        name: bucket.range || "",
+        count: bucket.count,
+        shutterMin: bucket.min,
+        shutterMax: bucket.max,
+      })),
     [data?.shutterSpeedDistribution]
   );
 
@@ -459,7 +362,7 @@ function DashboardPage() {
         </div>
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
           {/* Stat cards skeleton */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div
                 className="rounded-[8px] border border-border bg-card p-4"
@@ -500,7 +403,7 @@ function DashboardPage() {
             </div>
           ))}
           {/* Yearly / Monthly skeleton */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 className="rounded-[8px] border border-border bg-card p-4"
@@ -555,6 +458,7 @@ function DashboardPage() {
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center gap-4 border-border border-b px-6 py-4">
         <button
+          aria-label={t("backToHome")}
           className="text-muted-foreground hover:text-foreground"
           onClick={() => navigate({ to: "/" })}
         >
@@ -567,7 +471,7 @@ function DashboardPage() {
 
       <div className="flex-1 space-y-6 overflow-y-auto p-6" ref={scrollRef}>
         {/* Stat Cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label={t("totalPhotos")}
             value={data?.totalPhotos.toLocaleString() || "0"}
@@ -597,11 +501,13 @@ function DashboardPage() {
               {t("geoMap")}
             </h2>
             <button
+              aria-expanded={mapExpanded}
               className="flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               onClick={() => setMapExpanded((v) => !v)}
               title={t("expandMap")}
             >
               <svg
+                aria-hidden="true"
                 className="h-4 w-4 transition-transform"
                 style={{ transform: mapExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
                 fill="none"
@@ -616,25 +522,29 @@ function DashboardPage() {
           </div>
           {mapExpanded && (
             <div className="mt-4">
-              <PhotoMap
-                locations={data?.geoLocations || []}
-                mapSource={mapSource}
-                onMapSourceChange={handleMapSourceChange}
-              />
+              {mapIsLoading ? (
+                <div className="h-[300px] w-full animate-pulse rounded-[6px] bg-muted" />
+              ) : (
+                <PhotoMap
+                  locations={mapLocations}
+                  mapSource={mapSource}
+                  onMapSourceChange={handleMapSourceChange}
+                />
+              )}
             </div>
           )}
         </div>
 
         {/* Color Distribution */}
-        <ChartSection
-          hint={t("colorClickToSearch")}
-          title={t("colorDistribution")}
-        >
+        <div ref={colorRef}>
+          <ChartSection
+            hint={t("colorClickToSearch")}
+            title={t("colorDistribution")}
+          >
           {colorData ? (
             colorData && colorData.globalPalette.length > 0 ? (
               <div
                 className={colorVisible ? "animate-card-enter" : "opacity-0"}
-                ref={colorRef}
               >
                 {/* Insight text */}
                 {(() => {
@@ -678,7 +588,8 @@ function DashboardPage() {
                   <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
                     {colorData.globalPalette.map((c, i) => (
                       <button
-                        className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                        aria-label={`${c.hex}, ${Math.round(c.weight * 100)}%`}
+                        className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                         key={i}
                         onClick={() =>
                           drillToHome({
@@ -713,7 +624,8 @@ function DashboardPage() {
                             const opacity = 0.12 + ratio * 0.88;
                             return (
                               <button
-                                className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus:outline-none"
+                                aria-label={`${getHueLabel(h.hueRange[0])}: ${h.count}`}
+                                className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                                 key={h.hueRange[0]}
                                 onClick={() =>
                                   drillToHome({
@@ -815,7 +727,7 @@ function DashboardPage() {
                 )}
               </div>
             )
-          ) : (
+          ) : colorIsLoading ? (
             <div className="space-y-3 py-2">
               <p className="text-[11px] text-muted-foreground/50">
                 {t("colorAnalyzing")}
@@ -848,8 +760,11 @@ function DashboardPage() {
                 ))}
               </div>
             </div>
+          ) : (
+            <EmptyHint text={t("noColorData")} />
           )}
-        </ChartSection>
+          </ChartSection>
+        </div>
 
         {/* Camera Usage */}
         <ChartSection hint={t("clickToView")} title={t("cameraUsage")}>
@@ -890,7 +805,7 @@ function DashboardPage() {
         )}
 
         {/* Charts Grid 2×2 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartSection hint={t("clickToView")} title={t("focalDistribution")}>
             {focalData.length > 0 ? (
               <DashboardBarChart
@@ -942,11 +857,13 @@ function DashboardPage() {
                 data={isoData}
                 fillColor={CHART_4}
                 onBarClick={(entry) => {
-                  if (entry.isoMin && entry.isoMax) {
-                    drillToHome({
-                      isoMin: entry.isoMin,
-                      isoMax: entry.isoMax,
-                    });
+                  const params = buildRangeSearchParams(
+                    "iso",
+                    entry.isoMin,
+                    entry.isoMax
+                  );
+                  if (Object.keys(params).length > 0) {
+                    drillToHome(params);
                   }
                 }}
               />
@@ -1018,14 +935,13 @@ function DashboardPage() {
               data={shutterData}
               fillColor={CHART_5}
               onBarClick={(entry) => {
-                if (
-                  entry.shutterMin !== undefined &&
-                  entry.shutterMax !== undefined
-                ) {
-                  drillToHome({
-                    shutterMin: String(entry.shutterMin),
-                    shutterMax: String(entry.shutterMax),
-                  });
+                const params = buildRangeSearchParams(
+                  "shutter",
+                  entry.shutterMin,
+                  entry.shutterMax
+                );
+                if (Object.keys(params).length > 0) {
+                  drillToHome(params);
                 }
               }}
               xAxisAngle={-45}
@@ -1037,7 +953,7 @@ function DashboardPage() {
         </ChartSection>
 
         {/* Yearly & Monthly Distribution */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <ChartSection
             hint={t("clickYearToView")}
             title={t("yearlyDistribution")}
