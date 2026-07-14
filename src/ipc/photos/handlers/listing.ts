@@ -16,6 +16,10 @@ import {
 
 const GLOB_WILDCARD_RE = /[*?[]/;
 import { deletePhotoVectors } from "@/services/ai-embedder";
+import {
+  getFolderSubtreeIds,
+  getFolderTotalPhotoCounts,
+} from "@/services/folder-hierarchy";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
   cancelAllImports,
@@ -98,46 +102,11 @@ export const getFolders = os.handler(() => {
     .orderBy(desc(folders.lastScannedAt))
     .all();
 
-  // Build children map for recursive count computation
-  const childrenMap = new Map<number, number[]>();
-  for (const f of allFolders) {
-    if (f.parentId != null) {
-      const list = childrenMap.get(f.parentId);
-      if (list) {
-        list.push(f.id);
-      } else {
-        childrenMap.set(f.parentId, [f.id]);
-      }
-    }
-  }
-
-  // Compute recursive totalPhotoCount per folder
-  const recursiveCache = new Map<number, number>();
-  function computeRecursive(folderId: number): number {
-    const cached = recursiveCache.get(folderId);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const folder = allFolders.find((f) => f.id === folderId);
-    if (!folder) {
-      return 0;
-    }
-
-    let total = folder.photoCount;
-    const children = childrenMap.get(folderId);
-    if (children) {
-      for (const childId of children) {
-        total += computeRecursive(childId);
-      }
-    }
-    recursiveCache.set(folderId, total);
-    return total;
-  }
+  const totalPhotoCounts = getFolderTotalPhotoCounts(allFolders);
 
   return allFolders.map((f) => ({
     ...f,
-    totalPhotoCount: computeRecursive(f.id),
+    totalPhotoCount: totalPhotoCounts.get(f.id) ?? f.photoCount,
   }));
 });
 
@@ -172,28 +141,13 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
     return { success: true };
   }
 
-  // 1) Recursively collect all descendant folder IDs via parentId chain (BFS + cycle detection)
-  const descendantIds: number[] = [];
-  const visited = new Set<number>([input.id]);
-  const queue = [input.id];
-  while (queue.length > 0) {
-    const currentId = queue.shift()!;
-    const children = db
-      .select({ id: folders.id })
-      .from(folders)
-      .where(eq(folders.parentId, currentId))
-      .all();
-    for (const child of children) {
-      if (visited.has(child.id)) {
-        continue; // cycle guard
-      }
-      visited.add(child.id);
-      descendantIds.push(child.id);
-      queue.push(child.id);
-    }
-  }
-
-  const allFolderIds = [input.id, ...descendantIds];
+  // 1) Recursively collect all descendant folder IDs with cycle detection.
+  const folderHierarchy = db
+    .select({ id: folders.id, parentId: folders.parentId })
+    .from(folders)
+    .all();
+  const allFolderIds = getFolderSubtreeIds(folderHierarchy, input.id);
+  const descendantIds = allFolderIds.filter((id) => id !== input.id);
 
   // 2) Collect all photos belonging to any of these folders.
   //    This includes both active and soft-deleted photos — when the original
@@ -341,7 +295,16 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const conditions: ReturnType<typeof isNull>[] = [isNull(photos.deletedAt)];
 
   if (folderId) {
-    conditions.push(eq(photos.folderId, folderId) as any);
+    const folderHierarchy = db
+      .select({ id: folders.id, parentId: folders.parentId })
+      .from(folders)
+      .all();
+    const folderIds = getFolderSubtreeIds(folderHierarchy, folderId);
+    conditions.push(
+      (folderIds.length > 0
+        ? inArray(photos.folderId, folderIds)
+        : eq(photos.folderId, folderId)) as any
+    );
   }
 
   // Multi-tag filtering with AND/OR support

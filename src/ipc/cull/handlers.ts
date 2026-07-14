@@ -6,9 +6,11 @@ import {
   cullActionLogs,
   cullSessionPhotos,
   cullSessions,
+  folders,
   photos,
 } from "@/db/schema";
 import { BKTree, hammingDistance } from "@/services/bk-tree";
+import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 import {
   generateDuelPreview,
   getDuelPreviewStrategy,
@@ -47,14 +49,21 @@ export const createSession = os
 
     let allPhotoIds = [...input.photoIds];
 
-    // If folderId is provided, load non-deleted photos from that folder
+    // If folderId is provided, load non-deleted photos from its entire subtree.
     if (input.folderId && allPhotoIds.length === 0) {
+      const folderHierarchy = db
+        .select({ id: folders.id, parentId: folders.parentId })
+        .from(folders)
+        .all();
+      const folderIds = getFolderSubtreeIds(folderHierarchy, input.folderId);
       const folderPhotos = db
         .select({ id: photos.id })
         .from(photos)
         .where(
           and(
-            eq(photos.folderId, input.folderId),
+            folderIds.length > 0
+              ? inArray(photos.folderId, folderIds)
+              : eq(photos.folderId, input.folderId),
             isNull(photos.deletedAt)
           )
         )

@@ -1,7 +1,7 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import exifr from "exifr";
 import PQueue from "p-queue";
 import sharp from "sharp";
@@ -1108,7 +1108,12 @@ export async function scanFolder(
         folderId: photos.folderId,
       })
       .from(photos)
-      .where(inArray(photos.folderId, folderIds))
+      .where(
+        and(
+          inArray(photos.folderId, folderIds),
+          isNull(photos.deletedAt)
+        )
+      )
       .groupBy(photos.folderId)
       .all();
 

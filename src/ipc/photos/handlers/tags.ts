@@ -1,9 +1,10 @@
 import { os } from "@orpc/server";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
-import { photos, photoTags, tags } from "@/db/schema";
+import { folders, photos, photoTags, tags } from "@/db/schema";
 import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
+import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 import { IdSchema } from "./shared";
 
 export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
@@ -37,10 +38,26 @@ export const getTags = os
       .select({ tagId: photoTags.tagId, photoId: photoTags.photoId })
       .from(photoTags)
       .innerJoin(photos, eq(photos.id, photoTags.photoId));
+    const folderIds = folderId
+      ? getFolderSubtreeIds(
+          db
+            .select({ id: folders.id, parentId: folders.parentId })
+            .from(folders)
+            .all(),
+          folderId
+        )
+      : [];
     const pairs = (
       folderId
         ? baseQuery
-            .where(and(isNull(photos.deletedAt), eq(photos.folderId, folderId)))
+            .where(
+              and(
+                isNull(photos.deletedAt),
+                folderIds.length > 0
+                  ? inArray(photos.folderId, folderIds)
+                  : eq(photos.folderId, folderId)
+              )
+            )
             .all()
         : baseQuery.where(isNull(photos.deletedAt)).all()
     ) as TagPhotoRow[];
