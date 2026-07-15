@@ -1,15 +1,25 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { RouteError } from "@/components/RouteError";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-import { RouteError } from "@/components/RouteError";
 
 interface DeletedPhoto {
   deletedAt: number | null;
@@ -24,12 +34,54 @@ interface DeletedPhoto {
   width: number | null;
 }
 
+interface TrashOperationResult {
+  failed: Array<{ code: string; id: number; message: string }>;
+  restoredWithoutFolderIds?: number[];
+  succeededIds: number[];
+}
+
+interface TrashListResult {
+  items: DeletedPhoto[];
+  nextCursor: { id: number; value: number | string } | null;
+  totalBytes: number;
+  totalCount: number;
+  trashTotalBytes: number;
+  trashTotalCount: number;
+}
+
+const TRASH_SKELETON_KEYS = Array.from(
+  { length: 12 },
+  (_, index) => `trash-skeleton-${index + 1}`
+);
+const TRASH_EXPIRY_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates coupled desktop selection and batch-operation state
 function TrashPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const routeKey = "trash";
   const [photos, setPhotos] = useState<DeletedPhoto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
+  const [nextCursor, setNextCursor] = useState<{
+    id: number;
+    value: number | string;
+  } | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const [trashTotalCount, setTrashTotalCount] = useState(0);
+  const [trashTotalBytes, setTrashTotalBytes] = useState(0);
+  const [query, setQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [sort, setSort] = useState<"deletedAt" | "name" | "size">("deletedAt");
+  const [order, setOrder] = useState<"asc" | "desc">("desc");
   const {
     selectedIds,
     handleSelect,
@@ -41,6 +93,7 @@ function TrashPage() {
   const [deleting, setDeleting] = useState(false);
   const [confirmPermanent, setConfirmPermanent] = useState(false);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
+  const [previewPhoto, setPreviewPhoto] = useState<DeletedPhoto | null>(null);
   const [marquee, setMarquee] = useState<{
     startX: number;
     startY: number;
@@ -48,6 +101,12 @@ function TrashPage() {
     y: number;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const requestIdRef = useRef(0);
+  const hasLoadedRef = useRef(false);
+  const listParamsRef = useRef(`${query}:${sort}:${order}`);
+  const marqueeRef = useRef<typeof marquee>(null);
+  const marqueeFrameRef = useRef<number | null>(null);
   const marqueeJustCompleted = useRef(false);
   const [ctxMenu, setCtxMenu] = useState<{
     open: boolean;
@@ -65,20 +124,102 @@ function TrashPage() {
     selectionCount: 0,
   });
 
-  const loadPhotos = useCallback(async () => {
-    try {
-      const result = await ipc.client.photos.listDeletedPhotos();
-      setPhotos(result as DeletedPhoto[]);
-    } catch {
-      toast.error(t("trashLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadPhotos = useCallback(
+    async (
+      cursor: { id: number; value: number | string } | null = null,
+      append = false
+    ) => {
+      const requestId = ++requestIdRef.current;
+      if (append) {
+        setLoadingMore(true);
+        setLoadMoreError(false);
+      } else if (hasLoadedRef.current) {
+        setRefreshing(true);
+        setRefreshError(false);
+      } else {
+        setLoading(true);
+        setLoadError(false);
+      }
+      try {
+        const result = (await ipc.client.photos.listDeletedPhotos({
+          cursor,
+          limit: 100,
+          order,
+          query,
+          sort,
+        })) as TrashListResult;
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+        setPhotos((current) =>
+          append ? [...current, ...result.items] : result.items
+        );
+        setNextCursor(result.nextCursor);
+        setTotalCount(result.totalCount);
+        setTotalBytes(result.totalBytes);
+        setTrashTotalCount(result.trashTotalCount);
+        setTrashTotalBytes(result.trashTotalBytes);
+        hasLoadedRef.current = true;
+        window.dispatchEvent(
+          new CustomEvent("trash-count-changed", {
+            detail: result.trashTotalCount,
+          })
+        );
+      } catch {
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+        if (append) {
+          setLoadMoreError(true);
+        } else if (hasLoadedRef.current) {
+          setRefreshError(true);
+        } else {
+          setLoadError(true);
+        }
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+          setLoadingMore(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [order, query, sort]
+  );
 
   useEffect(() => {
-    loadPhotos();
-  }, [loadPhotos]);
+    const listParams = `${query}:${sort}:${order}`;
+    if (listParamsRef.current !== listParams) {
+      scrollRef.current?.scrollTo({ top: 0 });
+      listParamsRef.current = listParams;
+    }
+    clearSelection();
+    loadPhotos(null, false);
+  }, [loadPhotos, clearSelection, order, query, sort]);
+
+  useEffect(
+    () => () => {
+      requestIdRef.current += 1;
+    },
+    []
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(searchInput.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    function focusSearch(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
 
   // 集成路由滚动位置管理（使用 elementFromPoint O(1) 锚点，比 querySelectorAll 更高效）
   useRouteScrollRestoration(scrollRef, {
@@ -107,6 +248,7 @@ function TrashPage() {
       return {
         itemId: id,
         offsetFromTop: el.scrollTop - cardTopInContainer,
+        offsetRatio: 0,
       };
     },
     restoreFromAnchor: (anchorItemId: number) => {
@@ -144,27 +286,35 @@ function TrashPage() {
     try {
       const result = (await ipc.client.photos.restorePhotos({
         ids: [...selectedIds],
-      })) as { restored: number; restoredWithoutFolder: number };
-      if (result.restoredWithoutFolder > 0 && result.restored > 0) {
-        toast.success(t("restoredPhotosCount", { count: result.restored }));
+      })) as TrashOperationResult;
+      if (result.succeededIds.length > 0) {
+        toast.success(
+          t("restoredPhotosCount", { count: result.succeededIds.length })
+        );
+      }
+      if ((result.restoredWithoutFolderIds?.length ?? 0) > 0) {
         toast.warning(
           t("restoredWithoutFolderWarning", {
-            count: result.restoredWithoutFolder,
+            count: result.restoredWithoutFolderIds?.length ?? 0,
           })
         );
-      } else if (result.restoredWithoutFolder > 0) {
+      }
+      if (result.failed.length > 0) {
         toast.warning(
-          t("restoredWithoutFolderWarning", {
-            count: result.restoredWithoutFolder,
-          })
+          t("trashOperationPartial", { count: result.failed.length })
+        );
+        handleMarqueeSelect(
+          new Set(result.failed.map((failure) => failure.id))
         );
       } else {
-        toast.success(t("restoredPhotosCount", { count: result.restored }));
+        clearSelection();
       }
-      clearSelection();
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
-      loadPhotos();
+      await loadPhotos(null, false);
     } catch {
       toast.error(t("restoreFailed"));
     } finally {
@@ -176,13 +326,26 @@ function TrashPage() {
     setConfirmPermanent(false);
     setDeleting(true);
     try {
-      await ipc.client.photos.permanentlyDeletePhotos({
+      const result = (await ipc.client.photos.permanentlyDeletePhotos({
         ids: [...selectedIds],
-      });
-      toast.success(t("permanentlyDeletedCount", { count: selectedIds.size }));
-      clearSelection();
+      })) as TrashOperationResult;
+      if (result.succeededIds.length > 0) {
+        toast.success(
+          t("movedToSystemTrashCount", { count: result.succeededIds.length })
+        );
+      }
+      if (result.failed.length > 0) {
+        toast.warning(
+          t("trashOperationPartial", { count: result.failed.length })
+        );
+        handleMarqueeSelect(
+          new Set(result.failed.map((failure) => failure.id))
+        );
+      } else {
+        clearSelection();
+      }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
-      loadPhotos();
+      await loadPhotos(null, false);
     } catch {
       toast.error(t("deleteFailed"));
     } finally {
@@ -194,11 +357,25 @@ function TrashPage() {
     setConfirmEmpty(false);
     setDeleting(true);
     try {
-      await ipc.client.photos.emptyTrash();
-      toast.success(t("trashEmptied"));
-      clearSelection();
+      const result =
+        (await ipc.client.photos.emptyTrash()) as TrashOperationResult;
+      if (result.succeededIds.length > 0) {
+        toast.success(
+          t("movedToSystemTrashCount", { count: result.succeededIds.length })
+        );
+      }
+      if (result.failed.length > 0) {
+        toast.warning(
+          t("trashOperationPartial", { count: result.failed.length })
+        );
+        handleMarqueeSelect(
+          new Set(result.failed.map((failure) => failure.id))
+        );
+      } else {
+        clearSelection();
+      }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
-      setPhotos([]);
+      await loadPhotos(null, false);
     } catch {
       toast.error(t("emptyTrashFailed"));
     } finally {
@@ -214,7 +391,7 @@ function TrashPage() {
   }
 
   function handleEmptyTrash() {
-    if (photos.length === 0) {
+    if (trashTotalCount === 0 || searchInput.trim()) {
       return;
     }
     setConfirmEmpty(true);
@@ -234,16 +411,19 @@ function TrashPage() {
       return;
     }
     const rect = el.getBoundingClientRect();
-    setMarquee({
+    const nextMarquee = {
       startX: e.clientX - rect.left + el.scrollLeft,
       startY: e.clientY - rect.top + el.scrollTop,
       x: e.clientX - rect.left + el.scrollLeft,
       y: e.clientY - rect.top + el.scrollTop,
-    });
+    };
+    marqueeRef.current = nextMarquee;
+    setMarquee(nextMarquee);
   }
 
+  const marqueeActive = marquee !== null;
   useEffect(() => {
-    if (!marquee) {
+    if (!marqueeActive) {
       return;
     }
     const el = scrollRef.current;
@@ -255,65 +435,80 @@ function TrashPage() {
       if (!el) {
         return;
       }
-      const rect = el.getBoundingClientRect();
-      setMarquee((prev) =>
-        prev
-          ? {
-              ...prev,
-              x: e.clientX - rect.left + el.scrollLeft,
-              y: e.clientY - rect.top + el.scrollTop,
-            }
-          : null
-      );
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      if (marqueeFrameRef.current !== null) {
+        cancelAnimationFrame(marqueeFrameRef.current);
+      }
+      marqueeFrameRef.current = requestAnimationFrame(() => {
+        const previous = marqueeRef.current;
+        if (!(previous && el)) {
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        const nextMarquee = {
+          ...previous,
+          x: clientX - rect.left + el.scrollLeft,
+          y: clientY - rect.top + el.scrollTop,
+        };
+        marqueeRef.current = nextMarquee;
+        setMarquee(nextMarquee);
+        marqueeFrameRef.current = null;
+      });
     }
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: rectangle intersection and selection update are one atomic pointer gesture
     function handleMouseUp() {
       const scrollEl = el;
-      setMarquee((prev) => {
-        if (!(prev && scrollEl)) {
-          return null;
-        }
-        const minX = Math.min(prev.startX, prev.x);
-        const maxX = Math.max(prev.startX, prev.x);
-        const minY = Math.min(prev.startY, prev.y);
-        const maxY = Math.max(prev.startY, prev.y);
+      const previous = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarquee(null);
+      if (!(previous && scrollEl)) {
+        return;
+      }
+      const minX = Math.min(previous.startX, previous.x);
+      const maxX = Math.max(previous.startX, previous.x);
+      const minY = Math.min(previous.startY, previous.y);
+      const maxY = Math.max(previous.startY, previous.y);
 
-        if (maxX - minX > 5 || maxY - minY > 5) {
-          const cards = scrollEl.querySelectorAll("[data-photo-id]");
-          const selected = new Set<number>();
-          const containerRect = scrollEl.getBoundingClientRect();
-          for (const card of cards) {
-            const r = card.getBoundingClientRect();
-            const cardLeft = r.left - containerRect.left + scrollEl.scrollLeft;
-            const cardTop = r.top - containerRect.top + scrollEl.scrollTop;
-            if (
-              cardLeft < maxX &&
-              cardLeft + r.width > minX &&
-              cardTop < maxY &&
-              cardTop + r.height > minY
-            ) {
-              const id = Number((card as HTMLElement).dataset.photoId);
-              if (id) {
-                selected.add(id);
-              }
+      if (maxX - minX > 5 || maxY - minY > 5) {
+        const cards = scrollEl.querySelectorAll("[data-photo-id]");
+        const selected = new Set<number>();
+        const containerRect = scrollEl.getBoundingClientRect();
+        for (const card of cards) {
+          const r = card.getBoundingClientRect();
+          const cardLeft = r.left - containerRect.left + scrollEl.scrollLeft;
+          const cardTop = r.top - containerRect.top + scrollEl.scrollTop;
+          if (
+            cardLeft < maxX &&
+            cardLeft + r.width > minX &&
+            cardTop < maxY &&
+            cardTop + r.height > minY
+          ) {
+            const id = Number((card as HTMLElement).dataset.photoId);
+            if (id) {
+              selected.add(id);
             }
           }
-          if (selected.size > 0) {
-            handleMarqueeSelect(selected);
-            marqueeJustCompleted.current = true;
-          }
         }
-        return null;
-      });
+        if (selected.size > 0) {
+          handleMarqueeSelect(selected);
+          marqueeJustCompleted.current = true;
+        }
+      }
     }
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => {
+      if (marqueeFrameRef.current !== null) {
+        cancelAnimationFrame(marqueeFrameRef.current);
+        marqueeFrameRef.current = null;
+      }
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [marquee]);
+  }, [marqueeActive, handleMarqueeSelect]);
 
   // --- Context menu ---
   function handleContextMenu(e: React.MouseEvent) {
@@ -340,9 +535,9 @@ function TrashPage() {
     });
   }
 
-  function closeCtxMenu() {
+  const closeCtxMenu = useCallback(() => {
     setCtxMenu((prev) => ({ ...prev, open: false }));
-  }
+  }, []);
 
   useEffect(() => {
     if (!ctxMenu.open) {
@@ -354,22 +549,60 @@ function TrashPage() {
         closeCtxMenu();
       }
     }
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard menu navigation maps a small fixed key set
     function keyHandler(e: KeyboardEvent) {
       if (e.key === "Escape") {
         closeCtxMenu();
+        return;
       }
+      const items = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "#trash-context-menu [role='menuitem']:not([disabled])"
+        )
+      );
+      if (items.length === 0) {
+        return;
+      }
+      const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+      let nextIndex: number | null = null;
+      if (e.key === "ArrowDown") {
+        nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+      } else if (e.key === "ArrowUp") {
+        nextIndex =
+          currentIndex < 0
+            ? items.length - 1
+            : (currentIndex - 1 + items.length) % items.length;
+      } else if (e.key === "Home") {
+        nextIndex = 0;
+      } else if (e.key === "End") {
+        nextIndex = items.length - 1;
+      }
+      if (nextIndex !== null) {
+        e.preventDefault();
+        items[nextIndex]?.focus();
+      }
+    }
+    function dismissOnViewportChange() {
+      closeCtxMenu();
     }
     setTimeout(() => {
       document.addEventListener("mousedown", dismiss, true);
       document.addEventListener("contextmenu", dismiss, true);
+      document
+        .querySelector<HTMLElement>("#trash-context-menu [role='menuitem']")
+        ?.focus();
     }, 0);
     document.addEventListener("keydown", keyHandler);
+    window.addEventListener("resize", dismissOnViewportChange);
+    scrollRef.current?.addEventListener("scroll", dismissOnViewportChange);
     return () => {
       document.removeEventListener("mousedown", dismiss, true);
       document.removeEventListener("contextmenu", dismiss, true);
       document.removeEventListener("keydown", keyHandler);
+      window.removeEventListener("resize", dismissOnViewportChange);
+      scrollRef.current?.removeEventListener("scroll", dismissOnViewportChange);
     };
-  }, [ctxMenu.open]);
+  }, [ctxMenu.open, closeCtxMenu]);
 
   async function handleCtxRestore() {
     closeCtxMenu();
@@ -386,26 +619,33 @@ function TrashPage() {
     try {
       const result = (await ipc.client.photos.restorePhotos({
         ids: [ctxMenu.photoId],
-      })) as { restored: number; restoredWithoutFolder: number };
-      if (result.restoredWithoutFolder > 0 && result.restored > 0) {
-        toast.success(t("restoredPhotosCount", { count: result.restored }));
-        toast.warning(
-          t("restoredWithoutFolderWarning", {
-            count: result.restoredWithoutFolder,
-          })
+      })) as TrashOperationResult;
+      if (result.succeededIds.length > 0) {
+        toast.success(
+          t("restoredPhotosCount", { count: result.succeededIds.length })
         );
-      } else if (result.restoredWithoutFolder > 0) {
-        toast.warning(
-          t("restoredWithoutFolderWarning", {
-            count: result.restoredWithoutFolder,
-          })
-        );
-      } else {
-        toast.success(t("restoredPhotosCount", { count: result.restored }));
       }
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      if ((result.restoredWithoutFolderIds?.length ?? 0) > 0) {
+        toast.warning(
+          t("restoredWithoutFolderWarning", {
+            count: result.restoredWithoutFolderIds?.length ?? 0,
+          })
+        );
+      }
+      if (result.failed.length > 0) {
+        toast.warning(
+          t("trashOperationPartial", { count: result.failed.length })
+        );
+        handleMarqueeSelect(
+          new Set(result.failed.map((failure) => failure.id))
+        );
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
-      loadPhotos();
+      await loadPhotos(null, false);
     } catch {
       toast.error(t("restoreFailed"));
     } finally {
@@ -459,14 +699,316 @@ function TrashPage() {
     );
   }
 
+  async function handlePreviewRestore() {
+    if (!previewPhoto) {
+      return;
+    }
+    const photoId = previewPhoto.id;
+    setPreviewPhoto(null);
+    setRestoring(true);
+    try {
+      const result = (await ipc.client.photos.restorePhotos({
+        ids: [photoId],
+      })) as TrashOperationResult;
+      if (result.succeededIds.length > 0) {
+        toast.success(t("restoredPhotosCount", { count: 1 }));
+      }
+      if (result.failed.length > 0) {
+        toast.warning(
+          t("trashOperationPartial", { count: result.failed.length })
+        );
+        handleMarqueeSelect(new Set([photoId]));
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      await loadPhotos(null, false);
+    } catch {
+      toast.error(t("restoreFailed"));
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+  }
+
+  function expiryDate(ts: number | null): string {
+    if (!ts) {
+      return "";
+    }
+    return TRASH_EXPIRY_FORMATTER.format(
+      new Date(ts + 30 * 24 * 60 * 60 * 1000)
+    );
+  }
+
+  const groupedPhotos = useMemo(() => {
+    const now = Date.now();
+    const groups = new Map<string, DeletedPhoto[]>([
+      [t("trashGroupToday"), []],
+      [t("trashGroupWeek"), []],
+      [t("trashGroupOlder"), []],
+    ]);
+    for (const photo of photos) {
+      const age = photo.deletedAt
+        ? now - photo.deletedAt
+        : Number.POSITIVE_INFINITY;
+      let key = t("trashGroupOlder");
+      if (age < 24 * 60 * 60 * 1000) {
+        key = t("trashGroupToday");
+      } else if (age < 7 * 24 * 60 * 60 * 1000) {
+        key = t("trashGroupWeek");
+      }
+      groups.get(key)?.push(photo);
+    }
+    return [...groups.entries()].filter(([, items]) => items.length > 0);
+  }, [photos, t]);
+
+  const operationRunning = restoring || deleting;
+
+  function renderPhotoCard(photo: DeletedPhoto) {
+    const remaining = daysRemaining(photo.deletedAt);
+    return (
+      <button
+        aria-label={photo.filename}
+        aria-pressed={selectedIds.has(photo.id)}
+        className={`group relative cursor-pointer overflow-hidden rounded-[8px] border bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+          selectedIds.has(photo.id)
+            ? "border-primary ring-2 ring-primary/30"
+            : "border-border hover:border-foreground/20"
+        }`}
+        data-photo-id={photo.id}
+        data-photo-path={photo.path}
+        key={photo.id}
+        onClick={(event) => toggleSelect(photo.id, event)}
+        onContextMenu={handleContextMenu}
+        onDoubleClick={() => setPreviewPhoto(photo)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handleKeyboardSelect(photo.id);
+          }
+        }}
+        style={{
+          containIntrinsicSize: "240px",
+          contentVisibility: "auto",
+        }}
+        tabIndex={0}
+        type="button"
+      >
+        <div className="relative aspect-square bg-card">
+          <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/30">
+            <Trash2 className="h-8 w-8" />
+          </div>
+          {photo.thumbnailPath && (
+            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image error handling only swaps to a non-interactive fallback
+            <img
+              alt={photo.filename}
+              className="relative z-[1] h-full w-full object-cover"
+              decoding="async"
+              height={photo.height ?? 160}
+              loading="lazy"
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+              src={toLocalMediaUrl(photo.thumbnailPath)}
+              width={photo.width ?? 160}
+            />
+          )}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/45 to-transparent" />
+        </div>
+        <div className="p-2">
+          <p className="truncate text-[11px] text-foreground">
+            {photo.filename}
+          </p>
+          {photo.folderName ? (
+            <p className="truncate text-[10px] text-muted-foreground/70">
+              {photo.folderName}
+            </p>
+          ) : (
+            <p className="truncate text-[10px] text-orange-500/80">
+              {t("originalFolderRemoved")}
+            </p>
+          )}
+          <div className="mt-0.5 flex items-center justify-between gap-2">
+            <span className="truncate text-[10px] text-muted-foreground">
+              {formatTimeAgo(photo.deletedAt)}
+            </span>
+            <span
+              className={`shrink-0 text-[10px] ${
+                remaining <= 3 ? "text-destructive" : "text-muted-foreground"
+              }`}
+              title={t("trashExpiresAt", { date: expiryDate(photo.deletedAt) })}
+            >
+              {t("deleteAfterDays", { count: remaining })}
+            </span>
+          </div>
+        </div>
+        <div
+          aria-hidden="true"
+          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
+            selectedIds.has(photo.id)
+              ? "border-primary bg-primary text-white"
+              : "border-white/60 bg-black/30 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+          }`}
+        >
+          {selectedIds.has(photo.id) && (
+            <svg
+              aria-hidden="true"
+              className="h-3 w-3"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M5 13l4 4L19 7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={3}
+              />
+            </svg>
+          )}
+        </div>
+      </button>
+    );
+  }
+
+  function renderTrashContent() {
+    if (loading) {
+      return (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+          {TRASH_SKELETON_KEYS.map((key) => (
+            <div
+              className="overflow-hidden rounded-[8px] border border-border"
+              key={key}
+            >
+              <Skeleton className="aspect-square rounded-none" />
+              <div className="space-y-2 p-2">
+                <Skeleton className="h-3 w-4/5" />
+                <Skeleton className="h-2.5 w-3/5" />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (loadError) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3">
+          <p className="text-[14px] text-foreground">{t("trashLoadFailed")}</p>
+          <button
+            className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+            onClick={() => loadPhotos(null, false)}
+            type="button"
+          >
+            {t("retry")}
+          </button>
+        </div>
+      );
+    }
+    if (photos.length === 0) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3">
+          <Trash2 className="h-12 w-12 text-muted-foreground/30" />
+          <p className="text-[14px] text-muted-foreground">
+            {query ? t("trashNoSearchResults") : t("trashEmpty")}
+          </p>
+          <p className="text-[12px] text-muted-foreground/60">
+            {t("trashRetentionHint")}
+          </p>
+          {query ? (
+            <button
+              className="rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+              onClick={() => {
+                setSearchInput("");
+                searchInputRef.current?.focus();
+              }}
+              type="button"
+            >
+              {t("clearSearch")}
+            </button>
+          ) : (
+            <button
+              className="rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+              onClick={() => navigate({ to: "/" })}
+              type="button"
+            >
+              {t("backToHome")}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    const displayGroups =
+      sort === "deletedAt" ? groupedPhotos : [["", photos] as const];
+    return (
+      <div className="space-y-6">
+        {displayGroups.map(([label, items]) => (
+          <section key={label || "all"}>
+            {label && (
+              <h2 className="mb-2 font-medium text-[12px] text-muted-foreground">
+                {label}
+              </h2>
+            )}
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+              {items.map(renderPhotoCard)}
+            </div>
+          </section>
+        ))}
+        {nextCursor !== null && !loadMoreError && (
+          <div className="flex justify-center pb-2">
+            <button
+              className="flex items-center gap-2 rounded-[6px] border border-border px-4 py-2 text-[12px] text-foreground hover:bg-foreground/5 disabled:opacity-50"
+              disabled={loadingMore}
+              onClick={() => loadPhotos(nextCursor, true)}
+              type="button"
+            >
+              {loadingMore && <LoadingSpinner size="sm" />}
+              {t("loadMore")}
+            </button>
+          </div>
+        )}
+        {loadMoreError && nextCursor !== null && (
+          <div className="flex items-center justify-center gap-2 pb-2 text-[12px] text-destructive">
+            <span>{t("trashLoadMoreFailed")}</span>
+            <button
+              className="rounded-[6px] border border-border px-2 py-1 text-foreground hover:bg-foreground/5"
+              onClick={() => loadPhotos(nextCursor, true)}
+              type="button"
+            >
+              {t("retry")}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
           <button
+            aria-label={t("backToHome")}
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
+            title={t("backToHome")}
+            type="button"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -475,66 +1017,194 @@ function TrashPage() {
               {t("recentlyDeletedTitle")}
             </h1>
             <p className="text-[12px] text-muted-foreground">
-              {photos.length > 0
-                ? t("trashSubtitle", { count: photos.length })
+              {trashTotalCount > 0
+                ? t("trashSummary", {
+                    bytes: formatBytes(trashTotalBytes),
+                    count: trashTotalCount,
+                  })
                 : t("noDeletedPhotos")}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {selectedIds.size > 0 && (
             <>
               <button
                 className="flex items-center gap-1.5 rounded-[6px] bg-primary/10 px-3 py-1.5 text-[13px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-                disabled={restoring}
+                disabled={operationRunning}
                 onClick={handleRestore}
+                type="button"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 {t("restoreCount", { count: selectedIds.size })}
               </button>
               <button
                 className="flex items-center gap-1.5 rounded-[6px] bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
-                disabled={deleting}
+                disabled={operationRunning}
                 onClick={handlePermanentDelete}
+                type="button"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                {t("permanentlyDelete")}
+                {t("moveToSystemTrash")}
               </button>
             </>
           )}
-          {photos.length > 0 && (
+          {trashTotalCount > 0 && !searchInput.trim() && (
             <button
-              className="rounded-[6px] px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-              disabled={deleting}
+              className="hidden rounded-[6px] px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50 sm:block"
+              disabled={operationRunning}
               onClick={handleEmptyTrash}
+              type="button"
             >
-              {t("emptyTrash")}
+              {t("moveAllToSystemTrash")}
             </button>
+          )}
+          {trashTotalCount > 0 && !searchInput.trim() && (
+            <details className="group relative sm:hidden">
+              <summary className="cursor-pointer list-none rounded-[6px] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-foreground/5">
+                {t("moreActions")}
+              </summary>
+              <div className="absolute top-full right-0 z-40 mt-1 min-w-48 rounded-[8px] border border-border bg-popover p-1 shadow-lg">
+                <button
+                  className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  disabled={operationRunning}
+                  onClick={handleEmptyTrash}
+                  type="button"
+                >
+                  {t("moveAllToSystemTrash")}
+                </button>
+              </div>
+            </details>
           )}
         </div>
       </div>
 
       {/* Selection bar */}
-      {photos.length > 0 && (
-        <div className="flex items-center gap-3 border-border border-b px-6 py-2">
-          <button
-            className="text-[12px] text-muted-foreground hover:text-foreground"
-            onClick={selectAll}
-          >
-            {selectedIds.size === photos.length
-              ? t("deselectAll")
-              : t("selectAll")}
-          </button>
-          {selectedIds.size > 0 && (
-            <span className="text-[12px] text-muted-foreground">
-              {t("selectedCount", { count: selectedIds.size })}
+      {!loading && (trashTotalCount > 0 || query) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-2">
+          <div className="flex items-center gap-3">
+            {photos.length > 0 && (
+              <button
+                className="text-[12px] text-muted-foreground hover:text-foreground"
+                disabled={operationRunning}
+                onClick={selectAll}
+                type="button"
+              >
+                {selectedIds.size === photos.length
+                  ? t("deselectAll")
+                  : t("selectLoaded")}
+              </button>
+            )}
+            {selectedIds.size > 0 && (
+              <span className="text-[12px] text-muted-foreground">
+                {t("selectedCount", { count: selectedIds.size })}
+              </span>
+            )}
+            <span className="text-[12px] text-muted-foreground/70">
+              {query
+                ? t("trashSearchResults", {
+                    bytes: formatBytes(totalBytes),
+                    count: totalCount,
+                  })
+                : t("trashRetentionHint")}
             </span>
-          )}
+          </div>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <label className="relative min-w-36 flex-1 sm:flex-none">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                aria-keyshortcuts="Control+F Meta+F Escape"
+                aria-label={t("trashSearchPlaceholder")}
+                className="h-8 w-full rounded-[6px] border border-border bg-background pr-8 pl-8 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 sm:w-48"
+                onChange={(event) => setSearchInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && searchInput) {
+                    event.preventDefault();
+                    setSearchInput("");
+                  }
+                }}
+                placeholder={t("trashSearchPlaceholder")}
+                ref={searchInputRef}
+                type="search"
+                value={searchInput}
+              />
+              {searchInput && (
+                <button
+                  aria-label={t("clearSearch")}
+                  className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                  onClick={() => {
+                    setSearchInput("");
+                    searchInputRef.current?.focus();
+                  }}
+                  type="button"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </label>
+            <select
+              aria-label={t("sortBy")}
+              className="h-8 rounded-[6px] border border-border bg-background px-2 text-[12px]"
+              onChange={(event) =>
+                setSort(event.target.value as "deletedAt" | "name" | "size")
+              }
+              value={sort}
+            >
+              <option value="deletedAt">{t("trashSortDeletedAt")}</option>
+              <option value="name">{t("trashSortName")}</option>
+              <option value="size">{t("trashSortSize")}</option>
+            </select>
+            <button
+              aria-label={
+                order === "desc" ? t("sortDescending") : t("sortAscending")
+              }
+              className="h-8 rounded-[6px] border border-border px-2 text-[12px] text-muted-foreground hover:text-foreground"
+              onClick={() =>
+                setOrder((value) => (value === "desc" ? "asc" : "desc"))
+              }
+              title={
+                order === "desc" ? t("sortDescending") : t("sortAscending")
+              }
+              type="button"
+            >
+              {order === "desc" ? "↓" : "↑"}
+            </button>
+            {refreshing && (
+              <span
+                aria-label={t("trashSearching")}
+                aria-live="polite"
+                className="flex items-center"
+                role="status"
+              >
+                <LoadingSpinner size="sm" />
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {refreshError && (
+        <div
+          aria-live="polite"
+          className="flex items-center justify-center gap-2 border-border border-b bg-destructive/5 px-6 py-1.5 text-[12px] text-destructive"
+        >
+          <span>{t("trashRefreshFailed")}</span>
+          <button
+            className="rounded-[6px] border border-border px-2 py-0.5 text-foreground hover:bg-foreground/5"
+            onClick={() => loadPhotos(null, false)}
+            type="button"
+          >
+            {t("retry")}
+          </button>
         </div>
       )}
 
       {/* Photo grid */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users select individual semantic card buttons */}
+      {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
       <div
+        aria-busy={loading || refreshing}
         className="relative flex-1 overflow-y-auto p-6"
         onClick={(e) => {
           if (marqueeJustCompleted.current) {
@@ -562,106 +1232,7 @@ function TrashPage() {
             }}
           />
         )}
-        {loading ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-[14px] text-muted-foreground">{t("loading")}</p>
-          </div>
-        ) : photos.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3">
-            <Trash2 className="h-12 w-12 text-muted-foreground/30" />
-            <p className="text-[14px] text-muted-foreground">
-              {t("trashEmpty")}
-            </p>
-            <p className="text-[12px] text-muted-foreground/60">
-              {t("trashRetentionHint")}
-            </p>
-          </div>
-        ) : (
-          <div
-            className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3"
-            onContextMenu={handleContextMenu}
-            role="grid"
-          >
-            {photos.map((photo) => (
-              <div
-                className={`group relative cursor-pointer overflow-hidden rounded-[8px] border transition-all ${
-                  selectedIds.has(photo.id)
-                    ? "border-primary ring-2 ring-primary/30"
-                    : "border-border hover:border-foreground/20"
-                }`}
-                data-photo-id={photo.id}
-                data-photo-path={photo.path}
-                key={photo.id}
-                onClick={(e) => toggleSelect(photo.id, e)}
-                role="gridcell"
-                tabIndex={0}
-              >
-                <div className="aspect-square bg-card">
-                  {photo.thumbnailPath ? (
-                    <img
-                      alt={photo.filename}
-                      className="h-full w-full object-cover opacity-60"
-                      loading="lazy"
-                      src={toLocalMediaUrl(photo.thumbnailPath)}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-muted-foreground/30">
-                      <Trash2 className="h-8 w-8" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-2">
-                  <p className="truncate text-[11px] text-foreground">
-                    {photo.filename}
-                  </p>
-                  {photo.folderName ? (
-                    <p className="truncate text-[10px] text-muted-foreground/70">
-                      {photo.folderName}
-                    </p>
-                  ) : (
-                    <p className="truncate text-[10px] text-orange-500/80">
-                      {t("originalFolderRemoved")}
-                    </p>
-                  )}
-                  <div className="mt-0.5 flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground">
-                      {formatTimeAgo(photo.deletedAt)}
-                    </span>
-                    <span className="text-[10px] text-destructive/70">
-                      {t("deleteAfterDays", {
-                        count: daysRemaining(photo.deletedAt),
-                      })}
-                    </span>
-                  </div>
-                </div>
-                {/* Selection indicator */}
-                <div
-                  className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
-                    selectedIds.has(photo.id)
-                      ? "border-primary bg-primary text-white"
-                      : "border-white/60 bg-black/30 opacity-0 group-hover:opacity-100"
-                  }`}
-                >
-                  {selectedIds.has(photo.id) && (
-                    <svg
-                      className="h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        d="M5 13l4 4L19 7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={3}
-                      />
-                    </svg>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {renderTrashContent()}
       </div>
 
       {/* Context menu */}
@@ -669,15 +1240,20 @@ function TrashPage() {
         <div
           className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
           id="trash-context-menu"
+          role="menu"
           style={{
-            left: Math.min(ctxMenu.x, window.innerWidth - 190),
-            top: Math.min(ctxMenu.y, window.innerHeight - 100),
+            left: Math.max(8, Math.min(ctxMenu.x, window.innerWidth - 190)),
+            top: Math.max(8, Math.min(ctxMenu.y, window.innerHeight - 100)),
           }}
         >
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
-            disabled={ctxMenu.photoId === null && !ctxMenu.isBatch}
+            disabled={
+              operationRunning || (ctxMenu.photoId === null && !ctxMenu.isBatch)
+            }
             onClick={handleCtxRestore}
+            role="menuitem"
+            type="button"
           >
             <RotateCcw className="h-3.5 w-3.5 flex-shrink-0" />
             {ctxMenu.isBatch
@@ -687,19 +1263,84 @@ function TrashPage() {
           <div className="my-1 h-px bg-border" />
           <button
             className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10"
-            disabled={ctxMenu.photoId === null && !ctxMenu.isBatch}
+            disabled={
+              operationRunning || (ctxMenu.photoId === null && !ctxMenu.isBatch)
+            }
             onClick={handleCtxDelete}
+            role="menuitem"
+            type="button"
           >
             <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
             {ctxMenu.isBatch
-              ? `${t("permanentlyDelete")} (${ctxMenu.selectionCount})`
-              : t("permanentlyDelete")}
+              ? `${t("moveToSystemTrash")} (${ctxMenu.selectionCount})`
+              : t("moveToSystemTrash")}
           </button>
         </div>
       )}
 
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewPhoto(null);
+          }
+        }}
+        open={previewPhoto !== null}
+      >
+        <DialogContent className="max-w-3xl" size="xl">
+          <DialogHeader>
+            <DialogTitle>{previewPhoto?.filename}</DialogTitle>
+            <DialogDescription>
+              {previewPhoto?.folderName ?? t("originalFolderRemoved")}
+            </DialogDescription>
+          </DialogHeader>
+          {previewPhoto && (
+            <div className="relative flex max-h-[65vh] min-h-64 items-center justify-center overflow-hidden rounded-[8px] bg-black/80">
+              <Trash2 className="absolute h-12 w-12 text-white/20" />
+              {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: image error handling only swaps to a non-interactive fallback */}
+              <img
+                alt={previewPhoto.filename}
+                className="relative z-[1] max-h-[65vh] max-w-full object-contain"
+                decoding="async"
+                height={previewPhoto.height ?? 640}
+                onError={(event) => {
+                  event.currentTarget.hidden = true;
+                }}
+                src={toLocalMediaUrl(
+                  previewPhoto.thumbnailPath ?? previewPhoto.path
+                )}
+                width={previewPhoto.width ?? 960}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <button
+              className="rounded-[6px] bg-primary px-3 py-1.5 text-[13px] text-primary-foreground disabled:opacity-50"
+              disabled={operationRunning}
+              onClick={handlePreviewRestore}
+              type="button"
+            >
+              {t("restoreCount", { count: 1 })}
+            </button>
+            <button
+              className="rounded-[6px] bg-destructive/10 px-3 py-1.5 text-[13px] text-destructive disabled:opacity-50"
+              disabled={operationRunning}
+              onClick={() => {
+                if (previewPhoto) {
+                  handleKeyboardSelect(previewPhoto.id);
+                  setPreviewPhoto(null);
+                  setConfirmPermanent(true);
+                }
+              }}
+              type="button"
+            >
+              {t("moveToSystemTrash")}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <ConfirmDialog
-        confirmText={t("permanentlyDelete")}
+        confirmText={t("moveToSystemTrash")}
         description={t("confirmPermanentDeleteDescription", {
           count: selectedIds.size,
         })}
@@ -708,19 +1349,19 @@ function TrashPage() {
         onCancel={() => setConfirmPermanent(false)}
         onConfirm={performPermanentDelete}
         open={confirmPermanent}
-        title={t("confirmPermanentDeleteTitle")}
+        title={t("confirmMoveToSystemTrashTitle")}
       />
       <ConfirmDialog
-        confirmText={t("emptyTrash")}
+        confirmText={t("moveAllToSystemTrash")}
         description={t("confirmPermanentDeleteDescription", {
-          count: photos.length,
+          count: trashTotalCount,
         })}
         destructive
         disabled={deleting}
         onCancel={() => setConfirmEmpty(false)}
         onConfirm={performEmptyTrash}
         open={confirmEmpty}
-        title={t("confirmEmptyTrashTitle")}
+        title={t("confirmMoveAllToSystemTrashTitle")}
       />
     </div>
   );

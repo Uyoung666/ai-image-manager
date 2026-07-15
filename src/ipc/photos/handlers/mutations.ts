@@ -2,7 +2,18 @@ import fs from "node:fs";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { shell } from "electron";
 import { z } from "zod";
 import { getDatabase } from "@/db";
@@ -18,6 +29,7 @@ import {
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { deletePhotoVectors } from "@/services/ai-embedder";
 import { validateDuplicateCleanupGroup } from "@/services/duplicate-groups";
+import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
 import {
   cleanOrphanThumbnails as cleanOrphanThumbnailsService,
   clearThumbnailDiskCache,
@@ -26,7 +38,12 @@ import {
   getThumbnailPath,
   scanOrphanThumbnails as scanOrphanThumbnailsService,
 } from "@/services/thumbnailer";
-import { IdSchema } from "./shared";
+import {
+  executeSystemTrashMove,
+  type TrashOperationFailure,
+  type TrashOperationResult,
+} from "@/services/trash-operations";
+import { BatchPhotoIdsSchema, IdSchema, TrashListSchema } from "./shared";
 import { invalidateStatsCache } from "./stats";
 
 /**
@@ -121,6 +138,44 @@ function performHardDelete(photoIds: number[]): void {
   );
 
   invalidateStatsCache();
+  invalidateCountCache();
+  invalidateSmartAlbumCache();
+}
+
+const photoIdsMovingToSystemTrash = new Set<number>();
+
+async function moveFilesToSystemTrash(
+  targetPhotos: Array<{ id: number; path: string }>
+): Promise<TrashOperationResult> {
+  const availablePhotos = targetPhotos.filter(
+    (photo) => !photoIdsMovingToSystemTrash.has(photo.id)
+  );
+  const busyFailures: TrashOperationFailure[] = targetPhotos
+    .filter((photo) => photoIdsMovingToSystemTrash.has(photo.id))
+    .map((photo) => ({
+      code: "FILE_OPERATION_FAILED",
+      id: photo.id,
+      message: "Photo is already being moved to the system trash",
+    }));
+  for (const photo of availablePhotos) {
+    photoIdsMovingToSystemTrash.add(photo.id);
+  }
+  try {
+    const result = await executeSystemTrashMove(availablePhotos, {
+      fileExists: fs.existsSync,
+      hardDelete: performHardDelete,
+      onFailure: (photo, message) => {
+        console.warn(`[Trash] Failed to trash file: ${photo.path}`, message);
+      },
+      trashFile: (filePath) => shell.trashItem(filePath),
+    });
+    result.failed.push(...busyFailures);
+    return result;
+  } finally {
+    for (const photo of availablePhotos) {
+      photoIdsMovingToSystemTrash.delete(photo.id);
+    }
+  }
 }
 
 export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
@@ -139,24 +194,27 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
     if (photo.deletedAt !== null) {
       return { success: true };
     }
-    db.update(photos)
-      .set({ deletedAt: Date.now() })
-      .where(eq(photos.id, input.id))
-      .run();
-    if (photo.folderId) {
-      db.update(folders)
-        .set({ photoCount: sql`MAX(0, photo_count - 1)` })
-        .where(eq(folders.id, photo.folderId))
+    db.transaction(() => {
+      db.update(photos)
+        .set({ deletedAt: Date.now() })
+        .where(eq(photos.id, input.id))
         .run();
-    }
+      if (photo.folderId) {
+        db.update(folders)
+          .set({ photoCount: sql`MAX(0, photo_count - 1)` })
+          .where(eq(folders.id, photo.folderId))
+          .run();
+      }
+    });
   }
   invalidateStatsCache();
   invalidateCountCache();
+  invalidateSmartAlbumCache();
   return { success: true };
 });
 
 export const deletePhotos = os
-  .input(z.object({ ids: z.array(z.number()) }))
+  .input(BatchPhotoIdsSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
     // Only target active (non-soft-deleted) photos for idempotency
@@ -164,20 +222,13 @@ export const deletePhotos = os
       .select({ id: photos.id, folderId: photos.folderId })
       .from(photos)
       .where(
-        and(
-          inArray(photos.id, input.ids),
-          sql`${photos.deletedAt} IS NULL`
-        )
+        and(inArray(photos.id, input.ids), sql`${photos.deletedAt} IS NULL`)
       )
       .all();
     if (targetPhotos.length === 0) {
       return { deleted: 0 };
     }
     const activeIds = targetPhotos.map((p) => p.id);
-    db.update(photos)
-      .set({ deletedAt: Date.now() })
-      .where(inArray(photos.id, activeIds))
-      .run();
     const countsByFolder = new Map<number, number>();
     for (const p of targetPhotos) {
       if (p.folderId) {
@@ -187,13 +238,21 @@ export const deletePhotos = os
         );
       }
     }
-    for (const [fid, count] of countsByFolder) {
-      db.update(folders)
-        .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
-        .where(eq(folders.id, fid))
+    db.transaction(() => {
+      db.update(photos)
+        .set({ deletedAt: Date.now() })
+        .where(inArray(photos.id, activeIds))
         .run();
-    }
+      for (const [fid, count] of countsByFolder) {
+        db.update(folders)
+          .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
+          .where(eq(folders.id, fid))
+          .run();
+      }
+    });
     invalidateCountCache();
+    invalidateStatsCache();
+    invalidateSmartAlbumCache();
     return { deleted: activeIds.length };
   });
 
@@ -733,46 +792,168 @@ export const toggleFavorite = os
     return { success: true };
   });
 
-export const listDeletedPhotos = os.handler(() => {
-  const db = getDatabase();
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+export const listDeletedPhotos = os
+  .input(TrashListSchema)
+  .handler(({ input }) => {
+    const db = getDatabase();
 
-  // Trigger background cleanup for photos that crossed the 30-day threshold while app was running
-  cleanupExpiredTrash().catch((err) =>
-    console.warn("[TrashCleanup] Background cleanup failed:", err)
-  );
-
-  return db
-    .select({
-      id: photos.id,
-      path: photos.path,
-      filename: photos.filename,
-      fileSize: photos.fileSize,
-      width: photos.width,
-      height: photos.height,
-      thumbnailPath: photos.thumbnailPath,
+    // Expired records stay visible until their file operation succeeds. This
+    // lets users retry failures instead of silently losing them from the UI.
+    const trashCondition = sql`${photos.deletedAt} IS NOT NULL`;
+    const conditions = [trashCondition];
+    if (input.query) {
+      const escapedQuery = input.query.replace(/[\\%_]/g, "\\$&");
+      conditions.push(
+        sql`${photos.filename} LIKE ${`%${escapedQuery}%`} ESCAPE '\\'`
+      );
+    }
+    const filteredWhere = and(...conditions);
+    const sortColumns = {
       deletedAt: photos.deletedAt,
-      folderId: photos.folderId,
-      folderName: folders.displayName,
-    })
-    .from(photos)
-    .leftJoin(folders, eq(folders.id, photos.folderId))
-    .where(
-      sql`${photos.deletedAt} IS NOT NULL AND ${photos.deletedAt} > ${thirtyDaysAgo}`
-    )
-    .orderBy(desc(photos.deletedAt))
-    .all();
-});
+      name: photos.filename,
+      size: photos.fileSize,
+    };
+    const sortColumn = sortColumns[input.sort];
+    const sortDirection = input.order === "asc" ? asc : desc;
+
+    if (input.cursor) {
+      const idTieBreak = lt(photos.id, input.cursor.id);
+      if (input.sort === "name") {
+        const cursorValue = String(input.cursor.value);
+        const cursorCondition = or(
+          input.order === "asc"
+            ? gt(photos.filename, cursorValue)
+            : lt(photos.filename, cursorValue),
+          and(eq(photos.filename, cursorValue), idTieBreak)
+        );
+        if (cursorCondition) {
+          conditions.push(cursorCondition);
+        }
+      } else {
+        const cursorValue = Number(input.cursor.value);
+        const column =
+          input.sort === "size" ? photos.fileSize : photos.deletedAt;
+        const cursorCondition = or(
+          input.order === "asc"
+            ? gt(column, cursorValue)
+            : lt(column, cursorValue),
+          and(eq(column, cursorValue), idTieBreak)
+        );
+        if (cursorCondition) {
+          conditions.push(cursorCondition);
+        }
+      }
+    }
+    const pageWhere = and(...conditions);
+
+    const pageItems = db
+      .select({
+        id: photos.id,
+        path: photos.path,
+        filename: photos.filename,
+        fileSize: photos.fileSize,
+        width: photos.width,
+        height: photos.height,
+        thumbnailPath: photos.thumbnailPath,
+        deletedAt: photos.deletedAt,
+        folderId: photos.folderId,
+        folderName: folders.displayName,
+      })
+      .from(photos)
+      .leftJoin(folders, eq(folders.id, photos.folderId))
+      .where(pageWhere)
+      .orderBy(sortDirection(sortColumn), desc(photos.id))
+      .limit(input.limit + 1)
+      .all();
+
+    const hasMore = pageItems.length > input.limit;
+    const items = hasMore ? pageItems.slice(0, input.limit) : pageItems;
+
+    const summary = db
+      .select({
+        totalBytes: sql<number>`COALESCE(SUM(${photos.fileSize}), 0)`,
+        totalCount: sql<number>`COUNT(*)`,
+      })
+      .from(photos)
+      .where(filteredWhere)
+      .get();
+    const totalCount = summary?.totalCount ?? 0;
+
+    const trashSummary = input.query
+      ? db
+          .select({
+            totalBytes: sql<number>`COALESCE(SUM(${photos.fileSize}), 0)`,
+            totalCount: sql<number>`COUNT(*)`,
+          })
+          .from(photos)
+          .where(trashCondition)
+          .get()
+      : summary;
+
+    const lastItem = items.at(-1);
+    let cursorValue: number | string | null = null;
+    if (lastItem) {
+      if (input.sort === "name") {
+        cursorValue = lastItem.filename;
+      } else if (input.sort === "size") {
+        cursorValue = lastItem.fileSize;
+      } else {
+        cursorValue = lastItem.deletedAt;
+      }
+    }
+
+    return {
+      items,
+      nextCursor:
+        hasMore && lastItem && cursorValue !== null
+          ? { id: lastItem.id, value: cursorValue }
+          : null,
+      totalBytes: summary?.totalBytes ?? 0,
+      totalCount,
+      trashTotalBytes: trashSummary?.totalBytes ?? 0,
+      trashTotalCount: trashSummary?.totalCount ?? 0,
+    };
+  });
 
 export const restorePhotos = os
-  .input(z.object({ ids: z.array(z.number()) }))
+  .input(BatchPhotoIdsSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
     const targetPhotos = db
-      .select({ id: photos.id, folderId: photos.folderId })
+      .select({ id: photos.id, folderId: photos.folderId, path: photos.path })
       .from(photos)
-      .where(inArray(photos.id, input.ids))
+      .where(
+        and(inArray(photos.id, input.ids), sql`${photos.deletedAt} IS NOT NULL`)
+      )
       .all();
+
+    const targetById = new Map(targetPhotos.map((photo) => [photo.id, photo]));
+    const failed: TrashOperationFailure[] = input.ids
+      .filter((id) => !targetById.has(id))
+      .map((id) => ({
+        code: "NOT_FOUND_OR_NOT_DELETED",
+        id,
+        message: "Photo was not found in recently deleted",
+      }));
+    const restorablePhotos = targetPhotos.filter((photo) => {
+      if (photoIdsMovingToSystemTrash.has(photo.id)) {
+        failed.push({
+          code: "FILE_OPERATION_FAILED",
+          id: photo.id,
+          message: "Photo is currently being moved to the system trash",
+        });
+        return false;
+      }
+      if (fs.existsSync(photo.path)) {
+        return true;
+      }
+      failed.push({
+        code: "SOURCE_MISSING",
+        id: photo.id,
+        message: "Original file no longer exists",
+      });
+      return false;
+    });
 
     // Collect all valid folder IDs currently in the folders table
     const validFolderIds = new Set(
@@ -788,7 +969,7 @@ export const restorePhotos = os
     const idsWithoutFolder: number[] = [];
     const countsByFolder = new Map<number, number>();
 
-    for (const p of targetPhotos) {
+    for (const p of restorablePhotos) {
       if (p.folderId && validFolderIds.has(p.folderId)) {
         idsWithValidFolder.push(p.id);
         countsByFolder.set(
@@ -801,58 +982,63 @@ export const restorePhotos = os
     }
 
     // Restore photos with valid folders
-    if (idsWithValidFolder.length > 0) {
-      db.update(photos)
-        .set({ deletedAt: null })
-        .where(inArray(photos.id, idsWithValidFolder))
-        .run();
-      for (const [fid, count] of countsByFolder) {
-        db.update(folders)
-          .set({ photoCount: sql`photo_count + ${count}` })
-          .where(eq(folders.id, fid))
+    db.transaction(() => {
+      if (idsWithValidFolder.length > 0) {
+        db.update(photos)
+          .set({ deletedAt: null })
+          .where(inArray(photos.id, idsWithValidFolder))
+          .run();
+        for (const [fid, count] of countsByFolder) {
+          db.update(folders)
+            .set({ photoCount: sql`photo_count + ${count}` })
+            .where(eq(folders.id, fid))
+            .run();
+        }
+      }
+
+      // Restore photos whose original folder no longer exists — set folderId to NULL
+      if (idsWithoutFolder.length > 0) {
+        db.update(photos)
+          .set({ deletedAt: null, folderId: null })
+          .where(inArray(photos.id, idsWithoutFolder))
           .run();
       }
-    }
+    });
 
-    // Restore photos whose original folder no longer exists — set folderId to NULL
-    if (idsWithoutFolder.length > 0) {
-      db.update(photos)
-        .set({ deletedAt: null, folderId: null })
-        .where(inArray(photos.id, idsWithoutFolder))
-        .run();
-    }
+    invalidateCountCache();
+    invalidateStatsCache();
+    invalidateSmartAlbumCache();
 
     return {
-      restored: idsWithValidFolder.length,
-      restoredWithoutFolder: idsWithoutFolder.length,
+      failed,
+      restoredWithoutFolderIds: idsWithoutFolder,
+      succeededIds: [...idsWithValidFolder, ...idsWithoutFolder],
     };
   });
 
 export const permanentlyDeletePhotos = os
-  .input(z.object({ ids: z.array(z.number()) }))
+  .input(BatchPhotoIdsSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
     const targetPhotos = db
       .select({ id: photos.id, path: photos.path })
       .from(photos)
-      .where(inArray(photos.id, input.ids))
+      .where(
+        and(inArray(photos.id, input.ids), sql`${photos.deletedAt} IS NOT NULL`)
+      )
       .all();
-    // Delete DB records first so watcher unlink won't double-decrement photoCount
-    performHardDelete(input.ids);
-    for (const p of targetPhotos) {
-      try {
-        if (fs.existsSync(p.path)) {
-          await shell.trashItem(p.path);
-        }
-      } catch (err) {
-        console.warn(
-          `[Trash] Failed to trash file: ${p.path}`,
-          (err as Error)?.message
-        );
-      }
-    }
-    invalidateCountCache();
-    return { deleted: input.ids.length };
+    const foundIds = new Set(targetPhotos.map((photo) => photo.id));
+    const result = await moveFilesToSystemTrash(targetPhotos);
+    result.failed.push(
+      ...input.ids
+        .filter((id) => !foundIds.has(id))
+        .map((id) => ({
+          code: "NOT_FOUND_OR_NOT_DELETED" as const,
+          id,
+          message: "Photo was not found in recently deleted",
+        }))
+    );
+    return result;
   });
 
 export const emptyTrash = os.handler(async () => {
@@ -865,24 +1051,9 @@ export const emptyTrash = os.handler(async () => {
   const ids = deletedPhotos.map((p) => p.id);
   if (ids.length === 0) {
     invalidateStatsCache();
-    return { deleted: 0 };
+    return { failed: [], succeededIds: [] };
   }
-  // Delete DB records first so watcher unlink won't double-decrement photoCount
-  performHardDelete(ids);
-  for (const p of deletedPhotos) {
-    try {
-      if (fs.existsSync(p.path)) {
-        await shell.trashItem(p.path);
-      }
-    } catch (err) {
-      console.warn(
-        `[Trash] Failed to trash file: ${p.path}`,
-        (err as Error)?.message
-      );
-    }
-  }
-  invalidateCountCache();
-  return { deleted: ids.length };
+  return moveFilesToSystemTrash(deletedPhotos);
 });
 
 /**
@@ -890,7 +1061,18 @@ export const emptyTrash = os.handler(async () => {
  * Called at app startup to enforce the 30-day retention policy.
  * Returns the count of permanently deleted photos.
  */
-export async function cleanupExpiredTrash(): Promise<number> {
+let trashCleanupPromise: Promise<number> | null = null;
+
+export function cleanupExpiredTrash(): Promise<number> {
+  if (!trashCleanupPromise) {
+    trashCleanupPromise = runExpiredTrashCleanup().finally(() => {
+      trashCleanupPromise = null;
+    });
+  }
+  return trashCleanupPromise;
+}
+
+async function runExpiredTrashCleanup(): Promise<number> {
   const db = getDatabase();
   const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
@@ -906,30 +1088,14 @@ export async function cleanupExpiredTrash(): Promise<number> {
     return 0;
   }
 
-  const ids = expiredPhotos.map((p) => p.id);
-
   console.log(
     `[TrashCleanup] Removing ${expiredPhotos.length} expired photos (older than 30 days)...`
   );
 
-  // Delete DB records first so watcher unlink won't double-decrement photoCount
-  performHardDelete(ids);
-
-  for (const p of expiredPhotos) {
-    try {
-      if (fs.existsSync(p.path)) {
-        await shell.trashItem(p.path);
-      }
-    } catch (err) {
-      console.warn(
-        `[TrashCleanup] Failed to trash file: ${p.path}`,
-        (err as Error)?.message
-      );
-    }
-  }
+  const result = await moveFilesToSystemTrash(expiredPhotos);
 
   console.log(
-    `[TrashCleanup] Permanently deleted ${expiredPhotos.length} expired photos`
+    `[TrashCleanup] Moved ${result.succeededIds.length} expired photos to the system trash`
   );
-  return expiredPhotos.length;
+  return result.succeededIds.length;
 }

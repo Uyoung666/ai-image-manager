@@ -27,6 +27,26 @@ export const ListSchema = z.object({
   limit: z.number().optional().default(100),
 });
 export const IdSchema = z.object({ id: z.number() });
+export const BatchPhotoIdsSchema = z.object({
+  ids: z
+    .array(z.number().int().positive())
+    .min(1)
+    .max(1000)
+    .transform((ids) => [...new Set(ids)]),
+});
+export const TrashListSchema = z.object({
+  cursor: z
+    .object({
+      id: z.number().int().positive(),
+      value: z.union([z.number(), z.string()]),
+    })
+    .nullish()
+    .default(null),
+  limit: z.number().int().min(1).max(200).optional().default(100),
+  query: z.string().trim().max(200).optional().default(""),
+  sort: z.enum(["deletedAt", "name", "size"]).optional().default("deletedAt"),
+  order: z.enum(["asc", "desc"]).optional().default("desc"),
+});
 export const FolderAppearanceSchema = z.object({
   id: z.number(),
   color: z.string().regex(HEX_COLOR_PATTERN).nullable(),

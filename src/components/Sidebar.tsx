@@ -41,8 +41,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ipc } from "@/ipc/manager";
 import { useAiStatus } from "@/hooks/useAiStatus";
+import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Folder as FolderType } from "@/types/photo";
@@ -141,6 +141,31 @@ export function Sidebar({
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [tagSearch, setTagSearch] = useState("");
   const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
+  const [trashCount, setTrashCount] = useState(0);
+
+  useEffect(() => {
+    const listDeletedPhotos = ipc.client.photos.listDeletedPhotos;
+    if (typeof listDeletedPhotos === "function") {
+      listDeletedPhotos({
+        cursor: null,
+        limit: 1,
+        order: "desc",
+        query: "",
+        sort: "deletedAt",
+      })
+        .then((result) =>
+          setTrashCount(result.trashTotalCount ?? result.totalCount)
+        )
+        .catch(() => undefined);
+    }
+
+    function handleTrashCount(event: Event) {
+      setTrashCount((event as CustomEvent<number>).detail);
+    }
+    window.addEventListener("trash-count-changed", handleTrashCount);
+    return () =>
+      window.removeEventListener("trash-count-changed", handleTrashCount);
+  }, []);
   const ctxRef = useRef<HTMLDivElement>(null);
   const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
@@ -1175,7 +1200,7 @@ export function Sidebar({
               <SidebarTooltip content={t("trash")}>
                 <button
                   aria-label={t("trash")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                  className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname === "/trash"
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1184,6 +1209,11 @@ export function Sidebar({
                   type="button"
                 >
                   <Trash2 className="h-4 w-4" />
+                  {trashCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-destructive px-1 text-center font-medium text-[9px] text-white leading-4">
+                      {trashCount > 99 ? "99+" : trashCount}
+                    </span>
+                  )}
                 </button>
               </SidebarTooltip>
 
@@ -1766,15 +1796,22 @@ export function Sidebar({
                 {t("cull")}
               </button>
               <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
+                className={`flex w-full items-center justify-between rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
                   location.pathname === "/trash"
                     ? "nav-item-active bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 onClick={() => navigate({ to: "/trash" })}
               >
-                <Trash2 className="mr-2 inline h-3.5 w-3.5" />
-                {t("trash")}
+                <span>
+                  <Trash2 className="mr-2 inline h-3.5 w-3.5" />
+                  {t("trash")}
+                </span>
+                {trashCount > 0 && (
+                  <span className="rounded-full bg-destructive/10 px-1.5 text-[10px] text-destructive">
+                    {trashCount > 999 ? "999+" : trashCount}
+                  </span>
+                )}
               </button>
 
               <div className="my-1.5 border-border border-t" />

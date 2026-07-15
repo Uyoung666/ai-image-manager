@@ -159,20 +159,18 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 
   // 2) Collect all photos belonging to any of these folders.
   //    This includes both active and soft-deleted photos — when the original
-  //    folder is removed, trashed photos have nothing to restore, so they are
-  //    hard-deleted together with active ones.
+  //    Active photos are removed with the folder. Soft-deleted photos keep
+  //    their retention period and become unassigned through the folder FK.
   const folderPhotos = db
-    .select({ id: photos.id, path: photos.path })
+    .select({ id: photos.id, path: photos.path, deletedAt: photos.deletedAt })
     .from(photos)
     .where(inArray(photos.folderId, allFolderIds))
     .all();
-  const folderPhotoIds = folderPhotos.map((p) => p.id);
-
   // 3) Also catch orphan photos under the folder path that have no valid folderId
   const escapedPath = folder.path.replace(/'/g, "''");
   const normalizedPath = escapedPath.replace(/\\/g, "/");
   const orphanPhotos = db
-    .select({ id: photos.id, path: photos.path })
+    .select({ id: photos.id, path: photos.path, deletedAt: photos.deletedAt })
     .from(photos)
     .where(
       sql`(${photos.folderId} IS NULL OR ${photos.folderId} NOT IN (
@@ -180,10 +178,16 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
       )) AND REPLACE(${photos.path}, '\\', '/') LIKE ${`${normalizedPath}/%`}`
     )
     .all();
-  const orphanPhotoIds = orphanPhotos.map((p) => p.id);
-
-  const allPhotoIds = [...new Set([...folderPhotoIds, ...orphanPhotoIds])];
-  const allPhotoPaths = [...folderPhotos, ...orphanPhotos].map((p) => p.path);
+  const photosById = new Map(
+    [...folderPhotos, ...orphanPhotos].map((photo) => [photo.id, photo])
+  );
+  // Active photos leave the catalog with the folder. Soft-deleted photos stay
+  // in Recently Deleted; deleting the folder sets their folderId to NULL via FK.
+  const activePhotos = [...photosById.values()].filter(
+    (photo) => photo.deletedAt === null
+  );
+  const allPhotoIds = activePhotos.map((photo) => photo.id);
+  const allPhotoPaths = activePhotos.map((photo) => photo.path);
 
   // 4) Execute deletions in a transaction
   // parent_id FK uses ON DELETE SET NULL, so deletion order is safe in any direction
