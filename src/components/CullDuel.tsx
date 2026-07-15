@@ -1,9 +1,4 @@
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
   HelpCircle,
@@ -16,11 +11,6 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -29,7 +19,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ZoomableImage, type ZoomState } from "@/components/ZoomableImage";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  ZoomableImage,
+  type ZoomableImageHandle,
+  type ZoomState,
+} from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
@@ -123,7 +122,10 @@ function formatFileSize(bytes: number): string {
 
 export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
+  const requestedPreviewIdsRef = useRef(new Set<number>());
+  const [previewResolutions, setPreviewResolutions] = useState<
+    Record<number, { path: string | null; useOriginal: boolean }>
+  >({});
 
   // React 19: mark pair-switch state as non-urgent transition
   const [isTransitioning, startTransition] = useTransition();
@@ -170,26 +172,39 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const stats = pairData?.stats ?? null;
   const isSessionCompleted = done || session.status === "completed";
 
-  // 懒触发生成对比预览：当前 pair 的照片若缺失则后台生成
+  // 懒触发生成对比预览：直接更新本地资源，避免生成完成后刷新整个 PK 页面。
   useEffect(() => {
     if (!pair) {
       return;
     }
     for (const item of pair) {
-      if (!item.photo.duelPreviewPath) {
+      if (
+        !item.photo.duelPreviewPath &&
+        !requestedPreviewIdsRef.current.has(item.photo.id)
+      ) {
+        const photoId = item.photo.id;
+        requestedPreviewIdsRef.current.add(photoId);
         ipc.client.cull
-          .ensureDuelPreview({ photoId: item.photo.id })
-          .then(() => {
-            queryClient.invalidateQueries({
-              queryKey: ["cull", "session", session.id],
-            });
+          .ensureDuelPreview({ photoId })
+          .then((result) => {
+            const resolved = result as {
+              duelPreviewPath: string | null;
+              strategy?: "use_original";
+            };
+            setPreviewResolutions((current) => ({
+              ...current,
+              [photoId]: {
+                path: resolved.duelPreviewPath,
+                useOriginal: resolved.strategy === "use_original",
+              },
+            }));
           })
           .catch(() => {
-            /* 静默失败，下次重试 */
+            requestedPreviewIdsRef.current.delete(photoId);
           });
       }
     }
-  }, [pair, session.id, queryClient]);
+  }, [pair]);
 
   // useMutation.isPending drives button locking — no manual submittingRef
 
@@ -306,11 +321,19 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     [pairQuery.data?.pair, t]
   );
+  const handleLeftImageError = useCallback(
+    () => handleImageError("left"),
+    [handleImageError]
+  );
+  const handleRightImageError = useCallback(
+    () => handleImageError("right"),
+    [handleImageError]
+  );
 
   // Zoom sync between left/right images
   const [syncZoom, setSyncZoom] = useState(true);
-  const [syncState, setSyncState] = useState<ZoomState | null>(null);
-  const syncStateRef = useRef<ZoomState | null>(null);
+  const leftZoomRef = useRef<ZoomableImageHandle | null>(null);
+  const rightZoomRef = useRef<ZoomableImageHandle | null>(null);
 
   const sameRatio = pair
     ? Math.abs(
@@ -320,6 +343,25 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     : false;
 
   const effectiveSync = syncZoom && sameRatio;
+
+  const handleLeftZoomSync = useCallback(
+    (state: ZoomState) => {
+      if (!effectiveSync) {
+        return;
+      }
+      rightZoomRef.current?.applySync(state);
+    },
+    [effectiveSync]
+  );
+  const handleRightZoomSync = useCallback(
+    (state: ZoomState) => {
+      if (!effectiveSync) {
+        return;
+      }
+      leftZoomRef.current?.applySync(state);
+    },
+    [effectiveSync]
+  );
 
   // Dialogs, fatigue, EXIF
   const [exifLeft, setExifLeft] = useState<ExifData | null>(null);
@@ -663,8 +705,6 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
                   className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
                   onClick={() => {
                     setSyncZoom((v) => !v);
-                    setSyncState(null);
-                    syncStateRef.current = null;
                   }}
                   type="button"
                 >
@@ -729,30 +769,21 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
               alt={left.photo.filename}
-              duelPreviewPath={left.photo.duelPreviewPath}
+              duelPreviewPath={
+                left.photo.duelPreviewPath ??
+                previewResolutions[left.photo.id]?.path
+              }
               enableOriginalOnZoom={true}
               enableProgressiveLoading={true}
               filePath={left.photo.path}
               key={`L-${pairFetchId}`}
-              onError={() => handleImageError("left")}
-              onSync={(s) => {
-                if (!effectiveSync) {
-                  return;
-                }
-                const prev = syncStateRef.current;
-                if (
-                  prev &&
-                  prev.scale === s.scale &&
-                  prev.translate.x === s.translate.x &&
-                  prev.translate.y === s.translate.y
-                ) {
-                  return;
-                }
-                syncStateRef.current = s;
-                setSyncState(s);
-              }}
-              syncState={effectiveSync ? syncState : null}
+              onError={handleLeftImageError}
+              onSync={handleLeftZoomSync}
+              ref={leftZoomRef}
               thumbnailPath={left.photo.thumbnailPath}
+              useOriginalAsPreview={
+                previewResolutions[left.photo.id]?.useOriginal ?? false
+              }
             />
           </div>
 
@@ -763,7 +794,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             }`}
           >
             <div className="mx-auto max-w-[400px] px-4 pb-14">
-              <div className="rounded-[8px] bg-black/60 px-3 py-1.5 backdrop-blur-md">
+              <div className="rounded-[8px] bg-black/75 px-3 py-1.5">
                 {renderExifInfo(exifLeft, left.photo)}
                 <div className="mt-0.5 flex items-center justify-center gap-3 text-[10px] text-white/50">
                   <span>
@@ -825,30 +856,21 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           <div className="min-h-0 flex-1" data-zoom>
             <ZoomableImage
               alt={right.photo.filename}
-              duelPreviewPath={right.photo.duelPreviewPath}
+              duelPreviewPath={
+                right.photo.duelPreviewPath ??
+                previewResolutions[right.photo.id]?.path
+              }
               enableOriginalOnZoom={true}
               enableProgressiveLoading={true}
               filePath={right.photo.path}
               key={`R-${pairFetchId}`}
-              onError={() => handleImageError("right")}
-              onSync={(s) => {
-                if (!effectiveSync) {
-                  return;
-                }
-                const prev = syncStateRef.current;
-                if (
-                  prev &&
-                  prev.scale === s.scale &&
-                  prev.translate.x === s.translate.x &&
-                  prev.translate.y === s.translate.y
-                ) {
-                  return;
-                }
-                syncStateRef.current = s;
-                setSyncState(s);
-              }}
-              syncState={effectiveSync ? syncState : null}
+              onError={handleRightImageError}
+              onSync={handleRightZoomSync}
+              ref={rightZoomRef}
               thumbnailPath={right.photo.thumbnailPath}
+              useOriginalAsPreview={
+                previewResolutions[right.photo.id]?.useOriginal ?? false
+              }
             />
           </div>
 
@@ -859,7 +881,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             }`}
           >
             <div className="mx-auto max-w-[400px] px-4 pb-14">
-              <div className="rounded-[8px] bg-black/60 px-3 py-1.5 backdrop-blur-md">
+              <div className="rounded-[8px] bg-black/75 px-3 py-1.5">
                 {renderExifInfo(exifRight, right.photo)}
                 <div className="mt-0.5 flex items-center justify-center gap-3 text-[10px] text-white/50">
                   <span>

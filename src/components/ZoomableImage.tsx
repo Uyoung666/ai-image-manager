@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -31,6 +39,11 @@ function isRawExtension(filePath: string): boolean {
   return RAW_EXTENSIONS.has(ext);
 }
 
+function supportsOriginalZoom(filePath: string): boolean {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".webp", ".avif"].includes(ext);
+}
+
 // ── 缩放常量 ──────────────────────────────────────────────────────
 const MIN_SCALE = 0.25;
 const FIT_SCALE = 1; // 滚轮缩放下限（匹配 Windows Photos：滚轮到 fit 即停）
@@ -42,8 +55,8 @@ const INERTIA_THRESHOLD = 0.3;
 const OVERSCROLL_MARGIN = 0.3; // 允许拖出边界的比例
 
 // ── 渐进式加载常量 ────────────────────────────────────────────────
-const ZOOM_UPGRADE_RATIO = 0.9; // 显示像素 > 预览像素 × ratio → 加载原图
-const ZOOM_DOWNGRADE_RATIO = 0.7; // 显示像素 < 预览像素 × ratio → 释放原图
+const ORIGINAL_UPGRADE_PIXELS = 4096;
+const ORIGINAL_DOWNGRADE_PIXELS = 3072;
 const ORIGINAL_RELEASE_DELAY = 5000; // 缩小后 5s 释放原图内存
 
 // ── ZoomableImage Props ──────────────────────────────────────────
@@ -51,6 +64,10 @@ const ORIGINAL_RELEASE_DELAY = 5000; // 缩小后 5s 释放原图内存
 export interface ZoomState {
   scale: number;
   translate: { x: number; y: number };
+}
+
+export interface ZoomableImageHandle {
+  applySync: (state: ZoomState) => void;
 }
 
 interface ZoomableImageProps {
@@ -65,8 +82,9 @@ interface ZoomableImageProps {
   fillContainer?: boolean;
   onError?: () => void;
   onSync?: (state: ZoomState) => void;
-  syncState?: ZoomState | null;
   thumbnailPath?: string | null;
+  /** 预览策略已确认可直接使用原图（小尺寸浏览器原生格式） */
+  useOriginalAsPreview?: boolean;
 }
 
 // ── 图片加载来源状态机 ──────────────────────────────────────────
@@ -78,18 +96,33 @@ type ImageSource = "preview" | "image" | "error";
 // ── 渐进式加载层级状态 ───────────────────────────────────────────
 type ProgressiveTier = "thumbnail" | "preview" | "original";
 
-export const ZoomableImage = memo(function ZoomableImage({
-  alt,
-  filePath,
-  duelPreviewPath,
-  enableProgressiveLoading = false,
-  enableOriginalOnZoom = false,
-  thumbnailPath,
-  fillContainer: _fillContainer,
-  syncState,
-  onSync,
-  onError,
-}: ZoomableImageProps) {
+interface ZoomGeometry {
+  containerHeight: number;
+  containerWidth: number;
+  fitHeight: number;
+  fitWidth: number;
+  naturalHeight: number;
+  naturalWidth: number;
+}
+
+const ZoomableImageComponent = forwardRef<
+  ZoomableImageHandle,
+  ZoomableImageProps
+>(function ZoomableImage(
+  {
+    alt,
+    filePath,
+    duelPreviewPath,
+    enableProgressiveLoading = false,
+    enableOriginalOnZoom = false,
+    thumbnailPath,
+    useOriginalAsPreview = false,
+    fillContainer: _fillContainer,
+    onSync,
+    onError,
+  },
+  ref
+) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -117,11 +150,16 @@ export const ZoomableImage = memo(function ZoomableImage({
   // ── DOM ref 用于尺寸测量与边界计算 ─────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const geometryRef = useRef<ZoomGeometry | null>(null);
 
   // ── 惯性滚动状态 ───────────────────────────────────────────────
   const velocityRef = useRef({ x: 0, y: 0 });
   const lastMoveTimeRef = useRef(0);
   const inertiaRafRef = useRef<number | null>(null);
+  const transformRafRef = useRef<number | null>(null);
+  const transformNeedsSyncRef = useRef(false);
+  const wheelEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 拖拽中禁用 CSS transition 以保证跟手，松手后恢复以驱动回弹
   const [isDragging, setIsDragging] = useState(false);
@@ -136,10 +174,8 @@ export const ZoomableImage = memo(function ZoomableImage({
 
   const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const originalAbortRef = useRef<AbortController | null>(null);
+  const originalPreloadRef = useRef<HTMLImageElement | null>(null);
   const shouldReloadOriginalRef = useRef(false);
-
-  scaleRef.current = scale;
-  translateRef.current = translate;
 
   const fireSync = useCallback(() => {
     if (!applyingSync.current && onSyncRef.current) {
@@ -150,76 +186,137 @@ export const ZoomableImage = memo(function ZoomableImage({
     }
   }, []);
 
-  useEffect(() => {
-    if (!syncState) {
-      return;
-    }
-    applyingSync.current = true;
-    setScale(syncState.scale);
-    setTranslate(syncState.translate);
-    scaleRef.current = syncState.scale;
-    translateRef.current = syncState.translate;
-    requestAnimationFrame(() => {
-      applyingSync.current = false;
-    });
-  }, [syncState]);
+  const queueTransform = useCallback(
+    (
+      nextScale: number,
+      nextTranslate: { x: number; y: number },
+      syncOnFrame = false
+    ) => {
+      scaleRef.current = nextScale;
+      translateRef.current = nextTranslate;
+      transformNeedsSyncRef.current ||= syncOnFrame;
+
+      if (transformRafRef.current !== null) {
+        return;
+      }
+
+      transformRafRef.current = requestAnimationFrame(() => {
+        transformRafRef.current = null;
+        const image = imgRef.current;
+        if (image) {
+          const currentScale = scaleRef.current;
+          const currentTranslate = translateRef.current;
+          image.style.transform = `scale(${currentScale}) translate(${currentTranslate.x / currentScale}px, ${currentTranslate.y / currentScale}px)`;
+          image.style.willChange =
+            enableProgressiveLoading || currentScale > 1 ? "transform" : "auto";
+          image.style.boxShadow = currentScale > 1 ? "none" : "";
+        }
+        if (transformNeedsSyncRef.current) {
+          transformNeedsSyncRef.current = false;
+          fireSync();
+        }
+      });
+    },
+    [enableProgressiveLoading, fireSync]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      applySync(state) {
+        applyingSync.current = true;
+        const image = imgRef.current;
+        if (image) {
+          image.style.transition = "none";
+        }
+        queueTransform(state.scale, state.translate);
+        if (syncEndTimerRef.current) {
+          clearTimeout(syncEndTimerRef.current);
+        }
+        syncEndTimerRef.current = setTimeout(() => {
+          setScale(scaleRef.current);
+          setTranslate(translateRef.current);
+          applyingSync.current = false;
+        }, 120);
+      },
+    }),
+    [queueTransform]
+  );
 
   // ── 边界约束 ──────────────────────────────────────────────────
 
-  const getFitSize = useCallback(() => {
+  const measureGeometry = useCallback(() => {
     const container = containerRef.current;
     const img = imgRef.current;
     if (!(container && img)) {
-      return null;
+      geometryRef.current = null;
+      return;
     }
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
-    if (nw <= 0 || nh <= 0) {
-      return null;
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    const naturalWidth = img.naturalWidth;
+    const naturalHeight = img.naturalHeight;
+    if (naturalWidth <= 0 || naturalHeight <= 0) {
+      geometryRef.current = null;
+      return;
     }
 
-    // object-fit: contain — 等比缩放以适配容器，不放大
-    const s = Math.min(1, cw / nw, ch / nh);
-    return { w: nw * s, h: nh * s };
+    const fitScale = Math.min(
+      1,
+      containerWidth / naturalWidth,
+      containerHeight / naturalHeight
+    );
+    geometryRef.current = {
+      containerHeight,
+      containerWidth,
+      fitHeight: naturalHeight * fitScale,
+      fitWidth: naturalWidth * fitScale,
+      naturalHeight,
+      naturalWidth,
+    };
   }, []);
 
-  const clampToBounds = useCallback(
-    (tx: number, ty: number, s: number) => {
-      const fit = getFitSize();
-      if (!fit || s < 1.001) {
-        return { x: 0, y: 0 };
+  const getFitSize = useCallback(() => {
+    const geometry = geometryRef.current;
+    return geometry ? { w: geometry.fitWidth, h: geometry.fitHeight } : null;
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(measureGeometry);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [measureGeometry]);
+
+  const clampToBounds = useCallback((tx: number, ty: number, s: number) => {
+    const geometry = geometryRef.current;
+    if (!geometry || s < 1.001) {
+      return { x: 0, y: 0 };
+    }
+
+    const displayW = geometry.fitWidth * s;
+    const displayH = geometry.fitHeight * s;
+
+    const clamp1D = (v: number, displaySize: number, containerSize: number) => {
+      if (displaySize <= containerSize) {
+        return 0; // 居中
       }
+      const halfC = containerSize / 2;
+      const halfD = displaySize / 2;
+      const margin = containerSize * OVERSCROLL_MARGIN;
+      const min = halfC - margin - halfD;
+      const max = halfD - halfC + margin;
+      return Math.min(max, Math.max(min, v));
+    };
 
-      const cw = containerRef.current!.clientWidth;
-      const ch = containerRef.current!.clientHeight;
-      const displayW = fit.w * s;
-      const displayH = fit.h * s;
-
-      const clamp1D = (
-        v: number,
-        displaySize: number,
-        containerSize: number
-      ) => {
-        if (displaySize <= containerSize) {
-          return 0; // 居中
-        }
-        const halfC = containerSize / 2;
-        const halfD = displaySize / 2;
-        const margin = containerSize * OVERSCROLL_MARGIN;
-        const min = halfC - margin - halfD;
-        const max = halfD - halfC + margin;
-        return Math.min(max, Math.max(min, v));
-      };
-
-      return {
-        x: clamp1D(tx, displayW, cw),
-        y: clamp1D(ty, displayH, ch),
-      };
-    },
-    [getFitSize]
-  );
+    return {
+      x: clamp1D(tx, displayW, geometry.containerWidth),
+      y: clamp1D(ty, displayH, geometry.containerHeight),
+    };
+  }, []);
 
   // ── 惯性动画 ──────────────────────────────────────────────────
 
@@ -262,23 +359,25 @@ export const ZoomableImage = memo(function ZoomableImage({
         const t = 1 - speed / (INERTIA_THRESHOLD * 8);
         const easedX = rawX + (clamped.x - rawX) * t;
         const easedY = rawY + (clamped.y - rawY) * t;
-        setTranslate({ x: easedX, y: easedY });
-        translateRef.current = { x: easedX, y: easedY };
+        queueTransform(scaleRef.current, { x: easedX, y: easedY });
       } else {
-        setTranslate({ x: rawX, y: rawY });
-        translateRef.current = { x: rawX, y: rawY };
+        queueTransform(scaleRef.current, { x: rawX, y: rawY });
       }
 
       inertiaRafRef.current = requestAnimationFrame(step);
     }
 
     inertiaRafRef.current = requestAnimationFrame(step);
-  }, [cancelInertia, clampToBounds, fireSync]);
+  }, [cancelInertia, clampToBounds, fireSync, queueTransform]);
 
   // ── 渐进式加载：缩放触发原图加载 ──────────────────────────────
 
   const startOriginalLoad = useCallback(() => {
-    if (!enableOriginalOnZoom) {
+    if (
+      !enableOriginalOnZoom ||
+      useOriginalAsPreview ||
+      !supportsOriginalZoom(filePath)
+    ) {
       return;
     }
     if (originalLoaded || originalLoading) {
@@ -306,13 +405,30 @@ export const ZoomableImage = memo(function ZoomableImage({
     originalAbortRef.current = controller;
 
     const img = new Image();
-    img.onload = () => {
+    originalPreloadRef.current = img;
+    img.decoding = "async";
+    img.onload = async () => {
+      try {
+        await img.decode();
+      } catch {
+        // onload 已确认资源可用；部分 Chromium 版本可能拒绝重复 decode。
+      }
       if (controller.signal.aborted) {
         return;
       }
-      setOriginalLoaded(true);
-      setOriginalLoading(false);
-      setActiveTier("original");
+      const activateOriginal = () => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setOriginalLoaded(true);
+        setOriginalLoading(false);
+        setActiveTier("original");
+      };
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(activateOriginal, { timeout: 800 });
+      } else {
+        setTimeout(activateOriginal, 0);
+      }
     };
     img.onerror = () => {
       if (controller.signal.aborted) {
@@ -329,6 +445,7 @@ export const ZoomableImage = memo(function ZoomableImage({
     originalLoaded,
     originalLoading,
     originalError,
+    useOriginalAsPreview,
   ]);
 
   const scheduleOriginalRelease = useCallback(() => {
@@ -340,6 +457,10 @@ export const ZoomableImage = memo(function ZoomableImage({
       if (originalAbortRef.current) {
         originalAbortRef.current.abort();
         originalAbortRef.current = null;
+      }
+      if (originalPreloadRef.current) {
+        originalPreloadRef.current.src = "";
+        originalPreloadRef.current = null;
       }
       setOriginalLoading(false);
       setOriginalLoaded(false);
@@ -370,14 +491,12 @@ export const ZoomableImage = memo(function ZoomableImage({
         return;
       }
 
-      const displayPixels = Math.max(fit.w, fit.h) * scaleRef.current;
-      const previewNativePixels = 2560;
-
-      if (displayPixels > previewNativePixels * ZOOM_UPGRADE_RATIO) {
+      const displayPixels = Math.max(fit.w, fit.h) * scale;
+      if (displayPixels > ORIGINAL_UPGRADE_PIXELS) {
         startOriginalLoad();
       } else if (
         (originalLoaded || originalLoading) &&
-        displayPixels < previewNativePixels * ZOOM_DOWNGRADE_RATIO
+        displayPixels < ORIGINAL_DOWNGRADE_PIXELS
       ) {
         scheduleOriginalRelease();
       }
@@ -403,11 +522,24 @@ export const ZoomableImage = memo(function ZoomableImage({
   // 清理释放计时器
   useEffect(() => {
     return () => {
+      if (transformRafRef.current !== null) {
+        cancelAnimationFrame(transformRafRef.current);
+      }
+      if (wheelEndTimerRef.current) {
+        clearTimeout(wheelEndTimerRef.current);
+      }
+      if (syncEndTimerRef.current) {
+        clearTimeout(syncEndTimerRef.current);
+      }
       if (releaseTimerRef.current) {
         clearTimeout(releaseTimerRef.current);
       }
       if (originalAbortRef.current) {
         originalAbortRef.current.abort();
+      }
+      if (originalPreloadRef.current) {
+        originalPreloadRef.current.src = "";
+        originalPreloadRef.current = null;
       }
     };
   }, []);
@@ -439,29 +571,24 @@ export const ZoomableImage = memo(function ZoomableImage({
       }
 
       // fit → 100% 像素
-      const img = imgRef.current;
-      const container = containerRef.current;
-      if (!(img && container)) {
+      const geometry = geometryRef.current;
+      if (!geometry) {
         return;
       }
 
-      const naturalW = img.naturalWidth;
-      if (naturalW <= 0) {
-        return;
-      }
-
-      const containerW = container.clientWidth;
-      const containerH = container.clientHeight;
-      const containerRatio = containerW / containerH;
-      const imageRatio = naturalW / (img.naturalHeight || 1);
+      const containerRatio = geometry.containerWidth / geometry.containerHeight;
+      const imageRatio = geometry.naturalWidth / geometry.naturalHeight;
       let fitW: number;
       if (imageRatio > containerRatio) {
-        fitW = containerW;
+        fitW = geometry.containerWidth;
       } else {
-        fitW = containerH * imageRatio;
+        fitW = geometry.containerHeight * imageRatio;
       }
 
-      const targetScale = Math.min(MAX_SCALE, Math.max(1.1, naturalW / fitW));
+      const targetScale = Math.min(
+        MAX_SCALE,
+        Math.max(1.1, geometry.naturalWidth / fitW)
+      );
 
       const clamped = clampToBounds(0, 0, targetScale);
 
@@ -479,6 +606,11 @@ export const ZoomableImage = memo(function ZoomableImage({
     (e: React.WheelEvent) => {
       e.preventDefault();
       cancelInertia();
+      setIsDragging(true);
+
+      if (wheelEndTimerRef.current) {
+        clearTimeout(wheelEndTimerRef.current);
+      }
 
       let newScale: number;
 
@@ -501,22 +633,19 @@ export const ZoomableImage = memo(function ZoomableImage({
       const rawTx = translateRef.current.x * ratio;
       const rawTy = translateRef.current.y * ratio;
 
-      setScale(newScale);
-      scaleRef.current = newScale;
-
       if (newScale <= 1.001) {
-        setTranslate({ x: 0, y: 0 });
-        translateRef.current = { x: 0, y: 0 };
-        setIsDragging(false);
+        queueTransform(newScale, { x: 0, y: 0 }, true);
       } else {
         const clamped = clampToBounds(rawTx, rawTy, newScale);
-        setTranslate(clamped);
-        translateRef.current = clamped;
-        setIsDragging(false);
+        queueTransform(newScale, clamped, true);
       }
-      setTimeout(() => fireSync(), 0);
+      wheelEndTimerRef.current = setTimeout(() => {
+        setScale(scaleRef.current);
+        setTranslate(translateRef.current);
+        setIsDragging(false);
+      }, 120);
     },
-    [fireSync, cancelInertia, clampToBounds]
+    [fireSync, cancelInertia, clampToBounds, queueTransform]
   );
 
   // ── 键盘缩放快捷键（+/-/0）────────────────────────────────────
@@ -629,10 +758,9 @@ export const ZoomableImage = memo(function ZoomableImage({
       lastMoveTimeRef.current = now;
       lastPos.current = { x: e.clientX, y: e.clientY };
 
-      setTranslate((prev) => {
-        const next = { x: prev.x + dx, y: prev.y + dy };
-        translateRef.current = next;
-        return next;
+      queueTransform(scaleRef.current, {
+        x: translateRef.current.x + dx,
+        y: translateRef.current.y + dy,
       });
     }
 
@@ -667,7 +795,7 @@ export const ZoomableImage = memo(function ZoomableImage({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [fireSync, startInertia, clampToBounds]);
+  }, [fireSync, startInertia, clampToBounds, queueTransform]);
 
   const isZoomed = scale > 1;
   const imgTransform = `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`;
@@ -683,9 +811,12 @@ export const ZoomableImage = memo(function ZoomableImage({
   // ── 渐进式模式 URL 构造 ────────────────────────────────────────
   const tier1Src = toLocalMediaUrl(thumbnailPath ?? filePath);
   // Tier 2：有对比预览用 duel-preview 路由，否则回退到原图
-  const tier2Src = duelPreviewPath
-    ? toDuelPreviewUrl(duelPreviewPath)
-    : toLocalMediaUrl(filePath);
+  let tier2Src = tier1Src;
+  if (duelPreviewPath) {
+    tier2Src = toDuelPreviewUrl(duelPreviewPath);
+  } else if (useOriginalAsPreview) {
+    tier2Src = toLocalMediaUrl(filePath);
+  }
   const tier3Src = toLocalMediaUrl(filePath);
 
   // ── 降级链：ref 驱动，杜绝闭包过期竞态 ─────────────────────────
@@ -744,7 +875,7 @@ export const ZoomableImage = memo(function ZoomableImage({
         {/* 使用与 legacy 完全一致的渲染方式的单一 img 标签 */}
         <img
           alt={alt}
-          className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ${
+          className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg ${
             previewLoaded || originalLoaded ? "opacity-100" : "opacity-100"
           } ${isZoomed ? "cursor-grab active:cursor-grabbing" : ""}`}
           draggable={false}
@@ -761,6 +892,7 @@ export const ZoomableImage = memo(function ZoomableImage({
             }
           }}
           onLoad={() => {
+            measureGeometry();
             if (!(previewLoaded || previewError)) {
               setPreviewLoaded(true);
               setActiveTier("preview");
@@ -775,12 +907,14 @@ export const ZoomableImage = memo(function ZoomableImage({
           ref={imgRef}
           src={currentSrc}
           style={{
+            backfaceVisibility: "hidden",
+            boxShadow: isZoomed ? "none" : undefined,
             transform: imgTransform,
-            willChange: isZoomed ? "transform" : "auto",
-            transition: isDragging ? "none" : undefined,
-            transitionTimingFunction: isDragging
-              ? undefined
-              : "cubic-bezier(0.16, 1, 0.3, 1)",
+            transformOrigin: "center center",
+            willChange: "transform",
+            transition: isDragging
+              ? "none"
+              : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         />
 
@@ -812,19 +946,27 @@ export const ZoomableImage = memo(function ZoomableImage({
     >
       <img
         alt={alt}
-        className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg transition-all duration-150 ${
+        className={`max-h-full max-w-full select-none rounded-[6px] object-contain shadow-lg ${
           loaded ? "opacity-100" : "opacity-0"
         } ${isZoomed ? "cursor-grab active:cursor-grabbing" : ""}`}
         draggable={false}
         onError={handleImageError}
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          measureGeometry();
+          setLoaded(true);
+        }}
         onMouseDown={handleMouseDown}
         ref={imgRef}
         src={src}
         style={{
+          backfaceVisibility: "hidden",
+          boxShadow: isZoomed ? "none" : undefined,
           transform: imgTransform,
+          transformOrigin: "center center",
           willChange: isZoomed ? "transform" : "auto",
-          transition: isDragging ? "none" : undefined,
+          transition: isDragging
+            ? "none"
+            : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       />
 
@@ -842,3 +984,5 @@ export const ZoomableImage = memo(function ZoomableImage({
     </div>
   );
 });
+
+export const ZoomableImage = memo(ZoomableImageComponent);

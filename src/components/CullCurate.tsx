@@ -1,9 +1,4 @@
-import {
-  keepPreviousData,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
   CheckCircle,
   Eye,
@@ -108,7 +103,10 @@ function formatExifDate(ts: number | null): string {
 
 export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
+  const requestedPreviewIdsRef = useRef(new Set<number>());
+  const [previewResolutions, setPreviewResolutions] = useState<
+    Record<number, { path: string | null; useOriginal: boolean }>
+  >({});
 
   // React 19: mark photo-switch state as non-urgent transition
   const [isTransitioning, startTransition] = useTransition();
@@ -147,21 +145,35 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const stats = data?.stats ?? null;
   const similarCount = (data as { similarCount?: number })?.similarCount ?? 0;
 
-  // 懒触发生成对比预览
+  // 懒触发生成对比预览，并直接更新本地资源，避免刷新整条选片查询链路。
   useEffect(() => {
-    if (!item?.photo?.duelPreviewPath && item?.photo?.id) {
+    if (
+      !item?.photo?.duelPreviewPath &&
+      item?.photo?.id &&
+      !requestedPreviewIdsRef.current.has(item.photo.id)
+    ) {
+      const photoId = item.photo.id;
+      requestedPreviewIdsRef.current.add(photoId);
       ipc.client.cull
-        .ensureDuelPreview({ photoId: item.photo.id })
-        .then(() => {
-          queryClient.invalidateQueries({
-            queryKey: ["cull", "session", session.id],
-          });
+        .ensureDuelPreview({ photoId })
+        .then((result) => {
+          const resolved = result as {
+            duelPreviewPath: string | null;
+            strategy?: "use_original";
+          };
+          setPreviewResolutions((current) => ({
+            ...current,
+            [photoId]: {
+              path: resolved.duelPreviewPath,
+              useOriginal: resolved.strategy === "use_original",
+            },
+          }));
         })
         .catch(() => {
-          /* 静默失败 */
+          requestedPreviewIdsRef.current.delete(photoId);
         });
     }
-  }, [item, session.id, queryClient]);
+  }, [item]);
 
   // useMutation.isPending drives button locking — no manual submittingRef
 
@@ -524,13 +536,19 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         >
           <ZoomableImage
             alt={item.photo.filename}
-            duelPreviewPath={item.photo.duelPreviewPath}
+            duelPreviewPath={
+              item.photo.duelPreviewPath ??
+              previewResolutions[item.photo.id]?.path
+            }
             enableOriginalOnZoom={true}
             enableProgressiveLoading={true}
             filePath={item.photo.path}
             key={item.photo.id}
             onError={handleImageError}
             thumbnailPath={item.photo.thumbnailPath}
+            useOriginalAsPreview={
+              previewResolutions[item.photo.id]?.useOriginal ?? false
+            }
           />
         </div>
 
@@ -541,7 +559,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           }`}
         >
           <div className="mx-auto max-w-[600px] px-4 pb-3">
-            <div className="rounded-[8px] bg-black/60 px-4 py-2 backdrop-blur-md">
+            <div className="rounded-[8px] bg-black/75 px-4 py-2">
               <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
                 {exif ? (
                   <>
