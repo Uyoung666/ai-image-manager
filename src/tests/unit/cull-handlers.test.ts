@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { computeElo, PK_MODE_CONFIG } from "@/ipc/cull/elo";
+import { GetNextPairSchema, SubmitComparisonSchema } from "@/ipc/cull/schemas";
+import { getCullProgressDelta } from "@/ipc/cull/state";
 
 describe("computeElo", () => {
   it("winner gains rating, loser loses rating", () => {
@@ -65,6 +67,48 @@ describe("PK_MODE_CONFIG", () => {
   it("config fallback works for unknown mode", () => {
     const config = PK_MODE_CONFIG["unknown"] ?? PK_MODE_CONFIG.standard;
     expect(config).toBe(PK_MODE_CONFIG.standard);
+  });
+});
+
+describe("cull status transitions", () => {
+  it("increments only when an undecided photo becomes decided", () => {
+    expect(getCullProgressDelta("pending", "kept")).toBe(1);
+    expect(getCullProgressDelta("pending", "rejected")).toBe(1);
+    expect(getCullProgressDelta("kept", "rejected")).toBe(0);
+    expect(getCullProgressDelta("kept", "kept")).toBe(0);
+  });
+
+  it("decrements when a decided photo returns to pending", () => {
+    expect(getCullProgressDelta("kept", "pending")).toBe(-1);
+    expect(getCullProgressDelta("rejected", "pending")).toBe(-1);
+    expect(getCullProgressDelta("pending", "pending")).toBe(0);
+  });
+});
+
+describe("cull IPC schemas", () => {
+  it("rejects self-comparisons and invalid identifiers", () => {
+    expect(
+      SubmitComparisonSchema.safeParse({
+        sessionId: 1,
+        winnerId: 2,
+        loserId: 2,
+      }).success
+    ).toBe(false);
+    expect(
+      SubmitComparisonSchema.safeParse({
+        sessionId: 0,
+        winnerId: 1,
+        loserId: 2,
+      }).success
+    ).toBe(false);
+  });
+
+  it("uses explicit session-photo exclusions", () => {
+    const parsed = GetNextPairSchema.parse({
+      sessionId: 1,
+      excludeSessionPhotoIds: [4, 5],
+    });
+    expect(parsed.excludeSessionPhotoIds).toEqual([4, 5]);
   });
 });
 

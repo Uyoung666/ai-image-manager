@@ -18,6 +18,7 @@ import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
+import { CullStartDialog } from "@/components/CullStartDialog";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
@@ -114,6 +115,7 @@ function PersonDetailPage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareIds, setShareIds] = useState<number[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [cullPhotoIds, setCullPhotoIds] = useState<number[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
 
   const cancelledRef = useRef(false);
@@ -259,7 +261,10 @@ function PersonDetailPage() {
             ),
           };
         });
-        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         toast.success(
           newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
           {
@@ -281,7 +286,10 @@ function PersonDetailPage() {
                     ),
                   };
                 });
-                queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                queryClient.invalidateQueries({
+                  queryKey: ["photos"],
+                  refetchType: "active",
+                });
               },
             },
           }
@@ -422,7 +430,10 @@ function PersonDetailPage() {
       console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
-    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+    queryClient.invalidateQueries({
+      queryKey: ["photos"],
+      refetchType: "active",
+    });
   }
 
   function handleDeleteSelected() {
@@ -448,7 +459,10 @@ function PersonDetailPage() {
           : prev
       );
       clearSelection();
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
       toast.error(t("deleteFailed"));
@@ -470,7 +484,10 @@ function PersonDetailPage() {
           ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
           : prev
       );
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
@@ -482,7 +499,10 @@ function PersonDetailPage() {
     const ids = Array.from(selectedIds);
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       const r = result as {
         renamed: number;
         errors: number;
@@ -640,7 +660,10 @@ function PersonDetailPage() {
               ),
             };
           });
-          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+          queryClient.invalidateQueries({
+            queryKey: ["photos"],
+            refetchType: "active",
+          });
           toast.success(
             newVal
               ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -653,7 +676,10 @@ function PersonDetailPage() {
                     ids,
                     favorite: allFav,
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                  queryClient.invalidateQueries({
+                    queryKey: ["photos"],
+                    refetchType: "active",
+                  });
                 },
               },
             }
@@ -821,25 +847,12 @@ function PersonDetailPage() {
             onExport={handleExportSelected}
             onRename={() => setRenameDialogOpen(true)}
             onShare={handleShareSelected}
-            onStartCull={async () => {
+            onStartCull={() => {
               const ids = Array.from(selectedIds);
               if (ids.length < 2) {
                 return;
               }
-              try {
-                const session = (await ipc.client.cull.createSession({
-                  name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
-                  mode: "duel",
-                  photoIds: ids,
-                })) as { id: number };
-                clearSelection();
-                navigate({
-                  to: "/cull/$sessionId",
-                  params: { sessionId: String(session.id) },
-                });
-              } catch {
-                toast.error("Failed to create cull session");
-              }
+              setCullPhotoIds(ids);
             }}
             onToggleFavorite={() => {
               const ids = [...selectedIds];
@@ -862,7 +875,10 @@ function PersonDetailPage() {
                       ),
                     };
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                  queryClient.invalidateQueries({
+                    queryKey: ["photos"],
+                    refetchType: "active",
+                  });
                   toast.success(
                     newVal
                       ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -945,7 +961,10 @@ function PersonDetailPage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+              queryClient.invalidateQueries({
+                queryKey: ["photos"],
+                refetchType: "active",
+              });
               toast.success(
                 newVal
                   ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -958,7 +977,10 @@ function PersonDetailPage() {
                         ids,
                         favorite: allFav,
                       });
-                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                      queryClient.invalidateQueries({
+                        queryKey: ["photos"],
+                        refetchType: "active",
+                      });
                     },
                   },
                 }
@@ -1071,6 +1093,20 @@ function PersonDetailPage() {
         }}
         onConfirm={executeDelete}
         open={deleteConfirmOpen}
+      />
+      <CullStartDialog
+        defaultName={`${t("cullTitle")} · ${cullPhotoIds.length} ${t("photos")}`}
+        onClose={() => setCullPhotoIds([])}
+        onCreated={(sessionId) => {
+          setCullPhotoIds([]);
+          clearSelection();
+          navigate({
+            to: "/cull/$sessionId",
+            params: { sessionId: String(sessionId) },
+          });
+        }}
+        open={cullPhotoIds.length >= 2}
+        photoIds={cullPhotoIds}
       />
     </div>
   );

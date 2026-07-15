@@ -15,10 +15,15 @@ interface OpenAtLoginResult {
   openAtLogin?: boolean;
 }
 
+interface AppSettingResult {
+  value?: string | null;
+}
+
 function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const [openAtLogin, setOpenAtLogin] = useState(false);
+  const [syncCullFavorites, setSyncCullFavorites] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
@@ -35,6 +40,12 @@ function AppearanceSettingsPage() {
       const result = r as OpenAtLoginResult;
       setOpenAtLogin(result.openAtLogin ?? false);
     });
+    ipc.client.settings
+      .getAppSetting({ key: "cull.syncKeptWithFavorites" })
+      .then((r) => {
+        const result = r as AppSettingResult;
+        setSyncCullFavorites(result.value !== "false");
+      });
   }, []);
 
   let themeDescription = t("themeSystem");
@@ -60,6 +71,17 @@ function AppearanceSettingsPage() {
     } catch {
       /* ignore */
     }
+  }
+
+  function handleSyncCullFavoritesToggle() {
+    const next = !syncCullFavorites;
+    setSyncCullFavorites(next);
+    ipc.client.settings
+      .setAppSetting({
+        key: "cull.syncKeptWithFavorites",
+        value: String(next),
+      })
+      .catch(() => setSyncCullFavorites(!next));
   }
 
   return (
@@ -97,6 +119,17 @@ function AppearanceSettingsPage() {
             }
             description={t("sidebarDefaultCollapsedHint")}
             title={t("sidebarDefaultCollapsed")}
+          />
+
+          <SettingRow
+            action={
+              <Switch
+                checked={syncCullFavorites}
+                onCheckedChange={handleSyncCullFavoritesToggle}
+              />
+            }
+            description={t("cullSyncFavoritesHint")}
+            title={t("cullSyncFavorites")}
           />
         </div>
       </section>

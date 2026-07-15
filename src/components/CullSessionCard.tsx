@@ -1,11 +1,14 @@
-import { Trash2 } from "lucide-react";
+import { Copy, Pencil, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 interface CullSessionCardProps {
   getModeIcon: (mode: string) => ReactNode;
   getModeLabel: (mode: string) => string;
   onClick: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
+  onRename: () => void;
   session: {
     id: number;
     name: string;
@@ -24,8 +27,11 @@ export function CullSessionCard({
   getModeLabel,
   onClick,
   onDelete,
+  onDuplicate,
+  onRename,
   session,
 }: CullSessionCardProps) {
+  const { t } = useTranslation();
   const isCurate = session.mode === "curate";
   const isCompleted = session.status === "completed";
   const minC =
@@ -74,23 +80,25 @@ export function CullSessionCard({
       className="group relative flex cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
       onClick={onClick}
     >
-      {/* Delete — enlarged hit target to prevent mis-taps */}
-      <div
-        className="group/delete absolute top-1.5 right-1.5 z-10 rounded-[6px] p-2 opacity-0 transition-opacity hover:bg-destructive/8 group-hover:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.stopPropagation();
-            onDelete();
-          }
-        }}
-        role="button"
-        tabIndex={0}
-      >
-        <Trash2 className="h-4 w-4 text-muted-foreground transition-colors group-hover/delete:text-destructive" />
+      <div className="absolute top-1.5 right-1.5 z-10 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        {[
+          { action: onRename, icon: Pencil, label: t("rename") },
+          { action: onDuplicate, icon: Copy, label: t("duplicate") },
+          { action: onDelete, icon: Trash2, label: t("delete") },
+        ].map(({ action, icon: Icon, label }) => (
+          <button
+            aria-label={label}
+            className="rounded-[6px] p-2 text-muted-foreground hover:bg-muted hover:text-foreground last:hover:text-destructive"
+            key={label}
+            onClick={(event) => {
+              event.stopPropagation();
+              action();
+            }}
+            type="button"
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        ))}
       </div>
 
       {/* Mode badge */}
@@ -115,13 +123,13 @@ export function CullSessionCard({
 
       {/* Meta */}
       <div className="mt-1.5 text-[11px] text-muted-foreground/70">
-        {session.totalPhotos} photos
+        {t("cullPhotoCount", { count: session.totalPhotos })}
         {session.mode !== "curate" &&
           session.completedComparisons > 0 &&
-          ` · ${session.completedComparisons} PKs`}
+          ` · ${t("cullPkCount", { count: session.completedComparisons })}`}
         {session.mode === "curate" &&
           session.completedComparisons > 0 &&
-          ` · ${session.completedComparisons}/${session.totalPhotos} reviewed`}
+          ` · ${t("cullReviewedProgress", { done: session.completedComparisons, total: session.totalPhotos })}`}
       </div>
 
       {/* Progress bar */}

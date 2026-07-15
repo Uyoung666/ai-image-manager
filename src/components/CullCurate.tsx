@@ -32,8 +32,7 @@ import { ZoomableImage } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
-import type { Session } from "@/routes/cull.$sessionId";
-import { preloadImage } from "@/utils/local-media-url";
+import type { SessionSummary } from "@/routes/cull.$sessionId";
 
 // ── Types ──
 
@@ -82,8 +81,14 @@ interface CurateResult {
 interface CullCurateProps {
   onMutationSuccess: () => void;
   session: Pick<
-    Session,
-    "id" | "mode" | "totalPhotos" | "completedComparisons" | "items" | "status"
+    SessionSummary,
+    | "id"
+    | "mode"
+    | "totalPhotos"
+    | "completedComparisons"
+    | "keptCount"
+    | "rejectedCount"
+    | "status"
   >;
 }
 
@@ -121,15 +126,19 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const photoQuery = useQuery({
     queryKey: ["cull", "pair", session.id, photoFetchId],
     queryFn: async () => {
-      const excludeIds = Array.from(erroredPhotosRef.current);
+      const excludeSessionPhotoIds = Array.from(erroredPhotosRef.current);
       const result = (await ipc.client.cull.getNextPair({
         sessionId: session.id,
-        excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+        excludeSessionPhotoIds:
+          excludeSessionPhotoIds.length > 0
+            ? excludeSessionPhotoIds
+            : undefined,
       })) as CurateResult;
       return result;
     },
     placeholderData: keepPreviousData,
     staleTime: 0,
+    gcTime: 30_000,
   });
 
   const data = photoQuery.data;
@@ -137,40 +146,6 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   const item = data?.single ?? null;
   const stats = data?.stats ?? null;
   const similarCount = (data as { similarCount?: number })?.similarCount ?? 0;
-
-  // 主动预加载：提前获取下一张照片数据并将图片推入浏览器缓存
-  useEffect(() => {
-    if (!item || done) {
-      return;
-    }
-    const nextKey = photoFetchId + 1;
-    const excludeIds = Array.from(erroredPhotosRef.current);
-
-    queryClient
-      .fetchQuery<CurateResult>({
-        queryKey: ["cull", "pair", session.id, nextKey],
-        queryFn: async () => {
-          const result = (await ipc.client.cull.getNextPair({
-            sessionId: session.id,
-            excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
-          })) as CurateResult;
-          return result;
-        },
-        staleTime: 0,
-      })
-      .then((result) => {
-        if (result?.single) {
-          preloadImage(
-            result.single.photo.duelPreviewPath ??
-              result.single.photo.thumbnailPath ??
-              result.single.photo.path
-          );
-        }
-      })
-      .catch(() => {
-        // 静默失败 — useQuery 在激活时会自动 refetch
-      });
-  }, [item, done, photoFetchId, session.id, queryClient]);
 
   // 懒触发生成对比预览
   useEffect(() => {
@@ -192,27 +167,24 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   const keepMutation = useMutation({
     mutationFn: async (current: SingleItem) => {
-      await Promise.all([
-        ipc.client.photos.toggleFavorite({
-          ids: [current.photo.id],
-          favorite: true,
-        }),
-        ipc.client.cull.updatePhotoStatus({
-          sessionId: session.id,
-          photoId: current.sessionPhotoId,
-          status: "kept",
-        }),
-      ]);
+      await ipc.client.cull.updatePhotoStatus({
+        sessionId: session.id,
+        photoId: current.sessionPhotoId,
+        status: "kept",
+      });
     },
     onSuccess: () => {
-      toast.success(t("toastFavoriteAdded"));
+      toast.success(t("cullKeep"));
       onMutationSuccess();
       startTransition(() => {
         setPhotoFetchId((n) => n + 1);
         setShowExif(false);
       });
     },
-    onError: (err) => console.error("[keep] failed:", err),
+    onError: (err) => {
+      console.error("[keep] failed:", err);
+      toast.error(t("cullActionFailed"));
+    },
   });
 
   const rejectMutation = useMutation({
@@ -230,7 +202,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         setShowExif(false);
       });
     },
-    onError: (err) => console.error("[reject] failed:", err),
+    onError: (err) => {
+      console.error("[reject] failed:", err);
+      toast.error(t("cullActionFailed"));
+    },
   });
 
   const undoMutation = useMutation({
@@ -248,7 +223,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         });
       }
     },
-    onError: (err) => console.error("[undo] failed:", err),
+    onError: (err) => {
+      console.error("[undo] failed:", err);
+      toast.error(t("cullActionFailed"));
+    },
   });
 
   const skipSimilarMutation = useMutation({
@@ -269,7 +247,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         setShowExif(false);
       });
     },
-    onError: (err) => console.error("[skipSimilar] failed:", err),
+    onError: (err) => {
+      console.error("[skipSimilar] failed:", err);
+      toast.error(t("cullActionFailed"));
+    },
   });
 
   const completeMutation = useMutation({
@@ -277,7 +258,10 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       await ipc.client.cull.completeSession({ sessionId: session.id });
     },
     onSuccess: () => onMutationSuccess(),
-    onError: (err) => console.error("[complete] failed:", err),
+    onError: (err) => {
+      console.error("[complete] failed:", err);
+      toast.error(t("cullActionFailed"));
+    },
   });
 
   const isSubmitting =
@@ -285,7 +269,9 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     rejectMutation.isPending ||
     undoMutation.isPending ||
     skipSimilarMutation.isPending ||
-    completeMutation.isPending;
+    completeMutation.isPending ||
+    photoQuery.isFetching ||
+    isTransitioning;
 
   // Track broken photo in erroredPhotosRef, then skip to next
   const handleImageError = useCallback(() => {
@@ -328,10 +314,13 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
   // Keyboard shortcuts — item data via ref to avoid stale closures
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
+  const [skipSimilarConfirmOpen, setSkipSimilarConfirmOpen] = useState(false);
   const shortcutsOpenRef = useRef(false);
   shortcutsOpenRef.current = shortcutsOpen;
   const finishConfirmOpenRef = useRef(false);
   finishConfirmOpenRef.current = finishConfirmOpen;
+  const skipSimilarConfirmOpenRef = useRef(false);
+  skipSimilarConfirmOpenRef.current = skipSimilarConfirmOpen;
 
   // Chrome auto-hide: toolbars fade out after 2s of mouse inactivity
   const chrome = useChromeVisibility({
@@ -353,7 +342,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         });
         return;
       }
-      if (finishConfirmOpenRef.current) {
+      if (finishConfirmOpenRef.current || skipSimilarConfirmOpenRef.current) {
         return;
       }
       if (
@@ -386,7 +375,9 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         !isSubmitting
       ) {
         e.preventDefault();
-        skipSimilarMutation.mutate(current);
+        if (similarCount > 0) {
+          setSkipSimilarConfirmOpen(true);
+        }
       }
     }
     document.addEventListener("keydown", onKey, true);
@@ -397,6 +388,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     rejectMutation,
     undoMutation,
     skipSimilarMutation,
+    similarCount,
   ]);
 
   // showTransition 即时拦截交互，showSpinner 经 150ms 防抖避免频闪
@@ -406,9 +398,8 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   // Done state
   if (done) {
-    const kc = session.items?.filter((i) => i.status === "kept").length ?? 0;
-    const rc =
-      session.items?.filter((i) => i.status === "rejected").length ?? 0;
+    const kc = session.keptCount;
+    const rc = session.rejectedCount;
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
@@ -430,6 +421,21 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
     return (
       <div className="flex h-full items-center justify-center">
         <LoadingSpinner size="xl" />
+      </div>
+    );
+  }
+
+  if (photoQuery.isError && !photoQuery.data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-[13px] text-destructive">{t("cullActionFailed")}</p>
+        <button
+          className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+          onClick={() => photoQuery.refetch()}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }
@@ -593,8 +599,12 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       >
         <button
           className="flex items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40"
-          disabled={isSubmitting}
-          onClick={() => skipSimilarMutation.mutate(item)}
+          disabled={isSubmitting || similarCount === 0}
+          onClick={() => {
+            if (similarCount > 0) {
+              setSkipSimilarConfirmOpen(true);
+            }
+          }}
         >
           <SkipForward className="h-4 w-4" />
           {t("cullSkipSimilar")} (S)
@@ -644,6 +654,41 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
                 onClick={() => completeMutation.mutate()}
               >
                 {t("cullFinishAndViewResults")}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {skipSimilarConfirmOpen && (
+        <Dialog
+          onOpenChange={setSkipSimilarConfirmOpen}
+          open={skipSimilarConfirmOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("cullSkipSimilarConfirmTitle")}</DialogTitle>
+            </DialogHeader>
+            <p className="text-[13px] text-muted-foreground">
+              {t("cullSkipSimilarConfirmDescription", { count: similarCount })}
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
+                onClick={() => setSkipSimilarConfirmOpen(false)}
+                type="button"
+              >
+                {t("cancel")}
+              </button>
+              <button
+                className="rounded-[6px] bg-destructive px-4 py-2 text-[12px] text-destructive-foreground"
+                onClick={() => {
+                  setSkipSimilarConfirmOpen(false);
+                  skipSimilarMutation.mutate(item);
+                }}
+                type="button"
+              >
+                {t("cullRejectSimilarCount", { count: similarCount })}
               </button>
             </div>
           </DialogContent>

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, BarChart3, Eye, Swords } from "lucide-react";
+import { ArrowLeft, BarChart3, Eye, RotateCcw, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -54,6 +54,12 @@ export interface Session {
   totalPhotos: number;
 }
 
+export interface SessionSummary extends Omit<Session, "items"> {
+  keptCount: number;
+  pendingCount: number;
+  rejectedCount: number;
+}
+
 function CullSessionPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -61,8 +67,20 @@ function CullSessionPage() {
   const queryClient = useQueryClient();
   const [showResults, setShowResults] = useState(false);
 
-  // Session data via TanStack Query — single source of truth
+  // Lightweight summary stays on the hot path; full result rows load only
+  // when the user opens the result view.
   const sessionQuery = useQuery({
+    queryKey: ["cull", "summary", sessionId],
+    queryFn: async () => {
+      const result = await ipc.client.cull.getSessionSummary({
+        sessionId: Number(sessionId),
+      });
+      return result as SessionSummary;
+    },
+    staleTime: 10_000,
+  });
+
+  const resultQuery = useQuery({
     queryKey: ["cull", "session", sessionId],
     queryFn: async () => {
       const result = await ipc.client.cull.getSession({
@@ -70,11 +88,18 @@ function CullSessionPage() {
       });
       return result as Session;
     },
-    staleTime: 10_000,
+    enabled: showResults,
+    staleTime: 5_000,
   });
 
   const session = sessionQuery.data ?? null;
   const isLoading = sessionQuery.isLoading && !sessionQuery.data;
+
+  useEffect(() => {
+    if (session?.status === "completed") {
+      setShowResults(true);
+    }
+  }, [session?.status]);
 
   // File-change listener: invalidates both session AND pair queries
   // so header stats refresh AND CullDuel/CullCurate immediately refetch.
@@ -91,22 +116,9 @@ function CullSessionPage() {
         return;
       }
 
-      // Read latest session from TanStack Query cache (no ref needed)
-      const current = queryClient.getQueryData<Session>([
-        "cull",
-        "session",
-        sessionId,
-      ]);
-      if (!current?.items) {
-        return;
-      }
-
-      const affected = current.items.some((item) => item.photo.id === photoId);
-      if (!affected) {
-        return;
-      }
-
-      // Invalidate session query — header stats refresh
+      queryClient.invalidateQueries({
+        queryKey: ["cull", "summary", sessionId],
+      });
       queryClient.invalidateQueries({
         queryKey: ["cull", "session", sessionId],
       });
@@ -129,7 +141,7 @@ function CullSessionPage() {
   // Called by child components after every mutation
   const onMutationSuccess = useCallback(() => {
     queryClient.invalidateQueries({
-      queryKey: ["cull", "session", sessionId],
+      queryKey: ["cull", "summary", sessionId],
     });
   }, [sessionId, queryClient]);
 
@@ -138,6 +150,21 @@ function CullSessionPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <LoadingSpinner size="xl" />
+      </div>
+    );
+  }
+
+  if (sessionQuery.isError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-[13px] text-destructive">{t("cullActionFailed")}</p>
+        <button
+          className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+          onClick={() => sessionQuery.refetch()}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }
@@ -153,11 +180,9 @@ function CullSessionPage() {
 
   // ── Derived data ──
   const isDuel = session.mode !== "curate";
-  const keepCount = session.items.filter((i) => i.status === "kept").length;
-  const rejectCount = session.items.filter(
-    (i) => i.status === "rejected"
-  ).length;
-  const pending = session.items.filter((i) => i.status === "pending");
+  const keepCount = session.keptCount;
+  const rejectCount = session.rejectedCount;
+  const pendingCount = session.pendingCount;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -177,29 +202,35 @@ function CullSessionPage() {
             <span className="text-[12px] text-muted-foreground/70">
               {isDuel
                 ? session.status === "completed"
-                  ? `${session.completedComparisons} PKs · ✓`
-                  : pending.length === 0
-                    ? `${session.completedComparisons} PKs`
-                    : `${session.completedComparisons} / ~${(() => {
-                        const m =
-                          session.pkMode === "quick"
-                            ? 5
-                            : session.pkMode === "fine"
-                              ? 12
-                              : 8;
-                        const f =
-                          session.pkMode === "quick"
-                            ? 0
-                            : session.pkMode === "fine"
-                              ? 0.3
-                              : 0.15;
-                        const rb = Math.ceil(pending.length * f);
-                        return Math.max(
-                          1,
-                          Math.ceil((pending.length * m) / 2) + rb
-                        );
-                      })()} PKs`
-                : `${keepCount + rejectCount}/${session.totalPhotos} reviewed`}
+                  ? `${t("cullPkCount", { count: session.completedComparisons })} · ✓`
+                  : pendingCount === 0
+                    ? t("cullPkCount", { count: session.completedComparisons })
+                    : t("cullPkProgress", {
+                        done: session.completedComparisons,
+                        total: (() => {
+                          const m =
+                            session.pkMode === "quick"
+                              ? 5
+                              : session.pkMode === "fine"
+                                ? 12
+                                : 8;
+                          const f =
+                            session.pkMode === "quick"
+                              ? 0
+                              : session.pkMode === "fine"
+                                ? 0.3
+                                : 0.15;
+                          const rb = Math.ceil(pendingCount * f);
+                          return Math.max(
+                            1,
+                            Math.ceil((pendingCount * m) / 2) + rb
+                          );
+                        })(),
+                      })
+                : t("cullReviewedProgress", {
+                    done: keepCount + rejectCount,
+                    total: session.totalPhotos,
+                  })}
             </span>
           )}
           <span className="rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
@@ -255,19 +286,63 @@ function CullSessionPage() {
           <BarChart3 className="h-3.5 w-3.5" />
           {t("cullResult")}
         </button>
+        {session.status === "completed" && (
+          <button
+            className="ml-auto flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            onClick={async () => {
+              try {
+                await ipc.client.cull.resumeSession({ sessionId: session.id });
+                await queryClient.invalidateQueries({
+                  queryKey: ["cull", "summary", sessionId],
+                });
+                setShowResults(false);
+                toast.success(t("cullSessionResumed"));
+              } catch (error) {
+                console.error("[resumeSession] failed:", error);
+                toast.error(t("cullActionFailed"));
+              }
+            }}
+            type="button"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            {t("cullResumeSession")}
+          </button>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {showResults ? (
-          <CullResult
-            onUpdate={() =>
-              queryClient.invalidateQueries({
-                queryKey: ["cull", "session", sessionId],
-              })
-            }
-            session={session}
-          />
+          resultQuery.data ? (
+            <CullResult
+              onUpdate={() => {
+                queryClient.invalidateQueries({
+                  queryKey: ["cull", "summary", sessionId],
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ["cull", "session", sessionId],
+                });
+              }}
+              session={resultQuery.data}
+            />
+          ) : resultQuery.isError ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <p className="text-[13px] text-destructive">
+                {t("cullActionFailed")}
+              </p>
+              <button
+                className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+                onClick={() => resultQuery.refetch()}
+                type="button"
+              >
+                {t("retry")}
+              </button>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <LoadingSpinner size="xl" />
+            </div>
+          )
         ) : isDuel ? (
           <CullDuel onMutationSuccess={onMutationSuccess} session={session} />
         ) : (

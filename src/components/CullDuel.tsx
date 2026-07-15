@@ -33,8 +33,7 @@ import { ZoomableImage, type ZoomState } from "@/components/ZoomableImage";
 import { useChromeVisibility } from "@/hooks/use-chrome-visibility";
 import { useDebouncedFlag } from "@/hooks/use-debounced-flag";
 import { ipc } from "@/ipc/manager";
-import type { Session } from "@/routes/cull.$sessionId";
-import { preloadImage } from "@/utils/local-media-url";
+import type { SessionSummary } from "@/routes/cull.$sessionId";
 
 // ── Types ──
 
@@ -90,7 +89,7 @@ interface CullDuelProps {
   /** Called after every mutation so the parent can invalidate its session query */
   onMutationSuccess: () => void;
   session: Pick<
-    Session,
+    SessionSummary,
     "id" | "mode" | "pkMode" | "totalPhotos" | "completedComparisons" | "status"
   >;
 }
@@ -149,16 +148,20 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const pairQuery = useQuery({
     queryKey: ["cull", "pair", session.id, pairFetchId],
     queryFn: async () => {
-      const excludeIds = Array.from(erroredPhotosRef.current);
+      const excludeSessionPhotoIds = Array.from(erroredPhotosRef.current);
       const result = (await ipc.client.cull.getNextPair({
         sessionId: session.id,
-        excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
+        excludeSessionPhotoIds:
+          excludeSessionPhotoIds.length > 0
+            ? excludeSessionPhotoIds
+            : undefined,
       })) as PairResult;
       return result;
     },
     placeholderData: keepPreviousData,
     // pairFetchId changes force a fresh fetch each time
     staleTime: 0,
+    gcTime: 30_000,
   });
 
   const pairData = pairQuery.data;
@@ -166,46 +169,6 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
   const pair = pairData?.pair;
   const stats = pairData?.stats ?? null;
   const isSessionCompleted = done || session.status === "completed";
-
-  // 主动预加载：提前获取下一组 pair 数据并将图片推入浏览器缓存
-  useEffect(() => {
-    if (!pairData?.pair || pairData.done) {
-      return;
-    }
-    const nextKey = pairFetchId + 1;
-    const excludeIds = Array.from(erroredPhotosRef.current);
-
-    queryClient
-      .fetchQuery<PairResult>({
-        queryKey: ["cull", "pair", session.id, nextKey],
-        queryFn: async () => {
-          const result = (await ipc.client.cull.getNextPair({
-            sessionId: session.id,
-            excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
-          })) as PairResult;
-          return result;
-        },
-        staleTime: 0,
-      })
-      .then((result) => {
-        if (result?.pair) {
-          // 优先预加载对比预览，再降级到缩略图
-          preloadImage(
-            result.pair[0].photo.duelPreviewPath ??
-              result.pair[0].photo.thumbnailPath ??
-              result.pair[0].photo.path
-          );
-          preloadImage(
-            result.pair[1].photo.duelPreviewPath ??
-              result.pair[1].photo.thumbnailPath ??
-              result.pair[1].photo.path
-          );
-        }
-      })
-      .catch(() => {
-        // 静默失败 — useQuery 在激活时会自动 refetch
-      });
-  }, [pairData?.pair, pairData?.done, pairFetchId, session.id, queryClient]);
 
   // 懒触发生成对比预览：当前 pair 的照片若缺失则后台生成
   useEffect(() => {
@@ -251,6 +214,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onError: (err) => {
       console.error("[submitComparison] failed:", err);
+      toast.error(t("cullActionFailed"));
     },
   });
 
@@ -271,6 +235,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onError: (err) => {
       console.error("[recordSkip] failed:", err);
+      toast.error(t("cullActionFailed"));
     },
   });
 
@@ -290,6 +255,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onError: (err) => {
       console.error("[undoLastAction] failed:", err);
+      toast.error(t("cullActionFailed"));
     },
   });
 
@@ -304,6 +270,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
     onError: (err) => {
       console.error("[completeSession] failed:", err);
+      toast.error(t("cullActionFailed"));
     },
   });
 
@@ -312,7 +279,9 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     submitMutation.isPending ||
     skipMutation.isPending ||
     undoMutation.isPending ||
-    completeMutation.isPending;
+    completeMutation.isPending ||
+    pairQuery.isFetching ||
+    isTransitioning;
 
   // On image load failure: track the broken ID in erroredPhotosRef,
   // then skip to next pair without submitting a comparison.
@@ -324,7 +293,7 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
       }
 
       const errored = side === "left" ? current[0] : current[1];
-      erroredPhotosRef.current.add(errored.photo.id);
+      erroredPhotosRef.current.add(errored.sessionPhotoId);
 
       toast.warning(t("cullPhotoUnavailable"), { duration: 2500 });
 
@@ -531,7 +500,8 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
           </p>
           {stats && (
             <p className="mt-2 text-[13px] text-muted-foreground/70">
-              {stats.total} {t("photos")} · {stats.completed} PKs
+              {t("cullPhotoCount", { count: stats.total })} ·{" "}
+              {t("cullPkCount", { count: stats.completed })}
             </p>
           )}
         </div>
@@ -544,6 +514,21 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     return (
       <div className="flex h-full items-center justify-center">
         <LoadingSpinner size="xl" />
+      </div>
+    );
+  }
+
+  if (pairQuery.isError && !pairQuery.data) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-[13px] text-destructive">{t("cullActionFailed")}</p>
+        <button
+          className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+          onClick={() => pairQuery.refetch()}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }

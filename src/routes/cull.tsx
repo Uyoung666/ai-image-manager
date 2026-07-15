@@ -7,6 +7,7 @@ import {
 import { ArrowLeft, Eye, Plus, Swords } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { CullSessionCard } from "@/components/CullSessionCard";
 import { RouteError } from "@/components/RouteError";
 import {
@@ -56,6 +57,13 @@ function CullListPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<
+    number | null
+  >(null);
+  const [renameSession, setRenameSession] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
   const composingRef = useRef(false);
   const [noFolderHint, setNoFolderHint] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -68,6 +76,7 @@ function CullListPage() {
       setSessions(result as CullSession[]);
     } catch (err) {
       console.error("[loadSessions] failed:", err);
+      toast.error(t("cullActionFailed"));
     } finally {
       setLoading(false);
     }
@@ -83,6 +92,7 @@ function CullListPage() {
       setFolders(result as Folder[]);
     } catch (err) {
       console.error("[loadFolders] failed:", err);
+      toast.error(t("cullActionFailed"));
     }
   }, []);
 
@@ -119,6 +129,7 @@ function CullListPage() {
       });
     } catch (err) {
       console.error("[handleCreate] failed:", err);
+      toast.error(t("cullCreateSessionFailed"));
     } finally {
       setCreating(false);
     }
@@ -128,8 +139,45 @@ function CullListPage() {
     try {
       await ipc.client.cull.deleteSession({ sessionId });
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      setPendingDeleteSessionId(null);
+      toast.success(t("cullSessionDeleted"));
     } catch (err) {
       console.error("[handleDelete] failed:", err);
+      toast.error(t("cullActionFailed"));
+    }
+  }
+
+  async function handleDuplicate(sessionId: number) {
+    try {
+      await ipc.client.cull.duplicateSession({ sessionId });
+      await loadSessions();
+      toast.success(t("cullSessionDuplicated"));
+    } catch (error) {
+      console.error("[handleDuplicate] failed:", error);
+      toast.error(t("cullActionFailed"));
+    }
+  }
+
+  async function handleRename() {
+    if (!renameSession?.name.trim()) {
+      return;
+    }
+    try {
+      await ipc.client.cull.renameSession({
+        sessionId: renameSession.id,
+        name: renameSession.name.trim(),
+      });
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === renameSession.id
+            ? { ...session, name: renameSession.name.trim() }
+            : session
+        )
+      );
+      setRenameSession(null);
+    } catch (error) {
+      console.error("[handleRename] failed:", error);
+      toast.error(t("cullActionFailed"));
     }
   }
 
@@ -218,7 +266,11 @@ function CullListPage() {
                     params: { sessionId: String(session.id) },
                   })
                 }
-                onDelete={() => handleDelete(session.id)}
+                onDelete={() => setPendingDeleteSessionId(session.id)}
+                onDuplicate={() => handleDuplicate(session.id)}
+                onRename={() =>
+                  setRenameSession({ id: session.id, name: session.name })
+                }
                 session={session}
               />
             ))}
@@ -420,6 +472,70 @@ function CullListPage() {
                 {t("cullStart")}
               </button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        onOpenChange={(open) => !open && setRenameSession(null)}
+        open={renameSession !== null}
+      >
+        <DialogContent className="max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>{t("cullRenameSession")}</DialogTitle>
+          </DialogHeader>
+          <input
+            className="rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] outline-none focus:border-primary"
+            onChange={(event) =>
+              setRenameSession((current) =>
+                current ? { ...current, name: event.target.value } : null
+              )
+            }
+            value={renameSession?.name ?? ""}
+          />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setRenameSession(null)} type="button">
+              {t("cancel")}
+            </button>
+            <button
+              className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground"
+              onClick={handleRename}
+              type="button"
+            >
+              {t("confirm")}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        onOpenChange={(open) => !open && setPendingDeleteSessionId(null)}
+        open={pendingDeleteSessionId !== null}
+      >
+        <DialogContent className="max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>{t("cullDeleteSessionTitle")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-[13px] text-muted-foreground">
+            {t("cullDeleteSessionDescription")}
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
+              onClick={() => setPendingDeleteSessionId(null)}
+              type="button"
+            >
+              {t("cancel")}
+            </button>
+            <button
+              className="rounded-[6px] bg-destructive px-4 py-2 text-[12px] text-destructive-foreground"
+              onClick={() => {
+                if (pendingDeleteSessionId !== null) {
+                  handleDelete(pendingDeleteSessionId);
+                }
+              }}
+              type="button"
+            >
+              {t("delete")}
+            </button>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,5 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
@@ -24,6 +31,7 @@ import {
 } from "@/components/SearchBar";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
+import { CullStartDialog } from "@/components/CullStartDialog";
 import { ShareDialog } from "@/components/ShareDialog";
 import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
@@ -46,12 +54,19 @@ import {
   saveSortPreference,
 } from "./home-sort-storage";
 
+interface SemanticSearchMeta {
+  indexedPhotos: number;
+  reason?: string;
+  state: "ready" | "partial" | "unavailable" | "error";
+  totalPhotos: number;
+  used: boolean;
+}
+
 function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const filter = useSidebarFilter();
   const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
-  const aiIndexingRef = useRef(false);
   // 搜索状态：从 BrowseSessionContext 恢复，导航回来时保留搜索上下文
   const { getSession: getBrowseSession, saveSession: saveBrowseSession } =
     useBrowseSession();
@@ -62,6 +77,14 @@ function HomePage() {
   >(savedSearch.searchMode as "text" | "image" | "exif" | "color" | null);
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
+  const [searchSemantic, setSearchSemantic] =
+    useState<SemanticSearchMeta | null>(null);
+  const pendingSemanticRefreshRef = useRef<{
+    colorHex?: string;
+    filters?: ExifFilters;
+    generation: number;
+    query: string;
+  } | null>(null);
   const searchExpandedRef = useRef(false);
   const lastSearchParamsRef = useRef<{
     query: string;
@@ -92,6 +115,7 @@ function HomePage() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareIds, setShareIds] = useState<number[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [cullPhotoIds, setCullPhotoIds] = useState<number[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [searchLoading, setSearchLoading] = useState(false);
@@ -155,7 +179,10 @@ function HomePage() {
       // No direct setter exposed; use toggleTag for single tag
       filter.toggleTag(tagId);
       // 确保 usePhotos 在 tagId 变化后立即重新查询
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       return;
     }
 
@@ -264,42 +291,10 @@ function HomePage() {
         queryClient.invalidateQueries({ queryKey: ["folders"] });
         clearImageLoadCache();
       }
-      if (event.data?.channel === "scan-progress") {
-        if (filter.importPhaseRef.current !== "scanning") {
-          return;
-        }
-        const { scanned, total, phase } = event.data;
-        if (phase === "indexing") {
-          filter.setScanProgress(t("scanningIndexing", { scanned, total }));
-        } else if (phase === "complete") {
-          filter.setScanProgress(t("scanningCompleteShort", { total }));
-        }
-      }
-      if (event.data?.channel === "ai-progress") {
-        const { processed, total, phase } = event.data;
-        aiIndexingRef.current = phase === "loading" || phase === "embedding";
-        if (
-          aiIndexingRef.current &&
-          filter.importPhaseRef.current === "scanning"
-        ) {
-          filter.setScanProgress(
-            phase === "loading"
-              ? t("aiIndexingStarted")
-              : t("aiIndexingProgress", { processed, total })
-          );
-        }
-      }
       if (event.data?.channel === "ai-auto-repair-started") {
         toast.info(t("aiAutoRepairStarted"));
       }
       if (event.data?.channel === "ai-embedding-done") {
-        aiIndexingRef.current = false;
-        filter.setImportPhase("idle");
-        if (event.data?.error) {
-          filter.setScanProgress(t("aiIndexFailed", { error: event.data.error }));
-        } else {
-          filter.setScanProgress("");
-        }
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
       if (event.data?.channel === "ai-status-changed") {
@@ -308,7 +303,7 @@ function HomePage() {
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [t, filter.importPhaseRef, filter.setImportPhase, filter.setScanProgress]);
+  }, [t]);
 
   const {
     data: photosData,
@@ -328,6 +323,25 @@ function HomePage() {
   });
 
   const { data: aiStatus } = useAiStatus();
+  const previousCoverageStateRef = useRef(aiStatus?.coverageState);
+
+  useEffect(() => {
+    const previous = previousCoverageStateRef.current;
+    previousCoverageStateRef.current = aiStatus?.coverageState;
+    const pending = pendingSemanticRefreshRef.current;
+    if (
+      aiStatus?.coverageState !== "ready" ||
+      previous === "ready" ||
+      !pending ||
+      pending.generation !== searchGenerationRef.current ||
+      searchMode !== "text" ||
+      searchQuery !== pending.query
+    ) {
+      return;
+    }
+    pendingSemanticRefreshRef.current = null;
+    void handleSearch(pending.query, pending.filters, pending.colorHex);
+  }, [aiStatus?.coverageState, searchMode, searchQuery]);
 
   // Flatten paginated photos
   const pagedPhotos = useMemo(
@@ -501,7 +515,9 @@ function HomePage() {
     }
     // 如果 URL 已有钻取参数（如从仪表盘色块点击），跳过恢复：
     // 钻取参数优先于 sessionStorage，否则旧颜色会 setTimeout 覆盖新钻取结果。
-    const hasDrillParams = Object.values(drillParams).some((v) => v !== undefined);
+    const hasDrillParams = Object.values(drillParams).some(
+      (v) => v !== undefined
+    );
     if (hasDrillParams) {
       return;
     }
@@ -582,7 +598,10 @@ function HomePage() {
       !isFetchingNextPage &&
       !isSearching
     ) {
-      recordGalleryPerf("scrollRestoreFetchNextPageAtItems", pagedPhotos.length);
+      recordGalleryPerf(
+        "scrollRestoreFetchNextPageAtItems",
+        pagedPhotos.length
+      );
       fetchNextPage();
     }
   }, [
@@ -622,6 +641,7 @@ function HomePage() {
         <SearchEmptyState
           hasActiveFilters={hasActiveExifFilters}
           hasAiVectors={aiStatus?.hasVectors ?? false}
+          indexedPhotos={searchSemantic?.indexedPhotos ?? 0}
           onClearFilters={() => searchBarRef.current?.clearFilters()}
           onClearSearch={() => {
             setSearchQuery("");
@@ -638,6 +658,8 @@ function HomePage() {
           parsedTimeFilter={parsedTimeFilter}
           query={searchQuery}
           searchMode={searchMode}
+          semanticState={searchSemantic?.state}
+          totalPhotos={searchSemantic?.totalPhotos ?? 0}
         />
       );
     }
@@ -676,13 +698,21 @@ function HomePage() {
     parsedTimeFilter,
     hasActiveExifFilters,
     aiStatus?.hasVectors,
+    searchSemantic?.indexedPhotos,
+    searchSemantic?.state,
+    searchSemantic?.totalPhotos,
     navigate,
   ]);
 
   const handleEndReached = useCallback(() => {
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
-    } else if (isSearching && searchResults && searchResults.length >= 200 && !searchExpandedRef.current) {
+    } else if (
+      isSearching &&
+      searchResults &&
+      searchResults.length >= 200 &&
+      !searchExpandedRef.current
+    ) {
       // 搜索模式下：首次返回 200 条后，滚动到底自动加载更多
       // 直接调 IPC 追加结果，不触发 loading 状态避免闪烁
       const p = lastSearchParamsRef.current;
@@ -701,26 +731,44 @@ function HomePage() {
         const [y, m, d] = p.filters.dateTo.split("-").map(Number);
         searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
       }
-      if (p.filters?.cameraModel) searchParams.cameraModel = p.filters.cameraModel;
+      if (p.filters?.cameraModel)
+        searchParams.cameraModel = p.filters.cameraModel;
       if (p.filters?.lensModel) searchParams.lensModel = p.filters.lensModel;
-      if (p.filters?.focalMin) searchParams.focalMin = Number(p.filters.focalMin);
-      if (p.filters?.focalMax) searchParams.focalMax = Number(p.filters.focalMax);
-      if (p.filters?.apertureMin) searchParams.apertureMin = Number(p.filters.apertureMin);
-      if (p.filters?.apertureMax) searchParams.apertureMax = Number(p.filters.apertureMax);
+      if (p.filters?.focalMin)
+        searchParams.focalMin = Number(p.filters.focalMin);
+      if (p.filters?.focalMax)
+        searchParams.focalMax = Number(p.filters.focalMax);
+      if (p.filters?.apertureMin)
+        searchParams.apertureMin = Number(p.filters.apertureMin);
+      if (p.filters?.apertureMax)
+        searchParams.apertureMax = Number(p.filters.apertureMax);
       if (p.filters?.isoMin) searchParams.isoMin = Number(p.filters.isoMin);
       if (p.filters?.isoMax) searchParams.isoMax = Number(p.filters.isoMax);
-      if (p.filters?.shutterMin) searchParams.shutterMin = Number(p.filters.shutterMin);
-      if (p.filters?.shutterMax) searchParams.shutterMax = Number(p.filters.shutterMax);
+      if (p.filters?.shutterMin)
+        searchParams.shutterMin = Number(p.filters.shutterMin);
+      if (p.filters?.shutterMax)
+        searchParams.shutterMax = Number(p.filters.shutterMax);
 
-      ipc.client.photos.searchCompound(searchParams).then((result: any) => {
-        const newResults = result.results || [];
-        if (newResults.length > 0) {
-          setSearchResults(newResults);
-          setSearchTime(Math.round(performance.now() - startTime));
-        }
-      }).catch(() => { /* ignore */ });
+      ipc.client.photos
+        .searchCompound(searchParams)
+        .then((result: any) => {
+          const newResults = result.results || [];
+          if (newResults.length > 0) {
+            setSearchResults(newResults);
+            setSearchTime(Math.round(performance.now() - startTime));
+          }
+        })
+        .catch(() => {
+          /* ignore */
+        });
     }
-  }, [isSearching, hasNextPage, isFetchingNextPage, fetchNextPage, searchResults]);
+  }, [
+    isSearching,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    searchResults,
+  ]);
 
   const handleToggleFavorite = useCallback(async (id: number) => {
     const photo = photosRef.current.find((p) => p.id === id);
@@ -730,7 +778,10 @@ function HomePage() {
     const prevVal = !!photo.isFavorite;
     const newVal = !prevVal;
     await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
-    queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+    queryClient.invalidateQueries({
+      queryKey: ["photos"],
+      refetchType: "active",
+    });
     toast.success(
       newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
       {
@@ -741,7 +792,10 @@ function HomePage() {
               ids: [id],
               favorite: prevVal,
             });
-            queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
+            });
           },
         },
       }
@@ -773,6 +827,8 @@ function HomePage() {
     const hasColorHex = !!effectiveColorHex;
 
     if (!(query.trim() || hasFilters || hasColorHex)) {
+      pendingSemanticRefreshRef.current = null;
+      setSearchSemantic(null);
       setSearchMode(null);
       setSearchTime(undefined);
       setSearchResults(null);
@@ -850,7 +906,11 @@ function HomePage() {
 
       // 保存搜索参数以支持"加载更多"
       if (!searchExpandedRef.current) {
-        lastSearchParamsRef.current = { query, filters, colorHex: effectiveColorHex ?? undefined };
+        lastSearchParamsRef.current = {
+          query,
+          filters,
+          colorHex: effectiveColorHex ?? undefined,
+        };
       }
 
       const result = (await ipc.client.photos.searchCompound(
@@ -863,6 +923,22 @@ function HomePage() {
       }
 
       const results = result.results || [];
+      const semantic = (result.semantic ?? null) as SemanticSearchMeta | null;
+      setSearchSemantic(semantic);
+      if (
+        semantic &&
+        (semantic.state === "partial" || semantic.state === "unavailable") &&
+        query.trim()
+      ) {
+        pendingSemanticRefreshRef.current = {
+          generation: gen,
+          query,
+          filters,
+          colorHex: effectiveColorHex ?? undefined,
+        };
+      } else {
+        pendingSemanticRefreshRef.current = null;
+      }
 
       if (result.timeFilter) {
         const tf = result.timeFilter as { dateFrom: string; dateTo: string };
@@ -1035,7 +1111,10 @@ function HomePage() {
           (prev) => prev?.filter((p) => !ids.includes(p.id)) ?? null
         );
       } else {
-        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
       }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       toast.success(t("toastDeletedCount", { count }));
@@ -1048,7 +1127,10 @@ function HomePage() {
     const ids = Array.from(selectedIds);
     try {
       const result = await ipc.client.photos.renamePhotos({ ids, pattern });
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       const r = result as {
         renamed: number;
         errors: number;
@@ -1211,7 +1293,10 @@ function HomePage() {
         );
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
-          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+          queryClient.invalidateQueries({
+            queryKey: ["photos"],
+            refetchType: "active",
+          });
           toast.success(
             newVal
               ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1224,7 +1309,10 @@ function HomePage() {
                     ids,
                     favorite: allFav,
                   });
-                  queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                  queryClient.invalidateQueries({
+                    queryKey: ["photos"],
+                    refetchType: "active",
+                  });
                 },
               },
             }
@@ -1291,11 +1379,14 @@ function HomePage() {
           colorHex={colorHex ?? undefined}
           imageSearchActive={searchMode === "image"}
           onClear={() => {
+            searchGenerationRef.current++;
+            pendingSemanticRefreshRef.current = null;
             setSearchQuery("");
             setColorHex(null);
             setSearchMode(null);
             setSearchTime(undefined);
             setSearchResults(null);
+            setSearchSemantic(null);
             setParsedTimeFilter(null);
             setShowAiIndexHint(false);
             searchExpandedRef.current = false;
@@ -1308,6 +1399,18 @@ function HomePage() {
           searchMode={searchMode}
           searchTime={searchTime}
         />
+        {searchMode === "text" &&
+          searchSemantic &&
+          searchSemantic.state !== "ready" && (
+            <div className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-900 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              {searchSemantic.state === "error"
+                ? t("semanticSearchUnavailable")
+                : t("semanticSearchPartial", {
+                    indexed: searchSemantic.indexedPhotos,
+                    total: searchSemantic.totalPhotos,
+                  })}
+            </div>
+          )}
         {/* Drill-down banner */}
         {showDrillBanner && (
           <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
@@ -1405,25 +1508,12 @@ function HomePage() {
                 onExport={handleExportSelected}
                 onRename={() => setRenameDialogOpen(true)}
                 onShare={handleShareSelected}
-                onStartCull={async () => {
+                onStartCull={() => {
                   const ids = Array.from(selectedIds);
                   if (ids.length < 2) {
                     return;
                   }
-                  try {
-                    const session = (await ipc.client.cull.createSession({
-                      name: `${t("cullTitle")} · ${ids.length} ${t("photos")}`,
-                      mode: "duel",
-                      photoIds: ids,
-                    })) as { id: number };
-                    clearSelection();
-                    navigate({
-                      to: "/cull/$sessionId",
-                      params: { sessionId: String(session.id) },
-                    });
-                  } catch {
-                    toast.error(t("cullCreateSessionFailed"));
-                  }
+                  setCullPhotoIds(ids);
                 }}
                 onToggleFavorite={() => {
                   const ids = [...selectedIds];
@@ -1434,7 +1524,10 @@ function HomePage() {
                   ipc.client.photos
                     .toggleFavorite({ ids, favorite: newVal })
                     .then(() => {
-                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                      queryClient.invalidateQueries({
+                        queryKey: ["photos"],
+                        refetchType: "active",
+                      });
                       toast.success(
                         newVal
                           ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1472,10 +1565,7 @@ function HomePage() {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1">
-            <Welcome
-              disabled={filter.importPhase !== "idle"}
-              onAddFolder={filter.handleAddFolder}
-            />
+            <Welcome disabled={false} onAddFolder={filter.handleAddFolder} />
           </div>
         )}
         <StatusBar
@@ -1529,7 +1619,10 @@ function HomePage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+              queryClient.invalidateQueries({
+                queryKey: ["photos"],
+                refetchType: "active",
+              });
               toast.success(
                 newVal
                   ? t("toastFavoriteAddedCount", { count: ids.length })
@@ -1542,7 +1635,10 @@ function HomePage() {
                         ids,
                         favorite: allFav,
                       });
-                      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+                      queryClient.invalidateQueries({
+                        queryKey: ["photos"],
+                        refetchType: "active",
+                      });
                     },
                   },
                 }
@@ -1612,6 +1708,20 @@ function HomePage() {
         }}
         onConfirm={executeDelete}
         open={deleteConfirmOpen}
+      />
+      <CullStartDialog
+        defaultName={`${t("cullTitle")} · ${cullPhotoIds.length} ${t("photos")}`}
+        onClose={() => setCullPhotoIds([])}
+        onCreated={(sessionId) => {
+          setCullPhotoIds([]);
+          clearSelection();
+          navigate({
+            to: "/cull/$sessionId",
+            params: { sessionId: String(sessionId) },
+          });
+        }}
+        open={cullPhotoIds.length >= 2}
+        photoIds={cullPhotoIds}
       />
     </>
   );

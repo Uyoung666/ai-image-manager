@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { BKTree, hammingDistance } from "@/services/bk-tree";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import { getSetting } from "@/services/settings-manager";
 import {
   generateDuelPreview,
   getDuelPreviewStrategy,
@@ -18,12 +19,16 @@ import {
 import {
   bkTreeCaches,
   clearCullCaches,
+  clearCullPairCaches,
   comparedPairCaches,
+  curateOrderCaches,
   similarityCaches,
+  setBoundedCullCache,
   type SimPair,
 } from "./cache";
 
 import { computeElo, PK_MODE_CONFIG } from "./elo";
+import { getCullProgressDelta } from "./state";
 import {
   buildPairItem,
   loadPendingWithMetadata,
@@ -42,12 +47,39 @@ import {
 
 export { computeElo, PK_MODE_CONFIG };
 
+const SQLITE_ID_CHUNK_SIZE = 500;
+
+function uniqueIds(ids: number[]): number[] {
+  return [...new Set(ids)];
+}
+
+function loadActivePhotoIds(ids: number[]): number[] {
+  const db = getDatabase();
+  const result: number[] = [];
+  for (let index = 0; index < ids.length; index += SQLITE_ID_CHUNK_SIZE) {
+    const chunk = ids.slice(index, index + SQLITE_ID_CHUNK_SIZE);
+    result.push(
+      ...db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(and(inArray(photos.id, chunk), isNull(photos.deletedAt)))
+        .all()
+        .map((photo) => photo.id)
+    );
+  }
+  return result;
+}
+
+function syncKeptWithFavorites(): boolean {
+  return getSetting("cull.syncKeptWithFavorites") !== "false";
+}
+
 export const createSession = os
   .input(CreateSessionSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
 
-    let allPhotoIds = [...input.photoIds];
+    let allPhotoIds = uniqueIds(input.photoIds);
 
     // If folderId is provided, load non-deleted photos from its entire subtree.
     if (input.folderId && allPhotoIds.length === 0) {
@@ -71,53 +103,39 @@ export const createSession = os
       allPhotoIds = folderPhotos.map((p) => p.id);
     } else if (allPhotoIds.length > 0) {
       // Exclude soft-deleted photos from explicit photoIds
-      allPhotoIds = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(
-          and(
-            inArray(photos.id, allPhotoIds),
-            isNull(photos.deletedAt)
-          )
-        )
-        .all()
-        .map((p) => p.id);
+      allPhotoIds = loadActivePhotoIds(allPhotoIds);
     }
 
     if (allPhotoIds.length < 2) {
       throw new Error("至少需要 2 张照片才能创建选片会话");
     }
 
-    const result = db
-      .insert(cullSessions)
-      .values({
-        name: input.name,
-        mode: input.mode,
-        pkMode: input.pkMode,
-        sortStrategy: input.sortStrategy,
-        totalPhotos: allPhotoIds.length,
-      })
-      .run();
+    const sessionId = db.transaction(() => {
+      const result = db
+        .insert(cullSessions)
+        .values({
+          name: input.name,
+          mode: input.mode,
+          pkMode: input.pkMode,
+          sortStrategy: input.sortStrategy,
+          totalPhotos: allPhotoIds.length,
+        })
+        .run();
+      const createdSessionId = Number(result.lastInsertRowid);
 
-    const sessionId = Number(result.lastInsertRowid);
-
-    db.transaction(() => {
-      // Filter out already-existing photos (safety, though session is new)
-      const existingPhotos = db
-        .select({ photoId: cullSessionPhotos.photoId })
-        .from(cullSessionPhotos)
-        .where(eq(cullSessionPhotos.sessionId, sessionId))
-        .all();
-      const existingSet = new Set(existingPhotos.map((p) => p.photoId));
-      const newPhotoIds = allPhotoIds.filter((id) => !existingSet.has(id));
-
-      const batchSize = 500;
-      for (let i = 0; i < newPhotoIds.length; i += batchSize) {
-        const batch = newPhotoIds.slice(i, i + batchSize);
-        for (const photoId of batch) {
-          db.insert(cullSessionPhotos).values({ sessionId, photoId }).run();
-        }
+      for (
+        let index = 0;
+        index < allPhotoIds.length;
+        index += SQLITE_ID_CHUNK_SIZE
+      ) {
+        const batch = allPhotoIds.slice(index, index + SQLITE_ID_CHUNK_SIZE);
+        db.insert(cullSessionPhotos)
+          .values(
+            batch.map((photoId) => ({ sessionId: createdSessionId, photoId }))
+          )
+          .run();
       }
+      return createdSessionId;
     });
 
     return db
@@ -130,8 +148,8 @@ export const createSession = os
 export const addPhotosToSession = os
   .input(
     z.object({
-      sessionId: z.number(),
-      photoIds: z.array(z.number()).min(1),
+      sessionId: z.number().int().positive(),
+      photoIds: z.array(z.number().int().positive()).min(1),
     })
   )
   .handler(async ({ input }) => {
@@ -144,6 +162,9 @@ export const addPhotosToSession = os
     if (!session) {
       throw new Error("选片会话不存在");
     }
+    if (session.status === "completed") {
+      throw new Error("请先恢复已完成的选片会话");
+    }
 
     let added = 0;
     db.transaction(() => {
@@ -154,40 +175,33 @@ export const addPhotosToSession = os
         .all();
       const existingSet = new Set(existingPhotos.map((p) => p.photoId));
 
-      // Exclude soft-deleted photos (in trash) from being added to session
-      const deletedPhotos = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(
-          and(
-            inArray(photos.id, input.photoIds),
-            isNotNull(photos.deletedAt)
-          )
-        )
-        .all();
-      const deletedSet = new Set(deletedPhotos.map((p) => p.id));
-
-      const newPhotoIds = input.photoIds.filter(
-        (id) => !existingSet.has(id) && !deletedSet.has(id)
+      const requestedIds = uniqueIds(input.photoIds);
+      const activeIds = new Set(loadActivePhotoIds(requestedIds));
+      const newPhotoIds = requestedIds.filter(
+        (id) => activeIds.has(id) && !existingSet.has(id)
       );
 
       const batchSize = 500;
       for (let i = 0; i < newPhotoIds.length; i += batchSize) {
         const batch = newPhotoIds.slice(i, i + batchSize);
-        for (const photoId of batch) {
-          db.insert(cullSessionPhotos)
-            .values({ sessionId: input.sessionId, photoId })
-            .run();
-          added++;
-        }
+        db.insert(cullSessionPhotos)
+          .values(
+            batch.map((photoId) => ({ sessionId: input.sessionId, photoId }))
+          )
+          .run();
+      }
+
+      added = newPhotoIds.length;
+      if (added > 0) {
+        db.update(cullSessions)
+          .set({ totalPhotos: sql`${cullSessions.totalPhotos} + ${added}` })
+          .where(eq(cullSessions.id, input.sessionId))
+          .run();
       }
     });
 
     if (added > 0) {
-      db.update(cullSessions)
-        .set({ totalPhotos: session.totalPhotos + added })
-        .where(eq(cullSessions.id, input.sessionId))
-        .run();
+      clearCullCaches(input.sessionId);
     }
 
     return { success: true, addedCount: added };
@@ -204,6 +218,19 @@ export const recordSkip = os
       .get();
     if (session?.status === "completed") {
       return { success: false, reason: "选片会话已结束" };
+    }
+    const pairRows = db
+      .select({ id: cullSessionPhotos.id })
+      .from(cullSessionPhotos)
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
+          inArray(cullSessionPhotos.id, [input.photoAId, input.photoBId])
+        )
+      )
+      .all();
+    if (pairRows.length !== 2) {
+      throw new Error("照片不在当前选片会话中");
     }
     db.insert(cullActionLogs)
       .values({
@@ -225,26 +252,22 @@ export const listSessions = os.handler(async () => {
     .from(cullSessions)
     .orderBy(desc(cullSessions.createdAt))
     .all();
-
-  // Replace static cullSessions.totalPhotos with live COUNT from
-  // cullSessionPhotos. The static column drifts when photos are
-  // cascade-deleted externally — causing stale card counts and
-  // progress bars that can never reach 100%.
-  // N+1 queries, but session count is typically < 50 — acceptable.
-  return sessions.map((s) => {
-    const countResult = db
-      .select({ count: sql<number>`count(*)` })
-      .from(cullSessionPhotos)
-      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
-      .where(
-        and(
-          eq(cullSessionPhotos.sessionId, s.id),
-          isNull(photos.deletedAt)
-        )
-      )
-      .get();
-    return { ...s, totalPhotos: countResult?.count ?? 0 };
-  });
+  const counts = db
+    .select({
+      sessionId: cullSessionPhotos.sessionId,
+      count: sql<number>`count(case when ${photos.deletedAt} is null then 1 end)`,
+    })
+    .from(cullSessionPhotos)
+    .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+    .groupBy(cullSessionPhotos.sessionId)
+    .all();
+  const countBySession = new Map(
+    counts.map((row) => [row.sessionId, row.count])
+  );
+  return sessions.map((session) => ({
+    ...session,
+    totalPhotos: countBySession.get(session.id) ?? 0,
+  }));
 });
 
 export const getSession = os
@@ -299,24 +322,58 @@ export const getSession = os
     return { ...session, totalPhotos: actualCount?.count ?? 0, items };
   });
 
+export const getSessionSummary = os
+  .input(SessionIdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const session = db
+      .select()
+      .from(cullSessions)
+      .where(eq(cullSessions.id, input.sessionId))
+      .get();
+    if (!session) {
+      throw new Error("选片会话不存在");
+    }
+    const counts = db
+      .select({
+        totalPhotos: sql<number>`count(*)`,
+        keptCount: sql<number>`sum(case when ${cullSessionPhotos.status} = 'kept' then 1 else 0 end)`,
+        rejectedCount: sql<number>`sum(case when ${cullSessionPhotos.status} = 'rejected' then 1 else 0 end)`,
+        pendingCount: sql<number>`sum(case when ${cullSessionPhotos.status} = 'pending' then 1 else 0 end)`,
+      })
+      .from(cullSessionPhotos)
+      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
+          isNull(photos.deletedAt)
+        )
+      )
+      .get();
+    return {
+      ...session,
+      totalPhotos: counts?.totalPhotos ?? 0,
+      keptCount: counts?.keptCount ?? 0,
+      rejectedCount: counts?.rejectedCount ?? 0,
+      pendingCount: counts?.pendingCount ?? 0,
+    };
+  });
+
 export const deleteSession = os
   .input(SessionIdSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    db.delete(cullSessionPhotos)
-      .where(eq(cullSessionPhotos.sessionId, input.sessionId))
-      .run();
-    db.delete(cullActionLogs)
-      .where(eq(cullActionLogs.sessionId, input.sessionId))
-      .run();
-    db.delete(cullSessions).where(eq(cullSessions.id, input.sessionId)).run();
+    db.transaction(() => {
+      db.delete(cullSessions).where(eq(cullSessions.id, input.sessionId)).run();
+    });
+    clearCullCaches(input.sessionId);
     return { success: true };
   });
 
 // ── 对比预览懒生成 ──────────────────────────────────────────────
 
 export const ensureDuelPreview = os
-  .input(z.object({ photoId: z.number() }))
+  .input(z.object({ photoId: z.number().int().positive() }))
   .handler(async ({ input }) => {
     const db = getDatabase();
     const photo = db
@@ -373,6 +430,12 @@ function sortBySimilarityGroups(pending: PendingRow[]): PendingRow[] {
 
   const groups: PendingRow[][] = [];
   const visited = new Set<number>();
+  const tree = new BKTree();
+  const byId = new Map<number, PendingRow>();
+  for (const photo of withPHash) {
+    tree.insert(photo.id, photo.phash!);
+    byId.set(photo.id, photo);
+  }
 
   for (const photo of withPHash) {
     if (visited.has(photo.id)) {
@@ -381,11 +444,12 @@ function sortBySimilarityGroups(pending: PendingRow[]): PendingRow[] {
     const group = [photo];
     visited.add(photo.id);
 
-    for (const other of withPHash) {
-      if (visited.has(other.id)) {
+    for (const match of tree.query(photo.phash!, 8)) {
+      if (visited.has(match.photoId)) {
         continue;
       }
-      if (hammingDistance(photo.phash!, other.phash!) <= 8) {
+      const other = byId.get(match.photoId);
+      if (other) {
         group.push(other);
         visited.add(other.id);
       }
@@ -424,7 +488,7 @@ export const getNextPair = os
     let pending = loadPendingWithMetadata(input.sessionId);
 
     // Filter out photos the frontend can't load (prevents infinite retry loop)
-    const excludeIds = input.excludeIds ?? [];
+    const excludeIds = input.excludeSessionPhotoIds ?? [];
     if (excludeIds.length > 0) {
       const excludeSet = new Set(excludeIds);
       const before = pending.length;
@@ -436,8 +500,22 @@ export const getNextPair = os
       }
     }
 
+    const curateTotal =
+      session.mode === "curate"
+        ? (db
+            .select({ count: sql<number>`count(*)` })
+            .from(cullSessionPhotos)
+            .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+            .where(
+              and(
+                eq(cullSessionPhotos.sessionId, input.sessionId),
+                isNull(photos.deletedAt)
+              )
+            )
+            .get()?.count ?? 0)
+        : pending.length;
     const stats = {
-      total: pending.length,
+      total: curateTotal,
       completed: session.completedComparisons,
       remaining: pending.length,
     };
@@ -456,7 +534,26 @@ export const getNextPair = os
       let sorted = [...pending];
 
       if (strategy === "similarity") {
-        sorted = sortBySimilarityGroups(pending);
+        let orderCache = curateOrderCaches.get(input.sessionId);
+        if (!orderCache) {
+          orderCache = {
+            orderedIds: sortBySimilarityGroups([...pending]).map(
+              (photo) => photo.id
+            ),
+          };
+          setBoundedCullCache(curateOrderCaches, input.sessionId, orderCache);
+        }
+        const pendingById = new Map(pending.map((photo) => [photo.id, photo]));
+        sorted = orderCache.orderedIds
+          .map((id) => pendingById.get(id))
+          .filter((photo): photo is PendingRow => photo !== undefined);
+        if (sorted.length !== pending.length) {
+          clearCullCaches(input.sessionId);
+          sorted = sortBySimilarityGroups([...pending]);
+          setBoundedCullCache(curateOrderCaches, input.sessionId, {
+            orderedIds: sorted.map((photo) => photo.id),
+          });
+        }
       } else {
         sorted.sort((a, b) => (a.fileDate ?? 0) - (b.fileDate ?? 0));
       }
@@ -594,7 +691,7 @@ export const getNextPair = os
         }
       }
       pairCache = { set, latestKey, maxLogId: maxId };
-      comparedPairCaches.set(input.sessionId, pairCache);
+      setBoundedCullCache(comparedPairCaches, input.sessionId, pairCache);
     }
 
     const comparedPairs = pairCache.set;
@@ -687,7 +784,7 @@ export const getNextPair = os
             map.set(photo.id, photo);
           }
           bkCache = { tree, photoMap: map, idsHash };
-          bkTreeCaches.set(input.sessionId, bkCache);
+          setBoundedCullCache(bkTreeCaches, input.sessionId, bkCache);
           bkTree = tree;
           photoMap = map;
         }
@@ -709,7 +806,7 @@ export const getNextPair = os
           }
         }
         simCache = { pairs, idsHash };
-        similarityCaches.set(input.sessionId, simCache);
+        setBoundedCullCache(similarityCaches, input.sessionId, simCache);
       }
 
       // Fast path: scan pre-computed pairs, score only valid ones
@@ -1075,10 +1172,6 @@ export const undoLastAction = os
       .from(cullSessions)
       .where(eq(cullSessions.id, input.sessionId))
       .get();
-    if (session?.status === "completed") {
-      return { success: false, reason: "选片会话已结束" };
-    }
-
     const lastLog = db
       .select()
       .from(cullActionLogs)
@@ -1088,245 +1181,413 @@ export const undoLastAction = os
           sql`${cullActionLogs.action} != 'undo'`
         )
       )
-      .orderBy(desc(cullActionLogs.createdAt))
+      .orderBy(desc(cullActionLogs.id))
       .limit(1)
       .get();
 
     if (!lastLog) {
       return { success: false, reason: "没有可撤销的操作" };
     }
+    if (
+      session?.status === "completed" &&
+      lastLog.action !== "status" &&
+      lastLog.action !== "batchStatus" &&
+      lastLog.action !== "kept" &&
+      lastLog.action !== "rejected"
+    ) {
+      return { success: false, reason: "请先恢复会话再撤销对决操作" };
+    }
 
-    const payload = JSON.parse(lastLog.payload);
-
-    if (lastLog.action === "compare" && payload.winnerId && payload.loserId) {
-      // Reverse the Elo update
-      db.update(cullSessionPhotos)
-        .set({
-          rating: payload.winnerOldRating,
-          comparisons: sql`MAX(comparisons - 1, 0)`,
-          wins: sql`MAX(wins - 1, 0)`,
-        })
-        .where(eq(cullSessionPhotos.id, payload.winnerId))
-        .run();
-
-      db.update(cullSessionPhotos)
-        .set({
-          rating: payload.loserOldRating,
-          comparisons: sql`MAX(comparisons - 1, 0)`,
-          losses: sql`MAX(losses - 1, 0)`,
-        })
-        .where(eq(cullSessionPhotos.id, payload.loserId))
-        .run();
-
-      db.update(cullSessions)
-        .set({
-          completedComparisons: sql`MAX(completed_comparisons - 1, 0)`,
-        })
-        .where(eq(cullSessions.id, input.sessionId))
-        .run();
-    } else if (lastLog.action === "draw") {
-      const photoAId = payload.photoAId ?? payload.winnerId;
-      const photoBId = payload.photoBId ?? payload.loserId;
-      if (!(photoAId && photoBId)) {
-        return { success: false, reason: "撤销记录无效" };
-      }
-      db.update(cullSessionPhotos)
-        .set({
-          rating: payload.photoAOldRating ?? payload.winnerOldRating,
-          comparisons: sql`MAX(comparisons - 1, 0)`,
-        })
-        .where(eq(cullSessionPhotos.id, photoAId))
-        .run();
-
-      db.update(cullSessionPhotos)
-        .set({
-          rating: payload.photoBOldRating ?? payload.loserOldRating,
-          comparisons: sql`MAX(comparisons - 1, 0)`,
-        })
-        .where(eq(cullSessionPhotos.id, photoBId))
-        .run();
-
-      db.update(cullSessions)
-        .set({
-          completedComparisons: sql`MAX(completed_comparisons - 1, 0)`,
-        })
-        .where(eq(cullSessions.id, input.sessionId))
-        .run();
-    } else if (lastLog.action === "skipSimilar" && payload.skippedEntries) {
-      // Reverse the bulk skip-similar action
-      const entries: {
-        id: number;
-        previousStatus: string;
-        photoRefId: number;
-      }[] = payload.skippedEntries;
-      for (const entry of entries) {
+    const payload = JSON.parse(lastLog.payload) as Record<string, unknown>;
+    const result = db.transaction(() => {
+      if (lastLog.action === "compare" && payload.winnerId && payload.loserId) {
         db.update(cullSessionPhotos)
-          .set({ status: entry.previousStatus })
-          .where(eq(cullSessionPhotos.id, entry.id))
+          .set({
+            rating: Number(payload.winnerOldRating),
+            comparisons: sql`MAX(comparisons - 1, 0)`,
+            wins: sql`MAX(wins - 1, 0)`,
+          })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              eq(cullSessionPhotos.id, Number(payload.winnerId))
+            )
+          )
           .run();
-        if (entry.previousStatus === "pending") {
+        db.update(cullSessionPhotos)
+          .set({
+            rating: Number(payload.loserOldRating),
+            comparisons: sql`MAX(comparisons - 1, 0)`,
+            losses: sql`MAX(losses - 1, 0)`,
+          })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              eq(cullSessionPhotos.id, Number(payload.loserId))
+            )
+          )
+          .run();
+        db.update(cullSessions)
+          .set({ completedComparisons: sql`MAX(completed_comparisons - 1, 0)` })
+          .where(eq(cullSessions.id, input.sessionId))
+          .run();
+      } else if (lastLog.action === "draw") {
+        const photoAId = Number(payload.photoAId ?? payload.winnerId);
+        const photoBId = Number(payload.photoBId ?? payload.loserId);
+        if (!(photoAId && photoBId)) {
+          return { success: false, reason: "撤销记录无效" };
+        }
+        db.update(cullSessionPhotos)
+          .set({
+            rating: Number(payload.photoAOldRating ?? payload.winnerOldRating),
+            comparisons: sql`MAX(comparisons - 1, 0)`,
+          })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              eq(cullSessionPhotos.id, photoAId)
+            )
+          )
+          .run();
+        db.update(cullSessionPhotos)
+          .set({
+            rating: Number(payload.photoBOldRating ?? payload.loserOldRating),
+            comparisons: sql`MAX(comparisons - 1, 0)`,
+          })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              eq(cullSessionPhotos.id, photoBId)
+            )
+          )
+          .run();
+        db.update(cullSessions)
+          .set({ completedComparisons: sql`MAX(completed_comparisons - 1, 0)` })
+          .where(eq(cullSessions.id, input.sessionId))
+          .run();
+      } else if (lastLog.action === "batchStatus") {
+        const entries = (payload.entries ?? []) as Array<{
+          id: number;
+          photoRefId: number;
+          previousStatus: "pending" | "kept" | "rejected";
+          newStatus: "pending" | "kept" | "rejected";
+          previousFavorite: boolean;
+        }>;
+        let progressDelta = 0;
+        for (const entry of entries) {
+          db.update(cullSessionPhotos)
+            .set({ status: entry.previousStatus })
+            .where(
+              and(
+                eq(cullSessionPhotos.sessionId, input.sessionId),
+                eq(cullSessionPhotos.id, entry.id)
+              )
+            )
+            .run();
+          db.update(photos)
+            .set({ isFavorite: entry.previousFavorite })
+            .where(eq(photos.id, entry.photoRefId))
+            .run();
+          if (
+            entry.newStatus === "pending" &&
+            entry.previousStatus !== "pending"
+          ) {
+            progressDelta += 1;
+          } else if (
+            entry.newStatus !== "pending" &&
+            entry.previousStatus === "pending"
+          ) {
+            progressDelta -= 1;
+          }
+        }
+        if (progressDelta !== 0) {
           db.update(cullSessions)
             .set({
-              completedComparisons: sql`MAX(completed_comparisons - 1, 0)`,
+              completedComparisons: sql`MAX(completed_comparisons + ${progressDelta}, 0)`,
+            })
+            .where(eq(cullSessions.id, input.sessionId))
+            .run();
+        }
+      } else if (lastLog.action === "skipSimilar") {
+        const entries = (payload.skippedEntries ?? []) as Array<{
+          id: number;
+          previousStatus: "pending" | "kept" | "rejected";
+        }>;
+        for (const entry of entries) {
+          db.update(cullSessionPhotos)
+            .set({ status: entry.previousStatus })
+            .where(
+              and(
+                eq(cullSessionPhotos.sessionId, input.sessionId),
+                eq(cullSessionPhotos.id, entry.id)
+              )
+            )
+            .run();
+        }
+        const restoredPending = entries.filter(
+          (entry) => entry.previousStatus === "pending"
+        ).length;
+        if (restoredPending > 0) {
+          db.update(cullSessions)
+            .set({
+              completedComparisons: sql`MAX(completed_comparisons - ${restoredPending}, 0)`,
+            })
+            .where(eq(cullSessions.id, input.sessionId))
+            .run();
+        }
+      } else if (
+        (lastLog.action === "status" ||
+          lastLog.action === "kept" ||
+          lastLog.action === "rejected") &&
+        payload.photoId
+      ) {
+        const previousStatus = String(payload.previousStatus);
+        const newStatus = String(payload.newStatus ?? lastLog.action);
+        db.update(cullSessionPhotos)
+          .set({ status: previousStatus })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              eq(cullSessionPhotos.id, Number(payload.photoId))
+            )
+          )
+          .run();
+        if (
+          payload.photoRefId &&
+          typeof payload.previousFavorite === "boolean"
+        ) {
+          db.update(photos)
+            .set({ isFavorite: payload.previousFavorite })
+            .where(eq(photos.id, Number(payload.photoRefId)))
+            .run();
+        }
+        let progressDelta = 0;
+        if (newStatus === "pending" && previousStatus !== "pending") {
+          progressDelta = 1;
+        } else if (newStatus !== "pending" && previousStatus === "pending") {
+          progressDelta = -1;
+        }
+        if (progressDelta !== 0) {
+          db.update(cullSessions)
+            .set({
+              completedComparisons: sql`MAX(completed_comparisons + ${progressDelta}, 0)`,
             })
             .where(eq(cullSessions.id, input.sessionId))
             .run();
         }
       }
-    } else if (
-      (lastLog.action === "kept" || lastLog.action === "rejected") &&
-      payload.photoId
-    ) {
-      // Reverse the curate status change
-      db.update(cullSessionPhotos)
-        .set({ status: payload.previousStatus })
-        .where(
-          and(
-            eq(cullSessionPhotos.sessionId, input.sessionId),
-            eq(cullSessionPhotos.id, payload.photoId)
-          )
-        )
-        .run();
 
-      // Decrement progress if reverting from pending→kept/rejected back to pending
-      if (payload.previousStatus === "pending") {
-        db.update(cullSessions)
-          .set({ completedComparisons: sql`MAX(completed_comparisons - 1, 0)` })
-          .where(eq(cullSessions.id, input.sessionId))
-          .run();
-      }
-    }
-
-    // Delete the undone log (don't log undo-of-undo)
-    db.delete(cullActionLogs).where(eq(cullActionLogs.id, lastLog.id)).run();
-
-    // Invalidate caches since the log history changed
-    clearCullCaches(input.sessionId);
-
-    return { success: true };
+      db.delete(cullActionLogs).where(eq(cullActionLogs.id, lastLog.id)).run();
+      return { success: true };
+    });
+    clearCullPairCaches(input.sessionId);
+    return result;
   });
 
 export const updatePhotoStatus = os
   .input(UpdatePhotoStatusSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    const existing = db
-      .select()
-      .from(cullSessionPhotos)
-      .where(
-        and(
-          eq(cullSessionPhotos.sessionId, input.sessionId),
-          eq(cullSessionPhotos.id, input.photoId)
+    const result = db.transaction(() => {
+      const existing = db
+        .select({
+          id: cullSessionPhotos.id,
+          photoId: cullSessionPhotos.photoId,
+          status: cullSessionPhotos.status,
+          isFavorite: photos.isFavorite,
+        })
+        .from(cullSessionPhotos)
+        .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+        .where(
+          and(
+            eq(cullSessionPhotos.sessionId, input.sessionId),
+            eq(cullSessionPhotos.id, input.photoId)
+          )
         )
-      )
-      .get();
+        .get();
+      if (!existing) {
+        throw new Error("照片不在会话中");
+      }
+      if (existing.status === input.status) {
+        return { success: true, changed: false };
+      }
 
-    if (!existing) {
-      throw new Error("照片不在会话中");
-    }
-
-    db.update(cullSessionPhotos)
-      .set({ status: input.status })
-      .where(
-        and(
-          eq(cullSessionPhotos.sessionId, input.sessionId),
-          eq(cullSessionPhotos.id, input.photoId)
-        )
-      )
-      .run();
-
-    // For curate sessions, track progress when changing from pending to kept/rejected
-    if (existing.status === "pending" && input.status !== "pending") {
       const session = db
         .select({ mode: cullSessions.mode })
         .from(cullSessions)
         .where(eq(cullSessions.id, input.sessionId))
         .get();
-      if (session?.mode === "curate") {
-        db.update(cullSessions)
-          .set({ completedComparisons: sql`completed_comparisons + 1` })
-          .where(eq(cullSessions.id, input.sessionId))
+      if (!session) {
+        throw new Error("选片会话不存在");
+      }
+
+      db.update(cullSessionPhotos)
+        .set({ status: input.status })
+        .where(eq(cullSessionPhotos.id, existing.id))
+        .run();
+
+      if (input.status === "kept" && syncKeptWithFavorites()) {
+        db.update(photos)
+          .set({ isFavorite: true })
+          .where(eq(photos.id, existing.photoId))
           .run();
       }
-    }
 
-    // Log for undo support
-    db.insert(cullActionLogs)
-      .values({
-        sessionId: input.sessionId,
-        action: input.status,
-        payload: JSON.stringify({
-          photoId: input.photoId,
-          previousStatus: existing.status,
-          newStatus: input.status,
-          photoRefId: existing.photoId,
-        }),
-      })
-      .run();
+      let progressDelta = 0;
+      if (session.mode === "curate") {
+        progressDelta = getCullProgressDelta(existing.status, input.status);
+        if (progressDelta !== 0) {
+          db.update(cullSessions)
+            .set({
+              completedComparisons: sql`MAX(completed_comparisons + ${progressDelta}, 0)`,
+            })
+            .where(eq(cullSessions.id, input.sessionId))
+            .run();
+        }
+      }
 
-    return { success: true };
+      db.insert(cullActionLogs)
+        .values({
+          sessionId: input.sessionId,
+          action: "status",
+          payload: JSON.stringify({
+            photoId: existing.id,
+            photoRefId: existing.photoId,
+            previousStatus: existing.status,
+            newStatus: input.status,
+            previousFavorite: Boolean(existing.isFavorite),
+          }),
+        })
+        .run();
+      return { success: true, changed: true };
+    });
+    clearCullPairCaches(input.sessionId);
+    return result;
   });
 
 export const batchUpdatePhotoStatus = os
   .input(BatchUpdatePhotoStatusSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-
-    // Batch update all photos in a single SQL statement
-    db.transaction(() => {
-      db.update(cullSessionPhotos)
-        .set({ status: input.status })
-        .where(
-          and(
-            eq(cullSessionPhotos.sessionId, input.sessionId),
-            inArray(cullSessionPhotos.id, input.photoIds)
-          )
-        )
-        .run();
-
-      // For curate sessions, track progress
+    const requestedIds = uniqueIds(input.photoIds);
+    const result = db.transaction(() => {
       const session = db
         .select({ mode: cullSessions.mode })
         .from(cullSessions)
         .where(eq(cullSessions.id, input.sessionId))
         .get();
-
-      if (session?.mode === "curate" && input.status !== "pending") {
-        // Only count photos that were actually pending -> kept/rejected
-        // We use a rough estimate: all updated photos count
-        db.update(cullSessions)
-          .set({
-            completedComparisons: sql`completed_comparisons + ${input.photoIds.length}`,
-          })
-          .where(eq(cullSessions.id, input.sessionId))
-          .run();
+      if (!session) {
+        throw new Error("选片会话不存在");
       }
 
-      // Log each for undo support
-      for (const photoId of input.photoIds) {
-        db.insert(cullActionLogs)
-          .values({
-            sessionId: input.sessionId,
-            action: input.status,
-            payload: JSON.stringify({
-              photoId,
-              previousStatus: "pending", // will be refined below, but OK for batch undo
+      const entries: Array<{
+        id: number;
+        photoRefId: number;
+        previousStatus: string;
+        newStatus: string;
+        previousFavorite: boolean;
+      }> = [];
+      for (
+        let index = 0;
+        index < requestedIds.length;
+        index += SQLITE_ID_CHUNK_SIZE
+      ) {
+        const chunk = requestedIds.slice(index, index + SQLITE_ID_CHUNK_SIZE);
+        const rows = db
+          .select({
+            id: cullSessionPhotos.id,
+            photoId: cullSessionPhotos.photoId,
+            status: cullSessionPhotos.status,
+            isFavorite: photos.isFavorite,
+          })
+          .from(cullSessionPhotos)
+          .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              inArray(cullSessionPhotos.id, chunk)
+            )
+          )
+          .all();
+        for (const row of rows) {
+          if (row.status !== input.status) {
+            entries.push({
+              id: row.id,
+              photoRefId: row.photoId,
+              previousStatus: row.status,
               newStatus: input.status,
-            }),
-          })
-          .run();
+              previousFavorite: Boolean(row.isFavorite),
+            });
+          }
+        }
       }
-    });
+      if (entries.length === 0) {
+        return { success: true, updatedCount: 0 };
+      }
 
-    return { success: true, updatedCount: input.photoIds.length };
+      for (
+        let index = 0;
+        index < entries.length;
+        index += SQLITE_ID_CHUNK_SIZE
+      ) {
+        const chunk = entries.slice(index, index + SQLITE_ID_CHUNK_SIZE);
+        db.update(cullSessionPhotos)
+          .set({ status: input.status })
+          .where(
+            inArray(
+              cullSessionPhotos.id,
+              chunk.map((entry) => entry.id)
+            )
+          )
+          .run();
+        if (input.status === "kept" && syncKeptWithFavorites()) {
+          db.update(photos)
+            .set({ isFavorite: true })
+            .where(
+              inArray(
+                photos.id,
+                chunk.map((entry) => entry.photoRefId)
+              )
+            )
+            .run();
+        }
+      }
+
+      if (session.mode === "curate") {
+        const progressDelta = entries.reduce(
+          (sum, entry) =>
+            sum + getCullProgressDelta(entry.previousStatus, input.status),
+          0
+        );
+        if (progressDelta !== 0) {
+          db.update(cullSessions)
+            .set({
+              completedComparisons: sql`MAX(completed_comparisons + ${progressDelta}, 0)`,
+            })
+            .where(eq(cullSessions.id, input.sessionId))
+            .run();
+        }
+      }
+
+      db.insert(cullActionLogs)
+        .values({
+          sessionId: input.sessionId,
+          action: "batchStatus",
+          payload: JSON.stringify({ entries }),
+        })
+        .run();
+      return { success: true, updatedCount: entries.length };
+    });
+    clearCullPairCaches(input.sessionId);
+    return result;
   });
 
 export const skipSimilarPhotos = os
   .input(
     z.object({
-      sessionId: z.number(),
-      photoId: z.number(),
-      threshold: z.number().default(8),
+      sessionId: z.number().int().positive(),
+      photoId: z.number().int().positive(),
+      threshold: z.number().int().min(0).max(64).default(8),
     })
   )
   .handler(async ({ input }) => {
@@ -1338,6 +1599,7 @@ export const skipSimilarPhotos = os
       .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
       .where(
         and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
           eq(cullSessionPhotos.id, input.photoId),
           isNull(photos.deletedAt)
         )
@@ -1378,39 +1640,43 @@ export const skipSimilarPhotos = os
       });
     }
 
-    // Bulk UPDATE status using inArray
-    if (similar.length > 0) {
-      const similarIds = similar.map((p) => p.id);
-      db.update(cullSessionPhotos)
-        .set({ status: "rejected" })
-        .where(inArray(cullSessionPhotos.id, similarIds))
-        .run();
-    }
-
-    // In curate mode, bulk-update completedComparisons once
-    if (session?.mode === "curate") {
-      const pendingCount = similar.filter((p) => p.status === "pending").length;
-      if (pendingCount > 0) {
-        db.update(cullSessions)
-          .set({
-            completedComparisons: sql`completed_comparisons + ${pendingCount}`,
-          })
-          .where(eq(cullSessions.id, input.sessionId))
+    db.transaction(() => {
+      if (similar.length > 0) {
+        const similarIds = similar.map((p) => p.id);
+        db.update(cullSessionPhotos)
+          .set({ status: "rejected" })
+          .where(
+            and(
+              eq(cullSessionPhotos.sessionId, input.sessionId),
+              inArray(cullSessionPhotos.id, similarIds)
+            )
+          )
           .run();
       }
-    }
-
-    // Log as a single undo-able action
-    if (skippedEntries.length > 0) {
-      db.insert(cullActionLogs)
-        .values({
-          sessionId: input.sessionId,
-          action: "skipSimilar",
-          payload: JSON.stringify({ skippedEntries }),
-        })
-        .run();
-    }
-
+      if (session?.mode === "curate") {
+        const pendingCount = similar.filter(
+          (p) => p.status === "pending"
+        ).length;
+        if (pendingCount > 0) {
+          db.update(cullSessions)
+            .set({
+              completedComparisons: sql`completed_comparisons + ${pendingCount}`,
+            })
+            .where(eq(cullSessions.id, input.sessionId))
+            .run();
+        }
+      }
+      if (skippedEntries.length > 0) {
+        db.insert(cullActionLogs)
+          .values({
+            sessionId: input.sessionId,
+            action: "skipSimilar",
+            payload: JSON.stringify({ skippedEntries }),
+          })
+          .run();
+      }
+    });
+    clearCullPairCaches(input.sessionId);
     return { skippedCount: similar.length };
   });
 
@@ -1418,11 +1684,104 @@ export const completeSession = os
   .input(SessionIdSchema)
   .handler(async ({ input }) => {
     const db = getDatabase();
-    db.update(cullSessions)
+    const result = db
+      .update(cullSessions)
       .set({ status: "completed", completedAt: Date.now() })
       .where(eq(cullSessions.id, input.sessionId))
       .run();
+    if (result.changes === 0) {
+      throw new Error("选片会话不存在");
+    }
 
+    clearCullCaches(input.sessionId);
+    return { success: true };
+  });
+
+export const renameSession = os
+  .input(
+    z.object({
+      sessionId: z.number().int().positive(),
+      name: z.string().trim().min(1).max(200),
+    })
+  )
+  .handler(async ({ input }) => {
+    const result = getDatabase()
+      .update(cullSessions)
+      .set({ name: input.name })
+      .where(eq(cullSessions.id, input.sessionId))
+      .run();
+    if (result.changes === 0) {
+      throw new Error("选片会话不存在");
+    }
+    return { success: true };
+  });
+
+export const duplicateSession = os
+  .input(SessionIdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const source = db
+      .select()
+      .from(cullSessions)
+      .where(eq(cullSessions.id, input.sessionId))
+      .get();
+    if (!source) {
+      throw new Error("选片会话不存在");
+    }
+    const photoIds = db
+      .select({ photoId: cullSessionPhotos.photoId })
+      .from(cullSessionPhotos)
+      .innerJoin(photos, eq(cullSessionPhotos.photoId, photos.id))
+      .where(
+        and(
+          eq(cullSessionPhotos.sessionId, input.sessionId),
+          isNull(photos.deletedAt)
+        )
+      )
+      .all()
+      .map((row) => row.photoId);
+    if (photoIds.length < 2) {
+      throw new Error("至少需要 2 张照片才能复制会话");
+    }
+    const sessionId = db.transaction(() => {
+      const result = db
+        .insert(cullSessions)
+        .values({
+          name: `${source.name} - 副本`,
+          mode: source.mode,
+          pkMode: source.pkMode,
+          sortStrategy: source.sortStrategy,
+          totalPhotos: photoIds.length,
+        })
+        .run();
+      const createdId = Number(result.lastInsertRowid);
+      for (
+        let index = 0;
+        index < photoIds.length;
+        index += SQLITE_ID_CHUNK_SIZE
+      ) {
+        const chunk = photoIds.slice(index, index + SQLITE_ID_CHUNK_SIZE);
+        db.insert(cullSessionPhotos)
+          .values(chunk.map((photoId) => ({ sessionId: createdId, photoId })))
+          .run();
+      }
+      return createdId;
+    });
+    return { success: true, sessionId };
+  });
+
+export const resumeSession = os
+  .input(SessionIdSchema)
+  .handler(async ({ input }) => {
+    const db = getDatabase();
+    const result = db
+      .update(cullSessions)
+      .set({ status: "active", completedAt: null })
+      .where(eq(cullSessions.id, input.sessionId))
+      .run();
+    if (result.changes === 0) {
+      throw new Error("选片会话不存在");
+    }
     clearCullCaches(input.sessionId);
     return { success: true };
   });

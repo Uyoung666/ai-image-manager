@@ -9,6 +9,7 @@ import {
   LayoutList,
   Star,
   Trash2,
+  Undo2,
   XCircle,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -413,7 +414,31 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   const [lightboxIndex, setLightboxIndex] = useState(-1);
 
   // View mode toggle
-  const [viewMode, setViewMode] = useState<"list" | "gallery">("gallery");
+  const [viewMode, setViewMode] = useState<"list" | "gallery">(() => {
+    try {
+      return localStorage.getItem("cull.resultView") === "list"
+        ? "list"
+        : "gallery";
+    } catch {
+      return "gallery";
+    }
+  });
+  const [galleryColumns, setGalleryColumns] = useState(5);
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "pending" | "kept" | "rejected"
+  >("all");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [resultSort, setResultSort] = useState<
+    "default" | "dateAsc" | "dateDesc"
+  >("default");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("cull.resultView", viewMode);
+    } catch {
+      // Preferences are non-critical.
+    }
+  }, [viewMode]);
 
   // Virtual scrolling container ref
   const containerRef = useRef<HTMLDivElement>(null);
@@ -448,6 +473,12 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   const sorted = useMemo(
     () =>
       [...session.items].sort((a, b) => {
+        if (resultSort === "dateAsc") {
+          return (a.photo.fileDate ?? 0) - (b.photo.fileDate ?? 0);
+        }
+        if (resultSort === "dateDesc") {
+          return (b.photo.fileDate ?? 0) - (a.photo.fileDate ?? 0);
+        }
         if (!isDuel) {
           const order: Record<string, number> = {
             kept: 0,
@@ -462,7 +493,20 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         }
         return b.rating - a.rating;
       }),
-    [session.items, isDuel]
+    [session.items, isDuel, resultSort]
+  );
+  const visibleItems = useMemo(
+    () =>
+      sorted.filter(
+        (item) =>
+          (statusFilter === "all" || item.status === statusFilter) &&
+          (!favoriteOnly || Boolean(item.photo.isFavorite))
+      ),
+    [sorted, statusFilter, favoriteOnly]
+  );
+  const rankedForTopN = useMemo(
+    () => [...session.items].sort((a, b) => b.rating - a.rating),
+    [session.items]
   );
 
   const selectedIds = useMemo(
@@ -470,15 +514,51 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
     [sorted, selected]
   );
 
-  const lightboxPhotos = useMemo(() => sorted.map((i) => i.photo), [sorted]);
+  const lightboxPhotos = useMemo(
+    () => visibleItems.map((i) => i.photo),
+    [visibleItems]
+  );
 
   // ── useVirtualizer (list view only) ──
   const virtualizer = useVirtualizer({
-    count: sorted.length,
+    count: visibleItems.length,
     getScrollElement: () => containerRef.current,
     estimateSize: () => 80,
     overscan: 5,
   });
+  const galleryRowCount = Math.ceil(visibleItems.length / galleryColumns);
+  const galleryVirtualizer = useVirtualizer({
+    count: galleryRowCount,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 220,
+    overscan: 3,
+  });
+
+  useEffect(() => {
+    if (viewMode !== "gallery") {
+      return;
+    }
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+    const updateColumns = () => {
+      const width = element.clientWidth;
+      if (width >= 1280) {
+        setGalleryColumns(5);
+      } else if (width >= 1024) {
+        setGalleryColumns(4);
+      } else if (width >= 640) {
+        setGalleryColumns(3);
+      } else {
+        setGalleryColumns(2);
+      }
+    };
+    updateColumns();
+    const observer = new ResizeObserver(updateColumns);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [viewMode]);
 
   // ── useCallback: stable handler references ──
 
@@ -501,14 +581,16 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         // Shift + click: range select from last clicked index
         const start = Math.min(lastClickedIndexRef.current, index);
         const end = Math.max(lastClickedIndexRef.current, index);
-        setSelected(new Set(sorted.slice(start, end + 1).map((i) => i.id)));
+        setSelected(
+          new Set(visibleItems.slice(start, end + 1).map((i) => i.id))
+        );
       } else {
         // Plain click: single select, clear others
         setSelected(new Set([itemId]));
         lastClickedIndexRef.current = index;
       }
     },
-    [sorted]
+    [visibleItems]
   );
 
   // ── Marquee selection handlers ──
@@ -610,42 +692,33 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   }, [marquee]);
 
   const toggleSelectAll = useCallback(() => {
-    if (selected.size === sorted.length) {
+    const visibleSelectedCount = visibleItems.filter((item) =>
+      selected.has(item.id)
+    ).length;
+    if (visibleSelectedCount === visibleItems.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(sorted.map((i) => i.id)));
+      setSelected(new Set(visibleItems.map((i) => i.id)));
     }
-  }, [sorted, selected.size]);
+  }, [visibleItems, selected]);
 
   const handleStatusChange = useCallback(
     async (itemId: number, status: "kept" | "rejected" | "pending") => {
       setUpdating((s) => new Set(s).add(itemId));
       try {
-        const item = session.items.find((i) => i.id === itemId);
-        const wasKept = item?.status === "kept";
         await ipc.client.cull.updatePhotoStatus({
           sessionId: session.id,
           photoId: itemId,
           status,
         });
-        if (item) {
-          if (status === "kept") {
-            await ipc.client.photos.toggleFavorite({
-              ids: [item.photo.id],
-              favorite: true,
-            });
-          } else if (wasKept) {
-            await ipc.client.photos.toggleFavorite({
-              ids: [item.photo.id],
-              favorite: false,
-            });
-          }
-          // Immediately invalidate photo queries so favorites page reflects changes
-          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
-        }
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         onUpdate?.();
       } catch (err) {
         console.error("[handleStatusChange] failed:", err);
+        toast.error(t("cullActionFailed"));
       } finally {
         setUpdating((s) => {
           const n = new Set(s);
@@ -654,7 +727,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         });
       }
     },
-    [session.id, session.items, onUpdate, queryClient]
+    [session.id, onUpdate, queryClient, t]
   );
 
   // Stable callback wrapper for CullResultCard — avoids stale closures when
@@ -679,47 +752,35 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       }
       setUpdating((s) => new Set([...s, ...items.map((i) => i.id)]));
       try {
-        const wereKept = items.filter((i) => i.status === "kept");
         await ipc.client.cull.batchUpdatePhotoStatus({
           sessionId: session.id,
           photoIds: items.map((i) => i.id),
           status,
         });
-        if (status === "kept") {
-          await ipc.client.photos.toggleFavorite({
-            ids: items.map((i) => i.photo.id),
-            favorite: true,
-          });
-        }
-        if (status !== "kept" && wereKept.length > 0) {
-          await ipc.client.photos.toggleFavorite({
-            ids: wereKept.map((i) => i.photo.id),
-            favorite: false,
-          });
-        }
-        // Immediately invalidate photo queries so favorites page reflects changes
-        if (status === "kept" || wereKept.length > 0) {
-          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
-        }
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         setSelected(new Set());
         onUpdate?.();
       } catch (err) {
         console.error("[handleBatchStatusChange] failed:", err);
+        toast.error(t("cullActionFailed"));
       } finally {
         setUpdating(new Set());
       }
     },
-    [session.id, sorted, selected, onUpdate, queryClient]
+    [session.id, sorted, selected, onUpdate, queryClient, t]
   );
 
   const handleTopNApply = useCallback(async () => {
     const n = Number.parseInt(topN, 10);
-    if (isNaN(n) || n < 1 || n > sorted.length) {
+    if (isNaN(n) || n < 1 || n > rankedForTopN.length) {
       return;
     }
     // In duel mode, pick from top of sorted list; in curate mode, pick pending first then rejected
     const pool = isDuel
-      ? sorted.slice(0, n).filter((i) => i.status !== "kept")
+      ? rankedForTopN.slice(0, n).filter((i) => i.status !== "kept")
       : [
           ...sorted.filter((i) => i.status === "pending"),
           ...sorted.filter((i) => i.status === "rejected"),
@@ -735,17 +796,16 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         photoIds: topItems.map((i) => i.id),
         status: "kept",
       });
-      const favIds = topItems.map((i) => i.photo.id);
-      await ipc.client.photos.toggleFavorite({ ids: favIds, favorite: true });
       setTopN("");
       setTopNConfirmOpen(false);
       onUpdate?.();
     } catch (err) {
       console.error("[handleTopNApply] failed:", err);
+      toast.error(t("cullActionFailed"));
     } finally {
       setUpdating(new Set());
     }
-  }, [session.id, sorted, topN, isDuel, onUpdate]);
+  }, [session.id, sorted, rankedForTopN, topN, isDuel, onUpdate, t]);
 
   const handleTrashRejected = useCallback(async () => {
     if (rejected.length === 0) {
@@ -758,7 +818,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         ids: rejected.map((i) => i.photo.id),
       });
       toast.success(t("cullRejectedToTrash"));
-      queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       onUpdate?.();
     } catch (err) {
@@ -767,6 +830,26 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       setDeleting(false);
     }
   }, [rejected, t, onUpdate, queryClient]);
+
+  const handleUndo = useCallback(async () => {
+    try {
+      const result = (await ipc.client.cull.undoLastAction({
+        sessionId: session.id,
+      })) as { reason?: string; success: boolean };
+      if (!result.success) {
+        toast.info(result.reason ?? t("cullNothingToUndo"));
+        return;
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+      onUpdate?.();
+    } catch (error) {
+      console.error("[CullResult] undo failed:", error);
+      toast.error(t("cullActionFailed"));
+    }
+  }, [onUpdate, queryClient, session.id, t]);
 
   // ── Render ──
 
@@ -783,28 +866,85 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           })}
         </span>
         <span className="ml-auto flex items-center gap-2">
-          {/* Top N */}
-          <input
-            className="w-16 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
-            onChange={(e) => setTopN(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const n = Number.parseInt(topN, 10);
-                if (!isNaN(n) && n >= 1 && n <= total) {
-                  setTopNConfirmOpen(true);
-                }
-              }
+          <select
+            aria-label={t("cullFilterStatus")}
+            className="rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-[10px] text-foreground"
+            onChange={(event) => {
+              setStatusFilter(event.target.value as typeof statusFilter);
+              setSelected(new Set());
             }}
-            placeholder={t("cullTopNPlaceholder")}
-            value={topN}
-          />
-          <button
-            className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
-            disabled={!topN || isNaN(Number.parseInt(topN, 10))}
-            onClick={() => setTopNConfirmOpen(true)}
+            value={statusFilter}
           >
-            {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
+            <option value="all">{t("cullFilterAll")}</option>
+            <option value="kept">{t("cullKeep")}</option>
+            <option value="pending">{t("cullBatchPending")}</option>
+            <option value="rejected">{t("cullReject")}</option>
+          </select>
+          <select
+            aria-label={t("cullResultSort")}
+            className="rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-[10px] text-foreground"
+            onChange={(event) =>
+              setResultSort(event.target.value as typeof resultSort)
+            }
+            value={resultSort}
+          >
+            <option value="default">
+              {t(isDuel ? "cullSortByRating" : "cullSortDefault")}
+            </option>
+            <option value="dateAsc">{t("cullSortDateAsc")}</option>
+            <option value="dateDesc">{t("cullSortDateDesc")}</option>
+          </select>
+          <button
+            aria-pressed={favoriteOnly}
+            className={`rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+              favoriteOnly
+                ? "bg-amber-500/15 text-amber-500"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => {
+              setFavoriteOnly((value) => !value);
+              setSelected(new Set());
+            }}
+            type="button"
+          >
+            <Star className="mr-1 inline h-3 w-3" />
+            {t("favorites")}
           </button>
+          <button
+            aria-label={t("cullUndo")}
+            className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={handleUndo}
+            type="button"
+          >
+            <Undo2 className="mr-1 inline h-3 w-3" />
+            {t("cullUndo")}
+          </button>
+          {/* Top N is meaningful only for Elo-ranked duel sessions. */}
+          {isDuel && (
+            <input
+              className="w-16 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
+              onChange={(e) => setTopN(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const n = Number.parseInt(topN, 10);
+                  if (!isNaN(n) && n >= 1 && n <= total) {
+                    setTopNConfirmOpen(true);
+                  }
+                }
+              }}
+              placeholder={t("cullTopNPlaceholder")}
+              value={topN}
+            />
+          )}
+          {isDuel && (
+            <button
+              className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+              disabled={!topN || isNaN(Number.parseInt(topN, 10))}
+              onClick={() => setTopNConfirmOpen(true)}
+            >
+              {t("cullTopNApply", { n: Number.parseInt(topN, 10) || 0 })}
+            </button>
+          )}
           <span className="h-3 w-px bg-border/50" />
           <button
             className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
@@ -829,7 +969,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
             onClick={toggleSelectAll}
           >
-            {selected.size === sorted.length
+            {selected.size > 0 && selected.size === visibleItems.length
               ? t("cullDeselectAll")
               : t("cullSelectAll")}
           </button>
@@ -905,25 +1045,59 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           onMouseDown={handleMarqueeStart}
           ref={containerRef}
         >
-          {sorted.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               {t("cullNoPhotosInSession")}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {sorted.map((item, idx) => (
-                <CullResultCard
-                  index={idx}
-                  isDuel={isDuel}
-                  isSelected={selected.has(item.id)}
-                  item={item}
-                  key={item.id}
-                  onPreview={setLightboxIndex}
-                  onSelect={handleCardSelect}
-                  onStatusChange={stableHandleStatusChange}
-                  updating={updating}
-                />
-              ))}
+            <div
+              style={{
+                height: galleryVirtualizer.getTotalSize(),
+                position: "relative",
+              }}
+            >
+              {galleryVirtualizer.getVirtualItems().map((virtualRow) => {
+                const start = virtualRow.index * galleryColumns;
+                const rowItems = visibleItems.slice(
+                  start,
+                  start + galleryColumns
+                );
+                return (
+                  <div
+                    data-index={virtualRow.index}
+                    key={virtualRow.key}
+                    ref={galleryVirtualizer.measureElement}
+                    style={{
+                      display: "grid",
+                      gap: 12,
+                      gridTemplateColumns: `repeat(${galleryColumns}, minmax(0, 1fr))`,
+                      left: 0,
+                      paddingBottom: 12,
+                      position: "absolute",
+                      top: 0,
+                      transform: `translateY(${virtualRow.start}px)`,
+                      width: "100%",
+                    }}
+                  >
+                    {rowItems.map((item, offset) => {
+                      const index = start + offset;
+                      return (
+                        <CullResultCard
+                          index={index}
+                          isDuel={isDuel}
+                          isSelected={selected.has(item.id)}
+                          item={item}
+                          key={item.id}
+                          onPreview={setLightboxIndex}
+                          onSelect={handleCardSelect}
+                          onStatusChange={stableHandleStatusChange}
+                          updating={updating}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           )}
           {/* Marquee selection overlay */}
@@ -942,7 +1116,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       ) : (
         /* ── Original list view ── */
         <div className="flex-1 overflow-y-auto p-6" ref={containerRef}>
-          {sorted.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               {t("cullNoPhotosInSession")}
             </div>
@@ -954,7 +1128,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
               }}
             >
               {virtualizer.getVirtualItems().map((virtualRow) => {
-                const item = sorted[virtualRow.index];
+                const item = visibleItems[virtualRow.index];
                 return (
                   <div
                     data-index={virtualRow.index}
