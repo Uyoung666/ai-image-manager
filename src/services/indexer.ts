@@ -150,10 +150,10 @@ function dct2D(matrix: Float64Array[], size: number): Float64Array[] {
   return result;
 }
 
-async function computePHash(filePath: string): Promise<string | null> {
+async function computePHash(input: string | Buffer): Promise<string | null> {
   try {
     const SIZE = 32;
-    const { data } = await sharp(filePath)
+    const { data } = await sharp(input)
       .rotate()
       .resize(SIZE, SIZE, { fit: "fill" })
       .grayscale()
@@ -225,13 +225,15 @@ async function readBasicMeta(filePath: string): Promise<{
       }
     }
     const meta = await sharp(input).metadata();
-    // Read EXIF orientation to correct width/height for rotated photos
-    // Use exifr.orientation() — the dedicated API — instead of parse() with pick
-    let orientation = 1;
-    try {
-      orientation = (await exifr.orientation(filePath)) ?? 1;
-    } catch {
-      // If EXIF read fails, assume no rotation
+    // Sharp already reads orientation with the rest of the image metadata for
+    // most formats. Only fall back to a separate EXIF read when it is absent.
+    let orientation = meta.orientation ?? 1;
+    if (meta.orientation == null) {
+      try {
+        orientation = (await exifr.orientation(filePath)) ?? 1;
+      } catch {
+        // If EXIF read fails, assume no rotation
+      }
     }
     // Swap width/height when orientation is 5, 6, 7, 8 (90° or 270° rotation)
     const swapDimensions = orientation >= 5 && orientation <= 8;
@@ -446,7 +448,7 @@ async function preparePhotoRecord(
 } | null> {
   let stat: fs.Stats;
   try {
-    stat = fs.statSync(filePath);
+    stat = await fs.promises.stat(filePath);
   } catch {
     log.warn({ filePath }, "File disappeared before indexing");
     return null;
@@ -472,9 +474,13 @@ async function preparePhotoRecord(
   // Duel previews are generated lazily by cull.ensureDuelPreview.
   const duelPreviewPath: string | null = null;
 
+  // Reuse the in-memory thumbnail for pHash instead of decoding the original
+  // image a second time. pHash normalizes to 32x32, so the 512px thumbnail has
+  // ample detail while substantially reducing import I/O and CPU cost.
   let phash: string | null = null;
+  const phashInput = thumb.buffer ?? thumb.thumbnailPath ?? filePath;
   try {
-    phash = await computePHash(filePath);
+    phash = await computePHash(phashInput);
   } catch (err) {
     // pHash computation failed — photo can still be indexed and browsed;
     // it simply won't participate in pHash-based dedup.
