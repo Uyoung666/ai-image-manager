@@ -9,6 +9,7 @@ import { getDatabase } from "@/db";
 import {
   albumPhotos,
   albums,
+  duplicatePairs,
   exifData,
   folders,
   photos,
@@ -16,6 +17,7 @@ import {
 } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { deletePhotoVectors } from "@/services/ai-embedder";
+import { validateDuplicateCleanupGroup } from "@/services/duplicate-groups";
 import {
   cleanOrphanThumbnails as cleanOrphanThumbnailsService,
   clearThumbnailDiskCache,
@@ -192,6 +194,95 @@ export const deletePhotos = os
         .run();
     }
     invalidateCountCache();
+    return { deleted: activeIds.length };
+  });
+
+export const cleanDuplicateGroups = os
+  .input(
+    z.object({
+      groups: z
+        .array(
+          z.object({
+            deletePhotoIds: z.array(z.number().int().positive()).min(1),
+            keepPhotoId: z.number().int().positive(),
+            pairIds: z.array(z.number().int().positive()).min(1),
+          })
+        )
+        .min(1),
+    })
+  )
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const deleteIds = new Set<number>();
+    const keepIds = new Set<number>();
+    const claimedPairIds = new Set<number>();
+
+    for (const group of input.groups) {
+      const pairIds = [...new Set(group.pairIds)];
+      if (pairIds.some((id) => claimedPairIds.has(id))) {
+        throw new Error("Duplicate relationship submitted more than once");
+      }
+      const relations = db
+        .select({
+          id: duplicatePairs.id,
+          photoAId: duplicatePairs.photoAId,
+          photoBId: duplicatePairs.photoBId,
+        })
+        .from(duplicatePairs)
+        .where(inArray(duplicatePairs.id, pairIds))
+        .all();
+      for (const relation of relations) {
+        claimedPairIds.add(relation.id);
+      }
+      const groupDeleteIds = validateDuplicateCleanupGroup(relations, group);
+      keepIds.add(group.keepPhotoId);
+      for (const id of groupDeleteIds) {
+        deleteIds.add(id);
+      }
+    }
+
+    if ([...keepIds].some((id) => deleteIds.has(id))) {
+      throw new Error("A keeper cannot be deleted by another group");
+    }
+
+    const targetPhotos = db
+      .select({ id: photos.id, folderId: photos.folderId })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.id, [...deleteIds]),
+          sql`${photos.deletedAt} IS NULL`
+        )
+      )
+      .all();
+    if (targetPhotos.length === 0) {
+      return { deleted: 0 };
+    }
+
+    const activeIds = targetPhotos.map((photo) => photo.id);
+    db.transaction(() => {
+      db.update(photos)
+        .set({ deletedAt: Date.now() })
+        .where(inArray(photos.id, activeIds))
+        .run();
+      const countsByFolder = new Map<number, number>();
+      for (const photo of targetPhotos) {
+        if (photo.folderId) {
+          countsByFolder.set(
+            photo.folderId,
+            (countsByFolder.get(photo.folderId) ?? 0) + 1
+          );
+        }
+      }
+      for (const [folderId, count] of countsByFolder) {
+        db.update(folders)
+          .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
+          .where(eq(folders.id, folderId))
+          .run();
+      }
+    });
+    invalidateCountCache();
+    invalidateStatsCache();
     return { deleted: activeIds.length };
   });
 

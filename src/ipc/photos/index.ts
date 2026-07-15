@@ -30,6 +30,7 @@ import {
 } from "./handlers/listing";
 import {
   backfillMissingThumbnails,
+  cleanDuplicateGroups,
   cleanOrphanThumbnails,
   cleanupOrphanPhotos,
   clearThumbCache,
@@ -55,6 +56,7 @@ import {
 import { generateAndUploadShare } from "./handlers/share";
 import {
   dismissDuplicate,
+  dismissDuplicates,
   findDuplicates,
   getColorDistribution,
   getDuplicateStats,
@@ -68,8 +70,8 @@ import {
   addTag,
   confirmPhotoTag,
   deleteTag,
-  getPhotoTags,
   getPhotoTagAnalysisStatus,
+  getPhotoTags,
   getTags,
   removePhotoTag,
   setPhotoTag,
@@ -84,6 +86,7 @@ export const photos = {
   cancelAllImports: cancelAllImports_h,
   cancelQueuedImports: cancelQueuedImports_h,
   cleanupOrphanPhotos,
+  cleanDuplicateGroups,
   cleanOrphanThumbnails,
   clearThumbCache,
   confirmPhotoTag,
@@ -93,6 +96,7 @@ export const photos = {
   deletePhotos,
   deleteTag,
   dismissDuplicate,
+  dismissDuplicates,
   emptyTrash,
   exportPhotos,
   findDuplicates,

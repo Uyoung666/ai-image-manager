@@ -8,7 +8,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  or,
   sql,
 } from "drizzle-orm";
 import { z } from "zod";
@@ -23,6 +22,10 @@ import {
   invalidateColorCache,
   type PaletteColor,
 } from "@/services/color-extractor";
+import {
+  groupDuplicatePairs,
+  type DuplicatePairRecord,
+} from "@/services/duplicate-groups";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
 
 // Module-level cache for getStats (invalidate on photo/EXIF changes)
@@ -624,6 +627,58 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
 }
 
+type PersistedDuplicatePair = typeof duplicatePairs.$inferSelect;
+
+function hydrateDuplicateGroups(
+  db: ReturnType<typeof getDatabase>,
+  persistedPairs: PersistedDuplicatePair[]
+) {
+  if (persistedPairs.length === 0) {
+    return [];
+  }
+  const photoIds = new Set<number>();
+  for (const pair of persistedPairs) {
+    photoIds.add(pair.photoAId);
+    photoIds.add(pair.photoBId);
+  }
+  const photoRows = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      fileDate: photos.fileDate,
+      width: photos.width,
+      height: photos.height,
+      createdAt: photos.createdAt,
+      thumbnailPath: photos.thumbnailPath,
+    })
+    .from(photos)
+    .where(
+      and(inArray(photos.id, Array.from(photoIds)), isNull(photos.deletedAt))
+    )
+    .all();
+  const photoMap = new Map(photoRows.map((photo) => [photo.id, photo]));
+  const pairs: DuplicatePairRecord[] = [];
+  for (const pair of persistedPairs) {
+    const photoA = photoMap.get(pair.photoAId);
+    const photoB = photoMap.get(pair.photoBId);
+    if (!(photoA && photoB)) {
+      continue;
+    }
+    pairs.push({
+      pairId: pair.id,
+      photoA,
+      photoB,
+      matchType: pair.matchType as DuplicatePairRecord["matchType"],
+      distance: pair.phashDistance ?? 0,
+      clipSimilarity: pair.clipSimilarity,
+      status: pair.status as DuplicatePairRecord["status"],
+    });
+  }
+  return groupDuplicatePairs(pairs);
+}
+
 export const findDuplicates = os
   .input(
     z.object({
@@ -636,92 +691,10 @@ export const findDuplicates = os
 
     // If not forcing rescan, return persisted results
     if (!input.forceRescan) {
-      const existing = db
-        .select()
-        .from(duplicatePairs)
-        .where(
-          or(
-            eq(duplicatePairs.status, "pending"),
-            eq(duplicatePairs.status, "confirmed")
-          )
-        )
-        .all();
+      const existing = db.select().from(duplicatePairs).all();
 
       if (existing.length > 0) {
-        const photoIds = new Set<number>();
-        for (const pair of existing) {
-          photoIds.add(pair.photoAId);
-          photoIds.add(pair.photoBId);
-        }
-        const photoMap = new Map<
-          number,
-          {
-            id: number;
-            path: string;
-            filename: string;
-            fileSize: number | null;
-            width: number | null;
-            height: number | null;
-            createdAt: number;
-            thumbnailPath: string | null;
-          }
-        >();
-        const photoRows = db
-          .select({
-            id: photos.id,
-            path: photos.path,
-            filename: photos.filename,
-            fileSize: photos.fileSize,
-            width: photos.width,
-            height: photos.height,
-            createdAt: photos.createdAt,
-            thumbnailPath: photos.thumbnailPath,
-          })
-          .from(photos)
-          .where(inArray(photos.id, Array.from(photoIds)))
-          .all();
-        for (const p of photoRows) {
-          photoMap.set(p.id, p);
-        }
-
-        const duplicates = existing
-          .map((pair) => {
-            const a = photoMap.get(pair.photoAId);
-            const b = photoMap.get(pair.photoBId);
-            if (!(a && b)) {
-              return null;
-            }
-            return {
-              pairId: pair.id,
-              photoA: {
-                id: a.id,
-                path: a.path,
-                filename: a.filename,
-                fileSize: a.fileSize,
-                width: a.width,
-                height: a.height,
-                createdAt: a.createdAt,
-                thumbnailPath: a.thumbnailPath,
-              },
-              photoB: {
-                id: b.id,
-                path: b.path,
-                filename: b.filename,
-                fileSize: b.fileSize,
-                width: b.width,
-                height: b.height,
-                createdAt: b.createdAt,
-                thumbnailPath: b.thumbnailPath,
-              },
-              matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
-              distance: pair.phashDistance ?? 0,
-              clipSimilarity: pair.clipSimilarity,
-              status: pair.status as "pending" | "confirmed",
-            };
-          })
-          .filter(Boolean);
-
-        return { duplicates, fromCache: true };
+        return { groups: hydrateDuplicateGroups(db, existing), fromCache: true };
       }
     }
 
@@ -744,7 +717,7 @@ export const findDuplicates = os
       .all();
 
     if (allPhotos.length === 0) {
-      return { duplicates: [], fromCache: false };
+      return { groups: [], fromCache: false };
     }
 
     // --- Phase 0: Exact duplicate detection via content hash ---
@@ -972,53 +945,9 @@ export const findDuplicates = os
       })
       .run();
 
-    // Build response with photo metadata
-    const photoMap = new Map<number, (typeof allPhotos)[0]>();
-    for (const p of allPhotos) {
-      photoMap.set(p.id, p);
-    }
-
-    const duplicates = confirmedPairs
-      .map((pair) => {
-        const a = photoMap.get(pair.photoAId);
-        const b = photoMap.get(pair.photoBId);
-        if (!(a && b)) {
-          return null;
-        }
-        return {
-          pairId: null as number | null,
-          photoA: {
-            id: a.id,
-            path: a.path,
-            filename: a.filename,
-            fileSize: a.fileSize,
-            width: a.width,
-            height: a.height,
-            createdAt: a.createdAt,
-            thumbnailPath: a.thumbnailPath,
-          },
-          photoB: {
-            id: b.id,
-            path: b.path,
-            filename: b.filename,
-            fileSize: b.fileSize,
-            width: b.width,
-            height: b.height,
-            createdAt: b.createdAt,
-            thumbnailPath: b.thumbnailPath,
-          },
-          matchType: pair.matchType as "exact" | "phash" | "clip_confirmed",
-          distance: pair.phashDistance,
-          clipSimilarity: pair.clipSimilarity,
-          status: (pair.matchType === "exact" ||
-          pair.matchType === "clip_confirmed"
-            ? "confirmed"
-            : "pending") as "pending" | "confirmed",
-        };
-      })
-      .filter(Boolean);
-
-    return { duplicates, fromCache: false };
+    // Re-query persisted rows so the response always contains real pair IDs.
+    const persisted = db.select().from(duplicatePairs).all();
+    return { groups: hydrateDuplicateGroups(db, persisted), fromCache: false };
   });
 
 export const dismissDuplicate = os
@@ -1030,6 +959,18 @@ export const dismissDuplicate = os
       .where(eq(duplicatePairs.id, input.pairId))
       .run();
     return { success: true };
+  });
+
+export const dismissDuplicates = os
+  .input(z.object({ pairIds: z.array(z.number().int().positive()).min(1) }))
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const result = db
+      .update(duplicatePairs)
+      .set({ status: "dismissed", resolvedAt: Date.now() })
+      .where(inArray(duplicatePairs.id, [...new Set(input.pairIds)]))
+      .run();
+    return { dismissed: result.changes };
   });
 
 export const getDuplicateStats = os.handler(() => {
