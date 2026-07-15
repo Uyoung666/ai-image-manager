@@ -50,17 +50,13 @@ function SidebarSlot() {
         collapsed={filter.collapsed}
         favoriteActive={filter.favoriteOnly}
         folders={folders}
-        importPhase={filter.importPhase}
         onAddFolder={filter.handleAddFolder}
-        onCancelScan={filter.handleCancelScan}
         onDeleteFolder={filter.handleDeleteFolder}
         onSelectFavorites={filter.toggleFavoritesAndNotify}
         onSelectFolder={filter.selectFolderAndNotify}
         onToggleCollapse={filter.toggleCollapsed}
         onToggleTag={filter.toggleTag}
         onToggleTagMode={filter.toggleTagMode}
-        scanningFolder={filter.scanningFolder}
-        scanProgress={filter.scanProgress}
         tagMode={filter.tagMode}
         totalPhotos={filter.totalPhotos}
       />

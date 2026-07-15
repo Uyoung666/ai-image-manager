@@ -1,12 +1,17 @@
-import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
+
+const { getPhotoTagAnalysisStatusMock } = vi.hoisted(() => ({
+  getPhotoTagAnalysisStatusMock: vi.fn(),
+}));
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
       photos: {
         getPhotoExif: vi.fn(() => new Promise(() => undefined)),
+        getPhotoTagAnalysisStatus: getPhotoTagAnalysisStatusMock,
         getPhotoTags: vi.fn(() => new Promise(() => undefined)),
         getTags: vi.fn(() => new Promise(() => undefined)),
       },
@@ -25,6 +30,9 @@ const basePhoto = {
 };
 
 describe("PhotoDetailPanel preview", () => {
+  beforeEach(() => {
+    getPhotoTagAnalysisStatusMock.mockResolvedValue({ state: "ready" });
+  });
   it("keeps a stable preview frame and uses the cached thumbnail", () => {
     const { container } = render(
       <PhotoDetailPanel
@@ -72,5 +80,23 @@ describe("PhotoDetailPanel preview", () => {
     expect(container.querySelector("img[alt='first.jpg']")).toBeNull();
     expect(image?.getAttribute("src")).toContain("second.webp");
     expect(image).toHaveClass("opacity-0");
+  });
+
+  it("hides manual analysis while the photo is being auto-tagged", async () => {
+    getPhotoTagAnalysisStatusMock.mockResolvedValue({ state: "tagging" });
+    render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("正在自动分析此照片")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("button", { name: "分析建议标签" })
+    ).not.toBeInTheDocument();
   });
 });

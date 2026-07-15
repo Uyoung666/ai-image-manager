@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
+import { ipc } from "@/ipc/manager";
 import { getRandomPhrase } from "@/utils/progress-phrases";
 
 /** Smooth-transitioning global progress indicator for the header area. */
 export function GlobalProgressBar() {
+  const { t } = useTranslation();
   const status = useGlobalAiStatus();
 
   // ── Fun phrase rotation ─────────────────────────────────────
@@ -18,11 +21,15 @@ export function GlobalProgressBar() {
         setPhrase(getRandomPhrase(status.phase));
       }, 4000);
     } else {
-      clearInterval(phraseTimerRef.current!);
+      if (phraseTimerRef.current !== null) {
+        clearInterval(phraseTimerRef.current);
+      }
       phraseTimerRef.current = null;
     }
     return () => {
-      clearInterval(phraseTimerRef.current!);
+      if (phraseTimerRef.current !== null) {
+        clearInterval(phraseTimerRef.current);
+      }
     };
   }, [status.isRunning, status.phase]);
 
@@ -112,9 +119,33 @@ export function GlobalProgressBar() {
       <div className="glass-surface flex items-center gap-2 border-border/40 border-b px-3 py-1.5">
         {showSpinner && <LoadingSpinner size="xs" />}
 
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+        <span
+          className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+          title={
+            status.statusText ? `${phrase} · ${status.statusText}` : phrase
+          }
+        >
           {phrase}
+          {status.statusText && (
+            <span className="text-muted-foreground/70">
+              {` · ${status.statusText}`}
+            </span>
+          )}
         </span>
+
+        {status.canCancel && (
+          <button
+            className="shrink-0 rounded px-2 py-0.5 text-[10px] text-danger hover:bg-danger/10"
+            onClick={() => {
+              ipc.client.photos.stopScanning({}).catch((error) => {
+                console.error("[Import] Failed to cancel current scan", error);
+              });
+            }}
+            type="button"
+          >
+            {t("cancel")}
+          </button>
+        )}
 
         {!isIndeterminate && (
           <span className="shrink-0 font-medium text-[11px] text-primary tabular-nums">

@@ -29,7 +29,10 @@ export function StatusBar({
   } else if (aiStatus.isEmbedding) {
     const { processed, total } = aiStatus.embeddingProgress;
     const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-    aiLabel = t("aiIndexingPercent", { pct });
+    aiLabel =
+      aiStatus.embeddingProgress.phase === "tagging"
+        ? t("tagGeneratingProgress", { processed, total })
+        : t("aiIndexingPercent", { pct });
     aiColor = "text-warning";
   } else if (aiStatus.indexReady) {
     aiLabel = t("aiReadyVectors", { count: aiStatus.vectorCount });

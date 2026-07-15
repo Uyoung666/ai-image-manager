@@ -127,6 +127,9 @@ export function PhotoDetailPanel({
     confidence: number;
   }> | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiTagTaskState, setAiTagTaskState] = useState<
+    "checking" | "ready" | "indexing" | "tagging" | "busy" | "unavailable"
+  >("checking");
   const [loadedPreviewId, setLoadedPreviewId] = useState<number | null>(null);
   const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
   const [resizing, setResizing] = useState(false);
@@ -255,6 +258,55 @@ export function PhotoDetailPanel({
 
   useEffect(() => {
     if (!photo) {
+      setAiTagTaskState("unavailable");
+      return;
+    }
+    let active = true;
+    let previousState:
+      | "checking"
+      | "ready"
+      | "indexing"
+      | "tagging"
+      | "busy"
+      | "unavailable" = "checking";
+    const refresh = async () => {
+      try {
+        const result = (await ipc.client.photos.getPhotoTagAnalysisStatus({
+          id: photo.id,
+        })) as {
+          state: "ready" | "indexing" | "tagging" | "busy" | "unavailable";
+        };
+        if (!active) {
+          return;
+        }
+        if (
+          (previousState === "indexing" ||
+            previousState === "tagging" ||
+            previousState === "busy") &&
+          result.state === "ready"
+        ) {
+          await loadTags();
+          window.dispatchEvent(new CustomEvent("tags-changed"));
+        }
+        previousState = result.state;
+        setAiTagTaskState(result.state);
+      } catch {
+        if (active) {
+          setAiTagTaskState("unavailable");
+        }
+      }
+    };
+    setAiTagTaskState("checking");
+    refresh();
+    const interval = setInterval(refresh, 2000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [photo?.id, loadTags]);
+
+  useEffect(() => {
+    if (!photo) {
       return;
     }
     setLoading(true);
@@ -344,6 +396,14 @@ export function PhotoDetailPanel({
     setAiSuggestions(null);
     try {
       const result = await ipc.client.photos.suggestTags({ id: photo.id });
+      const taskResult = result as {
+        busy?: boolean;
+        reason?: "indexing" | "tagging" | "busy";
+      };
+      if (taskResult.busy) {
+        setAiTagTaskState(taskResult.reason ?? "indexing");
+        return;
+      }
       const suggestions =
         (result as { suggestions?: Array<{ tag: string; confidence: number }> })
           ?.suggestions || [];
@@ -352,7 +412,7 @@ export function PhotoDetailPanel({
       if (suggestions.length > 0) {
         suggestionCache.set(photo.id, suggestions);
         // Limit cache size to 20
-        if (suggestionCache.size > 20) {
+        if (suggestionCache.size > SUGGESTION_CACHE_MAX) {
           const firstKey = suggestionCache.keys().next().value;
           if (firstKey !== undefined) {
             suggestionCache.delete(firstKey);
@@ -415,6 +475,12 @@ export function PhotoDetailPanel({
     (t) => !photoTags.some((pt) => pt.id === t.id)
   );
   const photoTagIds = new Set(photoTags.map((t) => t.id));
+  let aiTagTaskLabel = t("tagAnalysisIndexing");
+  if (aiTagTaskState === "tagging") {
+    aiTagTaskLabel = t("tagAnalysisRunning");
+  } else if (aiTagTaskState === "busy") {
+    aiTagTaskLabel = t("tagAnalysisBusy");
+  }
 
   if (!displayPhoto) {
     return null;
@@ -586,7 +652,9 @@ export function PhotoDetailPanel({
                         >
                           {getTagDisplayName(tag.name, i18n.language)}
                           {unconfirmed ? (
-                            <span className="ml-0.5 text-[10px] opacity-60">?</span>
+                            <span className="ml-0.5 text-[10px] opacity-60">
+                              ?
+                            </span>
                           ) : (
                             <X className="h-2.5 w-2.5 opacity-60" />
                           )}
@@ -678,7 +746,17 @@ export function PhotoDetailPanel({
             <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
               {t("aiSuggestionTitle")}
             </h4>
-            {aiSuggestions === null && !aiLoading ? (
+            {aiTagTaskState === "checking" ||
+            aiTagTaskState === "indexing" ||
+            aiTagTaskState === "tagging" ||
+            aiTagTaskState === "busy" ? (
+              <div className="flex items-center gap-2 py-2">
+                <LoadingSpinner size="sm" />
+                <span className="text-[11px] text-muted-foreground/70">
+                  {aiTagTaskLabel}
+                </span>
+              </div>
+            ) : aiSuggestions === null && !aiLoading ? (
               <button
                 className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
                 onClick={handleAiSuggest}

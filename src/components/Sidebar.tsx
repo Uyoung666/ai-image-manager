@@ -31,7 +31,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
   PopoverContent,
@@ -43,6 +42,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
+import { useAiStatus } from "@/hooks/useAiStatus";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Folder as FolderType } from "@/types/photo";
@@ -56,8 +56,6 @@ import {
   renderTagTree,
   type TagInfo,
 } from "./sidebar-trees";
-
-export type ImportPhase = "idle" | "scanning" | "embedding";
 
 function SidebarTooltip({
   children,
@@ -101,17 +99,13 @@ interface SidebarProps {
   collapsed: boolean;
   favoriteActive?: boolean;
   folders: FolderType[];
-  importPhase: ImportPhase;
   onAddFolder: (externalPath?: string) => void;
-  onCancelScan?: () => void;
   onDeleteFolder: (id: number, displayName: string) => void;
   onSelectFavorites?: () => void;
   onSelectFolder: (id: number | null) => void;
   onToggleCollapse: () => void;
   onToggleTag?: (tagId: number | null) => void;
   onToggleTagMode?: () => void;
-  scanningFolder: string | null;
-  scanProgress: string;
   tagMode: "and" | "or";
   totalPhotos: number;
 }
@@ -126,15 +120,11 @@ export function Sidebar({
   onSelectFolder,
   onSelectFavorites,
   onAddFolder,
-  onCancelScan,
   onDeleteFolder,
   onToggleTag,
   onToggleTagMode,
   onToggleCollapse,
-  scanningFolder,
-  scanProgress,
   totalPhotos,
-  importPhase,
 }: SidebarProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -179,6 +169,45 @@ export function Sidebar({
   const childInputRef = useRef<HTMLInputElement>(null);
   const childComposingRef = useRef(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const [batchTagLoading, setBatchTagLoading] = useState(false);
+  const { data: aiStatus } = useAiStatus();
+  const aiTagging = aiStatus?.embeddingProgress.phase === "tagging";
+  const aiTagPipelineActive = Boolean(
+    batchTagLoading || aiTagging || aiStatus?.isEmbedding
+  );
+  let aiTagStatusText = t("tagWaitingForIndex");
+  if (batchTagLoading && !aiTagging) {
+    aiTagStatusText = t("tagUpdating");
+  } else if (aiTagging) {
+    aiTagStatusText = t("tagGeneratingProgress", {
+      processed: aiStatus?.embeddingProgress.processed ?? 0,
+      total: aiStatus?.embeddingProgress.total ?? 0,
+    });
+  }
+
+  async function handleBatchGenerateTags() {
+    if (batchTagLoading || aiTagPipelineActive) {
+      return;
+    }
+    setBatchTagLoading(true);
+    try {
+      const result = (await ipc.client.photos.batchGenerateTags({})) as {
+        busy?: boolean;
+      };
+      if (result.busy) {
+        return;
+      }
+      const updated = await ipc.client.photos.getTags({
+        folderId: activeFolderId ?? undefined,
+      });
+      setTags((updated as TagInfo[]) || []);
+      toast.success(t("aiTagsGenerated"));
+    } catch {
+      toast.error(t("aiTagsFailed"));
+    } finally {
+      setBatchTagLoading(false);
+    }
+  }
 
   // Debounce tag search to avoid rebuilding the tree on every keystroke
   useEffect(() => {
@@ -247,9 +276,6 @@ export function Sidebar({
     // External folder drop → import
     if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
-      if (importPhase !== "idle") {
-        return;
-      }
       const items = Array.from(e.dataTransfer.items);
       const folders: string[] = [];
       for (const item of items) {
@@ -432,13 +458,22 @@ export function Sidebar({
 
   useEffect(() => {
     function handler(event: MessageEvent) {
-      if (event.data?.channel === "ai-embedding-done") {
+      if (
+        event.data?.channel === "ai-embedding-done" ||
+        event.data?.channel === "ai-tags-done"
+      ) {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+        ipc.client.photos
+          .getTags({ folderId: activeFolderId ?? undefined })
+          .then((updated) => setTags((updated as TagInfo[]) || []))
+          .catch(() => {
+            /* ignore */
+          });
       }
     }
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, []);
+  }, [activeFolderId]);
 
   // Listen for tag changes from other components (e.g. PhotoDetailPanel)
   useEffect(() => {
@@ -802,7 +837,10 @@ export function Sidebar({
                     onDrop={(e) => handleFolderDrop(e, folder.id)}
                     type="button"
                   >
-                    <FolderBadge className="h-[22px] w-[22px]" folder={folder} />
+                    <FolderBadge
+                      className="h-[22px] w-[22px]"
+                      folder={folder}
+                    />
                   </button>
                 </SidebarTooltip>
               ))}
@@ -1045,25 +1083,21 @@ export function Sidebar({
 
             <div className="flex flex-col items-center gap-1 px-1.5">
               <SidebarTooltip content={t("sidebarAddFolder")}>
-                  <button
-                    aria-label={t("sidebarAddFolder")}
-                    className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                <button
+                  aria-label={t("sidebarAddFolder")}
+                  className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
                   onClick={() => onAddFolder()}
                   type="button"
                 >
-                  {importPhase === "idle" ? (
-                    <Plus className="h-4 w-4" />
-                  ) : (
-                    <LoadingSpinner size="sm" variant="inherit" />
-                  )}
+                  <Plus className="h-4 w-4" />
                 </button>
               </SidebarTooltip>
 
               {/* Content group */}
               <SidebarTooltip content={t("sidebarDashboard")}>
-                  <button
-                    aria-label={t("sidebarDashboard")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("sidebarDashboard")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname === "/dashboard"
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1076,9 +1110,9 @@ export function Sidebar({
               </SidebarTooltip>
 
               <SidebarTooltip content={t("sidebarAlbums")}>
-                  <button
-                    aria-label={t("sidebarAlbums")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("sidebarAlbums")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname.startsWith("/albums")
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1091,9 +1125,9 @@ export function Sidebar({
               </SidebarTooltip>
 
               <SidebarTooltip content={t("people")}>
-                  <button
-                    aria-label={t("people")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("people")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname === "/people"
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1109,9 +1143,9 @@ export function Sidebar({
 
               {/* Tool group */}
               <SidebarTooltip content={t("duplicates")}>
-                  <button
-                    aria-label={t("duplicates")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("duplicates")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname === "/duplicates"
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1124,9 +1158,9 @@ export function Sidebar({
               </SidebarTooltip>
 
               <SidebarTooltip content={t("cull")}>
-                  <button
-                    aria-label={t("cull")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("cull")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname.startsWith("/cull")
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1139,9 +1173,9 @@ export function Sidebar({
               </SidebarTooltip>
 
               <SidebarTooltip content={t("trash")}>
-                  <button
-                    aria-label={t("trash")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("trash")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname === "/trash"
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1157,9 +1191,9 @@ export function Sidebar({
 
               {/* System group */}
               <SidebarTooltip content={t("sidebarSettings")}>
-                  <button
-                    aria-label={t("sidebarSettings")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                <button
+                  aria-label={t("sidebarSettings")}
+                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
                     location.pathname.startsWith("/settings")
                       ? "nav-item-active bg-primary/15 text-primary"
                       : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -1172,9 +1206,9 @@ export function Sidebar({
               </SidebarTooltip>
 
               <SidebarTooltip content={t("keyboardHelpTitle")}>
-                  <button
-                    aria-label={t("keyboardHelpTitle")}
-                    className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                <button
+                  aria-label={t("keyboardHelpTitle")}
+                  className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                   onClick={() =>
                     document.dispatchEvent(
                       new KeyboardEvent("keydown", { key: "?" })
@@ -1243,35 +1277,8 @@ export function Sidebar({
 
             {/* AI Progress Bar */}
             <div className="px-3 py-2">
-              <AiProgressBar disabled={importPhase !== "idle"} />
+              <AiProgressBar />
             </div>
-
-            {/* Scan progress */}
-            {scanProgress && (
-              <div className="px-3 pb-2">
-                <div className="rounded-[6px] bg-card px-3 py-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[11px] text-muted-foreground">
-                      {scanProgress}
-                    </p>
-                    {importPhase === "scanning" && onCancelScan && (
-                      <button
-                        className="shrink-0 rounded-[4px] px-2 py-0.5 font-medium text-[10px] text-danger transition-colors hover:bg-danger/10"
-                        onClick={onCancelScan}
-                        type="button"
-                      >
-                        {t("cancel")}
-                      </button>
-                    )}
-                  </div>
-                  {scanningFolder && (
-                    <p className="mt-0.5 truncate text-[10px] text-muted-foreground/70">
-                      {t("scanningPath", { path: scanningFolder })}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
 
             {/* Separator */}
             <div className="mx-3 border-border border-t" />
@@ -1337,18 +1344,13 @@ export function Sidebar({
                       <button
                         aria-label={t("sidebarAddFolder")}
                         className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
-                        disabled={importPhase !== "idle"}
                         onClick={(e) => {
                           e.stopPropagation();
                           onAddFolder();
                         }}
                         type="button"
                       >
-                        {importPhase === "idle" ? (
-                          <Plus className="h-3 w-3" />
-                        ) : (
-                          <LoadingSpinner size="xs" variant="inherit" />
-                        )}
+                        <Plus className="h-3 w-3" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>{t("sidebarAddFolder")}</TooltipContent>
@@ -1407,6 +1409,14 @@ export function Sidebar({
                         className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
                       />
                     </button>
+                    {!tagsCollapsed &&
+                      aiTagPipelineActive &&
+                      tags.some((tag) => tag.photoCount > 0) && (
+                        <div className="flex items-center gap-1 px-3 py-1 text-[10px] text-primary/80">
+                          <ScanSearch className="h-3 w-3 animate-pulse" />
+                          {aiTagging ? aiTagStatusText : t("tagUpdating")}
+                        </div>
+                      )}
                     {!tagsCollapsed &&
                       (tags.length > 0 ? (
                         <>
@@ -1631,48 +1641,43 @@ export function Sidebar({
                           </div>
                           {!tags.some((t) => t.photoCount > 0) && (
                             <div className="px-1 py-1">
-                              <button
-                                className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20"
-                                onClick={async () => {
-                                  try {
-                                    await ipc.client.photos.batchGenerateTags(
-                                      {}
-                                    );
-                                    const updated =
-                                      await ipc.client.photos.getTags({});
-                                    setTags((updated as TagInfo[]) || []);
-                                    toast.success(t("aiTagsGenerated"));
-                                  } catch {
-                                    toast.error(t("aiTagsFailed"));
-                                  }
-                                }}
-                              >
-                                <ScanSearch className="h-3.5 w-3.5" />
-                                {t("tagBatchGenerate")}
-                              </button>
+                              {aiTagPipelineActive ? (
+                                <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                                  <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                                  {aiTagStatusText}
+                                </div>
+                              ) : (
+                                <button
+                                  className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+                                  disabled={batchTagLoading}
+                                  onClick={handleBatchGenerateTags}
+                                  type="button"
+                                >
+                                  <ScanSearch className="h-3.5 w-3.5" />
+                                  {t("tagBatchGenerate")}
+                                </button>
+                              )}
                             </div>
                           )}
                         </>
                       ) : (
                         <div className="px-3 py-1">
-                          <button
-                            className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                            onClick={async () => {
-                              try {
-                                await ipc.client.photos.batchGenerateTags({});
-                                const updated = await ipc.client.photos.getTags(
-                                  {}
-                                );
-                                setTags((updated as TagInfo[]) || []);
-                                toast.success(t("aiTagsGenerated"));
-                              } catch {
-                                toast.error(t("aiTagsFailed"));
-                              }
-                            }}
-                          >
-                            <ScanSearch className="h-3.5 w-3.5" />
-                            {t("tagBatchGenerate")}
-                          </button>
+                          {aiTagPipelineActive ? (
+                            <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                              <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                              {aiTagStatusText}
+                            </div>
+                          ) : (
+                            <button
+                              className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
+                              disabled={batchTagLoading}
+                              onClick={handleBatchGenerateTags}
+                              type="button"
+                            >
+                              <ScanSearch className="h-3.5 w-3.5" />
+                              {t("tagBatchGenerate")}
+                            </button>
+                          )}
                         </div>
                       ))}
                     <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">

@@ -11,7 +11,15 @@ interface AiProgress {
   isModelLoaded: boolean;
   isPaused?: boolean;
   loadingStartedAt?: number | null;
-  phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
+  phase:
+    | "idle"
+    | "loading"
+    | "embedding"
+    | "tagging"
+    | "complete"
+    | "error"
+    | "tag-error"
+    | "repairing";
   processed: number;
   repairReason?: string;
   total: number;
@@ -105,8 +113,13 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     if (!progress) {
       return;
     }
-    if (progress.phase === "error") {
-      setLastError(progress.error || t("aiInitFailed"));
+    if (progress.phase === "error" || progress.phase === "tag-error") {
+      setLastError(
+        progress.error ||
+          (progress.phase === "tag-error"
+            ? t("aiTagsFailed")
+            : t("aiInitFailed"))
+      );
     }
   }, [progress, t]);
 
@@ -146,7 +159,11 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     await runProgressMutation(() => ipc.client.photos.cancelAiIndexing({}));
   }
 
-  if (progress?.phase === "error" || lastError) {
+  if (
+    progress?.phase === "error" ||
+    progress?.phase === "tag-error" ||
+    lastError
+  ) {
     const isNetworkError =
       lastError?.includes("ENOTFOUND") ||
       lastError?.includes("timeout") ||
@@ -249,34 +266,41 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     );
   }
 
-  const pct =
-    progress.phase === "loading" && progress.downloadPercent != null
-      ? progress.downloadPercent
-      : progress.total > 0
-        ? Math.round((progress.processed / progress.total) * 100)
-        : 0;
+  let pct = 0;
+  if (progress.phase === "loading" && progress.downloadPercent != null) {
+    pct = progress.downloadPercent;
+  } else if (progress.total > 0) {
+    pct = Math.round((progress.processed / progress.total) * 100);
+  }
   const controlState = progress.controlState ?? "idle";
   const paused =
     progress.isPaused ||
     controlState === "paused" ||
     controlState === "pausing";
   const cancelling = controlState === "cancelling";
-  const phaseLabel = cancelling
-    ? t("cancel")
-    : paused
-    ? t("aiPaused")
-    : progress.phase === "repairing"
-      ? t("aiRepairingIndex")
-      : progress.phase === "loading"
-        ? progress.downloadPercent == null
-          ? t("aiLoadingClip")
-          : t("aiLoadingClip", { percent: progress.downloadPercent })
-        : progress.phase === "complete"
-          ? t("aiComplete")
-          : t("aiIndexingProgress", {
-              processed: progress.processed,
-              total: progress.total,
-            });
+  let phaseLabel = t("aiIndexingProgress", {
+    processed: progress.processed,
+    total: progress.total,
+  });
+  if (cancelling) {
+    phaseLabel = t("cancel");
+  } else if (paused) {
+    phaseLabel = t("aiPaused");
+  } else if (progress.phase === "repairing") {
+    phaseLabel = t("aiRepairingIndex");
+  } else if (progress.phase === "tagging") {
+    phaseLabel = t("tagGeneratingProgress", {
+      processed: progress.processed,
+      total: progress.total,
+    });
+  } else if (progress.phase === "loading") {
+    phaseLabel =
+      progress.downloadPercent == null
+        ? t("aiLoadingClip")
+        : t("aiLoadingClip", { percent: progress.downloadPercent });
+  } else if (progress.phase === "complete") {
+    phaseLabel = t("aiComplete");
+  }
 
   return (
     <div className="mt-2 rounded-[6px] border border-border bg-card px-2 py-2">
@@ -306,7 +330,9 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
             <>
               <button
                 className="flex-1 rounded-[4px] px-2 py-1 font-medium text-[11px] text-primary transition-colors hover:bg-primary/10"
-                disabled={isMutating || cancelling || controlState === "pausing"}
+                disabled={
+                  isMutating || cancelling || controlState === "pausing"
+                }
                 onClick={handleResume}
                 type="button"
               >

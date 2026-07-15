@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
+import { type AiCoverageState, deriveAiCoverageState } from "./coverage";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import { loadModel } from "./model-loader";
 import {
@@ -137,6 +138,7 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
 }
 
 export interface AiReadiness {
+  coverageState: AiCoverageState;
   embeddingProgress: {
     loadingStartedAt?: number | null;
     phase: string;
@@ -145,20 +147,29 @@ export interface AiReadiness {
   };
   hasVectors: boolean;
   indexReady: boolean;
+  indexedPhotos: number;
   isEmbedding: boolean;
   lastError?: string;
   model: "loading" | "ready" | "error";
+  pendingPhotos: number;
+  totalPhotos: number;
   vectorCount: number;
   vectorDB: "loading" | "ready" | "error";
 }
 
-export async function getAiReadiness(): Promise<AiReadiness> {
+export async function getAiReadiness(options?: {
+  loadModel?: boolean;
+}): Promise<AiReadiness> {
   const readiness: AiReadiness = {
     model: isModelLoaded ? "ready" : "loading",
     vectorDB: "loading",
     hasVectors: false,
+    coverageState: "unavailable",
     vectorCount: 0,
     indexReady: false,
+    indexedPhotos: 0,
+    pendingPhotos: 0,
+    totalPhotos: 0,
     isEmbedding,
     lastError:
       currentProgress.phase === "error" ? currentProgress.error : undefined,
@@ -169,8 +180,15 @@ export async function getAiReadiness(): Promise<AiReadiness> {
       loadingStartedAt: currentProgress.loadingStartedAt ?? null,
     },
   };
+  readiness.totalPhotos =
+    getDatabase()
+      .select({ count: sql<number>`count(*)` })
+      .from(photos)
+      .where(sql`${photos.deletedAt} IS NULL`)
+      .get()?.count ?? 0;
+  readiness.pendingPhotos = readiness.totalPhotos;
 
-  if (!isModelLoaded) {
+  if (!isModelLoaded && options?.loadModel !== false) {
     try {
       await loadModel();
       readiness.model = "ready";
@@ -185,13 +203,14 @@ export async function getAiReadiness(): Promise<AiReadiness> {
       readiness.vectorDB = "ready";
       const rowCount = await photoTable.countRows();
       // Cap at non-deleted photo count to exclude orphan vectors from trashed photos
-      const nonDeletedCount =
-        getDatabase()
-          .select({ count: sql<number>`count(*)` })
-          .from(photos)
-          .where(sql`${photos.deletedAt} IS NULL`)
-          .get()?.count ?? 0;
+      const nonDeletedCount = readiness.totalPhotos;
       readiness.vectorCount = Math.min(rowCount, nonDeletedCount);
+      readiness.totalPhotos = nonDeletedCount;
+      readiness.indexedPhotos = readiness.vectorCount;
+      readiness.pendingPhotos = Math.max(
+        0,
+        readiness.totalPhotos - readiness.indexedPhotos
+      );
       readiness.hasVectors = readiness.vectorCount > 0;
 
       if (rowCount >= MIN_VECTORS_FOR_INDEX) {
@@ -207,6 +226,16 @@ export async function getAiReadiness(): Promise<AiReadiness> {
   } catch {
     readiness.vectorDB = "error";
   }
+
+  readiness.coverageState = deriveAiCoverageState(
+    readiness.totalPhotos,
+    readiness.indexedPhotos,
+    Boolean(
+      readiness.lastError ||
+        readiness.model === "error" ||
+        readiness.vectorDB === "error"
+    )
+  );
 
   return readiness;
 }

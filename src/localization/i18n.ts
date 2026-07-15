@@ -61,6 +61,12 @@ i18n.use(initReactI18next).init({
             "正在为照片建立语义索引",
             "计算视觉特征中，这需要一点时间",
           ],
+          tagging: [
+            "正在读懂照片里的精彩内容...",
+            "为每张照片挑选合适的标签",
+            "让照片自己讲述它的故事",
+            "智能标签正在有序归位",
+          ],
           "face-detection": [
             "正在识别那些熟悉的面孔...",
             "帮你找到照片里的每一个人",
@@ -385,6 +391,12 @@ i18n.use(initReactI18next).init({
         sidebarTags: "标签",
         tagSearchPlaceholder: "搜索标签...",
         tagBatchGenerate: "批量生成 AI 标签",
+        tagWaitingForIndex: "AI 索引完成后将自动生成标签",
+        tagGeneratingProgress: "正在生成 AI 标签 {{processed}}/{{total}}",
+        tagUpdating: "正在为新照片更新标签…",
+        tagAnalysisIndexing: "AI 索引中，完成后可分析",
+        tagAnalysisRunning: "正在自动分析此照片",
+        tagAnalysisBusy: "AI 标签任务正在运行，完成后可分析",
         tagDropHint: "松手添加",
         tagDeleteTitle: "删除标签",
         tagDeleteDescription: "确定要删除标签「{{name}}」吗？该操作不可撤销。",
@@ -1250,6 +1262,12 @@ i18n.use(initReactI18next).init({
             "Building a semantic index of your library",
             "Computing visual features — this takes a moment",
           ],
+          tagging: [
+            "Reading the story inside every photo...",
+            "Choosing the best tags for each image",
+            "Helping every photo describe itself",
+            "Putting smart tags neatly into place",
+          ],
           "face-detection": [
             "Recognizing familiar faces...",
             "Finding everyone in your photos",
@@ -1586,6 +1604,14 @@ i18n.use(initReactI18next).init({
         sidebarTags: "Tags",
         tagSearchPlaceholder: "Search tags...",
         tagBatchGenerate: "Batch Generate AI Tags",
+        tagWaitingForIndex: "Tags will be generated after AI indexing",
+        tagGeneratingProgress: "Generating AI tags {{processed}}/{{total}}",
+        tagUpdating: "Updating tags for new photos…",
+        tagAnalysisIndexing:
+          "AI indexing in progress; analysis will be available soon",
+        tagAnalysisRunning: "Automatically analyzing this photo",
+        tagAnalysisBusy:
+          "AI tag generation is running; analysis will be available soon",
         tagDropHint: "Drop to add",
         tagDeleteTitle: "Delete Tag",
         tagDeleteDescription:

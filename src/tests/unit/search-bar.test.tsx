@@ -139,6 +139,33 @@ describe("SearchBar", () => {
     ).toBeDisabled();
   });
 
+  it("shows indexed coverage while semantic indexing is partial", () => {
+    render(
+      <SearchBar
+        {...baseProps}
+        aiStatus={{
+          coverageState: "partial",
+          model: "ready",
+          vectorDB: "ready",
+          hasVectors: true,
+          vectorCount: 25,
+          indexReady: true,
+          indexedPhotos: 25,
+          totalPhotos: 100,
+          isEmbedding: true,
+          embeddingProgress: { processed: 25, total: 100, phase: "embedding" },
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        "AI 已索引 25/100 张照片，当前结果可能不完整；索引完成后将自动刷新。"
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).not.toBeDisabled();
+  });
+
   it("does not open the text starter panel in image search mode", async () => {
     const user = userEvent.setup();
     render(<SearchBar {...baseProps} imageSearchActive />);

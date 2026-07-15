@@ -40,16 +40,27 @@ export interface SearchResponse {
   fallback?: "filename" | "tags";
   query?: string;
   results: Photo[];
+  semantic?: {
+    indexedPhotos: number;
+    reason?: string;
+    state: "ready" | "partial" | "unavailable" | "error";
+    totalPhotos: number;
+    used: boolean;
+  };
   total: number;
 }
 
 export interface AiStatus {
+  coverageState: "ready" | "partial" | "unavailable" | "error";
   embeddingProgress: { processed: number; total: number; phase: string };
   hasVectors: boolean;
   indexReady: boolean;
+  indexedPhotos: number;
   isEmbedding: boolean;
   lastError?: string;
   model: string;
+  pendingPhotos: number;
+  totalPhotos: number;
   vectorCount: number;
   vectorDB: string;
 }

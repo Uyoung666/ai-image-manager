@@ -4,18 +4,47 @@ import { z } from "zod";
 import { getDatabase } from "@/db";
 import { folders, photos, photoTags, tags } from "@/db/schema";
 import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
+import {
+  getAiControlState,
+  isAutoTaggingActive,
+  isAutoTaggingPhoto,
+} from "@/services/ai/state";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 import { IdSchema } from "./shared";
 
 export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
   const db = getDatabase();
   const photo = db
-    .select({ path: photos.path })
+    .select({ isAiProcessed: photos.isAiProcessed, path: photos.path })
     .from(photos)
     .where(eq(photos.id, input.id))
     .get();
   if (!photo) {
     return { photoId: input.id, suggestions: [] };
+  }
+  if (isAutoTaggingPhoto(input.id)) {
+    return {
+      busy: true,
+      photoId: input.id,
+      reason: "tagging" as const,
+      suggestions: [],
+    };
+  }
+  if (isAutoTaggingActive()) {
+    return {
+      busy: true,
+      photoId: input.id,
+      reason: "busy" as const,
+      suggestions: [],
+    };
+  }
+  if (getAiControlState() !== "idle") {
+    return {
+      busy: true,
+      photoId: input.id,
+      reason: "indexing" as const,
+      suggestions: [],
+    };
   }
   try {
     const suggestions = await aiSuggestTags(photo.path, 0.25, input.id);
@@ -24,6 +53,33 @@ export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
     return { photoId: input.id, suggestions: [] };
   }
 });
+
+export const getPhotoTagAnalysisStatus = os
+  .input(IdSchema)
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const photo = db
+      .select({ isAiProcessed: photos.isAiProcessed })
+      .from(photos)
+      .where(eq(photos.id, input.id))
+      .get();
+    if (!photo) {
+      return { state: "unavailable" as const };
+    }
+    if (isAutoTaggingPhoto(input.id)) {
+      return { state: "tagging" as const };
+    }
+    if (isAutoTaggingActive()) {
+      return { state: "busy" as const };
+    }
+    if (getAiControlState() !== "idle") {
+      return { state: "indexing" as const };
+    }
+    return {
+      indexed: photo.isAiProcessed,
+      state: "ready" as const,
+    };
+  });
 
 export const getTags = os
   .input(z.object({ folderId: z.number().optional() }).optional())

@@ -79,7 +79,12 @@ interface IndexProgress {
 
 type ProgressCallback = (progress: IndexProgress) => void;
 let activeScanToken: { cancelled: boolean } | null = null;
-let watchers: FSWatcher[] = [];
+const watchers = new Map<string, FSWatcher>();
+
+function watcherPathKey(folderPath: string): string {
+  const normalized = path.normalize(folderPath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
 
 export function isIndexing(): boolean {
   return activeScanToken !== null;
@@ -700,6 +705,7 @@ export async function scanFolder(
   folderPath: string,
   onProgress?: ProgressCallback
 ): Promise<{
+  createdFolderIds: number[];
   folderId: number;
   photoIds: number[];
   newPhotoIds: number[];
@@ -713,334 +719,340 @@ export async function scanFolder(
   }
   const scanToken = { cancelled: false };
   activeScanToken = scanToken;
+  const newPhotoIds: number[] = [];
+  const createdFolderIds: number[] = [];
 
-  const resolvedPath = path.resolve(folderPath);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`Folder does not exist: ${resolvedPath}`);
-  }
+  try {
+    let resolvedPath = path.resolve(folderPath);
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error(`Folder does not exist: ${resolvedPath}`);
+    }
 
-  let folder = db
-    .select()
-    .from(folders)
-    .where(eq(folders.path, resolvedPath))
-    .get();
-  const folderExisted = !!folder;
-  if (!folder) {
-    const result = db
-      .insert(folders)
-      .values({
+    let folder = db
+      .select()
+      .from(folders)
+      .where(
+        process.platform === "win32"
+          ? sql`lower(${folders.path}) = lower(${resolvedPath})`
+          : eq(folders.path, resolvedPath)
+      )
+      .get();
+    const folderExisted = !!folder;
+    if (folder) {
+      resolvedPath = folder.path;
+    }
+    if (!folder) {
+      const result = db
+        .insert(folders)
+        .values({
+          path: resolvedPath,
+          displayName: path.basename(resolvedPath),
+        })
+        .returning({ insertedId: folders.id })
+        .get();
+      if (!result) {
+        throw new Error("Failed to create folder record");
+      }
+      createdFolderIds.push(result.insertedId);
+      folder = {
+        id: result.insertedId,
         path: resolvedPath,
         displayName: path.basename(resolvedPath),
-      })
-      .returning({ insertedId: folders.id })
-      .get();
-    if (!result) {
-      throw new Error("Failed to create folder record");
-    }
-    folder = {
-      id: result.insertedId,
-      path: resolvedPath,
-      displayName: path.basename(resolvedPath),
-      appearanceColor: null,
-      appearanceIcon: null,
-      parentId: null,
-      photoCount: 0,
-      lastScannedAt: null,
-      createdAt: Date.now(),
-      isWatching: false,
-      watcherStartedAt: null,
-      lastWatcherEventAt: null,
-    };
-  }
-
-  const folderId = folder.id;
-
-  // Async walk — avoids blocking the main process on large folders.
-  // Each directory level yields the event loop via setImmediate to keep the UI responsive.
-  const files: string[] = [];
-  async function walk(dir: string): Promise<void> {
-    let entries: fs.Dirent[];
-    try {
-      entries = await fs.promises.readdir(dir, { withFileTypes: true });
-    } catch {
-      // Permission denied or directory removed — skip silently
-      return;
-    }
-    // Yield the event loop after reading each directory to prevent UI jank
-    await new Promise<void>((r) => setImmediate(r));
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-      } else if (entry.isFile() && shouldIndex(fullPath)) {
-        files.push(fullPath);
-      }
-    }
-  }
-  await walk(resolvedPath);
-
-  // Auto-discover subdirectories that contain images and create folder records.
-  // Walk up from each file's directory to the scan root, creating any missing
-  // intermediate folder records with proper parentId linkage.
-  const dirToFolderId = new Map<string, number>();
-  dirToFolderId.set(resolvedPath, folderId);
-
-  for (const f of files) {
-    let dir = path.dirname(f);
-
-    // Collect missing ancestor directories (bottom-up)
-    const missing: string[] = [];
-    while (dir !== resolvedPath && !dirToFolderId.has(dir)) {
-      missing.unshift(dir);
-      dir = path.dirname(dir);
+        appearanceColor: null,
+        appearanceIcon: null,
+        parentId: null,
+        photoCount: 0,
+        lastScannedAt: null,
+        createdAt: Date.now(),
+        isWatching: false,
+        watcherStartedAt: null,
+        lastWatcherEventAt: null,
+      };
     }
 
-    // Create missing directories top-down so parentId is available
-    for (const d of missing) {
-      const parentDir = path.dirname(d);
-      const parentId = dirToFolderId.get(parentDir) ?? null;
+    const folderId = folder.id;
 
-      let subFolder = db
-        .select({ id: folders.id })
-        .from(folders)
-        .where(eq(folders.path, d))
-        .get();
-      if (!subFolder) {
-        const result = db
-          .insert(folders)
-          .values({
-            path: d,
-            displayName: path.basename(d),
-            parentId,
-          })
-          .returning({ insertedId: folders.id })
-          .get();
-        if (result) {
-          subFolder = { id: result.insertedId };
-        }
-      } else if (subFolder) {
-        // Existing folder record — update parentId if missing
-        db.update(folders)
-          .set({ parentId })
-          .where(eq(folders.id, subFolder.id))
-          .run();
-      }
-
-      if (subFolder) {
-        dirToFolderId.set(d, subFolder.id);
-      }
-    }
-  }
-
-  // Index each file with concurrency for speed.
-  // Sharp/libvips uses the libuv thread pool internally, so overlapping
-  // thumbnail generation + metadata reads yields ~3x throughput on typical
-  // consumer hardware without saturating I/O.
-  const CONCURRENCY = 4;
-  const BATCH_SIZE = 50;
-  const photoIds: number[] = [];
-  const newPhotoIds: number[] = [];
-  let scanned = 0;
-  let skipped = 0;
-
-  async function runWithConcurrency<T, R>(
-    items: T[],
-    fn: (item: T) => Promise<R | null>,
-    limit: number
-  ): Promise<Array<R | null>> {
-    const results: Array<R | null> = new Array(items.length);
-    let cursor = 0;
-
-    async function worker(): Promise<void> {
-      while (cursor < items.length && !scanToken.cancelled) {
-        const idx = cursor++;
-        const item = items[idx];
-        results[idx] = await fn(item);
-      }
-    }
-
-    const workers = Array.from({ length: Math.min(limit, items.length) }, () =>
-      worker()
-    );
-    await Promise.all(workers);
-    return results;
-  }
-
-  // Batch preparation: prepare all photo records with concurrency
-  const preparedRecords = await runWithConcurrency(
-    files,
-    async (file) => {
+    // Async walk — avoids blocking the main process on large folders.
+    // Each directory level yields the event loop via setImmediate to keep the UI responsive.
+    const files: string[] = [];
+    async function walk(dir: string): Promise<void> {
       if (scanToken.cancelled) {
-        return null;
+        return;
+      }
+      let entries: fs.Dirent[];
+      try {
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch {
+        // Permission denied or directory removed — skip silently
+        return;
+      }
+      // Yield the event loop after reading each directory to prevent UI jank
+      await new Promise<void>((r) => setImmediate(r));
+      onProgress?.({
+        scanned: files.length,
+        total: 0,
+        phase: "scanning",
+        currentFile: dir,
+      });
+      for (const entry of entries) {
+        if (scanToken.cancelled) {
+          return;
+        }
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else if (entry.isFile() && shouldIndex(fullPath)) {
+          files.push(fullPath);
+        }
+      }
+    }
+    await walk(resolvedPath);
+
+    // Auto-discover subdirectories that contain images and create folder records.
+    // Walk up from each file's directory to the scan root, creating any missing
+    // intermediate folder records with proper parentId linkage.
+    const dirToFolderId = new Map<string, number>();
+    dirToFolderId.set(resolvedPath, folderId);
+
+    for (const f of files) {
+      let dir = path.dirname(f);
+
+      // Collect missing ancestor directories (bottom-up)
+      const missing: string[] = [];
+      while (dir !== resolvedPath && !dirToFolderId.has(dir)) {
+        missing.unshift(dir);
+        dir = path.dirname(dir);
       }
 
-      onProgress?.({
-        scanned,
-        total: files.length,
-        phase: "indexing",
-        currentFile: file,
-      });
+      // Create missing directories top-down so parentId is available
+      for (const d of missing) {
+        const parentDir = path.dirname(d);
+        const parentId = dirToFolderId.get(parentDir) ?? null;
 
-      try {
-        const fileDir = path.dirname(file);
-        const fileFolderId = dirToFolderId.get(fileDir) || folderId;
-
-        // Check if already indexed
-        const existing = db
-          .select({ id: photos.id, folderId: photos.folderId })
-          .from(photos)
-          .where(eq(photos.path, file))
+        let subFolder = db
+          .select({ id: folders.id })
+          .from(folders)
+          .where(eq(folders.path, d))
           .get();
+        if (!subFolder) {
+          const result = db
+            .insert(folders)
+            .values({
+              path: d,
+              displayName: path.basename(d),
+              parentId,
+            })
+            .returning({ insertedId: folders.id })
+            .get();
+          if (result) {
+            subFolder = { id: result.insertedId };
+            createdFolderIds.push(result.insertedId);
+          }
+        } else if (subFolder) {
+          // Existing folder record — update parentId if missing
+          db.update(folders)
+            .set({ parentId })
+            .where(eq(folders.id, subFolder.id))
+            .run();
+        }
 
-        if (existing) {
-          if (fileFolderId !== null && existing.folderId !== fileFolderId) {
-            const existingFolder = existing.folderId
-              ? db
+        if (subFolder) {
+          dirToFolderId.set(d, subFolder.id);
+        }
+      }
+    }
+
+    // Index each file with concurrency for speed.
+    // Sharp/libvips uses the libuv thread pool internally, so overlapping
+    // thumbnail generation + metadata reads yields ~3x throughput on typical
+    // consumer hardware without saturating I/O.
+    const CONCURRENCY = 4;
+    const BATCH_SIZE = 50;
+    const photoIds: number[] = [];
+    let scanned = 0;
+    let skipped = 0;
+
+    async function runWithConcurrency<T, R>(
+      items: T[],
+      fn: (item: T) => Promise<R | null>,
+      limit: number
+    ): Promise<Array<R | null>> {
+      const results: Array<R | null> = new Array(items.length);
+      let cursor = 0;
+
+      async function worker(): Promise<void> {
+        while (cursor < items.length && !scanToken.cancelled) {
+          const idx = cursor++;
+          const item = items[idx];
+          results[idx] = await fn(item);
+        }
+      }
+
+      const workers = Array.from(
+        { length: Math.min(limit, items.length) },
+        () => worker()
+      );
+      await Promise.all(workers);
+      return results;
+    }
+
+    // Process one bounded batch at a time so EXIF/raw metadata for very large
+    // folders cannot accumulate in memory before the first database write.
+    for (
+      let batchStart = 0;
+      batchStart < files.length;
+      batchStart += BATCH_SIZE
+    ) {
+      const batchFiles = files.slice(batchStart, batchStart + BATCH_SIZE);
+      const existingRows = db
+        .select({ id: photos.id, folderId: photos.folderId, path: photos.path })
+        .from(photos)
+        .where(inArray(photos.path, batchFiles))
+        .all();
+      const existingByPath = new Map(
+        existingRows.map((row) => [row.path, row])
+      );
+
+      const preparedRecords = await runWithConcurrency(
+        batchFiles,
+        async (file) => {
+          if (scanToken.cancelled) {
+            return null;
+          }
+
+          onProgress?.({
+            scanned,
+            total: files.length,
+            phase: "indexing",
+            currentFile: file,
+          });
+
+          try {
+            const fileDir = path.dirname(file);
+            const fileFolderId = dirToFolderId.get(fileDir) || folderId;
+
+            // Check if already indexed
+            const existing = existingByPath.get(file);
+
+            if (existing) {
+              if (fileFolderId !== null && existing.folderId !== fileFolderId) {
+                const existingFolder = existing.folderId
+                  ? db
+                      .select({ path: folders.path })
+                      .from(folders)
+                      .where(eq(folders.id, existing.folderId))
+                      .get()
+                  : null;
+                const newFolder = db
                   .select({ path: folders.path })
                   .from(folders)
-                  .where(eq(folders.id, existing.folderId))
-                  .get()
-              : null;
-            const newFolder = db
-              .select({ path: folders.path })
-              .from(folders)
-              .where(eq(folders.id, fileFolderId))
-              .get();
-            if (
-              newFolder &&
-              (!existingFolder ||
-                getFolderDepth(newFolder.path) >
-                  getFolderDepth(existingFolder.path))
-            ) {
-              db.update(photos)
-                .set({ folderId: fileFolderId })
-                .where(eq(photos.id, existing.id))
-                .run();
+                  .where(eq(folders.id, fileFolderId))
+                  .get();
+                if (
+                  newFolder &&
+                  (!existingFolder ||
+                    getFolderDepth(newFolder.path) >
+                      getFolderDepth(existingFolder.path))
+                ) {
+                  db.update(photos)
+                    .set({ folderId: fileFolderId })
+                    .where(eq(photos.id, existing.id))
+                    .run();
+                }
+              }
+              scanned++;
+              return { type: "existing" as const, photoId: existing.id };
             }
-          }
-          scanned++;
-          return { type: "existing" as const, photoId: existing.id };
-        }
 
-        const prepared = await preparePhotoRecord(file, fileFolderId);
-        if (!prepared) {
-          scanned++;
-          return null;
-        }
-
-        scanned++;
-        return { type: "new" as const, ...prepared };
-      } catch (error) {
-        log.error({ file, err: error }, "Error preparing file");
-        scanned++;
-        return null;
-      }
-    },
-    CONCURRENCY
-  );
-
-  // Batch insert: insert photos in batches
-  const newRecords = preparedRecords.filter(
-    (r) => r && r.type === "new"
-  ) as Array<{
-    type: "new";
-    photoRecord: PhotoRecord;
-    exifRecord: ExifRecord | null;
-    stat: fs.Stats;
-    phash: string | null;
-  }>;
-
-  const existingRecords = preparedRecords.filter(
-    (r) => r && r.type === "existing"
-  ) as Array<{ type: "existing"; photoId: number }>;
-
-  // Add existing photo IDs
-  for (const record of existingRecords) {
-    photoIds.push(record.photoId);
-  }
-
-  // Batch insert new photos
-  for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
-    if (scanToken.cancelled) {
-      // Clean up thumbnails for prepared-but-uninserted records.
-      // These files were processed by preparePhotoRecord (thumbnails
-      // already on disk) but were never committed to the database, so
-      // the IPC-level cancel cleanup won't find them.
-      for (let k = i; k < newRecords.length; k++) {
-        deletePhotoThumbnails(newRecords[k].photoRecord.path);
-      }
-      break;
-    }
-
-    const batch = newRecords.slice(i, i + BATCH_SIZE);
-    const photoRecords = batch.map((r) => r.photoRecord);
-
-    try {
-      const insertedPairs: Array<{
-        photoId: number;
-        record: (typeof batch)[number];
-      }> = [];
-
-      db.transaction(() => {
-        const insertedIds = db
-          .insert(photos)
-          .values(photoRecords)
-          .returning({ insertedId: photos.id })
-          .all();
-
-        for (let j = 0; j < insertedIds.length; j++) {
-          const photoId = insertedIds[j].insertedId;
-          const record = batch[j];
-
-          photoIds.push(photoId);
-          newPhotoIds.push(photoId);
-          insertedPairs.push({ photoId, record });
-
-          if (record.exifRecord) {
-            try {
-              record.exifRecord.photoId = photoId;
-              db.insert(exifData).values(record.exifRecord).run();
-            } catch (err: any) {
-              log.warn(
-                { filePath: record.photoRecord.path, err },
-                "EXIF insert failed"
-              );
+            const prepared = await preparePhotoRecord(file, fileFolderId);
+            if (!prepared) {
+              scanned++;
+              return null;
             }
-          }
-        }
-      });
 
-      for (const { photoId, record } of insertedPairs) {
-        checkNewPhotoDuplicates(
-          photoId,
-          record.phash,
-          record.photoRecord.path,
-          record.stat.size
-        );
-        queuePrimaryColorVectorUpsert(
-          photoId,
-          record.photoRecord.dominantColors
-        );
-      }
-    } catch (err: any) {
-      // Fallback to individual inserts if batch fails
-      log.warn(
-        { err },
-        "Batch insert failed, falling back to individual inserts"
+            scanned++;
+            return { type: "new" as const, ...prepared };
+          } catch (error) {
+            log.error({ file, err: error }, "Error preparing file");
+            scanned++;
+            return null;
+          }
+        },
+        CONCURRENCY
       );
-      for (const record of batch) {
+
+      // Batch insert: insert photos in batches
+      const newRecords = preparedRecords.filter(
+        (r) => r && r.type === "new"
+      ) as Array<{
+        type: "new";
+        photoRecord: PhotoRecord;
+        exifRecord: ExifRecord | null;
+        stat: fs.Stats;
+        phash: string | null;
+      }>;
+
+      const existingRecords = preparedRecords.filter(
+        (r) => r && r.type === "existing"
+      ) as Array<{ type: "existing"; photoId: number }>;
+
+      // Add existing photo IDs
+      for (const record of existingRecords) {
+        photoIds.push(record.photoId);
+      }
+
+      // Batch insert new photos
+      for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
+        if (scanToken.cancelled) {
+          // Clean up thumbnails for prepared-but-uninserted records.
+          // These files were processed by preparePhotoRecord (thumbnails
+          // already on disk) but were never committed to the database, so
+          // the IPC-level cancel cleanup won't find them.
+          for (let k = i; k < newRecords.length; k++) {
+            deletePhotoThumbnails(newRecords[k].photoRecord.path);
+          }
+          break;
+        }
+
+        const batch = newRecords.slice(i, i + BATCH_SIZE);
+        const photoRecords = batch.map((r) => r.photoRecord);
+
         try {
-          const result = db
-            .insert(photos)
-            .values(record.photoRecord)
-            .returning({ insertedId: photos.id })
-            .get();
+          const insertedPairs: Array<{
+            photoId: number;
+            record: (typeof batch)[number];
+          }> = [];
 
-          if (result) {
-            const photoId = result.insertedId;
-            photoIds.push(photoId);
-            newPhotoIds.push(photoId);
+          db.transaction(() => {
+            const insertedIds = db
+              .insert(photos)
+              .values(photoRecords)
+              .returning({ insertedId: photos.id })
+              .all();
 
+            for (let j = 0; j < insertedIds.length; j++) {
+              const photoId = insertedIds[j].insertedId;
+              const record = batch[j];
+
+              photoIds.push(photoId);
+              newPhotoIds.push(photoId);
+              insertedPairs.push({ photoId, record });
+
+              if (record.exifRecord) {
+                try {
+                  record.exifRecord.photoId = photoId;
+                  db.insert(exifData).values(record.exifRecord).run();
+                } catch (err: any) {
+                  log.warn(
+                    { filePath: record.photoRecord.path, err },
+                    "EXIF insert failed"
+                  );
+                }
+              }
+            }
+          });
+
+          for (const { photoId, record } of insertedPairs) {
             checkNewPhotoDuplicates(
               photoId,
               record.phash,
@@ -1051,118 +1063,191 @@ export async function scanFolder(
               photoId,
               record.photoRecord.dominantColors
             );
+          }
+        } catch (err: any) {
+          // Fallback to individual inserts if batch fails
+          log.warn(
+            { err },
+            "Batch insert failed, falling back to individual inserts"
+          );
+          for (const record of batch) {
+            try {
+              const result = db
+                .insert(photos)
+                .values(record.photoRecord)
+                .returning({ insertedId: photos.id })
+                .get();
 
-            if (record.exifRecord) {
-              try {
-                record.exifRecord.photoId = photoId;
-                db.insert(exifData).values(record.exifRecord).run();
-              } catch {
-                /* skip */
+              if (result) {
+                const photoId = result.insertedId;
+                photoIds.push(photoId);
+                newPhotoIds.push(photoId);
+
+                checkNewPhotoDuplicates(
+                  photoId,
+                  record.phash,
+                  record.photoRecord.path,
+                  record.stat.size
+                );
+                queuePrimaryColorVectorUpsert(
+                  photoId,
+                  record.photoRecord.dominantColors
+                );
+
+                if (record.exifRecord) {
+                  try {
+                    record.exifRecord.photoId = photoId;
+                    db.insert(exifData).values(record.exifRecord).run();
+                  } catch {
+                    /* skip */
+                  }
+                }
               }
+            } catch {
+              skipped++;
             }
           }
-        } catch {
-          skipped++;
+        }
+      }
+
+      // Count skipped files
+      skipped += preparedRecords.filter((r) => r === null).length;
+      if (scanToken.cancelled) {
+        break;
+      }
+    }
+
+    if (skipped > 0) {
+      log.info(
+        { indexed: photoIds.length, skipped, total: files.length },
+        "Folder scan summary"
+      );
+    }
+
+    // Clean up photos whose files no longer exist on disk — check all folders
+    const stalePhotoIds: number[] = [];
+    for (const [dirPath, fid] of dirToFolderId) {
+      const dbPhotos = db
+        .select({ id: photos.id, path: photos.path })
+        .from(photos)
+        .where(eq(photos.folderId, fid))
+        .all();
+      for (const p of dbPhotos) {
+        if (!fs.existsSync(p.path)) {
+          db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
+          db.delete(photos).where(eq(photos.id, p.id)).run();
+          stalePhotoIds.push(p.id);
+          const idx = photoIds.indexOf(p.id);
+          if (idx >= 0) {
+            photoIds.splice(idx, 1);
+          }
+          const newIdx = newPhotoIds.indexOf(p.id);
+          if (newIdx >= 0) {
+            newPhotoIds.splice(newIdx, 1);
+          }
+          log.info({ path: p.path }, "Removed stale record");
         }
       }
     }
-  }
+    if (stalePhotoIds.length > 0) {
+      await deletePhotoVectors(stalePhotoIds).catch((err) => {
+        log.warn({ err }, "Failed to remove stale photo vectors");
+      });
+    }
 
-  // Count skipped files
-  skipped = preparedRecords.filter((r) => r === null).length;
+    const folderIds = Array.from(new Set(dirToFolderId.values()));
+    const folderPhotoCounts = new Map<number, number>();
+    if (folderIds.length > 0) {
+      const rows = db
+        .select({
+          count: sql<number>`count(*)`,
+          folderId: photos.folderId,
+        })
+        .from(photos)
+        .where(
+          and(inArray(photos.folderId, folderIds), isNull(photos.deletedAt))
+        )
+        .groupBy(photos.folderId)
+        .all();
 
-  if (skipped > 0) {
-    log.info(
-      { indexed: photoIds.length, skipped, total: files.length },
-      "Folder scan summary"
-    );
-  }
-
-  // Clean up photos whose files no longer exist on disk — check all folders
-  const stalePhotoIds: number[] = [];
-  for (const [dirPath, fid] of dirToFolderId) {
-    const dbPhotos = db
-      .select({ id: photos.id, path: photos.path })
-      .from(photos)
-      .where(eq(photos.folderId, fid))
-      .all();
-    for (const p of dbPhotos) {
-      if (!fs.existsSync(p.path)) {
-        db.delete(exifData).where(eq(exifData.photoId, p.id)).run();
-        db.delete(photos).where(eq(photos.id, p.id)).run();
-        stalePhotoIds.push(p.id);
-        const idx = photoIds.indexOf(p.id);
-        if (idx >= 0) {
-          photoIds.splice(idx, 1);
+      for (const row of rows) {
+        if (row.folderId !== null) {
+          folderPhotoCounts.set(row.folderId, row.count);
         }
-        const newIdx = newPhotoIds.indexOf(p.id);
-        if (newIdx >= 0) {
-          newPhotoIds.splice(newIdx, 1);
-        }
-        log.info({ path: p.path }, "Removed stale record");
       }
     }
-  }
-  if (stalePhotoIds.length > 0) {
-    await deletePhotoVectors(stalePhotoIds).catch((err) => {
-      log.warn({ err }, "Failed to remove stale photo vectors");
+
+    for (const fid of folderIds) {
+      db.update(folders)
+        .set({
+          lastScannedAt: Date.now(),
+          photoCount: folderPhotoCounts.get(fid) ?? 0,
+        })
+        .where(eq(folders.id, fid))
+        .run();
+    }
+
+    // 重新加载文件夹匹配器缓存
+    reloadFolderMatcher();
+
+    onProgress?.({
+      scanned: files.length,
+      total: files.length,
+      phase: "complete",
+      currentFile: "",
     });
-  }
 
-  const folderIds = Array.from(new Set(dirToFolderId.values()));
-  const folderPhotoCounts = new Map<number, number>();
-  if (folderIds.length > 0) {
-    const rows = db
-      .select({
-        count: sql<number>`count(*)`,
-        folderId: photos.folderId,
-      })
-      .from(photos)
-      .where(and(inArray(photos.folderId, folderIds), isNull(photos.deletedAt)))
-      .groupBy(photos.folderId)
-      .all();
+    // Auto-tagging now runs after embedAllPhotos() completes, when all CLIP
+    // vectors are available in LanceDB. This avoids expensive per-photo worker
+    // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
 
-    for (const row of rows) {
-      if (row.folderId !== null) {
-        folderPhotoCounts.set(row.folderId, row.count);
+    return {
+      createdFolderIds: [...createdFolderIds],
+      folderId,
+      photoIds,
+      newPhotoIds,
+      skipped,
+      cancelled: scanToken.cancelled,
+      folderExisted,
+    };
+  } catch (error) {
+    const inserted =
+      newPhotoIds.length > 0
+        ? db
+            .select({ id: photos.id, path: photos.path })
+            .from(photos)
+            .where(inArray(photos.id, newPhotoIds))
+            .all()
+        : [];
+    if (newPhotoIds.length > 0) {
+      db.transaction(() => {
+        db.delete(exifData).where(inArray(exifData.photoId, newPhotoIds)).run();
+        db.delete(photos).where(inArray(photos.id, newPhotoIds)).run();
+      });
+      for (const record of inserted) {
+        deletePhotoThumbnails(record.path);
+      }
+      await deletePhotoVectors(newPhotoIds).catch(() => {
+        /* best-effort rollback */
+      });
+    }
+    for (const folderId of createdFolderIds.reverse()) {
+      const remaining = db
+        .select({ count: sql<number>`count(*)` })
+        .from(photos)
+        .where(eq(photos.folderId, folderId))
+        .get()?.count;
+      if (!remaining) {
+        db.delete(folders).where(eq(folders.id, folderId)).run();
       }
     }
+    reloadFolderMatcher();
+    throw error;
+  } finally {
+    if (activeScanToken === scanToken) {
+      activeScanToken = null;
+    }
   }
-
-  for (const fid of folderIds) {
-    db.update(folders)
-      .set({
-        lastScannedAt: Date.now(),
-        photoCount: folderPhotoCounts.get(fid) ?? 0,
-      })
-      .where(eq(folders.id, fid))
-      .run();
-  }
-
-  // 重新加载文件夹匹配器缓存
-  reloadFolderMatcher();
-
-  onProgress?.({
-    scanned: files.length,
-    total: files.length,
-    phase: "complete",
-    currentFile: "",
-  });
-
-  activeScanToken = null;
-
-  // Auto-tagging now runs after embedAllPhotos() completes, when all CLIP
-  // vectors are available in LanceDB. This avoids expensive per-photo worker
-  // embedding and prevents the scene-tag bias (every photo tagged as indoor/outdoor/city).
-
-  return {
-    folderId,
-    photoIds,
-    newPhotoIds,
-    skipped,
-    cancelled: scanToken.cancelled,
-    folderExisted,
-  };
 }
 
 export function startWatching(
@@ -1175,6 +1260,10 @@ export function startWatching(
     .all();
 
   for (const folder of indexedFolders) {
+    const watcherKey = watcherPathKey(folder.path);
+    if (watchers.has(watcherKey)) {
+      continue;
+    }
     const watcher = chokidar.watch(folder.path, {
       ignored: [/\.thumbnails/, /\.cache/],
       ignorePermissionErrors: true,
@@ -1278,7 +1367,7 @@ export function startWatching(
       .where(eq(folders.id, folder.id))
       .run();
 
-    watchers.push(watcher);
+    watchers.set(watcherKey, watcher);
   }
 
   log.info(
@@ -1291,6 +1380,10 @@ export function watchFolder(
   folderPath: string,
   onChange: (photoId: number | null, event: "add" | "remove") => void
 ): void {
+  const watcherKey = watcherPathKey(folderPath);
+  if (watchers.has(watcherKey)) {
+    return;
+  }
   const db = getDatabase();
   const watcher = chokidar.watch(folderPath, {
     ignored: [/\.thumbnails/, /\.cache/],
@@ -1383,7 +1476,21 @@ export function watchFolder(
     });
   });
 
-  watchers.push(watcher);
+  watchers.set(watcherKey, watcher);
+}
+
+/** Stop watchers rooted at this folder or one of its descendants. */
+export async function unwatchFolder(folderPath: string): Promise<void> {
+  const root = watcherPathKey(folderPath);
+  const descendantPrefix = `${root}${path.sep}`;
+  const closing: Promise<void>[] = [];
+  for (const [key, watcher] of watchers) {
+    if (key === root || key.startsWith(descendantPrefix)) {
+      watchers.delete(key);
+      closing.push(watcher.close());
+    }
+  }
+  await Promise.all(closing);
 }
 
 export async function stopWatching(): Promise<void> {
@@ -1392,10 +1499,10 @@ export async function stopWatching(): Promise<void> {
   // 等待队列清空
   await watcherQueue.onIdle();
 
-  for (const watcher of watchers) {
+  for (const watcher of watchers.values()) {
     await watcher.close();
   }
-  watchers = [];
+  watchers.clear();
 
   // 更新所有文件夹状态
   db.update(folders).set({ isWatching: false }).run();

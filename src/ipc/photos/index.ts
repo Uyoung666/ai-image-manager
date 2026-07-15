@@ -16,6 +16,7 @@ import {
   setWatermarkSettings,
 } from "./handlers/export";
 import {
+  cancelAllImports_h,
   cancelQueuedImports_h,
   deleteFolder,
   getFolders,
@@ -45,7 +46,12 @@ import {
   scanOrphanThumbnails,
   toggleFavorite,
 } from "./handlers/mutations";
-import { searchByImage, searchByText, searchCompound, searchSpotlight } from "./handlers/search";
+import {
+  searchByImage,
+  searchByText,
+  searchCompound,
+  searchSpotlight,
+} from "./handlers/search";
 import { generateAndUploadShare } from "./handlers/share";
 import {
   dismissDuplicate,
@@ -63,6 +69,7 @@ import {
   confirmPhotoTag,
   deleteTag,
   getPhotoTags,
+  getPhotoTagAnalysisStatus,
   getTags,
   removePhotoTag,
   setPhotoTag,
@@ -74,6 +81,7 @@ export const photos = {
   backfillMissingThumbnails,
   batchGenerateTags,
   cancelAiIndexing,
+  cancelAllImports: cancelAllImports_h,
   cancelQueuedImports: cancelQueuedImports_h,
   cleanupOrphanPhotos,
   cleanOrphanThumbnails,
@@ -101,6 +109,7 @@ export const photos = {
   getPhotoDetail,
   getPhotoExif,
   getPhotoTags,
+  getPhotoTagAnalysisStatus,
   getStats,
   getTags,
   getWatermarkSettings,

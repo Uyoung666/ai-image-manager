@@ -9,7 +9,7 @@ import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel } from "./model-loader";
-import type { EmbedProgressCallback } from "./state";
+import type { EmbedProgress, EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
   activeEmbeddingRunId,
@@ -937,28 +937,25 @@ export async function embedAllPhotos(
       return processed;
     }
 
-    // If there were no photos at all, stay in "idle" phase so the UI
-    // allows restarting after the user imports photos.
+    let finalProgress: EmbedProgress;
     if (total === 0 && totalPhotos === 0) {
-      setCurrentProgress({
+      finalProgress = {
         processed: 0,
         total: 0,
         phase: "idle",
         currentFile: "",
         downloadPercent: undefined,
-      });
+      };
     } else if (total === 0 && totalPhotos > 0) {
-      // All photos already processed — report complete with actual counts
-      setCurrentProgress({
+      finalProgress = {
         processed: processedCount,
         total: processedCount,
         phase: "complete",
         currentFile: "",
         downloadPercent: undefined,
-      });
+      };
     } else if (processed === 0) {
-      // Photos exist but none were embedded — workers likely failed
-      setCurrentProgress({
+      finalProgress = {
         processed: 0,
         total,
         phase: "error",
@@ -966,34 +963,68 @@ export async function embedAllPhotos(
         downloadPercent: undefined,
         error:
           "AI 嵌入失败：Worker 进程未能处理任何照片，请检查模型文件和依赖是否完整",
-      });
+      };
     } else {
-      setCurrentProgress({
+      finalProgress = {
         processed,
         total,
         phase: "complete",
         currentFile: "",
         downloadPercent: undefined,
-      });
+      };
     }
-    onProgress?.(currentProgress);
 
-    // Run batch auto-tagging for all photos embedded across pause/resume.
     const autoTagIds = drainPendingAutoTagPhotoIds();
-    if (autoTagIds.length > 0) {
+    let tagError: string | undefined;
+    if (finalProgress.phase !== "error" && autoTagIds.length > 0) {
+      setCurrentProgress({
+        processed: 0,
+        total: autoTagIds.length,
+        phase: "tagging",
+        currentFile: "",
+        downloadPercent: undefined,
+      });
+      onProgress?.(currentProgress);
       try {
-        const r = await batchSuggestTags(autoTagIds);
+        const r = await batchSuggestTags(
+          autoTagIds,
+          (taggedCount, tagTotal, photoId) => {
+            setCurrentProgress({
+              processed: taggedCount,
+              total: tagTotal,
+              phase: "tagging",
+              currentFile: String(photoId),
+              downloadPercent: undefined,
+            });
+            onProgress?.(currentProgress);
+          }
+        );
         console.log(
           `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
         );
       } catch (err: any) {
-        console.error("[AI] Auto-tag failed:", err?.message);
+        tagError = err?.message || String(err);
+        console.error("[AI] Auto-tag failed:", tagError);
       }
     }
 
     if (processed > 0 && photoTable) {
       await ensureVectorIndex(true);
     }
+
+    if (tagError) {
+      setCurrentProgress({
+        processed: currentProgress.processed,
+        total: currentProgress.total,
+        phase: "tag-error",
+        currentFile: "",
+        downloadPercent: undefined,
+        error: tagError,
+      });
+    } else {
+      setCurrentProgress(finalProgress);
+    }
+    onProgress?.(currentProgress);
 
     finishRun("idle");
     return processed;

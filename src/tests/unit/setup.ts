@@ -94,6 +94,12 @@ vi.mock("react-i18next", () => ({
         sidebarTags: "标签",
         tagSearchPlaceholder: "搜索标签...",
         tagBatchGenerate: "批量生成 AI 标签",
+        tagWaitingForIndex: "AI 索引完成后将自动生成标签",
+        tagGeneratingProgress: "正在生成 AI 标签 {{processed}}/{{total}}",
+        tagUpdating: "正在为新照片更新标签…",
+        tagAnalysisIndexing: "AI 索引中，完成后可分析",
+        tagAnalysisRunning: "正在自动分析此照片",
+        tagAnalysisBusy: "AI 标签任务正在运行，完成后可分析",
         tagDropHint: "松手添加",
         tagDeleteTitle: "删除标签",
         tagDeleteDescription: "确定要删除标签「{{name}}」吗？该操作不可撤销。",
@@ -107,6 +113,10 @@ vi.mock("react-i18next", () => ({
           "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
         toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
         toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
+        semanticSearchPartial:
+          "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
+        semanticSearchUnavailable:
+          "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。",
         toastScanFolderFailed: "扫描文件夹失败",
         toastFolderRemoved: "已移除文件夹",
         toastDeleteFolderFailed: "删除文件夹失败",

@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
 
 const PHOTOS_TITLE_PATTERN = /Photos/;
-const { updateFolderAppearanceMock } = vi.hoisted(() => ({
+const { updateFolderAppearanceMock, useAiStatusMock } = vi.hoisted(() => ({
   updateFolderAppearanceMock: vi.fn(),
+  useAiStatusMock: vi.fn(),
 }));
 
 vi.mock("@/ipc/manager", () => ({
@@ -29,7 +30,21 @@ vi.mock("@/components/AiProgressBar", () => ({
   AiProgressBar: () => null,
 }));
 
+vi.mock("@/hooks/useAiStatus", () => ({
+  useAiStatus: useAiStatusMock,
+}));
+
 describe("Sidebar", () => {
+  beforeEach(() => {
+    useAiStatusMock.mockReturnValue({
+      data: {
+        coverageState: "ready",
+        embeddingProgress: { phase: "complete", processed: 10, total: 10 },
+        isEmbedding: false,
+        pendingPhotos: 0,
+      },
+    });
+  });
   const baseProps = {
     activeFolderId: null as number | null,
     activeTagIds: [] as number[],
@@ -42,13 +57,10 @@ describe("Sidebar", () => {
       displayName: string;
       photoCount: number;
     }>,
-    importPhase: "idle" as "idle" | "scanning" | "embedding",
     onAddFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
     onSelectFolder: vi.fn(),
     onToggleCollapse: vi.fn(),
-    scanningFolder: null as string | null,
-    scanProgress: "",
     totalPhotos: 1250,
   };
 
@@ -64,7 +76,9 @@ describe("Sidebar", () => {
 
   it("shows Add Folder button", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByRole("button", { name: "添加文件夹" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加文件夹" })
+    ).toBeInTheDocument();
   });
 
   it("shows all photos button", () => {
@@ -164,7 +178,9 @@ describe("Sidebar", () => {
       <Sidebar {...baseProps} collapsed folders={[folder]} />
     );
     expect(
-      screen.getByRole("button", { name: PHOTOS_TITLE_PATTERN }).querySelector("svg")
+      screen
+        .getByRole("button", { name: PHOTOS_TITLE_PATTERN })
+        .querySelector("svg")
     ).not.toBeNull();
 
     rerender(<Sidebar {...baseProps} folders={[folder]} />);
@@ -277,7 +293,9 @@ describe("Sidebar", () => {
     expect(
       screen.getByRole("button", { name: PHOTOS_TITLE_PATTERN })
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Travel/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Travel/ })
+    ).not.toBeInTheDocument();
   });
 
   it("supports keyboard navigation and selection in the folder tree", async () => {
@@ -333,13 +351,6 @@ describe("Sidebar", () => {
     expect(folderBtn?.className).toContain("bg-primary/15");
   });
 
-  it("shows scan progress when provided", () => {
-    render(
-      <Sidebar {...baseProps} scanProgress="扫描完成，共索引 100 张照片" />
-    );
-    expect(screen.getByText("扫描完成，共索引 100 张照片")).toBeInTheDocument();
-  });
-
   it("shows empty folder message when no folders", () => {
     render(<Sidebar {...baseProps} />);
     expect(screen.getByText("尚未添加文件夹")).toBeInTheDocument();
@@ -351,5 +362,22 @@ describe("Sidebar", () => {
     const buttonTexts = allButtons.map((btn) => btn.textContent);
     expect(buttonTexts.some((t) => t?.includes("仪表盘"))).toBe(true);
     expect(buttonTexts.some((t) => t?.includes("设置"))).toBe(true);
+  });
+
+  it("shows automatic tag status instead of a batch action while AI is pending", () => {
+    useAiStatusMock.mockReturnValue({
+      data: {
+        coverageState: "unavailable",
+        embeddingProgress: { phase: "embedding", processed: 2, total: 10 },
+        isEmbedding: true,
+        pendingPhotos: 8,
+      },
+    });
+    render(<Sidebar {...baseProps} />);
+
+    expect(screen.getByText("AI 索引完成后将自动生成标签")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "批量生成 AI 标签" })
+    ).not.toBeInTheDocument();
   });
 });

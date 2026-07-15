@@ -13,6 +13,7 @@ import {
   finishEmbeddingRun,
   getAiReadiness,
   getEmbeddingProgress,
+  isAutoTaggingActive,
   pauseEmbedding,
   rebuildVectorDB,
   resetAllAiProcessedFlags,
@@ -140,6 +141,9 @@ export const resetAiIndex = os.handler(async () => {
 });
 
 export const batchGenerateTags = os.handler(async () => {
+  if (aiControlState !== "idle" || isAutoTaggingActive()) {
+    return { busy: true, skipped: 0, tagged: 0, total: 0 };
+  }
   const db = getDatabase();
   const indexed = db
     .select({ id: photos.id })
@@ -152,6 +156,55 @@ export const batchGenerateTags = os.handler(async () => {
     return { tagged: 0, skipped: 0, total: 0 };
   }
 
-  const result = await batchSuggestTags(indexed);
-  return { ...result, total: indexed.length };
+  const { BrowserWindow } = require("electron");
+  const broadcastProgress = () => {
+    const progress = getEmbeddingProgress();
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ai-progress", progress);
+    }
+  };
+  setCurrentProgress({
+    processed: 0,
+    total: indexed.length,
+    phase: "tagging",
+    currentFile: "",
+  });
+  broadcastProgress();
+  try {
+    const result = await batchSuggestTags(
+      indexed,
+      (processed, total, photoId) => {
+        setCurrentProgress({
+          processed,
+          total,
+          phase: "tagging",
+          currentFile: String(photoId),
+        });
+        broadcastProgress();
+      }
+    );
+    setCurrentProgress({
+      processed: indexed.length,
+      total: indexed.length,
+      phase: "complete",
+      currentFile: "",
+    });
+    broadcastProgress();
+    return { ...result, total: indexed.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setCurrentProgress({
+      processed: getEmbeddingProgress().processed,
+      total: indexed.length,
+      phase: "tag-error",
+      currentFile: "",
+      error: message,
+    });
+    broadcastProgress();
+    throw error;
+  } finally {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ai-tags-done");
+    }
+  }
 });

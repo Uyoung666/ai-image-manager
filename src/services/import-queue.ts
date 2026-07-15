@@ -1,4 +1,3 @@
-import path from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
@@ -6,6 +5,7 @@ import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { invalidateIndexStatsCache } from "@/ipc/photos/handlers/stats";
 import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
+import { getAiControlState } from "@/services/ai/state";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
   scanFolder as scanFolderService,
@@ -13,6 +13,7 @@ import {
   watchFolder,
 } from "@/services/indexer";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
+import { importPathKey, normalizeImportFolderPath } from "@/utils/import-path";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -33,6 +34,8 @@ export interface ImportTask {
   newPhotoCount?: number;
   /** Result from scanFolderService, set once scanning completes. */
   photoCount?: number;
+  /** Number of supported files that could not be indexed. */
+  skipped?: number;
   /** 1-based position in queue (only meaningful while status === "queued"). */
   position: number;
   status: ImportTaskStatus;
@@ -53,6 +56,8 @@ const history: ImportTask[] = [];
 let current: ImportTask | null = null;
 let running = false;
 let nextId = 1;
+let aiEmbeddingPending = false;
+let aiEmbeddingRunning = false;
 
 function broadcast(): void {
   const status: ImportQueueStatus = {
@@ -82,7 +87,8 @@ function dequeueTask(): ImportTask | null {
 function cleanupCancelledImport(
   folderId: number,
   newPhotoIds: number[],
-  folderExisted: boolean
+  folderExisted: boolean,
+  createdFolderIds: number[]
 ): void {
   const db = getDatabase();
 
@@ -137,6 +143,18 @@ function cleanupCancelledImport(
     }
     db.delete(folders).where(eq(folders.id, folderId)).run();
     reloadFolderMatcher();
+  } else if (createdFolderIds.length > 0) {
+    for (const fid of [...createdFolderIds].reverse()) {
+      const hasPhotos = db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(eq(photos.folderId, fid))
+        .get();
+      if (!hasPhotos) {
+        db.delete(folders).where(eq(folders.id, fid)).run();
+      }
+    }
+    reloadFolderMatcher();
   }
 }
 
@@ -153,7 +171,8 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
     cleanupCancelledImport(
       result.folderId,
       result.newPhotoIds,
-      result.folderExisted
+      result.folderExisted,
+      result.createdFolderIds
     );
     task.status = "cancelled";
     history.push(task);
@@ -162,6 +181,7 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
 
   task.photoCount = result.photoIds.length;
   task.newPhotoCount = result.newPhotoIds.length;
+  task.skipped = result.skipped;
 
   watchFolder(task.folderPath, (photoId, event) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -169,18 +189,16 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
     }
   });
 
-  if (result.photoIds.length > 0) {
-    task.status = "embedding";
-    broadcast();
-    await runEmbedPhase();
+  if (result.newPhotoIds.length > 0) {
+    aiEmbeddingPending = true;
   }
 
   return true;
 }
 
-async function runEmbedPhase(): Promise<void> {
+async function runEmbedPhase(): Promise<number> {
   try {
-    await embedAllPhotos((aiProgress) => {
+    return await embedAllPhotos((aiProgress) => {
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send("ai-progress", aiProgress);
       }
@@ -188,7 +206,39 @@ async function runEmbedPhase(): Promise<void> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[ImportQueue] AI embedding failed: ${message}`);
+    return 0;
+  } finally {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send("ai-embedding-done");
+      win.webContents.send("ai-status-changed");
+    }
   }
+}
+
+function runPendingAiEmbedding(): void {
+  if (
+    running ||
+    current ||
+    queue.length > 0 ||
+    aiEmbeddingRunning ||
+    !aiEmbeddingPending
+  ) {
+    return;
+  }
+
+  // A manual/repair embedding run may already own the worker. Keep this
+  // import-triggered request pending and run it after that owner releases it.
+  if (getAiControlState() !== "idle") {
+    setTimeout(runPendingAiEmbedding, 1000);
+    return;
+  }
+
+  aiEmbeddingPending = false;
+  aiEmbeddingRunning = true;
+  runEmbedPhase().then(() => {
+    aiEmbeddingRunning = false;
+    runPendingAiEmbedding();
+  });
 }
 
 // ── Consumer ───────────────────────────────────────────────────────
@@ -203,6 +253,7 @@ async function processNext(): Promise<void> {
     running = false;
     current = null;
     broadcast();
+    runPendingAiEmbedding();
     return;
   }
 
@@ -242,16 +293,19 @@ async function processNext(): Promise<void> {
  * Returns immediately with the queued task — the frontend is unblocked.
  */
 export function enqueueImport(folderPath: string): ImportTask {
-  const resolved = path.resolve(folderPath);
+  const resolved = normalizeImportFolderPath(folderPath);
+  const resolvedKey = importPathKey(resolved);
 
-  const duplicate = queue.find((t) => path.resolve(t.folderPath) === resolved);
+  const duplicate = queue.find(
+    (t) => importPathKey(t.folderPath) === resolvedKey
+  );
   if (duplicate) {
     return duplicate;
   }
   if (
     current &&
-    path.resolve(current.folderPath) === resolved &&
-    (current.status === "queued" || current.status === "scanning")
+    importPathKey(current.folderPath) === resolvedKey &&
+    current.status === "scanning"
   ) {
     return current;
   }
@@ -296,6 +350,15 @@ export function cancelAllImports(): void {
   }
 }
 
+/** Cancel only the currently scanning folder. Pending imports continue. */
+export function cancelCurrentImport(): boolean {
+  if (!current || current.status !== "scanning") {
+    return false;
+  }
+  stopScanningService();
+  return true;
+}
+
 /** Get the full queue snapshot. */
 export function getImportQueueStatus(): ImportQueueStatus {
   return {
@@ -307,15 +370,21 @@ export function getImportQueueStatus(): ImportQueueStatus {
 
 /** Check whether a folder path is currently being imported or queued. */
 export function isFolderImporting(folderPath: string): boolean {
-  const resolved = path.resolve(folderPath);
+  let resolved: string;
+  try {
+    resolved = normalizeImportFolderPath(folderPath);
+  } catch {
+    return false;
+  }
+  const resolvedKey = importPathKey(resolved);
   if (
     current &&
-    path.resolve(current.folderPath) === resolved &&
+    importPathKey(current.folderPath) === resolvedKey &&
     (current.status === "queued" ||
       current.status === "scanning" ||
       current.status === "embedding")
   ) {
     return true;
   }
-  return queue.some((t) => path.resolve(t.folderPath) === resolved);
+  return queue.some((t) => importPathKey(t.folderPath) === resolvedKey);
 }

@@ -6,7 +6,15 @@ export interface EmbedProgress {
   downloadPercent?: number;
   error?: string;
   loadingStartedAt?: number | null;
-  phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
+  phase:
+    | "idle"
+    | "loading"
+    | "embedding"
+    | "tagging"
+    | "complete"
+    | "error"
+    | "tag-error"
+    | "repairing";
   processed: number;
   /** 非空时表示这是一次自动修复引起的重新索引，值为修复原因 */
   repairReason?: string;
@@ -45,6 +53,7 @@ let nextEmbeddingRunId = 0;
 export let writtenPhotoIds: Set<number> = new Set();
 const writtenPhotoIdsByRun = new Map<number, Set<number>>();
 const pendingAutoTagPhotoIds = new Set<number>();
+const activeAutoTagPhotoIds = new Set<number>();
 /** 全局 AbortController，用于跨模块传递取消信号 */
 export let abortController: AbortController | null = null;
 /** 向量数据库是否在本次启动中由自动修复流程重建过 */
@@ -189,6 +198,30 @@ export function drainPendingAutoTagPhotoIds(): number[] {
 }
 export function getPendingAutoTagPhotoIds(): Set<number> {
   return new Set(pendingAutoTagPhotoIds);
+}
+
+export function beginAutoTagging(ids: number[]): void {
+  for (const id of ids) {
+    activeAutoTagPhotoIds.add(id);
+  }
+}
+
+export function finishAutoTaggingPhoto(id: number): void {
+  activeAutoTagPhotoIds.delete(id);
+}
+
+export function finishAutoTagging(ids: number[]): void {
+  for (const id of ids) {
+    activeAutoTagPhotoIds.delete(id);
+  }
+}
+
+export function isAutoTaggingPhoto(id: number): boolean {
+  return activeAutoTagPhotoIds.has(id);
+}
+
+export function isAutoTaggingActive(): boolean {
+  return activeAutoTagPhotoIds.size > 0;
 }
 export function setAbortController(c: AbortController | null): void {
   abortController = c;

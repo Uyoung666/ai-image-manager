@@ -455,7 +455,7 @@ export function getEmbeddingProgress(): EmbedProgress & {
   return {
     ...currentProgress,
     controlState: aiControlState,
-    isActive: isEmbedding,
+    isActive: isEmbedding || currentProgress.phase === "tagging",
     isModelLoaded,
     isPaused,
     runId: activeEmbeddingRunId,

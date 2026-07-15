@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface GlobalAiProgress {
+  canCancel: boolean;
   /** Whether any background AI task is currently active. */
   isRunning: boolean;
   /** 0–100 aggregate progress percentage. */
@@ -15,6 +18,7 @@ export interface GlobalAiProgress {
     | "scanning"
     | "loading-model"
     | "embedding"
+    | "tagging"
     | "face-detection"
     | "import-queue";
   /** Human-readable status line for the UI. */
@@ -31,7 +35,15 @@ interface ScanPayload {
 interface AiProgressPayload {
   channel: "ai-progress";
   downloadPercent?: number;
-  phase: "idle" | "loading" | "embedding" | "complete" | "error" | "repairing";
+  phase:
+    | "idle"
+    | "loading"
+    | "embedding"
+    | "tagging"
+    | "complete"
+    | "error"
+    | "tag-error"
+    | "repairing";
   processed: number;
   total: number;
 }
@@ -130,6 +142,9 @@ function getAiSnapshot(ai: AiProgressPayload | null) {
     } else if (ai.phase === "embedding") {
       aiPct = clampPct(ai.processed, ai.total);
       aiText = `AI 特征提取 ${ai.processed}/${ai.total}`;
+    } else if (ai.phase === "tagging") {
+      aiPct = clampPct(ai.processed, ai.total);
+      aiText = `AI 标签生成 ${ai.processed}/${ai.total}`;
     }
   }
   return {
@@ -218,6 +233,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
   // Queue currently processing a folder (covers scan+embed phases)
   if (snap.hasQueue && snap.queueCurrent) {
     return {
+      canCancel: snap.queueCurrent.status === "scanning",
       isRunning: true,
       percent: snap.scanPercent > 0 ? snap.scanPercent : snap.aiPercent,
       statusText: snap.queueText,
@@ -227,6 +243,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
   if (snap.hasQueue && snap.queuePending > 0) {
     return {
+      canCancel: false,
       isRunning: true,
       percent: 0,
       statusText: snap.queueText,
@@ -236,6 +253,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
   if (snap.hasFace && snap.isFaceRunning) {
     return {
+      canCancel: false,
       isRunning: true,
       percent: snap.facePercent,
       statusText: snap.faceText,
@@ -245,6 +263,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
   if (snap.hasAi && snap.aiPhase === "loading") {
     return {
+      canCancel: false,
       isRunning: true,
       percent: snap.aiPercent,
       statusText: snap.aiText,
@@ -254,6 +273,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
   if (snap.hasAi && snap.aiPhase === "embedding") {
     return {
+      canCancel: false,
       isRunning: true,
       percent: snap.aiPercent,
       statusText: snap.aiText,
@@ -261,8 +281,19 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
     };
   }
 
+  if (snap.hasAi && snap.aiPhase === "tagging") {
+    return {
+      canCancel: false,
+      isRunning: true,
+      percent: snap.aiPercent,
+      statusText: snap.aiText,
+      phase: "tagging",
+    };
+  }
+
   if (snap.hasAi && snap.aiPhase === "repairing") {
     return {
+      canCancel: false,
       isRunning: true,
       percent: snap.aiPercent,
       statusText: snap.aiText,
@@ -272,6 +303,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
   if (snap.hasScan) {
     return {
+      canCancel: false,
       isRunning: true,
       percent: snap.scanPercent,
       statusText: snap.scanText,
@@ -279,12 +311,19 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
     };
   }
 
-  return { isRunning: false, percent: 0, statusText: "", phase: "idle" };
+  return {
+    canCancel: false,
+    isRunning: false,
+    percent: 0,
+    statusText: "",
+    phase: "idle",
+  };
 }
 
 // ── Hook ───────────────────────────────────────────────────────────
 
 export function useGlobalAiStatus(): GlobalAiProgress {
+  const { t } = useTranslation();
   const [scan, setScan] = useState<ScanPayload | null>(null);
   const [ai, setAi] = useState<AiProgressPayload | null>(null);
   const [face, setFace] = useState<FaceProgressPayload | null>(null);
@@ -293,30 +332,63 @@ export function useGlobalAiStatus(): GlobalAiProgress {
   const [queueRunning, setQueueRunning] = useState(false);
 
   const faceActiveRef = useRef(false);
+  const lastAiPhaseRef = useRef<AiProgressPayload["phase"]>("idle");
   const prevQueueDoneIdsRef = useRef<Set<number>>(new Set());
+  const seenTerminalTaskIdsRef = useRef<Set<number>>(new Set());
+  const completedBatchRef = useRef({ folders: 0, photos: 0 });
 
   // ── Queue completion → auto-refresh UI caches ─────────────────
 
-  const handleQueueStatus = useCallback((payload: QueueStatusPayload) => {
-    setQueue(payload);
-    const hasActive = payload.current !== null || payload.pending.length > 0;
-    setQueueRunning(hasActive);
+  const handleQueueStatus = useCallback(
+    (payload: QueueStatusPayload) => {
+      setQueue(payload);
+      const hasActive = payload.current !== null || payload.pending.length > 0;
+      setQueueRunning(hasActive);
 
-    if (payload.history.length > 0) {
-      const doneIds = new Set(
-        payload.history.filter((t) => t.status === "done").map((t) => t.id)
-      );
-      const prevIds = prevQueueDoneIdsRef.current;
-      for (const id of doneIds) {
-        if (!prevIds.has(id)) {
-          queryClient.invalidateQueries({ queryKey: ["folders"] });
-          queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
-          break;
+      if (payload.history.length > 0) {
+        for (const task of payload.history) {
+          if (seenTerminalTaskIdsRef.current.has(task.id)) {
+            continue;
+          }
+          seenTerminalTaskIdsRef.current.add(task.id);
+          if (task.status === "done") {
+            completedBatchRef.current.folders++;
+            completedBatchRef.current.photos += task.newPhotoCount ?? 0;
+          } else if (task.status === "failed") {
+            toast.error(
+              t("toastImportFailed", {
+                folder: getFolderDisplayName(task.folderPath),
+                error: task.error ?? "",
+              })
+            );
+          }
         }
+        const doneIds = new Set(
+          payload.history
+            .filter((task) => task.status === "done")
+            .map((task) => task.id)
+        );
+        const prevIds = prevQueueDoneIdsRef.current;
+        for (const id of doneIds) {
+          if (!prevIds.has(id)) {
+            queryClient.invalidateQueries({ queryKey: ["folders"] });
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
+            });
+            break;
+          }
+        }
+        prevQueueDoneIdsRef.current = doneIds;
       }
-      prevQueueDoneIdsRef.current = doneIds;
-    }
-  }, []);
+
+      if (!hasActive && completedBatchRef.current.folders > 0) {
+        toast.success(t("toastImportBatchComplete", completedBatchRef.current));
+        completedBatchRef.current = { folders: 0, photos: 0 };
+      }
+    },
+    [t]
+  );
 
   const handleScanMsg = useCallback((payload: ScanPayload) => {
     setScan(payload);
@@ -353,10 +425,20 @@ export function useGlobalAiStatus(): GlobalAiProgress {
           handleScanMsg(e.data as ScanPayload);
           break;
         case "ai-progress":
+          lastAiPhaseRef.current = (e.data as AiProgressPayload).phase;
           setAi(e.data as AiProgressPayload);
           break;
         case "ai-embedding-done":
+          if (lastAiPhaseRef.current === "error") {
+            toast.error(t("toastAiIndexFailed"));
+          } else if (lastAiPhaseRef.current === "tag-error") {
+            toast.error(t("aiTagsFailed"));
+          } else if (lastAiPhaseRef.current !== "idle") {
+            toast.success(t("toastAiIndexReady"));
+          }
+          lastAiPhaseRef.current = "idle";
           setAi(null);
+          queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
           break;
         case "face-detection-progress":
           handleFaceMsg(e.data as FaceProgressPayload);
@@ -373,7 +455,7 @@ export function useGlobalAiStatus(): GlobalAiProgress {
           break;
       }
     },
-    [handleQueueStatus, handleScanMsg, handleFaceMsg]
+    [handleQueueStatus, handleScanMsg, handleFaceMsg, t]
   );
 
   useEffect(() => {
@@ -443,6 +525,9 @@ export function useGlobalAiStatus(): GlobalAiProgress {
       setQueueRunning(q.current !== null || q.pending.length > 0);
       prevQueueDoneIdsRef.current = new Set(
         q.history.filter((t) => t.status === "done").map((t) => t.id)
+      );
+      seenTerminalTaskIdsRef.current = new Set(
+        q.history.map((task) => task.id)
       );
     }
 

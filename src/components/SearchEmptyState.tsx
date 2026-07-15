@@ -32,6 +32,9 @@ interface SearchEmptyStateProps {
   query: string;
   /** 当前搜索模式 */
   searchMode: "text" | "image" | "exif" | "color" | null;
+  semanticState?: "ready" | "partial" | "unavailable" | "error";
+  indexedPhotos?: number;
+  totalPhotos?: number;
 }
 
 /**
@@ -48,11 +51,18 @@ export function SearchEmptyState({
   onClearSearch,
   onClearFilters,
   onGoToAiSettings,
+  semanticState,
+  indexedPhotos = 0,
+  totalPhotos = 0,
 }: SearchEmptyStateProps) {
   const { t } = useTranslation();
 
   // ── 场景 1: AI 未索引 + 文本搜索 ─────────────────
-  if (searchMode === "text" && !hasAiVectors && query.trim()) {
+  if (
+    searchMode === "text" &&
+    query.trim() &&
+    (semanticState ? semanticState !== "ready" : !hasAiVectors)
+  ) {
     return (
       <EmptyCard
         actions={[
@@ -70,9 +80,20 @@ export function SearchEmptyState({
             onClick: onClearSearch,
           },
         ]}
-        description={t("emptyAiNotIndexedDesc")}
+        description={
+          semanticState === "error"
+            ? t("semanticSearchUnavailable")
+            : t("semanticSearchPartial", {
+                indexed: indexedPhotos,
+                total: totalPhotos,
+              })
+        }
         icon={<Brain className="h-5 w-5" />}
-        title={t("emptyAiNotIndexedTitle")}
+        title={
+          semanticState === "error"
+            ? t("semanticSearchUnavailableTitle")
+            : t("emptyAiNotIndexedTitle")
+        }
       />
     );
   }

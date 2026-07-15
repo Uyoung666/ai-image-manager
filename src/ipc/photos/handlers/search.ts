@@ -27,6 +27,7 @@ import {
   extractTemporalContext,
   parseChineseQuery,
 } from "@/services/ai/query-parser";
+import { getAiReadiness } from "@/services/ai/health";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
@@ -441,7 +442,9 @@ export const searchCompound = os
                   rgb.b,
                   limit
                 );
-                return (results ?? []).filter((result) => result.distance < 10_000);
+                return (results ?? []).filter(
+                  (result) => result.distance < 10_000
+                );
               })(),
               COLOR_VECTOR_TIMEOUT_MS,
               "ColorVector"
@@ -467,10 +470,7 @@ export const searchCompound = os
                 .select(SEARCH_PHOTO_COLUMNS)
                 .from(photos)
                 .where(
-                  and(
-                    isNull(photos.deletedAt),
-                    inArray(photos.id, rankedIds)
-                  )
+                  and(isNull(photos.deletedAt), inArray(photos.id, rankedIds))
                 )
                 .all();
         const photoList = hydrateColorSearchResults(ranks, typedPhotos);
@@ -551,10 +551,8 @@ export const searchCompound = os
           exifConds.push(sql`${exifData.aperture} >= ${apertureMin}`);
         if (apertureMax !== undefined)
           exifConds.push(sql`${exifData.aperture} <= ${apertureMax}`);
-        if (isoMin !== undefined)
-          exifConds.push(gte(exifData.iso, isoMin));
-        if (isoMax !== undefined)
-          exifConds.push(lte(exifData.iso, isoMax));
+        if (isoMin !== undefined) exifConds.push(gte(exifData.iso, isoMin));
+        if (isoMax !== undefined) exifConds.push(lte(exifData.iso, isoMax));
         if (shutterMin !== undefined)
           exifConds.push(gte(exifData.shutterSpeedNum, shutterMin));
         if (shutterMax !== undefined)
@@ -577,7 +575,9 @@ export const searchCompound = os
         const photoList = db
           .select(SEARCH_PHOTO_COLUMNS)
           .from(photos)
-          .where(and(isNull(photos.deletedAt), inArray(photos.id, exifPhotoIds)))
+          .where(
+            and(isNull(photos.deletedAt), inArray(photos.id, exifPhotoIds))
+          )
           .orderBy(desc(photos.fileDate))
           .all();
 
@@ -607,6 +607,14 @@ export const searchCompound = os
     // Text query: multi-source retrieval → dedup → rerank
     if (searchText?.trim()) {
       const q = searchText.trim();
+      const aiReadiness = await getAiReadiness({ loadModel: false });
+      let semantic = {
+        indexedPhotos: aiReadiness.indexedPhotos,
+        reason: aiReadiness.lastError as string | undefined,
+        state: aiReadiness.coverageState,
+        totalPhotos: aiReadiness.totalPhotos,
+        used: false,
+      };
 
       // ── 提取原始查询中的潜在专有名词 token ─────────────────────
       // 中文姓名/标签通常 2-4 字，从原始 query 中提取 n-gram 子串，
@@ -681,13 +689,20 @@ export const searchCompound = os
       const aiSearchTimeoutMs = aiSearchWasReady
         ? AI_SEARCH_TIMEOUT_MS
         : AI_SEARCH_COLD_TIMEOUT_MS;
+      const semanticAvailable =
+        aiReadiness.coverageState === "ready" ||
+        aiReadiness.coverageState === "partial";
       const settled = await Promise.allSettled([
         // 路 1：CLIP 文本推理 + LanceDB 向量召回
-        withTimeout(
-          aiSearchByText(q, 200),
-          aiSearchTimeoutMs,
-          aiSearchWasReady ? "AI semantic search" : "AI semantic search warmup"
-        ),
+        semanticAvailable
+          ? withTimeout(
+              aiSearchByText(q, 200),
+              aiSearchTimeoutMs,
+              aiSearchWasReady
+                ? "AI semantic search"
+                : "AI semantic search warmup"
+            )
+          : Promise.resolve([]),
         // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
         db
           .select({ id: photos.id })
@@ -759,6 +774,15 @@ export const searchCompound = os
         settled[0].status === "fulfilled"
           ? (settled[0].value as Awaited<ReturnType<typeof aiSearchByText>>)
           : [];
+      semantic = {
+        ...semantic,
+        reason:
+          settled[0].status === "rejected"
+            ? ((settled[0].reason as Error)?.message ??
+              "semantic-search-failed")
+            : semantic.reason,
+        used: semanticAvailable && settled[0].status === "fulfilled",
+      };
       const tagPhotoRows =
         settled[1].status === "fulfilled"
           ? (settled[1].value as { id: number }[])
@@ -880,20 +904,29 @@ export const searchCompound = os
               results: datePhotos,
               query: q,
               total: datePhotos.length,
+              semantic,
               ...(rewrittenTimeFilter
                 ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
                 : {}),
             };
           }
         }
-        return { results: [], query: q, total: 0 };
+        return { results: [], query: q, total: 0, semantic };
       }
 
       let rerankedList = mergedList;
       try {
         if (mergedList.length > 20 && q) {
           const rerankTopK = Math.max(limit, 200);
-          rerankedList = await rerankWithCLIPScore(q, mergedList, rerankTopK);
+          const sources = new Map(
+            mergedList.map((item) => [item.photoId, item._source])
+          );
+          rerankedList = (
+            await rerankWithCLIPScore(q, mergedList, rerankTopK)
+          ).map((item) => ({
+            ...item,
+            _source: sources.get(item.photoId) ?? "ai",
+          }));
         }
       } catch {
         // Rerank failed, continue with merged results
@@ -946,6 +979,7 @@ export const searchCompound = os
           results: scored.slice(0, limit),
           query: q,
           total: scored.length,
+          semantic,
           ...(rewrittenTimeFilter
             ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
             : {}),
@@ -1013,6 +1047,7 @@ export const searchCompound = os
           results: [],
           query: q,
           total: 0,
+          semantic,
           ...(rewrittenTimeFilter
             ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
             : {}),
@@ -1048,6 +1083,7 @@ export const searchCompound = os
         results: scored.slice(0, limit),
         query: q,
         total: scored.length,
+        semantic,
         ...(rewrittenTimeFilter
           ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
           : {}),
@@ -1182,7 +1218,9 @@ export const searchSpotlight = os
               sql`SELECT rowid AS id FROM photos_fts WHERE photos_fts MATCH ${terms}`
             ) as Array<{ id: number }>;
             if (ftsResults.length > 0) return ftsResults.slice(0, limit);
-          } catch { /* FTS5 error → fallback */ }
+          } catch {
+            /* FTS5 error → fallback */
+          }
         }
         return db
           .select({ id: photos.id })

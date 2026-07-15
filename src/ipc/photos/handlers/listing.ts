@@ -23,11 +23,13 @@ import {
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
   cancelAllImports,
+  cancelCurrentImport,
   cancelQueuedImports,
   enqueueImport,
   getImportQueueStatus,
 } from "@/services/import-queue";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
+import { unwatchFolder } from "@/services/indexer";
 import {
   FolderAppearanceSchema,
   FolderSchema,
@@ -60,9 +62,9 @@ function logIpcError(handlerName: string, err: unknown): void {
 export const scanFolder = os.input(FolderSchema).handler(({ input }) => {
   try {
     const resolved = path.resolve(input.path);
-    if (!fs.existsSync(resolved)) {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
       throw new ORPCError("BAD_REQUEST", {
-        message: `Folder does not exist: ${resolved}`,
+        message: `Folder does not exist or is not a directory: ${resolved}`,
       });
     }
 
@@ -79,6 +81,10 @@ export const scanFolder = os.input(FolderSchema).handler(({ input }) => {
 });
 
 export const stopScanning = os.handler(() => {
+  return { stopped: cancelCurrentImport() };
+});
+
+export const cancelAllImports_h = os.handler(() => {
   cancelAllImports();
   return { stopped: true };
 });
@@ -140,6 +146,8 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
   if (!folder) {
     return { success: true };
   }
+
+  await unwatchFolder(folder.path);
 
   // 1) Recursively collect all descendant folder IDs with cycle detection.
   const folderHierarchy = db

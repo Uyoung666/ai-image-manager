@@ -10,7 +10,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { ImportPhase } from "@/components/Sidebar";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 
@@ -33,11 +32,6 @@ interface SidebarFilterState {
   collapsed: boolean;
   favoriteOnly: boolean;
 
-  // Import state
-  importPhase: ImportPhase;
-  importPhaseRef: React.RefObject<ImportPhase | null>;
-  scanningFolder: string | null;
-  scanProgress: string;
   tagMode: "and" | "or";
 
   // Shared data
@@ -47,15 +41,11 @@ interface SidebarFilterState {
 interface SidebarFilterActions {
   // Import actions
   handleAddFolder: (externalPath?: string) => void;
-  handleCancelScan: () => void;
   handleDeleteFolder: (id: number) => void;
   selectFolderAndNotify: (id: number | null) => void;
   // Filter actions
   setActiveFolderId: (id: number | null) => void;
   setFavoriteOnly: (v: boolean) => void;
-  setImportPhase: (phase: ImportPhase) => void;
-  setScanningFolder: (path: string | null) => void;
-  setScanProgress: (progress: string) => void;
 
   // Shared data setters
   setTotalPhotos: (n: number) => void;
@@ -84,22 +74,11 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
   const [favoriteOnly, setFavoriteOnlyState] = useState(false);
   const [tagMode, setTagMode] = useState<"and" | "or">("or");
 
-  // --- Import state ---
-  const [importPhase, setImportPhase] = useState<ImportPhase>("idle");
-  const importPhaseRef = useRef<ImportPhase>("idle");
-  const [scanningFolder, setScanningFolder] = useState<string | null>(null);
-  const [scanProgress, setScanProgress] = useState("");
-
   // --- Sidebar UI state ---
   const [collapsed, setCollapsed] = useState(loadSidebarState);
 
   // --- Shared data ---
   const [totalPhotos, setTotalPhotos] = useState(0);
-
-  // Keep importPhaseRef in sync for async callbacks
-  useEffect(() => {
-    importPhaseRef.current = importPhase;
-  }, [importPhase]);
 
   // --- Filter actions ---
 
@@ -188,14 +167,6 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
     [t]
   );
 
-  const handleCancelScan = useCallback(async () => {
-    try {
-      await ipc.client.photos.stopScanning({});
-    } catch (err) {
-      console.error("[cancelScan] failed:", err);
-    }
-  }, []);
-
   const handleDeleteFolder = useCallback(
     async (id: number) => {
       try {
@@ -203,7 +174,10 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
         // If the deleted folder is the currently active one, deselect it
         setActiveFolderIdState((prev) => (prev === id ? null : prev));
         queryClient.invalidateQueries({ queryKey: ["folders"] });
-        queryClient.invalidateQueries({ queryKey: ["photos"], refetchType: "active" });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
         toast.success(t("toastFolderRemoved"));
       } catch {
         toast.error(t("toastDeleteFolderFailed"));
@@ -252,10 +226,6 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       activeTagIds,
       favoriteOnly,
       tagMode,
-      importPhase,
-      importPhaseRef,
-      scanningFolder,
-      scanProgress,
       collapsed,
       totalPhotos,
       // Actions
@@ -266,11 +236,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       toggleTag,
       toggleTagMode,
       handleAddFolder,
-      handleCancelScan,
       handleDeleteFolder,
-      setImportPhase,
-      setScanningFolder,
-      setScanProgress,
       toggleCollapsed,
       setTotalPhotos,
     }),
@@ -279,9 +245,6 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       activeTagIds,
       favoriteOnly,
       tagMode,
-      importPhase,
-      scanningFolder,
-      scanProgress,
       collapsed,
       totalPhotos,
       setActiveFolderId,
@@ -291,7 +254,6 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       toggleTag,
       toggleTagMode,
       handleAddFolder,
-      handleCancelScan,
       handleDeleteFolder,
       toggleCollapsed,
     ]

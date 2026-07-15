@@ -1,10 +1,17 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photoTags, tags } from "@/db/schema";
 import { cosineSimilarity } from "./constants";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import { embedImageInWorker } from "./search";
-import { _localModelPath, embeddingModel, setLocalModelPath } from "./state";
+import {
+  _localModelPath,
+  beginAutoTagging,
+  embeddingModel,
+  finishAutoTagging,
+  finishAutoTaggingPhoto,
+  setLocalModelPath,
+} from "./state";
 import { getPhotoVectors, initVectorDB } from "./vector-db";
 
 export type TagCategory =
@@ -409,9 +416,34 @@ export async function suggestTags(
 }
 
 const MAX_AUTO_TAGS_PER_PHOTO = 5;
+let activeBatchTaggingPromise: Promise<{
+  tagged: number;
+  skipped: number;
+}> | null = null;
 
-export async function batchSuggestTags(
-  photoIds: number[]
+export function batchSuggestTags(
+  photoIds: number[],
+  onProgress?: (processed: number, total: number, photoId: number) => void
+): Promise<{ tagged: number; skipped: number }> {
+  if (activeBatchTaggingPromise) {
+    return activeBatchTaggingPromise;
+  }
+
+  const uniquePhotoIds = [...new Set(photoIds)];
+  beginAutoTagging(uniquePhotoIds);
+  activeBatchTaggingPromise = runBatchSuggestTags(
+    uniquePhotoIds,
+    onProgress
+  ).finally(() => {
+    finishAutoTagging(uniquePhotoIds);
+    activeBatchTaggingPromise = null;
+  });
+  return activeBatchTaggingPromise;
+}
+
+async function runBatchSuggestTags(
+  photoIds: number[],
+  onProgress?: (processed: number, total: number, photoId: number) => void
 ): Promise<{ tagged: number; skipped: number }> {
   const db = getDatabase();
 
@@ -419,20 +451,14 @@ export async function batchSuggestTags(
     await loadModel();
   } catch (err: any) {
     console.error("[AI] batchSuggestTags: model load failed:", err?.message);
-    return { tagged: 0, skipped: photoIds.length };
+    throw err;
   }
 
   if (!(embeddingModel && _localModelPath)) {
-    return { tagged: 0, skipped: photoIds.length };
+    throw new Error("AI model is not ready for tag generation");
   }
 
-  const alreadyTagged = db
-    .select({ photoId: photoTags.photoId })
-    .from(photoTags)
-    .where(inArray(photoTags.photoId, photoIds))
-    .all();
-  const alreadyTaggedSet = new Set(alreadyTagged.map((r) => r.photoId));
-  const toProcess = photoIds.filter((id) => !alreadyTaggedSet.has(id));
+  const toProcess = [...new Set(photoIds)];
 
   if (toProcess.length === 0) {
     return { tagged: 0, skipped: photoIds.length };
@@ -459,7 +485,7 @@ export async function batchSuggestTags(
   }
 
   if (!cachedTagEmbeddings) {
-    return { tagged: 0, skipped: photoIds.length };
+    throw new Error("Could not generate candidate tag embeddings");
   }
 
   const categoryParentIds: Record<string, number> = {};
@@ -501,86 +527,104 @@ export async function batchSuggestTags(
     "#a855f7",
   ];
 
-  for (const photoId of toProcess) {
-    const imageVec = vectors.get(photoId);
-    if (!imageVec) {
-      skipped++;
-      continue;
-    }
-
-    const scores = cachedTagEmbeddings.map(
-      ({ displayName, category, vector }) => ({
-        displayName,
-        category,
-        similarity: cosineSimilarity(imageVec, vector),
-      })
-    );
-
-    const topTags = selectTagsAdaptive(scores, MAX_AUTO_TAGS_PER_PHOTO);
-
-    for (const s of topTags) {
-      // Relative confirmation: top score's 85% or fallback 0.38
-      const confirmThreshold = topTags[0] ? topTags[0].confidence * 0.85 : 0.38;
-      const isConfirmed = s.confidence >= confirmThreshold;
-
+  try {
+    for (const [index, photoId] of toProcess.entries()) {
       try {
-        let hash = 0;
-        for (let i = 0; i < s.tag.length; i++) {
-          hash = s.tag.charCodeAt(i) + ((hash << 5) - hash);
+        const imageVec = vectors.get(photoId);
+        if (!imageVec) {
+          skipped++;
+          continue;
         }
-        const tagColor = tagColors[Math.abs(hash) % tagColors.length];
 
-        const existingTag = db
-          .select({ id: tags.id })
-          .from(tags)
-          .where(eq(tags.name, s.tag))
-          .get();
+        const scores = cachedTagEmbeddings.map(
+          ({ displayName, category, vector }) => ({
+            displayName,
+            category,
+            similarity: cosineSimilarity(imageVec, vector),
+          })
+        );
 
-        let tagId: number;
-        const parentId = categoryParentIds[s.category] || null;
-        if (existingTag) {
-          tagId = existingTag.id;
-          // Backfill parentId for existing tags that lack one (never self-reference)
-          if (parentId && tagId !== parentId) {
-            db.update(tags)
-              .set({ parentId })
-              .where(sql`${tags.id} = ${tagId} AND ${tags.parentId} IS NULL`)
-              .run();
+        const topTags = selectTagsAdaptive(scores, MAX_AUTO_TAGS_PER_PHOTO);
+
+        for (const s of topTags) {
+          // Relative confirmation: top score's 85% or fallback 0.38
+          const confirmThreshold = topTags[0]
+            ? topTags[0].confidence * 0.85
+            : 0.38;
+          const isConfirmed = s.confidence >= confirmThreshold;
+
+          try {
+            let hash = 0;
+            for (let i = 0; i < s.tag.length; i++) {
+              hash = s.tag.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const tagColor = tagColors[Math.abs(hash) % tagColors.length];
+
+            const existingTag = db
+              .select({ id: tags.id })
+              .from(tags)
+              .where(eq(tags.name, s.tag))
+              .get();
+
+            let tagId: number;
+            const parentId = categoryParentIds[s.category] || null;
+            if (existingTag) {
+              tagId = existingTag.id;
+              // Backfill parentId for existing tags that lack one (never self-reference)
+              if (parentId && tagId !== parentId) {
+                db.update(tags)
+                  .set({ parentId })
+                  .where(
+                    sql`${tags.id} = ${tagId} AND ${tags.parentId} IS NULL`
+                  )
+                  .run();
+              }
+            } else {
+              const result = db
+                .insert(tags)
+                .values({ name: s.tag, color: tagColor, parentId })
+                .returning({ insertedId: tags.id })
+                .get();
+              if (!result) {
+                continue;
+              }
+              tagId = result.insertedId;
+            }
+
+            const existing = db
+              .select({ id: photoTags.id })
+              .from(photoTags)
+              .where(
+                sql`${photoTags.photoId} = ${photoId} AND ${photoTags.tagId} = ${tagId}`
+              )
+              .get();
+            if (!existing) {
+              db.insert(photoTags)
+                .values({
+                  photoId,
+                  tagId,
+                  confidence: s.confidence,
+                  isConfirmed,
+                })
+                .onConflictDoNothing()
+                .run();
+            }
+          } catch {
+            /* skip individual tag failures */
           }
+        }
+        if (topTags.length > 0) {
+          tagged++;
         } else {
-          const result = db
-            .insert(tags)
-            .values({ name: s.tag, color: tagColor, parentId })
-            .returning({ insertedId: tags.id })
-            .get();
-          if (!result) {
-            continue;
-          }
-          tagId = result.insertedId;
+          skipped++;
         }
-
-        const existing = db
-          .select({ id: photoTags.id })
-          .from(photoTags)
-          .where(
-            sql`${photoTags.photoId} = ${photoId} AND ${photoTags.tagId} = ${tagId}`
-          )
-          .get();
-        if (!existing) {
-          db.insert(photoTags)
-            .values({ photoId, tagId, confidence: s.confidence, isConfirmed })
-            .onConflictDoNothing()
-            .run();
-        }
-      } catch {
-        /* skip individual tag failures */
+      } finally {
+        finishAutoTaggingPhoto(photoId);
+        onProgress?.(index + 1, toProcess.length, photoId);
       }
     }
-    if (topTags.length > 0) {
-      tagged++;
-    } else {
-      skipped++;
-    }
+  } finally {
+    finishAutoTagging(toProcess);
   }
 
   return { tagged, skipped };

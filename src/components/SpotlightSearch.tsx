@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
+import { useAiStatus } from "@/hooks/useAiStatus";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -63,6 +64,7 @@ export function SpotlightSearch() {
   const [albumResults, setAlbumResults] = useState<AlbumResult[]>([]);
   const [personResults, setPersonResults] = useState<PersonResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const { data: aiStatus } = useAiStatus();
   const navigate = useNavigate();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -330,6 +332,18 @@ export function SpotlightSearch() {
               ESC
             </kbd>
           </div>
+          {query.trim() &&
+            aiStatus?.coverageState &&
+            aiStatus.coverageState !== "ready" && (
+              <div className="border-border border-b px-4 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                {aiStatus.coverageState === "error"
+                  ? t("semanticSearchUnavailable")
+                  : t("semanticSearchPartial", {
+                      indexed: aiStatus.indexedPhotos,
+                      total: aiStatus.totalPhotos,
+                    })}
+              </div>
+            )}
           <Command.List className="relative max-h-[360px] overflow-y-auto p-2">
             {searching && (
               <div className="spotlight-loading-shield z-10 flex items-center justify-center bg-popover/50">

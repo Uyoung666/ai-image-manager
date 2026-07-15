@@ -9,6 +9,7 @@ type Phase =
   | "scanning"
   | "loading-model"
   | "embedding"
+  | "tagging"
   | "face-detection"
   | "import-queue";
 
