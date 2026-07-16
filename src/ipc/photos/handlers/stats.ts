@@ -14,7 +14,13 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase, getDbPath } from "@/db";
-import { detectionRuns, duplicatePairs, exifData, photos } from "@/db/schema";
+import {
+  advancedExifData,
+  detectionRuns,
+  duplicatePairs,
+  exifData,
+  photos,
+} from "@/db/schema";
 import { getPhotoVectors } from "@/services/ai-embedder";
 import { BKTree } from "@/services/bk-tree";
 import {
@@ -29,6 +35,20 @@ import {
   groupDuplicatePairs,
 } from "@/services/duplicate-groups";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
+
+type AdvancedCategoryColumn =
+  | typeof advancedExifData.vendor
+  | typeof advancedExifData.captureMode
+  | typeof advancedExifData.exposureProgram
+  | typeof advancedExifData.meteringMode
+  | typeof advancedExifData.whiteBalance
+  | typeof advancedExifData.focusMode
+  | typeof advancedExifData.subjectTarget
+  | typeof advancedExifData.driveMode
+  | typeof advancedExifData.stabilizationMode
+  | typeof advancedExifData.computationalMode
+  | typeof advancedExifData.inCameraLook
+  | typeof advancedExifData.provenanceStatus;
 
 // Module-level cache for getStats (invalidate on photo/EXIF changes)
 interface StatsCacheEntry {
@@ -56,6 +76,7 @@ interface ExifCandidatesCacheEntry {
     apertures: number[];
     isos: (number | null)[];
     formats: string[];
+    advancedCategories: Record<string, string[]>;
   };
   timestamp: number;
 }
@@ -136,6 +157,31 @@ export const getExifCandidates = os.handler(() => {
     .all()
     .map((r) => r.val ?? "");
 
+  const advancedCandidates = (field: AdvancedCategoryColumn) =>
+    db
+      .selectDistinct({ val: field })
+      .from(advancedExifData)
+      .where(isNotNull(field))
+      .orderBy(field)
+      .all()
+      .map((row) => row.val)
+      .filter((value): value is string => Boolean(value));
+
+  const advancedCategories = {
+    vendor: advancedCandidates(advancedExifData.vendor),
+    captureMode: advancedCandidates(advancedExifData.captureMode),
+    exposureProgram: advancedCandidates(advancedExifData.exposureProgram),
+    meteringMode: advancedCandidates(advancedExifData.meteringMode),
+    whiteBalance: advancedCandidates(advancedExifData.whiteBalance),
+    focusMode: advancedCandidates(advancedExifData.focusMode),
+    subjectTarget: advancedCandidates(advancedExifData.subjectTarget),
+    driveMode: advancedCandidates(advancedExifData.driveMode),
+    stabilizationMode: advancedCandidates(advancedExifData.stabilizationMode),
+    computationalMode: advancedCandidates(advancedExifData.computationalMode),
+    inCameraLook: advancedCandidates(advancedExifData.inCameraLook),
+    provenanceStatus: advancedCandidates(advancedExifData.provenanceStatus),
+  };
+
   const result = {
     cameraModels,
     lensModels,
@@ -143,6 +189,7 @@ export const getExifCandidates = os.handler(() => {
     apertures,
     isos,
     formats,
+    advancedCategories,
   };
   exifCandidatesCache = { data: result, timestamp: Date.now() };
   return result;
@@ -646,6 +693,61 @@ export const getStats = os
         .where(and(dashboardPhotoWhere(input), isNotNull(exifData.iso)))
         .get()?.avgIso || 0;
 
+    const advancedDistribution = (field: AdvancedCategoryColumn) =>
+      db
+        .select({ name: field, count: sql<number>`count(*)` })
+        .from(advancedExifData)
+        .innerJoin(photos, eq(advancedExifData.photoId, photos.id))
+        .innerJoin(exifData, eq(exifData.photoId, photos.id))
+        .where(and(dashboardPhotoWhere(input), isNotNull(field)))
+        .groupBy(field)
+        .orderBy(desc(sql`count(*)`))
+        .all()
+        .filter((row): row is { name: string; count: number } =>
+          Boolean(row.name)
+        );
+
+    const advancedStats = {
+      vendor: advancedDistribution(advancedExifData.vendor),
+      captureMode: advancedDistribution(advancedExifData.captureMode),
+      exposureProgram: advancedDistribution(advancedExifData.exposureProgram),
+      meteringMode: advancedDistribution(advancedExifData.meteringMode),
+      whiteBalance: advancedDistribution(advancedExifData.whiteBalance),
+      focusMode: advancedDistribution(advancedExifData.focusMode),
+      subjectTarget: advancedDistribution(advancedExifData.subjectTarget),
+      driveMode: advancedDistribution(advancedExifData.driveMode),
+      stabilizationMode: advancedDistribution(
+        advancedExifData.stabilizationMode
+      ),
+      computationalMode: advancedDistribution(
+        advancedExifData.computationalMode
+      ),
+      inCameraLook: advancedDistribution(advancedExifData.inCameraLook),
+      provenanceStatus: advancedDistribution(advancedExifData.provenanceStatus),
+    };
+    const advancedExifCoverage =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(advancedExifData)
+        .innerJoin(photos, eq(advancedExifData.photoId, photos.id))
+        .innerJoin(exifData, eq(exifData.photoId, photos.id))
+        .where(
+          and(
+            dashboardPhotoWhere(input),
+            inArray(advancedExifData.status, ["complete", "partial"])
+          )
+        )
+        .get()?.count ?? 0;
+    const advancedMeta = (rows: { count: number; name: string }[]) => {
+      const valid = rows.reduce((sum, row) => sum + row.count, 0);
+      return {
+        valid,
+        missing: Math.max(0, totalPhotos - valid),
+        totalCategories: rows.length,
+        truncated: false,
+      };
+    };
+
     const colorCoverage = hasRange
       ? (db
           .select({ count: sql<number>`count(*)` })
@@ -692,6 +794,7 @@ export const getStats = os
         color: colorCoverage,
         date: hasRange ? totalPhotos : libraryDated,
         exif: completeness?.withExif ?? 0,
+        advancedExif: advancedExifCoverage,
         gps: Math.max(
           0,
           totalPhotos - missingWithNoExif(completeness?.missingGps)
@@ -726,8 +829,21 @@ export const getStats = os
       monthlyStats,
       dateRange,
       avgIso,
+      advancedStats,
       geoLocations,
       distributionMetadata: {
+        advancedVendor: advancedMeta(advancedStats.vendor),
+        captureMode: advancedMeta(advancedStats.captureMode),
+        exposureProgram: advancedMeta(advancedStats.exposureProgram),
+        meteringMode: advancedMeta(advancedStats.meteringMode),
+        whiteBalance: advancedMeta(advancedStats.whiteBalance),
+        focusMode: advancedMeta(advancedStats.focusMode),
+        subjectTarget: advancedMeta(advancedStats.subjectTarget),
+        driveMode: advancedMeta(advancedStats.driveMode),
+        stabilizationMode: advancedMeta(advancedStats.stabilizationMode),
+        computationalMode: advancedMeta(advancedStats.computationalMode),
+        inCameraLook: advancedMeta(advancedStats.inCameraLook),
+        provenanceStatus: advancedMeta(advancedStats.provenanceStatus),
         camera: {
           valid: Math.max(
             0,

@@ -26,6 +26,7 @@ import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterPresets } from "./FilterPresets";
 import {
   clearSavedHistory,
+  type AdvancedExifFilterField,
   type ExifFilters,
   getFilterLabel,
   getTimePresets,
@@ -37,6 +38,21 @@ import {
 } from "./search-bar-utils";
 
 export type { ExifFilters } from "./search-bar-utils";
+
+const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
+  "vendor",
+  "captureMode",
+  "exposureProgram",
+  "meteringMode",
+  "whiteBalance",
+  "focusMode",
+  "subjectTarget",
+  "driveMode",
+  "stabilizationMode",
+  "computationalMode",
+  "inCameraLook",
+  "provenanceStatus",
+];
 
 interface SearchBarProps {
   aiStatus?: {
@@ -94,6 +110,9 @@ export const SearchBar = memo(
       const [cameraModels, setCameraModels] = useState<string[]>([]);
       const [showCameraSuggestions, setShowCameraSuggestions] = useState(false);
       const [lensModels, setLensModels] = useState<string[]>([]);
+      const [advancedCategories, setAdvancedCategories] = useState<
+        Record<string, string[]>
+      >({});
       const [showLensSuggestions, setShowLensSuggestions] = useState(false);
       // Person names for search suggestions and AI-powered dictionary suggestions
       const [personNames, setPersonNames] = useState<string[]>([]);
@@ -160,6 +179,7 @@ export const SearchBar = memo(
           .then((r: any) => {
             setCameraModels(r.cameraModels || []);
             setLensModels(r.lensModels || []);
+            setAdvancedCategories(r.advancedCategories || {});
           })
           .catch(() => {
             /* ignore */
@@ -920,6 +940,18 @@ export const SearchBar = memo(
                     onRemove={() => updateFilter("lensModel", "", true)}
                   />
                 )}
+                {filters.advancedField && filters.advancedValue && (
+                  <FilterChip
+                    label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedValue}`}
+                    onRemove={() => {
+                      setFilters((previous) => ({
+                        ...previous,
+                        advancedField: undefined,
+                        advancedValue: undefined,
+                      }));
+                    }}
+                  />
+                )}
                 {filters.isoMin && (
                   <FilterChip
                     label={`ISO ≥ ${filters.isoMin}`}
@@ -1156,6 +1188,50 @@ export const SearchBar = memo(
                           ))}
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Advanced maker metadata */}
+                  <div>
+                    <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                      {t("advancedExifFilter")}
+                    </label>
+                    <div className="space-y-1">
+                      <select
+                        className={filterInputClass}
+                        onChange={(event) =>
+                          updateFilter(
+                            "advancedField",
+                            event.target.value as AdvancedExifFilterField
+                          )
+                        }
+                        value={filters.advancedField ?? ""}
+                      >
+                        <option value="">{t("advancedExifFilterField")}</option>
+                        {ADVANCED_EXIF_FILTERS.map((field) => (
+                          <option key={field} value={field}>
+                            {t(`advancedFilter_${field}`)}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className={filterInputClass}
+                        disabled={!filters.advancedField}
+                        list="advanced-exif-values"
+                        onChange={(event) =>
+                          updateFilter("advancedValue", event.target.value)
+                        }
+                        placeholder={t("advancedExifFilterValue")}
+                        value={filters.advancedValue ?? ""}
+                      />
+                      <datalist id="advanced-exif-values">
+                        {(filters.advancedField
+                          ? (advancedCategories[filters.advancedField] ?? [])
+                          : []
+                        ).map((value) => (
+                          <option key={value} value={value} />
+                        ))}
+                      </datalist>
                     </div>
                   </div>
 

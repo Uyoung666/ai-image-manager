@@ -4,6 +4,7 @@ import {
   buildFocalChartData,
   buildMonthlyChartData,
   buildRangeSearchParams,
+  buildShootingGuidance,
   calculateCoverage,
   fillYearlyChartData,
   getDashboardTimeRange,
@@ -118,6 +119,36 @@ describe("dashboard chart data", () => {
       { count: 4 },
       { count: 2 },
     ]);
+  });
+
+  it("builds readable guidance from dominant shooting habits", () => {
+    expect(
+      buildShootingGuidance({
+        advancedExif: 20,
+        apertureStats: [
+          { aperture: 2.8, count: 30 },
+          { aperture: 8, count: 4 },
+        ],
+        avgIso: 2000,
+        focalStats: [
+          { focalLength: "24", count: 40 },
+          { focalLength: "85", count: 8 },
+        ],
+        totalPhotos: 100,
+      }).map((item) => item.kind)
+    ).toEqual(["wideAngle", "wideAperture", "highIso", "lowMetadataCoverage"]);
+  });
+
+  it("does not add warnings when metadata coverage and ISO are healthy", () => {
+    expect(
+      buildShootingGuidance({
+        advancedExif: 90,
+        apertureStats: [{ aperture: 5.6, count: 20 }],
+        avgIso: 400,
+        focalStats: [{ focalLength: "50", count: 20 }],
+        totalPhotos: 100,
+      })
+    ).toEqual([{ kind: "standardFocal", value: 50 }]);
   });
 
   it("preserves dashboard date scope when drilling down", () => {

@@ -61,6 +61,10 @@ interface PairItem {
 }
 
 interface ExifData {
+  advanced?: {
+    capture?: { captureMode?: string | null };
+    processing?: { inCameraLook?: string | null };
+  } | null;
   aperture: number | null;
   cameraMake: string | null;
   cameraModel: string | null;
@@ -616,6 +620,14 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
             {renderExifRow(
               t("aperture"),
               exif.aperture == null ? null : `f/${exif.aperture}`
+            )}
+            {renderExifRow(
+              t("metadataCaptureMode"),
+              exif.advanced?.capture?.captureMode
+            )}
+            {renderExifRow(
+              t("metadataInCameraLook"),
+              exif.advanced?.processing?.inCameraLook
             )}
           </>
         ) : (

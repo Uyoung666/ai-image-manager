@@ -172,6 +172,55 @@ i18n.use(initReactI18next).init({
         fileSize: "文件大小",
         filePath: "文件路径",
         noExifData: "无 EXIF 数据",
+        advancedMetadata: "高级摄影元数据",
+        metadataCapture: "拍摄与曝光",
+        metadataAutofocus: "对焦与主体识别",
+        metadataProcessing: "机内风格与计算摄影",
+        metadataWorkflow: "工作流与版权",
+        metadataProvenance: "内容来源",
+        metadataRawTags: "厂商原始标签（{{count}}）",
+        metadataCaptureMode: "拍摄模式",
+        metadataExposureProgram: "曝光程序",
+        metadataMeteringMode: "测光模式",
+        metadataWhiteBalance: "白平衡",
+        metadataFlashMode: "闪光灯",
+        metadataDriveMode: "驱动模式",
+        metadataBurstSequence: "连拍序列",
+        metadataFocusMode: "对焦模式",
+        metadataFocusArea: "对焦区域",
+        metadataSubjectTarget: "识别主体",
+        metadataEyeDetection: "眼部检测",
+        metadataTracking: "主体追踪",
+        metadataInCameraLook: "机内风格",
+        metadataStabilization: "防抖",
+        metadataComputationalMode: "计算摄影",
+        metadataLensCorrection: "镜头校正",
+        metadataRating: "评级",
+        metadataProtection: "保护状态",
+        metadataSoftware: "处理软件",
+        metadataCopyright: "版权",
+        metadataIssuer: "签发方",
+        metadataCredentialStatus: "凭证状态",
+        metadataProvenance_present_unverified: "检测到凭证（未经验证）",
+        metadataProvenance_not_detected: "未检测到内容凭证",
+        metadataProvenance_unknown: "当前格式无法判断",
+        metadataProvenanceDisclaimer:
+          "此状态仅表示检测到凭证结构，尚未进行密码学验证，也不代表照片内容真实。",
+        advancedExifFilter: "高级摄影元数据",
+        advancedExifFilterField: "选择字段",
+        advancedExifFilterValue: "输入精确值",
+        advancedFilter_vendor: "相机品牌",
+        advancedFilter_captureMode: "拍摄模式",
+        advancedFilter_exposureProgram: "曝光程序",
+        advancedFilter_meteringMode: "测光模式",
+        advancedFilter_whiteBalance: "白平衡",
+        advancedFilter_focusMode: "对焦模式",
+        advancedFilter_subjectTarget: "识别主体",
+        advancedFilter_driveMode: "驱动模式",
+        advancedFilter_stabilizationMode: "防抖",
+        advancedFilter_computationalMode: "计算摄影",
+        advancedFilter_inCameraLook: "机内风格",
+        advancedFilter_provenanceStatus: "内容凭证",
 
         // Dashboard
         dashboardLoadFailed: "数据加载失败，请检查数据目录是否可访问",
@@ -188,15 +237,22 @@ i18n.use(initReactI18next).init({
         dashboardTab_overview: "概览",
         dashboardTab_gear: "器材",
         dashboardTab_exposure: "曝光参数",
+        dashboardTab_technique: "拍摄技术",
         dashboardTab_time: "时间",
         dashboardTab_places: "地点与色彩",
         dashboardLibraryTotal: "图库照片总数",
         dashboardScopedPhotos: "当前范围照片",
         dashboardDateCoverage: "拍摄日期覆盖率",
         dashboardLibraryHealth: "图库健康度",
-        dashboardCoverageDescription: "覆盖率越高，搜索、筛选和 AI 功能提供的结果越完整",
+        dashboardCoverageDescription:
+          "覆盖率越高，搜索、筛选和 AI 功能提供的结果越完整",
         dashboardAiCoverage: "AI 已处理",
         dashboardExifCoverage: "包含 EXIF",
+        dashboardAdvancedExifCoverage: "高级元数据覆盖率",
+        dashboardCameraBrand: "相机品牌分布",
+        advancedExifProgress: "高级元数据补齐 {{processed}} / {{total}}",
+        advancedExifResume: "继续补齐",
+        advancedExifRetry: "重试失败项（{{count}}）",
         dashboardGpsCoverage: "包含 GPS",
         dashboardColorCoverage: "已分析色彩",
         dashboardInsights: "拍摄洞察",
@@ -209,8 +265,10 @@ i18n.use(initReactI18next).init({
         dashboardStartAi: "继续 AI 处理",
         dashboardStartingAi: "正在启动…",
         dashboardHealthGood: "当前图库处理状态良好，无需额外操作。",
-        dashboardMissingExifAction: "{{count}} 张照片缺少 EXIF；重新索引源文件可尝试补全。",
-        dashboardUndatedExcluded: "{{count}} 张缺少拍摄日期的照片未计入当前时间范围。",
+        dashboardMissingExifAction:
+          "{{count}} 张照片缺少 EXIF；重新索引源文件可尝试补全。",
+        dashboardUndatedExcluded:
+          "{{count}} 张缺少拍摄日期的照片未计入当前时间范围。",
         dashboardTooltipCount: "{{count}} 张 · {{percentage}}%",
         dashboardViewData: "查看数据",
         dashboardHideData: "收起数据",
@@ -218,6 +276,95 @@ i18n.use(initReactI18next).init({
         dashboardDataCount: "照片数",
         dashboardDataShare: "占比",
         dashboardChartCoverage: "有效 {{valid}} 张 · 缺失 {{missing}} 张",
+        dashboardChartClickHint: "点击分类可查看对应照片",
+        dashboardCoverageGood: "覆盖良好",
+        dashboardCoveragePartial: "部分覆盖",
+        dashboardCoverageLow: "数据较少",
+        dashboardHint_vendor:
+          "按文件中实际读取到的厂商信息统计，不根据机型猜测。",
+        dashboardHint_camera:
+          "查看不同机身的使用频率，可帮助了解器材使用习惯。",
+        dashboardHint_lens:
+          "查看镜头使用频率；转接或手动镜头可能无法被完整识别。",
+        dashboardHint_focal:
+          "焦段反映取景视角：数值越小视野越广，数值越大越适合远处主体。",
+        dashboardHint_aperture:
+          "f 值越小进光越多、景深通常越浅；f 值越大景深通常越深。",
+        dashboardHint_iso: "ISO 越高越利于弱光拍摄，但画面噪点也可能增加。",
+        dashboardHint_shutter:
+          "快门越快越容易凝固动作；慢快门更容易记录运动轨迹或手抖。",
+        dashboardHint_exposureProgram:
+          "表示相机如何分配光圈与快门，并不代表照片质量高低。",
+        dashboardHint_meteringMode:
+          "测光模式决定相机参考画面的哪些区域来判断曝光。",
+        dashboardHint_whiteBalance:
+          "白平衡用于校正环境光色偏，主要影响画面的冷暖观感。",
+        dashboardHint_stabilizationMode:
+          "防抖可降低手持抖动，但不能冻结正在移动的主体。",
+        dashboardHint_focusMode:
+          "单次、连续或手动对焦，决定相机如何获取并维持焦点。",
+        dashboardHint_subjectTarget:
+          "主体类型表示相机识别并优先追踪的人、动物或车辆等目标。",
+        dashboardHint_driveMode:
+          "驱动模式描述单张、连拍、预拍或定时等快门释放方式。",
+        dashboardHint_computationalMode:
+          "包括 HDR、多帧合成、像素位移等机内计算拍摄方式。",
+        dashboardHint_inCameraLook:
+          "包括胶片模拟、创意外观、Picture Control 或 LUT 等机内色彩风格。",
+        dashboardHint_provenanceStatus:
+          "这里只检测内容凭证线索；未经密码学验证，不代表照片内容真实。",
+        dashboardHint_yearly: "观察长期拍摄数量变化，数量也会受导入范围影响。",
+        dashboardHint_monthly:
+          "用于发现季节性拍摄偏好，缺少拍摄日期的照片不会计入。",
+        dashboardHint_time:
+          "展示一天中的拍摄时段偏好，时间来自照片的拍摄日期。",
+        dashboardFriendlyDriveContinuous: "连续拍摄",
+        dashboardFriendlyDriveSingle: "单张拍摄",
+        dashboardFriendlyDriveTimer: "定时拍摄",
+        dashboardFriendlyExposureManual: "手动曝光",
+        dashboardFriendlyExposureAperture: "光圈优先",
+        dashboardFriendlyExposureShutter: "快门优先",
+        dashboardFriendlyExposureProgram: "程序自动曝光",
+        dashboardFriendlyFocusContinuous: "连续对焦",
+        dashboardFriendlyFocusSingle: "单次对焦",
+        dashboardFriendlyFocusManual: "手动对焦",
+        dashboardFriendlyMeteringMatrix: "全画面综合测光",
+        dashboardFriendlyMeteringCenter: "中央重点测光",
+        dashboardFriendlyMeteringSpot: "点测光",
+        dashboardFriendlySubjectBird: "鸟类",
+        dashboardFriendlySubjectAnimal: "动物",
+        dashboardFriendlySubjectPerson: "人物",
+        dashboardFriendlySubjectVehicle: "车辆或交通工具",
+        dashboardFriendlyWhiteBalanceAuto: "自动白平衡",
+        dashboardFriendlyWhiteBalanceDaylight: "日光",
+        dashboardFriendlyWhiteBalanceCloudy: "阴天",
+        dashboardFriendlyWhiteBalanceShade: "阴影",
+        dashboardFriendlyWhiteBalanceTungsten: "钨丝灯",
+        dashboardFriendlyWhiteBalanceFluorescent: "荧光灯",
+        dashboardGuidanceTitle: "拍摄习惯解读",
+        dashboardGuidanceSubtitle:
+          "基于当前范围内可读取的照片统计，仅作为整理和拍摄参考。",
+        dashboardGuidance_wideAngleTitle: "广角视角使用较多",
+        dashboardGuidance_wideAngleBody:
+          "最常用约 {{value}}mm。拍摄建筑或风景时，可多留意画面边缘变形和前后透视。",
+        dashboardGuidance_standardFocalTitle: "自然视角是常用选择",
+        dashboardGuidance_standardFocalBody:
+          "最常用约 {{value}}mm，适合日常记录。可尝试改变拍摄距离，获得比变焦更明显的构图变化。",
+        dashboardGuidance_telephotoTitle: "中长焦使用较多",
+        dashboardGuidance_telephotoBody:
+          "最常用约 {{value}}mm。手持时可留意安全快门和防抖状态，减少远摄抖动。",
+        dashboardGuidance_wideApertureTitle: "偏爱大光圈",
+        dashboardGuidance_wideApertureBody:
+          "最常用约 f/{{value}}。浅景深能突出主体，也会提高对焦精度要求。",
+        dashboardGuidance_deepFocusTitle: "偏爱较深景深",
+        dashboardGuidance_deepFocusBody:
+          "最常用约 f/{{value}}。适合保留更多清晰范围，弱光时可考虑三脚架或适当提高 ISO。",
+        dashboardGuidance_highIsoTitle: "弱光拍摄较多",
+        dashboardGuidance_highIsoBody:
+          "平均 ISO 约 {{value}}。如需更干净的画面，可结合大光圈、稳定支撑或后期降噪。",
+        dashboardGuidance_lowMetadataCoverageTitle: "高级元数据仍在积累",
+        dashboardGuidance_lowMetadataCoverageBody:
+          "当前覆盖约 {{value}}%。等待后台补齐完成并尽量保留原始文件，可获得更完整的分析。",
         dashboardDataTruncated: "仅展示主要类别",
         dashboardShowAll: "显示全部 {{count}} 项",
         dashboardShowLess: "收起",
@@ -226,7 +373,8 @@ i18n.use(initReactI18next).init({
         dashboardMissingExifEmpty: "照片缺少该项 EXIF 数据",
         dashboardMonthlyPreference: "月份拍摄偏好",
         dashboardAverageIso: "平均 ISO",
-        dashboardAverageIsoHint: "请结合上方分布理解，平均值可能受少量高 ISO 照片影响",
+        dashboardAverageIsoHint:
+          "请结合上方分布理解，平均值可能受少量高 ISO 照片影响",
         dashboardMapCoverage: "共 {{count}} 个带定位的拍摄点",
         dashboardMapTruncated: "地图最多展示 2000 个点",
         totalPhotos: "照片总数",
@@ -1478,6 +1626,56 @@ i18n.use(initReactI18next).init({
         fileSize: "File Size",
         filePath: "File Path",
         noExifData: "No EXIF data",
+        advancedMetadata: "Advanced photography metadata",
+        metadataCapture: "Capture and exposure",
+        metadataAutofocus: "Autofocus and subject",
+        metadataProcessing: "In-camera look and computation",
+        metadataWorkflow: "Workflow and rights",
+        metadataProvenance: "Content provenance",
+        metadataRawTags: "Vendor raw tags ({{count}})",
+        metadataCaptureMode: "Capture mode",
+        metadataExposureProgram: "Exposure program",
+        metadataMeteringMode: "Metering mode",
+        metadataWhiteBalance: "White balance",
+        metadataFlashMode: "Flash",
+        metadataDriveMode: "Drive mode",
+        metadataBurstSequence: "Burst sequence",
+        metadataFocusMode: "Focus mode",
+        metadataFocusArea: "Focus area",
+        metadataSubjectTarget: "Subject target",
+        metadataEyeDetection: "Eye detection",
+        metadataTracking: "Subject tracking",
+        metadataInCameraLook: "In-camera look",
+        metadataStabilization: "Stabilization",
+        metadataComputationalMode: "Computational mode",
+        metadataLensCorrection: "Lens correction",
+        metadataRating: "Rating",
+        metadataProtection: "Protection",
+        metadataSoftware: "Software",
+        metadataCopyright: "Copyright",
+        metadataIssuer: "Issuer",
+        metadataCredentialStatus: "Credential status",
+        metadataProvenance_present_unverified:
+          "Credential detected (not verified)",
+        metadataProvenance_not_detected: "No credential detected",
+        metadataProvenance_unknown: "Cannot determine for this format",
+        metadataProvenanceDisclaimer:
+          "This only reports a credential structure. It has not been cryptographically verified and does not establish that the depicted content is true.",
+        advancedExifFilter: "Advanced photography metadata",
+        advancedExifFilterField: "Select field",
+        advancedExifFilterValue: "Enter exact value",
+        advancedFilter_vendor: "Camera brand",
+        advancedFilter_captureMode: "Capture mode",
+        advancedFilter_exposureProgram: "Exposure program",
+        advancedFilter_meteringMode: "Metering mode",
+        advancedFilter_whiteBalance: "White balance",
+        advancedFilter_focusMode: "Focus mode",
+        advancedFilter_subjectTarget: "Subject target",
+        advancedFilter_driveMode: "Drive mode",
+        advancedFilter_stabilizationMode: "Stabilization",
+        advancedFilter_computationalMode: "Computational mode",
+        advancedFilter_inCameraLook: "In-camera look",
+        advancedFilter_provenanceStatus: "Content credential",
 
         dashboardLoadFailed:
           "Failed to load data. Check if the data directory is accessible.",
@@ -1494,15 +1692,23 @@ i18n.use(initReactI18next).init({
         dashboardTab_overview: "Overview",
         dashboardTab_gear: "Gear",
         dashboardTab_exposure: "Exposure",
+        dashboardTab_technique: "Technique",
         dashboardTab_time: "Time",
         dashboardTab_places: "Places & color",
         dashboardLibraryTotal: "Library total",
         dashboardScopedPhotos: "Photos in range",
         dashboardDateCoverage: "Date coverage",
         dashboardLibraryHealth: "Library health",
-        dashboardCoverageDescription: "Higher coverage improves the completeness of search, filters, and AI features",
+        dashboardCoverageDescription:
+          "Higher coverage improves the completeness of search, filters, and AI features",
         dashboardAiCoverage: "AI processed",
         dashboardExifCoverage: "Has EXIF",
+        dashboardAdvancedExifCoverage: "Advanced metadata coverage",
+        dashboardCameraBrand: "Camera brands",
+        advancedExifProgress:
+          "Advanced metadata enrichment {{processed}} / {{total}}",
+        advancedExifResume: "Resume enrichment",
+        advancedExifRetry: "Retry failures ({{count}})",
         dashboardGpsCoverage: "Has GPS",
         dashboardColorCoverage: "Color analyzed",
         dashboardInsights: "Shooting insights",
@@ -1514,9 +1720,12 @@ i18n.use(initReactI18next).init({
         dashboardContinueAi: "{{count}} photos still need AI processing.",
         dashboardStartAi: "Continue AI processing",
         dashboardStartingAi: "Starting…",
-        dashboardHealthGood: "Your library is fully processed. No action is needed.",
-        dashboardMissingExifAction: "{{count}} photos have no EXIF. Reindexing their source files may restore it.",
-        dashboardUndatedExcluded: "{{count}} photos without a capture date are excluded from this range.",
+        dashboardHealthGood:
+          "Your library is fully processed. No action is needed.",
+        dashboardMissingExifAction:
+          "{{count}} photos have no EXIF. Reindexing their source files may restore it.",
+        dashboardUndatedExcluded:
+          "{{count}} photos without a capture date are excluded from this range.",
         dashboardTooltipCount: "{{count}} photos · {{percentage}}%",
         dashboardViewData: "View data",
         dashboardHideData: "Hide data",
@@ -1524,6 +1733,97 @@ i18n.use(initReactI18next).init({
         dashboardDataCount: "Photos",
         dashboardDataShare: "Share",
         dashboardChartCoverage: "{{valid}} valid · {{missing}} missing",
+        dashboardChartClickHint: "Click a category to view matching photos",
+        dashboardCoverageGood: "Good coverage",
+        dashboardCoveragePartial: "Partial coverage",
+        dashboardCoverageLow: "Limited data",
+        dashboardHint_vendor:
+          "Based on vendor data read from each file, without guessing from the model.",
+        dashboardHint_camera: "Shows how frequently each camera body is used.",
+        dashboardHint_lens:
+          "Shows lens usage; adapted or manual lenses may not be fully identified.",
+        dashboardHint_focal:
+          "Focal length describes angle of view: lower is wider, while higher brings distant subjects closer.",
+        dashboardHint_aperture:
+          "A lower f-number lets in more light and usually gives shallower depth of field.",
+        dashboardHint_iso:
+          "Higher ISO helps in low light, but may introduce more image noise.",
+        dashboardHint_shutter:
+          "Faster shutter speeds freeze motion; slower speeds can record movement or camera shake.",
+        dashboardHint_exposureProgram:
+          "Shows how the camera allocates aperture and shutter speed, not image quality.",
+        dashboardHint_meteringMode:
+          "Metering controls which parts of the frame the camera uses to judge exposure.",
+        dashboardHint_whiteBalance:
+          "White balance corrects the color of ambient light and affects warm or cool appearance.",
+        dashboardHint_stabilizationMode:
+          "Stabilization reduces camera shake but does not freeze a moving subject.",
+        dashboardHint_focusMode:
+          "Single, continuous, or manual focus controls how focus is acquired and maintained.",
+        dashboardHint_subjectTarget:
+          "The subject type the camera is configured to recognize and prioritize.",
+        dashboardHint_driveMode:
+          "Describes single-frame, burst, pre-capture, or timer shutter release.",
+        dashboardHint_computationalMode:
+          "Includes in-camera HDR, multi-frame composites, pixel shift, and related techniques.",
+        dashboardHint_inCameraLook:
+          "Includes film simulations, Creative Looks, Picture Controls, Photo Styles, or LUTs.",
+        dashboardHint_provenanceStatus:
+          "This only detects credential clues; without cryptographic verification it does not prove authenticity.",
+        dashboardHint_yearly:
+          "Shows long-term shooting volume; imported library scope also affects the trend.",
+        dashboardHint_monthly:
+          "Reveals seasonal habits; photos without capture dates are excluded.",
+        dashboardHint_time:
+          "Shows preferred times of day using each photo's capture date.",
+        dashboardFriendlyDriveContinuous: "Continuous shooting",
+        dashboardFriendlyDriveSingle: "Single frame",
+        dashboardFriendlyDriveTimer: "Self timer",
+        dashboardFriendlyExposureManual: "Manual exposure",
+        dashboardFriendlyExposureAperture: "Aperture priority",
+        dashboardFriendlyExposureShutter: "Shutter priority",
+        dashboardFriendlyExposureProgram: "Program auto exposure",
+        dashboardFriendlyFocusContinuous: "Continuous autofocus",
+        dashboardFriendlyFocusSingle: "Single autofocus",
+        dashboardFriendlyFocusManual: "Manual focus",
+        dashboardFriendlyMeteringMatrix: "Matrix / evaluative metering",
+        dashboardFriendlyMeteringCenter: "Center-weighted metering",
+        dashboardFriendlyMeteringSpot: "Spot metering",
+        dashboardFriendlySubjectBird: "Bird",
+        dashboardFriendlySubjectAnimal: "Animal",
+        dashboardFriendlySubjectPerson: "Person",
+        dashboardFriendlySubjectVehicle: "Vehicle",
+        dashboardFriendlyWhiteBalanceAuto: "Auto white balance",
+        dashboardFriendlyWhiteBalanceDaylight: "Daylight",
+        dashboardFriendlyWhiteBalanceCloudy: "Cloudy",
+        dashboardFriendlyWhiteBalanceShade: "Shade",
+        dashboardFriendlyWhiteBalanceTungsten: "Tungsten",
+        dashboardFriendlyWhiteBalanceFluorescent: "Fluorescent",
+        dashboardGuidanceTitle: "Shooting habit guide",
+        dashboardGuidanceSubtitle:
+          "Based on readable photos in the current range and intended only as a practical reference.",
+        dashboardGuidance_wideAngleTitle: "Wide-angle views are common",
+        dashboardGuidance_wideAngleBody:
+          "Your most-used focal length is about {{value}}mm. Watch edge distortion and perspective in architecture and landscapes.",
+        dashboardGuidance_standardFocalTitle: "Natural perspectives are common",
+        dashboardGuidance_standardFocalBody:
+          "Your most-used focal length is about {{value}}mm. Changing camera distance can create stronger composition changes than zooming.",
+        dashboardGuidance_telephotoTitle: "Telephoto views are common",
+        dashboardGuidance_telephotoBody:
+          "Your most-used focal length is about {{value}}mm. Check shutter speed and stabilization to reduce handheld blur.",
+        dashboardGuidance_wideApertureTitle: "You often use wide apertures",
+        dashboardGuidance_wideApertureBody:
+          "Your most-used aperture is about f/{{value}}. Shallow depth of field isolates subjects but needs precise focus.",
+        dashboardGuidance_deepFocusTitle: "You often use deeper focus",
+        dashboardGuidance_deepFocusBody:
+          "Your most-used aperture is about f/{{value}}. In low light, consider support or a modest ISO increase.",
+        dashboardGuidance_highIsoTitle: "You often shoot in low light",
+        dashboardGuidance_highIsoBody:
+          "Average ISO is about {{value}}. A wider aperture, stable support, or noise reduction may produce cleaner results.",
+        dashboardGuidance_lowMetadataCoverageTitle:
+          "Advanced metadata is still building",
+        dashboardGuidance_lowMetadataCoverageBody:
+          "Current coverage is about {{value}}%. Let background enrichment finish and keep original files for fuller analysis.",
         dashboardDataTruncated: "Major categories only",
         dashboardShowAll: "Show all {{count}} items",
         dashboardShowLess: "Show less",
@@ -1532,7 +1832,8 @@ i18n.use(initReactI18next).init({
         dashboardMissingExifEmpty: "Photos do not contain this EXIF field",
         dashboardMonthlyPreference: "Monthly shooting preference",
         dashboardAverageIso: "Average ISO",
-        dashboardAverageIsoHint: "Read this with the distribution above; a few high-ISO photos can skew the average",
+        dashboardAverageIsoHint:
+          "Read this with the distribution above; a few high-ISO photos can skew the average",
         dashboardMapCoverage: "{{count}} geotagged shooting points",
         dashboardMapTruncated: "The map displays up to 2,000 points",
         totalPhotos: "Total Photos",

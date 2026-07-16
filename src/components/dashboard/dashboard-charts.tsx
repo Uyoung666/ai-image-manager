@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Bar,
@@ -64,11 +64,26 @@ export function DashboardBarChart({
     typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
       : false;
+  const animationKey = data
+    .map((point) => `${point.name}:${point.count}`)
+    .join("|");
+  const [animationReady, setAnimationReady] = useState(noMotion);
+  useEffect(() => {
+    if (noMotion || !animationKey) {
+      setAnimationReady(true);
+      return;
+    }
+    setAnimationReady(false);
+    const frame = window.requestAnimationFrame(() => setAnimationReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [animationKey, noMotion]);
   if (horizontal) {
     const maxCount = Math.max(...data.map((point) => point.count), 1);
     return (
       <ul className="list-none space-y-2">
         {data.map((point) => {
+          const percentage =
+            sampleTotal > 0 ? (point.count / sampleTotal) * 100 : 0;
           const content = (
             <>
               <span
@@ -82,12 +97,20 @@ export function DashboardBarChart({
                   className="block h-full rounded-[4px]"
                   style={{
                     backgroundColor: color,
-                    width: `${Math.max(1.5, (point.count / maxCount) * 100)}%`,
+                    transition: noMotion ? undefined : "width 400ms ease-out",
+                    width: animationReady
+                      ? `${Math.max(1.5, (point.count / maxCount) * 100)}%`
+                      : "0%",
                   }}
                 />
               </span>
-              <span className="text-right text-[11px] text-foreground tabular-nums">
-                {point.count.toLocaleString()}
+              <span className="text-right tabular-nums">
+                <strong className="block font-medium text-[11px] text-foreground">
+                  {point.count.toLocaleString()}
+                </strong>
+                <small className="block text-[9px] text-muted-foreground">
+                  {percentage.toFixed(1)}%
+                </small>
               </span>
             </>
           );
@@ -95,7 +118,7 @@ export function DashboardBarChart({
             <li key={point.name}>
               {onPointClick ? (
                 <button
-                  className="grid w-full grid-cols-[minmax(100px,150px)_1fr_52px] items-center gap-3 rounded-[5px] py-1 focus-visible:outline-2 focus-visible:outline-ring"
+                  className="grid w-full grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 rounded-[5px] py-1 focus-visible:outline-2 focus-visible:outline-ring"
                   onClick={() => onPointClick(point)}
                   title={`${point.name}: ${point.count}`}
                   type="button"
@@ -104,7 +127,7 @@ export function DashboardBarChart({
                 </button>
               ) : (
                 <div
-                  className="grid grid-cols-[minmax(100px,150px)_1fr_52px] items-center gap-3 py-1"
+                  className="grid grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 py-1"
                   title={`${point.name}: ${point.count}`}
                 >
                   {content}
@@ -137,8 +160,10 @@ export function DashboardBarChart({
           cursor={{ fill: "var(--muted)" }}
         />
         <Bar
-          animationDuration={noMotion ? 0 : 500}
+          animationDuration={400}
+          animationEasing="ease-out"
           dataKey="count"
+          isAnimationActive={!noMotion}
           onClick={(point) => onPointClick?.(point as DashboardPoint)}
           radius={[4, 4, 0, 0]}
           style={onPointClick ? { cursor: "pointer" } : undefined}
@@ -178,9 +203,9 @@ export function ChartSection({
         <div>
           <h2 className="font-semibold text-[15px] text-foreground">{title}</h2>
           {description && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 text-[11px] text-muted-foreground">
               {description}
-            </p>
+            </div>
           )}
         </div>
         {data && data.length > 0 && (
@@ -254,6 +279,16 @@ export function CoverageCard({
   label: string;
   percentage: number;
 }) {
+  const { t } = useTranslation();
+  let statusKey = "dashboardCoverageLow";
+  let barColor = "var(--warning)";
+  if (percentage >= 80) {
+    statusKey = "dashboardCoverageGood";
+    barColor = "var(--primary)";
+  } else if (percentage >= 50) {
+    statusKey = "dashboardCoveragePartial";
+    barColor = "var(--chart-4)";
+  }
   return (
     <div className="rounded-[8px] border border-border bg-background/50 p-4">
       <div className="flex items-center justify-between gap-3">
@@ -264,13 +299,18 @@ export function CoverageCard({
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-primary transition-[width]"
-          style={{ width: `${Math.min(100, percentage)}%` }}
+          className="h-full rounded-full transition-[width] ease-out"
+          style={{
+            backgroundColor: barColor,
+            transitionDuration: "400ms",
+            width: `${Math.min(100, percentage)}%`,
+          }}
         />
       </div>
-      <p className="mt-2 text-[10px] text-muted-foreground tabular-nums">
-        {count.toLocaleString()}
-      </p>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <span className="tabular-nums">{count.toLocaleString()}</span>
+        <span>{t(statusKey)}</span>
+      </div>
     </div>
   );
 }

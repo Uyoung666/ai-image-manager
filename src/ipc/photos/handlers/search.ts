@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import {
+  advancedExifData,
   exifData,
   faceIdentities,
   faceIdentityMembers,
@@ -23,11 +24,11 @@ import {
   photoTags,
   tags,
 } from "@/db/schema";
+import { getAiReadiness } from "@/services/ai/health";
 import {
   extractTemporalContext,
   parseChineseQuery,
 } from "@/services/ai/query-parser";
-import { getAiReadiness } from "@/services/ai/health";
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
@@ -307,6 +308,8 @@ export const searchCompound = os
       dateTo,
       cameraModel,
       lensModel,
+      advancedField,
+      advancedValue,
       focalMin,
       focalMax,
       apertureMin,
@@ -317,6 +320,42 @@ export const searchCompound = os
       shutterMax,
       limit,
     } = input;
+    const advancedColumns = {
+      vendor: advancedExifData.vendor,
+      captureMode: advancedExifData.captureMode,
+      exposureProgram: advancedExifData.exposureProgram,
+      meteringMode: advancedExifData.meteringMode,
+      whiteBalance: advancedExifData.whiteBalance,
+      focusMode: advancedExifData.focusMode,
+      subjectTarget: advancedExifData.subjectTarget,
+      driveMode: advancedExifData.driveMode,
+      stabilizationMode: advancedExifData.stabilizationMode,
+      computationalMode: advancedExifData.computationalMode,
+      inCameraLook: advancedExifData.inCameraLook,
+      provenanceStatus: advancedExifData.provenanceStatus,
+    } as const;
+    const getAdvancedIds = (within?: number[]) => {
+      if (!(advancedField && advancedValue)) {
+        return null;
+      }
+      const conditions: SQL[] = [
+        eq(advancedColumns[advancedField], advancedValue),
+      ];
+      if (within) {
+        if (within.length === 0) {
+          return new Set<number>();
+        }
+        conditions.push(inArray(advancedExifData.photoId, within));
+      }
+      return new Set(
+        db
+          .select({ photoId: advancedExifData.photoId })
+          .from(advancedExifData)
+          .where(and(...conditions))
+          .all()
+          .map((row) => row.photoId)
+      );
+    };
 
     // Color search: if colorHex provided, or query is a hex code
     function parseHexColor(
@@ -383,8 +422,12 @@ export const searchCompound = os
           sql`p.dominant_colors IS NOT NULL`,
           sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`,
         ];
-        if (dateFrom) conditions.push(sql`e.date_taken >= ${dateFrom}`);
-        if (dateTo) conditions.push(sql`e.date_taken <= ${dateTo}`);
+        if (dateFrom) {
+          conditions.push(sql`e.date_taken >= ${dateFrom}`);
+        }
+        if (dateTo) {
+          conditions.push(sql`e.date_taken <= ${dateTo}`);
+        }
         if (cameraModel) {
           conditions.push(sql`e.camera_model LIKE ${`%${cameraModel}%`}`);
         }
@@ -403,8 +446,12 @@ export const searchCompound = os
         if (apertureMax !== undefined) {
           conditions.push(sql`e.aperture <= ${apertureMax}`);
         }
-        if (isoMin !== undefined) conditions.push(sql`e.iso >= ${isoMin}`);
-        if (isoMax !== undefined) conditions.push(sql`e.iso <= ${isoMax}`);
+        if (isoMin !== undefined) {
+          conditions.push(sql`e.iso >= ${isoMin}`);
+        }
+        if (isoMax !== undefined) {
+          conditions.push(sql`e.iso <= ${isoMax}`);
+        }
         if (shutterMin !== undefined) {
           conditions.push(sql`e.shutter_speed_num >= ${shutterMin}`);
         }
@@ -535,28 +582,42 @@ export const searchCompound = os
 
       if (hasExifFilter) {
         const exifConds: SQL[] = [];
-        if (effectiveDateFrom)
+        if (effectiveDateFrom) {
           exifConds.push(sql`${exifData.dateTaken} >= ${effectiveDateFrom}`);
-        if (effectiveDateTo)
+        }
+        if (effectiveDateTo) {
           exifConds.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
-        if (cameraModel)
+        }
+        if (cameraModel) {
           exifConds.push(like(exifData.cameraModel, `%${cameraModel}%`));
-        if (lensModel)
+        }
+        if (lensModel) {
           exifConds.push(like(exifData.lensModel, `%${lensModel}%`));
-        if (focalMin !== undefined)
+        }
+        if (focalMin !== undefined) {
           exifConds.push(gte(exifData.focalLengthNum, focalMin));
-        if (focalMax !== undefined)
+        }
+        if (focalMax !== undefined) {
           exifConds.push(lte(exifData.focalLengthNum, focalMax));
-        if (apertureMin !== undefined)
+        }
+        if (apertureMin !== undefined) {
           exifConds.push(sql`${exifData.aperture} >= ${apertureMin}`);
-        if (apertureMax !== undefined)
+        }
+        if (apertureMax !== undefined) {
           exifConds.push(sql`${exifData.aperture} <= ${apertureMax}`);
-        if (isoMin !== undefined) exifConds.push(gte(exifData.iso, isoMin));
-        if (isoMax !== undefined) exifConds.push(lte(exifData.iso, isoMax));
-        if (shutterMin !== undefined)
+        }
+        if (isoMin !== undefined) {
+          exifConds.push(gte(exifData.iso, isoMin));
+        }
+        if (isoMax !== undefined) {
+          exifConds.push(lte(exifData.iso, isoMax));
+        }
+        if (shutterMin !== undefined) {
           exifConds.push(gte(exifData.shutterSpeedNum, shutterMin));
-        if (shutterMax !== undefined)
+        }
+        if (shutterMax !== undefined) {
           exifConds.push(lte(exifData.shutterSpeedNum, shutterMax));
+        }
 
         const exifPhotoIds = db
           .select({ photoId: exifData.photoId })
@@ -944,7 +1005,8 @@ export const searchCompound = os
         isoMin !== undefined ||
         isoMax !== undefined ||
         shutterMin !== undefined ||
-        shutterMax !== undefined;
+        shutterMax !== undefined ||
+        Boolean(advancedField && advancedValue);
 
       if (!hasExifOrTimeFilter) {
         const allIds = rerankedList.map((r) => r.photoId);
@@ -1039,8 +1101,13 @@ export const searchCompound = os
           : exifBaseQuery
       ).all();
       const validIds = new Set(filteredExif.map((e) => e.photoId!));
+      const advancedIds = getAdvancedIds(allIds);
 
-      const filtered = rerankedList.filter((r) => validIds.has(r.photoId));
+      const filtered = rerankedList.filter(
+        (r) =>
+          validIds.has(r.photoId) &&
+          (!advancedIds || advancedIds.has(r.photoId))
+      );
 
       if (filtered.length === 0) {
         return {
@@ -1103,7 +1170,8 @@ export const searchCompound = os
       isoMin !== undefined ||
       isoMax !== undefined ||
       shutterMin !== undefined ||
-      shutterMax !== undefined;
+      shutterMax !== undefined ||
+      Boolean(advancedField && advancedValue);
     if (!hasEffectiveFilters) {
       const items = db
         .select(SEARCH_PHOTO_COLUMNS)
@@ -1158,6 +1226,17 @@ export const searchCompound = os
     }
     if (shutterMax !== undefined) {
       exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
+    }
+    const allAdvancedIds = getAdvancedIds();
+    if (allAdvancedIds) {
+      if (allAdvancedIds.size === 0) {
+        const emptyResult = { results: [], total: 0 };
+        setCachedResult(cacheKey, emptyResult);
+        return emptyResult;
+      }
+      exifConditions.push(
+        inArray(exifData.photoId, Array.from(allAdvancedIds))
+      );
     }
 
     const exifBaseQuery = db
@@ -1217,7 +1296,9 @@ export const searchSpotlight = os
             const ftsResults = db.all(
               sql`SELECT rowid AS id FROM photos_fts WHERE photos_fts MATCH ${terms}`
             ) as Array<{ id: number }>;
-            if (ftsResults.length > 0) return ftsResults.slice(0, limit);
+            if (ftsResults.length > 0) {
+              return ftsResults.slice(0, limit);
+            }
           } catch {
             /* FTS5 error → fallback */
           }
@@ -1245,13 +1326,19 @@ export const searchSpotlight = os
     const tagRows = settled[1].status === "fulfilled" ? settled[1].value : [];
     const ftsRows = settled[0].status === "fulfilled" ? settled[0].value : [];
 
-    for (const r of tagRows) merged.set(r.id, 1);
+    for (const r of tagRows) {
+      merged.set(r.id, 1);
+    }
     for (const r of ftsRows) {
-      if (!merged.has(r.id)) merged.set(r.id, 0);
+      if (!merged.has(r.id)) {
+        merged.set(r.id, 0);
+      }
     }
 
     const ids = [...merged.keys()].slice(0, limit);
-    if (ids.length === 0) return { results: [], query: q };
+    if (ids.length === 0) {
+      return { results: [], query: q };
+    }
 
     // 仅返回三字段，IPC payload 极小
     const results = db

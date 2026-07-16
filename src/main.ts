@@ -1220,6 +1220,17 @@ app.whenReady().then(async () => {
       }
     }, 5000);
 
+    // MakerNote enrichment is deferred and never blocks the basic import path.
+    setTimeout(() => {
+      import("@/services/advanced-exif")
+        .then(({ scheduleAdvancedExifEnrichment }) =>
+          scheduleAdvancedExifEnrichment(0)
+        )
+        .catch((err) =>
+          log.warn({ err }, "[AdvancedExif] Startup enrichment failed")
+        );
+    }, 8000);
+
     // Forward system theme changes to renderer
     nativeTheme.on("updated", () => {
       mainWindow?.webContents.send(

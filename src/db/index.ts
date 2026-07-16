@@ -7,6 +7,7 @@ import { app } from "electron";
 import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
 import {
+  advancedExifData,
   albumPhotos,
   albums,
   appSettings,
@@ -26,6 +27,7 @@ import {
 } from "./schema";
 
 const schema = {
+  advancedExifData,
   albumPhotos,
   albums,
   appSettings,

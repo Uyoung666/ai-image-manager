@@ -38,6 +38,17 @@ interface PhotoDetail {
 }
 
 interface ExifData {
+  advanced?: {
+    autofocus: Record<string, unknown>;
+    capture: Record<string, unknown>;
+    processing: Record<string, unknown>;
+    provenance: Record<string, unknown> & { status?: string };
+    standard: Record<string, unknown>;
+    vendor: string | null;
+    vendorRaw: Record<string, unknown>;
+    workflow: Record<string, unknown>;
+  } | null;
+  advancedStatus?: string;
   aperture: number | null;
   cameraMake: string | null;
   cameraModel: string | null;
@@ -830,7 +841,7 @@ export function PhotoDetailPanel({
             </p>
           </section>
 
-          {/* EXIF Info */}
+          {/* EXIF and maker metadata */}
           {loading ? (
             <section>
               <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
@@ -894,6 +905,64 @@ export function PhotoDetailPanel({
                   <InfoRow label="Software" value={exif.software} />
                 )}
               </div>
+              {exif.advanced && (
+                <div className="mt-4 space-y-4 border-border border-t pt-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-[11px] text-foreground">
+                      {t("advancedMetadata")}
+                    </span>
+                    {exif.advanced.vendor && (
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] text-primary">
+                        {exif.advanced.vendor} MakerNote
+                      </span>
+                    )}
+                  </div>
+                  <MetadataGroup
+                    data={{
+                      ...exif.advanced.standard,
+                      ...exif.advanced.capture,
+                    }}
+                    title={t("metadataCapture")}
+                  />
+                  <MetadataGroup
+                    data={exif.advanced.autofocus}
+                    title={t("metadataAutofocus")}
+                  />
+                  <MetadataGroup
+                    data={exif.advanced.processing}
+                    title={t("metadataProcessing")}
+                  />
+                  <MetadataGroup
+                    data={exif.advanced.workflow}
+                    title={t("metadataWorkflow")}
+                  />
+                  <MetadataGroup
+                    data={exif.advanced.provenance}
+                    provenance
+                    title={t("metadataProvenance")}
+                  />
+                  {Object.keys(exif.advanced.vendorRaw).length > 0 && (
+                    <details className="rounded-[6px] border border-border p-2">
+                      <summary className="cursor-pointer text-[10px] text-muted-foreground">
+                        {t("metadataRawTags", {
+                          count: Object.keys(exif.advanced.vendorRaw).length,
+                        })}
+                      </summary>
+                      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto font-mono">
+                        {Object.entries(exif.advanced.vendorRaw)
+                          .slice(0, 100)
+                          .map(([key, value]) => (
+                            <InfoRow
+                              key={key}
+                              label={key}
+                              value={formatMetadataValue(value)}
+                            />
+                          ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
             </section>
           ) : (
             <section>
@@ -938,6 +1007,79 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         {value}
       </span>
     </div>
+  );
+}
+
+const METADATA_LABEL_KEYS: Record<string, string> = {
+  burstSequence: "metadataBurstSequence",
+  captureMode: "metadataCaptureMode",
+  computationalMode: "metadataComputationalMode",
+  copyright: "metadataCopyright",
+  driveMode: "metadataDriveMode",
+  exposureProgram: "metadataExposureProgram",
+  eyeDetection: "metadataEyeDetection",
+  flashMode: "metadataFlashMode",
+  focusArea: "metadataFocusArea",
+  focusMode: "metadataFocusMode",
+  inCameraLook: "metadataInCameraLook",
+  issuer: "metadataIssuer",
+  lensCorrection: "metadataLensCorrection",
+  meteringMode: "metadataMeteringMode",
+  protection: "metadataProtection",
+  rating: "metadataRating",
+  software: "metadataSoftware",
+  stabilizationMode: "metadataStabilization",
+  status: "metadataCredentialStatus",
+  subjectTarget: "metadataSubjectTarget",
+  tracking: "metadataTracking",
+  whiteBalance: "metadataWhiteBalance",
+};
+
+function formatMetadataValue(value: unknown): string {
+  if (typeof value === "boolean") return value ? "✓" : "—";
+  if (value == null) return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function MetadataGroup({
+  data,
+  provenance = false,
+  title,
+}: {
+  data: Record<string, unknown>;
+  provenance?: boolean;
+  title: string;
+}) {
+  const { t } = useTranslation();
+  const rows = Object.entries(data).filter(
+    ([, value]) => value !== null && value !== undefined && value !== ""
+  );
+  if (rows.length === 0) return null;
+  return (
+    <section>
+      <h5 className="mb-1.5 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+        {title}
+      </h5>
+      <div className="space-y-1.5">
+        {rows.map(([key, value]) => (
+          <InfoRow
+            key={key}
+            label={t(METADATA_LABEL_KEYS[key] ?? key)}
+            value={
+              provenance && key === "status"
+                ? t(`metadataProvenance_${String(value)}`)
+                : formatMetadataValue(value)
+            }
+          />
+        ))}
+      </div>
+      {provenance && data.status === "present_unverified" && (
+        <p className="mt-2 text-[9px] text-warning">
+          {t("metadataProvenanceDisclaimer")}
+        </p>
+      )}
+    </section>
   );
 }
 

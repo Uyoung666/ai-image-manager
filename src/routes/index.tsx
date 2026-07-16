@@ -201,6 +201,11 @@ function HomePage() {
 
     // Build filters
     const filters: ExifFilters = {};
+    if (drillParams.advancedField && drillParams.advancedValue) {
+      filters.advancedField =
+        drillParams.advancedField as ExifFilters["advancedField"];
+      filters.advancedValue = drillParams.advancedValue;
+    }
     if (drillParams.cameraModel) {
       filters.cameraModel = drillParams.cameraModel;
     }
@@ -734,6 +739,10 @@ function HomePage() {
       if (p.filters?.cameraModel)
         searchParams.cameraModel = p.filters.cameraModel;
       if (p.filters?.lensModel) searchParams.lensModel = p.filters.lensModel;
+      if (p.filters?.advancedField)
+        searchParams.advancedField = p.filters.advancedField;
+      if (p.filters?.advancedValue)
+        searchParams.advancedValue = p.filters.advancedValue;
       if (p.filters?.focalMin)
         searchParams.focalMin = Number(p.filters.focalMin);
       if (p.filters?.focalMax)
@@ -849,6 +858,8 @@ function HomePage() {
         dateTo?: number;
         cameraModel?: string;
         lensModel?: string;
+        advancedField?: ExifFilters["advancedField"];
+        advancedValue?: string;
         focalMin?: number;
         focalMax?: number;
         apertureMin?: number;
@@ -878,6 +889,12 @@ function HomePage() {
       }
       if (filters?.lensModel) {
         searchParams.lensModel = filters.lensModel;
+      }
+      if (filters?.advancedField) {
+        searchParams.advancedField = filters.advancedField;
+      }
+      if (filters?.advancedValue) {
+        searchParams.advancedValue = filters.advancedValue;
       }
       if (filters?.focalMin) {
         searchParams.focalMin = Number(filters.focalMin);
@@ -1736,6 +1753,8 @@ export const Route = createFileRoute("/")({
     apertureMin?: string;
     cameraModel?: string;
     lensModel?: string;
+    advancedField?: string;
+    advancedValue?: string;
     dateFrom?: string;
     dateTo?: string;
     favoriteOnly?: boolean;
@@ -1757,6 +1776,8 @@ export const Route = createFileRoute("/")({
     apertureMin: search.apertureMin as string | undefined,
     cameraModel: search.cameraModel as string | undefined,
     lensModel: search.lensModel as string | undefined,
+    advancedField: search.advancedField as string | undefined,
+    advancedValue: search.advancedValue as string | undefined,
     dateFrom: search.dateFrom as string | undefined,
     dateTo: search.dateTo as string | undefined,
     favoriteOnly:

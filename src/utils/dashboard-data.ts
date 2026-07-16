@@ -21,6 +21,20 @@ export interface DashboardChartPoint {
   [key: string]: unknown;
 }
 
+export type ShootingGuidanceKind =
+  | "wideAngle"
+  | "standardFocal"
+  | "telephoto"
+  | "wideAperture"
+  | "deepFocus"
+  | "highIso"
+  | "lowMetadataCoverage";
+
+export interface ShootingGuidance {
+  kind: ShootingGuidanceKind;
+  value: number;
+}
+
 const STANDARD_APERTURES = [
   1, 1.1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3,
   7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32,
@@ -189,6 +203,54 @@ export function calculateCoverage(covered: number, total: number): number {
     return 0;
   }
   return Math.round((Math.max(0, covered) / total) * 100);
+}
+
+export function buildShootingGuidance(input: {
+  advancedExif: number;
+  apertureStats: ApertureStatInput[];
+  avgIso: number;
+  focalStats: FocalStatInput[];
+  totalPhotos: number;
+}): ShootingGuidance[] {
+  const guidance: ShootingGuidance[] = [];
+  const topFocal = [...input.focalStats]
+    .filter((item) => Number.isFinite(Number(item.focalLength)))
+    .sort((a, b) => b.count - a.count)[0];
+  if (topFocal) {
+    const focal = Number(topFocal.focalLength);
+    let kind: ShootingGuidanceKind = "standardFocal";
+    if (focal <= 35) {
+      kind = "wideAngle";
+    } else if (focal >= 85) {
+      kind = "telephoto";
+    }
+    guidance.push({ kind, value: focal });
+  }
+
+  const topAperture = [...input.apertureStats].sort(
+    (a, b) => b.count - a.count
+  )[0];
+  if (topAperture?.aperture && topAperture.aperture <= 2.8) {
+    guidance.push({ kind: "wideAperture", value: topAperture.aperture });
+  } else if (topAperture?.aperture && topAperture.aperture >= 8) {
+    guidance.push({ kind: "deepFocus", value: topAperture.aperture });
+  }
+
+  if (input.avgIso >= 1600) {
+    guidance.push({ kind: "highIso", value: Math.round(input.avgIso) });
+  }
+
+  const advancedCoverage = calculateCoverage(
+    input.advancedExif,
+    input.totalPhotos
+  );
+  if (input.totalPhotos > 0 && advancedCoverage < 50) {
+    guidance.push({
+      kind: "lowMetadataCoverage",
+      value: advancedCoverage,
+    });
+  }
+  return guidance.slice(0, 4);
 }
 
 export function getTopItems<T extends { count: number }>(

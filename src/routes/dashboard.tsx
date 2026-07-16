@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Lightbulb, Sparkles } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -19,6 +19,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { advancedExifActions } from "@/actions/advanced-exif";
 import {
   ChartSection,
   CoverageCard,
@@ -35,20 +36,29 @@ import {
 } from "@/components/ui/tooltip";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
+import type { AdvancedExifProgress } from "@/types/photo-metadata";
 import {
   buildApertureChartData,
   buildFocalChartData,
   buildMonthlyChartData,
   buildRangeSearchParams,
+  buildShootingGuidance,
   calculateCoverage,
   type DashboardRangePreset,
   fillYearlyChartData,
   getDashboardTimeRange,
   getTopItems,
   mergeDashboardDrillParams,
+  type ShootingGuidanceKind,
 } from "@/utils/dashboard-data";
 
-type DashboardTab = "overview" | "gear" | "exposure" | "time" | "places";
+type DashboardTab =
+  | "overview"
+  | "gear"
+  | "exposure"
+  | "technique"
+  | "time"
+  | "places";
 
 interface BucketStat {
   count: number;
@@ -76,11 +86,13 @@ interface DistributionMeta {
   valid: number;
 }
 interface DashboardData {
+  advancedStats: Record<string, { count: number; name: string }[]>;
   aiProcessed: number;
   apertureStats: { aperture: number; count: number }[];
   avgIso: number;
   cameraStats: { count: number; model: string }[];
   coverage: {
+    advancedExif: number;
     ai: number;
     color: number;
     date: number;
@@ -121,7 +133,14 @@ interface GeoData {
   truncated: boolean;
 }
 
-const TABS: DashboardTab[] = ["overview", "gear", "exposure", "time", "places"];
+const TABS: DashboardTab[] = [
+  "overview",
+  "gear",
+  "exposure",
+  "technique",
+  "time",
+  "places",
+];
 const PRESETS: DashboardRangePreset[] = ["all", "year", "last12", "custom"];
 const chartTooltipStyle = {
   contentStyle: {
@@ -132,6 +151,52 @@ const chartTooltipStyle = {
     fontSize: 12,
   },
   cursor: { fill: "var(--muted)" },
+};
+
+const DASHBOARD_COLORS = {
+  exposure: "var(--dashboard-exposure)",
+  gear: "var(--dashboard-gear)",
+  provenance: "var(--dashboard-provenance)",
+  technique: "var(--dashboard-technique)",
+  time: "var(--dashboard-time)",
+} as const;
+
+const FRIENDLY_ADVANCED_VALUES: Record<string, [RegExp, string][]> = {
+  driveMode: [
+    [/continuous|burst|high.speed/i, "dashboardFriendlyDriveContinuous"],
+    [/single/i, "dashboardFriendlyDriveSingle"],
+    [/timer|self.timer/i, "dashboardFriendlyDriveTimer"],
+  ],
+  exposureProgram: [
+    [/manual/i, "dashboardFriendlyExposureManual"],
+    [/aperture|\bav\b|\ba\b/i, "dashboardFriendlyExposureAperture"],
+    [/shutter|\btv\b|\bs\b/i, "dashboardFriendlyExposureShutter"],
+    [/program|\bp\b/i, "dashboardFriendlyExposureProgram"],
+  ],
+  focusMode: [
+    [/continuous|af.c|servo/i, "dashboardFriendlyFocusContinuous"],
+    [/single|af.s|one.shot/i, "dashboardFriendlyFocusSingle"],
+    [/manual|\bmf\b/i, "dashboardFriendlyFocusManual"],
+  ],
+  meteringMode: [
+    [/matrix|evaluative|multi/i, "dashboardFriendlyMeteringMatrix"],
+    [/center/i, "dashboardFriendlyMeteringCenter"],
+    [/spot/i, "dashboardFriendlyMeteringSpot"],
+  ],
+  subjectTarget: [
+    [/bird/i, "dashboardFriendlySubjectBird"],
+    [/animal|cat|dog/i, "dashboardFriendlySubjectAnimal"],
+    [/human|person|people|face/i, "dashboardFriendlySubjectPerson"],
+    [/vehicle|car|train|plane|aircraft/i, "dashboardFriendlySubjectVehicle"],
+  ],
+  whiteBalance: [
+    [/auto|awb/i, "dashboardFriendlyWhiteBalanceAuto"],
+    [/daylight|sun/i, "dashboardFriendlyWhiteBalanceDaylight"],
+    [/cloud/i, "dashboardFriendlyWhiteBalanceCloudy"],
+    [/shade/i, "dashboardFriendlyWhiteBalanceShade"],
+    [/tungsten|incandescent/i, "dashboardFriendlyWhiteBalanceTungsten"],
+    [/fluorescent/i, "dashboardFriendlyWhiteBalanceFluorescent"],
+  ],
 };
 const axisTick = { fill: "var(--muted-foreground)", fontSize: 11 };
 
@@ -177,6 +242,12 @@ function DashboardPage() {
     placeholderData: (previousData) => previousData,
     staleTime: 30_000,
   });
+  const advancedExifQuery = useQuery({
+    queryKey: ["advanced-exif-status"],
+    queryFn: () =>
+      advancedExifActions.getStatus() as Promise<AdvancedExifProgress>,
+    refetchInterval: 1500,
+  });
   const data = useDeferredValue(statsQuery.data ?? null);
   const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
   const colorQuery = useQuery({
@@ -211,6 +282,15 @@ function DashboardPage() {
         event.data?.status === "done"
       ) {
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      }
+      if (event.data?.type === "advanced-exif-progress") {
+        queryClient.setQueryData(
+          ["advanced-exif-status"],
+          event.data.progress ?? event.data
+        );
+        if (!event.data.running) {
+          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+        }
       }
     };
     window.addEventListener("message", onMessage);
@@ -302,6 +382,39 @@ function DashboardPage() {
     () => buildMonthlyChartData(data?.monthlyStats ?? [], i18n.language),
     [data?.monthlyStats, i18n.language]
   );
+  const shootingGuidance = useMemo(
+    () =>
+      buildShootingGuidance({
+        advancedExif: data?.coverage.advancedExif ?? 0,
+        apertureStats: data?.apertureStats ?? [],
+        avgIso: data?.avgIso ?? 0,
+        focalStats: data?.focalStats ?? [],
+        totalPhotos: data?.scope.scopedPhotos ?? 0,
+      }),
+    [
+      data?.apertureStats,
+      data?.avgIso,
+      data?.coverage.advancedExif,
+      data?.focalStats,
+      data?.scope.scopedPhotos,
+    ]
+  );
+  const friendlyAdvancedValue = (key: string, value: string) => {
+    const match = FRIENDLY_ADVANCED_VALUES[key]?.find(([pattern]) =>
+      pattern.test(value)
+    );
+    return match ? `${t(match[1])} · ${value}` : value;
+  };
+  const advancedChart = (key: string) =>
+    (data?.advancedStats?.[key] ?? []).map((item) => ({
+      name:
+        key === "provenanceStatus"
+          ? t(`metadataProvenance_${item.name}`)
+          : friendlyAdvancedValue(key, item.name),
+      count: item.count,
+      advancedField: key,
+      advancedValue: item.name,
+    }));
 
   if (statsQuery.isLoading) {
     return <DashboardSkeleton />;
@@ -429,10 +542,14 @@ function DashboardPage() {
 
         {tab === "overview" && (
           <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <SummaryCard
                 label={t("dashboardLibraryTotal")}
                 value={data.scope.libraryTotal.toLocaleString(i18n.language)}
+              />
+              <SummaryCard
+                label={t("dashboardAdvancedExifCoverage")}
+                value={`${calculateCoverage(data.coverage.advancedExif, sampleTotal)}%`}
               />
               <SummaryCard
                 label={t("dashboardScopedPhotos")}
@@ -501,6 +618,34 @@ function DashboardPage() {
                     }
                     label={t("cameraUsage")}
                     value={topCamera?.name ?? t("dashboardNoInsight")}
+                  />
+                  <Insight
+                    detail={
+                      advancedChart("captureMode")[0]?.count
+                        ? t("dashboardPhotoCount", {
+                            count: advancedChart("captureMode")[0].count,
+                          })
+                        : undefined
+                    }
+                    label={t("metadataCaptureMode")}
+                    value={
+                      advancedChart("captureMode")[0]?.name ??
+                      t("dashboardNoInsight")
+                    }
+                  />
+                  <Insight
+                    detail={
+                      advancedChart("inCameraLook")[0]?.count
+                        ? t("dashboardPhotoCount", {
+                            count: advancedChart("inCameraLook")[0].count,
+                          })
+                        : undefined
+                    }
+                    label={t("metadataInCameraLook")}
+                    value={
+                      advancedChart("inCameraLook")[0]?.name ??
+                      t("dashboardNoInsight")
+                    }
                   />
                   <Insight
                     detail={
@@ -573,17 +718,100 @@ function DashboardPage() {
                     })}
                   </p>
                 )}
+                {advancedExifQuery.data && (
+                  <div className="mt-4 border-border border-t pt-3">
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("advancedExifProgress", {
+                        processed: advancedExifQuery.data.processed,
+                        total: advancedExifQuery.data.total,
+                      })}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {advancedExifQuery.data.running &&
+                      !advancedExifQuery.data.paused ? (
+                        <Button
+                          className="h-7 text-[10px]"
+                          onClick={() => advancedExifActions.pause()}
+                          variant="outline"
+                        >
+                          {t("pause")}
+                        </Button>
+                      ) : (
+                        <Button
+                          className="h-7 text-[10px]"
+                          onClick={() => advancedExifActions.resume()}
+                          variant="outline"
+                        >
+                          {t("advancedExifResume")}
+                        </Button>
+                      )}
+                      {advancedExifQuery.data.failed > 0 && (
+                        <Button
+                          className="h-7 text-[10px]"
+                          onClick={() => advancedExifActions.retry()}
+                          variant="outline"
+                        >
+                          {t("advancedExifRetry", {
+                            count: advancedExifQuery.data.failed,
+                          })}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </section>
             </div>
+            {shootingGuidance.length > 0 && (
+              <section className="rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-full bg-primary/10 p-2 text-primary">
+                    <Lightbulb className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-[15px] text-foreground">
+                      {t("dashboardGuidanceTitle")}
+                    </h2>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {t("dashboardGuidanceSubtitle")}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {shootingGuidance.map((item) => (
+                    <GuidanceCard
+                      key={item.kind}
+                      kind={item.kind}
+                      value={item.value}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
 
         {tab === "gear" && (
           <div className="space-y-4">
+            <ChartBlock
+              color={DASHBOARD_COLORS.gear}
+              data={advancedChart("vendor")}
+              hint={t("dashboardHint_vendor")}
+              horizontal
+              meta={data.distributionMetadata.advancedVendor}
+              onClick={(point) =>
+                drill({
+                  advancedField: String(point.advancedField),
+                  advancedValue: String(point.advancedValue),
+                })
+              }
+              title={t("dashboardCameraBrand")}
+            />
             <ChartWithExpand
+              color={DASHBOARD_COLORS.gear}
               data={cameraData}
               expanded={expandedCharts.has("camera")}
               hasMore={cameraAll.length > 8}
+              hint={t("dashboardHint_camera")}
               meta={data.distributionMetadata.camera}
               onExpand={() => toggleExpanded("camera")}
               onPointClick={(point) =>
@@ -592,10 +820,11 @@ function DashboardPage() {
               title={t("cameraUsage")}
             />
             <ChartWithExpand
-              color="var(--chart-5)"
+              color={DASHBOARD_COLORS.gear}
               data={lensData}
               expanded={expandedCharts.has("lens")}
               hasMore={lensAll.length > 8}
+              hint={t("dashboardHint_lens")}
               meta={data.distributionMetadata.lens}
               onExpand={() => toggleExpanded("lens")}
               onPointClick={(point) =>
@@ -610,8 +839,9 @@ function DashboardPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               <ChartBlock
-                color="var(--chart-2)"
+                color={DASHBOARD_COLORS.exposure}
                 data={focalData}
+                hint={t("dashboardHint_focal")}
                 meta={data.distributionMetadata.focal}
                 onClick={(point) =>
                   drill({
@@ -622,8 +852,9 @@ function DashboardPage() {
                 title={t("focalDistribution")}
               />
               <ChartBlock
-                color="var(--chart-3)"
+                color={DASHBOARD_COLORS.exposure}
                 data={apertureData}
+                hint={t("dashboardHint_aperture")}
                 meta={data.distributionMetadata.aperture}
                 onClick={(point) =>
                   drill({
@@ -634,8 +865,9 @@ function DashboardPage() {
                 title={t("aperturePreference")}
               />
               <ChartBlock
-                color="var(--chart-4)"
+                color={DASHBOARD_COLORS.exposure}
                 data={isoData}
+                hint={t("dashboardHint_iso")}
                 meta={data.distributionMetadata.iso}
                 onClick={(point) =>
                   drill(
@@ -649,8 +881,9 @@ function DashboardPage() {
                 title={t("isoDistributionTitle")}
               />
               <ChartBlock
-                color="var(--chart-5)"
+                color={DASHBOARD_COLORS.exposure}
                 data={shutterData}
+                hint={t("dashboardHint_shutter")}
                 meta={data.distributionMetadata.shutter}
                 onClick={(point) =>
                   drill(
@@ -663,6 +896,28 @@ function DashboardPage() {
                 }
                 title={t("shutterDistribution")}
               />
+              {[
+                ["exposureProgram", "metadataExposureProgram"],
+                ["meteringMode", "metadataMeteringMode"],
+                ["whiteBalance", "metadataWhiteBalance"],
+                ["stabilizationMode", "metadataStabilization"],
+              ].map(([key, label]) => (
+                <ChartBlock
+                  color={DASHBOARD_COLORS.exposure}
+                  data={advancedChart(key)}
+                  hint={t(`dashboardHint_${key}`)}
+                  horizontal
+                  key={key}
+                  meta={data.distributionMetadata[key]}
+                  onClick={(point) =>
+                    drill({
+                      advancedField: String(point.advancedField),
+                      advancedValue: String(point.advancedValue),
+                    })
+                  }
+                  title={t(label)}
+                />
+              ))}
             </div>
             <div className="rounded-[8px] border border-border bg-secondary px-4 py-3 text-[12px] text-muted-foreground">
               {t("dashboardAverageIso")}:{" "}
@@ -676,16 +931,52 @@ function DashboardPage() {
           </div>
         )}
 
+        {tab === "technique" && (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {[
+              ["focusMode", "metadataFocusMode"],
+              ["subjectTarget", "metadataSubjectTarget"],
+              ["driveMode", "metadataDriveMode"],
+              ["computationalMode", "metadataComputationalMode"],
+              ["inCameraLook", "metadataInCameraLook"],
+              ["provenanceStatus", "metadataCredentialStatus"],
+            ].map(([key, label]) => (
+              <ChartBlock
+                color={
+                  key === "provenanceStatus"
+                    ? DASHBOARD_COLORS.provenance
+                    : DASHBOARD_COLORS.technique
+                }
+                data={advancedChart(key)}
+                hint={t(`dashboardHint_${key}`)}
+                horizontal
+                key={key}
+                meta={data.distributionMetadata[key]}
+                onClick={(point) =>
+                  drill({
+                    advancedField: String(point.advancedField),
+                    advancedValue: String(point.advancedValue),
+                  })
+                }
+                title={t(label)}
+              />
+            ))}
+          </div>
+        )}
+
         {tab === "time" && (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <TrendChart
+              color={DASHBOARD_COLORS.time}
               data={yearlyData}
+              hint={t("dashboardHint_yearly")}
               sampleTotal={sampleTotal}
               title={t("yearlyDistribution")}
             />
             <ChartBlock
-              color="var(--chart-4)"
+              color={DASHBOARD_COLORS.time}
               data={monthlyData}
+              hint={t("dashboardHint_monthly")}
               meta={{
                 valid: data.coverage.date,
                 missing: data.exifCompleteness?.missingDate ?? 0,
@@ -696,7 +987,9 @@ function DashboardPage() {
             />
             <div className="xl:col-span-2">
               <TrendChart
+                color={DASHBOARD_COLORS.time}
                 data={timeData}
+                hint={t("dashboardHint_time")}
                 sampleTotal={data.coverage.date}
                 title={t("timeDistribution24h")}
               />
@@ -725,27 +1018,63 @@ function DashboardPage() {
   );
 }
 
-function ChartDescription({ meta }: { meta: DistributionMeta }) {
+function GuidanceCard({
+  kind,
+  value,
+}: {
+  kind: ShootingGuidanceKind;
+  value: number;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article className="rounded-[8px] border border-border/80 bg-background/70 p-4">
+      <h3 className="font-medium text-[12px] text-foreground">
+        {t(`dashboardGuidance_${kind}Title`)}
+      </h3>
+      <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+        {t(`dashboardGuidance_${kind}Body`, { value })}
+      </p>
+    </article>
+  );
+}
+
+function ChartDescription({
+  hint,
+  meta,
+  showClickHint = false,
+}: {
+  hint?: string;
+  meta: DistributionMeta;
+  showClickHint?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   return (
-    <>
-      {t("dashboardChartCoverage", {
-        missing: meta.missing.toLocaleString(i18n.language),
-        valid: meta.valid.toLocaleString(i18n.language),
-      })}
-      {meta.truncated ? ` · ${t("dashboardDataTruncated")}` : ""}
-    </>
+    <div>
+      {hint && <p className="text-foreground/75">{hint}</p>}
+      <p className={hint ? "mt-1" : undefined}>
+        {t("dashboardChartCoverage", {
+          missing: meta.missing.toLocaleString(i18n.language),
+          valid: meta.valid.toLocaleString(i18n.language),
+        })}
+        {meta.truncated ? ` · ${t("dashboardDataTruncated")}` : ""}
+        {showClickHint ? ` · ${t("dashboardChartClickHint")}` : ""}
+      </p>
+    </div>
   );
 }
 function ChartBlock({
   color,
   data,
+  hint,
+  horizontal = false,
   meta,
   onClick,
   title,
 }: {
   color?: string;
   data: DashboardPoint[];
+  hint?: string;
+  horizontal?: boolean;
   meta: DistributionMeta;
   onClick?: (point: DashboardPoint) => void;
   title: string;
@@ -754,18 +1083,25 @@ function ChartBlock({
   return (
     <ChartSection
       data={data}
-      description={<ChartDescription meta={meta} />}
+      description={
+        <ChartDescription hint={hint} meta={meta} showClickHint={!!onClick} />
+      }
       onPointClick={onClick}
       sampleTotal={meta.valid}
       title={title}
     >
       {data.some((point) => point.count > 0) ? (
-        <DashboardBarChart
-          color={color}
-          data={data}
-          onPointClick={onClick}
-          sampleTotal={meta.valid}
-        />
+        <div
+          className={horizontal ? "max-h-[520px] overflow-y-auto" : undefined}
+        >
+          <DashboardBarChart
+            color={color}
+            data={data}
+            horizontal={horizontal}
+            onPointClick={onClick}
+            sampleTotal={meta.valid}
+          />
+        </div>
       ) : (
         <EmptyChart message={t("dashboardEmptyForRange")} />
       )}
@@ -777,6 +1113,7 @@ function ChartWithExpand({
   data,
   expanded,
   hasMore,
+  hint,
   meta,
   onExpand,
   onPointClick,
@@ -786,6 +1123,7 @@ function ChartWithExpand({
   data: DashboardPoint[];
   expanded: boolean;
   hasMore: boolean;
+  hint?: string;
   meta: DistributionMeta;
   onExpand: () => void;
   onPointClick: (point: DashboardPoint) => void;
@@ -795,10 +1133,7 @@ function ChartWithExpand({
   return (
     <ChartSection
       data={data}
-      description={t("dashboardChartCoverage", {
-        missing: meta.missing,
-        valid: meta.valid,
-      })}
+      description={<ChartDescription hint={hint} meta={meta} showClickHint />}
       onPointClick={onPointClick}
       sampleTotal={meta.valid}
       title={title}
@@ -833,11 +1168,15 @@ function ChartWithExpand({
   );
 }
 function TrendChart({
+  color,
   data,
+  hint,
   sampleTotal,
   title,
 }: {
+  color: string;
   data: DashboardPoint[];
+  hint?: string;
   sampleTotal: number;
   title: string;
 }) {
@@ -848,7 +1187,14 @@ function TrendChart({
   return (
     <ChartSection
       data={data}
-      description={t("dashboardValidSamples", { count: sampleTotal })}
+      description={
+        <div>
+          {hint && <p className="text-foreground/75">{hint}</p>}
+          <p className={hint ? "mt-1" : undefined}>
+            {t("dashboardValidSamples", { count: sampleTotal })}
+          </p>
+        </div>
+      }
       sampleTotal={sampleTotal}
       title={title}
     >
@@ -860,16 +1206,8 @@ function TrendChart({
           >
             <defs>
               <linearGradient id={`trend-${title}`} x1="0" x2="0" y1="0" y2="1">
-                <stop
-                  offset="0%"
-                  stopColor="var(--chart-2)"
-                  stopOpacity={0.35}
-                />
-                <stop
-                  offset="100%"
-                  stopColor="var(--chart-2)"
-                  stopOpacity={0.02}
-                />
+                <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid
@@ -892,10 +1230,12 @@ function TrendChart({
             />
             <Tooltip {...chartTooltipStyle} />
             <Area
-              animationDuration={noMotion ? 0 : 500}
+              animationDuration={400}
+              animationEasing="ease-out"
               dataKey="count"
               fill={`url(#trend-${title})`}
-              stroke="var(--chart-2)"
+              isAnimationActive={!noMotion}
+              stroke={color}
               strokeWidth={2}
               type="linear"
             />

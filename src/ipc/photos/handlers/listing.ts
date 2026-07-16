@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
+  advancedExifData,
   exifData,
   faceIdentities,
   faceIdentityMembers,
@@ -15,6 +16,7 @@ import {
 } from "@/db/schema";
 
 const GLOB_WILDCARD_RE = /[*?[]/;
+
 import { deletePhotoVectors } from "@/services/ai-embedder";
 import {
   getFolderSubtreeIds,
@@ -28,8 +30,8 @@ import {
   enqueueImport,
   getImportQueueStatus,
 } from "@/services/import-queue";
-import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import { unwatchFolder } from "@/services/indexer";
+import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import {
   FolderAppearanceSchema,
   FolderSchema,
@@ -62,7 +64,7 @@ function logIpcError(handlerName: string, err: unknown): void {
 export const scanFolder = os.input(FolderSchema).handler(({ input }) => {
   try {
     const resolved = path.resolve(input.path);
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+    if (!(fs.existsSync(resolved) && fs.statSync(resolved).isDirectory())) {
       throw new ORPCError("BAD_REQUEST", {
         message: `Folder does not exist or is not a directory: ${resolved}`,
       });
@@ -475,8 +477,35 @@ export const getPhotoDetail = os.input(IdSchema).handler(({ input }) => {
 
 export const getPhotoExif = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
-  return (
-    db.select().from(exifData).where(eq(exifData.photoId, input.id)).get() ||
-    null
-  );
+  const basic = db
+    .select()
+    .from(exifData)
+    .where(eq(exifData.photoId, input.id))
+    .get();
+  if (!basic) {
+    return null;
+  }
+  const advancedRow = db
+    .select()
+    .from(advancedExifData)
+    .where(eq(advancedExifData.photoId, input.id))
+    .get();
+  if (!advancedRow) {
+    return { ...basic, advanced: null };
+  }
+  try {
+    const normalized = advancedRow.normalizedJson
+      ? JSON.parse(advancedRow.normalizedJson)
+      : null;
+    const vendorRaw = advancedRow.vendorRawJson
+      ? JSON.parse(advancedRow.vendorRawJson)
+      : {};
+    return {
+      ...basic,
+      advanced: normalized ? { ...normalized, vendorRaw } : null,
+      advancedStatus: advancedRow.status,
+    };
+  } catch {
+    return { ...basic, advanced: null, advancedStatus: advancedRow.status };
+  }
 });

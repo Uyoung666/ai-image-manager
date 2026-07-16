@@ -36,12 +36,13 @@ describe("dashboard chart accessibility", () => {
       <CoverageCard count={12} label="EXIF" percentage={75} />
     );
     expect(screen.getByText("75%")).toBeInTheDocument();
-    expect(container.querySelector('[style="width: 75%;"]')).not.toBeNull();
+    expect(screen.getByText("dashboardCoveragePartial")).toBeInTheDocument();
+    expect(container.querySelector('[style*="width: 75%"]')).not.toBeNull();
   });
 
   it("renders every gear category as its own horizontal bar", () => {
     const onPointClick = vi.fn();
-    render(
+    const { container } = render(
       <DashboardBarChart
         data={[
           { count: 76, name: "Canon EOS 600D" },
@@ -56,10 +57,37 @@ describe("dashboard chart accessibility", () => {
 
     const bars = screen.getAllByRole("listitem");
     expect(bars).toHaveLength(3);
+    expect(
+      container.querySelector('[style*="width 400ms ease-out"]')
+    ).not.toBeNull();
+    expect(within(bars[0]).getByText("83.5%")).toBeInTheDocument();
     fireEvent.click(within(bars[1]).getByRole("button"));
     expect(onPointClick).toHaveBeenCalledWith({
       count: 9,
       name: "Canon EOS R7",
+    });
+  });
+
+  it("disables horizontal bar motion when reduced motion is requested", () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn(() => ({ matches: true }) as MediaQueryList),
+    });
+    const { container } = render(
+      <DashboardBarChart
+        data={[{ count: 5, name: "Manual" }]}
+        horizontal
+        sampleTotal={5}
+      />
+    );
+
+    expect(
+      container.querySelector('[style*="width 400ms ease-out"]')
+    ).toBeNull();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: originalMatchMedia,
     });
   });
 });

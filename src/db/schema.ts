@@ -88,12 +88,11 @@ export const photos = sqliteTable(
       table.deletedAt,
       table.fileDate
     ),
-    deletedFolderFileDateIdx:
-      index("idx_photos_deleted_folder_file_date").on(
-        table.deletedAt,
-        table.folderId,
-        table.fileDate
-      ),
+    deletedFolderFileDateIdx: index("idx_photos_deleted_folder_file_date").on(
+      table.deletedAt,
+      table.folderId,
+      table.fileDate
+    ),
     deletedFavFileDateIdx: index("idx_photos_deleted_fav_file_date").on(
       table.deletedAt,
       table.isFavorite,
@@ -169,6 +168,75 @@ export const exifData = sqliteTable(
     shutterIsoIdx: index("idx_exif_shutter_iso").on(
       table.shutterSpeedNum,
       table.iso
+    ),
+  })
+);
+
+export const advancedExifData = sqliteTable(
+  "advanced_exif_data",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    photoId: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" })
+      .unique(),
+    status: text("status").notNull().default("pending"),
+    parserVersion: integer("parser_version").notNull().default(1),
+    enrichedAt: integer("enriched_at"),
+    errorMessage: text("error_message"),
+    vendor: text("vendor"),
+    captureMode: text("capture_mode"),
+    exposureProgram: text("exposure_program"),
+    meteringMode: text("metering_mode"),
+    whiteBalance: text("white_balance"),
+    focusMode: text("focus_mode"),
+    focusArea: text("focus_area"),
+    subjectTarget: text("subject_target"),
+    eyeDetection: integer("eye_detection", { mode: "boolean" }),
+    tracking: integer("tracking", { mode: "boolean" }),
+    driveMode: text("drive_mode"),
+    stabilizationMode: text("stabilization_mode"),
+    computationalMode: text("computational_mode"),
+    inCameraLook: text("in_camera_look"),
+    provenanceStatus: text("provenance_status").notNull().default("unknown"),
+    provenanceIssuer: text("provenance_issuer"),
+    normalizedJson: text("normalized_json"),
+    vendorRawJson: text("vendor_raw_json"),
+  },
+  (table) => ({
+    statusVersionIdx: index("idx_advanced_exif_status_version").on(
+      table.status,
+      table.parserVersion
+    ),
+    vendorIdx: index("idx_advanced_exif_vendor").on(table.vendor),
+    captureModeIdx: index("idx_advanced_exif_capture_mode").on(
+      table.captureMode
+    ),
+    exposureProgramIdx: index("idx_advanced_exif_exposure_program").on(
+      table.exposureProgram
+    ),
+    meteringModeIdx: index("idx_advanced_exif_metering_mode").on(
+      table.meteringMode
+    ),
+    whiteBalanceIdx: index("idx_advanced_exif_white_balance").on(
+      table.whiteBalance
+    ),
+    focusModeIdx: index("idx_advanced_exif_focus_mode").on(table.focusMode),
+    subjectTargetIdx: index("idx_advanced_exif_subject_target").on(
+      table.subjectTarget
+    ),
+    driveModeIdx: index("idx_advanced_exif_drive_mode").on(table.driveMode),
+    stabilizationIdx: index("idx_advanced_exif_stabilization").on(
+      table.stabilizationMode
+    ),
+    computationalIdx: index("idx_advanced_exif_computational").on(
+      table.computationalMode
+    ),
+    inCameraLookIdx: index("idx_advanced_exif_in_camera_look").on(
+      table.inCameraLook
+    ),
+    provenanceIdx: index("idx_advanced_exif_provenance").on(
+      table.provenanceStatus
     ),
   })
 );

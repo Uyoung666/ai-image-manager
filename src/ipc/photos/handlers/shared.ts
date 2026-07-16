@@ -85,6 +85,23 @@ export const CompoundSearchSchema = z.object({
   dateTo: z.number().optional(),
   cameraModel: z.string().optional(),
   lensModel: z.string().optional(),
+  advancedField: z
+    .enum([
+      "vendor",
+      "captureMode",
+      "exposureProgram",
+      "meteringMode",
+      "whiteBalance",
+      "focusMode",
+      "subjectTarget",
+      "driveMode",
+      "stabilizationMode",
+      "computationalMode",
+      "inCameraLook",
+      "provenanceStatus",
+    ])
+    .optional(),
+  advancedValue: z.string().optional(),
   focalMin: z.number().optional(),
   focalMax: z.number().optional(),
   apertureMin: z.number().optional(),

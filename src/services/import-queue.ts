@@ -268,6 +268,11 @@ async function processNext(): Promise<void> {
       return;
     }
     task.status = "done";
+    import("@/services/advanced-exif")
+      .then(({ scheduleAdvancedExifEnrichment }) =>
+        scheduleAdvancedExifEnrichment(1000)
+      )
+      .catch(() => undefined);
     history.push(task);
   } catch (err: unknown) {
     task.status = "failed";

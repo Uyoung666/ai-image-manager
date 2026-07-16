@@ -57,6 +57,11 @@
   --chart-3: oklch(0.75 0.14 75);
   --chart-4: oklch(0.68 0.15 300);
   --chart-5: oklch(0.68 0.18 20);
+  --dashboard-gear: oklch(0.72 0.18 250);
+  --dashboard-exposure: oklch(0.72 0.16 305);
+  --dashboard-technique: oklch(0.72 0.14 185);
+  --dashboard-time: oklch(0.76 0.16 55);
+  --dashboard-provenance: var(--muted-foreground);
 
   /* 阴影令牌 — 深色主题用有色投影产生发光边缘感 */
   --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.3);
@@ -144,6 +149,11 @@
   --chart-3: oklch(0.58 0.14 70);
   --chart-4: oklch(0.52 0.14 300);
   --chart-5: oklch(0.52 0.17 15);
+  --dashboard-gear: oklch(0.55 0.17 250);
+  --dashboard-exposure: oklch(0.55 0.15 305);
+  --dashboard-technique: oklch(0.52 0.12 185);
+  --dashboard-time: oklch(0.6 0.16 55);
+  --dashboard-provenance: var(--muted-foreground);
 
   /* 浅色主题阴影 — 更柔和、更浅的投影 */
   --shadow-xs-val: 0 1px 2px 0 rgb(0 0 0 / 0.04);
@@ -1088,8 +1098,9 @@
   --selection-action-bar-height: 3.5rem;
   --selection-action-safe-gap: 0.75rem;
   --selection-action-avoid-bottom: calc(
-    var(--selection-action-bar-bottom) + var(--selection-action-bar-height) +
-      var(--selection-action-safe-gap)
+    var(--selection-action-bar-bottom) +
+    var(--selection-action-bar-height) +
+    var(--selection-action-safe-gap)
   );
 }
 
@@ -1478,4 +1489,3 @@
   background: #ff98a2;
   transform: rotateX(-90deg) translate3d(0, 0, 2em);
 }
-

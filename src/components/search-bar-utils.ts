@@ -19,7 +19,23 @@ export interface SearchSuggestion {
   type: "example" | "person" | "dictionary" | "tag" | "history";
 }
 
+export type AdvancedExifFilterField =
+  | "vendor"
+  | "captureMode"
+  | "exposureProgram"
+  | "meteringMode"
+  | "whiteBalance"
+  | "focusMode"
+  | "subjectTarget"
+  | "driveMode"
+  | "stabilizationMode"
+  | "computationalMode"
+  | "inCameraLook"
+  | "provenanceStatus";
+
 export interface ExifFilters {
+  advancedField?: AdvancedExifFilterField;
+  advancedValue?: string;
   apertureMax?: string;
   apertureMin?: string;
   cameraModel?: string;
@@ -126,6 +142,10 @@ export function getFilterLabel(
     return "";
   }
   switch (key) {
+    case "advancedField":
+      return value;
+    case "advancedValue":
+      return value;
     case "cameraModel":
       return value;
     case "lensModel":
