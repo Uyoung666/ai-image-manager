@@ -781,14 +781,18 @@ function TrashPage() {
 
   function renderPhotoCard(photo: DeletedPhoto) {
     const remaining = daysRemaining(photo.deletedAt);
+    const secondaryMeta =
+      sort === "size"
+        ? formatBytes(photo.fileSize)
+        : formatTimeAgo(photo.deletedAt);
     return (
       <button
         aria-label={photo.filename}
         aria-pressed={selectedIds.has(photo.id)}
-        className={`group relative cursor-pointer overflow-hidden rounded-[8px] border bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+        className={`group relative cursor-pointer overflow-hidden rounded-[10px] border bg-card text-left transition-[border-color,box-shadow,transform] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
           selectedIds.has(photo.id)
-            ? "border-primary ring-2 ring-primary/30"
-            : "border-border hover:border-foreground/20"
+            ? "border-primary bg-primary/[0.02] shadow-sm"
+            : "border-border hover:-translate-y-0.5 hover:border-foreground/25 hover:shadow-md"
         }`}
         data-photo-id={photo.id}
         data-photo-path={photo.path}
@@ -817,7 +821,7 @@ function TrashPage() {
             // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image error handling only swaps to a non-interactive fallback
             <img
               alt={photo.filename}
-              className="relative z-[1] h-full w-full object-cover"
+              className="relative z-[1] h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.015] motion-reduce:transform-none"
               decoding="async"
               height={photo.height ?? 160}
               loading="lazy"
@@ -828,33 +832,31 @@ function TrashPage() {
               width={photo.width ?? 160}
             />
           )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/45 to-transparent" />
+          {remaining <= 3 && (
+            <span
+              className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm"
+              title={t("trashExpiresAt", {
+                date: expiryDate(photo.deletedAt),
+              })}
+            >
+              {remaining === 0
+                ? t("trashMoveToday")
+                : t("trashMoveAfterDays", { count: remaining })}
+            </span>
+          )}
         </div>
-        <div className="p-2">
-          <p className="truncate text-[11px] text-foreground">
+        <div className="min-h-[54px] px-2.5 py-2">
+          <p className="truncate font-medium text-[12px] text-foreground leading-5">
             {photo.filename}
           </p>
-          {photo.folderName ? (
-            <p className="truncate text-[10px] text-muted-foreground/70">
-              {photo.folderName}
-            </p>
-          ) : (
-            <p className="truncate text-[10px] text-orange-500/80">
-              {t("originalFolderRemoved")}
-            </p>
-          )}
-          <div className="mt-0.5 flex items-center justify-between gap-2">
-            <span className="truncate text-[10px] text-muted-foreground">
-              {formatTimeAgo(photo.deletedAt)}
-            </span>
+          <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/75 leading-4">
             <span
-              className={`shrink-0 text-[10px] ${
-                remaining <= 3 ? "text-destructive" : "text-muted-foreground"
-              }`}
-              title={t("trashExpiresAt", { date: expiryDate(photo.deletedAt) })}
+              className="min-w-0 truncate"
+              title={photo.folderName ?? t("originalFolderRemoved")}
             >
-              {t("deleteAfterDays", { count: remaining })}
+              {photo.folderName ?? t("originalFolderRemoved")}
             </span>
+            <span className="shrink-0">{secondaryMeta}</span>
           </div>
         </div>
         <div
@@ -862,7 +864,7 @@ function TrashPage() {
           className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
             selectedIds.has(photo.id)
               ? "border-primary bg-primary text-white"
-              : "border-white/60 bg-black/30 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+              : "border-white/80 bg-black/20 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
           }`}
         >
           {selectedIds.has(photo.id) && (
@@ -892,7 +894,7 @@ function TrashPage() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
           {TRASH_SKELETON_KEYS.map((key) => (
             <div
-              className="overflow-hidden rounded-[8px] border border-border"
+              className="overflow-hidden rounded-[10px] border border-border"
               key={key}
             >
               <Skeleton className="aspect-square rounded-none" />
