@@ -5,9 +5,11 @@ import {
   and,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
+  lt,
   sql,
 } from "drizzle-orm";
 import { z } from "zod";
@@ -23,8 +25,8 @@ import {
   type PaletteColor,
 } from "@/services/color-extractor";
 import {
-  groupDuplicatePairs,
   type DuplicatePairRecord,
+  groupDuplicatePairs,
 } from "@/services/duplicate-groups";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
 
@@ -33,6 +35,7 @@ interface StatsCacheEntry {
   data: any;
   includesColors: boolean;
   includesGeo: boolean;
+  key?: string;
   timestamp: number;
 }
 
@@ -133,28 +136,71 @@ export const getExifCandidates = os.handler(() => {
     .all()
     .map((r) => r.val ?? "");
 
-  const result = { cameraModels, lensModels, focalLengths, apertures, isos, formats };
+  const result = {
+    cameraModels,
+    lensModels,
+    focalLengths,
+    apertures,
+    isos,
+    formats,
+  };
   exifCandidatesCache = { data: result, timestamp: Date.now() };
   return result;
 });
 
 // Shared color-distribution helper — reused by getColorDistribution and getStats
-function computeDashboardColors() {
+interface DashboardRangeInput {
+  from?: number;
+  toExclusive?: number;
+}
+
+const dashboardRangeSchema = z.object({
+  from: z.number().finite().optional(),
+  toExclusive: z.number().finite().optional(),
+});
+
+function dashboardPhotoWhere(range: DashboardRangeInput) {
+  return and(
+    isNull(photos.deletedAt),
+    range.from === undefined ? undefined : gte(exifData.dateTaken, range.from),
+    range.toExclusive === undefined
+      ? undefined
+      : lt(exifData.dateTaken, range.toExclusive)
+  );
+}
+
+function computeDashboardColors(range: DashboardRangeInput = {}) {
   const db = getDatabase();
 
-  const totalPhotos =
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(photos)
-      .where(isNull(photos.deletedAt))
-      .get()?.count ?? 0;
+  const isRanged = range.from !== undefined || range.toExclusive !== undefined;
+  const totalPhotos = isRanged
+    ? (db
+        .select({ count: sql<number>`count(*)` })
+        .from(photos)
+        .innerJoin(exifData, eq(exifData.photoId, photos.id))
+        .where(dashboardPhotoWhere(range))
+        .get()?.count ?? 0)
+    : (db
+        .select({ count: sql<number>`count(*)` })
+        .from(photos)
+        .where(isNull(photos.deletedAt))
+        .get()?.count ?? 0);
 
   // Primary path: aggregate from pre-extracted dominant_colors
-  const rows = db
-    .select({ dominantColors: photos.dominantColors })
-    .from(photos)
-    .where(and(isNull(photos.deletedAt), isNotNull(photos.dominantColors)))
-    .all();
+  const rows = isRanged
+    ? db
+        .select({ dominantColors: photos.dominantColors })
+        .from(photos)
+        .innerJoin(exifData, eq(exifData.photoId, photos.id))
+        .where(
+          and(dashboardPhotoWhere(range), isNotNull(photos.dominantColors))
+        )
+        .all()
+    : db
+        .select({ dominantColors: photos.dominantColors })
+        .from(photos)
+        .where(and(isNull(photos.deletedAt), isNotNull(photos.dominantColors)))
+        .all();
 
   const allColors = rows
     .map((r) => {
@@ -187,25 +233,47 @@ function computeDashboardColors() {
     `[Stats] Not enough dominant_colors data (${allColors.length}), falling back to sampling`
   );
 
-  const samplePhotos = db
-    .select({ path: photos.path, thumbnailPath: photos.thumbnailPath })
-    .from(photos)
-    .where(
-      sql`${photos.deletedAt} IS NULL AND ${photos.thumbnailPath} IS NOT NULL`
-    )
-    .orderBy(sql`random()`)
-    .limit(200)
-    .all();
+  const samplePhotos = isRanged
+    ? db
+        .select({ path: photos.path, thumbnailPath: photos.thumbnailPath })
+        .from(photos)
+        .innerJoin(exifData, eq(exifData.photoId, photos.id))
+        .where(and(dashboardPhotoWhere(range), isNotNull(photos.thumbnailPath)))
+        .orderBy(sql`random()`)
+        .limit(200)
+        .all()
+    : db
+        .select({ path: photos.path, thumbnailPath: photos.thumbnailPath })
+        .from(photos)
+        .where(and(isNull(photos.deletedAt), isNotNull(photos.thumbnailPath)))
+        .orderBy(sql`random()`)
+        .limit(200)
+        .all();
 
   return computeColorDistribution(samplePhotos, totalPhotos);
 }
 
 // Color distribution (standalone — also available merged into getStats)
-export const getColorDistribution = os.handler(() => computeDashboardColors());
+export const getColorDistribution = os
+  .input(dashboardRangeSchema.optional().default({}))
+  .handler(({ input }) => computeDashboardColors(input));
 
-function getDashboardGeoLocations() {
+function getDashboardGeoLocations(range: DashboardRangeInput = {}) {
   const db = getDatabase();
-  return db
+  const total =
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(exifData)
+      .innerJoin(photos, eq(exifData.photoId, photos.id))
+      .where(
+        and(
+          dashboardPhotoWhere(range),
+          isNotNull(exifData.gpsLatitude),
+          isNotNull(exifData.gpsLongitude)
+        )
+      )
+      .get()?.count ?? 0;
+  const allLocations = db
     .select({
       photoId: exifData.photoId,
       latitude: exifData.gpsLatitude,
@@ -219,7 +287,7 @@ function getDashboardGeoLocations() {
     .innerJoin(photos, eq(exifData.photoId, photos.id))
     .where(
       and(
-        isNull(photos.deletedAt),
+        dashboardPhotoWhere(range),
         isNotNull(exifData.gpsLatitude),
         isNotNull(exifData.gpsLongitude)
       )
@@ -247,9 +315,16 @@ function getDashboardGeoLocations() {
       width: location.width,
       height: location.height,
     }));
+  return {
+    locations: allLocations.slice(0, 2000),
+    total,
+    truncated: total > 2000,
+  };
 }
 
-export const getGeoLocations = os.handler(() => getDashboardGeoLocations());
+export const getGeoLocations = os
+  .input(dashboardRangeSchema.optional().default({}))
+  .handler(({ input }) => getDashboardGeoLocations(input));
 
 // Statistics for dashboard (optionally includes color distribution)
 export const getStats = os
@@ -257,13 +332,22 @@ export const getStats = os
     z.object({
       includeColors: z.boolean().optional().default(false),
       includeGeo: z.boolean().optional().default(true),
+      from: z.number().finite().optional(),
+      toExclusive: z.number().finite().optional(),
     })
   )
   .handler(({ input }) => {
+    const cacheKey = JSON.stringify({
+      from: input.from,
+      includeColors: input.includeColors,
+      includeGeo: input.includeGeo,
+      toExclusive: input.toExclusive,
+    });
     // Return cached stats if fresh (and colors already included if requested)
     if (
       statsCache &&
       Date.now() - statsCache.timestamp < STATS_CACHE_TTL &&
+      statsCache.key === cacheKey &&
       (!input.includeColors || statsCache.includesColors) &&
       (!input.includeGeo || statsCache.includesGeo)
     ) {
@@ -273,23 +357,57 @@ export const getStats = os
     const db = getDatabase();
 
     // Single query for total + AI-processed counts
-    const photoCounts = db
-      .select({
-        total: sql<number>`count(*)`,
-        aiProcessed: sql<number>`sum(case when ${photos.isAiProcessed} = 1 then 1 else 0 end)`,
-      })
-      .from(photos)
-      .where(isNull(photos.deletedAt))
-      .get();
+    const hasRange =
+      input.from !== undefined || input.toExclusive !== undefined;
+    const countSelection = {
+      total: sql<number>`count(*)`,
+      aiProcessed: sql<number>`sum(case when ${photos.isAiProcessed} = 1 then 1 else 0 end)`,
+    };
+    const photoCounts = hasRange
+      ? db
+          .select(countSelection)
+          .from(photos)
+          .innerJoin(exifData, eq(exifData.photoId, photos.id))
+          .where(dashboardPhotoWhere(input))
+          .get()
+      : db
+          .select(countSelection)
+          .from(photos)
+          .where(isNull(photos.deletedAt))
+          .get();
     const totalPhotos = photoCounts?.total ?? 0;
     const aiProcessed = photoCounts?.aiProcessed ?? 0;
+    const libraryTotal =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(photos)
+        .where(isNull(photos.deletedAt))
+        .get()?.count ?? 0;
+    const libraryDated =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(exifData)
+        .innerJoin(photos, eq(exifData.photoId, photos.id))
+        .where(and(isNull(photos.deletedAt), isNotNull(exifData.dateTaken)))
+        .get()?.count ?? 0;
 
     // EXIF completeness: single conditional-aggregation query so every
     // chart can show how many photos are missing each field. This prevents
     // the "silent data loss" where chart totals don't add up to totalPhotos.
     const completeness = db
       .select({
-        withExif: sql<number>`count(*)`,
+        exifRows: sql<number>`count(*)`,
+        withExif: sql<number>`SUM(CASE WHEN
+          (${exifData.cameraModel} IS NOT NULL AND TRIM(${exifData.cameraModel}) != '') OR
+          (${exifData.lensModel} IS NOT NULL AND TRIM(${exifData.lensModel}) != '') OR
+          ${exifData.focalLength} IS NOT NULL OR
+          ${exifData.aperture} IS NOT NULL OR
+          ${exifData.iso} IS NOT NULL OR
+          ${exifData.shutterSpeedNum} IS NOT NULL OR
+          ${exifData.dateTaken} IS NOT NULL OR
+          ${exifData.gpsLatitude} IS NOT NULL OR
+          ${exifData.gpsLongitude} IS NOT NULL
+          THEN 1 ELSE 0 END)`,
         missingCamera: sql<number>`SUM(CASE WHEN ${exifData.cameraModel} IS NULL OR ${exifData.cameraModel} = '' THEN 1 ELSE 0 END)`,
         missingLens: sql<number>`SUM(CASE WHEN ${exifData.lensModel} IS NULL OR ${exifData.lensModel} = '' THEN 1 ELSE 0 END)`,
         missingFocal: sql<number>`SUM(CASE WHEN ${exifData.focalLength} IS NULL THEN 1 ELSE 0 END)`,
@@ -301,7 +419,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(isNull(photos.deletedAt))
+      .where(dashboardPhotoWhere(input))
       .get();
 
     const cameraStats = db
@@ -313,13 +431,12 @@ export const getStats = os
       .innerJoin(photos, eq(exifData.photoId, photos.id))
       .where(
         and(
-          isNull(photos.deletedAt),
+          dashboardPhotoWhere(input),
           sql`${exifData.cameraModel} IS NOT NULL AND ${exifData.cameraModel} != ''`
         )
       )
       .groupBy(exifData.cameraModel)
       .orderBy(desc(sql`count(*)`))
-      .limit(20)
       .all();
 
     // ROUND(focal_length_num, 0) prevents EXIF rational→float precision
@@ -332,7 +449,7 @@ export const getStats = os
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
       .where(
-        and(isNull(photos.deletedAt), isNotNull(exifData.focalLengthNum))
+        and(dashboardPhotoWhere(input), isNotNull(exifData.focalLengthNum))
       )
       .groupBy(sql`ROUND(${exifData.focalLengthNum}, 0)`)
       .orderBy(desc(sql`count(*)`))
@@ -348,7 +465,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.aperture)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.aperture)))
       .groupBy(sql`ROUND(${exifData.aperture}, 1)`)
       .orderBy(desc(sql`count(*)`))
       .limit(50)
@@ -364,7 +481,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.iso)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.iso)))
       .get();
 
     const isoResult = [
@@ -385,13 +502,12 @@ export const getStats = os
       .innerJoin(photos, eq(exifData.photoId, photos.id))
       .where(
         and(
-          isNull(photos.deletedAt),
+          dashboardPhotoWhere(input),
           sql`${exifData.lensModel} IS NOT NULL AND ${exifData.lensModel} != ''`
         )
       )
       .groupBy(exifData.lensModel)
       .orderBy(desc(sql`count(*)`))
-      .limit(20)
       .all();
 
     // Shutter speed distribution (SQL-level bucketing)
@@ -408,7 +524,7 @@ export const getStats = os
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
       .where(
-        and(isNull(photos.deletedAt), isNotNull(exifData.shutterSpeedNum))
+        and(dashboardPhotoWhere(input), isNotNull(exifData.shutterSpeedNum))
       )
       .get();
 
@@ -459,7 +575,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.dateTaken)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.dateTaken)))
       .groupBy(
         sql`strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime')`
       )
@@ -480,7 +596,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.dateTaken)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.dateTaken)))
       .groupBy(
         sql`strftime('%Y', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime')`
       )
@@ -497,7 +613,7 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.dateTaken)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.dateTaken)))
       .groupBy(
         sql`strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime')`
       )
@@ -514,40 +630,86 @@ export const getStats = os
       })
       .from(exifData)
       .innerJoin(photos, eq(exifData.photoId, photos.id))
-      .where(and(isNull(photos.deletedAt), isNotNull(exifData.dateTaken)))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.dateTaken)))
       .get();
 
     const dateRange =
-      rangeRow?.earliest != null
-        ? { earliest: rangeRow.earliest, latest: rangeRow.latest }
-        : null;
+      rangeRow?.earliest == null
+        ? null
+        : { earliest: rangeRow.earliest, latest: rangeRow.latest };
 
     const avgIso =
       db
         .select({ avgIso: sql<number>`avg(${exifData.iso})` })
         .from(exifData)
         .innerJoin(photos, eq(exifData.photoId, photos.id))
-        .where(and(isNull(photos.deletedAt), isNotNull(exifData.iso)))
+        .where(and(dashboardPhotoWhere(input), isNotNull(exifData.iso)))
         .get()?.avgIso || 0;
 
-    const geoLocations = input.includeGeo ? getDashboardGeoLocations() : [];
+    const colorCoverage = hasRange
+      ? (db
+          .select({ count: sql<number>`count(*)` })
+          .from(photos)
+          .innerJoin(exifData, eq(exifData.photoId, photos.id))
+          .where(
+            and(dashboardPhotoWhere(input), isNotNull(photos.dominantColors))
+          )
+          .get()?.count ?? 0)
+      : (db
+          .select({ count: sql<number>`count(*)` })
+          .from(photos)
+          .where(
+            and(isNull(photos.deletedAt), isNotNull(photos.dominantColors))
+          )
+          .get()?.count ?? 0);
+    const geoLocations = input.includeGeo
+      ? getDashboardGeoLocations(input)
+      : { locations: [], total: 0, truncated: false };
+    const withoutExif = Math.max(
+      0,
+      totalPhotos - (completeness?.withExif ?? 0)
+    );
+    const withoutExifRow = Math.max(
+      0,
+      totalPhotos - (completeness?.exifRows ?? 0)
+    );
+    const missingWithNoExif = (missing: number | null | undefined) =>
+      (missing ?? 0) + withoutExifRow;
 
     const result = {
       totalPhotos,
       aiProcessed,
+      scope: {
+        from: input.from ?? null,
+        toExclusive: input.toExclusive ?? null,
+        libraryTotal,
+        scopedPhotos: totalPhotos,
+        datedPhotos: hasRange ? totalPhotos : libraryDated,
+        excludedUndated: libraryTotal - libraryDated,
+      },
+      coverage: {
+        ai: aiProcessed,
+        color: colorCoverage,
+        date: hasRange ? totalPhotos : libraryDated,
+        exif: completeness?.withExif ?? 0,
+        gps: Math.max(
+          0,
+          totalPhotos - missingWithNoExif(completeness?.missingGps)
+        ),
+      },
       exifCompleteness: completeness
         ? {
             withExif: completeness.withExif,
-            missingCamera: completeness.missingCamera,
-            missingLens: completeness.missingLens,
-            missingFocal: completeness.missingFocal,
-            missingAperture: completeness.missingAperture,
-            missingIso: completeness.missingIso,
-            missingShutter: completeness.missingShutter,
-            missingDate: completeness.missingDate,
-            missingGps: completeness.missingGps,
-            // Photos in the photos table that have no exif_data row at all
-            withoutExif: totalPhotos - completeness.withExif,
+            missingCamera: missingWithNoExif(completeness.missingCamera),
+            missingLens: missingWithNoExif(completeness.missingLens),
+            missingFocal: missingWithNoExif(completeness.missingFocal),
+            missingAperture: missingWithNoExif(completeness.missingAperture),
+            missingIso: missingWithNoExif(completeness.missingIso),
+            missingShutter: missingWithNoExif(completeness.missingShutter),
+            missingDate: missingWithNoExif(completeness.missingDate),
+            missingGps: missingWithNoExif(completeness.missingGps),
+            // Photos without any meaningful photographic EXIF field.
+            withoutExif,
           }
         : null,
       cameraStats: cameraStats.filter((c) => c.model),
@@ -565,12 +727,62 @@ export const getStats = os
       dateRange,
       avgIso,
       geoLocations,
+      distributionMetadata: {
+        camera: {
+          valid: Math.max(
+            0,
+            totalPhotos - missingWithNoExif(completeness?.missingCamera)
+          ),
+          missing: missingWithNoExif(completeness?.missingCamera),
+          totalCategories: cameraStats.length,
+          truncated: false,
+        },
+        lens: {
+          valid: Math.max(
+            0,
+            totalPhotos - missingWithNoExif(completeness?.missingLens)
+          ),
+          missing: missingWithNoExif(completeness?.missingLens),
+          totalCategories: lensStats.length,
+          truncated: false,
+        },
+        focal: {
+          valid: Math.max(
+            0,
+            totalPhotos - missingWithNoExif(completeness?.missingFocal)
+          ),
+          missing: missingWithNoExif(completeness?.missingFocal),
+          totalCategories: focalStats.length,
+          truncated: focalStats.length >= 50,
+        },
+        aperture: {
+          valid: Math.max(
+            0,
+            totalPhotos - missingWithNoExif(completeness?.missingAperture)
+          ),
+          missing: missingWithNoExif(completeness?.missingAperture),
+          totalCategories: apertureStats.length,
+          truncated: apertureStats.length >= 50,
+        },
+        iso: {
+          valid: isoResult.reduce((sum, item) => sum + item.count, 0),
+          missing: missingWithNoExif(completeness?.missingIso),
+          totalCategories: isoResult.length,
+          truncated: false,
+        },
+        shutter: {
+          valid: shutterResult.reduce((sum, item) => sum + item.count, 0),
+          missing: missingWithNoExif(completeness?.missingShutter),
+          totalCategories: shutterResult.length,
+          truncated: false,
+        },
+      },
     };
 
     // Optionally include color distribution in the same IPC call
     if (input.includeColors) {
       try {
-        (result as any).colorDistribution = computeDashboardColors();
+        (result as any).colorDistribution = computeDashboardColors(input);
       } catch (err) {
         console.error("[getStats] colorDistribution failed:", err);
         (result as any).colorDistribution = null;
@@ -581,6 +793,7 @@ export const getStats = os
       data: result,
       includesColors: input.includeColors,
       includesGeo: input.includeGeo,
+      key: cacheKey,
       timestamp: Date.now(),
     };
     return result;
@@ -694,7 +907,10 @@ export const findDuplicates = os
       const existing = db.select().from(duplicatePairs).all();
 
       if (existing.length > 0) {
-        return { groups: hydrateDuplicateGroups(db, existing), fromCache: true };
+        return {
+          groups: hydrateDuplicateGroups(db, existing),
+          fromCache: true,
+        };
       }
     }
 
@@ -1043,17 +1259,19 @@ async function computeIndexStats() {
 // database file location, and counts of valid vs invalid photo records.
 // "Invalid" matches cleanupOrphanPhotos: photos whose folderId is NULL or
 // points at a folder that no longer exists.
-export const getIndexStats = os.input(z.object({}).optional()).handler(async () => {
-  if (
-    indexStatsCache &&
-    Date.now() - indexStatsCache.timestamp < INDEX_STATS_CACHE_TTL
-  ) {
-    return indexStatsCache.value;
-  }
-  const result = await computeIndexStats();
-  indexStatsCache = { value: result, timestamp: Date.now() };
-  return result;
-});
+export const getIndexStats = os
+  .input(z.object({}).optional())
+  .handler(async () => {
+    if (
+      indexStatsCache &&
+      Date.now() - indexStatsCache.timestamp < INDEX_STATS_CACHE_TTL
+    ) {
+      return indexStatsCache.value;
+    }
+    const result = await computeIndexStats();
+    indexStatsCache = { value: result, timestamp: Date.now() };
+    return result;
+  });
 
 /** Invalidate index stats cache (call after import / bulk delete). */
 export function invalidateIndexStatsCache(): void {
@@ -1098,12 +1316,17 @@ export async function runColorMigration(
         // Compute hue bucket from the primary color for pre-filter optimization
         let bucketSql = sql`NULL`;
         try {
-          const palette = JSON.parse(colors) as Array<{ hue?: number; weight: number }>;
+          const palette = JSON.parse(colors) as Array<{
+            hue?: number;
+            weight: number;
+          }>;
           if (palette.length > 0 && palette[0].hue != null) {
             const bucket = Math.floor(palette[0].hue / 10) % 36;
             bucketSql = sql`${bucket}`;
           }
-        } catch { /* keep NULL */ }
+        } catch {
+          /* keep NULL */
+        }
         db.run(
           sql`UPDATE photos SET dominant_colors = ${colors}, color_bucket = ${bucketSql} WHERE id = ${photo.id}`
         );

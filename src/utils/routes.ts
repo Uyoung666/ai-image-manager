@@ -26,6 +26,12 @@ router.navigate = ((opts: any) => {
     const currentPath = router.state.location.pathname;
     const targetPath =
       typeof opts === "string" ? opts : (opts?.to ?? currentPath);
+    // Search-param and tab changes within one page are state updates, not
+    // page navigation. Animating them makes the whole page flash on every
+    // dashboard filter click.
+    if (currentPath === targetPath) {
+      return _orig.call(router, opts);
+    }
     // Skip view transition when switching between settings sub-pages
     if (
       currentPath.startsWith("/settings") &&

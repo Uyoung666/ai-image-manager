@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildApertureChartData,
   buildFocalChartData,
+  buildMonthlyChartData,
   buildRangeSearchParams,
+  calculateCoverage,
+  fillYearlyChartData,
+  getDashboardTimeRange,
+  getTopItems,
+  mergeDashboardDrillParams,
 } from "@/utils/dashboard-data";
 
 describe("dashboard chart data", () => {
@@ -62,6 +68,70 @@ describe("dashboard chart data", () => {
     });
     expect(buildRangeSearchParams("shutter", 0.0333)).toEqual({
       shutterMin: "0.0333",
+    });
+  });
+
+  it("builds local half-open ranges for common presets", () => {
+    const result = getDashboardTimeRange("year", new Date(2026, 6, 15, 12));
+    expect(new Date(result.from ?? 0).toString()).toContain("Jan 01 2026");
+    expect(new Date(result.toExclusive ?? 0).toString()).toContain(
+      "Jul 16 2026"
+    );
+  });
+
+  it("includes the custom end date by advancing to the next local day", () => {
+    const result = getDashboardTimeRange(
+      "custom",
+      new Date(2026, 0, 1),
+      "2026-02-01",
+      "2026-02-28"
+    );
+    expect(new Date(result.from ?? 0).getDate()).toBe(1);
+    expect(new Date(result.toExclusive ?? 0).getDate()).toBe(1);
+    expect(new Date(result.toExclusive ?? 0).getMonth()).toBe(2);
+  });
+
+  it("fills missing years without smoothing over the gap", () => {
+    expect(
+      fillYearlyChartData([
+        { year: "2023", count: 4 },
+        { year: "2025", count: 7 },
+      ])
+    ).toEqual([
+      { name: "2023", count: 4, year: 2023 },
+      { name: "2024", count: 0, year: 2024 },
+      { name: "2025", count: 7, year: 2025 },
+    ]);
+  });
+
+  it("fills all twelve month preference buckets", () => {
+    const result = buildMonthlyChartData([{ month: "02", count: 9 }], "en");
+    expect(result).toHaveLength(12);
+    expect(result[1].count).toBe(9);
+    expect(result.reduce((sum, item) => sum + item.count, 0)).toBe(9);
+  });
+
+  it("calculates bounded coverage and selects top items", () => {
+    expect(calculateCoverage(3, 4)).toBe(75);
+    expect(calculateCoverage(3, 0)).toBe(0);
+    expect(getTopItems([{ count: 1 }, { count: 4 }, { count: 2 }], 2)).toEqual([
+      { count: 4 },
+      { count: 2 },
+    ]);
+  });
+
+  it("preserves dashboard date scope when drilling down", () => {
+    const result = mergeDashboardDrillParams(
+      { cameraModel: "Example" },
+      {
+        from: new Date(2026, 0, 1).getTime(),
+        toExclusive: new Date(2026, 1, 1).getTime(),
+      }
+    );
+    expect(result).toMatchObject({
+      cameraModel: "Example",
+      dateFrom: "2026-01-01",
+      dateTo: "2026-01-31",
     });
   });
 });

@@ -1,0 +1,65 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import {
+  ChartSection,
+  CoverageCard,
+  DashboardBarChart,
+} from "@/components/dashboard/dashboard-charts";
+
+describe("dashboard chart accessibility", () => {
+  it("exposes chart values through a keyboard-operable data table", () => {
+    const onPointClick = vi.fn();
+    render(
+      <ChartSection
+        data={[{ count: 3, name: "Example camera" }]}
+        onPointClick={onPointClick}
+        sampleTotal={4}
+        title="Camera usage"
+      >
+        <div>chart</div>
+      </ChartSection>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "dashboardViewData" }));
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("75.0%")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Example camera" }));
+    expect(onPointClick).toHaveBeenCalledWith({
+      count: 3,
+      name: "Example camera",
+    });
+  });
+
+  it("renders coverage as a bounded progress indicator", () => {
+    const { container } = render(
+      <CoverageCard count={12} label="EXIF" percentage={75} />
+    );
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(container.querySelector('[style="width: 75%;"]')).not.toBeNull();
+  });
+
+  it("renders every gear category as its own horizontal bar", () => {
+    const onPointClick = vi.fn();
+    render(
+      <DashboardBarChart
+        data={[
+          { count: 76, name: "Canon EOS 600D" },
+          { count: 9, name: "Canon EOS R7" },
+          { count: 6, name: "OPPO Find X6" },
+        ]}
+        horizontal
+        onPointClick={onPointClick}
+        sampleTotal={91}
+      />
+    );
+
+    const bars = screen.getAllByRole("listitem");
+    expect(bars).toHaveLength(3);
+    fireEvent.click(within(bars[1]).getByRole("button"));
+    expect(onPointClick).toHaveBeenCalledWith({
+      count: 9,
+      name: "Canon EOS R7",
+    });
+  });
+});

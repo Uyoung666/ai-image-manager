@@ -8,6 +8,19 @@ export interface FocalStatInput {
   focalLength: string;
 }
 
+export type DashboardRangePreset = "all" | "year" | "last12" | "custom";
+
+export interface DashboardTimeRange {
+  from?: number;
+  toExclusive?: number;
+}
+
+export interface DashboardChartPoint {
+  count: number;
+  name: string;
+  [key: string]: unknown;
+}
+
 const STANDARD_APERTURES = [
   1, 1.1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3,
   7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32,
@@ -103,4 +116,98 @@ export function buildRangeSearchParams(
     params[`${prefix}Max`] = String(max);
   }
   return params;
+}
+
+export function getDashboardTimeRange(
+  preset: DashboardRangePreset,
+  now = new Date(),
+  customFrom?: string,
+  customTo?: string
+): DashboardTimeRange {
+  if (preset === "all") {
+    return {};
+  }
+
+  if (preset === "custom") {
+    const from = customFrom
+      ? new Date(`${customFrom}T00:00:00`).getTime()
+      : Number.NaN;
+    const to = customTo ? new Date(`${customTo}T00:00:00`) : null;
+    if (to) {
+      to.setDate(to.getDate() + 1);
+    }
+    return {
+      from: Number.isFinite(from) ? from : undefined,
+      toExclusive:
+        to && Number.isFinite(to.getTime()) ? to.getTime() : undefined,
+    };
+  }
+
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const from =
+    preset === "year"
+      ? new Date(now.getFullYear(), 0, 1)
+      : new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  return { from: from.getTime(), toExclusive: to.getTime() };
+}
+
+export function fillYearlyChartData(
+  stats: { count: number; year: string }[],
+  range?: DashboardTimeRange
+) {
+  if (stats.length === 0) {
+    return [];
+  }
+  const counts = new Map(stats.map((item) => [Number(item.year), item.count]));
+  const dataYears = [...counts.keys()].filter(Number.isFinite);
+  const first = range?.from
+    ? new Date(range.from).getFullYear()
+    : Math.min(...dataYears);
+  const last = range?.toExclusive
+    ? new Date(range.toExclusive - 1).getFullYear()
+    : Math.max(...dataYears);
+  return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => {
+    const year = first + index;
+    return { name: String(year), count: counts.get(year) ?? 0, year };
+  });
+}
+
+export function buildMonthlyChartData(
+  stats: { count: number; month: string }[],
+  locale: string
+): DashboardChartPoint[] {
+  const formatter = new Intl.DateTimeFormat(locale, { month: "short" });
+  const counts = new Map(stats.map((item) => [Number(item.month), item.count]));
+  return Array.from({ length: 12 }, (_, index) => ({
+    name: formatter.format(new Date(2000, index, 1)),
+    count: counts.get(index + 1) ?? 0,
+  }));
+}
+
+export function calculateCoverage(covered: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return Math.round((Math.max(0, covered) / total) * 100);
+}
+
+export function getTopItems<T extends { count: number }>(
+  items: T[],
+  limit = 8
+) {
+  return [...items].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
+export function mergeDashboardDrillParams(
+  params: Record<string, string>,
+  range: DashboardTimeRange
+): Record<string, string> {
+  const result = { ...params };
+  if (range.from !== undefined) {
+    result.dateFrom = new Date(range.from).toLocaleDateString("en-CA");
+  }
+  if (range.toExclusive !== undefined) {
+    result.dateTo = new Date(range.toExclusive - 1).toLocaleDateString("en-CA");
+  }
+  return result;
 }

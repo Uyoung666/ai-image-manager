@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Sparkles } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -9,54 +9,47 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
-  Cell,
+  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import {
-  buildApertureChartData,
-  buildFocalChartData,
-  buildRangeSearchParams,
-} from "@/utils/dashboard-data";
-
-interface ChartClickState {
-  activePayload?: { payload: Record<string, unknown> }[];
-}
-
+  ChartSection,
+  CoverageCard,
+  DashboardBarChart,
+  type DashboardPoint,
+  EmptyChart,
+} from "@/components/dashboard/dashboard-charts";
+import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
+import { Button } from "@/components/ui/button";
 import {
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
 } from "@/components/ui/tooltip";
-import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
+import {
+  buildApertureChartData,
+  buildFocalChartData,
+  buildMonthlyChartData,
+  buildRangeSearchParams,
+  calculateCoverage,
+  type DashboardRangePreset,
+  fillYearlyChartData,
+  getDashboardTimeRange,
+  getTopItems,
+  mergeDashboardDrillParams,
+} from "@/utils/dashboard-data";
 
-interface CameraStat {
-  count: number;
-  model: string;
-}
-interface LensStat {
-  count: number;
-  model: string;
-}
-interface FocalStat {
-  count: number;
-  focalLength: string;
-}
-interface ApertureStat {
-  aperture: number;
-  count: number;
-}
+type DashboardTab = "overview" | "gear" | "exposure" | "time" | "places";
+
 interface BucketStat {
   count: number;
   max?: number;
@@ -64,1196 +57,1109 @@ interface BucketStat {
   period?: string;
   range?: string;
 }
+interface Completeness {
+  missingAperture: number;
+  missingCamera: number;
+  missingDate: number;
+  missingFocal: number;
+  missingGps: number;
+  missingIso: number;
+  missingLens: number;
+  missingShutter: number;
+  withExif: number;
+  withoutExif: number;
+}
+interface DistributionMeta {
+  missing: number;
+  totalCategories: number;
+  truncated: boolean;
+  valid: number;
+}
 interface DashboardData {
   aiProcessed: number;
-  apertureStats: ApertureStat[];
+  apertureStats: { aperture: number; count: number }[];
   avgIso: number;
-  cameraStats: CameraStat[];
+  cameraStats: { count: number; model: string }[];
+  coverage: {
+    ai: number;
+    color: number;
+    date: number;
+    exif: number;
+    gps: number;
+  };
   dateRange: { earliest: number; latest: number } | null;
-  focalStats: FocalStat[];
-  geoLocations: GeoLocation[];
+  distributionMetadata: Record<string, DistributionMeta>;
+  exifCompleteness: Completeness | null;
+  focalStats: { count: number; focalLength: string }[];
   isoDistribution: BucketStat[];
-  lensStats: LensStat[];
+  lensStats: { count: number; model: string }[];
   monthlyStats: { count: number; month: string }[];
+  scope: {
+    datedPhotos: number;
+    excludedUndated: number;
+    libraryTotal: number;
+    scopedPhotos: number;
+  };
   shutterSpeedDistribution: BucketStat[];
   timeHeatmap: BucketStat[];
   totalPhotos: number;
   yearlyStats: { count: number; year: string }[];
 }
-
-interface ColorPaletteColor {
-  b: number;
-  g: number;
-  hex: string;
-  hue: number;
-  lightness: number;
-  r: number;
-  saturation: number;
-  weight: number;
-}
-interface HueBucket {
-  count: number;
-  hex: string;
-  hueRange: [number, number];
-  label: string;
-}
-interface SaturationBucket {
-  count: number;
-  label: string;
-  level: "vivid" | "moderate" | "muted";
-}
-interface ColorDistributionUI {
-  globalPalette: ColorPaletteColor[];
-  hueDistribution: HueBucket[];
+interface ColorData {
+  globalPalette: { hex: string; weight: number }[];
+  hueDistribution: { count: number; hex: string; hueRange: [number, number] }[];
   sampled: number;
-  saturationDistribution: SaturationBucket[];
+  saturationDistribution: {
+    count: number;
+    level: "vivid" | "moderate" | "muted";
+  }[];
   totalPhotos: number;
 }
-const CHART_1 = "var(--chart-1)";
-const CHART_2 = "var(--chart-2)";
-const CHART_3 = "var(--chart-3)";
-const CHART_4 = "var(--chart-4)";
-const CHART_5 = "var(--chart-5)";
-const TEXT_SECONDARY = "#a1a1aa";
-const TEXT_TERTIARY = "#6b6b75";
+interface GeoData {
+  locations: GeoLocation[];
+  total: number;
+  truncated: boolean;
+}
 
+const TABS: DashboardTab[] = ["overview", "gear", "exposure", "time", "places"];
+const PRESETS: DashboardRangePreset[] = ["all", "year", "last12", "custom"];
 const chartTooltipStyle = {
   contentStyle: {
     background: "var(--popover)",
     border: "1px solid var(--border)",
     borderRadius: 6,
-    fontSize: 13,
+    color: "var(--popover-foreground)",
+    fontSize: 12,
   },
-  cursor: { fill: "var(--border)" },
-  itemStyle: { color: "var(--popover-foreground)" },
-  labelStyle: { color: "var(--popover-foreground)", fontWeight: 600 },
+  cursor: { fill: "var(--muted)" },
 };
+const axisTick = { fill: "var(--muted-foreground)", fontSize: 11 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates five lazy dashboard sections and their shared filters
 function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-
-  const HUE_LABEL_KEYS: Record<number, string> = {
-    0: "hueRed",
-    30: "hueOrange",
-    60: "hueYellow",
-    90: "hueYellowGreen",
-    120: "hueGreen",
-    150: "hueSpringGreen",
-    180: "hueCyan",
-    210: "hueBlue",
-    240: "hueBlueViolet",
-    270: "huePurple",
-    300: "hueMagenta",
-    330: "huePink",
-  };
-  function getHueLabel(hueStart: number): string {
-    return t(HUE_LABEL_KEYS[hueStart] || "hueRed");
-  }
-
-  const prefersReducedMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)"
-  ).matches;
-
+  const search = Route.useSearch();
+  const tab = search.tab ?? "overview";
+  const preset = search.range ?? "all";
   const scrollRef = useRef<HTMLDivElement>(null);
-  useRouteScrollRestoration(scrollRef, { getRouteKey: () => "dashboard" });
+  const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
+  const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set());
+  const [startingAi, setStartingAi] = useState(false);
+  useRouteScrollRestoration(scrollRef, {
+    getRouteKey: () => `dashboard-${tab}`,
+  });
 
-  // Load core statistics first; heavier colors and map points are progressive.
-  const {
-    data: rawData,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery({
-    queryKey: ["dashboard", "stats"],
-    queryFn: async () => {
-      const result = (await ipc.client.photos.getStats({
+  const range = useMemo(
+    () => getDashboardTimeRange(preset, new Date(), search.from, search.to),
+    [preset, search.from, search.to]
+  );
+  const setSearch = useCallback(
+    (patch: Partial<typeof search>) => {
+      navigate({
+        to: "/dashboard",
+        search: { ...search, ...patch },
+        replace: true,
+      });
+    },
+    [navigate, search]
+  );
+
+  const statsQuery = useQuery({
+    queryKey: ["dashboard", "stats", range.from, range.toExclusive],
+    queryFn: () =>
+      ipc.client.photos.getStats({
         includeColors: false,
         includeGeo: false,
-      })) as DashboardData & { colorDistribution?: ColorDistributionUI | null };
-      return result;
-    },
+        ...range,
+      }) as Promise<DashboardData>,
+    placeholderData: (previousData) => previousData,
+    staleTime: 30_000,
+  });
+  const data = useDeferredValue(statsQuery.data ?? null);
+  const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
+  const colorQuery = useQuery({
+    queryKey: ["dashboard", "colors", range.from, range.toExclusive],
+    queryFn: () =>
+      ipc.client.photos.getColorDistribution(range) as Promise<ColorData>,
+    enabled: heavyEnabled,
+    staleTime: 30_000,
+  });
+  const geoQuery = useQuery({
+    queryKey: ["dashboard", "geo", range.from, range.toExclusive],
+    queryFn: () => ipc.client.photos.getGeoLocations(range) as Promise<GeoData>,
+    enabled: heavyEnabled,
     staleTime: 30_000,
   });
 
-  // React 19: defer chart recalc to keep page responsive
-  const data = useDeferredValue(rawData ?? null);
-  const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
-  const [mapExpanded, setMapExpanded] = useState(false);
-  const [colorVisible, setColorVisible] = useState(false);
-  const colorRef = useRef<HTMLDivElement | null>(null);
-  const { data: colorData = null, isPending: colorIsLoading } = useQuery({
-    queryKey: ["dashboard", "colors"],
-    queryFn: () => ipc.client.photos.getColorDistribution(),
-    enabled: rawData !== undefined && colorVisible,
-    staleTime: 30_000,
-  });
-  const { data: mapLocations = [], isLoading: mapIsLoading } = useQuery({
-    queryKey: ["dashboard", "geo-locations"],
-    queryFn: () => ipc.client.photos.getGeoLocations(),
-    enabled: mapExpanded,
-    staleTime: 30_000,
-  });
-
-  // Map source setting (lightweight, loaded once)
   useEffect(() => {
     ipc.client.settings
       .getAppSetting({ key: "mapSource" })
-      .then((r) => {
-        if (r?.value === "online") {
+      .then((result) => {
+        if (result?.value === "online") {
           setMapSource("online");
         }
       })
-      .catch(() => {
-        // Keep the offline default when the persisted setting is unavailable.
-      });
+      .catch(() => undefined);
   }, []);
-
-  // Auto-refresh dashboard when background import queue finishes
   useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      if (e.data?.type === "import-queue-status") {
-        const prev = (e.data as any).prevStatus;
-        const next = (e.data as any).status;
-        // Transition from running → done: invalidate to pick up new data
-        if (prev === "processing" && next === "done") {
-          queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-        }
+    const onMessage = (event: MessageEvent) => {
+      if (
+        event.data?.type === "import-queue-status" &&
+        event.data?.prevStatus === "processing" &&
+        event.data?.status === "done"
+      ) {
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       }
-    }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, [queryClient]);
 
-  // IntersectionObserver: entrance animation when color section scrolls into view
-  useEffect(() => {
-    const el = colorRef.current;
-    if (!el) {
-      return;
-    }
-    const rect = el.getBoundingClientRect();
-    if (rect.top < window.innerHeight && rect.bottom > 0) {
-      setColorVisible(true);
-      return;
-    }
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setColorVisible(true);
-          obs.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [isLoading]);
-
-  const handleMapSourceChange = useCallback((source: "offline" | "online") => {
-    setMapSource(source);
-    ipc.client.settings
-      .setAppSetting({ key: "mapSource", value: source })
-      .catch(() => {
-        // The in-memory selection remains usable if persistence fails.
-      });
-  }, []);
-
-  const drillToHome = useCallback(
+  const drill = useCallback(
     (params: Record<string, string>) => {
-      navigate({ to: "/", search: params });
+      navigate({ to: "/", search: mergeDashboardDrillParams(params, range) });
     },
-    [navigate]
+    [navigate, range]
   );
+  const toggleExpanded = (key: string) =>
+    setExpandedCharts((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
 
-  const cameraData = useMemo(
+  const cameraAll = useMemo(
     () =>
-      (data?.cameraStats || []).map((c) => ({
-        name: c.model || "Unknown",
-        count: c.count,
-        cameraModel: c.model,
+      (data?.cameraStats ?? []).map((item) => ({
+        name: item.model,
+        count: item.count,
+        cameraModel: item.model,
       })),
     [data?.cameraStats]
   );
-
-  const lensData = useMemo(
+  const lensAll = useMemo(
     () =>
-      (data?.lensStats || []).map((l) => ({
-        name: l.model,
-        count: l.count,
-        lensModel: l.model,
+      (data?.lensStats ?? []).map((item) => ({
+        name: item.model,
+        count: item.count,
+        lensModel: item.model,
       })),
     [data?.lensStats]
   );
-
+  const cameraData = expandedCharts.has("camera")
+    ? cameraAll
+    : getTopItems(cameraAll, 8);
+  const lensData = expandedCharts.has("lens")
+    ? lensAll
+    : getTopItems(lensAll, 8);
   const focalData = useMemo(
-    () => buildFocalChartData(data?.focalStats || []),
+    () => buildFocalChartData(data?.focalStats ?? [], 12),
     [data?.focalStats]
   );
-
   const apertureData = useMemo(
-    () => buildApertureChartData(data?.apertureStats || []),
+    () => buildApertureChartData(data?.apertureStats ?? [], 10),
     [data?.apertureStats]
   );
-
   const isoData = useMemo(
     () =>
-      (data?.isoDistribution || []).map((bucket) => ({
-        name: bucket.range || "",
-        count: bucket.count,
-        isoMin: bucket.min,
-        isoMax: bucket.max,
+      (data?.isoDistribution ?? []).map((item) => ({
+        name: item.range ?? "",
+        count: item.count,
+        isoMin: item.min,
+        isoMax: item.max,
       })),
     [data?.isoDistribution]
   );
-
-  const timeData = useMemo(
-    () =>
-      (data?.timeHeatmap || []).map((b) => ({
-        name: b.period,
-        count: b.count,
-      })),
-    [data?.timeHeatmap]
-  );
-
   const shutterData = useMemo(
     () =>
-      (data?.shutterSpeedDistribution || []).map((bucket) => ({
-        name: bucket.range || "",
-        count: bucket.count,
-        shutterMin: bucket.min,
-        shutterMax: bucket.max,
+      (data?.shutterSpeedDistribution ?? []).map((item) => ({
+        name: item.range ?? "",
+        count: item.count,
+        shutterMin: item.min,
+        shutterMax: item.max,
       })),
     [data?.shutterSpeedDistribution]
   );
-
-  const yearlyData = useMemo(
+  const timeData = useMemo(
     () =>
-      (data?.yearlyStats || []).map((y) => {
-        const year = Number.parseInt(y.year, 10);
-        return {
-          name: y.year,
-          count: y.count,
-          dateFrom: `${year}-01-01`,
-          dateTo: `${year}-12-31`,
-        };
-      }),
-    [data?.yearlyStats]
+      (data?.timeHeatmap ?? []).map((item) => ({
+        name: item.period ?? "",
+        count: item.count,
+      })),
+    [data?.timeHeatmap]
+  );
+  const yearlyData = useMemo(
+    () => fillYearlyChartData(data?.yearlyStats ?? [], range),
+    [data?.yearlyStats, range]
+  );
+  const monthlyData = useMemo(
+    () => buildMonthlyChartData(data?.monthlyStats ?? [], i18n.language),
+    [data?.monthlyStats, i18n.language]
   );
 
-  const monthlyData = useMemo(() => {
-    const monthLabelFormatter = new Intl.DateTimeFormat(i18n.language, {
-      month: "short",
-    });
-    const monthCountMap = new Map<number, number>();
-    for (const m of data?.monthlyStats || []) {
-      const idx = Number.parseInt(m.month, 10);
-      if (idx >= 1 && idx <= 12) {
-        monthCountMap.set(idx, m.count);
-      }
+  if (statsQuery.isLoading) {
+    return <DashboardSkeleton />;
+  }
+  if (statsQuery.isError || !data) {
+    return <DashboardError onRetry={() => statsQuery.refetch()} />;
+  }
+
+  const sampleTotal = data.scope.scopedPhotos;
+  const topCamera = cameraAll[0];
+  const topLens = lensAll[0];
+  const peakHour = [...timeData].sort((a, b) => b.count - a.count)[0];
+  const peakMonth = [...monthlyData].sort((a, b) => b.count - a.count)[0];
+
+  const startAi = async () => {
+    setStartingAi(true);
+    try {
+      await ipc.client.photos.startAiIndexing();
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    } finally {
+      setStartingAi(false);
     }
-    return Array.from({ length: 12 }, (_, i) => ({
-      name: monthLabelFormatter.format(new Date(2000, i, 1)),
-      count: monthCountMap.get(i + 1) || 0,
-    }));
-  }, [data?.monthlyStats, i18n.language]);
-
-  if (isLoading) {
-    return (
-      <div className="flex h-full flex-col bg-background">
-        <div className="flex items-center gap-4 border-border border-b px-6 py-4">
-          <div className="h-5 w-5 animate-pulse rounded-[4px] bg-muted" />
-          <div className="h-5 w-32 animate-pulse rounded-[4px] bg-muted" />
-        </div>
-        <div className="flex-1 space-y-6 overflow-y-auto p-6">
-          {/* Stat cards skeleton */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                className="rounded-[8px] border border-border bg-card p-4"
-                key={`stat-skel-${i}`}
-              >
-                <div className="mb-2 h-3 w-16 animate-pulse rounded-[3px] bg-muted" />
-                <div className="h-7 w-20 animate-pulse rounded-[3px] bg-muted" />
-              </div>
-            ))}
-          </div>
-          {/* Map skeleton */}
-          <div className="rounded-[8px] border border-border bg-card p-4">
-            <div className="mb-3 h-4 w-20 animate-pulse rounded-[3px] bg-muted" />
-            <div className="h-[300px] w-full animate-pulse rounded-[6px] bg-muted" />
-          </div>
-          {/* Color skeleton */}
-          <div className="rounded-[8px] border border-border bg-card p-4">
-            <div className="mb-3 h-4 w-24 animate-pulse rounded-[3px] bg-muted" />
-            <div className="mb-3 h-6 w-full animate-pulse rounded-[4px] bg-muted" />
-            <div className="mb-3 h-6 w-full animate-pulse rounded-[4px] bg-muted" />
-            <div className="space-y-1.5">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div className="flex items-center gap-2" key={`clr-skel-${i}`}>
-                  <div className="h-2 w-10 animate-pulse rounded-[2px] bg-muted" />
-                  <div className="h-2 flex-1 animate-pulse rounded-[2px] bg-muted" />
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* Chart skeletons (6 charts) */}
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              className="rounded-[8px] border border-border bg-card p-4"
-              key={`chart-skel-${i}`}
-            >
-              <div className="mb-3 h-4 w-24 animate-pulse rounded-[3px] bg-muted" />
-              <div className="h-[200px] w-full animate-pulse rounded-[6px] bg-muted" />
-            </div>
-          ))}
-          {/* Yearly / Monthly skeleton */}
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {Array.from({ length: 2 }).map((_, i) => (
-              <div
-                className="rounded-[8px] border border-border bg-card p-4"
-                key={`ym-skel-${i}`}
-              >
-                <div className="mb-3 h-4 w-20 animate-pulse rounded-[3px] bg-muted" />
-                <div className="h-[200px] w-full animate-pulse rounded-[6px] bg-muted" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (isError && !data) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">
-          <svg
-            aria-hidden="true"
-            className="h-5 w-5 text-danger"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            viewBox="0 0 24 24"
-          >
-            <path
-              d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
-        <p className="font-medium text-[13px] text-foreground">
-          {t("errorBoundaryTitle")}
-        </p>
-        <p className="text-[12px] text-muted-foreground">
-          {t("dashboardLoadFailed")}
-        </p>
-        <button
-          className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/20"
-          onClick={() => refetch()}
-        >
-          {t("retry")}
-        </button>
-      </div>
-    );
-  }
+  };
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center gap-4 border-border border-b px-6 py-4">
-        <button
-          aria-label={t("backToHome")}
-          className="text-muted-foreground hover:text-foreground"
-          onClick={() => navigate({ to: "/" })}
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h1 className="font-semibold text-[18px] text-foreground">
-          {t("dashboardTitle")}
-        </h1>
-      </div>
-
-      <div className="flex-1 space-y-6 overflow-y-auto p-6" ref={scrollRef}>
-        {/* Stat Cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            label={t("totalPhotos")}
-            value={data?.totalPhotos.toLocaleString() || "0"}
-          />
-          <StatCard
-            label={t("aiProcessed")}
-            value={data?.aiProcessed.toLocaleString() || "0"}
-          />
-          <StatCard
-            label={t("dateRange")}
-            value={
-              data?.dateRange
-                ? `${new Date(data.dateRange.earliest).getFullYear()} - ${new Date(data.dateRange.latest).getFullYear()}`
-                : "—"
-            }
-          />
-          <StatCard
-            label={t("avgIso")}
-            value={data?.avgIso ? Math.round(data.avgIso).toString() : "—"}
-          />
-        </div>
-
-        {/* GPS Map — collapsed by default */}
-        <div className="rounded-[8px] border border-border bg-secondary p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-[16px] text-foreground">
-              {t("geoMap")}
-            </h2>
-            <AppTooltip>
-              <AppTooltipTrigger asChild>
-                <button
-                  aria-expanded={mapExpanded}
-                  className="flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  onClick={() => setMapExpanded((v) => !v)}
-                  type="button"
-                >
-                  <svg
-                    aria-hidden="true"
-                    className="h-4 w-4 transition-transform"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    style={{
-                      transform: mapExpanded ? "rotate(180deg)" : "rotate(0deg)",
-                    }}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="m6 9 6 6 6-6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span>{t("expandMap")}</span>
-                </button>
-              </AppTooltipTrigger>
-              <AppTooltipContent>{t("expandMap")}</AppTooltipContent>
-            </AppTooltip>
-          </div>
-          {mapExpanded && (
-            <div className="mt-4">
-              {mapIsLoading ? (
-                <div className="h-[300px] w-full animate-pulse rounded-[6px] bg-muted" />
-              ) : (
-                <PhotoMap
-                  locations={mapLocations}
-                  mapSource={mapSource}
-                  onMapSourceChange={handleMapSourceChange}
-                />
-              )}
+      <header className="border-border border-b px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              aria-label={t("backToHome")}
+              className="rounded-[5px] p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => navigate({ to: "/" })}
+              type="button"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="font-semibold text-[18px] text-foreground">
+                {t("dashboardTitle")}
+              </h1>
+              <p className="text-[11px] text-muted-foreground">
+                {t("dashboardSubtitle")}
+              </p>
             </div>
-          )}
-        </div>
-
-        {/* Color Distribution */}
-        <div ref={colorRef}>
-          <ChartSection
-            hint={t("colorClickToSearch")}
-            title={t("colorDistribution")}
-          >
-          {colorData ? (
-            colorData && colorData.globalPalette.length > 0 ? (
-              <div
-                className={colorVisible ? "animate-card-enter" : "opacity-0"}
+          </div>
+          <fieldset className="flex flex-wrap items-center gap-2">
+            <legend className="sr-only">{t("dashboardRangeLabel")}</legend>
+            {PRESETS.map((item) => (
+              <button
+                className={`rounded-[6px] px-3 py-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring ${preset === item ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}
+                key={item}
+                onClick={() =>
+                  setSearch({
+                    range: item,
+                    from: item === "custom" ? search.from : undefined,
+                    to: item === "custom" ? search.to : undefined,
+                  })
+                }
+                type="button"
               >
-                {/* Insight text */}
-                {(() => {
-                  let warmT = 0,
-                    coolT = 0,
-                    greenT = 0;
-                  for (const h of colorData.hueDistribution) {
-                    const hue = h.hueRange[0];
-                    if (hue >= 0 && hue < 90) {
-                      warmT += h.count;
-                    } else if (hue >= 210 && hue < 330) {
-                      coolT += h.count;
-                    } else if (hue >= 90 && hue < 180) {
-                      greenT += h.count;
-                    }
-                  }
-                  const total = warmT + coolT + greenT;
-                  const max = Math.max(warmT, coolT, greenT);
-                  let insightKey = "colorInsightNeutral";
-                  if (total > 0 && max / total >= 0.35) {
-                    if (max === warmT) {
-                      insightKey = "colorInsightWarm";
-                    } else if (max === coolT) {
-                      insightKey = "colorInsightCool";
-                    } else {
-                      insightKey = "colorInsightGreen";
-                    }
-                  }
-                  return (
-                    <p className="mb-3 text-[12px] text-muted-foreground/80">
-                      {t(insightKey)}
-                    </p>
-                  );
-                })()}
+                {t(`dashboardRange_${item}`)}
+              </button>
+            ))}
+          </fieldset>
+        </div>
+        {preset === "custom" && (
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[11px] text-muted-foreground">
+            <label>
+              {t("dashboardFromDate")}{" "}
+              <input
+                className="ml-1 rounded-[5px] border border-border bg-background px-2 py-1 text-foreground"
+                max={search.to}
+                onChange={(event) =>
+                  setSearch({ from: event.target.value || undefined })
+                }
+                type="date"
+                value={search.from ?? ""}
+              />
+            </label>
+            <label>
+              {t("dashboardToDate")}{" "}
+              <input
+                className="ml-1 rounded-[5px] border border-border bg-background px-2 py-1 text-foreground"
+                min={search.from}
+                onChange={(event) =>
+                  setSearch({ to: event.target.value || undefined })
+                }
+                type="date"
+                value={search.to ?? ""}
+              />
+            </label>
+          </div>
+        )}
+      </header>
 
-                {/* Palette Swatch Row — sorted by hue */}
-                <div className="mb-4">
-                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
-                    {t("colorPalette")}
-                  </h3>
-                  <div className="flex h-6 w-full overflow-hidden rounded-[4px]">
-                    {colorData.globalPalette.map((c, i) => (
-                      <AppTooltip key={i}>
-                        <AppTooltipTrigger asChild>
-                          <button
-                            aria-label={`${c.hex}, ${Math.round(c.weight * 100)}%`}
-                            className="h-full shrink-0 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                            onClick={() =>
-                              drillToHome({
-                                colorHex: c.hex.replace("#", ""),
-                              })
-                            }
-                            style={{
-                              width: `${Math.max(c.weight * 100, 1.5)}%`,
-                              backgroundColor: c.hex,
-                            }}
-                            type="button"
-                          />
-                        </AppTooltipTrigger>
-                        <AppTooltipContent>{`${c.hex} — ${Math.round(c.weight * 100)}%`}</AppTooltipContent>
-                      </AppTooltip>
-                    ))}
-                  </div>
-                </div>
+      <nav
+        aria-label={t("dashboardSections")}
+        className="flex shrink-0 gap-1 overflow-x-auto border-border border-b px-4 py-2 sm:px-6"
+      >
+        {TABS.map((item) => (
+          <button
+            aria-current={tab === item ? "page" : undefined}
+            className={`shrink-0 rounded-[6px] px-3 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-ring ${tab === item ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+            key={item}
+            onClick={() => setSearch({ tab: item })}
+            type="button"
+          >
+            {t(`dashboardTab_${item}`)}
+          </button>
+        ))}
+      </nav>
 
-                {/* Hue Distribution Bar — equal-width segments, opacity = relative count */}
-                <div className="mb-4">
-                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
-                    {t("colorHueDistribution")}
-                  </h3>
-                  {(() => {
-                    const maxHue = Math.max(
-                      ...colorData.hueDistribution.map((h) => h.count),
-                      1
-                    );
-                    return (
-                      <>
-                        <div className="flex h-6 w-full gap-[1px] overflow-hidden rounded-[4px]">
-                          {colorData.hueDistribution.map((h) => {
-                            const ratio = h.count / maxHue;
-                            const opacity = 0.12 + ratio * 0.88;
-                            return (
-                              <AppTooltip key={h.hueRange[0]}>
-                                <AppTooltipTrigger asChild>
-                                  <button
-                                    aria-label={`${getHueLabel(h.hueRange[0])}: ${h.count}`}
-                                    className="h-full flex-1 cursor-pointer border-0 p-0 transition-opacity hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                                    onClick={() =>
-                                      drillToHome({
-                                        colorHex: h.hex.replace("#", ""),
-                                      })
-                                    }
-                                    style={{
-                                      backgroundColor: h.hex,
-                                      opacity,
-                                    }}
-                                    type="button"
-                                  />
-                                </AppTooltipTrigger>
-                                <AppTooltipContent>{`${getHueLabel(h.hueRange[0])}: ${h.count} — ${t("colorClickToSearch")}`}</AppTooltipContent>
-                              </AppTooltip>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-1.5 flex justify-between px-0">
-                          {colorData.hueDistribution.map((h) => (
-                            <span
-                              className="text-center text-[10px] text-muted-foreground/60 leading-tight"
-                              key={h.hueRange[0]}
-                            >
-                              {getHueLabel(h.hueRange[0])}
-                            </span>
-                          ))}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+        {range.from !== undefined && data.scope.excludedUndated > 0 && (
+          <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <span>
+              {t("dashboardUndatedExcluded", {
+                count: data.scope.excludedUndated.toLocaleString(i18n.language),
+              })}
+            </span>
+          </div>
+        )}
 
-                {/* Saturation Distribution */}
-                <div>
-                  <h3 className="mb-2 font-semibold text-[12px] text-foreground uppercase tracking-wider">
-                    {t("colorSaturationDistribution")}
-                  </h3>
-                  {(() => {
-                    const maxSat = Math.max(
-                      ...colorData.saturationDistribution.map((s) => s.count),
-                      1
-                    );
-                    const barColors: Record<string, string> = {
-                      vivid: "hsl(237, 55%, 55%)",
-                      moderate: "hsl(237, 25%, 48%)",
-                      muted: "hsl(237, 8%, 40%)",
-                    };
-                    const satLabels: Record<string, string> = {
-                      vivid: t("colorVivid"),
-                      moderate: t("colorModerate"),
-                      muted: t("colorMuted"),
-                    };
-                    return (
-                      <div className="space-y-1.5">
-                        {colorData.saturationDistribution.map((s) => {
-                          const pct = Math.round((s.count / maxSat) * 100);
-                          return (
-                            <div
-                              className="flex items-center gap-2"
-                              key={s.level}
-                            >
-                              <span className="w-10 shrink-0 text-[11px] text-muted-foreground/70">
-                                {satLabels[s.level]}
-                              </span>
-                              <div className="h-2.5 flex-1 overflow-hidden rounded-[2px] bg-muted">
-                                <div
-                                  className="h-full rounded-[2px] transition-all"
-                                  style={{
-                                    width: `${Math.max(pct, 4)}%`,
-                                    backgroundColor: barColors[s.level],
-                                  }}
-                                />
-                              </div>
-                              <span className="w-8 text-right text-[11px] text-muted-foreground/50 tabular-nums">
-                                {s.count}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                <p className="mt-3 text-right text-[10px] text-muted-foreground/50">
-                  {t("colorSampled", {
-                    count: colorData.sampled,
-                    total: colorData.totalPhotos,
-                  })}
-                </p>
+        {tab === "overview" && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <SummaryCard
+                label={t("dashboardLibraryTotal")}
+                value={data.scope.libraryTotal.toLocaleString(i18n.language)}
+              />
+              <SummaryCard
+                label={t("dashboardScopedPhotos")}
+                value={sampleTotal.toLocaleString(i18n.language)}
+              />
+              <SummaryCard
+                label={t("dashboardDateCoverage")}
+                value={`${calculateCoverage(data.coverage.date, sampleTotal)}%`}
+              />
+              <SummaryCard
+                label={t("dateRange")}
+                value={
+                  data.dateRange
+                    ? `${new Date(data.dateRange.earliest).getFullYear()}–${new Date(data.dateRange.latest).getFullYear()}`
+                    : "—"
+                }
+              />
+            </div>
+            <section className="rounded-[10px] border border-border bg-secondary p-5">
+              <h2 className="font-semibold text-[15px] text-foreground">
+                {t("dashboardLibraryHealth")}
+              </h2>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {t("dashboardCoverageDescription")}
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <CoverageCard
+                  count={data.coverage.ai}
+                  label={t("dashboardAiCoverage")}
+                  percentage={calculateCoverage(data.coverage.ai, sampleTotal)}
+                />
+                <CoverageCard
+                  count={data.coverage.exif}
+                  label={t("dashboardExifCoverage")}
+                  percentage={calculateCoverage(
+                    data.coverage.exif,
+                    sampleTotal
+                  )}
+                />
+                <CoverageCard
+                  count={data.coverage.gps}
+                  label={t("dashboardGpsCoverage")}
+                  percentage={calculateCoverage(data.coverage.gps, sampleTotal)}
+                />
+                <CoverageCard
+                  count={data.coverage.color}
+                  label={t("dashboardColorCoverage")}
+                  percentage={calculateCoverage(
+                    data.coverage.color,
+                    sampleTotal
+                  )}
+                />
               </div>
-            ) : (
-              <div className="py-2 text-center">
-                <p className="text-[12px] text-muted-foreground/50">
-                  {t("noColorData")}
-                </p>
-                {colorData && colorData.sampled > 0 && (
-                  <p className="mt-1 text-[11px] text-muted-foreground/30">
-                    {t("colorNotEnoughData", { count: colorData.sampled })}
+            </section>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
+              <section className="rounded-[10px] border border-border bg-secondary p-5">
+                <h2 className="font-semibold text-[15px] text-foreground">
+                  {t("dashboardInsights")}
+                </h2>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Insight
+                    detail={
+                      topCamera
+                        ? t("dashboardPhotoCount", { count: topCamera.count })
+                        : undefined
+                    }
+                    label={t("cameraUsage")}
+                    value={topCamera?.name ?? t("dashboardNoInsight")}
+                  />
+                  <Insight
+                    detail={
+                      topLens
+                        ? t("dashboardPhotoCount", { count: topLens.count })
+                        : undefined
+                    }
+                    label={t("lensUsage")}
+                    value={topLens?.name ?? t("dashboardNoInsight")}
+                  />
+                  <Insight
+                    detail={
+                      peakHour?.count
+                        ? t("dashboardPhotoCount", { count: peakHour.count })
+                        : undefined
+                    }
+                    label={t("dashboardPeakHour")}
+                    value={
+                      peakHour?.count ? peakHour.name : t("dashboardNoInsight")
+                    }
+                  />
+                  <Insight
+                    detail={
+                      peakMonth?.count
+                        ? t("dashboardPhotoCount", { count: peakMonth.count })
+                        : undefined
+                    }
+                    label={t("dashboardPeakMonth")}
+                    value={
+                      peakMonth?.count
+                        ? peakMonth.name
+                        : t("dashboardNoInsight")
+                    }
+                  />
+                </div>
+              </section>
+              <section className="rounded-[10px] border border-border bg-secondary p-5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <h2 className="font-semibold text-[15px] text-foreground">
+                    {t("dashboardNextActions")}
+                  </h2>
+                </div>
+                {data.coverage.ai < sampleTotal ? (
+                  <div className="mt-4">
+                    <p className="text-[12px] text-foreground">
+                      {t("dashboardContinueAi", {
+                        count: sampleTotal - data.coverage.ai,
+                      })}
+                    </p>
+                    <Button
+                      className="mt-3 h-8 text-[11px]"
+                      disabled={startingAi}
+                      onClick={startAi}
+                    >
+                      {startingAi
+                        ? t("dashboardStartingAi")
+                        : t("dashboardStartAi")}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-[12px] text-muted-foreground">
+                    {t("dashboardHealthGood")}
                   </p>
                 )}
-              </div>
-            )
-          ) : colorIsLoading ? (
-            <div className="space-y-3 py-2">
-              <p className="text-[11px] text-muted-foreground/50">
-                {t("colorAnalyzing")}
-              </p>
-              <div className="flex h-5 w-full gap-[2px] overflow-hidden rounded-[4px]">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div
-                    className="h-full flex-1 animate-shimmer rounded-[2px]"
-                    key={i}
-                    style={{ animationDelay: `${i * 80}ms` }}
-                  />
-                ))}
-              </div>
-              <div className="flex h-5 w-full gap-[2px] overflow-hidden rounded-[4px]">
-                {Array.from({ length: 12 }).map((_, i) => (
-                  <div
-                    className="h-full flex-1 animate-shimmer rounded-[2px]"
-                    key={i}
-                    style={{ animationDelay: `${i * 60}ms` }}
-                  />
-                ))}
-              </div>
-              <div className="space-y-1.5">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div className="flex items-center gap-2" key={i}>
-                    <div className="h-2 w-10 animate-shimmer rounded-[2px]" />
-                    <div className="h-2 flex-1 animate-shimmer rounded-[2px]" />
-                    <div className="h-2 w-8 animate-shimmer rounded-[2px]" />
-                  </div>
-                ))}
-              </div>
+                {(data.exifCompleteness?.withoutExif ?? 0) > 0 && (
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    {t("dashboardMissingExifAction", {
+                      count: data.exifCompleteness?.withoutExif,
+                    })}
+                  </p>
+                )}
+              </section>
             </div>
-          ) : (
-            <EmptyHint text={t("noColorData")} />
-          )}
-          </ChartSection>
-        </div>
-
-        {/* Camera Usage */}
-        <ChartSection hint={t("clickToView")} title={t("cameraUsage")}>
-          {cameraData.length > 0 ? (
-            <DashboardBarChart
-              barRadius={[0, 4, 4, 0]}
-              data={cameraData}
-              fillColor={CHART_1}
-              horizontal
-              leftMargin={140}
-              onBarClick={(entry) => {
-                if (entry.cameraModel) {
-                  drillToHome({ cameraModel: entry.cameraModel });
-                }
-              }}
-            />
-          ) : (
-            <EmptyHint text={t("noCameraData")} />
-          )}
-        </ChartSection>
-
-        {/* Lens Usage */}
-        {lensData.length > 0 && (
-          <ChartSection hint={t("clickToView")} title={t("lensUsage")}>
-            <DashboardBarChart
-              barRadius={[0, 4, 4, 0]}
-              data={lensData}
-              fillColor={CHART_5}
-              horizontal
-              leftMargin={160}
-              onBarClick={(entry) => {
-                if (entry.lensModel) {
-                  drillToHome({ lensModel: entry.lensModel });
-                }
-              }}
-            />
-          </ChartSection>
+          </div>
         )}
 
-        {/* Charts Grid 2×2 */}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartSection hint={t("clickToView")} title={t("focalDistribution")}>
-            {focalData.length > 0 ? (
-              <DashboardBarChart
-                data={focalData}
-                fillColor={CHART_2}
-                onBarClick={(entry) => {
-                  if (entry.focalMin && entry.focalMax) {
-                    drillToHome({
-                      focalMin: String(entry.focalMin),
-                      focalMax: String(entry.focalMax),
-                    });
-                  }
-                }}
-                xAxisAngle={-45}
-                xAxisFontSize={10}
-              />
-            ) : (
-              <EmptyHint text={t("noFocalData")} />
-            )}
-          </ChartSection>
-
-          <ChartSection hint={t("clickToView")} title={t("aperturePreference")}>
-            {apertureData.length > 0 ? (
-              <DashboardBarChart
-                data={apertureData}
-                fillColor={CHART_3}
-                onBarClick={(entry) => {
-                  if (entry.apertureMin && entry.apertureMax) {
-                    drillToHome({
-                      apertureMin: entry.apertureMin,
-                      apertureMax: entry.apertureMax,
-                    });
-                  }
-                }}
-                xAxisAngle={-45}
-                xAxisFontSize={10}
-              />
-            ) : (
-              <EmptyHint text={t("noApertureData")} />
-            )}
-          </ChartSection>
-
-          <ChartSection
-            hint={t("clickToView")}
-            title={t("isoDistributionTitle")}
-          >
-            {isoData.length > 0 && isoData.some((d) => d.count > 0) ? (
-              <DashboardBarChart
-                data={isoData}
-                fillColor={CHART_4}
-                onBarClick={(entry) => {
-                  const params = buildRangeSearchParams(
-                    "iso",
-                    entry.isoMin,
-                    entry.isoMax
-                  );
-                  if (Object.keys(params).length > 0) {
-                    drillToHome(params);
-                  }
-                }}
-              />
-            ) : (
-              <EmptyHint text={t("noIsoData")} />
-            )}
-          </ChartSection>
-
-          <ChartSection title={t("timeDistribution24h")}>
-            {timeData.length > 0 && timeData.some((d) => d.count > 0) ? (
-              <ResponsiveContainer height={180} width="100%">
-                <AreaChart
-                  data={timeData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                >
-                  <defs>
-                    <linearGradient
-                      id="timeGradient"
-                      x1="0"
-                      x2="0"
-                      y1="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="0%"
-                        stopColor="var(--chart-1)"
-                        stopOpacity={0.5}
-                      />
-                      <stop
-                        offset="100%"
-                        stopColor="var(--chart-1)"
-                        stopOpacity={0.02}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    interval={3}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Area
-                    animationDuration={prefersReducedMotion ? 0 : 800}
-                    dataKey="count"
-                    fill="url(#timeGradient)"
-                    stroke={CHART_1}
-                    strokeWidth={2}
-                    type="monotone"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyHint text={t("noTimeData")} />
-            )}
-          </ChartSection>
-        </div>
-
-        {/* Shutter Speed Distribution */}
-        <ChartSection hint={t("clickToView")} title={t("shutterDistribution")}>
-          {shutterData.length > 0 && shutterData.some((d) => d.count > 0) ? (
-            <DashboardBarChart
-              data={shutterData}
-              fillColor={CHART_5}
-              onBarClick={(entry) => {
-                const params = buildRangeSearchParams(
-                  "shutter",
-                  entry.shutterMin,
-                  entry.shutterMax
-                );
-                if (Object.keys(params).length > 0) {
-                  drillToHome(params);
-                }
-              }}
-              xAxisAngle={-45}
-              xAxisFontSize={10}
+        {tab === "gear" && (
+          <div className="space-y-4">
+            <ChartWithExpand
+              data={cameraData}
+              expanded={expandedCharts.has("camera")}
+              hasMore={cameraAll.length > 8}
+              meta={data.distributionMetadata.camera}
+              onExpand={() => toggleExpanded("camera")}
+              onPointClick={(point) =>
+                drill({ cameraModel: String(point.cameraModel) })
+              }
+              title={t("cameraUsage")}
             />
-          ) : (
-            <EmptyHint text={t("noShutterData")} />
-          )}
-        </ChartSection>
+            <ChartWithExpand
+              color="var(--chart-5)"
+              data={lensData}
+              expanded={expandedCharts.has("lens")}
+              hasMore={lensAll.length > 8}
+              meta={data.distributionMetadata.lens}
+              onExpand={() => toggleExpanded("lens")}
+              onPointClick={(point) =>
+                drill({ lensModel: String(point.lensModel) })
+              }
+              title={t("lensUsage")}
+            />
+          </div>
+        )}
 
-        {/* Yearly & Monthly Distribution */}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <ChartSection
-            hint={t("clickYearToView")}
-            title={t("yearlyDistribution")}
-          >
-            {yearlyData.length > 0 ? (
-              <ResponsiveContainer height={200} width="100%">
-                <AreaChart
-                  data={yearlyData}
-                  margin={{ top: 0, right: 0, left: 0, bottom: 20 }}
-                  onClick={(state: ChartClickState) => {
-                    if (state?.activePayload?.[0]?.payload) {
-                      const p = state.activePayload[0].payload as {
-                        dateFrom?: string;
-                        dateTo?: string;
-                      };
-                      if (p.dateFrom && p.dateTo) {
-                        drillToHome({ dateFrom: p.dateFrom, dateTo: p.dateTo });
-                      }
-                    }
-                  }}
-                >
-                  <defs>
-                    <linearGradient
-                      id="yearGradient"
-                      x1="0"
-                      x2="0"
-                      y1="0"
-                      y2="1"
-                    >
-                      <stop
-                        offset="0%"
-                        stopColor="var(--chart-2)"
-                        stopOpacity={0.5}
-                      />
-                      <stop
-                        offset="100%"
-                        stopColor="var(--chart-2)"
-                        stopOpacity={0.02}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    axisLine={false}
-                    dataKey="name"
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip {...chartTooltipStyle} />
-                  <Area
-                    animationDuration={prefersReducedMotion ? 0 : 800}
-                    className="cursor-pointer"
-                    dataKey="count"
-                    fill="url(#yearGradient)"
-                    stroke={CHART_2}
-                    strokeWidth={2}
-                    type="monotone"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyHint text={t("noYearData")} />
-            )}
-          </ChartSection>
-
-          <ChartSection title={t("monthlyDistribution")}>
-            {monthlyData.some((d) => d.count > 0) ? (
-              <DashboardBarChart
-                data={monthlyData}
-                fillColor={CHART_4}
-                height={200}
+        {tab === "exposure" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <ChartBlock
+                color="var(--chart-2)"
+                data={focalData}
+                meta={data.distributionMetadata.focal}
+                onClick={(point) =>
+                  drill({
+                    focalMin: String(point.focalMin),
+                    focalMax: String(point.focalMax),
+                  })
+                }
+                title={t("focalDistribution")}
               />
-            ) : (
-              <EmptyHint text={t("noMonthData")} />
-            )}
-          </ChartSection>
-        </div>
-      </div>
+              <ChartBlock
+                color="var(--chart-3)"
+                data={apertureData}
+                meta={data.distributionMetadata.aperture}
+                onClick={(point) =>
+                  drill({
+                    apertureMin: String(point.apertureMin),
+                    apertureMax: String(point.apertureMax),
+                  })
+                }
+                title={t("aperturePreference")}
+              />
+              <ChartBlock
+                color="var(--chart-4)"
+                data={isoData}
+                meta={data.distributionMetadata.iso}
+                onClick={(point) =>
+                  drill(
+                    buildRangeSearchParams(
+                      "iso",
+                      point.isoMin as number | undefined,
+                      point.isoMax as number | undefined
+                    )
+                  )
+                }
+                title={t("isoDistributionTitle")}
+              />
+              <ChartBlock
+                color="var(--chart-5)"
+                data={shutterData}
+                meta={data.distributionMetadata.shutter}
+                onClick={(point) =>
+                  drill(
+                    buildRangeSearchParams(
+                      "shutter",
+                      point.shutterMin as number | undefined,
+                      point.shutterMax as number | undefined
+                    )
+                  )
+                }
+                title={t("shutterDistribution")}
+              />
+            </div>
+            <div className="rounded-[8px] border border-border bg-secondary px-4 py-3 text-[12px] text-muted-foreground">
+              {t("dashboardAverageIso")}:{" "}
+              <strong className="text-foreground">
+                {data.avgIso
+                  ? Math.round(data.avgIso).toLocaleString(i18n.language)
+                  : "—"}
+              </strong>{" "}
+              · {t("dashboardAverageIsoHint")}
+            </div>
+          </div>
+        )}
+
+        {tab === "time" && (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <TrendChart
+              data={yearlyData}
+              sampleTotal={sampleTotal}
+              title={t("yearlyDistribution")}
+            />
+            <ChartBlock
+              color="var(--chart-4)"
+              data={monthlyData}
+              meta={{
+                valid: data.coverage.date,
+                missing: data.exifCompleteness?.missingDate ?? 0,
+                totalCategories: 12,
+                truncated: false,
+              }}
+              title={t("dashboardMonthlyPreference")}
+            />
+            <div className="xl:col-span-2">
+              <TrendChart
+                data={timeData}
+                sampleTotal={data.coverage.date}
+                title={t("timeDistribution24h")}
+              />
+            </div>
+          </div>
+        )}
+
+        {tab === "places" && (
+          <PlacesAndColors
+            colorData={colorQuery.data ?? null}
+            colorLoading={colorQuery.isLoading}
+            drill={drill}
+            geoData={geoQuery.data ?? null}
+            geoLoading={geoQuery.isLoading}
+            mapSource={mapSource}
+            onMapSourceChange={(source) => {
+              setMapSource(source);
+              ipc.client.settings
+                .setAppSetting({ key: "mapSource", value: source })
+                .catch(() => undefined);
+            }}
+          />
+        )}
+      </main>
     </div>
   );
 }
 
-interface DashboardBarChartProps {
-  barRadius?: [number, number, number, number];
-  data: any[];
-  dataKey?: string;
-  fillColor: string;
-  height?: number;
-  horizontal?: boolean;
-  leftMargin?: number;
-  onBarClick?: (entry: any) => void;
-  xAxisAngle?: number;
-  xAxisFontSize?: number;
-  xAxisHeight?: number;
-  xAxisInterval?: number;
-}
-
-// Tooltip rendered to document.body via portal so it escapes any
-// overflow:auto/scroll container and is never clipped.
-function PortalTooltip({
-  active,
-  payload,
-  label,
-  coordinate,
-}: any) {
-  // Track mouse position for portal placement
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => setPos({ x: e.clientX, y: e.clientY });
-    window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
-  }, []);
-
-  if (!(active && payload?.length && pos)) {
-    return null;
-  }
-
-  return createPortal(
-    <div
-      className="surface-elevated pointer-events-none rounded-[6px] border border-border bg-popover px-3 py-2 text-[12px] text-popover-foreground shadow-md ring-1 ring-foreground/10"
-      style={{
-        left: pos.x + 12,
-        position: "fixed",
-        top: pos.y - 40,
-        zIndex: 9999,
-      }}
-    >
-      <div className="font-medium">{label}</div>
-      {payload.map((p: any, i: number) => (
-        <div key={i} className="text-muted-foreground">
-          {p.name}: {p.value}
-        </div>
-      ))}
-    </div>,
-    document.body
+function ChartDescription({ meta }: { meta: DistributionMeta }) {
+  const { t, i18n } = useTranslation();
+  return (
+    <>
+      {t("dashboardChartCoverage", {
+        missing: meta.missing.toLocaleString(i18n.language),
+        valid: meta.valid.toLocaleString(i18n.language),
+      })}
+      {meta.truncated ? ` · ${t("dashboardDataTruncated")}` : ""}
+    </>
   );
 }
-
-function DashboardBarChart({
+function ChartBlock({
+  color,
   data,
-  dataKey = "count",
-  fillColor,
-  height = 180,
-  horizontal = false,
-  leftMargin = 0,
-  xAxisAngle = 0,
-  xAxisHeight = 40,
-  xAxisFontSize = 11,
-  xAxisInterval = 0,
-  barRadius = [4, 4, 0, 0],
-  onBarClick,
-}: DashboardBarChartProps) {
-  const noAnim = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (horizontal) {
-    // Render full chart at natural height, wrap in a scrollable container.
-    // Tooltip clipping is avoided by rendering it to document.body via Portal.
-    const barHeight = 36;
-    const fullHeight = data.length * barHeight + 20;
-    const maxHeight = 8 * barHeight + 20;
-    return (
-      <div className="overflow-y-auto" style={{ maxHeight }}>
-        <ResponsiveContainer height={fullHeight} width="100%">
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ top: 0, right: 20, left: leftMargin, bottom: 0 }}
-        >
-          <XAxis
-            axisLine={false}
-            tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-            tickLine={false}
-            type="number"
-          />
-          <YAxis
-            axisLine={false}
-            dataKey="name"
-            tick={{ fill: TEXT_SECONDARY, fontSize: 12 }}
-            tickLine={false}
-            type="category"
-            width={leftMargin - 10}
-          />
-          <Tooltip content={<PortalTooltip />} />
-          <Bar
-            animationDuration={noAnim ? 0 : 800}
-            dataKey={dataKey}
-            onClick={onBarClick}
-            radius={barRadius as [number, number, number, number]}
-            style={onBarClick ? { cursor: "pointer" } : undefined}
-          >
-            {data.map((_, i) => (
-              <Cell fill={fillColor} key={i} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  return (
-    <ResponsiveContainer height={height} width="100%">
-      <BarChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 20 }}>
-        <XAxis
-          angle={xAxisAngle}
-          axisLine={false}
-          dataKey="name"
-          height={xAxisHeight}
-          interval={xAxisInterval}
-          textAnchor={xAxisAngle === 0 ? undefined : "end"}
-          tick={{ fill: TEXT_TERTIARY, fontSize: xAxisFontSize }}
-          tickLine={false}
-        />
-        <YAxis
-          axisLine={false}
-          tick={{ fill: TEXT_TERTIARY, fontSize: 11 }}
-          tickLine={false}
-        />
-        <Tooltip {...chartTooltipStyle} />
-        <Bar
-          animationDuration={noAnim ? 0 : 800}
-          dataKey={dataKey}
-          onClick={onBarClick}
-          radius={barRadius as [number, number, number, number]}
-          style={onBarClick ? { cursor: "pointer" } : undefined}
-        >
-          {data.map((_, i) => (
-            <Cell fill={fillColor} key={i} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[8px] border border-border bg-secondary p-4">
-      <p className="font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
-        {label}
-      </p>
-      <p className="mt-1 font-semibold text-[24px] text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function ChartSection({
+  meta,
+  onClick,
   title,
-  children,
-  hint,
 }: {
-  children: React.ReactNode;
-  hint?: string;
+  color?: string;
+  data: DashboardPoint[];
+  meta: DistributionMeta;
+  onClick?: (point: DashboardPoint) => void;
   title: string;
 }) {
+  const { t } = useTranslation();
   return (
-    <div className="rounded-[8px] border border-border bg-secondary p-5">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-semibold text-[16px] text-foreground">{title}</h2>
-        {hint && (
-          <span className="text-[10px] text-muted-foreground/70">{hint}</span>
-        )}
-      </div>
-      {children}
+    <ChartSection
+      data={data}
+      description={<ChartDescription meta={meta} />}
+      onPointClick={onClick}
+      sampleTotal={meta.valid}
+      title={title}
+    >
+      {data.some((point) => point.count > 0) ? (
+        <DashboardBarChart
+          color={color}
+          data={data}
+          onPointClick={onClick}
+          sampleTotal={meta.valid}
+        />
+      ) : (
+        <EmptyChart message={t("dashboardEmptyForRange")} />
+      )}
+    </ChartSection>
+  );
+}
+function ChartWithExpand({
+  color,
+  data,
+  expanded,
+  hasMore,
+  meta,
+  onExpand,
+  onPointClick,
+  title,
+}: {
+  color?: string;
+  data: DashboardPoint[];
+  expanded: boolean;
+  hasMore: boolean;
+  meta: DistributionMeta;
+  onExpand: () => void;
+  onPointClick: (point: DashboardPoint) => void;
+  title: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ChartSection
+      data={data}
+      description={t("dashboardChartCoverage", {
+        missing: meta.missing,
+        valid: meta.valid,
+      })}
+      onPointClick={onPointClick}
+      sampleTotal={meta.valid}
+      title={title}
+    >
+      {data.length ? (
+        <>
+          <div className="max-h-[620px] overflow-y-auto">
+            <DashboardBarChart
+              color={color}
+              data={data}
+              horizontal
+              onPointClick={onPointClick}
+              sampleTotal={meta.valid}
+            />
+          </div>
+          {hasMore && (
+            <button
+              className="mt-2 text-[11px] text-primary hover:underline"
+              onClick={onExpand}
+              type="button"
+            >
+              {expanded
+                ? t("dashboardShowLess")
+                : t("dashboardShowAll", { count: meta.totalCategories })}
+            </button>
+          )}
+        </>
+      ) : (
+        <EmptyChart message={t("dashboardMissingExifEmpty")} />
+      )}
+    </ChartSection>
+  );
+}
+function TrendChart({
+  data,
+  sampleTotal,
+  title,
+}: {
+  data: DashboardPoint[];
+  sampleTotal: number;
+  title: string;
+}) {
+  const { t } = useTranslation();
+  const noMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+  return (
+    <ChartSection
+      data={data}
+      description={t("dashboardValidSamples", { count: sampleTotal })}
+      sampleTotal={sampleTotal}
+      title={title}
+    >
+      {data.some((point) => point.count > 0) ? (
+        <ResponsiveContainer height={230} width="100%">
+          <AreaChart
+            data={data}
+            margin={{ bottom: 18, left: 0, right: 8, top: 4 }}
+          >
+            <defs>
+              <linearGradient id={`trend-${title}`} x1="0" x2="0" y1="0" y2="1">
+                <stop
+                  offset="0%"
+                  stopColor="var(--chart-2)"
+                  stopOpacity={0.35}
+                />
+                <stop
+                  offset="100%"
+                  stopColor="var(--chart-2)"
+                  stopOpacity={0.02}
+                />
+              </linearGradient>
+            </defs>
+            <CartesianGrid
+              stroke="var(--border)"
+              strokeDasharray="3 3"
+              vertical={false}
+            />
+            <XAxis
+              axisLine={false}
+              dataKey="name"
+              interval="preserveStartEnd"
+              tick={axisTick}
+              tickLine={false}
+            />
+            <YAxis
+              axisLine={false}
+              tick={axisTick}
+              tickLine={false}
+              width={42}
+            />
+            <Tooltip {...chartTooltipStyle} />
+            <Area
+              animationDuration={noMotion ? 0 : 500}
+              dataKey="count"
+              fill={`url(#trend-${title})`}
+              stroke="var(--chart-2)"
+              strokeWidth={2}
+              type="linear"
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : (
+        <EmptyChart message={t("dashboardEmptyForRange")} />
+      )}
+    </ChartSection>
+  );
+}
+
+function PlacesAndColors({
+  colorData,
+  colorLoading,
+  drill,
+  geoData,
+  geoLoading,
+  mapSource,
+  onMapSourceChange,
+}: {
+  colorData: ColorData | null;
+  colorLoading: boolean;
+  drill: (params: Record<string, string>) => void;
+  geoData: GeoData | null;
+  geoLoading: boolean;
+  mapSource: "offline" | "online";
+  onMapSourceChange: (source: "offline" | "online") => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-4">
+      <ChartSection
+        description={
+          geoData
+            ? t("dashboardMapCoverage", { count: geoData.total }) +
+              (geoData.truncated ? ` · ${t("dashboardMapTruncated")}` : "")
+            : undefined
+        }
+        title={t("geoMap")}
+      >
+        <GeoContent
+          data={geoData}
+          loading={geoLoading}
+          mapSource={mapSource}
+          onMapSourceChange={onMapSourceChange}
+        />
+      </ChartSection>
+      <ChartSection
+        description={
+          colorData
+            ? t("colorSampled", {
+                count: colorData.sampled,
+                total: colorData.totalPhotos,
+              })
+            : undefined
+        }
+        title={t("colorDistribution")}
+      >
+        <ColorContent data={colorData} drill={drill} loading={colorLoading} />
+      </ChartSection>
     </div>
   );
 }
 
-function EmptyHint({ text }: { text: string }) {
-  return <p className="text-[13px] text-muted-foreground/70">{text}</p>;
+function GeoContent({
+  data,
+  loading,
+  mapSource,
+  onMapSourceChange,
+}: {
+  data: GeoData | null;
+  loading: boolean;
+  mapSource: "offline" | "online";
+  onMapSourceChange: (source: "offline" | "online") => void;
+}) {
+  const { t } = useTranslation();
+  if (loading) {
+    return <div className="h-[320px] animate-pulse rounded-[6px] bg-muted" />;
+  }
+  if (!data?.locations.length) {
+    return <EmptyChart message={t("noGeoData")} />;
+  }
+  return (
+    <PhotoMap
+      locations={data.locations}
+      mapSource={mapSource}
+      onMapSourceChange={onMapSourceChange}
+    />
+  );
+}
+
+function ColorContent({
+  data,
+  drill,
+  loading,
+}: {
+  data: ColorData | null;
+  drill: (params: Record<string, string>) => void;
+  loading: boolean;
+}) {
+  const { t } = useTranslation();
+  if (loading) {
+    return <div className="h-32 animate-pulse rounded-[6px] bg-muted" />;
+  }
+  if (!data?.globalPalette.length) {
+    return <EmptyChart message={t("noColorData")} />;
+  }
+  return (
+    <div className="space-y-5">
+      <div>
+        <h3 className="mb-2 text-[11px] text-muted-foreground uppercase">
+          {t("colorPalette")}
+        </h3>
+        <div className="flex h-9 overflow-hidden rounded-[6px]">
+          {data.globalPalette.map((color) => (
+            <AppTooltip key={color.hex}>
+              <AppTooltipTrigger asChild>
+                <button
+                  aria-label={`${color.hex} ${Math.round(color.weight * 100)}%`}
+                  className="min-w-2 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring"
+                  onClick={() =>
+                    drill({ colorHex: color.hex.replace("#", "") })
+                  }
+                  style={{
+                    backgroundColor: color.hex,
+                    width: `${Math.max(2, color.weight * 100)}%`,
+                  }}
+                  type="button"
+                />
+              </AppTooltipTrigger>
+              <AppTooltipContent>
+                {color.hex} · {Math.round(color.weight * 100)}%
+              </AppTooltipContent>
+            </AppTooltip>
+          ))}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <h3 className="mb-2 text-[11px] text-muted-foreground uppercase">
+          {t("colorHueDistribution")}
+        </h3>
+        <div className="flex min-w-[640px] gap-1">
+          {data.hueDistribution.map((hue) => (
+            <AppTooltip key={hue.hueRange[0]}>
+              <AppTooltipTrigger asChild>
+                <button
+                  className="flex-1 rounded-[4px] px-1 py-4 font-medium text-[10px] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-ring"
+                  onClick={() => drill({ colorHex: hue.hex.replace("#", "") })}
+                  style={{
+                    backgroundColor: hue.hex,
+                    opacity:
+                      0.35 +
+                      0.65 *
+                        (hue.count /
+                          Math.max(
+                            ...data.hueDistribution.map((item) => item.count),
+                            1
+                          )),
+                  }}
+                  type="button"
+                >
+                  {hue.count}
+                </button>
+              </AppTooltipTrigger>
+              <AppTooltipContent>
+                {hue.hex} · {t("dashboardPhotoCount", { count: hue.count })}
+              </AppTooltipContent>
+            </AppTooltip>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[9px] border border-border bg-secondary p-4">
+      <p className="text-[11px] text-muted-foreground uppercase tracking-wide">
+        {label}
+      </p>
+      <p className="mt-1 font-semibold text-[24px] text-foreground tabular-nums">
+        {value}
+      </p>
+    </div>
+  );
+}
+function Insight({
+  detail,
+  label,
+  value,
+}: {
+  detail?: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[7px] bg-background/50 p-3">
+      <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
+      <p
+        className="mt-1 truncate font-medium text-[13px] text-foreground"
+        title={value}
+      >
+        {value}
+      </p>
+      {detail && (
+        <p className="mt-1 text-[10px] text-muted-foreground">{detail}</p>
+      )}
+    </div>
+  );
+}
+function DashboardSkeleton() {
+  const skeletonKeys = [
+    "summary-1",
+    "summary-2",
+    "summary-3",
+    "summary-4",
+    "panel-1",
+    "panel-2",
+    "panel-3",
+    "panel-4",
+  ];
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="h-16 border-border border-b" />
+      <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-6 sm:grid-cols-2 xl:grid-cols-4">
+        {skeletonKeys.map((key) => (
+          <div
+            className="h-32 animate-pulse rounded-[9px] bg-muted"
+            key={key}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+function DashboardError({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 bg-background text-center">
+      <AlertTriangle className="h-8 w-8 text-danger" />
+      <p className="text-[13px] text-foreground">{t("dashboardLoadFailed")}</p>
+      <Button onClick={onRetry}>{t("retry")}</Button>
+    </div>
+  );
 }
 
 export const Route = createFileRoute("/dashboard")({
   component: DashboardPage,
+  validateSearch: (
+    search: Record<string, unknown>
+  ): {
+    from?: string;
+    range?: DashboardRangePreset;
+    tab?: DashboardTab;
+    to?: string;
+  } => ({
+    from: typeof search.from === "string" ? search.from : undefined,
+    range: PRESETS.includes(search.range as DashboardRangePreset)
+      ? (search.range as DashboardRangePreset)
+      : undefined,
+    tab: TABS.includes(search.tab as DashboardTab)
+      ? (search.tab as DashboardTab)
+      : undefined,
+    to: typeof search.to === "string" ? search.to : undefined,
+  }),
 });
