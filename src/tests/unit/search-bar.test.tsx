@@ -1,10 +1,36 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef } from "react";
+import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SearchBar, type SearchBarHandle } from "@/components/SearchBar";
+import { SearchBar } from "@/components/SearchBar";
+import type { ExifFilters } from "@/types/search";
 
 const SEARCH_HISTORY_KEY = "search_history";
+const FILTER_COUNT_PATTERN = /· 1/;
+
+type SearchBarProps = ComponentProps<typeof SearchBar>;
+
+function ControlledSearchBar(
+  props: Omit<
+    Partial<SearchBarProps>,
+    "filters" | "onFiltersChange" | "onQueryChange" | "query"
+  > & { initialFilters?: ExifFilters; initialQuery?: string }
+) {
+  const { initialFilters = {}, initialQuery = "", ...searchBarProps } = props;
+  const [query, setQuery] = useState(initialQuery);
+  const [filters, setFilters] = useState<ExifFilters>(initialFilters);
+  return (
+    <SearchBar
+      filters={filters}
+      onClear={vi.fn()}
+      onFiltersChange={setFilters}
+      onQueryChange={setQuery}
+      onSearch={vi.fn()}
+      query={query}
+      {...searchBarProps}
+    />
+  );
+}
 
 describe("SearchBar", () => {
   const baseProps = {
@@ -18,41 +44,59 @@ describe("SearchBar", () => {
   });
 
   it("renders the simplified search placeholder", () => {
-    render(<SearchBar {...baseProps} />);
+    render(<ControlledSearchBar {...baseProps} />);
 
     expect(
       screen.getByPlaceholderText("试试搜索“去年秋天的红叶”")
     ).toBeInTheDocument();
   });
 
-  it("resets query and filters without firing search callbacks", async () => {
+  it("reflects a controlled query and filter reset without searching", async () => {
     const user = userEvent.setup();
-    const ref = createRef<SearchBarHandle>();
     const onClear = vi.fn();
     const onSearch = vi.fn();
-    render(
-      <SearchBar ref={ref} onClear={onClear} onSearch={onSearch} />
-    );
 
-    await user.type(screen.getByRole("combobox"), "sunset");
-    act(() => {
-      ref.current?.setFilters({ cameraModel: "Example Camera" });
-    });
-    expect(screen.getByText(/· 1/)).toBeInTheDocument();
+    function ResetHarness() {
+      const [query, setQuery] = useState("sunset");
+      const [filters, setFilters] = useState<ExifFilters>({
+        cameraModel: "Example Camera",
+      });
+      return (
+        <>
+          <button
+            onClick={() => {
+              setQuery("");
+              setFilters({});
+            }}
+            type="button"
+          >
+            reset
+          </button>
+          <SearchBar
+            filters={filters}
+            onClear={onClear}
+            onFiltersChange={setFilters}
+            onQueryChange={setQuery}
+            onSearch={onSearch}
+            query={query}
+          />
+        </>
+      );
+    }
+    render(<ResetHarness />);
 
-    act(() => {
-      ref.current?.resetUiState();
-    });
+    expect(screen.getByText(FILTER_COUNT_PATTERN)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "reset" }));
 
     expect(screen.getByRole("combobox")).toHaveValue("");
-    expect(screen.queryByText(/· 1/)).not.toBeInTheDocument();
+    expect(screen.queryByText(FILTER_COUNT_PATTERN)).not.toBeInTheDocument();
     expect(onClear).not.toHaveBeenCalled();
     expect(onSearch).not.toHaveBeenCalled();
   });
 
   it("shows starter examples when an empty search input is focused", async () => {
     const user = userEvent.setup();
-    render(<SearchBar {...baseProps} />);
+    render(<ControlledSearchBar {...baseProps} />);
 
     expect(
       screen.queryByRole("button", { name: "today" })
@@ -69,7 +113,7 @@ describe("SearchBar", () => {
   it("runs an example search and stores it in recent history", async () => {
     const user = userEvent.setup();
     const onSearch = vi.fn();
-    render(<SearchBar {...baseProps} onSearch={onSearch} />);
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
 
     await user.click(screen.getByRole("combobox"));
     await user.click(screen.getByRole("option", { name: "海边的日落" }));
@@ -87,7 +131,7 @@ describe("SearchBar", () => {
       JSON.stringify(["海边旅行", "夜景"])
     );
     const user = userEvent.setup();
-    render(<SearchBar {...baseProps} />);
+    render(<ControlledSearchBar {...baseProps} />);
 
     await user.click(screen.getByRole("combobox"));
 
@@ -103,7 +147,7 @@ describe("SearchBar", () => {
   it("switches from starter content to matching suggestions while typing", async () => {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["海边旅行"]));
     const user = userEvent.setup();
-    render(<SearchBar {...baseProps} />);
+    render(<ControlledSearchBar {...baseProps} />);
     const input = screen.getByRole("combobox");
 
     await user.click(input);
@@ -120,7 +164,7 @@ describe("SearchBar", () => {
   it("supports keyboard selection for starter examples", async () => {
     const user = userEvent.setup();
     const onSearch = vi.fn();
-    render(<SearchBar {...baseProps} onSearch={onSearch} />);
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
 
     await user.click(screen.getByRole("combobox"));
     await user.keyboard("{ArrowDown}{Enter}");
@@ -131,7 +175,7 @@ describe("SearchBar", () => {
   it("closes suggestions with Escape without clearing typed text", async () => {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(["海边旅行"]));
     const user = userEvent.setup();
-    render(<SearchBar {...baseProps} />);
+    render(<ControlledSearchBar {...baseProps} />);
     const input = screen.getByRole("combobox");
 
     await user.click(input);
@@ -145,7 +189,7 @@ describe("SearchBar", () => {
   it("disables semantic examples while AI indexing is unavailable", async () => {
     const user = userEvent.setup();
     render(
-      <SearchBar
+      <ControlledSearchBar
         {...baseProps}
         aiStatus={{
           model: "ready",
@@ -171,7 +215,7 @@ describe("SearchBar", () => {
 
   it("shows indexed coverage while semantic indexing is partial", () => {
     render(
-      <SearchBar
+      <ControlledSearchBar
         {...baseProps}
         aiStatus={{
           coverageState: "partial",
@@ -198,7 +242,7 @@ describe("SearchBar", () => {
 
   it("does not open the text starter panel in image search mode", async () => {
     const user = userEvent.setup();
-    render(<SearchBar {...baseProps} imageSearchActive />);
+    render(<ControlledSearchBar {...baseProps} imageSearchActive />);
 
     await user.click(screen.getByRole("combobox"));
 
@@ -210,7 +254,7 @@ describe("SearchBar", () => {
     const inputClick = vi
       .spyOn(HTMLInputElement.prototype, "click")
       .mockImplementation(() => undefined);
-    render(<SearchBar {...baseProps} onImageSearch={vi.fn()} />);
+    render(<ControlledSearchBar {...baseProps} onImageSearch={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "以图搜图" }));
 
@@ -221,7 +265,7 @@ describe("SearchBar", () => {
   it("calls onSearch when the form is submitted", async () => {
     const user = userEvent.setup();
     const onSearch = vi.fn();
-    render(<SearchBar {...baseProps} onSearch={onSearch} />);
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
     const input = screen.getByRole("combobox");
 
     await user.type(input, "test query");
@@ -237,7 +281,7 @@ describe("SearchBar", () => {
 
   it("does not search an empty query", () => {
     const onSearch = vi.fn();
-    render(<SearchBar {...baseProps} onSearch={onSearch} />);
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
 
     const form = screen.getByRole("combobox").closest("form");
     expect(form).not.toBeNull();
@@ -252,7 +296,7 @@ describe("SearchBar", () => {
   it("calls onClear when the query clear button is clicked", async () => {
     const user = userEvent.setup();
     const onClear = vi.fn();
-    render(<SearchBar {...baseProps} onClear={onClear} />);
+    render(<ControlledSearchBar {...baseProps} onClear={onClear} />);
     const input = screen.getByRole("combobox");
 
     await user.type(input, "x");

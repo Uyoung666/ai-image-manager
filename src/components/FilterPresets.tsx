@@ -2,7 +2,7 @@ import { Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import type { ExifFilters } from "./SearchBar";
+import type { ExifFilters } from "@/types/search";
 
 interface FilterPreset {
   createdAt: number;

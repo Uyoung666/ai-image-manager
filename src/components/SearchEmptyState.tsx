@@ -8,6 +8,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { SearchMode } from "@/types/search";
 
 interface ParsedTimeFilter {
   dateFrom: string;
@@ -31,7 +32,7 @@ interface SearchEmptyStateProps {
   /** 搜索关键词 */
   query: string;
   /** 当前搜索模式 */
-  searchMode: "text" | "image" | "exif" | "color" | null;
+  searchMode: SearchMode | null;
   semanticState?: "ready" | "partial" | "unavailable" | "error";
   indexedPhotos?: number;
   totalPhotos?: number;

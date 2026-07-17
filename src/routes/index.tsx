@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,11 +35,8 @@ import {
 } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
-import {
-  type ExifFilters,
-  SearchBar,
-  type SearchBarHandle,
-} from "@/components/SearchBar";
+import { SearchBar } from "@/components/SearchBar";
+import type { ExifFilters, SearchMode } from "@/types/search";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SortDropdown } from "@/components/SortDropdown";
@@ -74,6 +72,22 @@ interface SemanticSearchMeta {
   used: boolean;
 }
 
+const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
+
+function isSearchMode(value: string | null): value is SearchMode {
+  return SEARCH_MODES.includes(value as SearchMode);
+}
+
+function resolveSearchMode(query: string, color?: string | null): SearchMode {
+  if (color) {
+    return "color";
+  }
+  if (query.trim()) {
+    return "text";
+  }
+  return "exif";
+}
+
 function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -82,11 +96,8 @@ function HomePage() {
   // 搜索状态：从 BrowseSessionContext 恢复，导航回来时保留搜索上下文
   const { getSession: getBrowseSession, saveSession: saveBrowseSession } =
     useBrowseSession();
-  const savedSearch = getBrowseSession("home-search");
-  const [searchQuery, setSearchQuery] = useState(savedSearch.searchQuery);
-  const [searchMode, setSearchMode] = useState<
-    "text" | "image" | "exif" | "color" | null
-  >(savedSearch.searchMode as "text" | "image" | "exif" | "color" | null);
+  const searchQuery = filter.appliedSearch?.query ?? "";
+  const searchMode = filter.appliedSearch?.mode ?? null;
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
   const [searchSemantic, setSearchSemantic] =
@@ -100,12 +111,10 @@ function HomePage() {
   const searchExpandedRef = useRef(false);
   const lastSearchParamsRef = useRef<{
     query: string;
-    filters?: import("@/components/SearchBar").ExifFilters;
+    filters?: ExifFilters;
     colorHex?: string;
   } | null>(null);
-  const [colorHex, setColorHex] = useState<string | null>(
-    savedSearch.colorHex ?? null
-  );
+  const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
@@ -142,6 +151,7 @@ function HomePage() {
   const galleryToolbarRef = useRef<HTMLDivElement>(null);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [showDrillBanner, setShowDrillBanner] = useState(false);
+  const [drillDownFilters, setDrillDownFilters] = useState<ExifFilters>();
   const [showAiIndexHint, setShowAiIndexHint] = useState(false);
   const [searchResultFade, setSearchResultFade] = useState(false);
   const [parsedTimeFilter, setParsedTimeFilter] = useState<{
@@ -156,7 +166,6 @@ function HomePage() {
   // Drill-down from dashboard: detect search params and auto-trigger EXIF search
   const drillParams = Route.useSearch();
   const drillConsumed = useRef(false);
-  const searchBarRef = useRef<SearchBarHandle>(null);
   const searchGenerationRef = useRef(0);
 
   const resetHomeSearchState = useCallback(() => {
@@ -164,18 +173,15 @@ function HomePage() {
     pendingSemanticRefreshRef.current = null;
     searchExpandedRef.current = false;
     lastSearchParamsRef.current = null;
-    setSearchQuery("");
-    setSearchMode(null);
     setSearchTime(undefined);
     setSearchResults(null);
     setSearchSemantic(null);
     setSearchLoading(false);
-    setColorHex(null);
     setParsedTimeFilter(null);
     setShowAiIndexHint(false);
     setShowDrillBanner(false);
+    setDrillDownFilters(undefined);
     setSearchResultFade(false);
-    searchBarRef.current?.resetUiState();
     saveBrowseSession("home-search", {
       colorHex: null,
       searchMode: null,
@@ -183,6 +189,15 @@ function HomePage() {
     });
     navigate({ to: "/", search: {}, replace: true });
   }, [navigate, saveBrowseSession]);
+
+  const handledSearchResetVersion = useRef(filter.searchResetVersion);
+  useLayoutEffect(() => {
+    if (handledSearchResetVersion.current === filter.searchResetVersion) {
+      return;
+    }
+    handledSearchResetVersion.current = filter.searchResetVersion;
+    resetHomeSearchState();
+  }, [filter.searchResetVersion, resetHomeSearchState]);
 
   useEffect(() => {
     const hasParams = Object.values(drillParams).some((v) => v !== undefined);
@@ -209,8 +224,6 @@ function HomePage() {
     if (drillParams.tagId != null) {
       const tagId = drillParams.tagId;
       navigate({ to: "/", search: {}, replace: true });
-      setSearchMode(null);
-      setSearchQuery("");
       setSearchTime(undefined);
       setSearchResults(null);
       filter.setFavoriteOnly(false);
@@ -229,8 +242,6 @@ function HomePage() {
     // Handle favoriteOnly navigation from SpotlightSearch
     if (drillParams.favoriteOnly) {
       navigate({ to: "/", search: {}, replace: true });
-      setSearchMode(null);
-      setSearchQuery("");
       setSearchTime(undefined);
       setSearchResults(null);
       filter.setFavoriteOnly(true); // also clears activeFolderId + activeTagIds
@@ -287,10 +298,7 @@ function HomePage() {
     const textQuery = (drillParams.searchQuery as string) || "";
     const colorHexParam = (drillParams.colorHex as string) || undefined;
 
-    // Sync filters to SearchBar BEFORE clearing URL params
-    if (searchBarRef.current) {
-      searchBarRef.current.setFilters(filters, true);
-    }
+    setDrillDownFilters(filters);
 
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
@@ -309,15 +317,6 @@ function HomePage() {
     window.addEventListener("photo-drop:album", handler);
     return () => window.removeEventListener("photo-drop:album", handler);
   }, []);
-
-  // Listen for sidebar-triggered clear-search events
-  useEffect(() => {
-    function handler() {
-      resetHomeSearchState();
-    }
-    window.addEventListener("sidebar:clear-search", handler);
-    return () => window.removeEventListener("sidebar:clear-search", handler);
-  }, [resetHomeSearchState]);
 
   // Listen for file-change events from main process (chokidar watcher)
   useEffect(() => {
@@ -567,13 +566,15 @@ function HomePage() {
     if (saved.searchQuery || saved.searchMode === "color" || saved.colorHex) {
       restoredSearchRef.current = true;
       const q = saved.searchQuery;
-      setSearchQuery(q);
-      if (saved.searchMode) {
-        setSearchMode(saved.searchMode);
-      }
-      if (saved.colorHex) {
-        setColorHex(saved.colorHex);
-      }
+      const restoredMode = isSearchMode(saved.searchMode)
+        ? saved.searchMode
+        : resolveSearchMode(q, saved.colorHex);
+      filter.applySearch({
+        colorHex: saved.colorHex ?? undefined,
+        filters: {},
+        mode: restoredMode,
+        query: q,
+      });
       // 等 AI 模型就绪后自动触发搜索（轮询检测，最多等 10s）
       let attempts = 0;
       const trySearch = () => {
@@ -728,18 +729,16 @@ function HomePage() {
           hasActiveFilters={hasActiveExifFilters}
           hasAiVectors={aiStatus?.hasVectors ?? false}
           indexedPhotos={searchSemantic?.indexedPhotos ?? 0}
-          onClearFilters={() => searchBarRef.current?.clearFilters()}
-          onClearSearch={() => {
-            setSearchQuery("");
-            setColorHex(null);
-            setSearchMode(null);
-            setSearchTime(undefined);
-            setSearchResults(null);
-            setParsedTimeFilter(null);
-            setShowAiIndexHint(false);
-            filter.setActiveFolderId(null);
-            searchBarRef.current?.clearFilters();
+          onClearFilters={() => {
+            filter.setSearchDraftFilters({});
+            setDrillDownFilters(undefined);
+            if (filter.searchDraft.query.trim()) {
+              handleSearch(filter.searchDraft.query, undefined);
+            } else {
+              filter.clearSearch();
+            }
           }}
+          onClearSearch={filter.clearSearch}
           onGoToAiSettings={() => navigate({ to: "/settings" })}
           parsedTimeFilter={parsedTimeFilter}
           query={searchQuery}
@@ -910,17 +909,13 @@ function HomePage() {
     // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
     const effectiveColorHex =
       paramColorHex === undefined ? colorHex : paramColorHex;
-    setSearchQuery(query);
-    if (paramColorHex !== undefined) {
-      setColorHex(paramColorHex);
-    }
     const hasFilters = filters && Object.values(filters).some((v) => v);
     const hasColorHex = !!effectiveColorHex;
 
     if (!(query.trim() || hasFilters || hasColorHex)) {
+      filter.clearSearch();
       pendingSemanticRefreshRef.current = null;
       setSearchSemantic(null);
-      setSearchMode(null);
       setSearchTime(undefined);
       setSearchResults(null);
       return;
@@ -929,7 +924,13 @@ function HomePage() {
     // 递增代数，使前一个未完成的请求变成 stale
     const gen = ++searchGenerationRef.current;
     const startTime = performance.now();
-    setSearchMode(hasColorHex ? "color" : query.trim() ? "text" : "exif");
+    const nextSearchMode = resolveSearchMode(query, effectiveColorHex);
+    filter.applySearch({
+      colorHex: effectiveColorHex ?? undefined,
+      filters: filters ?? {},
+      mode: nextSearchMode,
+      query,
+    });
     setSearchLoading(true);
 
     try {
@@ -1289,8 +1290,8 @@ function HomePage() {
 
   async function handleImageSearch(imagePath: string) {
     const gen = ++searchGenerationRef.current;
-    setSearchQuery(t("imageSearchToken"));
-    setSearchMode("image");
+    const imageSearchQuery = t("imageSearchToken");
+    filter.applySearch({ filters: {}, mode: "image", query: imageSearchQuery });
     setSearchLoading(true);
     const startTime = performance.now();
     try {
@@ -1490,93 +1491,100 @@ function HomePage() {
           style={{ right: detailPhoto ? detailPanelWidth : 0 }}
         >
           <SearchBar
-          aiStatus={aiStatus ?? null}
-          colorHex={colorHex ?? undefined}
-          imageSearchActive={searchMode === "image"}
-          leadingContent={
-            <div className="flex min-w-[148px] max-w-[220px] items-center gap-2 pr-1">
-              <div className="min-w-0">
-                <div className="truncate font-medium text-[13px] text-foreground">
-                  {galleryContextLabel}
-                </div>
-                <div className="text-[10px] text-muted-foreground/70 tabular-nums">
-                  {t("photosCount", { count: totalPhotos.toLocaleString() })}
+            aiStatus={aiStatus ?? null}
+            colorHex={colorHex ?? undefined}
+            drillDownFilters={drillDownFilters}
+            filters={filter.searchDraft.filters}
+            imageSearchActive={searchMode === "image"}
+            leadingContent={
+              <div className="flex min-w-[148px] max-w-[220px] items-center gap-2 pr-1">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-[13px] text-foreground">
+                    {galleryContextLabel}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/70 tabular-nums">
+                    {t("photosCount", { count: totalPhotos.toLocaleString() })}
+                  </div>
                 </div>
               </div>
-            </div>
-          }
-          onClear={resetHomeSearchState}
-          onImageSearch={handleImageSearch}
-          onSearch={handleSearch}
-          ref={searchBarRef}
-          resultCount={searchQuery ? photos.length : undefined}
-          searchMode={searchMode}
-          searchTime={searchTime}
-          trailingContent={
-            <>
-              <SortDropdown
-                onChange={handleSortChange}
-                order={sortOrder}
-                sort={sortField}
-              />
-              <label className="home-grid-size-control flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
-                <span>{t("gridSize")}</span>
-                <input
-                  aria-label={t("gridSize")}
-                  className="h-4 w-16 cursor-pointer accent-primary"
-                  max={GRID_COLUMN_WIDTH_MAX}
-                  min={GRID_COLUMN_WIDTH_MIN}
-                  onChange={(event) =>
-                    handleGridColumnWidthChange(Number(event.target.value))
-                  }
-                  step={10}
-                  type="range"
-                  value={gridColumnWidth}
+            }
+            onClear={filter.clearSearch}
+            onFiltersChange={filter.setSearchDraftFilters}
+            onImageSearch={handleImageSearch}
+            onQueryChange={filter.setSearchDraftQuery}
+            onSearch={handleSearch}
+            query={filter.searchDraft.query}
+            resetVersion={filter.searchResetVersion}
+            resultCount={searchQuery ? photos.length : undefined}
+            searchMode={searchMode}
+            searchTime={searchTime}
+            trailingContent={
+              <>
+                <SortDropdown
+                  onChange={handleSortChange}
+                  order={sortOrder}
+                  sort={sortField}
                 />
-              </label>
-            </>
-          }
+                <label className="home-grid-size-control flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+                  <span>{t("gridSize")}</span>
+                  <input
+                    aria-label={t("gridSize")}
+                    className="h-4 w-16 cursor-pointer accent-primary"
+                    max={GRID_COLUMN_WIDTH_MAX}
+                    min={GRID_COLUMN_WIDTH_MIN}
+                    onChange={(event) =>
+                      handleGridColumnWidthChange(Number(event.target.value))
+                    }
+                    step={10}
+                    type="range"
+                    value={gridColumnWidth}
+                  />
+                </label>
+              </>
+            }
           />
           {searchMode === "text" &&
-          searchSemantic &&
-          searchSemantic.state !== "ready" && (
-            <div className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-900 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-              {searchSemantic.state === "error"
-                ? t("semanticSearchUnavailable")
-                : t("semanticSearchPartial", {
-                    indexed: searchSemantic.indexedPhotos,
-                    total: searchSemantic.totalPhotos,
-                  })}
-            </div>
-          )}
-        {/* Drill-down banner */}
+            searchSemantic &&
+            searchSemantic.state !== "ready" && (
+              <div className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-900 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                {searchSemantic.state === "error"
+                  ? t("semanticSearchUnavailable")
+                  : t("semanticSearchPartial", {
+                      indexed: searchSemantic.indexedPhotos,
+                      total: searchSemantic.totalPhotos,
+                    })}
+              </div>
+            )}
+          {/* Drill-down banner */}
           {showDrillBanner && (
-          <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
-            <div className="flex items-center gap-2">
-              <span className="text-blue-900 text-sm dark:text-blue-100">
-                {t("drillDownActiveHint")}
-              </span>
+            <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
+              <div className="flex items-center gap-2">
+                <span className="text-blue-900 text-sm dark:text-blue-100">
+                  {t("drillDownActiveHint")}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-[4px] px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-800"
+                  onClick={() => {
+                    filter.setSearchDraftFilters({});
+                    filter.clearSearch();
+                    setDrillDownFilters(undefined);
+                    setShowDrillBanner(false);
+                  }}
+                  type="button"
+                >
+                  {t("clearAll")}
+                </button>
+                <button
+                  className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
+                  onClick={() => navigate({ to: "/dashboard" })}
+                  type="button"
+                >
+                  {t("backToDashboard")}
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button
-                className="rounded-[4px] px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-800"
-                onClick={() => {
-                  searchBarRef.current?.clearFilters();
-                  setShowDrillBanner(false);
-                }}
-                type="button"
-              >
-                {t("clearAll")}
-              </button>
-              <button
-                className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
-                onClick={() => navigate({ to: "/dashboard" })}
-                type="button"
-              >
-                {t("backToDashboard")}
-              </button>
-            </div>
-          </div>
           )}
         </div>
         {hasPhotos ? (

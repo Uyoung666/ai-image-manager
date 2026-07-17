@@ -1,6 +1,6 @@
 import { ChevronRight, Home, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ExifFilters } from "./SearchBar";
+import type { ExifFilters } from "@/types/search";
 
 interface FilterBreadcrumbProps {
   filters: ExifFilters;

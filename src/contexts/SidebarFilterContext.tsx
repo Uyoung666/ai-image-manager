@@ -1,10 +1,13 @@
 import {
   createContext,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -12,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
+import type { ExifFilters, SearchCriteria } from "@/types/search";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
@@ -24,36 +28,155 @@ function loadSidebarState(): boolean {
 }
 
 interface SidebarFilterState {
-  // Filter state (drives usePhotos query)
   activeFolderId: number | null;
   activeTagIds: number[];
-
-  // Sidebar UI state
+  appliedSearch: SearchCriteria | null;
   collapsed: boolean;
   favoriteOnly: boolean;
-
+  searchDraft: { filters: ExifFilters; query: string };
+  searchResetVersion: number;
   tagMode: "and" | "or";
-
-  // Shared data
   totalPhotos: number;
 }
 
+export interface BrowseCriteriaState {
+  activeFolderId: number | null;
+  activeTagIds: number[];
+  appliedSearch: SearchCriteria | null;
+  favoriteOnly: boolean;
+  searchDraft: { filters: ExifFilters; query: string };
+  searchResetVersion: number;
+  tagMode: "and" | "or";
+}
+
+export type BrowseCriteriaAction =
+  | { type: "applySearch"; criteria: SearchCriteria }
+  | { type: "clearSearch" }
+  | { type: "selectAllPhotos" }
+  | { type: "selectFavorites"; value: boolean }
+  | { type: "selectFolder"; id: number | null }
+  | { type: "setDraftFilters"; update: SetStateAction<ExifFilters> }
+  | { type: "setDraftQuery"; query: string }
+  | { type: "toggleTag"; tagId: number | null }
+  | { type: "toggleTagMode" };
+
+export const initialBrowseCriteriaState: BrowseCriteriaState = {
+  activeFolderId: null,
+  activeTagIds: [],
+  appliedSearch: null,
+  favoriteOnly: false,
+  searchDraft: { filters: {}, query: "" },
+  searchResetVersion: 0,
+  tagMode: "or",
+};
+
+function withoutSearch(
+  state: BrowseCriteriaState
+): Pick<
+  BrowseCriteriaState,
+  "appliedSearch" | "searchDraft" | "searchResetVersion"
+> {
+  return {
+    appliedSearch: null,
+    searchDraft: { filters: {}, query: "" },
+    searchResetVersion: state.searchResetVersion + 1,
+  };
+}
+
+export function browseCriteriaReducer(
+  state: BrowseCriteriaState,
+  action: BrowseCriteriaAction
+): BrowseCriteriaState {
+  switch (action.type) {
+    case "applySearch":
+      return {
+        ...state,
+        activeFolderId: null,
+        activeTagIds: [],
+        appliedSearch: action.criteria,
+        favoriteOnly: false,
+        searchDraft: {
+          filters: action.criteria.filters,
+          query: action.criteria.query,
+        },
+      };
+    case "clearSearch":
+      return { ...state, ...withoutSearch(state) };
+    case "selectAllPhotos":
+      return {
+        ...state,
+        activeFolderId: null,
+        activeTagIds: [],
+        favoriteOnly: false,
+        ...withoutSearch(state),
+      };
+    case "selectFavorites":
+      return {
+        ...state,
+        activeFolderId: null,
+        activeTagIds: [],
+        favoriteOnly: action.value,
+        ...withoutSearch(state),
+      };
+    case "selectFolder":
+      return {
+        ...state,
+        activeFolderId: action.id,
+        activeTagIds: [],
+        favoriteOnly: false,
+        ...withoutSearch(state),
+      };
+    case "setDraftFilters":
+      return {
+        ...state,
+        searchDraft: {
+          ...state.searchDraft,
+          filters:
+            typeof action.update === "function"
+              ? action.update(state.searchDraft.filters)
+              : action.update,
+        },
+      };
+    case "setDraftQuery":
+      return {
+        ...state,
+        searchDraft: { ...state.searchDraft, query: action.query },
+      };
+    case "toggleTag": {
+      let activeTagIds: number[] = [];
+      if (action.tagId !== null) {
+        activeTagIds = state.activeTagIds.includes(action.tagId)
+          ? state.activeTagIds.filter((id) => id !== action.tagId)
+          : [...state.activeTagIds, action.tagId];
+      }
+      return {
+        ...state,
+        activeTagIds,
+        favoriteOnly: false,
+        ...withoutSearch(state),
+      };
+    }
+    case "toggleTagMode":
+      return { ...state, tagMode: state.tagMode === "or" ? "and" : "or" };
+    default:
+      return state;
+  }
+}
+
 interface SidebarFilterActions {
-  // Import actions
+  applySearch: (criteria: SearchCriteria) => void;
+  clearSearch: () => void;
   handleAddFolder: (externalPath?: string) => void;
   handleDeleteFolder: (id: number) => void;
-  selectAllPhotosAndNotify: () => void;
-  selectFolderAndNotify: (id: number | null) => void;
-  // Filter actions
+  selectAllPhotos: () => void;
+  selectFolder: (id: number | null) => void;
   setActiveFolderId: (id: number | null) => void;
   setFavoriteOnly: (v: boolean) => void;
-
-  // Shared data setters
+  setSearchDraftFilters: Dispatch<SetStateAction<ExifFilters>>;
+  setSearchDraftQuery: (query: string) => void;
   setTotalPhotos: (n: number) => void;
-
-  // Sidebar UI actions
   toggleCollapsed: () => void;
-  toggleFavoritesAndNotify: () => void;
+  toggleFavorites: () => void;
   toggleTag: (tagId: number | null) => void;
   toggleTagMode: () => void;
 }
@@ -68,12 +191,19 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
 
   // --- Filter state ---
-  const [activeFolderId, setActiveFolderIdState] = useState<number | null>(
-    null
+  const [criteria, dispatchCriteria] = useReducer(
+    browseCriteriaReducer,
+    initialBrowseCriteriaState
   );
-  const [activeTagIds, setActiveTagIds] = useState<number[]>([]);
-  const [favoriteOnly, setFavoriteOnlyState] = useState(false);
-  const [tagMode, setTagMode] = useState<"and" | "or">("or");
+  const {
+    activeFolderId,
+    activeTagIds,
+    appliedSearch,
+    favoriteOnly,
+    searchDraft,
+    searchResetVersion,
+    tagMode,
+  } = criteria;
 
   // --- Sidebar UI state ---
   const [collapsed, setCollapsed] = useState(loadSidebarState);
@@ -84,65 +214,50 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
   // --- Filter actions ---
 
   const setActiveFolderId = useCallback((id: number | null) => {
-    setActiveFolderIdState(id);
-    setFavoriteOnlyState(false);
-    setActiveTagIds([]);
+    dispatchCriteria({ type: "selectFolder", id });
   }, []);
 
   const setFavoriteOnly = useCallback((v: boolean) => {
-    setFavoriteOnlyState(v);
-    if (v) {
-      setActiveFolderIdState(null);
-      setActiveTagIds([]);
-    }
+    dispatchCriteria({ type: "selectFavorites", value: v });
   }, []);
 
-  // Sidebar-triggered actions that also notify HomePage to clear search state.
-  // Regular setActiveFolderId / setFavoriteOnly are kept for internal use
-  // (drill-down, etc.) where clearing search is handled separately.
-  const selectFolderAndNotify = useCallback((id: number | null) => {
-    setActiveFolderIdState(id);
-    setFavoriteOnlyState(false);
-    setActiveTagIds([]);
-    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
+  const selectFolder = useCallback((id: number | null) => {
+    dispatchCriteria({ type: "selectFolder", id });
   }, []);
 
-  const selectAllPhotosAndNotify = useCallback(() => {
-    setActiveFolderIdState(null);
-    setFavoriteOnlyState(false);
-    setActiveTagIds([]);
-    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
+  const selectAllPhotos = useCallback(() => {
+    dispatchCriteria({ type: "selectAllPhotos" });
   }, []);
 
-  const toggleFavoritesAndNotify = useCallback(() => {
-    setFavoriteOnlyState((prev) => !prev);
-    // Always clear folder/tag when toggling favorites — matches the original
-    // inline onSelectFavorites behavior which unconditionally reset both.
-    setActiveFolderIdState(null);
-    setActiveTagIds([]);
-    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
-  }, []);
+  const toggleFavorites = useCallback(() => {
+    dispatchCriteria({ type: "selectFavorites", value: !favoriteOnly });
+  }, [favoriteOnly]);
 
   const toggleTag = useCallback((tagId: number | null) => {
-    if (tagId === null) {
-      setActiveTagIds([]);
-      window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
-      return;
-    }
-    setActiveTagIds((prev) => {
-      if (prev.includes(tagId)) {
-        return prev.filter((id) => id !== tagId);
-      }
-      return [...prev, tagId];
-    });
-    setFavoriteOnlyState(false);
+    dispatchCriteria({ type: "toggleTag", tagId });
     // 清除搜索状态，确保标签筛选结果不会被舊的搜索模式覆盖
-    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
   }, []);
 
   const toggleTagMode = useCallback(() => {
-    setTagMode((m) => (m === "or" ? "and" : "or"));
+    dispatchCriteria({ type: "toggleTagMode" });
   }, []);
+
+  const applySearch = useCallback((search: SearchCriteria) => {
+    dispatchCriteria({ type: "applySearch", criteria: search });
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    dispatchCriteria({ type: "clearSearch" });
+  }, []);
+
+  const setSearchDraftQuery = useCallback((query: string) => {
+    dispatchCriteria({ type: "setDraftQuery", query });
+  }, []);
+
+  const setSearchDraftFilters: Dispatch<SetStateAction<ExifFilters>> =
+    useCallback((update) => {
+      dispatchCriteria({ type: "setDraftFilters", update });
+    }, []);
 
   // --- Import actions ---
 
@@ -180,7 +295,9 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       try {
         await ipc.client.photos.deleteFolder({ id });
         // If the deleted folder is the currently active one, deselect it
-        setActiveFolderIdState((prev) => (prev === id ? null : prev));
+        if (activeFolderId === id) {
+          dispatchCriteria({ type: "selectAllPhotos" });
+        }
         queryClient.invalidateQueries({ queryKey: ["folders"] });
         queryClient.invalidateQueries({
           queryKey: ["photos"],
@@ -191,7 +308,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
         toast.error(t("toastDeleteFolderFailed"));
       }
     },
-    [t]
+    [activeFolderId, t]
   );
 
   // --- Sidebar UI actions ---
@@ -236,12 +353,19 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       tagMode,
       collapsed,
       totalPhotos,
+      appliedSearch,
+      searchDraft,
+      searchResetVersion,
       // Actions
+      applySearch,
+      clearSearch,
+      setSearchDraftFilters,
+      setSearchDraftQuery,
       setActiveFolderId,
       setFavoriteOnly,
-      selectAllPhotosAndNotify,
-      selectFolderAndNotify,
-      toggleFavoritesAndNotify,
+      selectAllPhotos,
+      selectFolder,
+      toggleFavorites,
       toggleTag,
       toggleTagMode,
       handleAddFolder,
@@ -256,11 +380,18 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       tagMode,
       collapsed,
       totalPhotos,
+      appliedSearch,
+      searchDraft,
+      searchResetVersion,
+      applySearch,
+      clearSearch,
+      setSearchDraftFilters,
+      setSearchDraftQuery,
       setActiveFolderId,
       setFavoriteOnly,
-      selectAllPhotosAndNotify,
-      selectFolderAndNotify,
-      toggleFavoritesAndNotify,
+      selectAllPhotos,
+      selectFolder,
+      toggleFavorites,
       toggleTag,
       toggleTagMode,
       handleAddFolder,

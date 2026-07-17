@@ -1,3 +1,5 @@
+import type { ExifFilters } from "@/types/search";
+
 const HISTORY_KEY = "search_history";
 export const MAX_HISTORY = 20;
 
@@ -17,37 +19,6 @@ export interface SearchSuggestion {
   color?: string;
   text: string;
   type: "example" | "person" | "dictionary" | "tag" | "history";
-}
-
-export type AdvancedExifFilterField =
-  | "vendor"
-  | "captureMode"
-  | "exposureProgram"
-  | "meteringMode"
-  | "whiteBalance"
-  | "focusMode"
-  | "subjectTarget"
-  | "driveMode"
-  | "stabilizationMode"
-  | "computationalMode"
-  | "inCameraLook"
-  | "provenanceStatus";
-
-export interface ExifFilters {
-  advancedField?: AdvancedExifFilterField;
-  advancedValue?: string;
-  apertureMax?: string;
-  apertureMin?: string;
-  cameraModel?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  focalMax?: string;
-  focalMin?: string;
-  isoMax?: string;
-  isoMin?: string;
-  lensModel?: string;
-  shutterMax?: string;
-  shutterMin?: string;
 }
 
 function formatDate(d: Date): string {

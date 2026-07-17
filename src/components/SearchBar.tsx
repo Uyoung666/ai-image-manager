@@ -1,11 +1,12 @@
 import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
+  type Dispatch,
   forwardRef,
   memo,
   type ReactNode,
+  type SetStateAction,
   useCallback,
   useEffect,
-  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -17,6 +18,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
+import type {
+  AdvancedExifFilterField,
+  ExifFilters,
+  SearchMode,
+} from "@/types/search";
 import {
   buildPersonTrie,
   getSearchSuggestions,
@@ -25,9 +31,7 @@ import { cn } from "@/utils/tailwind";
 import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterPresets } from "./FilterPresets";
 import {
-  type AdvancedExifFilterField,
   clearSavedHistory,
-  type ExifFilters,
   getFilterLabel,
   getTimePresets,
   loadHistory,
@@ -36,8 +40,6 @@ import {
   saveHistory,
   type TagInfo,
 } from "./search-bar-utils";
-
-export type { ExifFilters } from "./search-bar-utils";
 
 const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
   "vendor",
@@ -68,46 +70,46 @@ interface SearchBarProps {
     embeddingProgress: { processed: number; total: number; phase: string };
   } | null;
   colorHex?: string | null;
+  drillDownFilters?: ExifFilters;
+  filters: ExifFilters;
   imageSearchActive?: boolean;
   leadingContent?: ReactNode;
   onClear: () => void;
+  onFiltersChange: Dispatch<SetStateAction<ExifFilters>>;
   onImageSearch?: (imagePath: string) => void;
+  onQueryChange: (query: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
+  query: string;
+  resetVersion?: number;
   resultCount?: number;
-  searchMode?: "text" | "image" | "exif" | "color" | null;
+  searchMode?: SearchMode | null;
   searchTime?: number;
   trailingContent?: ReactNode;
 }
 
-export interface SearchBarHandle {
-  clearFilters: () => void;
-  resetUiState: () => void;
-  setFilters: (filters: ExifFilters, isDrillDown?: boolean) => void;
-}
-
 export const SearchBar = memo(
-  forwardRef<SearchBarHandle, SearchBarProps>(
-    (
-      {
-        aiStatus,
-        colorHex,
-        imageSearchActive,
-        leadingContent,
-        onSearch,
-        onClear,
-        onImageSearch,
-        resultCount,
-        searchMode,
-        searchTime,
-        trailingContent,
-      }: SearchBarProps,
-      ref
-    ) => {
+  forwardRef<never, SearchBarProps>(
+    ({
+      aiStatus,
+      colorHex,
+      drillDownFilters,
+      filters,
+      imageSearchActive,
+      leadingContent,
+      onFiltersChange: setFilters,
+      onQueryChange: setQuery,
+      onSearch,
+      onClear,
+      onImageSearch,
+      query,
+      resetVersion,
+      resultCount,
+      searchMode,
+      searchTime,
+      trailingContent,
+    }: SearchBarProps, _ref) => {
       const { t } = useTranslation();
       const timePresets = useMemo(() => getTimePresets(t), [t]);
-      const [query, setQuery] = useState(
-        imageSearchActive ? t("imageSearchToken") : ""
-      );
       const [history, setHistory] = useState<string[]>(loadHistory);
       const [showSuggestions, setShowSuggestions] = useState(false);
       const [inputFocused, setInputFocused] = useState(false);
@@ -275,7 +277,7 @@ export const SearchBar = memo(
           setQuery(t("imageSearchToken"));
           setShowSuggestions(false);
         }
-      }, [imageSearchActive, t]);
+      }, [imageSearchActive, setQuery, t]);
       const [dragOver, setDragOver] = useState(false);
       const inputRef = useRef<HTMLInputElement>(null);
       const fileInputRef = useRef<HTMLInputElement>(null);
@@ -284,11 +286,7 @@ export const SearchBar = memo(
       const cameraDropdownRef = useRef<HTMLDivElement>(null);
       const lensDropdownRef = useRef<HTMLDivElement>(null);
       const [locallyDragging, setLocallyDragging] = useState(false);
-      const queryRef = useRef(query);
       const [suggestionIndex, setSuggestionIndex] = useState(-1);
-      useEffect(() => {
-        queryRef.current = query;
-      }, [query]);
 
       function clearHistory() {
         clearSavedHistory();
@@ -296,12 +294,17 @@ export const SearchBar = memo(
         setSuggestionIndex(-1);
       }
 
-      // Filter state
-      const [filters, setFilters] = useState<ExifFilters>({});
-
       const [drillOriginFilters, setDrillOriginFilters] = useState<
         Set<keyof ExifFilters>
       >(new Set());
+
+      useEffect(() => {
+        setDrillOriginFilters(
+          new Set(
+            Object.keys(drillDownFilters ?? {}) as Array<keyof ExifFilters>
+          )
+        );
+      }, [drillDownFilters]);
 
       const hasActiveFilters = Object.values(filters).some(
         (v) => v && v.length > 0
@@ -320,6 +323,16 @@ export const SearchBar = memo(
         filters.focalMax,
         filters.shutterMin || filters.shutterMax,
       ].filter(Boolean).length;
+
+      useEffect(() => {
+        setDrillOriginFilters(new Set());
+        setShowSuggestions(false);
+        setShowFilters(false);
+        setShowCameraSuggestions(false);
+        setShowLensSuggestions(false);
+        setSuggestionIndex(-1);
+        setInputFocused(false);
+      }, [resetVersion]);
 
       const cameraSuggestions = useMemo(() => {
         if (!filters.cameraModel) {
@@ -680,37 +693,6 @@ export const SearchBar = memo(
         }
         return t("searchPlaceholder");
       }
-
-      useImperativeHandle(ref, () => ({
-        setFilters: (newFilters: ExifFilters, isDrillDown = false) => {
-          setFilters(newFilters);
-          if (isDrillDown) {
-            setDrillOriginFilters(
-              new Set(Object.keys(newFilters) as Array<keyof ExifFilters>)
-            );
-          }
-        },
-        clearFilters: () => {
-          setFilters({});
-          setDrillOriginFilters(new Set());
-          if (queryRef.current.trim()) {
-            onSearch(queryRef.current.trim(), undefined);
-          } else {
-            onClear();
-          }
-        },
-        resetUiState: () => {
-          setQuery("");
-          setFilters({});
-          setDrillOriginFilters(new Set());
-          setShowSuggestions(false);
-          setShowFilters(false);
-          setShowCameraSuggestions(false);
-          setShowLensSuggestions(false);
-          setSuggestionIndex(-1);
-          setInputFocused(false);
-        },
-      }));
 
       const filterInputClass =
         "h-8 w-full rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40";
@@ -1759,6 +1741,18 @@ export const SearchBar = memo(
       return false;
     }
     if (prevProps.imageSearchActive !== nextProps.imageSearchActive) {
+      return false;
+    }
+    if (prevProps.query !== nextProps.query) {
+      return false;
+    }
+    if (prevProps.resetVersion !== nextProps.resetVersion) {
+      return false;
+    }
+    if (prevProps.filters !== nextProps.filters) {
+      return false;
+    }
+    if (prevProps.drillDownFilters !== nextProps.drillDownFilters) {
       return false;
     }
     if (prevProps.resultCount !== nextProps.resultCount) {

@@ -52,9 +52,9 @@ function SidebarSlot() {
         folders={folders}
         onAddFolder={filter.handleAddFolder}
         onDeleteFolder={filter.handleDeleteFolder}
-        onSelectAllPhotos={filter.selectAllPhotosAndNotify}
-        onSelectFavorites={filter.toggleFavoritesAndNotify}
-        onSelectFolder={filter.selectFolderAndNotify}
+        onSelectAllPhotos={filter.selectAllPhotos}
+        onSelectFavorites={filter.toggleFavorites}
+        onSelectFolder={filter.selectFolder}
         onToggleCollapse={filter.toggleCollapsed}
         onToggleTag={filter.toggleTag}
         onToggleTagMode={filter.toggleTagMode}
