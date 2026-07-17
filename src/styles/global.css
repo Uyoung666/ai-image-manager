@@ -462,7 +462,7 @@
   top: 0;
   right: 0;
   left: 0;
-  z-index: 60;
+  z-index: 40;
   background: var(--gallery-canvas);
   transition:
     background-color 160ms ease,
