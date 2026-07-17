@@ -512,7 +512,7 @@ export function PhotoDetailPanel({
 
   return (
     <div
-      className="shrink-0 overflow-hidden"
+      className="photo-detail-panel-shell shrink-0 overflow-hidden"
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div

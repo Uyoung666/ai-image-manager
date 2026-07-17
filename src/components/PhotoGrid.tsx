@@ -26,6 +26,7 @@ export type SortField = "date" | "name" | "size";
 export type SortOrder = "asc" | "desc";
 
 interface PhotoGridProps {
+  columnWidth?: number;
   deletingIds?: Set<number>;
   emptyState?: React.ReactNode;
   error?: string;
@@ -61,37 +62,43 @@ interface PhotoGridProps {
   routeKey: string;
   searchQuery?: string;
   selectedIds: Set<number>;
+  showToolbar?: boolean;
   sort?: SortField;
   sortOrder?: SortOrder;
 }
 
 const MIN_COLUMNS = 2;
-const COL_WIDTH_MIN = 140;
-const COL_WIDTH_MAX = 320;
-const COL_WIDTH_DEFAULT = 220;
+export const GRID_COLUMN_WIDTH_MIN = 140;
+export const GRID_COLUMN_WIDTH_MAX = 320;
+export const GRID_COLUMN_WIDTH_DEFAULT = 220;
 const GAP = 8;
 const INITIAL_EAGER_ROWS = 2;
 
-const GRID_COL_WIDTH_KEY = "grid_column_width";
+export const GRID_COLUMN_WIDTH_KEY = "grid_column_width";
 
-function loadColWidth(): number {
+export function loadGridColumnWidth(): number {
   try {
-    const raw = localStorage.getItem(GRID_COL_WIDTH_KEY);
+    const raw = localStorage.getItem(GRID_COLUMN_WIDTH_KEY);
     if (raw !== null) {
       const val = Number(raw);
-      if (!Number.isNaN(val) && val >= COL_WIDTH_MIN && val <= COL_WIDTH_MAX) {
+      if (
+        !Number.isNaN(val) &&
+        val >= GRID_COLUMN_WIDTH_MIN &&
+        val <= GRID_COLUMN_WIDTH_MAX
+      ) {
         return val;
       }
     }
   } catch {
     /* ignore */
   }
-  return COL_WIDTH_DEFAULT;
+  return GRID_COLUMN_WIDTH_DEFAULT;
 }
 
 export const PhotoGrid = memo(
   function PhotoGrid({
     photos,
+    columnWidth,
     loading,
     isLoadingMore = false,
     selectedIds,
@@ -115,18 +122,19 @@ export const PhotoGrid = memo(
     onKeyboardSelect,
     onMarqueeSelect,
     onBackgroundClick,
+    showToolbar = true,
   }: PhotoGridProps) {
     const { t, i18n } = useTranslation();
-    const [targetColWidth, setTargetColWidth] = useState(loadColWidth);
+    const [internalColumnWidth, setInternalColumnWidth] =
+      useState(loadGridColumnWidth);
+    const targetColWidth = columnWidth ?? internalColumnWidth;
     const [columnCount, setColumnCount] = useState(4);
-    const [compact, setCompact] = useState(false);
     const [containerWidth, setContainerWidth] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
     const observerRef = useRef<ResizeObserver | null>(null);
     const targetColWidthRef = useRef(targetColWidth);
     targetColWidthRef.current = targetColWidth;
     const metricsRef = useRef({
-      compact: false,
       columnCount: 4,
       width: 0,
     });
@@ -154,7 +162,6 @@ export const PhotoGrid = memo(
         MIN_COLUMNS,
         Math.floor(width / targetColWidthRef.current)
       );
-      const nextCompact = width < 500;
       const prev = metricsRef.current;
       if (prev.width !== width) {
         metricsRef.current = { ...metricsRef.current, width };
@@ -167,33 +174,32 @@ export const PhotoGrid = memo(
         };
         setColumnCount(nextColumnCount);
       }
-      if (prev.compact !== nextCompact) {
-        metricsRef.current = { ...metricsRef.current, compact: nextCompact };
-        setCompact(nextCompact);
-      }
     }, []);
 
-    const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
-        observerRef.current = null;
-      }
-      containerRef.current = node;
-      if (!node) {
-        return;
-      }
-      // Set initial width synchronously so MasonryGrid never renders with
-      // containerWidth=0 (avoids a blank first frame while waiting for the
-      // async ResizeObserver callback).
-      const w = node.clientWidth;
-      applyGridMetrics(w);
-      // ResizeObserver for subsequent size changes.
-      const observer = new ResizeObserver(([entry]) => {
-        applyGridMetrics(entry.contentRect.width);
-      });
-      observer.observe(node);
-      observerRef.current = observer;
-    }, [applyGridMetrics]);
+    const containerCallbackRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+          observerRef.current = null;
+        }
+        containerRef.current = node;
+        if (!node) {
+          return;
+        }
+        // Set initial width synchronously so MasonryGrid never renders with
+        // containerWidth=0 (avoids a blank first frame while waiting for the
+        // async ResizeObserver callback).
+        const w = node.clientWidth;
+        applyGridMetrics(w);
+        // ResizeObserver for subsequent size changes.
+        const observer = new ResizeObserver(([entry]) => {
+          applyGridMetrics(entry.contentRect.width);
+        });
+        observer.observe(node);
+        observerRef.current = observer;
+      },
+      [applyGridMetrics]
+    );
 
     useEffect(() => {
       const el = containerRef.current;
@@ -400,13 +406,15 @@ export const PhotoGrid = memo(
       );
       return (
         <div className="flex flex-1 flex-col">
-          <div className="flex items-center justify-between border-border border-b px-4 py-2">
-            <Skeleton className="h-4 w-24 bg-card" />
-            <div className="flex items-center gap-1.5">
-              <Skeleton className="h-2.5 w-8 rounded-[2px] bg-card" />
-              <Skeleton className="h-4 w-20 rounded-[4px] bg-card" />
+          {showToolbar && (
+            <div className="flex items-center justify-between border-border border-b px-4 py-2">
+              <Skeleton className="h-4 w-24 bg-card" />
+              <div className="flex items-center gap-1.5">
+                <Skeleton className="h-2.5 w-8 rounded-[2px] bg-card" />
+                <Skeleton className="h-4 w-20 rounded-[4px] bg-card" />
+              </div>
             </div>
-          </div>
+          )}
           <div className="flex-1 overflow-y-auto px-2 pt-2">
             <div className="flex gap-2">
               {skelCols.map((items, ci) => (
@@ -433,11 +441,13 @@ export const PhotoGrid = memo(
       const isError = !!error;
       return (
         <div className="flex flex-1 flex-col">
-          <div className="flex items-center justify-between border-border border-b px-4 py-2">
-            <span className="truncate text-[12px] text-muted-foreground">
-              {t("photosCount", { count: 0 })}
-            </span>
-          </div>
+          {showToolbar && (
+            <div className="flex items-center justify-between border-border border-b px-4 py-2">
+              <span className="truncate text-[12px] text-muted-foreground">
+                {t("photosCount", { count: 0 })}
+              </span>
+            </div>
+          )}
           <div className="flex flex-1 items-center justify-center">
             {isError ? (
               <div className="flex flex-col items-center gap-3 px-6 text-center">
@@ -485,51 +495,52 @@ export const PhotoGrid = memo(
         }}
       >
         {/* Floating glass toolbar — 悬浮毛玻璃工具条 */}
-        <div
-          className="glass-surface absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-border border-b px-4 py-2"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <span className="truncate text-[12px] text-muted-foreground">
-            {t("photosCount", { count: photos.length.toLocaleString() })}
-            {selectedIds.size > 0 &&
-              t("photosSelected", { count: selectedIds.size })}
-          </span>
-          <div className="flex items-center gap-2">
-            {!compact && onSortChange && (
-              <SortDropdown
-                onChange={onSortChange}
-                order={sortOrder}
-                sort={sort}
-              />
-            )}
-            {!compact && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-muted-foreground/70">
-                  {t("gridSize")}
-                </span>
+        {/* Masonry grid */}
+        {showToolbar && (
+          <div
+            className="glass-surface absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-border border-b px-4 py-2"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="truncate text-[12px] text-muted-foreground">
+              {t("photosCount", { count: photos.length.toLocaleString() })}
+              {selectedIds.size > 0 &&
+                t("photosSelected", { count: selectedIds.size })}
+            </span>
+            <div className="flex items-center gap-2">
+              {onSortChange && (
+                <SortDropdown
+                  onChange={onSortChange}
+                  order={sortOrder}
+                  sort={sort}
+                />
+              )}
+              <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+                <span>{t("gridSize")}</span>
                 <input
+                  aria-label={t("gridSize")}
                   className="h-4 w-20 cursor-pointer accent-primary"
-                  max={COL_WIDTH_MAX}
-                  min={COL_WIDTH_MIN}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    setTargetColWidth(val);
+                  max={GRID_COLUMN_WIDTH_MAX}
+                  min={GRID_COLUMN_WIDTH_MIN}
+                  onChange={(event) => {
+                    const width = Number(event.target.value);
+                    setInternalColumnWidth(width);
                     try {
-                      localStorage.setItem(GRID_COL_WIDTH_KEY, String(val));
+                      localStorage.setItem(
+                        GRID_COLUMN_WIDTH_KEY,
+                        String(width)
+                      );
                     } catch {
-                      /* ignore */
+                      // Keep the in-memory preference.
                     }
                   }}
                   step={10}
                   type="range"
                   value={targetColWidth}
                 />
-              </div>
-            )}
+              </label>
+            </div>
           </div>
-        </div>
-
-        {/* Masonry grid */}
+        )}
         <div
           className="min-h-0 flex-1"
           onContextMenu={onContextMenu}
@@ -540,7 +551,7 @@ export const PhotoGrid = memo(
           }}
         >
           <MasonryGrid
-            className="scrollbar-thin px-2 pt-12 pb-7"
+            className={`scrollbar-thin px-2 ${showToolbar ? "pt-12" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
             columnCount={columnCount}
             containerWidth={containerWidth - 16}
             gap={GAP}
@@ -570,6 +581,9 @@ export const PhotoGrid = memo(
     );
   },
   (prevProps, nextProps) => {
+    if (prevProps.columnWidth !== nextProps.columnWidth) {
+      return false;
+    }
     if (prevProps.photos !== nextProps.photos) {
       return false;
     }
@@ -607,6 +621,9 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.hasMore !== nextProps.hasMore) {
+      return false;
+    }
+    if (prevProps.showToolbar !== nextProps.showToolbar) {
       return false;
     }
     return true;

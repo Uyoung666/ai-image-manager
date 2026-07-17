@@ -24,6 +24,7 @@ type ActionHandler = () => void | Promise<void>;
 
 interface SelectionActionBarProps {
   allFavorite?: boolean;
+  bottomOffset?: number | string;
   onAddToAlbum?: ActionHandler;
   onClearSelection: ActionHandler;
   onConvert?: ActionHandler;
@@ -40,6 +41,7 @@ interface SelectionActionBarProps {
 export function SelectionActionBar({
   selectedCount,
   allFavorite = false,
+  bottomOffset,
   onToggleFavorite,
   onAddToAlbum,
   onExport,
@@ -110,6 +112,16 @@ export function SelectionActionBar({
           mountedRef.current = false;
         }
       }}
+      style={
+        bottomOffset === undefined
+          ? undefined
+          : {
+              bottom:
+                typeof bottomOffset === "number"
+                  ? `${bottomOffset}px`
+                  : bottomOffset,
+            }
+      }
     >
       <div className="selection-menu pointer-events-auto">
         <span className="selection-menu-count">

@@ -28,8 +28,12 @@ describe("SearchBar", () => {
     const user = userEvent.setup();
     render(<SearchBar {...baseProps} />);
 
+    expect(
+      screen.queryByRole("button", { name: "today" })
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("combobox"));
 
+    expect(screen.getByRole("button", { name: "today" })).toBeInTheDocument();
     expect(screen.getByText("试试这样搜索")).toBeInTheDocument();
     expect(screen.getByText("去年秋天的红叶")).toBeInTheDocument();
     expect(screen.getByText("海边的日落")).toBeInTheDocument();
@@ -159,9 +163,9 @@ describe("SearchBar", () => {
     );
 
     expect(
-      screen.getByText(
-        "AI 已索引 25/100 张照片，当前结果可能不完整；索引完成后将自动刷新。"
-      )
+      screen.getByRole("status", {
+        name: "AI 已索引 25/100 张照片，当前结果可能不完整；索引完成后将自动刷新。",
+      })
     ).toBeInTheDocument();
     expect(screen.getByRole("combobox")).not.toBeDisabled();
   });

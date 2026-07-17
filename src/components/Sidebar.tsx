@@ -46,9 +46,7 @@ import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Folder as FolderType } from "@/types/photo";
-import { AiProgressBar } from "./AiProgressBar";
 import { FolderAppearanceDialog } from "./FolderAppearanceDialog";
-import { FolderBadge } from "./FolderBadge";
 import {
   buildFolderTree,
   buildTagTree,
@@ -72,25 +70,50 @@ function SidebarTooltip({
   );
 }
 
-function findRootFolderId(
-  folders: FolderType[],
-  activeFolderId: number | null
-): number | null {
-  if (activeFolderId === null) {
-    return null;
-  }
-  const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
-  const visited = new Set<number>();
-  let current = folderMap.get(activeFolderId);
-  while (
-    current?.parentId !== null &&
-    current?.parentId !== undefined &&
-    !visited.has(current.id)
-  ) {
-    visited.add(current.id);
-    current = folderMap.get(current.parentId);
-  }
-  return current?.id ?? activeFolderId;
+function RailButton({
+  active = false,
+  badge = false,
+  icon,
+  label,
+  onClick,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
+}: {
+  active?: boolean;
+  badge?: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  onDragEnter?: React.DragEventHandler<HTMLButtonElement>;
+  onDragLeave?: React.DragEventHandler<HTMLButtonElement>;
+  onDragOver?: React.DragEventHandler<HTMLButtonElement>;
+  onDrop?: React.DragEventHandler<HTMLButtonElement>;
+}) {
+  return (
+    <SidebarTooltip content={label}>
+      <button
+        aria-label={label}
+        className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+          active
+            ? "nav-item-active text-primary"
+            : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+        }`}
+        onClick={onClick}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        type="button"
+      >
+        {icon}
+        {badge && (
+          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-destructive ring-2 ring-sidebar" />
+        )}
+      </button>
+    </SidebarTooltip>
+  );
 }
 
 interface SidebarProps {
@@ -172,6 +195,9 @@ export function Sidebar({
   const [dragOverAlbumNav, setDragOverAlbumNav] = useState(false);
   const [foldersCollapsed, setFoldersCollapsed] = useState(false);
   const [tagsCollapsed, setTagsCollapsed] = useState(false);
+  const [resourceView, setResourceView] = useState<"folders" | "tags">(
+    "folders"
+  );
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<number>>(
     new Set()
   );
@@ -724,11 +750,6 @@ export function Sidebar({
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
   const appearanceFolder =
     folders.find((folder) => folder.id === appearanceFolderId) ?? null;
-  const activeRootFolderId = useMemo(
-    () => findRootFolderId(folders, activeFolderId),
-    [activeFolderId, folders]
-  );
-
   // Auto-expand each root parent once without overwriting the user's choices.
   const autoExpandedFolderIdsRef = useRef(new Set<number>());
   useEffect(() => {
@@ -769,545 +790,133 @@ export function Sidebar({
   return (
     <>
       <div
-        className={`sidebar-bg flex h-full flex-col overflow-hidden ${
-          collapsed ? "w-12" : "w-[clamp(240px,20vw,300px)]"
+        className={`sidebar-bg flex h-full flex-row overflow-hidden ${
+          collapsed ? "w-12" : "w-[calc(48px+clamp(240px,20vw,300px))]"
         }`}
         onDragOver={handleSidebarDragOver}
         onDrop={handleSidebarDrop}
       >
-        {collapsed ? (
-          <div className="flex h-full w-12 flex-col items-center py-3">
-            <SidebarTooltip content={t("expandSidebar")}>
-              <button
-                aria-label={t("expandSidebar")}
-                className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-                onClick={onToggleCollapse}
-                type="button"
-              >
+        <nav
+          aria-label={t("appName")}
+          className="sidebar-rail flex h-full w-12 flex-shrink-0 flex-col items-center border-foreground/8 border-r py-2"
+        >
+          <SidebarTooltip
+            content={collapsed ? t("expandSidebar") : t("collapseSidebar")}
+          >
+            <button
+              aria-label={collapsed ? t("expandSidebar") : t("collapseSidebar")}
+              className="mb-2 flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
+              onClick={onToggleCollapse}
+              type="button"
+            >
+              {collapsed ? (
                 <PanelLeftOpen className="h-4 w-4" />
-              </button>
-            </SidebarTooltip>
-
-            <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
-              <SidebarTooltip content={t("sidebarAllPhotos")}>
-                <button
-                  aria-label={t("sidebarAllPhotos")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    activeFolderId === null && !favoriteActive
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => {
-                    onToggleTag?.(null);
-                    onSelectFolder(null);
-                  }}
-                  type="button"
-                >
-                  <Images className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              {onSelectFavorites && (
-                <SidebarTooltip content={t("favorite")}>
-                  <button
-                    aria-label={t("favorite")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                      favoriteActive
-                        ? "nav-item-active bg-primary/15 text-primary"
-                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                    }`}
-                    onClick={() => {
-                      if (favoriteActive) {
-                        return;
-                      }
-                      onSelectFavorites?.();
-                    }}
-                    type="button"
-                  >
-                    <Star className="h-4 w-4" />
-                  </button>
-                </SidebarTooltip>
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
               )}
+            </button>
+          </SidebarTooltip>
 
-              {folderTree.map(({ folder }) => (
-                <SidebarTooltip
-                  key={folder.id}
-                  content={
-                    <>
-                      <div className="font-medium">{folder.displayName}</div>
-                      <div className="text-muted-foreground">
-                        {folder.totalPhotoCount ?? folder.photoCount}
-                      </div>
-                      <div className="text-muted-foreground">
-                        {t("rightClickFolderActions")}
-                      </div>
-                    </>
-                  }
-                >
-                  <button
-                    aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
-                    className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                      dragOverFolderId === folder.id
-                        ? "bg-primary/20 text-primary ring-1 ring-primary/50"
-                        : activeRootFolderId === folder.id
-                          ? "nav-item-active bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                    }`}
-                    onClick={() => onSelectFolder(folder.id)}
-                    onContextMenu={(e) =>
-                      handleFolderContextMenu(e, folder.id, folder.displayName)
-                    }
-                    onDragLeave={handleFolderDragLeave}
-                    onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-                    onDrop={(e) => handleFolderDrop(e, folder.id)}
-                    type="button"
-                  >
-                    <FolderBadge
-                      className="h-[22px] w-[22px]"
-                      folder={folder}
-                    />
-                  </button>
-                </SidebarTooltip>
-              ))}
+          <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5">
+            <RailButton
+              active={location.pathname === "/"}
+              icon={<Images className="h-4 w-4" />}
+              label={t("sidebarAllPhotos")}
+              onClick={() => {
+                if (collapsed) {
+                  onToggleCollapse();
+                } else {
+                  onToggleTag?.(null);
+                  onSelectFolder(null);
+                }
+              }}
+            />
+            <RailButton
+              active={location.pathname === "/dashboard"}
+              icon={<LayoutDashboard className="h-4 w-4" />}
+              label={t("sidebarDashboard")}
+              onClick={() => navigate({ to: "/dashboard" })}
+            />
+            <RailButton
+              active={
+                dragOverAlbumNav || location.pathname.startsWith("/albums")
+              }
+              icon={<Album className="h-4 w-4" />}
+              label={t("sidebarAlbums")}
+              onClick={() => navigate({ to: "/albums" as const })}
+              onDragEnter={() => setDragOverAlbumNav(true)}
+              onDragLeave={(event) => {
+                if (
+                  !event.currentTarget.contains(event.relatedTarget as Node)
+                ) {
+                  setDragOverAlbumNav(false);
+                }
+              }}
+              onDragOver={handleSidebarDragOver}
+              onDrop={handleDropOnAlbumNav}
+            />
+            <RailButton
+              active={location.pathname === "/people"}
+              icon={<Users className="h-4 w-4" />}
+              label={t("people")}
+              onClick={() => navigate({ to: "/people" })}
+            />
 
-              {/* Tags popover — available when collapsed */}
-              {tags.length > 0 && (
-                <Popover onOpenChange={setTagPopoverOpen} open={tagPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                        activeTagIds.length > 0
-                          ? "nav-item-active bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                      }`}
-                      type="button"
-                    >
-                      <Tag className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="end"
-                    className="w-48 p-0"
-                    sideOffset={8}
-                  >
-                    <div className="p-1.5">
-                      <p className="px-2 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-                        {t("sidebarTags")}
-                      </p>
-                      <div className="px-1 pb-1">
-                        <div className="relative">
-                          <input
-                            aria-label={t("tagSearchPlaceholder")}
-                            className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                            onChange={(e) => setTagSearch(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                setTagSearch("");
-                                setDebouncedTagSearch("");
-                                const tree = (
-                                  e.currentTarget as HTMLElement
-                                ).closest(
-                                  '[role="tree"]'
-                                ) as HTMLElement | null;
-                                tree?.focus();
-                              }
-                            }}
-                            placeholder={t("tagSearchPlaceholder")}
-                            role="searchbox"
-                            value={tagSearch}
-                          />
-                          {tagSearch && (
-                            <button
-                              className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                              onClick={() => {
-                                setTagSearch("");
-                                setDebouncedTagSearch("");
-                              }}
-                              type="button"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {activeTagIds.length > 0 && (
-                        <div className="flex flex-wrap gap-1 px-1 pb-1">
-                          {activeTagIds.slice(0, 3).map((id) => {
-                            const tag = tags.find((t) => t.id === id);
-                            return (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
-                                key={id}
-                              >
-                                <span
-                                  className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
-                                  style={{
-                                    backgroundColor: tag?.color ?? "#888",
-                                  }}
-                                />
-                                <span className="max-w-[80px] truncate">
-                                  {getTagDisplayName(
-                                    tag?.name ?? "",
-                                    i18n.language
-                                  )}
-                                </span>
-                                <button
-                                  aria-label={
-                                    t("clickToRemove") +
-                                    " " +
-                                    getTagDisplayName(
-                                      tag?.name ?? "",
-                                      i18n.language
-                                    )
-                                  }
-                                  className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onToggleTag?.(id);
-                                  }}
-                                  type="button"
-                                >
-                                  <X className="h-2 w-2" />
-                                </button>
-                              </span>
-                            );
-                          })}
-                          {activeTagIds.length > 3 && (
-                            <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                              {t("andMore", { count: activeTagIds.length - 3 })}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {activeTagIds.length >= 2 && onToggleTagMode && (
-                        <div className="flex items-center justify-between px-1 pb-1">
-                          <span className="text-[10px] text-muted-foreground/70">
-                            {t("tagFilterMode")}
-                          </span>
-                          <button
-                            aria-label={t("tagFilterMode")}
-                            aria-pressed={tagMode === "and"}
-                            className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
-                            onClick={onToggleTagMode}
-                            type="button"
-                          >
-                            {tagMode.toUpperCase()}
-                          </button>
-                        </div>
-                      )}
-                      <div
-                        aria-label={t("sidebarTags")}
-                        className="max-h-[280px] overflow-y-auto"
-                        onFocus={(e) => {
-                          const container = e.currentTarget;
-                          const currentFocus = document.activeElement;
-                          if (
-                            currentFocus === container ||
-                            !container.contains(currentFocus)
-                          ) {
-                            const first = container.querySelector(
-                              '[role="treeitem"]'
-                            ) as HTMLElement | null;
-                            if (first) {
-                              const items =
-                                container.querySelectorAll('[role="treeitem"]');
-                              for (const item of items) {
-                                (item as HTMLElement).setAttribute(
-                                  "tabindex",
-                                  "-1"
-                                );
-                              }
-                              first.setAttribute("tabindex", "0");
-                              first.focus();
-                            }
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          handleTagTreeKeyDown(
-                            e,
-                            expandedTagIds,
-                            setExpandedTagIds,
-                            onToggleTag,
-                            setTagSearch,
-                            setDebouncedTagSearch
-                          );
-                        }}
-                        role="tree"
-                        tabIndex={0}
-                      >
-                        {(() => {
-                          const filtered = tags.filter((t) =>
-                            debouncedTagSearch
-                              ? t.name
-                                  .toLowerCase()
-                                  .includes(debouncedTagSearch.toLowerCase())
-                              : true
-                          );
-                          const allIds = new Set(filtered.map((t) => t.id));
-                          for (const t of filtered) {
-                            let cur = t.parentId;
-                            while (cur) {
-                              if (allIds.has(cur)) {
-                                break;
-                              }
-                              const parent = tags.find((p) => p.id === cur);
-                              if (parent) {
-                                allIds.add(cur);
-                                cur = parent.parentId;
-                              } else {
-                                break;
-                              }
-                            }
-                          }
-                          const visible = tags.filter((t) => allIds.has(t.id));
-                          const tree = buildTagTree(visible);
-                          return renderTagTree(
-                            tree,
-                            0,
-                            expandedTagIds,
-                            (id) => {
-                              const next = new Set(expandedTagIds);
-                              if (next.has(id)) {
-                                next.delete(id);
-                              } else {
-                                next.add(id);
-                              }
-                              setExpandedTagIds(next);
-                            },
-                            activeTagIds,
-                            (nextId) => {
-                              if (nextId !== null) {
-                                onToggleTag?.(nextId);
-                              }
-                              setTagPopoverOpen(false);
-                            },
-                            (e, id, name) => {
-                              e.preventDefault();
-                              setTagCtx({
-                                tagId: id,
-                                tagName: name,
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            },
-                            () => {},
-                            () => {},
-                            () => {},
-                            () => {},
-                            null,
-                            i18n.language
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
-            </div>
+            <div className="my-1 h-px w-6 bg-foreground/8" />
 
-            <div className="flex flex-col items-center gap-1 px-1.5">
-              <SidebarTooltip content={t("sidebarAddFolder")}>
-                <button
-                  aria-label={t("sidebarAddFolder")}
-                  className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
-                  onClick={() => onAddFolder()}
-                  type="button"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              {/* Content group */}
-              <SidebarTooltip content={t("sidebarDashboard")}>
-                <button
-                  aria-label={t("sidebarDashboard")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname === "/dashboard"
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/dashboard" })}
-                  type="button"
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <SidebarTooltip content={t("sidebarAlbums")}>
-                <button
-                  aria-label={t("sidebarAlbums")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname.startsWith("/albums")
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/albums" as const })}
-                  type="button"
-                >
-                  <Album className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <SidebarTooltip content={t("people")}>
-                <button
-                  aria-label={t("people")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname === "/people"
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/people" })}
-                  type="button"
-                >
-                  <Users className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <div className="my-0.5 w-4 border-border border-t" />
-
-              {/* Tool group */}
-              <SidebarTooltip content={t("duplicates")}>
-                <button
-                  aria-label={t("duplicates")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname === "/duplicates"
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/duplicates" })}
-                  type="button"
-                >
-                  <ScanSearch className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <SidebarTooltip content={t("cull")}>
-                <button
-                  aria-label={t("cull")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname.startsWith("/cull")
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/cull" })}
-                  type="button"
-                >
-                  <Swords className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <SidebarTooltip content={t("trash")}>
-                <button
-                  aria-label={t("trash")}
-                  className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname === "/trash"
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/trash" })}
-                  type="button"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {trashCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-destructive px-1 text-center font-medium text-[9px] text-white leading-4">
-                      {trashCount > 99 ? "99+" : trashCount}
-                    </span>
-                  )}
-                </button>
-              </SidebarTooltip>
-
-              <div className="my-0.5 w-4 border-border border-t" />
-
-              {/* System group */}
-              <SidebarTooltip content={t("sidebarSettings")}>
-                <button
-                  aria-label={t("sidebarSettings")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
-                    location.pathname.startsWith("/settings")
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  }`}
-                  onClick={() => navigate({ to: "/settings" })}
-                  type="button"
-                >
-                  <Settings className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-
-              <SidebarTooltip content={t("keyboardHelpTitle")}>
-                <button
-                  aria-label={t("keyboardHelpTitle")}
-                  className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-                  onClick={() =>
-                    document.dispatchEvent(
-                      new KeyboardEvent("keydown", { key: "?" })
-                    )
-                  }
-                  type="button"
-                >
-                  <CircleHelp className="h-4 w-4" />
-                </button>
-              </SidebarTooltip>
-            </div>
+            <RailButton
+              active={location.pathname === "/duplicates"}
+              icon={<ScanSearch className="h-4 w-4" />}
+              label={t("duplicates")}
+              onClick={() => navigate({ to: "/duplicates" })}
+            />
+            <RailButton
+              active={location.pathname.startsWith("/cull")}
+              icon={<Swords className="h-4 w-4" />}
+              label={t("cull")}
+              onClick={() => navigate({ to: "/cull" })}
+            />
+            <RailButton
+              active={location.pathname === "/trash"}
+              badge={trashCount > 0}
+              icon={<Trash2 className="h-4 w-4" />}
+              label={t("trash")}
+              onClick={() => navigate({ to: "/trash" })}
+            />
           </div>
-        ) : (
+
+          <div className="flex flex-col items-center gap-1 px-1.5">
+            <RailButton
+              active={location.pathname.startsWith("/settings")}
+              icon={<Settings className="h-4 w-4" />}
+              label={t("sidebarSettings")}
+              onClick={() => navigate({ to: "/settings" })}
+            />
+            <RailButton
+              icon={<CircleHelp className="h-4 w-4" />}
+              label={t("keyboardHelpTitle")}
+              onClick={() =>
+                document.dispatchEvent(
+                  new KeyboardEvent("keydown", { key: "?" })
+                )
+              }
+            />
+          </div>
+        </nav>
+
+        {!collapsed && (
           <div className="flex h-full w-[clamp(240px,20vw,300px)] select-none flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3">
-              <div>
-                <button
-                  className="font-semibold text-[14px] text-foreground transition-colors hover:text-primary"
-                  onClick={() => {
-                    window.electronAPI?.openExternal(
-                      "https://ai-image-manager.uyoungvision.cn/"
-                    );
-                  }}
-                  type="button"
-                >
-                  {t("appName")}
-                </button>
-                <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+            <div className="flex items-center gap-2 px-4 py-3">
+              <Images className="h-4 w-4 text-primary" />
+              <div className="min-w-0">
+                <p className="font-semibold text-[13px] text-foreground">
+                  {t("sidebarAllPhotos")}
+                </p>
+                <p className="text-[10px] text-muted-foreground/70 tabular-nums">
                   {t("photosCount", { count: totalPhotos.toLocaleString() })}
                 </p>
               </div>
-              <div className="flex items-center gap-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-label={t("keyboardHelpTitle")}
-                      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-                      onClick={() =>
-                        document.dispatchEvent(
-                          new KeyboardEvent("keydown", { key: "?" })
-                        )
-                      }
-                      type="button"
-                    >
-                      <CircleHelp className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("keyboardHelpTitle")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      aria-label={t("collapseSidebar")}
-                      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground"
-                      onClick={onToggleCollapse}
-                      type="button"
-                    >
-                      <PanelLeftClose className="h-4 w-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("collapseSidebar")}</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-
-            {/* AI Progress Bar */}
-            <div className="px-3 py-2">
-              <AiProgressBar />
             </div>
 
             {/* Separator */}
@@ -1351,9 +960,36 @@ export function Sidebar({
 
               <div className="my-2 border-border border-t" />
 
+              <div className="mb-2 grid grid-cols-2 rounded-[6px] bg-foreground/5 p-0.5">
+                <button
+                  aria-pressed={resourceView === "folders"}
+                  className={`rounded-[5px] px-2 py-1 text-[11px] transition-colors ${
+                    resourceView === "folders"
+                      ? "bg-card text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setResourceView("folders")}
+                  type="button"
+                >
+                  {t("sidebarFolders")}
+                </button>
+                <button
+                  aria-pressed={resourceView === "tags"}
+                  className={`rounded-[5px] px-2 py-1 text-[11px] transition-colors ${
+                    resourceView === "tags"
+                      ? "bg-card text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setResourceView("tags")}
+                  type="button"
+                >
+                  {t("sidebarTags")}
+                </button>
+              </div>
+
               {/* Folders */}
               <div
-                className={`flex flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
+                className={`${resourceView === "folders" ? "flex" : "hidden"} flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
               >
                 <div className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 transition-colors hover:bg-foreground/5">
                   <button
@@ -1420,414 +1056,308 @@ export function Sidebar({
               </div>
 
               {/* Tags */}
-              {(tags.length > 0 || totalPhotos > 0) && (
-                <>
-                  <div className="mx-3 my-2 border-border border-t" />
-                  <div
-                    className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
-                  >
-                    <button
-                      className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
-                      onClick={() => setTagsCollapsed((v) => !v)}
+              {resourceView === "tags" &&
+                (tags.length > 0 || totalPhotos > 0) && (
+                  <>
+                    <div className="mx-3 my-2 border-border border-t" />
+                    <div
+                      className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
                     >
-                      <p
-                        className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                      <button
+                        className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
+                        onClick={() => setTagsCollapsed((v) => !v)}
                       >
-                        {t("sidebarTags")}
-                      </p>
-                      <ChevronDown
-                        className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
-                      />
-                    </button>
-                    {!tagsCollapsed &&
-                      aiTagPipelineActive &&
-                      tags.some((tag) => tag.photoCount > 0) && (
-                        <div className="flex items-center gap-1 px-3 py-1 text-[10px] text-primary/80">
-                          <ScanSearch className="h-3 w-3 animate-pulse" />
-                          {aiTagging ? aiTagStatusText : t("tagUpdating")}
-                        </div>
-                      )}
-                    {!tagsCollapsed &&
-                      (tags.length > 0 ? (
-                        <>
-                          {/* Active tag chips */}
-                          {activeTagIds.length > 0 && (
-                            <div className="flex flex-wrap gap-1 px-1 pb-1">
-                              {activeTagIds.slice(0, 3).map((id) => {
-                                const tag = tags.find((t) => t.id === id);
-                                return (
-                                  <span
-                                    className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
-                                    key={id}
-                                  >
+                        <p
+                          className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
+                        >
+                          {t("sidebarTags")}
+                        </p>
+                        <ChevronDown
+                          className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
+                        />
+                      </button>
+                      {!tagsCollapsed &&
+                        aiTagPipelineActive &&
+                        tags.some((tag) => tag.photoCount > 0) && (
+                          <div className="flex items-center gap-1 px-3 py-1 text-[10px] text-primary/80">
+                            <ScanSearch className="h-3 w-3 animate-pulse" />
+                            {aiTagging ? aiTagStatusText : t("tagUpdating")}
+                          </div>
+                        )}
+                      {!tagsCollapsed &&
+                        (tags.length > 0 ? (
+                          <>
+                            {/* Active tag chips */}
+                            {activeTagIds.length > 0 && (
+                              <div className="flex flex-wrap gap-1 px-1 pb-1">
+                                {activeTagIds.slice(0, 3).map((id) => {
+                                  const tag = tags.find((t) => t.id === id);
+                                  return (
                                     <span
-                                      className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
-                                      style={{
-                                        backgroundColor: tag?.color ?? "#888",
-                                      }}
-                                    />
-                                    <span className="max-w-[90px] truncate">
-                                      {getTagDisplayName(
-                                        tag?.name ?? "",
-                                        i18n.language
-                                      )}
-                                    </span>
-                                    <button
-                                      aria-label={
-                                        t("clickToRemove") +
-                                        " " +
-                                        getTagDisplayName(
+                                      className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
+                                      key={id}
+                                    >
+                                      <span
+                                        className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                                        style={{
+                                          backgroundColor: tag?.color ?? "#888",
+                                        }}
+                                      />
+                                      <span className="max-w-[90px] truncate">
+                                        {getTagDisplayName(
                                           tag?.name ?? "",
                                           i18n.language
-                                        )
-                                      }
-                                      className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                                      onClick={() => onToggleTag?.(id)}
-                                      type="button"
-                                    >
-                                      <X className="h-2 w-2" />
-                                    </button>
+                                        )}
+                                      </span>
+                                      <button
+                                        aria-label={
+                                          t("clickToRemove") +
+                                          " " +
+                                          getTagDisplayName(
+                                            tag?.name ?? "",
+                                            i18n.language
+                                          )
+                                        }
+                                        className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                        onClick={() => onToggleTag?.(id)}
+                                        type="button"
+                                      >
+                                        <X className="h-2 w-2" />
+                                      </button>
+                                    </span>
+                                  );
+                                })}
+                                {activeTagIds.length > 3 && (
+                                  <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                    {t("andMore", {
+                                      count: activeTagIds.length - 3,
+                                    })}
                                   </span>
-                                );
-                              })}
-                              {activeTagIds.length > 3 && (
-                                <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                  {t("andMore", {
-                                    count: activeTagIds.length - 3,
-                                  })}
+                                )}
+                              </div>
+                            )}
+                            {activeTagIds.length >= 2 && onToggleTagMode && (
+                              <div className="flex items-center justify-between px-1 pb-1">
+                                <span className="text-[10px] text-muted-foreground/70">
+                                  {t("tagFilterMode")}
                                 </span>
-                              )}
+                                <button
+                                  aria-label={t("tagFilterMode")}
+                                  aria-pressed={tagMode === "and"}
+                                  className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
+                                  onClick={onToggleTagMode}
+                                  type="button"
+                                >
+                                  {tagMode.toUpperCase()}
+                                </button>
+                              </div>
+                            )}
+                            <div className="px-1 pb-1">
+                              <div className="relative">
+                                <input
+                                  aria-label={t("tagSearchPlaceholder")}
+                                  className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                                  onChange={(e) => setTagSearch(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      setTagSearch("");
+                                      setDebouncedTagSearch("");
+                                      const tree = (
+                                        e.currentTarget as HTMLElement
+                                      ).closest(
+                                        '[role="tree"]'
+                                      ) as HTMLElement | null;
+                                      tree?.focus();
+                                    }
+                                  }}
+                                  placeholder={t("tagSearchPlaceholder")}
+                                  role="searchbox"
+                                  value={tagSearch}
+                                />
+                                {tagSearch && (
+                                  <button
+                                    className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                    onClick={() => {
+                                      setTagSearch("");
+                                      setDebouncedTagSearch("");
+                                    }}
+                                    type="button"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          )}
-                          {activeTagIds.length >= 2 && onToggleTagMode && (
-                            <div className="flex items-center justify-between px-1 pb-1">
-                              <span className="text-[10px] text-muted-foreground/70">
-                                {t("tagFilterMode")}
-                              </span>
+                            <div
+                              aria-label={t("sidebarTags")}
+                              className="flex-1 overflow-y-auto"
+                              onFocus={(e) => {
+                                const container = e.currentTarget;
+                                const currentFocus = document.activeElement;
+                                if (
+                                  currentFocus === container ||
+                                  !container.contains(currentFocus)
+                                ) {
+                                  const first = container.querySelector(
+                                    '[role="treeitem"]'
+                                  ) as HTMLElement | null;
+                                  if (first) {
+                                    const items =
+                                      container.querySelectorAll(
+                                        '[role="treeitem"]'
+                                      );
+                                    for (const item of items) {
+                                      (item as HTMLElement).setAttribute(
+                                        "tabindex",
+                                        "-1"
+                                      );
+                                    }
+                                    first.setAttribute("tabindex", "0");
+                                    first.focus();
+                                  }
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                handleTagTreeKeyDown(
+                                  e,
+                                  expandedTagIds,
+                                  setExpandedTagIds,
+                                  onToggleTag,
+                                  setTagSearch,
+                                  setDebouncedTagSearch
+                                );
+                              }}
+                              role="tree"
+                              tabIndex={0}
+                            >
+                              {(() => {
+                                const filtered = tags.filter((t) =>
+                                  debouncedTagSearch
+                                    ? t.name
+                                        .toLowerCase()
+                                        .includes(
+                                          debouncedTagSearch.toLowerCase()
+                                        )
+                                    : true
+                                );
+                                const allIds = new Set(
+                                  filtered.map((t) => t.id)
+                                );
+                                for (const t of filtered) {
+                                  let cur: number | null = t.parentId;
+                                  while (cur !== null) {
+                                    const currentId = cur;
+                                    if (allIds.has(currentId)) {
+                                      break;
+                                    }
+                                    const parent = tags.find(
+                                      (p) => p.id === currentId
+                                    );
+                                    if (parent) {
+                                      allIds.add(cur);
+                                      cur = parent.parentId;
+                                    } else {
+                                      break;
+                                    }
+                                  }
+                                }
+                                const visible = tags.filter((t) =>
+                                  allIds.has(t.id)
+                                );
+                                const tree = buildTagTree(visible);
+                                return renderTagTree(
+                                  tree,
+                                  0,
+                                  expandedTagIds,
+                                  (id) => {
+                                    const next = new Set(expandedTagIds);
+                                    if (next.has(id)) {
+                                      next.delete(id);
+                                    } else {
+                                      next.add(id);
+                                    }
+                                    setExpandedTagIds(next);
+                                  },
+                                  activeTagIds,
+                                  (nextId) => {
+                                    if (nextId !== null) {
+                                      onToggleTag?.(nextId);
+                                    }
+                                  },
+                                  (e, id, name) => {
+                                    e.preventDefault();
+                                    setTagCtx({
+                                      tagId: id,
+                                      tagName: name,
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                    });
+                                  },
+                                  handleSidebarDragOver,
+                                  (id) => setDragOverTagId(id),
+                                  (e) => {
+                                    if (
+                                      !(
+                                        e.currentTarget as HTMLElement
+                                      ).contains(e.relatedTarget as Node)
+                                    ) {
+                                      setDragOverTagId(null);
+                                    }
+                                  },
+                                  (e, id) => handleDropOnTag(e, id),
+                                  dragOverTagId,
+                                  i18n.language
+                                );
+                              })()}
+                            </div>
+                            {!tags.some((t) => t.photoCount > 0) && (
+                              <div className="px-1 py-1">
+                                {aiTagPipelineActive ? (
+                                  <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                                    <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                                    {aiTagStatusText}
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+                                    disabled={batchTagLoading}
+                                    onClick={handleBatchGenerateTags}
+                                    type="button"
+                                  >
+                                    <ScanSearch className="h-3.5 w-3.5" />
+                                    {t("tagBatchGenerate")}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="px-3 py-1">
+                            {aiTagPipelineActive ? (
+                              <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                                <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                                {aiTagStatusText}
+                              </div>
+                            ) : (
                               <button
-                                aria-label={t("tagFilterMode")}
-                                aria-pressed={tagMode === "and"}
-                                className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
-                                onClick={onToggleTagMode}
+                                className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
+                                disabled={batchTagLoading}
+                                onClick={handleBatchGenerateTags}
                                 type="button"
                               >
-                                {tagMode.toUpperCase()}
+                                <ScanSearch className="h-3.5 w-3.5" />
+                                {t("tagBatchGenerate")}
                               </button>
-                            </div>
-                          )}
-                          <div className="px-1 pb-1">
-                            <div className="relative">
-                              <input
-                                aria-label={t("tagSearchPlaceholder")}
-                                className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                                onChange={(e) => setTagSearch(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Escape") {
-                                    e.preventDefault();
-                                    setTagSearch("");
-                                    setDebouncedTagSearch("");
-                                    const tree = (
-                                      e.currentTarget as HTMLElement
-                                    ).closest(
-                                      '[role="tree"]'
-                                    ) as HTMLElement | null;
-                                    tree?.focus();
-                                  }
-                                }}
-                                placeholder={t("tagSearchPlaceholder")}
-                                role="searchbox"
-                                value={tagSearch}
-                              />
-                              {tagSearch && (
-                                <button
-                                  className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                                  onClick={() => {
-                                    setTagSearch("");
-                                    setDebouncedTagSearch("");
-                                  }}
-                                  type="button"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              )}
-                            </div>
+                            )}
                           </div>
-                          <div
-                            aria-label={t("sidebarTags")}
-                            className="flex-1 overflow-y-auto"
-                            onFocus={(e) => {
-                              const container = e.currentTarget;
-                              const currentFocus = document.activeElement;
-                              if (
-                                currentFocus === container ||
-                                !container.contains(currentFocus)
-                              ) {
-                                const first = container.querySelector(
-                                  '[role="treeitem"]'
-                                ) as HTMLElement | null;
-                                if (first) {
-                                  const items =
-                                    container.querySelectorAll(
-                                      '[role="treeitem"]'
-                                    );
-                                  for (const item of items) {
-                                    (item as HTMLElement).setAttribute(
-                                      "tabindex",
-                                      "-1"
-                                    );
-                                  }
-                                  first.setAttribute("tabindex", "0");
-                                  first.focus();
-                                }
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              handleTagTreeKeyDown(
-                                e,
-                                expandedTagIds,
-                                setExpandedTagIds,
-                                onToggleTag,
-                                setTagSearch,
-                                setDebouncedTagSearch
-                              );
-                            }}
-                            role="tree"
-                            tabIndex={0}
-                          >
-                            {(() => {
-                              const filtered = tags.filter((t) =>
-                                debouncedTagSearch
-                                  ? t.name
-                                      .toLowerCase()
-                                      .includes(
-                                        debouncedTagSearch.toLowerCase()
-                                      )
-                                  : true
-                              );
-                              const allIds = new Set(filtered.map((t) => t.id));
-                              for (const t of filtered) {
-                                let cur = t.parentId;
-                                while (cur) {
-                                  if (allIds.has(cur)) {
-                                    break;
-                                  }
-                                  const parent = tags.find((p) => p.id === cur);
-                                  if (parent) {
-                                    allIds.add(cur);
-                                    cur = parent.parentId;
-                                  } else {
-                                    break;
-                                  }
-                                }
-                              }
-                              const visible = tags.filter((t) =>
-                                allIds.has(t.id)
-                              );
-                              const tree = buildTagTree(visible);
-                              return renderTagTree(
-                                tree,
-                                0,
-                                expandedTagIds,
-                                (id) => {
-                                  const next = new Set(expandedTagIds);
-                                  if (next.has(id)) {
-                                    next.delete(id);
-                                  } else {
-                                    next.add(id);
-                                  }
-                                  setExpandedTagIds(next);
-                                },
-                                activeTagIds,
-                                (nextId) => {
-                                  if (nextId !== null) {
-                                    onToggleTag?.(nextId);
-                                  }
-                                },
-                                (e, id, name) => {
-                                  e.preventDefault();
-                                  setTagCtx({
-                                    tagId: id,
-                                    tagName: name,
-                                    x: e.clientX,
-                                    y: e.clientY,
-                                  });
-                                },
-                                handleSidebarDragOver,
-                                (id) => setDragOverTagId(id),
-                                (e) => {
-                                  if (
-                                    !(e.currentTarget as HTMLElement).contains(
-                                      e.relatedTarget as Node
-                                    )
-                                  ) {
-                                    setDragOverTagId(null);
-                                  }
-                                },
-                                (e, id) => handleDropOnTag(e, id),
-                                dragOverTagId,
-                                i18n.language
-                              );
-                            })()}
-                          </div>
-                          {!tags.some((t) => t.photoCount > 0) && (
-                            <div className="px-1 py-1">
-                              {aiTagPipelineActive ? (
-                                <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
-                                  <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
-                                  {aiTagStatusText}
-                                </div>
-                              ) : (
-                                <button
-                                  className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
-                                  disabled={batchTagLoading}
-                                  onClick={handleBatchGenerateTags}
-                                  type="button"
-                                >
-                                  <ScanSearch className="h-3.5 w-3.5" />
-                                  {t("tagBatchGenerate")}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className="px-3 py-1">
-                          {aiTagPipelineActive ? (
-                            <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
-                              <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
-                              {aiTagStatusText}
-                            </div>
-                          ) : (
-                            <button
-                              className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
-                              disabled={batchTagLoading}
-                              onClick={handleBatchGenerateTags}
-                              type="button"
-                            >
-                              <ScanSearch className="h-3.5 w-3.5" />
-                              {t("tagBatchGenerate")}
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
-                      {t("aiTagDisclaimer")}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="px-3 py-2">
-              {/* Content group */}
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname === "/dashboard"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/dashboard" })}
-              >
-                <LayoutDashboard className="mr-2 inline h-3.5 w-3.5" />
-                {t("sidebarDashboard")}
-              </button>
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  dragOverAlbumNav
-                    ? "animate-pulse bg-primary/20 text-primary ring-1 ring-primary/50"
-                    : location.pathname.startsWith("/albums")
-                      ? "nav-item-active bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/albums" as const })}
-                onDragEnter={() => setDragOverAlbumNav(true)}
-                onDragLeave={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                    setDragOverAlbumNav(false);
-                  }
-                }}
-                onDragOver={handleSidebarDragOver}
-                onDrop={handleDropOnAlbumNav}
-              >
-                <Album className="mr-2 inline h-3.5 w-3.5" />
-                {t("sidebarAlbums")}
-                {dragOverAlbumNav && (
-                  <span className="ml-auto text-[10px] text-primary">
-                    {t("tagDropHint")}
-                  </span>
+                        ))}
+                      <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
+                        {t("aiTagDisclaimer")}
+                      </p>
+                    </div>
+                  </>
                 )}
-              </button>
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname === "/people"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/people" })}
-              >
-                <Users className="mr-2 inline h-3.5 w-3.5" />
-                {t("people")}
-              </button>
-
-              <div className="my-1.5 border-border border-t" />
-
-              {/* Tool group */}
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname === "/duplicates"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/duplicates" })}
-              >
-                <ScanSearch className="mr-2 inline h-3.5 w-3.5" />
-                {t("duplicates")}
-              </button>
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname.startsWith("/cull")
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/cull" })}
-              >
-                <Swords className="mr-2 inline h-3.5 w-3.5" />
-                {t("cull")}
-              </button>
-              <button
-                className={`flex w-full items-center justify-between rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname === "/trash"
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/trash" })}
-              >
-                <span>
-                  <Trash2 className="mr-2 inline h-3.5 w-3.5" />
-                  {t("trash")}
-                </span>
-                {trashCount > 0 && (
-                  <span className="rounded-full bg-destructive/10 px-1.5 text-[10px] text-destructive">
-                    {trashCount > 999 ? "999+" : trashCount}
-                  </span>
-                )}
-              </button>
-
-              <div className="my-1.5 border-border border-t" />
-
-              {/* System group */}
-              <button
-                className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
-                  location.pathname.startsWith("/settings")
-                    ? "nav-item-active bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                }`}
-                onClick={() => navigate({ to: "/settings" })}
-              >
-                <Settings className="mr-2 inline h-3.5 w-3.5" />
-                {t("sidebarSettings")}
-              </button>
             </div>
           </div>
         )}

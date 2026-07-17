@@ -64,9 +64,11 @@ describe("Sidebar", () => {
     totalPhotos: 1250,
   };
 
-  it("renders app name", () => {
+  it("uses the app name as the primary navigation label", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByText("AI 图片管理器")).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "AI 图片管理器" })
+    ).toBeInTheDocument();
   });
 
   it("shows total photo count", () => {
@@ -83,7 +85,9 @@ describe("Sidebar", () => {
 
   it("shows all photos button", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByText("全部照片")).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "全部照片" }).length
+    ).toBeGreaterThan(0);
   });
 
   it("renders folder list", () => {
@@ -140,7 +144,7 @@ describe("Sidebar", () => {
     expect(await screen.findByText("Travel")).toBeInTheDocument();
   });
 
-  it("keeps folder badges in the collapsed sidebar", () => {
+  it("keeps the primary navigation rail when resources are collapsed", () => {
     render(
       <Sidebar
         {...baseProps}
@@ -158,13 +162,14 @@ describe("Sidebar", () => {
     );
 
     expect(
-      screen
-        .getByRole("button", { name: PHOTOS_TITLE_PATTERN })
-        .querySelector('[data-folder-badge="true"]')
-    ).not.toBeNull();
+      screen.getByRole("button", { name: "全部照片" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: PHOTOS_TITLE_PATTERN })
+    ).not.toBeInTheDocument();
   });
 
-  it("renders a custom folder icon in both sidebar modes", () => {
+  it("renders a custom folder icon in the resource panel", () => {
     const folder = {
       appearanceColor: "#DC2626",
       appearanceIcon: "camera" as const,
@@ -174,16 +179,7 @@ describe("Sidebar", () => {
       path: "C:/Photos",
       photoCount: 500,
     };
-    const { rerender } = render(
-      <Sidebar {...baseProps} collapsed folders={[folder]} />
-    );
-    expect(
-      screen
-        .getByRole("button", { name: PHOTOS_TITLE_PATTERN })
-        .querySelector("svg")
-    ).not.toBeNull();
-
-    rerender(<Sidebar {...baseProps} folders={[folder]} />);
+    render(<Sidebar {...baseProps} folders={[folder]} />);
     expect(
       screen.getByText("Photos").closest("button")?.querySelector("svg")
     ).not.toBeNull();
@@ -266,7 +262,7 @@ describe("Sidebar", () => {
     );
   });
 
-  it("shows only root folders in the collapsed sidebar", () => {
+  it("hides folder resources in the collapsed sidebar", () => {
     render(
       <Sidebar
         {...baseProps}
@@ -291,8 +287,8 @@ describe("Sidebar", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: PHOTOS_TITLE_PATTERN })
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: PHOTOS_TITLE_PATTERN })
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Travel/ })
     ).not.toBeInTheDocument();
@@ -358,10 +354,8 @@ describe("Sidebar", () => {
 
   it("has dashboard and settings links", () => {
     render(<Sidebar {...baseProps} />);
-    const allButtons = screen.getAllByRole("button");
-    const buttonTexts = allButtons.map((btn) => btn.textContent);
-    expect(buttonTexts.some((t) => t?.includes("仪表盘"))).toBe(true);
-    expect(buttonTexts.some((t) => t?.includes("设置"))).toBe(true);
+    expect(screen.getByRole("button", { name: "仪表盘" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
   });
 
   it("shows automatic tag status instead of a batch action while AI is pending", () => {
@@ -374,6 +368,7 @@ describe("Sidebar", () => {
       },
     });
     render(<Sidebar {...baseProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "标签" }));
 
     expect(screen.getByText("AI 索引完成后将自动生成标签")).toBeInTheDocument();
     expect(

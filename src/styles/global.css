@@ -413,6 +413,44 @@
     var(--gallery-canvas-shadow);
 }
 
+.sidebar-rail {
+  background: color-mix(in srgb, var(--workspace-background) 92%, transparent);
+}
+
+.home-toolbar-context {
+  max-width: 220px;
+}
+
+.home-toolbar-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1120px) {
+  .home-grid-size-control {
+    display: none;
+  }
+
+  .photo-detail-panel-shell {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
+    box-shadow: -16px 0 36px -24px rgb(0 0 0 / 0.55);
+  }
+}
+
+@media (max-width: 860px) {
+  .home-toolbar-context,
+  .home-image-search-label {
+    display: none;
+  }
+
+  .home-toolbar-actions {
+    gap: 2px;
+  }
+}
+
 @media (max-width: 840px), (max-height: 560px) {
   .home-workspace-content {
     gap: 4px;
@@ -1154,13 +1192,16 @@ html.transitioning [data-theme-sensitive] {
   display: flex;
   align-items: center;
   justify-content: center;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 24px);
   padding: 0.45rem;
   overflow: visible;
   background: color-mix(in srgb, var(--surface) 85%, transparent);
   border: 1px solid var(--border);
   border-radius: 15px;
-  box-shadow: 0 10px 25px 0 rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 16px 38px -18px rgb(0 0 0 / 0.68),
+    0 4px 12px -6px rgb(0 0 0 / 0.42),
+    inset 0 1px 0 rgb(255 255 255 / 0.05);
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
   backdrop-filter: blur(12px) saturate(1.2);
 }
@@ -1332,6 +1373,40 @@ html.transitioning [data-theme-sensitive] {
   align-items: center;
   justify-content: center;
   width: 18px;
+}
+
+@media (max-width: 720px) {
+  .selection-action-layer {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .selection-menu {
+    max-width: 100%;
+    padding: 0.3rem;
+  }
+
+  .selection-menu-link,
+  .selection-menu-link:hover,
+  .selection-menu-link:focus-visible {
+    width: 40px;
+  }
+
+  .selection-menu-title {
+    display: none;
+  }
+
+  .selection-menu-icon,
+  .selection-menu-link-edge .selection-menu-icon {
+    right: auto;
+    left: 8px;
+  }
+
+  .selection-menu-count {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ── 自定义开关组件 ──────────────────────────────── */

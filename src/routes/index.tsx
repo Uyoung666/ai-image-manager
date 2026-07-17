@@ -20,8 +20,15 @@ import { clearImageLoadCache } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
-import type { SortField, SortOrder } from "@/components/PhotoGrid";
-import { PhotoGrid } from "@/components/PhotoGrid";
+import {
+  GRID_COLUMN_WIDTH_KEY,
+  GRID_COLUMN_WIDTH_MAX,
+  GRID_COLUMN_WIDTH_MIN,
+  loadGridColumnWidth,
+  PhotoGrid,
+  type SortField,
+  type SortOrder,
+} from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import {
@@ -31,6 +38,7 @@ import {
 } from "@/components/SearchBar";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
+import { SortDropdown } from "@/components/SortDropdown";
 import { CullStartDialog } from "@/components/CullStartDialog";
 import { ShareDialog } from "@/components/ShareDialog";
 import { StatusBar } from "@/components/StatusBar";
@@ -40,6 +48,7 @@ import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
+import { useFolders } from "@/hooks/useFolders";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
@@ -121,6 +130,7 @@ function HomePage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
+  const [gridColumnWidth, setGridColumnWidth] = useState(loadGridColumnWidth);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [showDrillBanner, setShowDrillBanner] = useState(false);
   const [showAiIndexHint, setShowAiIndexHint] = useState(false);
@@ -326,6 +336,7 @@ function HomePage() {
     order: sortOrder,
     enabled: !isSearching,
   });
+  const { data: folders = [] } = useFolders();
 
   const { data: aiStatus } = useAiStatus();
   const previousCoverageStateRef = useRef(aiStatus?.coverageState);
@@ -633,6 +644,28 @@ function HomePage() {
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
+  const showAiTaskStatus = Boolean(
+    aiStatus?.isEmbedding || aiStatus?.lastError
+  );
+  const activeFolder = folders.find(
+    (folder) => folder.id === filter.activeFolderId
+  );
+  let galleryContextLabel = activeFolder?.displayName ?? t("sidebarAllPhotos");
+  if (filter.activeTagIds.length > 0) {
+    galleryContextLabel = `${t("sidebarTags")} · ${filter.activeTagIds.length}`;
+  }
+  if (filter.favoriteOnly) {
+    galleryContextLabel = t("favorite");
+  }
+
+  const handleGridColumnWidthChange = useCallback((width: number) => {
+    setGridColumnWidth(width);
+    try {
+      localStorage.setItem(GRID_COLUMN_WIDTH_KEY, String(width));
+    } catch {
+      // Keep the in-memory preference when persistence is unavailable.
+    }
+  }, []);
 
   // Keep Sidebar's totalPhotos display in sync
   useEffect(() => {
@@ -1395,6 +1428,18 @@ function HomePage() {
           aiStatus={aiStatus ?? null}
           colorHex={colorHex ?? undefined}
           imageSearchActive={searchMode === "image"}
+          leadingContent={
+            <div className="flex min-w-[148px] max-w-[220px] items-center gap-2 pr-1">
+              <div className="min-w-0">
+                <div className="truncate font-medium text-[13px] text-foreground">
+                  {galleryContextLabel}
+                </div>
+                <div className="text-[10px] text-muted-foreground/70 tabular-nums">
+                  {t("photosCount", { count: totalPhotos.toLocaleString() })}
+                </div>
+              </div>
+            </div>
+          }
           onClear={() => {
             searchGenerationRef.current++;
             pendingSemanticRefreshRef.current = null;
@@ -1415,6 +1460,30 @@ function HomePage() {
           resultCount={searchQuery ? photos.length : undefined}
           searchMode={searchMode}
           searchTime={searchTime}
+          trailingContent={
+            <>
+              <SortDropdown
+                onChange={handleSortChange}
+                order={sortOrder}
+                sort={sortField}
+              />
+              <label className="home-grid-size-control flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+                <span>{t("gridSize")}</span>
+                <input
+                  aria-label={t("gridSize")}
+                  className="h-4 w-16 cursor-pointer accent-primary"
+                  max={GRID_COLUMN_WIDTH_MAX}
+                  min={GRID_COLUMN_WIDTH_MIN}
+                  onChange={(event) =>
+                    handleGridColumnWidthChange(Number(event.target.value))
+                  }
+                  step={10}
+                  type="range"
+                  value={gridColumnWidth}
+                />
+              </label>
+            </>
+          }
         />
         {searchMode === "text" &&
           searchSemantic &&
@@ -1458,7 +1527,7 @@ function HomePage() {
           </div>
         )}
         {hasPhotos ? (
-          <div className="flex min-h-0 flex-1">
+          <div className="home-gallery-body relative flex min-h-0 flex-1">
             <div
               className={`relative flex min-w-0 flex-1 ${
                 searchResultFade ? "search-results-enter" : ""
@@ -1478,6 +1547,7 @@ function HomePage() {
                 </div>
               )}
               <PhotoGrid
+                columnWidth={gridColumnWidth}
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
                 gridRef={gridRef}
@@ -1498,13 +1568,13 @@ function HomePage() {
                 onKeyboardSelect={handleKeyboardSelect}
                 onMarqueeSelect={wrappedMarqueeSelect}
                 onSelect={handleSelect}
-                onSortChange={handleSortChange}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
                 isStale={isPhotosStale}
                 routeKey={routeKey}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
+                showToolbar={false}
                 sort={sortField}
                 sortOrder={sortOrder}
               />
@@ -1568,6 +1638,7 @@ function HomePage() {
                 }}
                 onUploadToCloud={handleUploadSelectedToCloud}
                 selectedCount={selectedIds.size}
+                bottomOffset={showAiTaskStatus ? 44 : 16}
               />
             </div>
             <PhotoDetailPanel
@@ -1585,12 +1656,14 @@ function HomePage() {
             <Welcome disabled={false} onAddFolder={filter.handleAddFolder} />
           </div>
         )}
-        <StatusBar
-          aiStatus={aiStatus ?? null}
-          className="absolute right-0 bottom-0 left-0 z-50"
-          selectedCount={selectedIds.size}
-          totalPhotos={totalPhotos}
-        />
+        {showAiTaskStatus && (
+          <StatusBar
+            aiStatus={aiStatus ?? null}
+            className="absolute right-0 bottom-0 left-0 z-50"
+            selectedCount={selectedIds.size}
+            totalPhotos={totalPhotos}
+          />
+        )}
       </div>
       {lightboxIndex >= 0 && (
         <PhotoLightbox

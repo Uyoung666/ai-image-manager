@@ -2,6 +2,7 @@ import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
   forwardRef,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -69,12 +70,14 @@ interface SearchBarProps {
   } | null;
   colorHex?: string | null;
   imageSearchActive?: boolean;
+  leadingContent?: ReactNode;
   onClear: () => void;
   onImageSearch?: (imagePath: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
   resultCount?: number;
   searchMode?: "text" | "image" | "exif" | "color" | null;
   searchTime?: number;
+  trailingContent?: ReactNode;
 }
 
 export interface SearchBarHandle {
@@ -89,12 +92,14 @@ export const SearchBar = memo(
         aiStatus,
         colorHex,
         imageSearchActive,
+        leadingContent,
         onSearch,
         onClear,
         onImageSearch,
         resultCount,
         searchMode,
         searchTime,
+        trailingContent,
       }: SearchBarProps,
       ref
     ) => {
@@ -700,10 +705,18 @@ export const SearchBar = memo(
             </div>
           )}
 
-          <div className="px-4 py-3">
+          <div className="px-3 py-2">
             {/* Search input row */}
-            <div className="flex items-center gap-2">
-              <form className="relative flex-1" onSubmit={handleSubmit}>
+            <div className="flex min-h-9 items-center gap-2">
+              {leadingContent && (
+                <div className="home-toolbar-context min-w-0 flex-shrink-0">
+                  {leadingContent}
+                </div>
+              )}
+              <form
+                className="relative min-w-[180px] flex-1 xl:max-w-[720px]"
+                onSubmit={handleSubmit}
+              >
                 <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
                 <input
                   aria-activedescendant={
@@ -777,7 +790,9 @@ export const SearchBar = memo(
                         type="button"
                       >
                         <ImageUp className="h-4 w-4" />
-                        <span>{t("searchModeImage")}</span>
+                        <span className="home-image-search-label">
+                          {t("searchModeImage")}
+                        </span>
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>{t("imageSearchTitle")}</TooltipContent>
@@ -811,50 +826,40 @@ export const SearchBar = memo(
                 </TooltipTrigger>
                 <TooltipContent>{t("exifFilterTitle")}</TooltipContent>
               </Tooltip>
+              {aiStatus?.coverageState &&
+                aiStatus.coverageState !== "ready" &&
+                aiStatus.coverageState !== "error" && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        aria-label={t("semanticSearchPartial", {
+                          indexed: aiStatus.indexedPhotos ?? 0,
+                          total: aiStatus.totalPhotos ?? 0,
+                        })}
+                        className="flex h-9 w-5 items-center justify-center text-amber-500"
+                        role="status"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t("semanticSearchPartial", {
+                        indexed: aiStatus.indexedPhotos ?? 0,
+                        total: aiStatus.totalPhotos ?? 0,
+                      })}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              {trailingContent && (
+                <div className="home-toolbar-actions ml-auto flex min-w-0 items-center gap-2">
+                  {trailingContent}
+                </div>
+              )}
             </div>
 
-            {aiStatus?.coverageState && aiStatus.coverageState !== "ready" && (
+            {aiStatus?.coverageState === "error" && (
               <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
-                {aiStatus.coverageState === "error"
-                  ? t("semanticSearchUnavailable")
-                  : t("semanticSearchPartial", {
-                      indexed: aiStatus.indexedPhotos ?? 0,
-                      total: aiStatus.totalPhotos ?? 0,
-                    })}
-              </div>
-            )}
-
-            {/* Time quick presets */}
-            {!imageSearchActive && (
-              <div className="mt-2 flex items-center gap-1.5">
-                <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
-                {timePresets.map((preset) => (
-                  <button
-                    className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
-                    key={preset.label}
-                    onClick={() => {
-                      const range = preset.getRange();
-                      const newFilters: ExifFilters = {
-                        ...filters,
-                        dateFrom: range.dateFrom,
-                        dateTo: range.dateTo,
-                      };
-                      setFilters(newFilters);
-                      const q = query.trim();
-                      queueMicrotask(() =>
-                        onSearch(
-                          q,
-                          Object.values(newFilters).some((v) => v)
-                            ? newFilters
-                            : undefined
-                        )
-                      );
-                    }}
-                    type="button"
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+                {t("semanticSearchUnavailable")}
               </div>
             )}
 
@@ -1554,6 +1559,30 @@ export const SearchBar = memo(
             >
               {!query.trim() ? (
                 <>
+                  <div className="flex flex-wrap items-center gap-1.5 border-border border-b px-3 py-2">
+                    <Clock className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
+                    {timePresets.map((preset) => (
+                      <button
+                        className="rounded-[4px] border border-border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                        key={preset.label}
+                        onClick={() => {
+                          const range = preset.getRange();
+                          const nextFilters: ExifFilters = {
+                            ...filters,
+                            dateFrom: range.dateFrom,
+                            dateTo: range.dateTo,
+                          };
+                          setFilters(nextFilters);
+                          setShowSuggestions(false);
+                          queueMicrotask(() => onSearch("", nextFilters));
+                        }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        type="button"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                   <div className="px-3 pt-2.5 pb-1.5">
                     <div className="font-medium text-[12px] text-foreground">
                       {t("searchStarterTitle")}
@@ -1721,6 +1750,8 @@ export const SearchBar = memo(
     if (prevProps.resultCount !== nextProps.resultCount) return false;
     if (prevProps.searchMode !== nextProps.searchMode) return false;
     if (prevProps.searchTime !== nextProps.searchTime) return false;
+    if (prevProps.leadingContent !== nextProps.leadingContent) return false;
+    if (prevProps.trailingContent !== nextProps.trailingContent) return false;
     return true;
   }
 );
