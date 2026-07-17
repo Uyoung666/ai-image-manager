@@ -1093,8 +1093,7 @@ i18n.use(initReactI18next).init({
         noSuggestedTags: "未识别到合适的标签",
         retry: "重试",
         confidence: "置信度: {{value}}%",
-        quickPreviewHelp:
-          "Space / Esc 关闭 · ← → 切换 · R 旋转 · 滚轮缩放 · 双击还原",
+        quickPreviewHelp: "Space / Esc 关闭 · ← → 切换",
         albumsCount: "{{count}} 个相册",
         albumNewHint: "创建一个手动整理的照片集合",
         smartAlbum: "智能相册",
@@ -2598,8 +2597,7 @@ i18n.use(initReactI18next).init({
         noSuggestedTags: "No suitable tags detected",
         retry: "Retry",
         confidence: "Confidence: {{value}}%",
-        quickPreviewHelp:
-          "Space / Esc to close · ← → to switch · R to rotate · Wheel to zoom · Double-click to reset",
+        quickPreviewHelp: "Space / Esc to close · ← → to switch",
         albumsCount: "{{count}} albums",
         albumNewHint: "Create a collection to organize manually",
         smartAlbum: "Smart Album",

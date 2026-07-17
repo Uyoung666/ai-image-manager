@@ -550,6 +550,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           ref: zoomRef,
           maxZoomPixelRatio: 5,
           scrollToZoom: true,
+          wheelZoomDistanceFactor: 400,
         }}
       />
       {infoPanelVisible &&
