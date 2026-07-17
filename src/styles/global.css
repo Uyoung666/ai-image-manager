@@ -417,6 +417,86 @@
   background: color-mix(in srgb, var(--workspace-background) 92%, transparent);
 }
 
+.sidebar-resize-handle::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  content: "";
+  background: transparent;
+  transition: background-color 140ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:active::after {
+  background: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.resource-tree-scroll {
+  padding-bottom: 20px;
+}
+
+.resource-tree-scroll[data-bottom-fade="true"] {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+}
+
+.home-unified-toolbar {
+  background: transparent;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.035);
+}
+
+.home-gallery-toolbar-layer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 60;
+  background: var(--gallery-canvas);
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    backdrop-filter 160ms ease;
+}
+
+.home-gallery-toolbar-layer.is-scrolled {
+  background: color-mix(in srgb, var(--gallery-canvas) 82%, transparent);
+  box-shadow: 0 8px 24px -20px rgb(0 0 0 / 0.75);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.light .home-unified-toolbar {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5);
+}
+
+.light .home-gallery-toolbar-layer.is-scrolled {
+  background: color-mix(in srgb, var(--gallery-canvas) 86%, transparent);
+}
+
+.home-search-input {
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  -webkit-backdrop-filter: blur(8px) saturate(1.1);
+  backdrop-filter: blur(8px) saturate(1.1);
+}
+
+.home-search-input.is-active {
+  background: color-mix(in srgb, var(--card) 98%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .home-toolbar-context {
   max-width: 220px;
 }

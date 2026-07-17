@@ -51,6 +51,7 @@ interface PhotoGridProps {
   onEndReached?: () => void;
   onKeyboardSelect?: (id: number) => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
@@ -65,6 +66,7 @@ interface PhotoGridProps {
   showToolbar?: boolean;
   sort?: SortField;
   sortOrder?: SortOrder;
+  topInset?: number;
 }
 
 const MIN_COLUMNS = 2;
@@ -121,8 +123,10 @@ export const PhotoGrid = memo(
     onToggleFavorite,
     onKeyboardSelect,
     onMarqueeSelect,
+    onScrollTopChange,
     onBackgroundClick,
     showToolbar = true,
+    topInset = 0,
   }: PhotoGridProps) {
     const { t, i18n } = useTranslation();
     const [internalColumnWidth, setInternalColumnWidth] =
@@ -551,7 +555,7 @@ export const PhotoGrid = memo(
           }}
         >
           <MasonryGrid
-            className={`scrollbar-thin px-2 ${showToolbar ? "pt-12" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
+            className={`scrollbar-thin px-2 ${showToolbar ? "pt-12" : topInset > 0 ? "" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
             columnCount={columnCount}
             containerWidth={containerWidth - 16}
             gap={GAP}
@@ -563,11 +567,13 @@ export const PhotoGrid = memo(
             items={photos}
             onEndReached={onEndReached}
             onMarqueeSelect={onMarqueeSelect}
+            onScrollTopChange={onScrollTopChange}
             ref={gridRef}
             renderItem={renderItem}
             routeKey={routeKey}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
+            topInset={topInset}
           />
         </div>
 
@@ -624,6 +630,12 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.showToolbar !== nextProps.showToolbar) {
+      return false;
+    }
+    if (prevProps.onScrollTopChange !== nextProps.onScrollTopChange) {
+      return false;
+    }
+    if (prevProps.topInset !== nextProps.topInset) {
       return false;
     }
     return true;

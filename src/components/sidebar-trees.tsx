@@ -2,15 +2,15 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight } from "lucide-react";
 import type React from "react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getTagDisplayName } from "@/localization/tag-display";
-import type { Folder as FolderType } from "@/types/photo";
-import { FolderBadge } from "./FolderBadge";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getTagDisplayName } from "@/localization/tag-display";
+import type { Folder as FolderType } from "@/types/photo";
+import { FolderBadge } from "./FolderBadge";
 
 export interface TagInfo {
   color: string | null;
@@ -192,6 +192,7 @@ export function FolderTree({
 }: FolderTreeProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingFocusRef = useRef(false);
+  const [hasMoreBelow, setHasMoreBelow] = useState(false);
   const visibleNodes = useMemo(
     () => flattenVisibleFolderTree(nodes, expandedIds),
     [expandedIds, nodes]
@@ -210,6 +211,31 @@ export function FolderTree({
   const virtualItems = virtualizer.getVirtualItems();
   const virtualStartIndex = virtualItems[0]?.index ?? -1;
   const virtualEndIndex = virtualItems.at(-1)?.index ?? -1;
+
+  const updateBottomFade = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      setHasMoreBelow(false);
+      return;
+    }
+    setHasMoreBelow(
+      element.scrollHeight - element.scrollTop - element.clientHeight > 2
+    );
+  }, []);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      return;
+    }
+    updateBottomFade();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateBottomFade);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [updateBottomFade, visibleNodes]);
 
   useEffect(() => {
     if (visibleNodes.some((item) => item.node.folder.id === focusedId)) {
@@ -431,8 +457,10 @@ export function FolderTree({
   return (
     <div
       aria-label={label}
-      className="min-h-0 flex-1 overflow-y-auto"
+      className="resource-tree-scroll min-h-0 flex-1 overflow-y-auto"
+      data-bottom-fade={hasMoreBelow}
       data-virtualized={shouldVirtualize}
+      onScroll={updateBottomFade}
       ref={scrollRef}
       role="tree"
     >
@@ -589,4 +617,3 @@ export function renderTagTree(
       : [row];
   });
 }
-

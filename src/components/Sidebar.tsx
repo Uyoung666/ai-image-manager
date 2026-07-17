@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Album,
-  ChevronDown,
   CircleHelp,
   Images,
   LayoutDashboard,
@@ -10,10 +9,10 @@ import {
   PanelLeftOpen,
   Plus,
   ScanSearch,
+  Search,
   Settings,
   Star,
   Swords,
-  Tag,
   Trash2,
   Users,
   X,
@@ -32,11 +31,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -51,9 +45,30 @@ import {
   buildFolderTree,
   buildTagTree,
   FolderTree,
+  type FolderTreeNode,
   renderTagTree,
   type TagInfo,
 } from "./sidebar-trees";
+
+const RESOURCE_PANEL_DEFAULT_WIDTH = 232;
+const RESOURCE_PANEL_MIN_WIDTH = 192;
+const RESOURCE_PANEL_MAX_WIDTH = 320;
+const RESOURCE_PANEL_WIDTH_KEY = "sidebar-resource-panel-width";
+
+function loadResourcePanelWidth() {
+  try {
+    const stored = Number(localStorage.getItem(RESOURCE_PANEL_WIDTH_KEY));
+    if (Number.isFinite(stored)) {
+      return Math.min(
+        RESOURCE_PANEL_MAX_WIDTH,
+        Math.max(RESOURCE_PANEL_MIN_WIDTH, stored)
+      );
+    }
+  } catch {
+    // Use the default width when storage is unavailable.
+  }
+  return RESOURCE_PANEL_DEFAULT_WIDTH;
+}
 
 function SidebarTooltip({
   children,
@@ -162,6 +177,7 @@ export function Sidebar({
     null
   );
   const [tags, setTags] = useState<TagInfo[]>([]);
+  const [folderSearch, setFolderSearch] = useState("");
   const [tagSearch, setTagSearch] = useState("");
   const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
   const [trashCount, setTrashCount] = useState(0);
@@ -193,8 +209,9 @@ export function Sidebar({
   const [dragOverTagId, setDragOverTagId] = useState<number | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
   const [dragOverAlbumNav, setDragOverAlbumNav] = useState(false);
-  const [foldersCollapsed, setFoldersCollapsed] = useState(false);
-  const [tagsCollapsed, setTagsCollapsed] = useState(false);
+  const [resourcePanelWidth, setResourcePanelWidth] = useState(
+    loadResourcePanelWidth
+  );
   const [resourceView, setResourceView] = useState<"folders" | "tags">(
     "folders"
   );
@@ -219,6 +236,8 @@ export function Sidebar({
   const [newChildTagName, setNewChildTagName] = useState("");
   const childInputRef = useRef<HTMLInputElement>(null);
   const childComposingRef = useRef(false);
+  const tagTreeScrollRef = useRef<HTMLDivElement>(null);
+  const [tagTreeHasMoreBelow, setTagTreeHasMoreBelow] = useState(false);
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const [batchTagLoading, setBatchTagLoading] = useState(false);
   const { data: aiStatus } = useAiStatus();
@@ -748,6 +767,36 @@ export function Sidebar({
   }, [onToggleCollapse]);
 
   const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
+  const folderSearchResult = useMemo(() => {
+    const query = folderSearch.trim().toLocaleLowerCase();
+    if (!query) {
+      return { ancestorIds: new Set<number>(), nodes: folderTree };
+    }
+
+    const ancestorIds = new Set<number>();
+    const filterNodes = (nodes: FolderTreeNode[]): FolderTreeNode[] =>
+      nodes.flatMap((node) => {
+        const children = filterNodes(node.children);
+        const matches = node.folder.displayName
+          .toLocaleLowerCase()
+          .includes(query);
+        if (!(matches || children.length > 0)) {
+          return [];
+        }
+        if (children.length > 0) {
+          ancestorIds.add(node.folder.id);
+        }
+        return [{ ...node, children }];
+      });
+
+    return { ancestorIds, nodes: filterNodes(folderTree) };
+  }, [folderSearch, folderTree]);
+  const visibleExpandedFolderIds = useMemo(() => {
+    if (!folderSearch.trim()) {
+      return expandedFolderIds;
+    }
+    return new Set([...expandedFolderIds, ...folderSearchResult.ancestorIds]);
+  }, [expandedFolderIds, folderSearch, folderSearchResult.ancestorIds]);
   const appearanceFolder =
     folders.find((folder) => folder.id === appearanceFolderId) ?? null;
   // Auto-expand each root parent once without overwriting the user's choices.
@@ -776,6 +825,85 @@ export function Sidebar({
     });
   }, [folderTree]);
 
+  const updateTagTreeFade = useCallback(() => {
+    const element = tagTreeScrollRef.current;
+    if (!element) {
+      setTagTreeHasMoreBelow(false);
+      return;
+    }
+    setTagTreeHasMoreBelow(
+      element.scrollHeight - element.scrollTop - element.clientHeight > 2
+    );
+  }, []);
+
+  useEffect(() => {
+    if (resourceView !== "tags") {
+      return;
+    }
+    const element = tagTreeScrollRef.current;
+    if (!element) {
+      return;
+    }
+    updateTagTreeFade();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateTagTreeFade);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [
+    activeTagIds,
+    resourcePanelWidth,
+    resourceView,
+    tagSearch,
+    tags,
+    updateTagTreeFade,
+  ]);
+
+  const handleResourceResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = resourcePanelWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const nextWidth = Math.min(
+          RESOURCE_PANEL_MAX_WIDTH,
+          Math.max(
+            RESOURCE_PANEL_MIN_WIDTH,
+            startWidth + moveEvent.clientX - startX
+          )
+        );
+        setResourcePanelWidth(nextWidth);
+      };
+      const handlePointerUp = (upEvent: PointerEvent) => {
+        const nextWidth = Math.min(
+          RESOURCE_PANEL_MAX_WIDTH,
+          Math.max(
+            RESOURCE_PANEL_MIN_WIDTH,
+            startWidth + upEvent.clientX - startX
+          )
+        );
+        setResourcePanelWidth(nextWidth);
+        try {
+          localStorage.setItem(RESOURCE_PANEL_WIDTH_KEY, String(nextWidth));
+        } catch {
+          // Keep the in-memory width when storage is unavailable.
+        }
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [resourcePanelWidth]
+  );
+
   function handleFolderContextMenu(
     e: React.MouseEvent,
     folderId: number,
@@ -790,11 +918,10 @@ export function Sidebar({
   return (
     <>
       <div
-        className={`sidebar-bg flex h-full flex-row overflow-hidden ${
-          collapsed ? "w-12" : "w-[calc(48px+clamp(240px,20vw,300px))]"
-        }`}
+        className="sidebar-bg relative flex h-full flex-row overflow-hidden"
         onDragOver={handleSidebarDragOver}
         onDrop={handleSidebarDrop}
+        style={{ width: collapsed ? 48 : 48 + resourcePanelWidth }}
       >
         <nav
           aria-label={t("appName")}
@@ -905,25 +1032,12 @@ export function Sidebar({
         </nav>
 
         {!collapsed && (
-          <div className="flex h-full w-[clamp(240px,20vw,300px)] select-none flex-col">
-            {/* Header */}
-            <div className="flex items-center gap-2 px-4 py-3">
-              <Images className="h-4 w-4 text-primary" />
-              <div className="min-w-0">
-                <p className="font-semibold text-[13px] text-foreground">
-                  {t("sidebarAllPhotos")}
-                </p>
-                <p className="text-[10px] text-muted-foreground/70 tabular-nums">
-                  {t("photosCount", { count: totalPhotos.toLocaleString() })}
-                </p>
-              </div>
-            </div>
-
-            {/* Separator */}
-            <div className="mx-3 border-border border-t" />
-
+          <div
+            className="flex h-full select-none flex-col"
+            style={{ width: resourcePanelWidth }}
+          >
             {/* Content area — dual flex-1 sections */}
-            <div className="flex min-h-0 flex-1 flex-col px-3 pt-2">
+            <div className="flex min-h-0 flex-1 flex-col px-3 pt-3">
               {/* All Photos + Favorites — content filters */}
               <button
                 className={`flex w-full items-center gap-2 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${
@@ -989,31 +1103,42 @@ export function Sidebar({
 
               {/* Folders */}
               <div
-                className={`${resourceView === "folders" ? "flex" : "hidden"} flex-col ${foldersCollapsed ? "" : "min-h-0 flex-1"}`}
+                className={`${resourceView === "folders" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}
               >
-                <div className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 transition-colors hover:bg-foreground/5">
-                  <button
-                    className="flex flex-1 items-center gap-1 text-left"
-                    onClick={() => setFoldersCollapsed((v) => !v)}
-                  >
-                    <p
-                      className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
-                    >
-                      {t("sidebarFolders")}
-                    </p>
-                    <ChevronDown
-                      className={`h-3 w-3 text-muted-foreground/70 transition-transform ${foldersCollapsed ? "-rotate-90" : "rotate-0"}`}
+                <div className="mb-1 flex items-center gap-1 px-1">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute top-1/2 left-2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" />
+                    <input
+                      aria-label={t("folderSearchPlaceholder")}
+                      className="w-full rounded-[4px] bg-card py-1 pr-6 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:ring-1 focus:ring-primary/50"
+                      onChange={(event) => setFolderSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setFolderSearch("");
+                        }
+                      }}
+                      placeholder={t("folderSearchPlaceholder")}
+                      role="searchbox"
+                      value={folderSearch}
                     />
-                  </button>
+                    {folderSearch && (
+                      <button
+                        aria-label={t("clearSearch")}
+                        className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                        onClick={() => setFolderSearch("")}
+                        type="button"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         aria-label={t("sidebarAddFolder")}
-                        className="flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground disabled:opacity-50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAddFolder();
-                        }}
+                        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground disabled:opacity-50"
+                        onClick={() => onAddFolder()}
                         type="button"
                       >
                         <Plus className="h-3 w-3" />
@@ -1022,36 +1147,36 @@ export function Sidebar({
                     <TooltipContent>{t("sidebarAddFolder")}</TooltipContent>
                   </Tooltip>
                 </div>
-                {!foldersCollapsed && (
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    {folderTree.length === 0 ? (
-                      <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
-                        {t("sidebarNoFolders")}
-                      </p>
-                    ) : (
-                      <FolderTree
-                        activeId={activeFolderId}
-                        dragOverId={dragOverFolderId}
-                        expandedIds={expandedFolderIds}
-                        label={t("sidebarFolders")}
-                        nodes={folderTree}
-                        onContextMenu={handleFolderContextMenu}
-                        onDragLeave={handleFolderDragLeave}
-                        onDragOver={handleFolderDragOver}
-                        onDrop={handleFolderDrop}
-                        onSelect={onSelectFolder}
-                        onToggle={(id) => {
-                          const next = new Set(expandedFolderIds);
-                          if (next.has(id)) {
-                            next.delete(id);
-                          } else {
-                            next.add(id);
-                          }
-                          setExpandedFolderIds(next);
-                        }}
-                      />
-                    )}
-                  </div>
+                {folderTree.length === 0 ? (
+                  <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
+                    {t("sidebarNoFolders")}
+                  </p>
+                ) : folderSearchResult.nodes.length === 0 ? (
+                  <p className="px-3 py-2 text-[12px] text-muted-foreground/70">
+                    {t("folderSearchEmpty")}
+                  </p>
+                ) : (
+                  <FolderTree
+                    activeId={activeFolderId}
+                    dragOverId={dragOverFolderId}
+                    expandedIds={visibleExpandedFolderIds}
+                    label={t("sidebarFolders")}
+                    nodes={folderSearchResult.nodes}
+                    onContextMenu={handleFolderContextMenu}
+                    onDragLeave={handleFolderDragLeave}
+                    onDragOver={handleFolderDragOver}
+                    onDrop={handleFolderDrop}
+                    onSelect={onSelectFolder}
+                    onToggle={(id) => {
+                      const next = new Set(expandedFolderIds);
+                      if (next.has(id)) {
+                        next.delete(id);
+                      } else {
+                        next.add(id);
+                      }
+                      setExpandedFolderIds(next);
+                    }}
+                  />
                 )}
               </div>
 
@@ -1059,299 +1184,282 @@ export function Sidebar({
               {resourceView === "tags" &&
                 (tags.length > 0 || totalPhotos > 0) && (
                   <>
-                    <div className="mx-3 my-2 border-border border-t" />
-                    <div
-                      className={`flex flex-col ${tagsCollapsed ? "" : "min-h-0 flex-1"}`}
-                    >
-                      <button
-                        className="flex w-full items-center gap-1 rounded-[4px] px-3 py-1 text-left transition-colors hover:bg-foreground/5"
-                        onClick={() => setTagsCollapsed((v) => !v)}
-                      >
-                        <p
-                          className={`flex-1 font-medium text-[11px] uppercase ${i18n.language === "zh" ? "tracking-normal" : "tracking-wider"} text-muted-foreground/70`}
-                        >
-                          {t("sidebarTags")}
-                        </p>
-                        <ChevronDown
-                          className={`h-3 w-3 text-muted-foreground/70 transition-transform ${tagsCollapsed ? "-rotate-90" : "rotate-0"}`}
-                        />
-                      </button>
-                      {!tagsCollapsed &&
-                        aiTagPipelineActive &&
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      {aiTagPipelineActive &&
                         tags.some((tag) => tag.photoCount > 0) && (
                           <div className="flex items-center gap-1 px-3 py-1 text-[10px] text-primary/80">
                             <ScanSearch className="h-3 w-3 animate-pulse" />
                             {aiTagging ? aiTagStatusText : t("tagUpdating")}
                           </div>
                         )}
-                      {!tagsCollapsed &&
-                        (tags.length > 0 ? (
-                          <>
-                            {/* Active tag chips */}
-                            {activeTagIds.length > 0 && (
-                              <div className="flex flex-wrap gap-1 px-1 pb-1">
-                                {activeTagIds.slice(0, 3).map((id) => {
-                                  const tag = tags.find((t) => t.id === id);
-                                  return (
+                      {tags.length > 0 ? (
+                        <>
+                          {/* Active tag chips */}
+                          {activeTagIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1 px-1 pb-1">
+                              {activeTagIds.slice(0, 3).map((id) => {
+                                const tag = tags.find((t) => t.id === id);
+                                return (
+                                  <span
+                                    className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
+                                    key={id}
+                                  >
                                     <span
-                                      className="inline-flex items-center gap-1 rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px]"
-                                      key={id}
-                                    >
-                                      <span
-                                        className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
-                                        style={{
-                                          backgroundColor: tag?.color ?? "#888",
-                                        }}
-                                      />
-                                      <span className="max-w-[90px] truncate">
-                                        {getTagDisplayName(
+                                      className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                                      style={{
+                                        backgroundColor: tag?.color ?? "#888",
+                                      }}
+                                    />
+                                    <span className="max-w-[90px] truncate">
+                                      {getTagDisplayName(
+                                        tag?.name ?? "",
+                                        i18n.language
+                                      )}
+                                    </span>
+                                    <button
+                                      aria-label={
+                                        t("clickToRemove") +
+                                        " " +
+                                        getTagDisplayName(
                                           tag?.name ?? "",
                                           i18n.language
-                                        )}
-                                      </span>
-                                      <button
-                                        aria-label={
-                                          t("clickToRemove") +
-                                          " " +
-                                          getTagDisplayName(
-                                            tag?.name ?? "",
-                                            i18n.language
-                                          )
-                                        }
-                                        className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                                        onClick={() => onToggleTag?.(id)}
-                                        type="button"
-                                      >
-                                        <X className="h-2 w-2" />
-                                      </button>
-                                    </span>
-                                  );
-                                })}
-                                {activeTagIds.length > 3 && (
-                                  <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                    {t("andMore", {
-                                      count: activeTagIds.length - 3,
-                                    })}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {activeTagIds.length >= 2 && onToggleTagMode && (
-                              <div className="flex items-center justify-between px-1 pb-1">
-                                <span className="text-[10px] text-muted-foreground/70">
-                                  {t("tagFilterMode")}
-                                </span>
-                                <button
-                                  aria-label={t("tagFilterMode")}
-                                  aria-pressed={tagMode === "and"}
-                                  className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
-                                  onClick={onToggleTagMode}
-                                  type="button"
-                                >
-                                  {tagMode.toUpperCase()}
-                                </button>
-                              </div>
-                            )}
-                            <div className="px-1 pb-1">
-                              <div className="relative">
-                                <input
-                                  aria-label={t("tagSearchPlaceholder")}
-                                  className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
-                                  onChange={(e) => setTagSearch(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      setTagSearch("");
-                                      setDebouncedTagSearch("");
-                                      const tree = (
-                                        e.currentTarget as HTMLElement
-                                      ).closest(
-                                        '[role="tree"]'
-                                      ) as HTMLElement | null;
-                                      tree?.focus();
-                                    }
-                                  }}
-                                  placeholder={t("tagSearchPlaceholder")}
-                                  role="searchbox"
-                                  value={tagSearch}
-                                />
-                                {tagSearch && (
-                                  <button
-                                    className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                                    onClick={() => {
-                                      setTagSearch("");
-                                      setDebouncedTagSearch("");
-                                    }}
-                                    type="button"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <div
-                              aria-label={t("sidebarTags")}
-                              className="flex-1 overflow-y-auto"
-                              onFocus={(e) => {
-                                const container = e.currentTarget;
-                                const currentFocus = document.activeElement;
-                                if (
-                                  currentFocus === container ||
-                                  !container.contains(currentFocus)
-                                ) {
-                                  const first = container.querySelector(
-                                    '[role="treeitem"]'
-                                  ) as HTMLElement | null;
-                                  if (first) {
-                                    const items =
-                                      container.querySelectorAll(
-                                        '[role="treeitem"]'
-                                      );
-                                    for (const item of items) {
-                                      (item as HTMLElement).setAttribute(
-                                        "tabindex",
-                                        "-1"
-                                      );
-                                    }
-                                    first.setAttribute("tabindex", "0");
-                                    first.focus();
-                                  }
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                handleTagTreeKeyDown(
-                                  e,
-                                  expandedTagIds,
-                                  setExpandedTagIds,
-                                  onToggleTag,
-                                  setTagSearch,
-                                  setDebouncedTagSearch
-                                );
-                              }}
-                              role="tree"
-                              tabIndex={0}
-                            >
-                              {(() => {
-                                const filtered = tags.filter((t) =>
-                                  debouncedTagSearch
-                                    ? t.name
-                                        .toLowerCase()
-                                        .includes(
-                                          debouncedTagSearch.toLowerCase()
                                         )
-                                    : true
+                                      }
+                                      className="ml-0.5 flex h-3 w-3 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                      onClick={() => onToggleTag?.(id)}
+                                      type="button"
+                                    >
+                                      <X className="h-2 w-2" />
+                                    </button>
+                                  </span>
                                 );
-                                const allIds = new Set(
-                                  filtered.map((t) => t.id)
-                                );
-                                for (const t of filtered) {
-                                  let cur: number | null = t.parentId;
-                                  while (cur !== null) {
-                                    const currentId = cur;
-                                    if (allIds.has(currentId)) {
-                                      break;
-                                    }
-                                    const parent = tags.find(
-                                      (p) => p.id === currentId
-                                    );
-                                    if (parent) {
-                                      allIds.add(cur);
-                                      cur = parent.parentId;
-                                    } else {
-                                      break;
-                                    }
-                                  }
-                                }
-                                const visible = tags.filter((t) =>
-                                  allIds.has(t.id)
-                                );
-                                const tree = buildTagTree(visible);
-                                return renderTagTree(
-                                  tree,
-                                  0,
-                                  expandedTagIds,
-                                  (id) => {
-                                    const next = new Set(expandedTagIds);
-                                    if (next.has(id)) {
-                                      next.delete(id);
-                                    } else {
-                                      next.add(id);
-                                    }
-                                    setExpandedTagIds(next);
-                                  },
-                                  activeTagIds,
-                                  (nextId) => {
-                                    if (nextId !== null) {
-                                      onToggleTag?.(nextId);
-                                    }
-                                  },
-                                  (e, id, name) => {
-                                    e.preventDefault();
-                                    setTagCtx({
-                                      tagId: id,
-                                      tagName: name,
-                                      x: e.clientX,
-                                      y: e.clientY,
-                                    });
-                                  },
-                                  handleSidebarDragOver,
-                                  (id) => setDragOverTagId(id),
-                                  (e) => {
-                                    if (
-                                      !(
-                                        e.currentTarget as HTMLElement
-                                      ).contains(e.relatedTarget as Node)
-                                    ) {
-                                      setDragOverTagId(null);
-                                    }
-                                  },
-                                  (e, id) => handleDropOnTag(e, id),
-                                  dragOverTagId,
-                                  i18n.language
-                                );
-                              })()}
+                              })}
+                              {activeTagIds.length > 3 && (
+                                <span className="inline-flex items-center rounded-[4px] border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                  {t("andMore", {
+                                    count: activeTagIds.length - 3,
+                                  })}
+                                </span>
+                              )}
                             </div>
-                            {!tags.some((t) => t.photoCount > 0) && (
-                              <div className="px-1 py-1">
-                                {aiTagPipelineActive ? (
-                                  <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
-                                    <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
-                                    {aiTagStatusText}
-                                  </div>
-                                ) : (
-                                  <button
-                                    className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
-                                    disabled={batchTagLoading}
-                                    onClick={handleBatchGenerateTags}
-                                    type="button"
-                                  >
-                                    <ScanSearch className="h-3.5 w-3.5" />
-                                    {t("tagBatchGenerate")}
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="px-3 py-1">
-                            {aiTagPipelineActive ? (
-                              <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
-                                <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
-                                {aiTagStatusText}
-                              </div>
-                            ) : (
+                          )}
+                          {activeTagIds.length >= 2 && onToggleTagMode && (
+                            <div className="flex items-center justify-between px-1 pb-1">
+                              <span className="text-[10px] text-muted-foreground/70">
+                                {t("tagFilterMode")}
+                              </span>
                               <button
-                                className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
-                                disabled={batchTagLoading}
-                                onClick={handleBatchGenerateTags}
+                                aria-label={t("tagFilterMode")}
+                                aria-pressed={tagMode === "and"}
+                                className="rounded-[3px] border border-border px-1.5 py-0 font-medium text-[10px] text-primary transition-colors hover:bg-primary/10"
+                                onClick={onToggleTagMode}
                                 type="button"
                               >
-                                <ScanSearch className="h-3.5 w-3.5" />
-                                {t("tagBatchGenerate")}
+                                {tagMode.toUpperCase()}
                               </button>
-                            )}
+                            </div>
+                          )}
+                          <div className="px-1 pb-1">
+                            <div className="relative">
+                              <input
+                                aria-label={t("tagSearchPlaceholder")}
+                                className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                                onChange={(e) => setTagSearch(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    setTagSearch("");
+                                    setDebouncedTagSearch("");
+                                    const tree = (
+                                      e.currentTarget as HTMLElement
+                                    ).closest(
+                                      '[role="tree"]'
+                                    ) as HTMLElement | null;
+                                    tree?.focus();
+                                  }
+                                }}
+                                placeholder={t("tagSearchPlaceholder")}
+                                role="searchbox"
+                                value={tagSearch}
+                              />
+                              {tagSearch && (
+                                <button
+                                  className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                                  onClick={() => {
+                                    setTagSearch("");
+                                    setDebouncedTagSearch("");
+                                  }}
+                                  type="button"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        ))}
+                          <div
+                            aria-label={t("sidebarTags")}
+                            className="resource-tree-scroll flex-1 overflow-y-auto"
+                            data-bottom-fade={tagTreeHasMoreBelow}
+                            onFocus={(e) => {
+                              const container = e.currentTarget;
+                              const currentFocus = document.activeElement;
+                              if (
+                                currentFocus === container ||
+                                !container.contains(currentFocus)
+                              ) {
+                                const first = container.querySelector(
+                                  '[role="treeitem"]'
+                                ) as HTMLElement | null;
+                                if (first) {
+                                  const items =
+                                    container.querySelectorAll(
+                                      '[role="treeitem"]'
+                                    );
+                                  for (const item of items) {
+                                    (item as HTMLElement).setAttribute(
+                                      "tabindex",
+                                      "-1"
+                                    );
+                                  }
+                                  first.setAttribute("tabindex", "0");
+                                  first.focus();
+                                }
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              handleTagTreeKeyDown(
+                                e,
+                                expandedTagIds,
+                                setExpandedTagIds,
+                                onToggleTag,
+                                setTagSearch,
+                                setDebouncedTagSearch
+                              );
+                            }}
+                            onScroll={updateTagTreeFade}
+                            ref={tagTreeScrollRef}
+                            role="tree"
+                            tabIndex={0}
+                          >
+                            {(() => {
+                              const filtered = tags.filter((t) =>
+                                debouncedTagSearch
+                                  ? t.name
+                                      .toLowerCase()
+                                      .includes(
+                                        debouncedTagSearch.toLowerCase()
+                                      )
+                                  : true
+                              );
+                              const allIds = new Set(filtered.map((t) => t.id));
+                              for (const t of filtered) {
+                                let cur: number | null = t.parentId;
+                                while (cur !== null) {
+                                  const currentId = cur;
+                                  if (allIds.has(currentId)) {
+                                    break;
+                                  }
+                                  const parent = tags.find(
+                                    (p) => p.id === currentId
+                                  );
+                                  if (parent) {
+                                    allIds.add(cur);
+                                    cur = parent.parentId;
+                                  } else {
+                                    break;
+                                  }
+                                }
+                              }
+                              const visible = tags.filter((t) =>
+                                allIds.has(t.id)
+                              );
+                              const tree = buildTagTree(visible);
+                              return renderTagTree(
+                                tree,
+                                0,
+                                expandedTagIds,
+                                (id) => {
+                                  const next = new Set(expandedTagIds);
+                                  if (next.has(id)) {
+                                    next.delete(id);
+                                  } else {
+                                    next.add(id);
+                                  }
+                                  setExpandedTagIds(next);
+                                },
+                                activeTagIds,
+                                (nextId) => {
+                                  if (nextId !== null) {
+                                    onToggleTag?.(nextId);
+                                  }
+                                },
+                                (e, id, name) => {
+                                  e.preventDefault();
+                                  setTagCtx({
+                                    tagId: id,
+                                    tagName: name,
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                  });
+                                },
+                                handleSidebarDragOver,
+                                (id) => setDragOverTagId(id),
+                                (e) => {
+                                  if (
+                                    !(e.currentTarget as HTMLElement).contains(
+                                      e.relatedTarget as Node
+                                    )
+                                  ) {
+                                    setDragOverTagId(null);
+                                  }
+                                },
+                                (e, id) => handleDropOnTag(e, id),
+                                dragOverTagId,
+                                i18n.language
+                              );
+                            })()}
+                          </div>
+                          {!tags.some((t) => t.photoCount > 0) && (
+                            <div className="px-1 py-1">
+                              {aiTagPipelineActive ? (
+                                <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                                  <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                                  {aiTagStatusText}
+                                </div>
+                              ) : (
+                                <button
+                                  className="flex w-full items-center justify-center gap-1.5 rounded-[6px] border border-primary/30 bg-primary/10 px-2 py-1.5 text-[11px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-60"
+                                  disabled={batchTagLoading}
+                                  onClick={handleBatchGenerateTags}
+                                  type="button"
+                                >
+                                  <ScanSearch className="h-3.5 w-3.5" />
+                                  {t("tagBatchGenerate")}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="px-3 py-1">
+                          {aiTagPipelineActive ? (
+                            <div className="flex items-center gap-1.5 rounded-[6px] border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+                              <ScanSearch className="h-3.5 w-3.5 animate-pulse" />
+                              {aiTagStatusText}
+                            </div>
+                          ) : (
+                            <button
+                              className="flex w-full items-center gap-1.5 rounded-[6px] border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-60"
+                              disabled={batchTagLoading}
+                              onClick={handleBatchGenerateTags}
+                              type="button"
+                            >
+                              <ScanSearch className="h-3.5 w-3.5" />
+                              {t("tagBatchGenerate")}
+                            </button>
+                          )}
+                        </div>
+                      )}
                       <p className="mt-1 px-1 text-[10px] text-muted-foreground/40">
                         {t("aiTagDisclaimer")}
                       </p>
@@ -1360,6 +1468,29 @@ export function Sidebar({
                 )}
             </div>
           </div>
+        )}
+        {!collapsed && (
+          <div
+            aria-label={t("resizeSidebar")}
+            aria-orientation="vertical"
+            aria-valuemax={RESOURCE_PANEL_MAX_WIDTH}
+            aria-valuemin={RESOURCE_PANEL_MIN_WIDTH}
+            aria-valuenow={resourcePanelWidth}
+            className="sidebar-resize-handle absolute top-0 right-0 bottom-0 z-20 w-1 cursor-col-resize"
+            onDoubleClick={() => {
+              setResourcePanelWidth(RESOURCE_PANEL_DEFAULT_WIDTH);
+              try {
+                localStorage.setItem(
+                  RESOURCE_PANEL_WIDTH_KEY,
+                  String(RESOURCE_PANEL_DEFAULT_WIDTH)
+                );
+              } catch {
+                // Keep the in-memory width when storage is unavailable.
+              }
+            }}
+            onPointerDown={handleResourceResizePointerDown}
+            role="separator"
+          />
         )}
       </div>
 

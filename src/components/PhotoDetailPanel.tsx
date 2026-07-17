@@ -77,6 +77,7 @@ interface PhotoDetailPanelProps {
   onClose: () => void;
   onNavigate?: (direction: "prev" | "next") => void;
   onOpenExplorer: (path: string) => void;
+  onWidthChange?: (width: number) => void;
   photo: PhotoDetail | null;
 }
 
@@ -92,7 +93,7 @@ const suggestionCache = new Map<
   Array<{ tag: string; confidence: number }>
 >();
 
-function loadPanelWidth(): number {
+export function loadPhotoDetailPanelWidth(): number {
   try {
     const saved = localStorage.getItem(PANEL_WIDTH_KEY);
     if (saved) {
@@ -125,6 +126,7 @@ export function PhotoDetailPanel({
   onClose,
   onNavigate,
   onOpenExplorer,
+  onWidthChange,
 }: PhotoDetailPanelProps) {
   const { t, i18n } = useTranslation();
   const [exif, setExif] = useState<ExifData | null>(null);
@@ -142,7 +144,7 @@ export function PhotoDetailPanel({
     "checking" | "ready" | "indexing" | "tagging" | "busy" | "unavailable"
   >("checking");
   const [loadedPreviewId, setLoadedPreviewId] = useState<number | null>(null);
-  const [panelWidth, setPanelWidth] = useState(loadPanelWidth);
+  const [panelWidth, setPanelWidth] = useState(loadPhotoDetailPanelWidth);
   const [resizing, setResizing] = useState(false);
   const resizeStartX = useRef(0);
   const resizeStartWidth = useRef(0);
@@ -204,7 +206,8 @@ export function PhotoDetailPanel({
   // Keep ref in sync for resize callback closure
   useEffect(() => {
     currentWidth.current = panelWidth;
-  }, [panelWidth]);
+    onWidthChange?.(panelWidth);
+  }, [onWidthChange, panelWidth]);
 
   // Resize handling
   useEffect(() => {

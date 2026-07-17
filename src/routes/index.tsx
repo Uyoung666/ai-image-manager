@@ -19,7 +19,10 @@ import type { MasonryGridHandle } from "@/components/MasonryGrid";
 import { clearImageLoadCache } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
-import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
+import {
+  loadPhotoDetailPanelWidth,
+  PhotoDetailPanel,
+} from "@/components/PhotoDetailPanel";
 import {
   GRID_COLUMN_WIDTH_KEY,
   GRID_COLUMN_WIDTH_MAX,
@@ -131,6 +134,12 @@ function HomePage() {
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [gridColumnWidth, setGridColumnWidth] = useState(loadGridColumnWidth);
+  const [galleryToolbarHeight, setGalleryToolbarHeight] = useState(52);
+  const [galleryScrolled, setGalleryScrolled] = useState(false);
+  const [detailPanelWidth, setDetailPanelWidth] = useState(
+    loadPhotoDetailPanelWidth
+  );
+  const galleryToolbarRef = useRef<HTMLDivElement>(null);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [showDrillBanner, setShowDrillBanner] = useState(false);
   const [showAiIndexHint, setShowAiIndexHint] = useState(false);
@@ -665,6 +674,28 @@ function HomePage() {
     } catch {
       // Keep the in-memory preference when persistence is unavailable.
     }
+  }, []);
+
+  const handleGalleryScrollTopChange = useCallback((scrollTop: number) => {
+    setGalleryScrolled((previous) => {
+      const next = scrollTop > 4;
+      return previous === next ? previous : next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const element = galleryToolbarRef.current;
+    if (!element) {
+      return;
+    }
+    const updateHeight = () => setGalleryToolbarHeight(element.offsetHeight);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   // Keep Sidebar's totalPhotos display in sync
@@ -1424,7 +1455,12 @@ function HomePage() {
         onDragOver={handleGlobalDragOver}
         onDrop={handleGlobalDrop}
       >
-        <SearchBar
+        <div
+          className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
+          ref={galleryToolbarRef}
+          style={{ right: detailPhoto ? detailPanelWidth : 0 }}
+        >
+          <SearchBar
           aiStatus={aiStatus ?? null}
           colorHex={colorHex ?? undefined}
           imageSearchActive={searchMode === "image"}
@@ -1484,8 +1520,8 @@ function HomePage() {
               </label>
             </>
           }
-        />
-        {searchMode === "text" &&
+          />
+          {searchMode === "text" &&
           searchSemantic &&
           searchSemantic.state !== "ready" && (
             <div className="border-amber-300 border-b bg-amber-50 px-4 py-2 text-amber-900 text-xs dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -1498,7 +1534,7 @@ function HomePage() {
             </div>
           )}
         {/* Drill-down banner */}
-        {showDrillBanner && (
+          {showDrillBanner && (
           <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
             <div className="flex items-center gap-2">
               <span className="text-blue-900 text-sm dark:text-blue-100">
@@ -1525,7 +1561,8 @@ function HomePage() {
               </button>
             </div>
           </div>
-        )}
+          )}
+        </div>
         {hasPhotos ? (
           <div className="home-gallery-body relative flex min-h-0 flex-1">
             <div
@@ -1567,6 +1604,7 @@ function HomePage() {
                 onEndReached={handleEndReached}
                 onKeyboardSelect={handleKeyboardSelect}
                 onMarqueeSelect={wrappedMarqueeSelect}
+                onScrollTopChange={handleGalleryScrollTopChange}
                 onSelect={handleSelect}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
@@ -1577,6 +1615,7 @@ function HomePage() {
                 showToolbar={false}
                 sort={sortField}
                 sortOrder={sortOrder}
+                topInset={galleryToolbarHeight}
               />
               <SelectionActionBar
                 allFavorite={
@@ -1648,11 +1687,15 @@ function HomePage() {
               }}
               onNavigate={navigateDetail}
               onOpenExplorer={handleOpenExplorer}
+              onWidthChange={setDetailPanelWidth}
               photo={detailPhoto}
             />
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1">
+          <div
+            className="flex min-h-0 flex-1"
+            style={{ paddingTop: galleryToolbarHeight }}
+          >
             <Welcome disabled={false} onAddFolder={filter.handleAddFolder} />
           </div>
         )}

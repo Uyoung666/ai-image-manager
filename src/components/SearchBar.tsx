@@ -26,8 +26,8 @@ import { cn } from "@/utils/tailwind";
 import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterPresets } from "./FilterPresets";
 import {
-  clearSavedHistory,
   type AdvancedExifFilterField,
+  clearSavedHistory,
   type ExifFilters,
   getFilterLabel,
   getTimePresets,
@@ -110,6 +110,7 @@ export const SearchBar = memo(
       );
       const [history, setHistory] = useState<string[]>(loadHistory);
       const [showSuggestions, setShowSuggestions] = useState(false);
+      const [inputFocused, setInputFocused] = useState(false);
       const [showFilters, setShowFilters] = useState(false);
       const [tags, setTags] = useState<TagInfo[]>([]);
       const [cameraModels, setCameraModels] = useState<string[]>([]);
@@ -339,6 +340,7 @@ export const SearchBar = memo(
       }, []);
 
       function handleInputBlur(e: React.FocusEvent<HTMLInputElement>) {
+        setInputFocused(false);
         const related = e.relatedTarget as Node | null;
         if (related && suggestionListRef.current?.contains(related)) {
           return;
@@ -691,7 +693,7 @@ export const SearchBar = memo(
       return (
         <div
           aria-label={t("searchPlaceholder")}
-          className={`relative border-border border-b transition-colors ${dragOver ? "bg-primary/5" : ""}`}
+          className={`home-unified-toolbar relative border-border border-b transition-colors ${dragOver ? "bg-primary/5" : ""}`}
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
@@ -727,15 +729,15 @@ export const SearchBar = memo(
                   aria-autocomplete="list"
                   aria-controls="search-suggestions-listbox"
                   aria-expanded={showSuggestionPanel}
-                  className="h-9 w-full rounded-[6px] border border-border bg-card pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring"
+                  className={`home-search-input h-9 w-full rounded-[6px] border border-border pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring ${inputFocused || showSuggestionPanel || showFilters || query.trim() ? "is-active" : ""}`}
                   onBlur={handleInputBlur}
-                  role="combobox"
                   onChange={(e) => {
                     setQuery(e.target.value);
                     setShowSuggestions(true);
                     setSuggestionIndex(-1); // 输入变化时重置高亮
                   }}
                   onFocus={() => {
+                    setInputFocused(true);
                     if (!(imageSearchActive || showFilters)) {
                       setShowSuggestions(true);
                     }
@@ -743,6 +745,7 @@ export const SearchBar = memo(
                   onKeyDown={handleInputKeyDown}
                   placeholder={getPlaceholder()}
                   ref={inputRef}
+                  role="combobox"
                   type="text"
                   value={query}
                 />
@@ -1532,7 +1535,6 @@ export const SearchBar = memo(
             <div
               className="absolute top-full left-4 z-[60] mt-1 max-h-[min(440px,calc(100vh-150px))] w-[min(960px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
               id="search-suggestions-listbox"
-              role="listbox"
               onBlur={(e) => {
                 // 焦点离开建议列表且没有回到 input 时关闭
                 const related = e.relatedTarget as Node | null;
@@ -1555,9 +1557,75 @@ export const SearchBar = memo(
                   suggestionListRef as React.MutableRefObject<HTMLDivElement | null>
                 ).current = node;
               }}
+              role="listbox"
               tabIndex={0}
             >
-              {!query.trim() ? (
+              {query.trim() ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5">
+                    <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                      {t("searchSuggestions")}
+                    </span>
+                  </div>
+                  {suggestions.map((s, i) => (
+                    <button
+                      aria-selected={i === suggestionIndex}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
+                        i === suggestionIndex
+                          ? "bg-foreground/8 text-foreground"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      data-suggestion-index={i}
+                      id={`search-suggestion-${i}`}
+                      key={`${s.type}-${s.text}`}
+                      onClick={() => handleSuggestionClick(s)}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseEnter={() => setSuggestionIndex(i)}
+                      role="option"
+                      tabIndex={-1}
+                      type="button"
+                    >
+                      {s.type === "person" ? (
+                        <>
+                          <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px]">
+                            👤
+                          </span>
+                          <span className="truncate">{s.text}</span>
+                          <span className="ml-auto flex-shrink-0 rounded-[3px] bg-blue-500/10 px-1 text-[10px] text-blue-500">
+                            人物
+                          </span>
+                        </>
+                      ) : s.type === "dictionary" ? (
+                        <>
+                          <Search className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                          <span className="truncate">{s.text}</span>
+                          {s.category && (
+                            <span className="ml-auto flex-shrink-0 rounded-[3px] bg-primary/10 px-1 text-[10px] text-primary/70">
+                              {s.category}
+                            </span>
+                          )}
+                        </>
+                      ) : s.type === "tag" ? (
+                        <>
+                          <span
+                            className="h-2 w-2 flex-shrink-0 rounded-full"
+                            style={{ background: s.color }}
+                          />
+                          <span className="truncate">{s.text}</span>
+                          <span className="ml-auto flex-shrink-0 rounded-[3px] bg-green-500/10 px-1 text-[10px] text-green-500">
+                            标签
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                          <span className="truncate">{s.text}</span>
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </>
+              ) : (
                 <>
                   <div className="flex flex-wrap items-center gap-1.5 border-border border-b px-3 py-2">
                     <Clock className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60" />
@@ -1670,71 +1738,6 @@ export const SearchBar = memo(
                     </>
                   )}
                 </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between px-3 py-1.5">
-                    <span className="font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-                      {t("searchSuggestions")}
-                    </span>
-                  </div>
-                  {suggestions.map((s, i) => (
-                    <button
-                      aria-selected={i === suggestionIndex}
-                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${
-                        i === suggestionIndex
-                          ? "bg-foreground/8 text-foreground"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                      }`}
-                      data-suggestion-index={i}
-                      id={`search-suggestion-${i}`}
-                      key={`${s.type}-${s.text}`}
-                      onClick={() => handleSuggestionClick(s)}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onMouseEnter={() => setSuggestionIndex(i)}
-                      role="option"
-                      tabIndex={-1}
-                      type="button"
-                    >
-                      {s.type === "person" ? (
-                        <>
-                          <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px]">
-                            👤
-                          </span>
-                          <span className="truncate">{s.text}</span>
-                          <span className="ml-auto flex-shrink-0 rounded-[3px] bg-blue-500/10 px-1 text-[10px] text-blue-500">
-                            人物
-                          </span>
-                        </>
-                      ) : s.type === "dictionary" ? (
-                        <>
-                          <Search className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                          <span className="truncate">{s.text}</span>
-                          {s.category && (
-                            <span className="ml-auto flex-shrink-0 rounded-[3px] bg-primary/10 px-1 text-[10px] text-primary/70">
-                              {s.category}
-                            </span>
-                          )}
-                        </>
-                      ) : s.type === "tag" ? (
-                        <>
-                          <span
-                            className="h-2 w-2 flex-shrink-0 rounded-full"
-                            style={{ background: s.color }}
-                          />
-                          <span className="truncate">{s.text}</span>
-                          <span className="ml-auto flex-shrink-0 rounded-[3px] bg-green-500/10 px-1 text-[10px] text-green-500">
-                            标签
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <Clock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                          <span className="truncate">{s.text}</span>
-                        </>
-                      )}
-                    </button>
-                  ))}
-                </>
               )}
             </div>
           )}
@@ -1743,15 +1746,30 @@ export const SearchBar = memo(
     }
   ),
   (prevProps, nextProps) => {
-    if (prevProps.aiStatus !== nextProps.aiStatus) return false;
-    if (prevProps.colorHex !== nextProps.colorHex) return false;
-    if (prevProps.imageSearchActive !== nextProps.imageSearchActive)
+    if (prevProps.aiStatus !== nextProps.aiStatus) {
       return false;
-    if (prevProps.resultCount !== nextProps.resultCount) return false;
-    if (prevProps.searchMode !== nextProps.searchMode) return false;
-    if (prevProps.searchTime !== nextProps.searchTime) return false;
-    if (prevProps.leadingContent !== nextProps.leadingContent) return false;
-    if (prevProps.trailingContent !== nextProps.trailingContent) return false;
+    }
+    if (prevProps.colorHex !== nextProps.colorHex) {
+      return false;
+    }
+    if (prevProps.imageSearchActive !== nextProps.imageSearchActive) {
+      return false;
+    }
+    if (prevProps.resultCount !== nextProps.resultCount) {
+      return false;
+    }
+    if (prevProps.searchMode !== nextProps.searchMode) {
+      return false;
+    }
+    if (prevProps.searchTime !== nextProps.searchTime) {
+      return false;
+    }
+    if (prevProps.leadingContent !== nextProps.leadingContent) {
+      return false;
+    }
+    if (prevProps.trailingContent !== nextProps.trailingContent) {
+      return false;
+    }
     return true;
   }
 );

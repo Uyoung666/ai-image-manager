@@ -71,9 +71,9 @@ describe("Sidebar", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows total photo count", () => {
+  it("does not repeat the total photo count in the resource panel", () => {
     render(<Sidebar {...baseProps} />);
-    expect(screen.getByText("1,250 张照片")).toBeInTheDocument();
+    expect(screen.queryByText("1,250 张照片")).not.toBeInTheDocument();
   });
 
   it("shows Add Folder button", () => {
@@ -116,6 +116,40 @@ describe("Sidebar", () => {
     expect(
       screen.getByText("Photos").closest("button")?.querySelector("svg")
     ).toBeNull();
+  });
+
+  it("filters folders by display name", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            displayName: "Photos",
+            photoCount: 500,
+          },
+          {
+            id: 2,
+            parentId: null,
+            path: "C:/Travel",
+            displayName: "Travel",
+            photoCount: 200,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "folderSearchPlaceholder" }),
+      {
+        target: { value: "travel" },
+      }
+    );
+
+    expect(screen.queryByText("Photos")).not.toBeInTheDocument();
+    expect(screen.getByText("Travel")).toBeInTheDocument();
   });
 
   it("expands a nested folder tree on initial load", async () => {

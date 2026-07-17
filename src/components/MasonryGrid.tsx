@@ -57,7 +57,9 @@ export function shouldUpdateScrollRenderTop(
   currentScrollTop: number,
   renderedScrollTop: number
 ): boolean {
-  return Math.abs(currentScrollTop - renderedScrollTop) >= SCROLL_RENDER_STEP_PX;
+  return (
+    Math.abs(currentScrollTop - renderedScrollTop) >= SCROLL_RENDER_STEP_PX
+  );
 }
 
 interface MasonryGridProps {
@@ -78,6 +80,7 @@ interface MasonryGridProps {
   }>;
   onEndReached?: () => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
   renderItem: (
     item: any,
@@ -88,6 +91,7 @@ interface MasonryGridProps {
   routeKey: string;
   scrollToId?: number | null;
   selectionActive?: boolean;
+  topInset?: number;
 }
 
 export const MasonryGrid = memo(
@@ -104,11 +108,13 @@ export const MasonryGrid = memo(
       hasMore = false,
       isLoadingMore = false,
       onMarqueeSelect,
+      onScrollTopChange,
       scrollToId,
       className,
       selectionActive = false,
       routeKey,
       isPlaceholderData = false,
+      topInset = 0,
     }: MasonryGridProps,
     ref
   ) {
@@ -214,6 +220,7 @@ export const MasonryGrid = memo(
         }
 
         const dy = Math.abs(el.scrollTop - prevScrollYRef.current);
+        onScrollTopChange?.(el.scrollTop);
         prevScrollYRef.current = el.scrollTop;
         const nextOverscanMultiplier = getVelocityOverscanMultiplier(dy);
         if (nextOverscanMultiplier !== scrollOverscanMultiplierRef.current) {
@@ -222,7 +229,9 @@ export const MasonryGrid = memo(
           setScrollVelocity(dy);
         }
 
-        if (shouldUpdateScrollRenderTop(el.scrollTop, scrollTopStateRef.current)) {
+        if (
+          shouldUpdateScrollRenderTop(el.scrollTop, scrollTopStateRef.current)
+        ) {
           scrollTopStateRef.current = el.scrollTop;
           setScrollTop(el.scrollTop);
           recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
@@ -287,7 +296,7 @@ export const MasonryGrid = memo(
           performance.now() - frameStart
         );
       });
-    }, [checkNearBottom]);
+    }, [checkNearBottom, onScrollTopChange]);
 
     useLayoutEffect(() => {
       const el = scrollRef.current;
@@ -370,6 +379,27 @@ export const MasonryGrid = memo(
         setScrollTop(next);
       };
 
+      // A selection change can open the detail panel and resize the grid in
+      // the same frame. Resolve the requested item against the final positions
+      // before preserving the previous width anchor, otherwise the resize
+      // branch consumes the one-shot scroll request.
+      if (scrollToId != null && scrollToIdChanged) {
+        const idx = idToIndexMap.get(scrollToId);
+        if (idx !== undefined && positions[idx]) {
+          const pos = positions[idx];
+          const itemTop = pos.top;
+          const itemBottom = pos.top + pos.height;
+          const viewTop = el.scrollTop;
+          const viewBottom = el.scrollTop + el.clientHeight;
+          if (itemTop < viewTop || itemBottom > viewBottom) {
+            syncScrollTopBeforePaint(
+              itemTop - (el.clientHeight - pos.height) / 2
+            );
+          }
+        }
+        return;
+      }
+
       if (widthChanged && positionsChanged && prevPositions.length > 0) {
         const currentScrollTop = el.scrollTop;
         if (currentScrollTop <= 0) {
@@ -395,22 +425,6 @@ export const MasonryGrid = memo(
           syncScrollTopBeforePaint(newTop);
         }
         return;
-      }
-
-      if (scrollToId != null && scrollToIdChanged) {
-        const idx = idToIndexMap.get(scrollToId);
-        if (idx !== undefined && positions[idx]) {
-          const pos = positions[idx];
-          const itemTop = pos.top;
-          const itemBottom = pos.top + pos.height;
-          const viewTop = el.scrollTop;
-          const viewBottom = el.scrollTop + el.clientHeight;
-          if (itemTop < viewTop || itemBottom > viewBottom) {
-            syncScrollTopBeforePaint(
-              itemTop - (el.clientHeight - pos.height) / 2
-            );
-          }
-        }
       }
     }, [positions, scrollToId, routeKey, containerWidth, idToIndexMap]);
 
@@ -504,7 +518,12 @@ export const MasonryGrid = memo(
           data-masonry-scroll=""
           onMouseDown={handleMarqueeStart}
           ref={scrollRef}
-          style={{ height: "100%", overflowY: "auto", overflowX: "hidden" }}
+          style={{
+            height: "100%",
+            overflowX: "hidden",
+            overflowY: "auto",
+            paddingTop: topInset > 0 ? topInset + 8 : undefined,
+          }}
         >
           {layoutReady && (
             <div
@@ -608,5 +627,7 @@ export const MasonryGrid = memo(
     prevProps.itemStateVersion === nextProps.itemStateVersion &&
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.scrollToId === nextProps.scrollToId &&
+    prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
+    prevProps.topInset === nextProps.topInset &&
     prevProps.routeKey === nextProps.routeKey
 );
