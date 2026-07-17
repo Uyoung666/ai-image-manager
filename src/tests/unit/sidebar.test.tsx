@@ -36,6 +36,8 @@ vi.mock("@/hooks/useAiStatus", () => ({
 
 describe("Sidebar", () => {
   beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
     useAiStatusMock.mockReturnValue({
       data: {
         coverageState: "ready",
@@ -93,9 +95,7 @@ describe("Sidebar", () => {
 
   it("uses one atomic action when all photos is selected", () => {
     const onSelectAllPhotos = vi.fn();
-    render(
-      <Sidebar {...baseProps} onSelectAllPhotos={onSelectAllPhotos} />
-    );
+    render(<Sidebar {...baseProps} onSelectAllPhotos={onSelectAllPhotos} />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "全部照片" })[0]);
 
@@ -214,6 +214,229 @@ describe("Sidebar", () => {
     expect(
       screen.queryByRole("button", { name: PHOTOS_TITLE_PATTERN })
     ).not.toBeInTheDocument();
+  });
+
+  it("opens folder shortcuts from the collapsed navigation rail", () => {
+    render(<Sidebar {...baseProps} collapsed />);
+
+    fireEvent.click(screen.getByRole("button", { name: "文件夹快捷入口" }));
+
+    expect(
+      screen.getByText("暂无快捷文件夹。展开侧边栏后，可右键文件夹将其置顶。")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "查看全部文件夹" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows current, pinned, and recent folders without duplicates", () => {
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([1, 2]));
+    localStorage.setItem("sidebar-recent-folder-ids", JSON.stringify([2, 3]));
+    render(
+      <Sidebar
+        {...baseProps}
+        activeFolderId={1}
+        collapsed
+        folders={[
+          {
+            displayName: "Current",
+            id: 1,
+            parentId: null,
+            path: "C:/Current",
+            photoCount: 10,
+          },
+          {
+            displayName: "Pinned",
+            id: 2,
+            parentId: null,
+            path: "C:/Pinned",
+            photoCount: 20,
+          },
+          {
+            displayName: "Recent",
+            id: 3,
+            parentId: null,
+            path: "C:/Recent",
+            photoCount: 30,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "文件夹快捷入口" }));
+
+    expect(
+      screen.getByRole("region", { name: "当前文件夹" })
+    ).toHaveTextContent("Current");
+    expect(
+      screen.getByRole("region", { name: "置顶文件夹" })
+    ).toHaveTextContent("Pinned");
+    expect(screen.getByRole("region", { name: "最近访问" })).toHaveTextContent(
+      "Recent"
+    );
+    expect(screen.getAllByText("Current")).toHaveLength(1);
+    expect(screen.getAllByText("Pinned")).toHaveLength(1);
+    expect(screen.getAllByText("Recent")).toHaveLength(1);
+  });
+
+  it("selects a shortcut, closes the popover, and records recent folders", async () => {
+    const onSelectFolder = vi.fn();
+    const folders = [
+      {
+        displayName: "Photos",
+        id: 1,
+        parentId: null,
+        path: "C:/Photos",
+        photoCount: 500,
+      },
+      {
+        displayName: "Travel",
+        id: 2,
+        parentId: null,
+        path: "C:/Travel",
+        photoCount: 200,
+      },
+    ];
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([1]));
+    const { rerender } = render(
+      <Sidebar
+        {...baseProps}
+        activeFolderId={2}
+        collapsed
+        folders={folders}
+        onSelectFolder={onSelectFolder}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "文件夹快捷入口" }));
+    fireEvent.click(screen.getByRole("button", { name: "Photos (500)" }));
+
+    expect(onSelectFolder).toHaveBeenCalledWith(1);
+    await waitFor(() =>
+      expect(screen.queryByText("当前文件夹")).not.toBeInTheDocument()
+    );
+
+    rerender(
+      <Sidebar
+        {...baseProps}
+        activeFolderId={1}
+        collapsed
+        folders={folders}
+        onSelectFolder={onSelectFolder}
+      />
+    );
+    await waitFor(() =>
+      expect(
+        JSON.parse(localStorage.getItem("sidebar-recent-folder-ids") ?? "[]")
+      ).toEqual([1, 2])
+    );
+  });
+
+  it("pins and unpins a folder from its context menu", () => {
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+        ]}
+      />
+    );
+
+    fireEvent.contextMenu(
+      screen.getByText("Photos").closest("button") as Element
+    );
+    fireEvent.click(screen.getByRole("button", { name: "置顶文件夹" }));
+    expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[1]");
+
+    fireEvent.contextMenu(
+      screen.getByText("Photos").closest("button") as Element
+    );
+    fireEvent.click(screen.getByRole("button", { name: "取消置顶" }));
+    expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[]");
+  });
+
+  it("does not replace pinned folders when the five-folder limit is reached", () => {
+    localStorage.setItem(
+      "sidebar-pinned-folder-ids",
+      JSON.stringify([1, 2, 3, 4, 5])
+    );
+    const folders = Array.from({ length: 6 }, (_, index) => ({
+      displayName: `Folder ${index + 1}`,
+      id: index + 1,
+      parentId: null,
+      path: `C:/Folder-${index + 1}`,
+      photoCount: index + 1,
+    }));
+    render(<Sidebar {...baseProps} folders={folders} />);
+
+    fireEvent.contextMenu(
+      screen.getByText("Folder 6").closest("button") as Element
+    );
+    fireEvent.click(screen.getByRole("button", { name: "置顶文件夹" }));
+
+    expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe(
+      "[1,2,3,4,5]"
+    );
+  });
+
+  it("removes folder shortcut ids that no longer exist", async () => {
+    localStorage.setItem(
+      "sidebar-pinned-folder-ids",
+      JSON.stringify([1, 999])
+    );
+    localStorage.setItem(
+      "sidebar-recent-folder-ids",
+      JSON.stringify([999, 1])
+    );
+    render(
+      <Sidebar
+        {...baseProps}
+        folders={[
+          {
+            displayName: "Photos",
+            id: 1,
+            parentId: null,
+            path: "C:/Photos",
+            photoCount: 500,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[1]");
+      expect(localStorage.getItem("sidebar-recent-folder-ids")).toBe("[1]");
+    });
+  });
+
+  it("expands to all folders and focuses folder search", async () => {
+    const onToggleCollapse = vi.fn();
+    const { rerender } = render(
+      <Sidebar {...baseProps} collapsed onToggleCollapse={onToggleCollapse} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "文件夹快捷入口" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看全部文件夹" }));
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Sidebar
+        {...baseProps}
+        collapsed={false}
+        onToggleCollapse={onToggleCollapse}
+      />
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "folderSearchPlaceholder" })
+      ).toHaveFocus()
+    );
   });
 
   it("renders a custom folder icon in the resource panel", () => {

@@ -2,11 +2,14 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Album,
   CircleHelp,
+  Folder,
   Images,
   LayoutDashboard,
   Paintbrush,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
+  PinOff,
   Plus,
   ScanSearch,
   Search,
@@ -31,6 +34,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -41,6 +49,7 @@ import { getTagDisplayName } from "@/localization/tag-display";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Folder as FolderType } from "@/types/photo";
 import { FolderAppearanceDialog } from "./FolderAppearanceDialog";
+import { FolderBadge } from "./FolderBadge";
 import {
   buildFolderTree,
   buildTagTree,
@@ -54,6 +63,36 @@ const RESOURCE_PANEL_DEFAULT_WIDTH = 232;
 const RESOURCE_PANEL_MIN_WIDTH = 192;
 const RESOURCE_PANEL_MAX_WIDTH = 320;
 const RESOURCE_PANEL_WIDTH_KEY = "sidebar-resource-panel-width";
+const PINNED_FOLDER_IDS_KEY = "sidebar-pinned-folder-ids";
+const RECENT_FOLDER_IDS_KEY = "sidebar-recent-folder-ids";
+const MAX_PINNED_FOLDERS = 5;
+const MAX_RECENT_FOLDERS = 3;
+
+function loadFolderIds(key: string, limit: number): number[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
+    if (!Array.isArray(stored)) {
+      return [];
+    }
+    return [
+      ...new Set(
+        stored.filter(
+          (id): id is number => Number.isInteger(id) && Number(id) > 0
+        )
+      ),
+    ].slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+function saveFolderIds(key: string, ids: number[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Keep the in-memory preference when storage is unavailable.
+  }
+}
 
 function loadResourcePanelWidth() {
   try {
@@ -131,6 +170,54 @@ function RailButton({
   );
 }
 
+function FolderShortcutRow({
+  folder,
+  onSelect,
+  onUnpin,
+  unpinLabel,
+}: {
+  folder: FolderType;
+  onSelect: () => void;
+  onUnpin?: () => void;
+  unpinLabel: string;
+}) {
+  return (
+    <div className="group flex min-w-0 items-center rounded-[6px] hover:bg-foreground/5">
+      <button
+        aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+        onClick={onSelect}
+        title={folder.path}
+        type="button"
+      >
+        <FolderBadge className="h-6 w-6" folder={folder} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-[12px] text-foreground">
+            {folder.displayName}
+          </span>
+          <span className="block truncate text-[10px] text-muted-foreground/65">
+            {folder.path}
+          </span>
+        </span>
+        <span className="flex-shrink-0 text-[10px] text-muted-foreground/60">
+          {(folder.totalPhotoCount ?? folder.photoCount).toLocaleString()}
+        </span>
+      </button>
+      {onUnpin && (
+        <button
+          aria-label={`${unpinLabel}: ${folder.displayName}`}
+          className="mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[5px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-foreground/8 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+          onClick={onUnpin}
+          title={unpinLabel}
+          type="button"
+        >
+          <PinOff className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface SidebarProps {
   activeFolderId: number | null;
   activeTagIds: number[];
@@ -180,6 +267,16 @@ export function Sidebar({
   );
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [folderSearch, setFolderSearch] = useState("");
+  const folderSearchRef = useRef<HTMLInputElement>(null);
+  const pendingFolderSearchFocusRef = useRef(false);
+  const hasLoadedFoldersRef = useRef(false);
+  const [folderShortcutsOpen, setFolderShortcutsOpen] = useState(false);
+  const [pinnedFolderIds, setPinnedFolderIds] = useState<number[]>(() =>
+    loadFolderIds(PINNED_FOLDER_IDS_KEY, MAX_PINNED_FOLDERS)
+  );
+  const [recentFolderIds, setRecentFolderIds] = useState<number[]>(() =>
+    loadFolderIds(RECENT_FOLDER_IDS_KEY, MAX_RECENT_FOLDERS)
+  );
   const [tagSearch, setTagSearch] = useState("");
   const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
   const [trashCount, setTrashCount] = useState(0);
@@ -247,6 +344,79 @@ export function Sidebar({
   const aiTagPipelineActive = Boolean(
     batchTagLoading || aiTagging || aiStatus?.isEmbedding
   );
+
+  const updatePinnedFolderIds = useCallback((next: number[]) => {
+    const normalized = [...new Set(next)].slice(0, MAX_PINNED_FOLDERS);
+    setPinnedFolderIds(normalized);
+    saveFolderIds(PINNED_FOLDER_IDS_KEY, normalized);
+  }, []);
+
+  const togglePinnedFolder = useCallback(
+    (folderId: number) => {
+      if (pinnedFolderIds.includes(folderId)) {
+        updatePinnedFolderIds(pinnedFolderIds.filter((id) => id !== folderId));
+        return true;
+      }
+      if (pinnedFolderIds.length >= MAX_PINNED_FOLDERS) {
+        toast.error(t("folderPinLimit", { count: MAX_PINNED_FOLDERS }));
+        return false;
+      }
+      updatePinnedFolderIds([...pinnedFolderIds, folderId]);
+      return true;
+    },
+    [pinnedFolderIds, t, updatePinnedFolderIds]
+  );
+
+  useEffect(() => {
+    if (activeFolderId === null) {
+      return;
+    }
+    setRecentFolderIds((previous) => {
+      const next = [
+        activeFolderId,
+        ...previous.filter((id) => id !== activeFolderId),
+      ].slice(0, MAX_RECENT_FOLDERS);
+      saveFolderIds(RECENT_FOLDER_IDS_KEY, next);
+      return next;
+    });
+  }, [activeFolderId]);
+
+  useEffect(() => {
+    if (folders.length > 0) {
+      hasLoadedFoldersRef.current = true;
+    } else if (!hasLoadedFoldersRef.current) {
+      return;
+    }
+    const validIds = new Set(folders.map((folder) => folder.id));
+    setPinnedFolderIds((previous) => {
+      const next = previous.filter((id) => validIds.has(id));
+      if (next.length !== previous.length) {
+        saveFolderIds(PINNED_FOLDER_IDS_KEY, next);
+        return next;
+      }
+      return previous;
+    });
+    setRecentFolderIds((previous) => {
+      const next = previous.filter((id) => validIds.has(id));
+      if (next.length !== previous.length) {
+        saveFolderIds(RECENT_FOLDER_IDS_KEY, next);
+        return next;
+      }
+      return previous;
+    });
+  }, [folders]);
+
+  useEffect(() => {
+    if (
+      collapsed ||
+      resourceView !== "folders" ||
+      !pendingFolderSearchFocusRef.current
+    ) {
+      return;
+    }
+    pendingFolderSearchFocusRef.current = false;
+    requestAnimationFrame(() => folderSearchRef.current?.focus());
+  }, [collapsed, resourceView]);
   let aiTagStatusText = t("tagWaitingForIndex");
   if (batchTagLoading && !aiTagging) {
     aiTagStatusText = t("tagUpdating");
@@ -801,6 +971,46 @@ export function Sidebar({
   }, [expandedFolderIds, folderSearch, folderSearchResult.ancestorIds]);
   const appearanceFolder =
     folders.find((folder) => folder.id === appearanceFolderId) ?? null;
+  const folderById = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, folder])),
+    [folders]
+  );
+  const activeShortcutFolder =
+    activeFolderId === null ? null : (folderById.get(activeFolderId) ?? null);
+  const pinnedShortcutFolders = pinnedFolderIds
+    .filter((id) => id !== activeFolderId)
+    .map((id) => folderById.get(id))
+    .filter((folder): folder is FolderType => folder !== undefined);
+  const shortcutIds = new Set([
+    ...(activeFolderId === null ? [] : [activeFolderId]),
+    ...pinnedFolderIds,
+  ]);
+  const recentShortcutFolders = recentFolderIds
+    .filter((id) => !shortcutIds.has(id))
+    .map((id) => folderById.get(id))
+    .filter((folder): folder is FolderType => folder !== undefined);
+  const hasFolderShortcuts = Boolean(
+    activeShortcutFolder ||
+      pinnedShortcutFolders.length > 0 ||
+      recentShortcutFolders.length > 0
+  );
+
+  const selectShortcutFolder = useCallback(
+    (folderId: number) => {
+      onSelectFolder(folderId);
+      setFolderShortcutsOpen(false);
+    },
+    [onSelectFolder]
+  );
+
+  const showAllFolders = useCallback(() => {
+    setFolderShortcutsOpen(false);
+    setResourceView("folders");
+    pendingFolderSearchFocusRef.current = true;
+    if (collapsed) {
+      onToggleCollapse();
+    }
+  }, [collapsed, onToggleCollapse]);
   // Auto-expand each root parent once without overwriting the user's choices.
   const autoExpandedFolderIdsRef = useRef(new Set<number>());
   useEffect(() => {
@@ -959,6 +1169,105 @@ export function Sidebar({
                 }
               }}
             />
+            {collapsed && (
+              <Popover
+                onOpenChange={setFolderShortcutsOpen}
+                open={folderShortcutsOpen}
+              >
+                <SidebarTooltip content={t("folderShortcuts")}>
+                  <PopoverTrigger asChild>
+                    <button
+                      aria-label={t("folderShortcuts")}
+                      aria-pressed={folderShortcutsOpen}
+                      className={`relative flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors ${
+                        activeFolderId !== null || folderShortcutsOpen
+                          ? "nav-item-active text-primary"
+                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                      }`}
+                      type="button"
+                    >
+                      <Folder className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                </SidebarTooltip>
+                <PopoverContent
+                  align="start"
+                  aria-label={t("folderShortcuts")}
+                  className="w-72 gap-2 p-2"
+                  side="right"
+                  sideOffset={8}
+                >
+                  <div className="px-2 pt-1 font-medium text-[12px] text-foreground">
+                    {t("folderShortcuts")}
+                  </div>
+                  {activeShortcutFolder && (
+                    <section aria-label={t("currentFolder")}>
+                      <p className="px-2 py-1 text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                        {t("currentFolder")}
+                      </p>
+                      <FolderShortcutRow
+                        folder={activeShortcutFolder}
+                        onSelect={() =>
+                          selectShortcutFolder(activeShortcutFolder.id)
+                        }
+                        onUnpin={
+                          pinnedFolderIds.includes(activeShortcutFolder.id)
+                            ? () => togglePinnedFolder(activeShortcutFolder.id)
+                            : undefined
+                        }
+                        unpinLabel={t("unpinFolder")}
+                      />
+                    </section>
+                  )}
+                  {pinnedShortcutFolders.length > 0 && (
+                    <section aria-label={t("pinnedFolders")}>
+                      <p className="px-2 py-1 text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                        {t("pinnedFolders")}
+                      </p>
+                      {pinnedShortcutFolders.map((folder) => (
+                        <FolderShortcutRow
+                          folder={folder}
+                          key={folder.id}
+                          onSelect={() => selectShortcutFolder(folder.id)}
+                          onUnpin={() => togglePinnedFolder(folder.id)}
+                          unpinLabel={t("unpinFolder")}
+                        />
+                      ))}
+                    </section>
+                  )}
+                  {recentShortcutFolders.length > 0 && (
+                    <section aria-label={t("recentFolders")}>
+                      <p className="px-2 py-1 text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                        {t("recentFolders")}
+                      </p>
+                      {recentShortcutFolders.map((folder) => (
+                        <FolderShortcutRow
+                          folder={folder}
+                          key={folder.id}
+                          onSelect={() => selectShortcutFolder(folder.id)}
+                          unpinLabel={t("unpinFolder")}
+                        />
+                      ))}
+                    </section>
+                  )}
+                  {!hasFolderShortcuts && (
+                    <p className="px-2 py-3 text-[11px] text-muted-foreground leading-relaxed">
+                      {t("folderShortcutsEmpty")}
+                    </p>
+                  )}
+                  <div className="border-border border-t pt-1">
+                    <button
+                      className="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                      onClick={showAllFolders}
+                      type="button"
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      {t("viewAllFolders")}
+                    </button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
             <RailButton
               active={location.pathname === "/dashboard"}
               icon={<LayoutDashboard className="h-4 w-4" />}
@@ -1119,6 +1428,7 @@ export function Sidebar({
                         }
                       }}
                       placeholder={t("folderSearchPlaceholder")}
+                      ref={folderSearchRef}
                       role="searchbox"
                       value={folderSearch}
                     />
@@ -1516,13 +1826,31 @@ export function Sidebar({
           ref={ctxRef}
           style={{
             left: Math.min(folderCtx.x, window.innerWidth - 160),
-            top: Math.min(folderCtx.y, window.innerHeight - 140),
+            top: Math.min(folderCtx.y, window.innerHeight - 180),
           }}
         >
           <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
             {folderCtx.displayName}
           </div>
           <div className="mx-2 my-1 border-border border-t" />
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+            onClick={() => {
+              if (togglePinnedFolder(folderCtx.folderId)) {
+                closeCtx();
+              }
+            }}
+            type="button"
+          >
+            {pinnedFolderIds.includes(folderCtx.folderId) ? (
+              <PinOff className="h-3.5 w-3.5" />
+            ) : (
+              <Pin className="h-3.5 w-3.5" />
+            )}
+            {pinnedFolderIds.includes(folderCtx.folderId)
+              ? t("unpinFolder")
+              : t("pinFolder")}
+          </button>
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
             onClick={() => {
