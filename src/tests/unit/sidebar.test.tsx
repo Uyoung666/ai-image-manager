@@ -59,6 +59,7 @@ describe("Sidebar", () => {
     }>,
     onAddFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
+    onSelectAllPhotos: vi.fn(),
     onSelectFolder: vi.fn(),
     onToggleCollapse: vi.fn(),
     totalPhotos: 1250,
@@ -88,6 +89,18 @@ describe("Sidebar", () => {
     expect(
       screen.getAllByRole("button", { name: "全部照片" }).length
     ).toBeGreaterThan(0);
+  });
+
+  it("uses one atomic action when all photos is selected", () => {
+    const onSelectAllPhotos = vi.fn();
+    render(
+      <Sidebar {...baseProps} onSelectAllPhotos={onSelectAllPhotos} />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "全部照片" })[0]);
+
+    expect(onSelectAllPhotos).toHaveBeenCalledTimes(1);
+    expect(baseProps.onSelectFolder).not.toHaveBeenCalled();
   });
 
   it("renders folder list", () => {

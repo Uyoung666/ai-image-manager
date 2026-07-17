@@ -139,6 +139,7 @@ interface SidebarProps {
   folders: FolderType[];
   onAddFolder: (externalPath?: string) => void;
   onDeleteFolder: (id: number, displayName: string) => void;
+  onSelectAllPhotos: () => void;
   onSelectFavorites?: () => void;
   onSelectFolder: (id: number | null) => void;
   onToggleCollapse: () => void;
@@ -159,6 +160,7 @@ export function Sidebar({
   onSelectFavorites,
   onAddFolder,
   onDeleteFolder,
+  onSelectAllPhotos,
   onToggleTag,
   onToggleTagMode,
   onToggleCollapse,
@@ -953,8 +955,7 @@ export function Sidebar({
                 if (collapsed) {
                   onToggleCollapse();
                 } else {
-                  onToggleTag?.(null);
-                  onSelectFolder(null);
+                  onSelectAllPhotos();
                 }
               }}
             />
@@ -1046,8 +1047,7 @@ export function Sidebar({
                     : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                 }`}
                 onClick={() => {
-                  onToggleTag?.(null);
-                  onSelectFolder(null);
+                  onSelectAllPhotos();
                 }}
               >
                 <Images className="h-3.5 w-3.5" />

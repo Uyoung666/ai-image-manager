@@ -157,6 +157,32 @@ function HomePage() {
   const drillParams = Route.useSearch();
   const drillConsumed = useRef(false);
   const searchBarRef = useRef<SearchBarHandle>(null);
+  const searchGenerationRef = useRef(0);
+
+  const resetHomeSearchState = useCallback(() => {
+    searchGenerationRef.current += 1;
+    pendingSemanticRefreshRef.current = null;
+    searchExpandedRef.current = false;
+    lastSearchParamsRef.current = null;
+    setSearchQuery("");
+    setSearchMode(null);
+    setSearchTime(undefined);
+    setSearchResults(null);
+    setSearchSemantic(null);
+    setSearchLoading(false);
+    setColorHex(null);
+    setParsedTimeFilter(null);
+    setShowAiIndexHint(false);
+    setShowDrillBanner(false);
+    setSearchResultFade(false);
+    searchBarRef.current?.resetUiState();
+    saveBrowseSession("home-search", {
+      colorHex: null,
+      searchMode: null,
+      searchQuery: "",
+    });
+    navigate({ to: "/", search: {}, replace: true });
+  }, [navigate, saveBrowseSession]);
 
   useEffect(() => {
     const hasParams = Object.values(drillParams).some((v) => v !== undefined);
@@ -174,12 +200,7 @@ function HomePage() {
 
     // Handle reset from SpotlightSearch "All Photos"
     if (drillParams.reset) {
-      navigate({ to: "/", search: {}, replace: true });
-      setSearchMode(null);
-      setSearchQuery("");
-      setSearchTime(undefined);
-      setSearchResults(null);
-      setColorHex(null);
+      resetHomeSearchState();
       filter.setActiveFolderId(null); // also clears favoriteOnly + activeTagIds
       return;
     }
@@ -292,15 +313,11 @@ function HomePage() {
   // Listen for sidebar-triggered clear-search events
   useEffect(() => {
     function handler() {
-      setSearchMode(null);
-      setSearchQuery("");
-      setSearchTime(undefined);
-      setSearchResults(null);
-      setColorHex(null);
+      resetHomeSearchState();
     }
     window.addEventListener("sidebar:clear-search", handler);
     return () => window.removeEventListener("sidebar:clear-search", handler);
-  }, []);
+  }, [resetHomeSearchState]);
 
   // Listen for file-change events from main process (chokidar watcher)
   useEffect(() => {
@@ -787,6 +804,7 @@ function HomePage() {
       const p = lastSearchParamsRef.current;
       if (!p) return;
       searchExpandedRef.current = true;
+      const generation = searchGenerationRef.current;
 
       const startTime = performance.now();
       const searchParams: any = { limit: 1000 };
@@ -825,6 +843,9 @@ function HomePage() {
       ipc.client.photos
         .searchCompound(searchParams)
         .then((result: any) => {
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
           const newResults = result.results || [];
           if (newResults.length > 0) {
             setSearchResults(newResults);
@@ -881,9 +902,6 @@ function HomePage() {
       setLightboxIndex(idx);
     }
   }, []);
-  // 搜索生成计数器：每次新搜索递增，用于丢弃过时请求的响应
-  const searchGenerationRef = useRef(0);
-
   async function handleSearch(
     query: string,
     filters?: ExifFilters,
@@ -1062,6 +1080,9 @@ function HomePage() {
       setSearchTime(Math.round(performance.now() - startTime));
       setSearchResultFade(true);
     } catch {
+      if (gen !== searchGenerationRef.current) {
+        return;
+      }
       // 颜色搜索失败不降级到全量查询
       if (effectiveColorHex) {
         setSearchResults([]);
@@ -1075,15 +1096,23 @@ function HomePage() {
             offset: 0,
             limit: 500,
           });
+          if (gen !== searchGenerationRef.current) {
+            return;
+          }
           setSearchResults((fallback as any).items || []);
           setSearchTime(Math.round(performance.now() - startTime));
         } catch {
+          if (gen !== searchGenerationRef.current) {
+            return;
+          }
           toast.error(t("toastSearchFailed"));
           setSearchResults([]);
         }
       }
     } finally {
-      setSearchLoading(false);
+      if (gen === searchGenerationRef.current) {
+        setSearchLoading(false);
+      }
     }
   }
   const handleContextMenu = useCallback(
@@ -1476,20 +1505,7 @@ function HomePage() {
               </div>
             </div>
           }
-          onClear={() => {
-            searchGenerationRef.current++;
-            pendingSemanticRefreshRef.current = null;
-            setSearchQuery("");
-            setColorHex(null);
-            setSearchMode(null);
-            setSearchTime(undefined);
-            setSearchResults(null);
-            setSearchSemantic(null);
-            setParsedTimeFilter(null);
-            setShowAiIndexHint(false);
-            searchExpandedRef.current = false;
-            lastSearchParamsRef.current = null;
-          }}
+          onClear={resetHomeSearchState}
           onImageSearch={handleImageSearch}
           onSearch={handleSearch}
           ref={searchBarRef}

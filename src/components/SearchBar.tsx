@@ -81,6 +81,7 @@ interface SearchBarProps {
 
 export interface SearchBarHandle {
   clearFilters: () => void;
+  resetUiState: () => void;
   setFilters: (filters: ExifFilters, isDrillDown?: boolean) => void;
 }
 
@@ -697,6 +698,17 @@ export const SearchBar = memo(
           } else {
             onClear();
           }
+        },
+        resetUiState: () => {
+          setQuery("");
+          setFilters({});
+          setDrillOriginFilters(new Set());
+          setShowSuggestions(false);
+          setShowFilters(false);
+          setShowCameraSuggestions(false);
+          setShowLensSuggestions(false);
+          setSuggestionIndex(-1);
+          setInputFocused(false);
         },
       }));
 

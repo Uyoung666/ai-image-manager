@@ -42,6 +42,7 @@ interface SidebarFilterActions {
   // Import actions
   handleAddFolder: (externalPath?: string) => void;
   handleDeleteFolder: (id: number) => void;
+  selectAllPhotosAndNotify: () => void;
   selectFolderAndNotify: (id: number | null) => void;
   // Filter actions
   setActiveFolderId: (id: number | null) => void;
@@ -101,6 +102,13 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
   // (drill-down, etc.) where clearing search is handled separately.
   const selectFolderAndNotify = useCallback((id: number | null) => {
     setActiveFolderIdState(id);
+    setFavoriteOnlyState(false);
+    setActiveTagIds([]);
+    window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
+  }, []);
+
+  const selectAllPhotosAndNotify = useCallback(() => {
+    setActiveFolderIdState(null);
     setFavoriteOnlyState(false);
     setActiveTagIds([]);
     window.dispatchEvent(new CustomEvent("sidebar:clear-search"));
@@ -231,6 +239,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       // Actions
       setActiveFolderId,
       setFavoriteOnly,
+      selectAllPhotosAndNotify,
       selectFolderAndNotify,
       toggleFavoritesAndNotify,
       toggleTag,
@@ -249,6 +258,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       totalPhotos,
       setActiveFolderId,
       setFavoriteOnly,
+      selectAllPhotosAndNotify,
       selectFolderAndNotify,
       toggleFavoritesAndNotify,
       toggleTag,

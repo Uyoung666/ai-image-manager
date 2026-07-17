@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SearchBar } from "@/components/SearchBar";
+import { SearchBar, type SearchBarHandle } from "@/components/SearchBar";
 
 const SEARCH_HISTORY_KEY = "search_history";
 
@@ -22,6 +23,31 @@ describe("SearchBar", () => {
     expect(
       screen.getByPlaceholderText("试试搜索“去年秋天的红叶”")
     ).toBeInTheDocument();
+  });
+
+  it("resets query and filters without firing search callbacks", async () => {
+    const user = userEvent.setup();
+    const ref = createRef<SearchBarHandle>();
+    const onClear = vi.fn();
+    const onSearch = vi.fn();
+    render(
+      <SearchBar ref={ref} onClear={onClear} onSearch={onSearch} />
+    );
+
+    await user.type(screen.getByRole("combobox"), "sunset");
+    act(() => {
+      ref.current?.setFilters({ cameraModel: "Example Camera" });
+    });
+    expect(screen.getByText(/· 1/)).toBeInTheDocument();
+
+    act(() => {
+      ref.current?.resetUiState();
+    });
+
+    expect(screen.getByRole("combobox")).toHaveValue("");
+    expect(screen.queryByText(/· 1/)).not.toBeInTheDocument();
+    expect(onClear).not.toHaveBeenCalled();
+    expect(onSearch).not.toHaveBeenCalled();
   });
 
   it("shows starter examples when an empty search input is focused", async () => {
