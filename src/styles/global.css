@@ -102,6 +102,15 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--primary);
+
+  /* 首页画廊工作台：侧栏是底层，图库画布是抬升的工作表面 */
+  --workspace-background: var(--sidebar);
+  --gallery-canvas: #14161a;
+  --gallery-canvas-border: rgba(255, 255, 255, 0.075);
+  --gallery-canvas-highlight: rgba(255, 255, 255, 0.045);
+  --gallery-canvas-shadow:
+    -4px 10px 26px -14px rgba(0, 0, 0, 0.58),
+    0 16px 34px -22px rgba(0, 0, 0, 0.78);
 }
 
 /* Light Theme */
@@ -175,6 +184,14 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border-subtle);
   --sidebar-ring: var(--primary);
+
+  --workspace-background: #f1f1f3;
+  --gallery-canvas: #ffffff;
+  --gallery-canvas-border: rgba(24, 24, 27, 0.09);
+  --gallery-canvas-highlight: rgba(255, 255, 255, 0.9);
+  --gallery-canvas-shadow:
+    -4px 10px 24px -14px rgba(31, 35, 48, 0.14),
+    0 16px 32px -23px rgba(31, 35, 48, 0.2);
 }
 
 @theme inline {
@@ -336,20 +353,6 @@
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
-  /* Theme transition — smooth color shift on theme switch, scope to theme-sensitive containers */
-  html.transitioning body,
-  html.transitioning .sidebar-bg,
-  html.transitioning .glass-surface,
-  html.transitioning .glass-surface-heavy,
-  html.transitioning .surface-elevated,
-  html.transitioning [data-theme-sensitive] {
-    transition:
-      background-color 300ms ease-out,
-      color 300ms ease-out,
-      border-color 300ms ease-out,
-      box-shadow 300ms ease-out;
-  }
-
   .draglayer {
     -webkit-app-region: drag;
   }
@@ -365,9 +368,10 @@
   }
 }
 
-/* ── 侧边栏选中项左侧亮色指示线 ── */
+/* 侧边栏选中项：中性底色维持层级，主色仅用于文字与图标 */
 .nav-item-active {
-  box-shadow: inset 3px 0 0 0 var(--primary);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  box-shadow: none;
 }
 
 /* 文件夹身份色：在深浅主题中向高对比色收敛，保留用户选择的色相。 */
@@ -380,22 +384,60 @@
   color: color-mix(in srgb, var(--folder-badge-color) 72%, black);
 }
 
-/* ── 侧边栏渐变 — 顶部到底部逐渐加深 ── */
+/* 侧边栏本身不再形成色块，直接使用窗口工作区的连续背景 */
 .sidebar-bg {
-  background: linear-gradient(
-    180deg,
-    var(--sidebar) 0%,
-    var(--sidebar) 30%,
-    color-mix(in srgb, var(--sidebar) 85%, black) 100%
-  );
+  background: transparent;
 }
-.light .sidebar-bg {
-  background: linear-gradient(
-    180deg,
-    var(--sidebar) 0%,
-    var(--sidebar) 30%,
-    color-mix(in srgb, var(--sidebar) 90%, black) 100%
-  );
+
+.sidebar-bg .border-t {
+  border-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+/* ── 首页画廊工作台 ─────────────────────────────────────────────── */
+.home-workspace {
+  background: var(--workspace-background);
+}
+
+.home-workspace-content {
+  gap: 8px;
+}
+
+.home-gallery-canvas {
+  position: relative;
+  margin: 10px 12px 12px 0;
+  background: var(--gallery-canvas);
+  border: 1px solid var(--gallery-canvas-border);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 var(--gallery-canvas-highlight),
+    var(--gallery-canvas-shadow);
+}
+
+@media (max-width: 840px), (max-height: 560px) {
+  .home-workspace-content {
+    gap: 4px;
+  }
+
+  .home-gallery-canvas {
+    margin: 6px 8px 8px 0;
+    border-radius: 9px;
+  }
+}
+
+/* Theme transition — smooth color shift on theme switch, scope to theme-sensitive containers */
+html.transitioning body,
+html.transitioning .sidebar-bg,
+html.transitioning .home-workspace,
+html.transitioning .home-gallery-canvas,
+html.transitioning .glass-surface,
+html.transitioning .glass-surface-heavy,
+html.transitioning .surface-elevated,
+html.transitioning [data-theme-sensitive] {
+  transition:
+    background-color 300ms ease-out,
+    color 300ms ease-out,
+    border-color 300ms ease-out,
+    box-shadow 300ms ease-out;
 }
 
 /* Page transition animation */

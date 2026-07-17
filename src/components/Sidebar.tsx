@@ -769,7 +769,7 @@ export function Sidebar({
   return (
     <>
       <div
-        className={`sidebar-bg flex h-full flex-col overflow-hidden border-sidebar-border border-r ${
+        className={`sidebar-bg flex h-full flex-col overflow-hidden ${
           collapsed ? "w-12" : "w-[clamp(240px,20vw,300px)]"
         }`}
         onDragOver={handleSidebarDragOver}
@@ -1254,7 +1254,7 @@ export function Sidebar({
         ) : (
           <div className="flex h-full w-[clamp(240px,20vw,300px)] select-none flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between border-border border-b px-4 py-3">
+            <div className="flex items-center justify-between px-4 py-3">
               <div>
                 <button
                   className="font-semibold text-[14px] text-foreground transition-colors hover:text-primary"
@@ -1719,7 +1719,7 @@ export function Sidebar({
             </div>
 
             {/* Footer */}
-            <div className="border-border border-t px-3 py-2">
+            <div className="px-3 py-2">
               {/* Content group */}
               <button
                 className={`w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors ${

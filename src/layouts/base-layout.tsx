@@ -65,6 +65,8 @@ function SidebarSlot() {
 }
 
 export default function BaseLayout({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const isHomePage = location.pathname === "/";
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [perfOn] = useState(isPerfMonitorEnabled);
   const { metrics, memory } = usePerfMonitor(perfOn);
@@ -104,12 +106,26 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
         <AppContentGate>
           <BrowseSessionProvider>
             <SidebarFilterProvider>
-              <div className="flex h-screen flex-col overflow-hidden">
+              <div
+                className={`flex h-screen flex-col overflow-hidden ${
+                  isHomePage ? "home-workspace" : ""
+                }`}
+              >
                 <DragWindowRegion title="AI Image Manager" />
                 <GlobalProgressBar />
-                <div className="flex flex-1 overflow-hidden">
+                <div
+                  className={`flex min-h-0 flex-1 overflow-hidden ${
+                    isHomePage ? "home-workspace-content" : ""
+                  }`}
+                >
                   <SidebarSlot />
-                  <main className="flex-1 overflow-hidden">{children}</main>
+                  <main
+                    className={`min-w-0 flex-1 overflow-hidden ${
+                      isHomePage ? "home-gallery-canvas" : ""
+                    }`}
+                  >
+                    {children}
+                  </main>
                 </div>
                 <SpotlightSearch />
                 <KeyboardShortcuts
