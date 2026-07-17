@@ -17,7 +17,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
-import { hexToColorName } from "@/utils/color-name";
 import {
   buildPersonTrie,
   getSearchSuggestions,
@@ -306,6 +305,20 @@ export const SearchBar = memo(
       const hasActiveFilters = Object.values(filters).some(
         (v) => v && v.length > 0
       );
+      const activeFilterCount = [
+        filters.dateFrom,
+        filters.dateTo,
+        filters.cameraModel,
+        filters.lensModel,
+        filters.advancedField && filters.advancedValue,
+        filters.isoMin,
+        filters.isoMax,
+        filters.apertureMin,
+        filters.apertureMax,
+        filters.focalMin,
+        filters.focalMax,
+        filters.shutterMin || filters.shutterMax,
+      ].filter(Boolean).length;
 
       const cameraSuggestions = useMemo(() => {
         if (!filters.cameraModel) {
@@ -760,6 +773,37 @@ export const SearchBar = memo(
                 )}
               </form>
 
+              {(searchMode || resultCount !== undefined) && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="home-search-result-summary inline-flex h-7 flex-shrink-0 items-center gap-1 rounded-[5px] bg-foreground/5 px-2 text-[10px] text-muted-foreground">
+                      {searchMode === "color" && colorHex && (
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ backgroundColor: `#${colorHex}` }}
+                        />
+                      )}
+                      {resultCount !== undefined
+                        ? resultCount > 0
+                          ? t("resultCount", { count: resultCount })
+                          : t("noMatchResult")
+                        : searchMode === "image"
+                          ? t("searchModeImage")
+                          : searchMode === "color"
+                            ? t("searchModeColor")
+                            : searchMode === "exif"
+                              ? t("searchModeExif")
+                              : t("searchModeSemantic")}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {searchTime !== undefined
+                      ? `${searchTime < 1000 ? `${searchTime}ms` : `${(searchTime / 1000).toFixed(1)}s`}`
+                      : t("searchSuggestions")}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
               {onImageSearch && (
                 <>
                   <input
@@ -807,7 +851,7 @@ export const SearchBar = memo(
                   <button
                     aria-expanded={showFilters}
                     aria-label={t("exifFilterTitle")}
-                    className={`flex h-9 w-9 items-center justify-center rounded-[6px] transition-colors ${
+                    className={`flex h-9 flex-shrink-0 items-center justify-center gap-1 rounded-[6px] px-2 transition-colors ${
                       showFilters || hasActiveFilters
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
@@ -825,6 +869,11 @@ export const SearchBar = memo(
                     type="button"
                   >
                     <Filter className="h-4 w-4" />
+                    {hasActiveFilters && (
+                      <span className="home-filter-summary whitespace-nowrap text-[10px]">
+                        {t("exifFilterTitle")} · {activeFilterCount}
+                      </span>
+                    )}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>{t("exifFilterTitle")}</TooltipContent>
@@ -866,64 +915,9 @@ export const SearchBar = memo(
               </div>
             )}
 
-            {/* Search status line — shows mode, timing, and result count */}
-            {(searchMode ||
-              searchTime !== undefined ||
-              resultCount !== undefined) && (
-              <div className="mt-2 flex items-center gap-2 text-[11px]">
-                {searchMode && (
-                  <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-                    {searchMode === "text" ? (
-                      t("searchModeSemantic")
-                    ) : searchMode === "image" ? (
-                      t("searchModeImage")
-                    ) : searchMode === "color" && colorHex ? (
-                      <>
-                        <span
-                          className="inline-block h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: `#${colorHex}` }}
-                        />
-                        {hexToColorName(`#${colorHex}`, "zh")}
-                        <span className="font-mono opacity-70">
-                          #{colorHex.toUpperCase()}
-                        </span>
-                        <button
-                          className="ml-0.5 hover:text-foreground"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onClear();
-                          }}
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </>
-                    ) : (
-                      t("searchModeExif")
-                    )}
-                  </span>
-                )}
-                {searchTime !== undefined && (
-                  <span className="text-muted-foreground/70">
-                    {searchTime < 1000
-                      ? `${searchTime}ms`
-                      : `${(searchTime / 1000).toFixed(1)}s`}
-                  </span>
-                )}
-                {resultCount !== undefined && (
-                  <span className="text-muted-foreground">
-                    {resultCount > 0
-                      ? t("resultCount", { count: resultCount })
-                      : searchMode
-                        ? t("noMatchResult")
-                        : ""}
-                  </span>
-                )}
-              </div>
-            )}
-
             {/* Active filter chips */}
             {hasActiveFilters && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <div className="hidden">
                 {filters.dateFrom && (
                   <FilterChip
                     label={t("filterFrom", { value: filters.dateFrom })}

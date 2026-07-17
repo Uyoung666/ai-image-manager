@@ -497,6 +497,19 @@
   backdrop-filter: none;
 }
 
+.home-search-result-summary {
+  max-width: 124px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .home-search-result-summary {
+    display: none;
+  }
+}
+
 .home-toolbar-context {
   max-width: 220px;
 }
