@@ -20,12 +20,14 @@ interface AlbumInfo {
 }
 
 interface AddToAlbumDialogProps {
+  elevated?: boolean;
   onClose: () => void;
   open: boolean;
   photoIds: number[];
 }
 
 export function AddToAlbumDialog({
+  elevated = false,
   open,
   onClose,
   photoIds,
@@ -111,7 +113,11 @@ export function AddToAlbumDialog({
       }}
       open={open}
     >
-      <DialogContent size="sm">
+      <DialogContent
+        className={elevated ? "z-[1101]" : undefined}
+        overlayClassName={elevated ? "z-[1100]" : undefined}
+        size="sm"
+      >
         <DialogHeader>
           <DialogTitle>{t("albumAddTitle")}</DialogTitle>
         </DialogHeader>

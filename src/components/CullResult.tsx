@@ -1226,6 +1226,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
       {/* Add to album dialog */}
       <AddToAlbumDialog
+        elevated={lightboxIndex >= 0}
         onClose={() => setAlbumOpen(false)}
         open={albumOpen}
         photoIds={albumIds}
@@ -1233,8 +1234,24 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
       {/* Lightbox */}
       <PhotoLightbox
-        index={lightboxIndex}
+        initialIndex={lightboxIndex}
+        modalOpen={albumOpen}
+        onAddToAlbum={(photoId) => {
+          setAlbumIds([photoId]);
+          setAlbumOpen(true);
+        }}
         onClose={() => setLightboxIndex(-1)}
+        onToggleFavorite={async (photoId, nextFavorite) => {
+          await ipc.client.photos.toggleFavorite({
+            ids: [photoId],
+            favorite: nextFavorite,
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["photos"],
+            refetchType: "active",
+          });
+          onUpdate?.();
+        }}
         open={lightboxIndex >= 0}
         photos={lightboxPhotos}
       />

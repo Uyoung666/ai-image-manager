@@ -74,7 +74,7 @@ AI Image Manager 为本地照片库提供从导入、检索、整理到筛选和
 
 | 快速预览 | 照片详情 |
 | :---: | :---: |
-| ![全屏灯箱](screenshots/04-lightbox-preview.png) | ![EXIF 详情](screenshots/05-photo-detail.png) |
+| ![快速预览](screenshots/04-lightbox-preview.png) | ![EXIF 详情](screenshots/05-photo-detail.png) |
 
 ### 专业选片
 

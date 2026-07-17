@@ -652,19 +652,74 @@ html.transitioning [data-theme-sensitive] {
   animation: indeterminate 1.4s ease-in-out infinite;
 }
 
-/* Lightbox active thumbnail highlight */
-.yarl__thumbnails_thumbnail_active {
-  border-color: rgba(94, 106, 210, 0.9) !important;
-  opacity: 1 !important;
+/* Immersive lightbox controls */
+.lightbox-interactive,
+.lightbox-interactive * {
+  -webkit-app-region: no-drag;
 }
 
-.yarl__thumbnails_thumbnail {
-  opacity: 0.5;
-  transition: opacity 150ms ease;
+.lightbox-control-button svg {
+  pointer-events: none;
 }
 
-.yarl__thumbnails_thumbnail:hover {
-  opacity: 0.8;
+.lightbox-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  color: rgb(255 255 255 / 65%);
+  border-radius: 0.5rem;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.lightbox-control-button:hover:not(:disabled) {
+  color: white;
+  background: rgb(255 255 255 / 10%);
+}
+
+.lightbox-control-button:focus-visible,
+.lightbox-secondary-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.lightbox-control-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.lightbox-secondary-button {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.6875rem;
+  color: rgb(255 255 255 / 65%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0.375rem;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.lightbox-secondary-button:hover {
+  color: white;
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 18%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-lightbox-chrome],
+  .lightbox-control-button,
+  .lightbox-secondary-button {
+    transition: none !important;
+  }
 }
 
 /* Photo card stagger entrance */

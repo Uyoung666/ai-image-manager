@@ -74,7 +74,7 @@ On first launch, the setup wizard helps you choose a data directory, configure o
 
 | Quick Preview | Photo Details |
 | :---: | :---: |
-| ![Fullscreen lightbox](screenshots/04-lightbox-preview.png) | ![EXIF details](screenshots/05-photo-detail.png) |
+| ![Quick preview](screenshots/04-lightbox-preview.png) | ![EXIF details](screenshots/05-photo-detail.png) |
 
 ### Professional Photo Culling
 

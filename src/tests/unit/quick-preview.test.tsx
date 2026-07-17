@@ -45,4 +45,19 @@ describe("QuickPreview", () => {
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(onNavigate).toHaveBeenCalledWith(1);
   });
+
+  it("opens the current photo in the lightbox with Enter", () => {
+    const onOpenLightbox = vi.fn();
+    render(
+      <QuickPreview
+        onClose={vi.fn()}
+        onNavigate={vi.fn()}
+        onOpenLightbox={onOpenLightbox}
+        photo={photo}
+      />
+    );
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenLightbox).toHaveBeenCalledOnce();
+  });
 });

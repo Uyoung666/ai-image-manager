@@ -240,61 +240,57 @@ function PersonDetailPage() {
   // handleDetailNavigate 由 usePhotoDetailPanel.navigateDetail 提供
 
   // Single-photo actions (triggered from context menu)
-  const handleToggleFavorite = useCallback((id: number) => {
+  const handleToggleFavorite = useCallback(async (
+    id: number,
+    requestedValue?: boolean
+  ) => {
     const photo = photosRef.current.find((p) => p.id === id);
     if (!photo) {
       return;
     }
     const prevVal = !!photo.isFavorite;
-    const newVal = !prevVal;
-    ipc.client.photos
-      .toggleFavorite({ ids: [id], favorite: newVal })
-      .then(() => {
-        setIdentity((prev) => {
-          if (!prev) {
-            return prev;
-          }
-          return {
-            ...prev,
-            photos: prev.photos.map((p) =>
-              p.id === id ? { ...p, isFavorite: newVal } : p
-            ),
-          };
-        });
-        queryClient.invalidateQueries({
-          queryKey: ["photos"],
-          refetchType: "active",
-        });
-        toast.success(
-          newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
-          {
-            action: {
-              label: t("toastUndo"),
-              onClick: async () => {
-                await ipc.client.photos.toggleFavorite({
-                  ids: [id],
-                  favorite: prevVal,
-                });
-                setIdentity((prev) => {
-                  if (!prev) {
-                    return prev;
-                  }
-                  return {
-                    ...prev,
-                    photos: prev.photos.map((p) =>
-                      p.id === id ? { ...p, isFavorite: prevVal } : p
-                    ),
-                  };
-                });
-                queryClient.invalidateQueries({
-                  queryKey: ["photos"],
-                  refetchType: "active",
-                });
-              },
-            },
-          }
-        );
-      });
+    const newVal = requestedValue ?? !prevVal;
+    await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+    setIdentity((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        photos: prev.photos.map((p) =>
+          p.id === id ? { ...p, isFavorite: newVal } : p
+        ),
+      };
+    });
+    queryClient.invalidateQueries({
+      queryKey: ["photos"],
+      refetchType: "active",
+    });
+    toast.success(
+      newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
+      {
+        action: {
+          label: t("toastUndo"),
+          onClick: async () => {
+            await ipc.client.photos.toggleFavorite({
+              ids: [id],
+              favorite: prevVal,
+            });
+            setIdentity((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                photos: prev.photos.map((p) =>
+                  p.id === id ? { ...p, isFavorite: prevVal } : p
+                ),
+              };
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
+            });
+          },
+        },
+      }
+    );
   }, []);
 
   function handleDeletePhoto(id: number) {
@@ -917,8 +913,14 @@ function PersonDetailPage() {
 
       {lightboxIndex >= 0 && (
         <PhotoLightbox
-          index={lightboxIndex}
-          onClose={() => setLightboxIndex(-1)}
+          initialIndex={lightboxIndex}
+          modalOpen={addToAlbumOpen}
+          onAddToAlbum={handleAddToAlbum}
+          onClose={({ photoId }) => {
+            setLightboxIndex(-1);
+            handleKeyboardSelect(photoId);
+          }}
+          onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={photos as any}
         />
@@ -936,6 +938,10 @@ function PersonDetailPage() {
               handleKeyboardSelect(photos[next].id);
               return next;
             });
+          }}
+          onOpenLightbox={() => {
+            setLightboxIndex(quickPreviewIndex);
+            setQuickPreviewIndex(-1);
           }}
           photo={photos[quickPreviewIndex] as any}
         />
@@ -999,6 +1005,7 @@ function PersonDetailPage() {
       />
 
       <AddToAlbumDialog
+        elevated={lightboxIndex >= 0}
         onClose={() => {
           setAddToAlbumOpen(false);
           setAddToAlbumIds([]);

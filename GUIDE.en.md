@@ -88,19 +88,20 @@ Panel width is adjustable by dragging the edge; preference is remembered.
 ### Quick Preview
 
 Select a photo and press **`Space`** for quick preview:
-- Scroll wheel zoom (1x – 8x, stops at fit)
-- Drag to pan (when zoomed)
-- `+/-/0` keyboard zoom
-- Double-click to toggle 1:1 / fit
 - Arrow keys to navigate
+- View the file name, dimensions, and date
+- Drag the file out, copy the image, or reveal it in Explorer
+- Press `Enter` to open the current photo in the lightbox
 
 ### Lightbox
 
-Double-click a photo or press `Enter` to open the fullscreen lightbox:
-- Infinite carousel browsing
+Double-click a photo, or press `Enter` in Quick Preview, to enter the immersive review lightbox:
+- Infinite browsing, wheel zoom, 1:1 inspection, panning, and rotation
+- Favorite the current photo or add it to an album from the More menu
+- A read-only EXIF, tag, and file panel without a duplicate preview
+- An on-demand thumbnail strip that is collapsed by default
 - Slideshow mode (`Space` to toggle play/pause, 3/5/10s intervals)
-- Thumbnail navigation strip
-- Fullscreen mode
+- Fullscreen mode with unified auto-hiding review controls
 
 ---
 
@@ -524,8 +525,11 @@ Press **`?`** to open the shortcuts panel.
 | `Space` | Play/pause slideshow |
 | `Esc` | Exit lightbox |
 | `I` | Toggle detail panel |
+| `F` | Favorite/unfavorite |
+| `T` | Toggle thumbnails |
 | `R` | Rotate 90° clockwise |
 | `Shift` + `R` | Rotate 90° counter-clockwise |
+| `0` / `1` | Fit window / actual pixels |
 
 ---
 

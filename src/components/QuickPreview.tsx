@@ -21,6 +21,7 @@ interface QuickPreviewPhoto {
 interface QuickPreviewProps {
   onClose: () => void;
   onNavigate: (direction: -1 | 1) => void;
+  onOpenLightbox?: () => void;
   photo: QuickPreviewPhoto;
 }
 
@@ -28,6 +29,7 @@ export function QuickPreview({
   photo,
   onClose,
   onNavigate,
+  onOpenLightbox,
 }: QuickPreviewProps) {
   const { t, i18n } = useTranslation();
   const [loaded, setLoaded] = useState(false);
@@ -46,6 +48,8 @@ export function QuickPreview({
   onCloseRef.current = onClose;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const onOpenLightboxRef = useRef(onOpenLightbox);
+  onOpenLightboxRef.current = onOpenLightbox;
 
   // ── 入场动画 ──────────────────────────────────────────────────
   useEffect(() => {
@@ -76,6 +80,10 @@ export function QuickPreview({
         e.preventDefault();
         e.stopImmediatePropagation();
         handleCloseRef.current();
+      } else if (e.key === "Enter" && onOpenLightboxRef.current) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onOpenLightboxRef.current();
       } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
         e.preventDefault();
         e.stopImmediatePropagation();

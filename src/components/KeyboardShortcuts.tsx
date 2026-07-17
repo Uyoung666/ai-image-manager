@@ -130,6 +130,26 @@ const SHORTCUTS: Shortcut[] = [
   },
   {
     sectionKey: "shortcutLightbox",
+    keyLabels: ["F"],
+    labelKey: "shortcutToggleFavorite",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["T"],
+    labelKey: "shortcutLightboxThumbnails",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["R"],
+    labelKey: "shortcutLightboxRotate",
+  },
+  {
+    sectionKey: "shortcutLightbox",
+    keyLabels: ["0", "1"],
+    labelKey: "shortcutLightboxZoomModes",
+  },
+  {
+    sectionKey: "shortcutLightbox",
     keyLabels: ["Esc"],
     labelKey: "shortcutExitLightbox",
   },

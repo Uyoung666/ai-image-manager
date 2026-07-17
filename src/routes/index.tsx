@@ -863,13 +863,16 @@ function HomePage() {
     searchResults,
   ]);
 
-  const handleToggleFavorite = useCallback(async (id: number) => {
+  const handleToggleFavorite = useCallback(async (
+    id: number,
+    requestedValue?: boolean
+  ) => {
     const photo = photosRef.current.find((p) => p.id === id);
     if (!photo) {
       return;
     }
     const prevVal = !!photo.isFavorite;
-    const newVal = !prevVal;
+    const newVal = requestedValue ?? !prevVal;
     await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
     queryClient.invalidateQueries({
       queryKey: ["photos"],
@@ -1734,8 +1737,14 @@ function HomePage() {
       </div>
       {lightboxIndex >= 0 && (
         <PhotoLightbox
-          index={lightboxIndex}
-          onClose={() => setLightboxIndex(-1)}
+          initialIndex={lightboxIndex}
+          modalOpen={addToAlbumOpen}
+          onAddToAlbum={handleAddToAlbum}
+          onClose={({ photoId }) => {
+            setLightboxIndex(-1);
+            handleKeyboardSelect(photoId);
+          }}
+          onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={photos}
         />
@@ -1752,6 +1761,10 @@ function HomePage() {
               handleKeyboardSelect(photos[next].id);
               return next;
             });
+          }}
+          onOpenLightbox={() => {
+            setLightboxIndex(quickPreviewIndex);
+            setQuickPreviewIndex(-1);
           }}
           photo={photos[quickPreviewIndex]}
         />
@@ -1838,6 +1851,7 @@ function HomePage() {
         photoCount={selectedIds.size}
       />
       <AddToAlbumDialog
+        elevated={lightboxIndex >= 0}
         onClose={() => setAddToAlbumOpen(false)}
         open={addToAlbumOpen}
         photoIds={addToAlbumIds}
