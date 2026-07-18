@@ -140,7 +140,14 @@ export const MasonryGrid = memo(
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
 
     const { positions, totalHeight, headerPositions, visibilityIndex } =
-      useMasonryLayout(items, containerWidth, columnCount, gap, groupHeaders);
+      useMasonryLayout(
+        items,
+        containerWidth,
+        columnCount,
+        gap,
+        groupHeaders,
+        routeKey
+      );
 
     const idToIndexMap = useMemo(
       () => new Map(items.map((item, i) => [item.id, i])),

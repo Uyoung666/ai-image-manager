@@ -1,5 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  buildPhotoGroupHeaders,
+  hasMatchingPhotoGroupPrefix,
+  type PhotoGroupInputSnapshot,
+  snapshotPhotoGroupInputs,
+} from "@/utils/photo-group-headers";
 import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
@@ -155,9 +161,8 @@ export const PhotoGrid = memo(
     const groupHeaderCacheRef = useRef<{
       headers: GroupHeader[];
       language: string;
-      photoCount: number;
-      firstPhotoId: number | null;
-      lastPhotoId: number | null;
+      photoSnapshot: PhotoGroupInputSnapshot[];
+      routeKey: string;
       sort: SortField;
     } | null>(null);
 
@@ -341,68 +346,44 @@ export const PhotoGrid = memo(
         return [];
       }
 
-      const firstPhotoId = photos[0]?.id ?? null;
-      const lastPhotoId = photos[photos.length - 1]?.id ?? null;
       const cached = groupHeaderCacheRef.current;
-      if (
-        cached &&
-        cached.sort === sort &&
+      const cacheContextMatches =
+        cached?.sort === sort &&
         cached.language === i18n.language &&
-        cached.firstPhotoId === firstPhotoId &&
-        cached.lastPhotoId === lastPhotoId &&
-        cached.photoCount === photos.length
+        cached.routeKey === routeKey;
+      if (
+        cacheContextMatches &&
+        cached.photoSnapshot.length === photos.length &&
+        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, photos)
       ) {
         return cached.headers;
       }
 
-      const headers: GroupHeader[] = [];
-      let lastKey = "";
       let startIndex = 0;
+      let existingHeaders: GroupHeader[] = [];
       if (
-        cached &&
-        cached.sort === sort &&
-        cached.language === i18n.language &&
-        cached.firstPhotoId === firstPhotoId &&
-        cached.photoCount < photos.length &&
-        photos[cached.photoCount - 1]?.id === cached.lastPhotoId
+        cacheContextMatches &&
+        cached.photoSnapshot.length < photos.length &&
+        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, photos)
       ) {
-        headers.push(...cached.headers);
-        startIndex = cached.photoCount;
-        const prev = photos[startIndex - 1];
-        if (prev?.fileDate) {
-          const d = new Date(prev.fileDate);
-          lastKey = `${d.getFullYear()}-${d.getMonth()}`;
-        }
+        existingHeaders = cached.headers;
+        startIndex = cached.photoSnapshot.length;
       }
-      const dtf = new Intl.DateTimeFormat(i18n.language, {
-        year: "numeric",
-        month: "long",
-      });
-      for (let i = startIndex; i < photos.length; i++) {
-        const ts = photos[i].fileDate;
-        if (!ts) {
-          continue;
-        }
-        const d = new Date(ts);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
-        if (key !== lastKey) {
-          lastKey = key;
-          headers.push({
-            beforeIndex: i,
-            label: dtf.format(d),
-          });
-        }
-      }
+      const headers = buildPhotoGroupHeaders(
+        photos,
+        i18n.language,
+        startIndex,
+        existingHeaders
+      );
       groupHeaderCacheRef.current = {
         headers,
         language: i18n.language,
-        photoCount: photos.length,
-        firstPhotoId,
-        lastPhotoId,
+        photoSnapshot: snapshotPhotoGroupInputs(photos),
+        routeKey,
         sort,
       };
       return headers;
-    }, [photos, sort, i18n.language]);
+    }, [photos, sort, i18n.language, routeKey]);
 
     if (loading && photos.length === 0) {
       const skelCols = Array.from({ length: columnCount }, (_, ci) =>
