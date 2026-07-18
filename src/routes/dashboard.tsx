@@ -22,7 +22,6 @@ import {
 import { advancedExifActions } from "@/actions/advanced-exif";
 import {
   ChartSection,
-  CoverageCard,
   DashboardBarChart,
   type DashboardPoint,
   EmptyChart,
@@ -430,6 +429,20 @@ function DashboardPage() {
   const topLens = lensAll[0];
   const peakHour = [...timeData].sort((a, b) => b.count - a.count)[0];
   const peakMonth = [...monthlyData].sort((a, b) => b.count - a.count)[0];
+  const overviewCoverage = {
+    ai: calculateCoverage(data.coverage.ai, sampleTotal),
+    advancedExif: calculateCoverage(data.coverage.advancedExif, sampleTotal),
+    color: calculateCoverage(data.coverage.color, sampleTotal),
+    date: calculateCoverage(data.coverage.date, sampleTotal),
+    exif: calculateCoverage(data.coverage.exif, sampleTotal),
+    gps: calculateCoverage(data.coverage.gps, sampleTotal),
+  };
+  const weakestCoverageKey =
+    sampleTotal > 0
+      ? Object.entries(overviewCoverage).sort(
+          ([, left], [, right]) => left - right
+        )[0]?.[0]
+      : undefined;
 
   const startAi = async () => {
     setStartingAi(true);
@@ -543,75 +556,103 @@ function DashboardPage() {
         )}
 
         {tab === "overview" && (
-          <div className="space-y-5">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <SummaryCard
-                label={t("dashboardLibraryTotal")}
-                value={data.scope.libraryTotal.toLocaleString(i18n.language)}
-              />
-              <SummaryCard
-                label={t("dashboardAdvancedExifCoverage")}
-                value={`${calculateCoverage(data.coverage.advancedExif, sampleTotal)}%`}
-              />
-              <SummaryCard
-                label={t("dashboardScopedPhotos")}
-                value={sampleTotal.toLocaleString(i18n.language)}
-              />
-              <SummaryCard
-                label={t("dashboardDateCoverage")}
-                value={`${calculateCoverage(data.coverage.date, sampleTotal)}%`}
-              />
-              <SummaryCard
-                label={t("dateRange")}
-                value={
-                  data.dateRange
-                    ? `${new Date(data.dateRange.earliest).getFullYear()}–${new Date(data.dateRange.latest).getFullYear()}`
-                    : "—"
-                }
-              />
-            </div>
-            <section className="rounded-[10px] border border-border bg-secondary p-5">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+            <section className="order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
+                    {t("dashboardOverviewEyebrow")}
+                  </p>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    {t("dashboardScopedPhotos")}
+                  </p>
+                  <h2 className="mt-1 font-semibold text-[40px] text-foreground tabular-nums leading-none tracking-tight">
+                    {sampleTotal.toLocaleString(i18n.language)}
+                  </h2>
+                  <p className="mt-3 max-w-xl text-[11px] text-muted-foreground">
+                    {t("dashboardOverviewSubtitle")}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-x-6 gap-y-2 border-primary/15 border-t pt-3 text-[11px] sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
+                  {sampleTotal !== data.scope.libraryTotal && (
+                    <div>
+                      <p className="text-muted-foreground">
+                        {t("dashboardLibraryTotal")}
+                      </p>
+                      <p className="mt-0.5 font-medium text-foreground tabular-nums">
+                        {data.scope.libraryTotal.toLocaleString(i18n.language)}
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-muted-foreground">{t("dateRange")}</p>
+                    <p className="mt-0.5 font-medium text-foreground tabular-nums">
+                      {data.dateRange
+                        ? `${new Date(data.dateRange.earliest).getFullYear()}–${new Date(data.dateRange.latest).getFullYear()}`
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 border-primary/10 border-t pt-3">
+                <OverviewTrend
+                  color={DASHBOARD_COLORS.time}
+                  data={yearlyData}
+                  title={t("yearlyDistribution")}
+                />
+              </div>
+            </section>
+            <section className="order-3 rounded-[10px] border border-border bg-secondary p-5 xl:col-span-3">
               <h2 className="font-semibold text-[15px] text-foreground">
                 {t("dashboardLibraryHealth")}
               </h2>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {t("dashboardCoverageDescription")}
               </p>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <CoverageCard
-                  count={data.coverage.ai}
+              <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border sm:grid-cols-3 xl:grid-cols-6">
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "ai"}
                   label={t("dashboardAiCoverage")}
-                  percentage={calculateCoverage(data.coverage.ai, sampleTotal)}
+                  percentage={overviewCoverage.ai}
                 />
-                <CoverageCard
-                  count={data.coverage.exif}
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "exif"}
                   label={t("dashboardExifCoverage")}
-                  percentage={calculateCoverage(
-                    data.coverage.exif,
-                    sampleTotal
-                  )}
+                  percentage={overviewCoverage.exif}
                 />
-                <CoverageCard
-                  count={data.coverage.gps}
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "advancedExif"}
+                  label={t("dashboardAdvancedExifCoverage")}
+                  percentage={overviewCoverage.advancedExif}
+                />
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "date"}
+                  label={t("dashboardDateCoverage")}
+                  percentage={overviewCoverage.date}
+                />
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "gps"}
                   label={t("dashboardGpsCoverage")}
-                  percentage={calculateCoverage(data.coverage.gps, sampleTotal)}
+                  percentage={overviewCoverage.gps}
                 />
-                <CoverageCard
-                  count={data.coverage.color}
+                <HealthMetric
+                  emphasized={weakestCoverageKey === "color"}
                   label={t("dashboardColorCoverage")}
-                  percentage={calculateCoverage(
-                    data.coverage.color,
-                    sampleTotal
-                  )}
+                  percentage={overviewCoverage.color}
                 />
               </div>
             </section>
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
-              <section className="rounded-[10px] border border-border bg-secondary p-5">
+            <div className="contents">
+              <section
+                className={`order-4 rounded-[10px] border border-border bg-secondary p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
+              >
                 <h2 className="font-semibold text-[15px] text-foreground">
-                  {t("dashboardInsights")}
+                  {t("dashboardPhotographyProfile")}
                 </h2>
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t("dashboardPhotographyProfileSubtitle")}
+                </p>
+                <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border lg:grid-cols-3">
                   <Insight
                     detail={
                       topCamera
@@ -684,7 +725,7 @@ function DashboardPage() {
                   />
                 </div>
               </section>
-              <section className="rounded-[10px] border border-border bg-secondary p-5">
+              <section className="order-2 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-5 shadow-sm">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-primary" />
                   <h2 className="font-semibold text-[15px] text-foreground">
@@ -708,16 +749,15 @@ function DashboardPage() {
                         : t("dashboardStartAi")}
                     </Button>
                   </div>
-                ) : (
-                  <p className="mt-4 text-[12px] text-muted-foreground">
-                    {t("dashboardHealthGood")}
-                  </p>
-                )}
-                {(data.exifCompleteness?.withoutExif ?? 0) > 0 && (
-                  <p className="mt-3 text-[11px] text-muted-foreground">
+                ) : (data.exifCompleteness?.withoutExif ?? 0) > 0 ? (
+                  <p className="mt-4 text-[12px] text-foreground">
                     {t("dashboardMissingExifAction", {
                       count: data.exifCompleteness?.withoutExif,
                     })}
+                  </p>
+                ) : (
+                  <p className="mt-4 text-[12px] text-muted-foreground">
+                    {t("dashboardHealthGood")}
                   </p>
                 )}
                 {advancedExifQuery.data && (
@@ -764,7 +804,7 @@ function DashboardPage() {
               </section>
             </div>
             {shootingGuidance.length > 0 && (
-              <section className="rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
+              <section className="order-5 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
                 <div className="flex items-start gap-3">
                   <div className="rounded-full bg-primary/10 p-2 text-primary">
                     <Lightbulb className="h-4 w-4" />
@@ -778,8 +818,8 @@ function DashboardPage() {
                     </p>
                   </div>
                 </div>
-                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {shootingGuidance.map((item) => (
+                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  {shootingGuidance.slice(0, 3).map((item) => (
                     <GuidanceCard
                       key={item.kind}
                       kind={item.kind}
@@ -1440,15 +1480,95 @@ function ColorContent({
     </div>
   );
 }
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function HealthMetric({
+  emphasized,
+  label,
+  percentage,
+}: {
+  emphasized: boolean;
+  label: string;
+  percentage: number;
+}) {
   return (
-    <div className="rounded-[9px] border border-border bg-secondary p-4">
-      <p className="text-[11px] text-muted-foreground uppercase tracking-wide">
-        {label}
+    <div
+      className={`min-w-0 border-border/70 border-r border-b p-4 xl:border-b-0 ${emphasized ? "bg-warning/[0.06]" : "bg-background/30"}`}
+    >
+      <div className="flex items-center gap-1.5">
+        {emphasized && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+        )}
+        <p className="truncate text-[10px] text-muted-foreground" title={label}>
+          {label}
+        </p>
+      </div>
+      <p className="mt-1 font-semibold text-[18px] text-foreground tabular-nums">
+        {percentage}%
       </p>
-      <p className="mt-1 font-semibold text-[24px] text-foreground tabular-nums">
-        {value}
-      </p>
+      <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full"
+          style={{
+            backgroundColor: emphasized ? "var(--warning)" : "var(--primary)",
+            width: `${Math.min(100, percentage)}%`,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function OverviewTrend({
+  color,
+  data,
+  title,
+}: {
+  color: string;
+  data: DashboardPoint[];
+  title: string;
+}) {
+  const noMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)"
+  ).matches;
+  if (!data.some((point) => point.count > 0)) {
+    return null;
+  }
+  return (
+    <div aria-label={title} className="h-40 w-full" role="img">
+      <ResponsiveContainer height="100%" width="100%">
+        <AreaChart
+          data={data}
+          margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
+        >
+          <defs>
+            <linearGradient id="overview-trend" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.38} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid
+            stroke="var(--border)"
+            strokeDasharray="3 3"
+            vertical={false}
+          />
+          <XAxis
+            axisLine={false}
+            dataKey="name"
+            interval="preserveStartEnd"
+            tick={axisTick}
+            tickLine={false}
+          />
+          <Tooltip {...chartTooltipStyle} />
+          <Area
+            animationDuration={400}
+            dataKey="count"
+            fill="url(#overview-trend)"
+            isAnimationActive={!noMotion}
+            stroke={color}
+            strokeWidth={2}
+            type="linear"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -1462,7 +1582,7 @@ function Insight({
   value: string;
 }) {
   return (
-    <div className="rounded-[7px] bg-background/50 p-3">
+    <div className="min-w-0 border-border/70 border-r border-b bg-background/20 p-4">
       <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
       <p
         className="mt-1 truncate font-medium text-[13px] text-foreground"

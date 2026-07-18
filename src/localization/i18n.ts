@@ -239,6 +239,12 @@ i18n.use(initReactI18next).init({
         dashboardLoadFailed: "数据加载失败，请检查数据目录是否可访问",
         dashboardTitle: "数据仪表盘",
         dashboardSubtitle: "了解图库健康度与拍摄习惯",
+        dashboardOverviewEyebrow: "图库概览",
+        dashboardOverviewSubtitle:
+          "从照片规模、时间趋势到数据完整度，快速了解当前图库状态。",
+        dashboardPhotographyProfile: "摄影画像",
+        dashboardPhotographyProfileSubtitle:
+          "汇总最具代表性的器材选择、拍摄方式与时间偏好。",
         dashboardSections: "仪表盘分类",
         dashboardRangeLabel: "统计时间范围",
         dashboardRange_all: "全部",
@@ -1731,6 +1737,12 @@ i18n.use(initReactI18next).init({
           "Failed to load data. Check if the data directory is accessible.",
         dashboardTitle: "Dashboard",
         dashboardSubtitle: "Understand library health and shooting habits",
+        dashboardOverviewEyebrow: "Library overview",
+        dashboardOverviewSubtitle:
+          "See library size, shooting trends, and metadata completeness in one place.",
+        dashboardPhotographyProfile: "Photography profile",
+        dashboardPhotographyProfileSubtitle:
+          "A concise view of your most representative gear, techniques, and timing.",
         dashboardSections: "Dashboard sections",
         dashboardRangeLabel: "Statistics date range",
         dashboardRange_all: "All time",
