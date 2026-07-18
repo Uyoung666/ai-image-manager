@@ -290,6 +290,12 @@ function HomePage() {
     if (drillParams.dateFrom) {
       filters.dateFrom = drillParams.dateFrom;
     }
+    if (drillParams.dateMonth) {
+      filters.dateMonth = drillParams.dateMonth;
+    }
+    if (drillParams.dateHour) {
+      filters.dateHour = drillParams.dateHour;
+    }
     if (drillParams.dateTo) {
       filters.dateTo = drillParams.dateTo;
     }
@@ -813,6 +819,12 @@ function HomePage() {
         const [y, m, d] = p.filters.dateFrom.split("-").map(Number);
         searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
       }
+      if (p.filters?.dateMonth) {
+        searchParams.dateMonth = Number(p.filters.dateMonth);
+      }
+      if (p.filters?.dateHour) {
+        searchParams.dateHour = Number(p.filters.dateHour);
+      }
       if (p.filters?.dateTo) {
         const [y, m, d] = p.filters.dateTo.split("-").map(Number);
         searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
@@ -941,6 +953,8 @@ function HomePage() {
         query?: string;
         colorHex?: string;
         dateFrom?: number;
+        dateMonth?: number;
+        dateHour?: number;
         dateTo?: number;
         cameraModel?: string;
         lensModel?: string;
@@ -965,6 +979,12 @@ function HomePage() {
       if (filters?.dateFrom) {
         const [y, m, d] = filters.dateFrom.split("-").map(Number);
         searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
+      }
+      if (filters?.dateMonth) {
+        searchParams.dateMonth = Number(filters.dateMonth);
+      }
+      if (filters?.dateHour) {
+        searchParams.dateHour = Number(filters.dateHour);
       }
       if (filters?.dateTo) {
         const [y, m, d] = filters.dateTo.split("-").map(Number);
@@ -1910,6 +1930,8 @@ export const Route = createFileRoute("/")({
     advancedField?: string;
     advancedValue?: string;
     dateFrom?: string;
+    dateMonth?: string;
+    dateHour?: string;
     dateTo?: string;
     favoriteOnly?: boolean;
     focalMax?: string;
@@ -1933,6 +1955,8 @@ export const Route = createFileRoute("/")({
     advancedField: search.advancedField as string | undefined,
     advancedValue: search.advancedValue as string | undefined,
     dateFrom: search.dateFrom as string | undefined,
+    dateMonth: search.dateMonth as string | undefined,
+    dateHour: search.dateHour as string | undefined,
     dateTo: search.dateTo as string | undefined,
     favoriteOnly:
       search.favoriteOnly === true || search.favoriteOnly === "true"

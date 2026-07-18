@@ -5,6 +5,7 @@ import {
   buildMonthlyChartData,
   buildRangeSearchParams,
   buildShootingGuidance,
+  buildYearDrillParams,
   calculateCoverage,
   fillYearlyChartData,
   getDashboardTimeRange,
@@ -109,7 +110,35 @@ describe("dashboard chart data", () => {
     const result = buildMonthlyChartData([{ month: "02", count: 9 }], "en");
     expect(result).toHaveLength(12);
     expect(result[1].count).toBe(9);
+    expect(result[1].month).toBe(2);
     expect(result.reduce((sum, item) => sum + item.count, 0)).toBe(9);
+  });
+
+  it("intersects a drilled year with the active dashboard range", () => {
+    expect(
+      buildYearDrillParams(2026, {
+        from: new Date(2026, 2, 15).getTime(),
+        toExclusive: new Date(2026, 8, 2).getTime(),
+      })
+    ).toEqual({
+      dateFrom: "2026-03-15",
+      dateTo: "2026-09-01",
+    });
+  });
+
+  it("does not let the dashboard range overwrite an explicit drill range", () => {
+    expect(
+      mergeDashboardDrillParams(
+        { dateFrom: "2026-03-15", dateTo: "2026-09-01" },
+        {
+          from: new Date(2026, 0, 1).getTime(),
+          toExclusive: new Date(2027, 0, 1).getTime(),
+        }
+      )
+    ).toMatchObject({
+      dateFrom: "2026-03-15",
+      dateTo: "2026-09-01",
+    });
   });
 
   it("calculates bounded coverage and selects top items", () => {

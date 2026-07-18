@@ -312,6 +312,8 @@ export const SearchBar = memo(
       const activeFilterCount = [
         filters.dateFrom,
         filters.dateTo,
+        filters.dateMonth,
+        filters.dateHour,
         filters.cameraModel,
         filters.lensModel,
         filters.advancedField && filters.advancedValue,
@@ -924,6 +926,26 @@ export const SearchBar = memo(
                     onRemove={() => updateFilter("dateTo", "", true)}
                   />
                 )}
+                {filters.dateMonth && (
+                  <FilterChip
+                    label={t("dateMonthValue", {
+                      value: filters.dateMonth,
+                    })}
+                    onRemove={() => updateFilter("dateMonth", "", true)}
+                  />
+                )}
+                {filters.dateHour && (
+                  <FilterChip
+                    label={t("dateHourValue", {
+                      next: String((Number(filters.dateHour) + 1) % 24).padStart(
+                        2,
+                        "0"
+                      ),
+                      value: filters.dateHour.padStart(2, "0"),
+                    })}
+                    onRemove={() => updateFilter("dateHour", "", true)}
+                  />
+                )}
                 {filters.cameraModel && (
                   <FilterChip
                     label={filters.cameraModel}
@@ -1086,6 +1108,79 @@ export const SearchBar = memo(
                         value={filters.dateTo || ""}
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-date-month"
+                    >
+                      {t("dateMonthLabel")}
+                    </label>
+                    <select
+                      className={cn(
+                        filterInputClass,
+                        drillOriginFilters.has("dateMonth") &&
+                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                      id="search-date-month"
+                      onChange={(event) => {
+                        updateFilter("dateMonth", event.target.value);
+                        setDrillOriginFilters((previous) => {
+                          const next = new Set(previous);
+                          next.delete("dateMonth");
+                          return next;
+                        });
+                      }}
+                      value={filters.dateMonth || ""}
+                    >
+                      <option value="">{t("datePeriodicAny")}</option>
+                      {Array.from({ length: 12 }, (_, index) => index + 1).map(
+                        (month) => (
+                          <option key={month} value={month}>
+                            {t("dateMonthValue", { value: month })}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-date-hour"
+                    >
+                      {t("dateHourLabel")}
+                    </label>
+                    <select
+                      className={cn(
+                        filterInputClass,
+                        drillOriginFilters.has("dateHour") &&
+                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                      id="search-date-hour"
+                      onChange={(event) => {
+                        updateFilter("dateHour", event.target.value);
+                        setDrillOriginFilters((previous) => {
+                          const next = new Set(previous);
+                          next.delete("dateHour");
+                          return next;
+                        });
+                      }}
+                      value={filters.dateHour || ""}
+                    >
+                      <option value="">{t("datePeriodicAny")}</option>
+                      {Array.from({ length: 24 }, (_, hour) => hour).map(
+                        (hour) => (
+                          <option key={hour} value={hour}>
+                            {t("dateHourValue", {
+                              next: String((hour + 1) % 24).padStart(2, "0"),
+                              value: String(hour).padStart(2, "0"),
+                            })}
+                          </option>
+                        )
+                      )}
+                    </select>
                   </div>
 
                   {/* Camera */}

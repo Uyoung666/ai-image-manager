@@ -279,6 +279,24 @@ describe("SearchBar", () => {
     expect(onSearch).toHaveBeenCalledWith("test query", undefined);
   });
 
+  it("applies periodic month and hour filters", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    );
+    await user.selectOptions(screen.getByLabelText("dateMonthLabel"), "7");
+    await user.selectOptions(screen.getByLabelText("dateHourLabel"), "0");
+    await user.click(screen.getByRole("button", { name: "applyFilters" }));
+
+    expect(onSearch).toHaveBeenCalledWith("", {
+      dateMonth: "7",
+      dateHour: "0",
+    });
+  });
+
   it("does not search an empty query", () => {
     const onSearch = vi.fn();
     render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);

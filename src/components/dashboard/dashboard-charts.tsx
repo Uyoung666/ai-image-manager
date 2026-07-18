@@ -116,7 +116,7 @@ export function DashboardBarChart({
           );
           return (
             <li key={point.name}>
-              {onPointClick ? (
+              {onPointClick && point.count > 0 ? (
                 <button
                   className="grid w-full grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 rounded-[5px] py-1 focus-visible:outline-2 focus-visible:outline-ring"
                   onClick={() => onPointClick(point)}
@@ -164,7 +164,12 @@ export function DashboardBarChart({
           animationEasing="ease-out"
           dataKey="count"
           isAnimationActive={!noMotion}
-          onClick={(point) => onPointClick?.(point as DashboardPoint)}
+          onClick={(point) => {
+            const dashboardPoint = point as DashboardPoint;
+            if (dashboardPoint.count > 0) {
+              onPointClick?.(dashboardPoint);
+            }
+          }}
           radius={[4, 4, 0, 0]}
           style={onPointClick ? { cursor: "pointer" } : undefined}
         >
@@ -207,6 +212,11 @@ export function ChartSection({
               {description}
             </div>
           )}
+          {onPointClick && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {t("dashboardChartClickHint")}
+            </p>
+          )}
         </div>
         {data && data.length > 0 && (
           <button
@@ -240,7 +250,7 @@ export function ChartSection({
               {data.map((point) => (
                 <tr className="border-border border-t" key={point.name}>
                   <td className="px-3 py-2">
-                    {onPointClick ? (
+                    {onPointClick && point.count > 0 ? (
                       <button
                         className="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
                         onClick={() => onPointClick(point)}

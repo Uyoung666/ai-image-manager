@@ -305,6 +305,8 @@ export const searchCompound = os
       query,
       colorHex,
       dateFrom,
+      dateMonth,
+      dateHour,
       dateTo,
       cameraModel,
       lensModel,
@@ -320,6 +322,20 @@ export const searchCompound = os
       shutterMax,
       limit,
     } = input;
+    const periodicDateConditions = (): SQL[] => {
+      const conditions: SQL[] = [];
+      if (dateMonth !== undefined) {
+        conditions.push(
+          sql`CAST(strftime('%m', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateMonth}`
+        );
+      }
+      if (dateHour !== undefined) {
+        conditions.push(
+          sql`CAST(strftime('%H', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateHour}`
+        );
+      }
+      return conditions;
+    };
     const advancedColumns = {
       vendor: advancedExifData.vendor,
       captureMode: advancedExifData.captureMode,
@@ -406,6 +422,8 @@ export const searchCompound = os
         const exifActive =
           dateFrom ||
           dateTo ||
+          dateMonth !== undefined ||
+          dateHour !== undefined ||
           cameraModel ||
           lensModel ||
           focalMin !== undefined ||
@@ -427,6 +445,16 @@ export const searchCompound = os
         }
         if (dateTo) {
           conditions.push(sql`e.date_taken <= ${dateTo}`);
+        }
+        if (dateMonth !== undefined) {
+          conditions.push(
+            sql`CAST(strftime('%m', e.date_taken / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateMonth}`
+          );
+        }
+        if (dateHour !== undefined) {
+          conditions.push(
+            sql`CAST(strftime('%H', e.date_taken / 1000, 'unixepoch', 'localtime') AS INTEGER) = ${dateHour}`
+          );
         }
         if (cameraModel) {
           conditions.push(sql`e.camera_model LIKE ${`%${cameraModel}%`}`);
@@ -569,6 +597,8 @@ export const searchCompound = os
       const hasExifFilter =
         effectiveDateFrom ||
         effectiveDateTo ||
+        dateMonth !== undefined ||
+        dateHour !== undefined ||
         cameraModel ||
         lensModel ||
         focalMin !== undefined ||
@@ -588,6 +618,7 @@ export const searchCompound = os
         if (effectiveDateTo) {
           exifConds.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
         }
+        exifConds.push(...periodicDateConditions());
         if (cameraModel) {
           exifConds.push(like(exifData.cameraModel, `%${cameraModel}%`));
         }
@@ -934,7 +965,12 @@ export const searchCompound = os
 
       if (mergedList.length === 0) {
         // If time filter was parsed from query, skip AI and do plain date filter
-        if (effectiveDateFrom || effectiveDateTo) {
+        if (
+          effectiveDateFrom ||
+          effectiveDateTo ||
+          dateMonth !== undefined ||
+          dateHour !== undefined
+        ) {
           const dateConditions: SQL[] = [];
           if (effectiveDateFrom) {
             dateConditions.push(gte(exifData.dateTaken, effectiveDateFrom));
@@ -942,6 +978,7 @@ export const searchCompound = os
           if (effectiveDateTo) {
             dateConditions.push(lte(exifData.dateTaken, effectiveDateTo));
           }
+          dateConditions.push(...periodicDateConditions());
           const dateFiltered = db
             .select({ photoId: exifData.photoId })
             .from(exifData)
@@ -996,6 +1033,8 @@ export const searchCompound = os
       const hasExifOrTimeFilter =
         effectiveDateFrom ||
         effectiveDateTo ||
+        dateMonth !== undefined ||
+        dateHour !== undefined ||
         cameraModel ||
         lensModel ||
         focalMin !== undefined ||
@@ -1058,6 +1097,7 @@ export const searchCompound = os
       if (effectiveDateTo) {
         exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
       }
+      exifConditions.push(...periodicDateConditions());
       if (cameraModel) {
         exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
       }
@@ -1161,6 +1201,8 @@ export const searchCompound = os
     const hasEffectiveFilters =
       effectiveDateFrom ||
       effectiveDateTo ||
+      dateMonth !== undefined ||
+      dateHour !== undefined ||
       cameraModel ||
       lensModel ||
       focalMin !== undefined ||
@@ -1197,6 +1239,7 @@ export const searchCompound = os
     if (effectiveDateTo) {
       exifConditions.push(sql`${exifData.dateTaken} <= ${effectiveDateTo}`);
     }
+    exifConditions.push(...periodicDateConditions());
     if (cameraModel) {
       exifConditions.push(like(exifData.cameraModel, `%${cameraModel}%`));
     }

@@ -43,6 +43,7 @@ import {
   buildMonthlyChartData,
   buildRangeSearchParams,
   buildShootingGuidance,
+  buildYearDrillParams,
   calculateCoverage,
   type DashboardRangePreset,
   fillYearlyChartData,
@@ -368,9 +369,10 @@ function DashboardPage() {
   );
   const timeData = useMemo(
     () =>
-      (data?.timeHeatmap ?? []).map((item) => ({
+      (data?.timeHeatmap ?? []).map((item, hour) => ({
         name: item.period ?? "",
         count: item.count,
+        hour,
       })),
     [data?.timeHeatmap]
   );
@@ -970,6 +972,15 @@ function DashboardPage() {
               color={DASHBOARD_COLORS.time}
               data={yearlyData}
               hint={t("dashboardHint_yearly")}
+              onPointClick={(point) => {
+                const params = buildYearDrillParams(
+                  Number(point.year),
+                  range
+                );
+                if (Object.keys(params).length > 0) {
+                  drill(params);
+                }
+              }}
               sampleTotal={sampleTotal}
               title={t("yearlyDistribution")}
             />
@@ -983,6 +994,9 @@ function DashboardPage() {
                 totalCategories: 12,
                 truncated: false,
               }}
+              onClick={(point) =>
+                drill({ dateMonth: String(point.month) })
+              }
               title={t("dashboardMonthlyPreference")}
             />
             <div className="xl:col-span-2">
@@ -990,6 +1004,9 @@ function DashboardPage() {
                 color={DASHBOARD_COLORS.time}
                 data={timeData}
                 hint={t("dashboardHint_time")}
+                onPointClick={(point) =>
+                  drill({ dateHour: String(point.hour) })
+                }
                 sampleTotal={data.coverage.date}
                 title={t("timeDistribution24h")}
               />
@@ -1171,12 +1188,14 @@ function TrendChart({
   color,
   data,
   hint,
+  onPointClick,
   sampleTotal,
   title,
 }: {
   color: string;
   data: DashboardPoint[];
   hint?: string;
+  onPointClick?: (point: DashboardPoint) => void;
   sampleTotal: number;
   title: string;
 }) {
@@ -1195,6 +1214,7 @@ function TrendChart({
           </p>
         </div>
       }
+      onPointClick={onPointClick}
       sampleTotal={sampleTotal}
       title={title}
     >
@@ -1203,6 +1223,14 @@ function TrendChart({
           <AreaChart
             data={data}
             margin={{ bottom: 18, left: 0, right: 8, top: 4 }}
+            onClick={(state) => {
+              const dashboardPoint = state?.activePayload?.[0]?.payload as
+                | DashboardPoint
+                | undefined;
+              if (dashboardPoint && dashboardPoint.count > 0) {
+                onPointClick?.(dashboardPoint);
+              }
+            }}
           >
             <defs>
               <linearGradient id={`trend-${title}`} x1="0" x2="0" y1="0" y2="1">
@@ -1237,6 +1265,7 @@ function TrendChart({
               isAnimationActive={!noMotion}
               stroke={color}
               strokeWidth={2}
+              style={onPointClick ? { cursor: "pointer" } : undefined}
               type="linear"
             />
           </AreaChart>

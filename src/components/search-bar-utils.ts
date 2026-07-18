@@ -139,6 +139,10 @@ export function getFilterLabel(
       return `快门 ≤ ${value}s`;
     case "dateFrom":
       return `从 ${value}`;
+    case "dateMonth":
+      return `月份 ${value}`;
+    case "dateHour":
+      return `${value.padStart(2, "0")}:00–${String((Number(value) + 1) % 24).padStart(2, "0")}:00`;
     case "dateTo":
       return `至 ${value}`;
     default:

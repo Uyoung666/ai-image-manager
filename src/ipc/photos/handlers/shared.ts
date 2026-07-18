@@ -82,6 +82,8 @@ export const CompoundSearchSchema = z.object({
   query: z.string().optional(),
   colorHex: z.string().optional(),
   dateFrom: z.number().optional(),
+  dateMonth: z.number().int().min(1).max(12).optional(),
+  dateHour: z.number().int().min(0).max(23).optional(),
   dateTo: z.number().optional(),
   cameraModel: z.string().optional(),
   lensModel: z.string().optional(),

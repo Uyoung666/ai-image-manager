@@ -195,7 +195,36 @@ export function buildMonthlyChartData(
   return Array.from({ length: 12 }, (_, index) => ({
     name: formatter.format(new Date(2000, index, 1)),
     count: counts.get(index + 1) ?? 0,
+    month: index + 1,
   }));
+}
+
+function formatLocalDate(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function buildYearDrillParams(
+  year: number,
+  range: DashboardTimeRange
+): Record<string, string> {
+  const yearFrom = new Date(year, 0, 1).getTime();
+  const yearToExclusive = new Date(year + 1, 0, 1).getTime();
+  const from = Math.max(yearFrom, range.from ?? yearFrom);
+  const toExclusive = Math.min(
+    yearToExclusive,
+    range.toExclusive ?? yearToExclusive
+  );
+  if (from >= toExclusive) {
+    return {};
+  }
+  return {
+    dateFrom: formatLocalDate(from),
+    dateTo: formatLocalDate(toExclusive - 1),
+  };
 }
 
 export function calculateCoverage(covered: number, total: number): number {
@@ -265,11 +294,11 @@ export function mergeDashboardDrillParams(
   range: DashboardTimeRange
 ): Record<string, string> {
   const result = { ...params };
-  if (range.from !== undefined) {
-    result.dateFrom = new Date(range.from).toLocaleDateString("en-CA");
+  if (range.from !== undefined && result.dateFrom === undefined) {
+    result.dateFrom = formatLocalDate(range.from);
   }
-  if (range.toExclusive !== undefined) {
-    result.dateTo = new Date(range.toExclusive - 1).toLocaleDateString("en-CA");
+  if (range.toExclusive !== undefined && result.dateTo === undefined) {
+    result.dateTo = formatLocalDate(range.toExclusive - 1);
   }
   return result;
 }

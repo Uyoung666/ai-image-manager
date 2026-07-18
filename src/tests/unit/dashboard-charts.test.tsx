@@ -90,4 +90,23 @@ describe("dashboard chart accessibility", () => {
       value: originalMatchMedia,
     });
   });
+
+  it("keeps zero-count data points non-interactive", () => {
+    const onPointClick = vi.fn();
+    render(
+      <ChartSection
+        data={[{ count: 0, name: "Empty period" }]}
+        onPointClick={onPointClick}
+        sampleTotal={0}
+        title="Time"
+      >
+        <div>chart</div>
+      </ChartSection>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "dashboardViewData" }));
+    expect(screen.queryByRole("button", { name: "Empty period" })).toBeNull();
+    expect(screen.getByText("Empty period")).toBeInTheDocument();
+    expect(onPointClick).not.toHaveBeenCalled();
+  });
 });

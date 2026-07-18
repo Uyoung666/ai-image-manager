@@ -19,6 +19,8 @@ export interface ExifFilters {
   apertureMin?: string;
   cameraModel?: string;
   dateFrom?: string;
+  dateHour?: string;
+  dateMonth?: string;
   dateTo?: string;
   focalMax?: string;
   focalMin?: string;
