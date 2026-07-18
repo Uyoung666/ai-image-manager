@@ -190,7 +190,7 @@ i18n.use(initReactI18next).init({
         metadataAutofocus: "对焦与主体识别",
         metadataProcessing: "机内风格与计算摄影",
         metadataWorkflow: "工作流与版权",
-        metadataProvenance: "内容来源",
+        metadataProvenance: "内容来源（实验功能）",
         metadataRawTags: "厂商原始标签（{{count}}）",
         metadataCaptureMode: "拍摄模式",
         metadataExposureProgram: "曝光程序",
@@ -213,12 +213,12 @@ i18n.use(initReactI18next).init({
         metadataSoftware: "处理软件",
         metadataCopyright: "版权",
         metadataIssuer: "签发方",
-        metadataCredentialStatus: "凭证状态",
+        metadataCredentialStatus: "凭证状态（实验功能）",
         metadataProvenance_present_unverified: "检测到凭证（未经验证）",
         metadataProvenance_not_detected: "未检测到内容凭证",
         metadataProvenance_unknown: "当前格式无法判断",
         metadataProvenanceDisclaimer:
-          "此状态仅表示检测到凭证结构，尚未进行密码学验证，也不代表照片内容真实。",
+          "实验功能：此状态仅表示检测到凭证结构，尚未进行密码学验证，也不代表照片内容真实。",
         advancedExifFilter: "高级摄影元数据",
         advancedExifFilterField: "选择字段",
         advancedExifFilterValue: "输入精确值",
@@ -233,7 +233,7 @@ i18n.use(initReactI18next).init({
         advancedFilter_stabilizationMode: "防抖",
         advancedFilter_computationalMode: "计算摄影",
         advancedFilter_inCameraLook: "机内风格",
-        advancedFilter_provenanceStatus: "内容凭证",
+        advancedFilter_provenanceStatus: "内容凭证（实验功能）",
 
         // Dashboard
         dashboardLoadFailed: "数据加载失败，请检查数据目录是否可访问",
@@ -325,7 +325,7 @@ i18n.use(initReactI18next).init({
         dashboardHint_inCameraLook:
           "包括胶片模拟、创意外观、Picture Control 或 LUT 等机内色彩风格。",
         dashboardHint_provenanceStatus:
-          "这里只检测内容凭证线索；未经密码学验证，不代表照片内容真实。",
+          "实验功能：这里只检测内容凭证线索；未经密码学验证，不代表照片内容真实。",
         dashboardHint_yearly: "观察长期拍摄数量变化，数量也会受导入范围影响。",
         dashboardHint_monthly:
           "用于发现季节性拍摄偏好，缺少拍摄日期的照片不会计入。",
@@ -1676,7 +1676,7 @@ i18n.use(initReactI18next).init({
         metadataAutofocus: "Autofocus and subject",
         metadataProcessing: "In-camera look and computation",
         metadataWorkflow: "Workflow and rights",
-        metadataProvenance: "Content provenance",
+        metadataProvenance: "Content provenance (Experimental)",
         metadataRawTags: "Vendor raw tags ({{count}})",
         metadataCaptureMode: "Capture mode",
         metadataExposureProgram: "Exposure program",
@@ -1699,13 +1699,13 @@ i18n.use(initReactI18next).init({
         metadataSoftware: "Software",
         metadataCopyright: "Copyright",
         metadataIssuer: "Issuer",
-        metadataCredentialStatus: "Credential status",
+        metadataCredentialStatus: "Credential status (Experimental)",
         metadataProvenance_present_unverified:
           "Credential detected (not verified)",
         metadataProvenance_not_detected: "No credential detected",
         metadataProvenance_unknown: "Cannot determine for this format",
         metadataProvenanceDisclaimer:
-          "This only reports a credential structure. It has not been cryptographically verified and does not establish that the depicted content is true.",
+          "Experimental: this only reports a credential structure. It has not been cryptographically verified and does not establish that the depicted content is true.",
         advancedExifFilter: "Advanced photography metadata",
         advancedExifFilterField: "Select field",
         advancedExifFilterValue: "Enter exact value",
@@ -1720,7 +1720,7 @@ i18n.use(initReactI18next).init({
         advancedFilter_stabilizationMode: "Stabilization",
         advancedFilter_computationalMode: "Computational mode",
         advancedFilter_inCameraLook: "In-camera look",
-        advancedFilter_provenanceStatus: "Content credential",
+        advancedFilter_provenanceStatus: "Content credential (Experimental)",
 
         dashboardLoadFailed:
           "Failed to load data. Check if the data directory is accessible.",
@@ -1814,7 +1814,7 @@ i18n.use(initReactI18next).init({
         dashboardHint_inCameraLook:
           "Includes film simulations, Creative Looks, Picture Controls, Photo Styles, or LUTs.",
         dashboardHint_provenanceStatus:
-          "This only detects credential clues; without cryptographic verification it does not prove authenticity.",
+          "Experimental: this only detects credential clues; without cryptographic verification it does not prove authenticity.",
         dashboardHint_yearly:
           "Shows long-term shooting volume; imported library scope also affects the trend.",
         dashboardHint_monthly:
