@@ -314,8 +314,14 @@
 
   [data-masonry-scroll] {
     scrollbar-gutter: stable;
+    scrollbar-color: auto;
+    scrollbar-width: auto;
     transform: translateZ(0);
     will-change: scroll-position;
+  }
+
+  [data-masonry-scroll]::-webkit-scrollbar-track {
+    margin-block-start: var(--masonry-scrollbar-top-inset, 0);
   }
 
   /* ── 选中文本颜色 ──────────────────── */

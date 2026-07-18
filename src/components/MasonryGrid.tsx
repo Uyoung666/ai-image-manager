@@ -525,12 +525,15 @@ export const MasonryGrid = memo(
           data-masonry-scroll=""
           onMouseDown={handleMarqueeStart}
           ref={scrollRef}
-          style={{
-            height: "100%",
-            overflowX: "hidden",
-            overflowY: "auto",
-            paddingTop: topInset > 0 ? topInset + 8 : undefined,
-          }}
+          style={
+            {
+              "--masonry-scrollbar-top-inset": `${topInset}px`,
+              height: "100%",
+              overflowX: "hidden",
+              overflowY: "auto",
+              paddingTop: topInset > 0 ? topInset + 8 : undefined,
+            } as React.CSSProperties
+          }
         >
           {layoutReady && (
             <div
