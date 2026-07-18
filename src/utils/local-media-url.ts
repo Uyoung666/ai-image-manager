@@ -1,5 +1,7 @@
 import { getHttpPortSync } from "./http-port";
 
+const DISPLAY_PIPELINE_VERSION = 2;
+
 /**
  * 将本地文件路径转换为可访问的媒体 URL。
  *
@@ -20,7 +22,7 @@ export function toLocalMediaUrl(filePath: string | null | undefined): string {
     // webp 缩略图走 /thumbnail 路由，非 webp 原始文件走 /image 路由
     const lower = filePath.toLowerCase();
     const route = lower.endsWith(".webp") ? "thumbnail" : "image";
-    return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}`;
+    return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
   }
 
   // ── 回退：原有 local-media:// 协议 ──────────────────────────────
@@ -43,7 +45,7 @@ export function toPreviewUrl(filePath: string | null | undefined): string {
 
   const port = getHttpPortSync();
   if (port !== null) {
-    return `http://127.0.0.1:${port}/preview?path=${encodeURIComponent(filePath)}`;
+    return `http://127.0.0.1:${port}/preview?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
   }
 
   // 回退：提取 preview 对 local-media:// 无意义，走通用 URL
@@ -64,22 +66,20 @@ export async function toHttpMediaUrl(
   const port = await getHttpPort();
   const lower = filePath.toLowerCase();
   const route = lower.endsWith(".webp") ? "thumbnail" : "image";
-  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}`;
+  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
 }
 
 /**
  * 构造对比预览 URL（PK 选片专用 2560px JPEG）。
  * 走 /duel-preview 路由，immutable 缓存。
  */
-export function toDuelPreviewUrl(
-  filePath: string | null | undefined
-): string {
+export function toDuelPreviewUrl(filePath: string | null | undefined): string {
   if (!filePath) {
     return "";
   }
   const port = getHttpPortSync();
   if (port !== null) {
-    return `http://127.0.0.1:${port}/duel-preview?path=${encodeURIComponent(filePath)}`;
+    return `http://127.0.0.1:${port}/duel-preview?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
   }
   // 回退：JPEG 走 /image 路由
   return toLocalMediaUrl(filePath);

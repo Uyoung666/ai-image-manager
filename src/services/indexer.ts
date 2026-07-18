@@ -12,6 +12,11 @@ import { deletePhotoVectors } from "./ai-embedder";
 import { extractDominantColors } from "./color-extractor";
 import { checkNewPhotoDuplicates } from "./dedup-service";
 import { getFolderMatcher, reloadFolderMatcher } from "./folder-matcher";
+import {
+  type ExifOrientation,
+  getOrientedDimensions,
+  resolveImageOrientation,
+} from "./image-orientation";
 import { extractRawPreview, isRawFile } from "./raw-preview";
 import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
@@ -215,6 +220,7 @@ async function readBasicMeta(filePath: string): Promise<{
   format: string;
   colorSpace: string;
   hasAlpha: boolean;
+  orientation: ExifOrientation;
   thumbnailInput?: Buffer;
 } | null> {
   try {
@@ -230,20 +236,12 @@ async function readBasicMeta(filePath: string): Promise<{
       }
     }
     const meta = await sharp(input).metadata();
-    // Sharp already reads orientation with the rest of the image metadata for
-    // most formats. Only fall back to a separate EXIF read when it is absent.
-    let orientation = meta.orientation ?? 1;
-    if (meta.orientation == null) {
-      try {
-        orientation = (await exifr.orientation(filePath)) ?? 1;
-      } catch {
-        // If EXIF read fails, assume no rotation
-      }
-    }
-    // Swap width/height when orientation is 5, 6, 7, 8 (90° or 270° rotation)
-    const swapDimensions = orientation >= 5 && orientation <= 8;
-    const width = swapDimensions ? meta.height || 0 : meta.width || 0;
-    const height = swapDimensions ? meta.width || 0 : meta.height || 0;
+    const orientation = await resolveImageOrientation(filePath, meta);
+    const { width, height } = getOrientedDimensions(
+      meta.width,
+      meta.height,
+      orientation
+    );
     // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
     const format = raw
       ? path.extname(filePath).toLowerCase().replace(".", "")
@@ -254,6 +252,7 @@ async function readBasicMeta(filePath: string): Promise<{
       format,
       colorSpace: meta.space || "",
       hasAlpha: meta.hasAlpha,
+      orientation,
       thumbnailInput,
     };
   } catch {
@@ -470,6 +469,7 @@ async function preparePhotoRecord(
   try {
     thumb = await generateThumbnail(filePath, "md", {
       input: meta.thumbnailInput,
+      orientation: meta.orientation,
     });
   } catch {
     log.warn({ filePath }, "Thumbnail generation failed");

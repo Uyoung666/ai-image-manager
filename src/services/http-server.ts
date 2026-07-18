@@ -2,6 +2,10 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import sharp from "sharp";
+import {
+  applyExifOrientation,
+  resolveImageOrientation,
+} from "@/services/image-orientation";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import {
   findPhotoPathByDuelPreview,
@@ -11,8 +15,8 @@ import {
 } from "@/services/thumbnailer";
 import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
-import { createLogger } from "@/utils/logger";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
+import { createLogger } from "@/utils/logger";
 import { isSafePath } from "@/utils/path-security";
 
 const log = createLogger("http-server");
@@ -121,6 +125,64 @@ class ConversionSemaphore {
 }
 
 const conversionSemaphore = new ConversionSemaphore(4);
+
+async function createOrientedPipeline(
+  input: string | Buffer,
+  originalPath: string
+): Promise<ReturnType<typeof sharp>> {
+  const metadata = await sharp(input, { failOn: "none" }).metadata();
+  const orientation = await resolveImageOrientation(originalPath, metadata);
+  return applyExifOrientation(sharp(input, { failOn: "none" }), orientation);
+}
+
+async function normalizeJpegPreview(
+  preview: Buffer,
+  originalPath: string
+): Promise<Buffer> {
+  const metadata = await sharp(preview, { failOn: "none" }).metadata();
+  const orientation = await resolveImageOrientation(originalPath, metadata);
+  if (orientation === 1) {
+    return preview;
+  }
+  return await applyExifOrientation(
+    sharp(preview, { failOn: "none" }),
+    orientation
+  )
+    .jpeg({ quality: 95 })
+    .toBuffer();
+}
+
+async function serveOrientedBrowserFile(
+  safePath: string,
+  ext: string,
+  res: http.ServerResponse
+): Promise<boolean> {
+  let pipeline: ReturnType<typeof sharp>;
+  try {
+    const metadata = await sharp(safePath, { failOn: "none" }).metadata();
+    const orientation = await resolveImageOrientation(safePath, metadata);
+    if (orientation === 1) {
+      return false;
+    }
+    pipeline = applyExifOrientation(
+      sharp(safePath, { failOn: "none" }),
+      orientation
+    );
+  } catch {
+    return false;
+  }
+
+  const isJpeg = ext === ".jpg" || ext === ".jpeg";
+  const output = isJpeg
+    ? await pipeline.jpeg({ quality: 95 }).toBuffer()
+    : await pipeline.png().toBuffer();
+  res.setHeader("content-type", isJpeg ? "image/jpeg" : "image/png");
+  res.setHeader("cache-control", "public, max-age=86400");
+  res.setHeader("content-length", output.length);
+  res.writeHead(200);
+  res.end(output);
+  return true;
+}
 
 // ── 安全关闭响应 ──────────────────────────────────────────────────────
 
@@ -327,9 +389,7 @@ async function handleThumbnail(
       await sharp(safePath).metadata();
     } catch {
       // Corrupt file → delete and fall through to regeneration
-      log.warn(
-        `[HttpServer] /thumbnail corrupt file, deleting: ${safePath}`
-      );
+      log.warn(`[HttpServer] /thumbnail corrupt file, deleting: ${safePath}`);
       await fs.promises.unlink(safePath).catch(() => {
         /* best-effort deletion */
       });
@@ -487,6 +547,8 @@ async function handlePreview(
     `[HttpServer] /preview OK: path=${safePath} size=${preview.length} bytes elapsed=${extractMs}ms`
   );
 
+  preview = await normalizeJpegPreview(preview, safePath);
+
   res.setHeader("content-type", "image/jpeg");
   res.setHeader("cache-control", "public, max-age=86400");
   res.setHeader("content-length", preview.length);
@@ -550,6 +612,8 @@ function handleImage(
           `[HttpServer] /image RAW preview OK: path=${safePath} size=${preview.length} bytes elapsed=${Date.now() - extractStart}ms`
         );
 
+        preview = await normalizeJpegPreview(preview, safePath);
+
         res.setHeader("content-type", "image/jpeg");
         res.setHeader("cache-control", "public, max-age=86400");
         res.setHeader("content-length", preview.length);
@@ -560,6 +624,10 @@ function handleImage(
 
       // ── 路径 2：浏览器原生兼容 → 直接流式输出 ──────────────
       if (isBrowserCompatible(ext)) {
+        if (await serveOrientedBrowserFile(safePath, ext, res)) {
+          return;
+        }
+
         const mimeType = getMimeType(ext);
         res.setHeader("content-type", mimeType);
         res.setHeader("cache-control", "public, max-age=86400");
@@ -590,7 +658,7 @@ function handleImage(
         `[HttpServer] /image converting via sharp: path=${safePath} ext=${ext} size=${stats.size}`
       );
 
-      conversionSemaphore.acquire().then(() => {
+      conversionSemaphore.acquire().then(async () => {
         if (res.destroyed) {
           conversionSemaphore.release();
           return;
@@ -619,9 +687,9 @@ function handleImage(
         res.setHeader("cache-control", "public, max-age=86400");
 
         try {
-          const sharpStream = sharp(safePath, { failOn: "none" })
-            .rotate()
-            .png();
+          const sharpStream = (
+            await createOrientedPipeline(safePath, safePath)
+          ).png();
 
           sharpStream.on("error", (err: Error) => {
             releaseSlot();
