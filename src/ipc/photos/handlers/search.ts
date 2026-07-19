@@ -310,6 +310,7 @@ export const searchCompound = os
       dateTo,
       cameraModel,
       lensModel,
+      creator,
       advancedField,
       advancedValue,
       focalMin,
@@ -372,6 +373,44 @@ export const searchCompound = os
           .map((row) => row.photoId)
       );
     };
+    const getCreatorIds = (within?: number[]) => {
+      if (!creator) {
+        return null;
+      }
+      if (within?.length === 0) {
+        return new Set<number>();
+      }
+      const pattern = `%${creator}%`;
+      const basicConditions: SQL[] = [like(exifData.artist, pattern)];
+      const advancedConditions: SQL[] = [
+        sql`json_extract(${advancedExifData.normalizedJson}, '$.workflow.artist') LIKE ${pattern}`,
+      ];
+      if (within) {
+        basicConditions.push(inArray(exifData.photoId, within));
+        advancedConditions.push(inArray(advancedExifData.photoId, within));
+      }
+      const ids = new Set(
+        db
+          .select({ photoId: exifData.photoId })
+          .from(exifData)
+          .where(and(...basicConditions))
+          .all()
+          .map((row) => row.photoId)
+          .filter((photoId): photoId is number => photoId !== null)
+      );
+      for (const row of db
+        .select({ photoId: advancedExifData.photoId })
+        .from(advancedExifData)
+        .where(and(...advancedConditions))
+        .all()) {
+        ids.add(row.photoId);
+      }
+      return ids;
+    };
+    const creatorIds = getCreatorIds();
+    if (creatorIds?.size === 0) {
+      return { results: [], total: 0 };
+    }
 
     // Color search: if colorHex provided, or query is a hex code
     function parseHexColor(
@@ -440,6 +479,14 @@ export const searchCompound = os
           sql`p.dominant_colors IS NOT NULL`,
           sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`,
         ];
+        if (creatorIds) {
+          conditions.push(
+            sql`p.id IN (${sql.join(
+              Array.from(creatorIds).map((id) => sql`${id}`),
+              sql`, `
+            )})`
+          );
+        }
         if (dateFrom) {
           conditions.push(sql`e.date_taken >= ${dateFrom}`);
         }
@@ -518,7 +565,9 @@ export const searchCompound = os
                   limit
                 );
                 return (results ?? []).filter(
-                  (result) => result.distance < 10_000
+                  (result) =>
+                    result.distance < 10_000 &&
+                    (!creatorIds || creatorIds.has(result.photoId))
                 );
               })(),
               COLOR_VECTOR_TIMEOUT_MS,
@@ -593,6 +642,9 @@ export const searchCompound = os
         isNull(photos.deletedAt),
         sql`LOWER(${photos.filename}) GLOB LOWER(${globPattern})`,
       ];
+      if (creatorIds) {
+        baseConds.push(inArray(photos.id, Array.from(creatorIds)));
+      }
 
       const hasExifFilter =
         effectiveDateFrom ||
@@ -1037,6 +1089,7 @@ export const searchCompound = os
         dateHour !== undefined ||
         cameraModel ||
         lensModel ||
+        creator ||
         focalMin !== undefined ||
         focalMax !== undefined ||
         apertureMin !== undefined ||
@@ -1129,23 +1182,29 @@ export const searchCompound = os
         exifConditions.push(lte(exifData.shutterSpeedNum, shutterMax));
       }
 
-      const exifBaseQuery = db
-        .select({ photoId: exifData.photoId })
-        .from(exifData)
-        .where(inArray(exifData.photoId, allIds))
-        .$dynamic();
-
-      const filteredExif = (
+      const validIds =
         exifConditions.length > 0
-          ? exifBaseQuery.where(and(...exifConditions))
-          : exifBaseQuery
-      ).all();
-      const validIds = new Set(filteredExif.map((e) => e.photoId!));
+          ? new Set(
+              db
+                .select({ photoId: exifData.photoId })
+                .from(exifData)
+                .where(
+                  and(
+                    inArray(exifData.photoId, allIds),
+                    ...exifConditions
+                  )
+                )
+                .all()
+                .map((row) => row.photoId)
+                .filter((photoId): photoId is number => photoId !== null)
+            )
+          : new Set(allIds);
       const advancedIds = getAdvancedIds(allIds);
 
       const filtered = rerankedList.filter(
         (r) =>
           validIds.has(r.photoId) &&
+          (!creatorIds || creatorIds.has(r.photoId)) &&
           (!advancedIds || advancedIds.has(r.photoId))
       );
 
@@ -1205,6 +1264,7 @@ export const searchCompound = os
       dateHour !== undefined ||
       cameraModel ||
       lensModel ||
+      creator ||
       focalMin !== undefined ||
       focalMax !== undefined ||
       apertureMin !== undefined ||
@@ -1245,6 +1305,11 @@ export const searchCompound = os
     }
     if (lensModel) {
       exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
+    }
+    if (creatorIds) {
+      exifConditions.push(
+        inArray(exifData.photoId, Array.from(creatorIds))
+      );
     }
     if (focalMin !== undefined) {
       exifConditions.push(gte(exifData.focalLengthNum, focalMin));

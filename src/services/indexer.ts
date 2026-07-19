@@ -605,7 +605,7 @@ async function preparePhotoRecord(
       gpsAltitude: exif.GPSAltitude as number,
       software: exif.Software as string,
       imageDescription: exif.ImageDescription as string,
-      artist: exif.Artist as string,
+      artist: (exif.Artist ?? exif.Creator) as string,
       copyright: exif.Copyright as string,
       rawJson: JSON.stringify(exif),
     };

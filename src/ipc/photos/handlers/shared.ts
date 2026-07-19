@@ -87,6 +87,7 @@ export const CompoundSearchSchema = z.object({
   dateTo: z.number().optional(),
   cameraModel: z.string().optional(),
   lensModel: z.string().optional(),
+  creator: z.string().optional(),
   advancedField: z
     .enum([
       "vendor",

@@ -297,6 +297,18 @@ describe("SearchBar", () => {
     });
   });
 
+  it("applies a creator EXIF filter", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
+
+    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
+    await user.type(screen.getByLabelText("creatorLabel"), "Jane Doe");
+    await user.click(screen.getByRole("button", { name: "applyFilters" }));
+
+    expect(onSearch).toHaveBeenCalledWith("", { creator: "Jane Doe" });
+  });
+
   it("does not search an empty query", () => {
     const onSearch = vi.fn();
     render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);

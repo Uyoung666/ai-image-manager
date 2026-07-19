@@ -71,6 +71,7 @@ export function invalidateStatsCache(): void {
 interface ExifCandidatesCacheEntry {
   data: {
     cameraModels: (string | null)[];
+    creators: string[];
     lensModels: (string | null)[];
     focalLengths: string[];
     apertures: number[];
@@ -119,6 +120,28 @@ export const getExifCandidates = os.handler(() => {
     .orderBy(desc(sql`count(*)`))
     .all()
     .map((r) => r.val);
+
+  const basicCreators = db
+    .selectDistinct({ val: exifData.artist })
+    .from(exifData)
+    .where(sql`${exifData.artist} IS NOT NULL AND ${exifData.artist} != ''`)
+    .orderBy(exifData.artist)
+    .all()
+    .map((row) => row.val)
+    .filter((value): value is string => Boolean(value));
+
+  const advancedCreator = sql<string | null>`json_extract(${advancedExifData.normalizedJson}, '$.workflow.artist')`;
+  const advancedCreators = db
+    .selectDistinct({ val: advancedCreator })
+    .from(advancedExifData)
+    .where(sql`${advancedCreator} IS NOT NULL AND ${advancedCreator} != ''`)
+    .orderBy(advancedCreator)
+    .all()
+    .map((row) => row.val)
+    .filter((value): value is string => Boolean(value));
+  const creators = [...new Set([...basicCreators, ...advancedCreators])].sort(
+    (left, right) => left.localeCompare(right)
+  );
 
   // Round to prevent precision artifacts from EXIF rational conversion
   const focalLengths = db
@@ -184,6 +207,7 @@ export const getExifCandidates = os.handler(() => {
 
   const result = {
     cameraModels,
+    creators,
     lensModels,
     focalLengths,
     apertures,

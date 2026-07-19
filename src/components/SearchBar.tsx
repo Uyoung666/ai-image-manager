@@ -220,6 +220,7 @@ export const SearchBar = memo(
       const [showFilters, setShowFilters] = useState(false);
       const [tags, setTags] = useState<TagInfo[]>([]);
       const [cameraModels, setCameraModels] = useState<string[]>([]);
+      const [creators, setCreators] = useState<string[]>([]);
       const [lensModels, setLensModels] = useState<string[]>([]);
       const [advancedCategories, setAdvancedCategories] = useState<
         Record<string, string[]>
@@ -288,6 +289,7 @@ export const SearchBar = memo(
           .getExifCandidates({})
           .then((r: any) => {
             setCameraModels(r.cameraModels || []);
+            setCreators(r.creators || []);
             setLensModels(r.lensModels || []);
             setAdvancedCategories(r.advancedCategories || {});
           })
@@ -415,6 +417,7 @@ export const SearchBar = memo(
         filters.dateMonth,
         filters.dateHour,
         filters.cameraModel,
+        filters.creator,
         filters.lensModel,
         filters.advancedField && filters.advancedValue,
         filters.isoMin,
@@ -453,6 +456,18 @@ export const SearchBar = memo(
           .filter((m) => m.toLowerCase().includes(q))
           .slice(0, 20);
       }, [filters.lensModel, lensModels]);
+
+      const creatorSuggestions = useMemo(() => {
+        if (!filters.creator) {
+          return creators.slice(0, 20);
+        }
+        const query = filters.creator.toLocaleLowerCase();
+        return creators
+          .filter((creator) =>
+            creator.toLocaleLowerCase().includes(query)
+          )
+          .slice(0, 20);
+      }, [creators, filters.creator]);
 
       useEffect(() => {
         function handleGlobalShortcut(e: MessageEvent) {
@@ -1032,6 +1047,12 @@ export const SearchBar = memo(
                     onRemove={() => updateFilter("cameraModel", "", true)}
                   />
                 )}
+                {filters.creator && (
+                  <FilterChip
+                    label={filters.creator}
+                    onRemove={() => updateFilter("creator", "", true)}
+                  />
+                )}
                 {filters.lensModel && (
                   <FilterChip
                     label={filters.lensModel}
@@ -1329,6 +1350,39 @@ export const SearchBar = memo(
                       }))}
                       placeholder={t("lensModelPlaceholder")}
                       value={filters.lensModel || ""}
+                    />
+                  </div>
+
+                  {/* Creator */}
+                  <div>
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-creator"
+                    >
+                      {t("creatorLabel")}
+                    </label>
+                    <FilterDropdown
+                      className={cn(
+                        filterInputClass,
+                        drillOriginFilters.has("creator") &&
+                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                      editable
+                      id="search-creator"
+                      onChange={(value) => {
+                        updateFilter("creator", value);
+                        setDrillOriginFilters((previous) => {
+                          const next = new Set(previous);
+                          next.delete("creator");
+                          return next;
+                        });
+                      }}
+                      options={creatorSuggestions.map((creator) => ({
+                        label: creator,
+                        value: creator,
+                      }))}
+                      placeholder={t("creatorPlaceholder")}
+                      value={filters.creator || ""}
                     />
                   </div>
 

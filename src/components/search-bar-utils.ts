@@ -119,6 +119,8 @@ export function getFilterLabel(
       return value;
     case "cameraModel":
       return value;
+    case "creator":
+      return value;
     case "lensModel":
       return value;
     case "isoMin":

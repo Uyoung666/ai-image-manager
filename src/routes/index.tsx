@@ -260,6 +260,9 @@ function HomePage() {
     if (drillParams.cameraModel) {
       filters.cameraModel = drillParams.cameraModel;
     }
+    if (drillParams.creator) {
+      filters.creator = drillParams.creator;
+    }
     if (drillParams.lensModel) {
       filters.lensModel = drillParams.lensModel;
     }
@@ -831,6 +834,7 @@ function HomePage() {
       }
       if (p.filters?.cameraModel)
         searchParams.cameraModel = p.filters.cameraModel;
+      if (p.filters?.creator) searchParams.creator = p.filters.creator;
       if (p.filters?.lensModel) searchParams.lensModel = p.filters.lensModel;
       if (p.filters?.advancedField)
         searchParams.advancedField = p.filters.advancedField;
@@ -957,6 +961,7 @@ function HomePage() {
         dateHour?: number;
         dateTo?: number;
         cameraModel?: string;
+        creator?: string;
         lensModel?: string;
         advancedField?: ExifFilters["advancedField"];
         advancedValue?: string;
@@ -992,6 +997,9 @@ function HomePage() {
       }
       if (filters?.cameraModel) {
         searchParams.cameraModel = filters.cameraModel;
+      }
+      if (filters?.creator) {
+        searchParams.creator = filters.creator;
       }
       if (filters?.lensModel) {
         searchParams.lensModel = filters.lensModel;
@@ -1926,6 +1934,7 @@ export const Route = createFileRoute("/")({
     apertureMax?: string;
     apertureMin?: string;
     cameraModel?: string;
+    creator?: string;
     lensModel?: string;
     advancedField?: string;
     advancedValue?: string;
@@ -1951,6 +1960,7 @@ export const Route = createFileRoute("/")({
     apertureMax: search.apertureMax as string | undefined,
     apertureMin: search.apertureMin as string | undefined,
     cameraModel: search.cameraModel as string | undefined,
+    creator: search.creator as string | undefined,
     lensModel: search.lensModel as string | undefined,
     advancedField: search.advancedField as string | undefined,
     advancedValue: search.advancedValue as string | undefined,
