@@ -1,4 +1,4 @@
-import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
+import { ChevronDown, Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
   type Dispatch,
   forwardRef,
@@ -55,6 +55,110 @@ const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
   "inCameraLook",
   "provenanceStatus",
 ];
+
+interface FilterDropdownOption {
+  label: string;
+  value: string;
+}
+
+function FilterDropdown({
+  ariaLabel,
+  className,
+  disabled = false,
+  editable = false,
+  id,
+  onChange,
+  options,
+  placeholder,
+  value,
+}: {
+  ariaLabel?: string;
+  className: string;
+  disabled?: boolean;
+  editable?: boolean;
+  id?: string;
+  onChange: (value: string) => void;
+  options: FilterDropdownOption[];
+  placeholder: string;
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const visibleOptions = useMemo(() => {
+    if (!(editable && value.trim())) {
+      return options;
+    }
+    const query = value.toLocaleLowerCase();
+    return options.filter((option) =>
+      option.label.toLocaleLowerCase().includes(query)
+    );
+  }, [editable, options, value]);
+  const displayValue = editable
+    ? value
+    : (options.find((option) => option.value === value)?.label ?? "");
+
+  return (
+    <div className="relative">
+      <input
+        aria-autocomplete={editable ? "list" : "none"}
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        autoComplete="off"
+        className={cn(
+          className,
+          !editable && "cursor-pointer pr-7",
+          disabled && "cursor-not-allowed opacity-50"
+        )}
+        disabled={disabled}
+        id={id}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={(event) => {
+          if (editable) {
+            onChange(event.target.value);
+          }
+          setOpen(true);
+        }}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        readOnly={!editable}
+        role="combobox"
+        value={displayValue}
+      />
+      {!editable && (
+        <ChevronDown
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+        />
+      )}
+      {open && visibleOptions.length > 0 && (
+        <div
+          className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5"
+          role="listbox"
+        >
+          {visibleOptions.map((option) => (
+            <button
+              aria-selected={option.value === value}
+              className={cn(
+                "flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5",
+                option.value === value && "bg-foreground/5"
+              )}
+              key={option.value || "__empty__"}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+              role="option"
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface SearchBarProps {
   aiStatus?: {
@@ -116,12 +220,10 @@ export const SearchBar = memo(
       const [showFilters, setShowFilters] = useState(false);
       const [tags, setTags] = useState<TagInfo[]>([]);
       const [cameraModels, setCameraModels] = useState<string[]>([]);
-      const [showCameraSuggestions, setShowCameraSuggestions] = useState(false);
       const [lensModels, setLensModels] = useState<string[]>([]);
       const [advancedCategories, setAdvancedCategories] = useState<
         Record<string, string[]>
       >({});
-      const [showLensSuggestions, setShowLensSuggestions] = useState(false);
       // Person names for search suggestions and AI-powered dictionary suggestions
       const [personNames, setPersonNames] = useState<string[]>([]);
       const [dictSuggestionsEnabled, setDictSuggestionsEnabled] =
@@ -283,8 +385,6 @@ export const SearchBar = memo(
       const fileInputRef = useRef<HTMLInputElement>(null);
       const dropdownRef = useRef<HTMLDivElement>(null);
       const suggestionListRef = useRef<HTMLDivElement>(null);
-      const cameraDropdownRef = useRef<HTMLDivElement>(null);
-      const lensDropdownRef = useRef<HTMLDivElement>(null);
       const [locallyDragging, setLocallyDragging] = useState(false);
       const [suggestionIndex, setSuggestionIndex] = useState(-1);
 
@@ -330,8 +430,6 @@ export const SearchBar = memo(
         setDrillOriginFilters(new Set());
         setShowSuggestions(false);
         setShowFilters(false);
-        setShowCameraSuggestions(false);
-        setShowLensSuggestions(false);
         setSuggestionIndex(-1);
         setInputFocused(false);
       }, [resetVersion]);
@@ -450,24 +548,6 @@ export const SearchBar = memo(
           activeEl.scrollIntoView?.({ block: "nearest" });
         }
       }, [suggestionIndex]);
-
-      function handleCameraBlur() {
-        setTimeout(() => setShowCameraSuggestions(false), 150);
-      }
-
-      function handleCameraSuggestionClick(model: string) {
-        setFilters((prev) => ({ ...prev, cameraModel: model }));
-        setShowCameraSuggestions(false);
-      }
-
-      function handleLensBlur() {
-        setTimeout(() => setShowLensSuggestions(false), 150);
-      }
-
-      function handleLensSuggestionClick(model: string) {
-        setFilters((prev) => ({ ...prev, lensModel: model }));
-        setShowLensSuggestions(false);
-      }
 
       const addToHistory = useCallback((q: string) => {
         if (!q.trim()) {
@@ -1117,32 +1197,34 @@ export const SearchBar = memo(
                     >
                       {t("dateMonthLabel")}
                     </label>
-                    <select
+                    <FilterDropdown
                       className={cn(
                         filterInputClass,
                         drillOriginFilters.has("dateMonth") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
                       id="search-date-month"
-                      onChange={(event) => {
-                        updateFilter("dateMonth", event.target.value);
+                      onChange={(value) => {
+                        updateFilter("dateMonth", value);
                         setDrillOriginFilters((previous) => {
                           const next = new Set(previous);
                           next.delete("dateMonth");
                           return next;
                         });
                       }}
+                      options={[
+                        { label: t("datePeriodicAny"), value: "" },
+                        ...Array.from(
+                          { length: 12 },
+                          (_, index) => index + 1
+                        ).map((month) => ({
+                          label: t("dateMonthValue", { value: month }),
+                          value: String(month),
+                        })),
+                      ]}
+                      placeholder={t("datePeriodicAny")}
                       value={filters.dateMonth || ""}
-                    >
-                      <option value="">{t("datePeriodicAny")}</option>
-                      {Array.from({ length: 12 }, (_, index) => index + 1).map(
-                        (month) => (
-                          <option key={month} value={month}>
-                            {t("dateMonthValue", { value: month })}
-                          </option>
-                        )
-                      )}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -1152,177 +1234,151 @@ export const SearchBar = memo(
                     >
                       {t("dateHourLabel")}
                     </label>
-                    <select
+                    <FilterDropdown
                       className={cn(
                         filterInputClass,
                         drillOriginFilters.has("dateHour") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
                       id="search-date-hour"
-                      onChange={(event) => {
-                        updateFilter("dateHour", event.target.value);
+                      onChange={(value) => {
+                        updateFilter("dateHour", value);
                         setDrillOriginFilters((previous) => {
                           const next = new Set(previous);
                           next.delete("dateHour");
                           return next;
                         });
                       }}
-                      value={filters.dateHour || ""}
-                    >
-                      <option value="">{t("datePeriodicAny")}</option>
-                      {Array.from({ length: 24 }, (_, hour) => hour).map(
-                        (hour) => (
-                          <option key={hour} value={hour}>
-                            {t("dateHourValue", {
+                      options={[
+                        { label: t("datePeriodicAny"), value: "" },
+                        ...Array.from({ length: 24 }, (_, hour) => hour).map(
+                          (hour) => ({
+                            label: t("dateHourValue", {
                               next: String((hour + 1) % 24).padStart(2, "0"),
                               value: String(hour).padStart(2, "0"),
-                            })}
-                          </option>
-                        )
-                      )}
-                    </select>
+                            }),
+                            value: String(hour),
+                          })
+                        ),
+                      ]}
+                      placeholder={t("datePeriodicAny")}
+                      value={filters.dateHour || ""}
+                    />
                   </div>
 
                   {/* Camera */}
                   <div>
-                    <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-camera-model"
+                    >
                       {t("cameraModelLabel")}
                     </label>
-                    <div className="relative" ref={cameraDropdownRef}>
-                      <input
-                        className={cn(
-                          filterInputClass,
-                          drillOriginFilters.has("cameraModel") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                        )}
-                        onBlur={handleCameraBlur}
-                        onChange={(e) => {
-                          updateFilter("cameraModel", e.target.value);
-                          setDrillOriginFilters((prev) => {
-                            const next = new Set(prev);
-                            next.delete("cameraModel");
-                            return next;
-                          });
-                          setShowCameraSuggestions(true);
-                        }}
-                        onFocus={() => {
-                          if (cameraSuggestions.length > 0) {
-                            setShowCameraSuggestions(true);
-                          }
-                        }}
-                        placeholder={t("cameraPlaceholder")}
-                        value={filters.cameraModel || ""}
-                      />
-                      {showCameraSuggestions &&
-                        cameraSuggestions.length > 0 && (
-                          <div className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
-                            {cameraSuggestions.map((model) => (
-                              <button
-                                className="flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5"
-                                key={model}
-                                onClick={() =>
-                                  handleCameraSuggestionClick(model)
-                                }
-                                onMouseDown={(e) => e.preventDefault()}
-                                type="button"
-                              >
-                                {model}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                    </div>
+                    <FilterDropdown
+                      className={cn(
+                        filterInputClass,
+                        drillOriginFilters.has("cameraModel") &&
+                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                      )}
+                      editable
+                      id="search-camera-model"
+                      onChange={(value) => {
+                        updateFilter("cameraModel", value);
+                        setDrillOriginFilters((prev) => {
+                          const next = new Set(prev);
+                          next.delete("cameraModel");
+                          return next;
+                        });
+                      }}
+                      options={cameraSuggestions.map((model) => ({
+                        label: model,
+                        value: model,
+                      }))}
+                      placeholder={t("cameraPlaceholder")}
+                      value={filters.cameraModel || ""}
+                    />
                   </div>
 
                   {/* Lens */}
                   <div>
-                    <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-lens-model"
+                    >
                       {t("lensModelLabel")}
                     </label>
-                    <div className="relative" ref={lensDropdownRef}>
-                      <input
-                        className={cn(
-                          filterInputClass,
-                          drillOriginFilters.has("lensModel") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
-                        )}
-                        onBlur={handleLensBlur}
-                        onChange={(e) => {
-                          updateFilter("lensModel", e.target.value);
-                          setDrillOriginFilters((prev) => {
-                            const next = new Set(prev);
-                            next.delete("lensModel");
-                            return next;
-                          });
-                          setShowLensSuggestions(true);
-                        }}
-                        onFocus={() => {
-                          if (lensSuggestions.length > 0) {
-                            setShowLensSuggestions(true);
-                          }
-                        }}
-                        placeholder={t("lensModelPlaceholder")}
-                        value={filters.lensModel || ""}
-                      />
-                      {showLensSuggestions && lensSuggestions.length > 0 && (
-                        <div className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5">
-                          {lensSuggestions.map((model) => (
-                            <button
-                              className="flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5"
-                              key={model}
-                              onClick={() => handleLensSuggestionClick(model)}
-                              onMouseDown={(e) => e.preventDefault()}
-                              type="button"
-                            >
-                              {model}
-                            </button>
-                          ))}
-                        </div>
+                    <FilterDropdown
+                      className={cn(
+                        filterInputClass,
+                        drillOriginFilters.has("lensModel") &&
+                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
-                    </div>
+                      editable
+                      id="search-lens-model"
+                      onChange={(value) => {
+                        updateFilter("lensModel", value);
+                        setDrillOriginFilters((prev) => {
+                          const next = new Set(prev);
+                          next.delete("lensModel");
+                          return next;
+                        });
+                      }}
+                      options={lensSuggestions.map((model) => ({
+                        label: model,
+                        value: model,
+                      }))}
+                      placeholder={t("lensModelPlaceholder")}
+                      value={filters.lensModel || ""}
+                    />
                   </div>
 
                   {/* Advanced maker metadata */}
                   <div>
-                    <label className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+                    <label
+                      className="mb-1 block font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider"
+                      htmlFor="search-advanced-exif-field"
+                    >
                       {t("advancedExifFilter")}
                     </label>
                     <div className="space-y-1">
-                      <select
+                      <FilterDropdown
+                        ariaLabel={t("advancedExifFilterField")}
                         className={filterInputClass}
-                        onChange={(event) =>
+                        id="search-advanced-exif-field"
+                        onChange={(value) =>
                           updateFilter(
                             "advancedField",
-                            event.target.value as AdvancedExifFilterField
+                            value as AdvancedExifFilterField
                           )
                         }
+                        options={[
+                          {
+                            label: t("advancedExifFilterField"),
+                            value: "",
+                          },
+                          ...ADVANCED_EXIF_FILTERS.map((field) => ({
+                            label: t(`advancedFilter_${field}`),
+                            value: field,
+                          })),
+                        ]}
+                        placeholder={t("advancedExifFilterField")}
                         value={filters.advancedField ?? ""}
-                      >
-                        <option value="">{t("advancedExifFilterField")}</option>
-                        {ADVANCED_EXIF_FILTERS.map((field) => (
-                          <option key={field} value={field}>
-                            {t(`advancedFilter_${field}`)}
-                          </option>
-                        ))}
-                      </select>
-                      <input
+                      />
+                      <FilterDropdown
+                        ariaLabel={t("advancedExifFilterValue")}
                         className={filterInputClass}
                         disabled={!filters.advancedField}
-                        list="advanced-exif-values"
-                        onChange={(event) =>
-                          updateFilter("advancedValue", event.target.value)
+                        editable
+                        onChange={(value) =>
+                          updateFilter("advancedValue", value)
                         }
+                        options={(filters.advancedField
+                          ? (advancedCategories[filters.advancedField] ?? [])
+                          : []
+                        ).map((option) => ({ label: option, value: option }))}
                         placeholder={t("advancedExifFilterValue")}
                         value={filters.advancedValue ?? ""}
                       />
-                      <datalist id="advanced-exif-values">
-                        {(filters.advancedField
-                          ? (advancedCategories[filters.advancedField] ?? [])
-                          : []
-                        ).map((value) => (
-                          <option key={value} value={value} />
-                        ))}
-                      </datalist>
                     </div>
                   </div>
 

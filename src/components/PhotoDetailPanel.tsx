@@ -4,6 +4,7 @@ import {
   FolderOpen,
   Plus,
   Sparkles,
+  Star,
   X,
 } from "lucide-react";
 import {
@@ -944,26 +945,6 @@ export function PhotoDetailPanel({
                     provenance
                     title={t("metadataProvenance")}
                   />
-                  {Object.keys(exif.advanced.vendorRaw).length > 0 && (
-                    <details className="rounded-[6px] border border-border p-2">
-                      <summary className="cursor-pointer text-[10px] text-muted-foreground">
-                        {t("metadataRawTags", {
-                          count: Object.keys(exif.advanced.vendorRaw).length,
-                        })}
-                      </summary>
-                      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto font-mono">
-                        {Object.entries(exif.advanced.vendorRaw)
-                          .slice(0, 100)
-                          .map(([key, value]) => (
-                            <InfoRow
-                              key={key}
-                              label={key}
-                              value={formatMetadataValue(value)}
-                            />
-                          ))}
-                      </div>
-                    </details>
-                  )}
                 </div>
               )}
             </section>
@@ -1000,7 +981,13 @@ export function PhotoDetailPanel({
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <div className="flex items-start justify-between gap-2">
       <span className="flex-shrink-0 text-[11px] text-muted-foreground/70">
@@ -1010,6 +997,49 @@ function InfoRow({ label, value }: { label: string; value: string }) {
         {value}
       </span>
     </div>
+  );
+}
+
+function getStarRating(value: unknown): number {
+  const rating = Number.parseFloat(String(value));
+  if (!Number.isFinite(rating) || rating <= 0) {
+    return 0;
+  }
+  if (rating <= 5) {
+    return Math.min(5, Math.round(rating));
+  }
+  if (rating >= 99) {
+    return 5;
+  }
+  if (rating >= 75) {
+    return 4;
+  }
+  if (rating >= 50) {
+    return 3;
+  }
+  if (rating >= 25) {
+    return 2;
+  }
+  return 1;
+}
+
+function RatingStars({ value }: { value: unknown }) {
+  const rating = getStarRating(value);
+  return (
+    <span
+      aria-label={`${rating} / 5`}
+      className="flex items-center gap-0.5 text-amber-400"
+      role="img"
+    >
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          aria-hidden="true"
+          className="h-3 w-3"
+          fill={star <= rating ? "currentColor" : "none"}
+          key={star}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -1065,17 +1095,21 @@ function MetadataGroup({
         {title}
       </h5>
       <div className="space-y-1.5">
-        {rows.map(([key, value]) => (
-          <InfoRow
-            key={key}
-            label={t(METADATA_LABEL_KEYS[key] ?? key)}
-            value={
-              provenance && key === "status"
-                ? t(`metadataProvenance_${String(value)}`)
-                : formatMetadataValue(value)
-            }
-          />
-        ))}
+        {rows.map(([key, value]) => {
+          let displayValue: React.ReactNode = formatMetadataValue(value);
+          if (key === "rating") {
+            displayValue = <RatingStars value={value} />;
+          } else if (provenance && key === "status") {
+            displayValue = t(`metadataProvenance_${String(value)}`);
+          }
+          return (
+            <InfoRow
+              key={key}
+              label={t(METADATA_LABEL_KEYS[key] ?? key)}
+              value={displayValue}
+            />
+          );
+        })}
       </div>
       {provenance && data.status === "present_unverified" && (
         <p className="mt-2 text-[9px] text-warning">

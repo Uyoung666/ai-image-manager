@@ -284,11 +284,11 @@ describe("SearchBar", () => {
     const onSearch = vi.fn();
     render(<ControlledSearchBar {...baseProps} onSearch={onSearch} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "exifFilterTitle" })
-    );
-    await user.selectOptions(screen.getByLabelText("dateMonthLabel"), "7");
-    await user.selectOptions(screen.getByLabelText("dateHourLabel"), "0");
+    await user.click(screen.getByRole("button", { name: "exifFilterTitle" }));
+    await user.click(screen.getByLabelText("dateMonthLabel"));
+    await user.click(screen.getByRole("option", { name: "7 月" }));
+    await user.click(screen.getByLabelText("dateHourLabel"));
+    await user.click(screen.getByRole("option", { name: "00:00–01:00" }));
     await user.click(screen.getByRole("button", { name: "applyFilters" }));
 
     expect(onSearch).toHaveBeenCalledWith("", {
