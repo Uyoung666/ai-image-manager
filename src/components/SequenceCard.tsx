@@ -1,34 +1,67 @@
 import { Layers, Timer } from "lucide-react";
-import { memo } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface SequenceCardProps {
   isSelected: boolean;
   onClick: (id: number, event: React.MouseEvent) => void;
+  onOpenDetails: (sequenceId: number) => void;
   onOpen: (sequenceId: number) => void;
   sequence: PhotoSequence;
 }
+
+const SINGLE_CLICK_DELAY_MS = 250;
 
 export const SequenceCard = memo(function SequenceCard({
   sequence,
   isSelected,
   onClick,
+  onOpenDetails,
   onOpen,
 }: SequenceCardProps) {
+  const { t } = useTranslation();
   const { photo } = sequence;
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingClick = useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => cancelPendingClick, [cancelPendingClick]);
   const duration = Math.max(0, sequence.endedAt - sequence.startedAt);
-  const durationLabel =
+  /* const durationLabel =
     duration >= 60_000 ? `${Math.round(duration / 60_000)} 分钟` : "";
+  */
+  const durationLabel =
+    duration >= 60_000
+      ? t("sequenceMinutes", { count: Math.round(duration / 60_000) })
+      : "";
   return (
     <div
-      aria-label={`${sequence.type === "burst" ? "连拍" : "延时"}序列，${sequence.frameCount} 张`}
+      aria-label={t("sequenceCardLabel", { count: sequence.frameCount, type: t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse") })}
       aria-selected={isSelected}
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
       data-photo-id={photo.id}
       data-photo-path={photo.path}
-      onClick={(event) => onClick(photo.id, event)}
-      onDoubleClick={() => onOpen(sequence.id)}
+      onClick={(event) => {
+        if (event.ctrlKey || event.metaKey) {
+          cancelPendingClick();
+          onClick(photo.id, event);
+        } else {
+          cancelPendingClick();
+          clickTimerRef.current = setTimeout(() => {
+            clickTimerRef.current = null;
+            onOpenDetails(sequence.id);
+          }, SINGLE_CLICK_DELAY_MS);
+        }
+      }}
+      onDoubleClick={() => {
+        cancelPendingClick();
+        onOpen(sequence.id);
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           onOpen(sequence.id);
@@ -72,8 +105,8 @@ export const SequenceCard = memo(function SequenceCard({
       >
         {sequence.type === "burst" ? <Layers size={13} /> : <Timer size={13} />}
         <span>
-          {sequence.type === "burst" ? "连拍" : "延时"} · {sequence.frameCount}{" "}
-          张{durationLabel ? ` · ${durationLabel}` : ""}
+          {t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse")} · {sequence.frameCount}{" "}
+          {t("sequenceFrames")}{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       </button>
     </div>

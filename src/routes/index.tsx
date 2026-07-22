@@ -24,6 +24,7 @@ import {
   loadPhotoDetailPanelWidth,
   PhotoDetailPanel,
 } from "@/components/PhotoDetailPanel";
+import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import {
   GRID_COLUMN_WIDTH_KEY,
   GRID_COLUMN_WIDTH_MAX,
@@ -120,6 +121,8 @@ function HomePage() {
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">("photos");
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(null);
+  const [selectedSequence, setSelectedSequence] = useState<PhotoSequenceDetail | null>(null);
+  const [sequenceDetailsLoading, setSequenceDetailsLoading] = useState(false);
   const [sequenceRefresh, setSequenceRefresh] = useState(0);
   const [rebuildingSequences, setRebuildingSequences] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
@@ -446,8 +449,19 @@ function HomePage() {
   const handleOpenSequence = useCallback((sequenceId: number) => {
     ipc.client.photos.getSequence({ id: sequenceId }).then((sequence) => {
       if (sequence) setOpenSequence(sequence as unknown as PhotoSequenceDetail);
-    }).catch(() => toast.error("无法打开序列"));
-  }, []);
+    }).catch(() => toast.error(t("sequenceOpenFailed")));
+  }, [t]);
+
+  const handleOpenSequenceDetails = useCallback((sequenceId: number) => {
+    setSequenceDetailsLoading(true);
+    ipc.client.photos.getSequence({ id: sequenceId }).then((sequence) => {
+      if (sequence) {
+        setSelectedSequence(sequence as unknown as PhotoSequenceDetail);
+      }
+    }).catch(() => toast.error(t("sequenceDetailOpenFailed"))).finally(() => {
+      setSequenceDetailsLoading(false);
+    });
+  }, [t]);
 
   const handleRebuildSequences = useCallback(async () => {
     setRebuildingSequences(true);
@@ -456,13 +470,13 @@ function HomePage() {
         folderId: filter.activeFolderId ?? undefined,
       });
       setSequenceRefresh((value) => value + 1);
-      toast.success("序列识别完成");
+      toast.success(t("sequenceDetectComplete"));
     } catch {
-      toast.error("序列识别失败");
+      toast.error(t("sequenceDetectFailed"));
     } finally {
       setRebuildingSequences(false);
     }
-  }, [filter.activeFolderId]);
+  }, [filter.activeFolderId, t]);
 
   useEffect(() => {
     const missingIds: number[] = [];
@@ -718,6 +732,15 @@ function HomePage() {
   } = usePhotoSelection(routeKey, photos);
   const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+  const handlePhotoSelect = useCallback((id: number, event: React.MouseEvent) => {
+    setSelectedSequence(null);
+    setSequenceDetailsLoading(false);
+    handleSelect(id, event);
+  }, [handleSelect]);
+  const handleSequenceDetails = useCallback((sequenceId: number) => {
+    clearSelection();
+    handleOpenSequenceDetails(sequenceId);
+  }, [clearSelection, handleOpenSequenceDetails]);
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
   const showAiTaskStatus = Boolean(
@@ -1559,7 +1582,7 @@ function HomePage() {
         <div
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
           ref={galleryToolbarRef}
-          style={{ right: detailPhoto ? detailPanelWidth : 0 }}
+          style={{ right: detailPhoto || selectedSequence || sequenceDetailsLoading ? detailPanelWidth : 0 }}
         >
           <SearchBar
             aiStatus={aiStatus ?? null}
@@ -1597,14 +1620,14 @@ function HomePage() {
                     onClick={() => setSequenceMode("photos")}
                     type="button"
                   >
-                    照片
+                    {t("sequenceViewPhotos")}
                   </button>
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
                     onClick={() => setSequenceMode("sequences")}
                     type="button"
                   >
-                    序列{sequences.length > 0 ? ` ${sequences.length}` : ""}
+                    {t("sequenceViewSequences")}{sequences.length > 0 ? ` ${sequences.length}` : ""}
                   </button>
                 </div>
                 <button
@@ -1613,7 +1636,7 @@ function HomePage() {
                   onClick={handleRebuildSequences}
                   type="button"
                 >
-                  {rebuildingSequences ? "识别中…" : "识别序列"}
+                  {rebuildingSequences ? t("sequenceDetecting") : t("sequenceDetect")}
                 </button>
                 <SortDropdown
                   onChange={handleSortChange}
@@ -1721,11 +1744,12 @@ function HomePage() {
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
                 onOpenSequence={handleOpenSequence}
+                onOpenSequenceDetails={handleSequenceDetails}
                 onEndReached={handleEndReached}
                 onKeyboardSelect={handleKeyboardSelect}
                 onMarqueeSelect={wrappedMarqueeSelect}
                 onScrollTopChange={handleGalleryScrollTopChange}
-                onSelect={handleSelect}
+                onSelect={handlePhotoSelect}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
                 sequences={sequences}
@@ -1802,16 +1826,34 @@ function HomePage() {
                 bottomOffset={showAiTaskStatus ? 44 : 16}
               />
             </div>
-            <PhotoDetailPanel
-              onClose={() => {
-                dismissDetail();
-                clearSelection();
-              }}
-              onNavigate={navigateDetail}
-              onOpenExplorer={handleOpenExplorer}
-              onWidthChange={setDetailPanelWidth}
-              photo={detailPhoto}
-            />
+            {selectedSequence || sequenceDetailsLoading ? (
+              <SequenceDetailPanel
+                onClose={() => {
+                  setSelectedSequence(null);
+                  setSequenceDetailsLoading(false);
+                }}
+                onOpenPhoto={(photoId) => {
+                  setSelectedSequence(null);
+                  handleKeyboardSelect(photoId);
+                }}
+                onPlay={() => {
+                  setOpenSequence(selectedSequence);
+                }}
+                sequence={selectedSequence}
+                width={detailPanelWidth}
+              />
+            ) : (
+              <PhotoDetailPanel
+                onClose={() => {
+                  dismissDetail();
+                  clearSelection();
+                }}
+                onNavigate={navigateDetail}
+                onOpenExplorer={handleOpenExplorer}
+                onWidthChange={setDetailPanelWidth}
+                photo={detailPhoto}
+              />
+            )}
           </div>
         ) : (
           <div
@@ -1851,6 +1893,7 @@ function HomePage() {
             onToggleFavorite={handleToggleFavorite}
             open={true}
             photos={openSequence.members}
+            autoPlay={true}
             sequencePlayback={true}
             showThumbnailsInitially={true}
           />

@@ -16,5 +16,12 @@ export interface PhotoSequence {
 }
 
 export interface PhotoSequenceDetail {
+  cameraModel?: string | null;
+  endedAt: number;
+  frameCount: number;
+  id: number;
+  lensModel?: string | null;
   members: Photo[];
+  startedAt: number;
+  type: PhotoSequenceType;
 }

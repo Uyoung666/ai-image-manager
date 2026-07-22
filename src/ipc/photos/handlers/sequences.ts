@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
+  exifData,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequences,
@@ -116,7 +117,10 @@ export const getSequence = os.input(SequenceIdSchema).handler(({ input }) => {
     )
     .orderBy(asc(photoSequenceMembers.position))
     .all();
-  return { ...sequence, members };
+  const exif = sequence.representativePhotoId
+    ? db.select({ cameraModel: exifData.cameraModel, lensModel: exifData.lensModel }).from(exifData).where(eq(exifData.photoId, sequence.representativePhotoId)).get()
+    : null;
+  return { ...sequence, ...exif, members };
 });
 
 export const rebuildSequences = os

@@ -54,6 +54,7 @@ interface PhotoLightboxProps {
   onToggleFavorite?: (photoId: number, nextFavorite: boolean) => Promise<void>;
   open: boolean;
   photos: LightboxPhoto[];
+  autoPlay?: boolean;
   sequencePlayback?: boolean;
   showThumbnailsInitially?: boolean;
 }
@@ -86,6 +87,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   onAddToAlbum,
   showThumbnailsInitially = false,
   sequencePlayback = false,
+  autoPlay = false,
 }: PhotoLightboxProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -146,10 +148,19 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
   const safeIndex = photos.length ? clamp(photoIndex, 0, photos.length - 1) : 0;
   const photo = photos[safeIndex];
+  const previewPlayback = sequencePlayback && slideshowMode && playing;
+  const previewUrl = photo?.thumbnailPath
+    ? toLocalMediaUrl(photo.thumbnailPath)
+    : null;
   currentPhotoIdRef.current = photo?.id ?? null;
   const favorite = photo
     ? (favoriteOverrides[photo.id] ?? Boolean(photo.isFavorite))
     : false;
+
+  useEffect(() => {
+    setLoaded(false);
+    setImageError(false);
+  }, [photo?.id, previewPlayback]);
 
   const resetView = useCallback(() => {
     wheelZoomRef.current = 1;
@@ -355,11 +366,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setInfoVisible(false);
     setThumbnailsVisible(false);
     setMoreOpen(false);
-    setSlideshowMode(false);
-    setPlaying(false);
+    setSlideshowMode(autoPlay);
+    setPlaying(autoPlay);
     setProgress(0);
     setFavoriteOverrides({});
-  }, [initialIndex, open, resetView]);
+  }, [autoPlay, initialIndex, open, resetView]);
 
   useEffect(() => {
     const id = currentPhotoIdRef.current;
@@ -378,17 +389,12 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     if (!(open && photo)) {
       return;
     }
-    const range = 2;
-    for (
-      let index = Math.max(0, safeIndex - range);
-      index <= Math.min(photos.length - 1, safeIndex + range);
-      index += 1
-    ) {
-      if (index !== safeIndex) {
-        preloadImage(photos[index].thumbnailPath ?? photos[index].path);
-      }
+    const ahead = previewPlayback ? 12 : 2;
+    const behind = previewPlayback ? 1 : 2;
+    for (let index = Math.max(0, safeIndex - behind); index <= Math.min(photos.length - 1, safeIndex + ahead); index += 1) {
+      if (index !== safeIndex) preloadImage(photos[index].thumbnailPath ?? photos[index].path);
     }
-  }, [open, photo, photos, safeIndex]);
+  }, [open, photo, photos, previewPlayback, safeIndex]);
 
   useEffect(() => {
     if (!(open && thumbnailsVisible && photo)) {
@@ -784,6 +790,17 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             </div>
           ) : (
             // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
+            <>
+              {sequencePlayback && previewUrl && (
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className={`absolute max-h-full max-w-full select-none object-contain transition-opacity duration-100 ${previewPlayback || !loaded ? "opacity-100" : "opacity-0"}`}
+                  height={photo.height || undefined}
+                  src={previewUrl}
+                  width={photo.width || undefined}
+                />
+              )}
             <img
               alt={photo.filename}
               className={`max-h-full max-w-full select-none object-contain shadow-2xl transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
@@ -840,7 +857,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               }}
               onWheel={handleWheelZoom}
               ref={imageRef}
-              src={toLocalMediaUrl(photo.path)}
+              src={toLocalMediaUrl(previewPlayback && photo.thumbnailPath ? photo.thumbnailPath : photo.path)}
               style={{
                 maxHeight:
                   isQuarterTurn && canvasSize.width
@@ -859,8 +876,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               }}
               width={photo.width || undefined}
             />
+            </>
           )}
-          {!(loaded || imageError) && (
+          {(!previewPlayback || !previewUrl) && !(loaded || imageError) && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/20 border-t-white/75" />
             </div>

@@ -73,6 +73,7 @@ interface PhotoGridProps {
   sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
   onOpenSequence?: (sequenceId: number) => void;
+  onOpenSequenceDetails?: (sequenceId: number) => void;
   onSequenceModeChange?: (mode: "photos" | "sequences") => void;
   selectedIds: Set<number>;
   showToolbar?: boolean;
@@ -142,6 +143,7 @@ export const PhotoGrid = memo(
     sequences = [],
     sequenceMode = "photos",
     onOpenSequence,
+    onOpenSequenceDetails,
     onSequenceModeChange,
   }: PhotoGridProps) {
     const { t, i18n } = useTranslation();
@@ -338,8 +340,8 @@ export const PhotoGrid = memo(
             />
           );
         }
-        if (sequence && onOpenSequence) {
-          return <SequenceCard isSelected={selectedIdsRef.current.has(photo.id)} onClick={onSelect} onOpen={onOpenSequence} sequence={sequence} />;
+        if (sequence && onOpenSequence && onOpenSequenceDetails) {
+          return <SequenceCard isSelected={selectedIdsRef.current.has(photo.id)} onClick={onSelect} onOpen={onOpenSequence} onOpenDetails={onOpenSequenceDetails} sequence={sequence} />;
         }
         return (
           <PhotoCard
@@ -372,7 +374,7 @@ export const PhotoGrid = memo(
         onToggleFavorite,
         searchQuery,
         getDragIds,
-        columnCount, sequenceByRepresentative, onOpenSequence,
+        columnCount, sequenceByRepresentative, onOpenSequence, onOpenSequenceDetails,
       ]
     );
 
@@ -623,6 +625,9 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.onOpenSequence !== nextProps.onOpenSequence) {
+      return false;
+    }
+    if (prevProps.onOpenSequenceDetails !== nextProps.onOpenSequenceDetails) {
       return false;
     }
     if (prevProps.loading !== nextProps.loading) {
