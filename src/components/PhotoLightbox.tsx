@@ -54,6 +54,8 @@ interface PhotoLightboxProps {
   onToggleFavorite?: (photoId: number, nextFavorite: boolean) => Promise<void>;
   open: boolean;
   photos: LightboxPhoto[];
+  sequencePlayback?: boolean;
+  showThumbnailsInitially?: boolean;
 }
 
 const SLIDESHOW_DELAYS = [3000, 5000, 10_000] as const;
@@ -82,6 +84,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   onClose,
   onToggleFavorite,
   onAddToAlbum,
+  showThumbnailsInitially = false,
+  sequencePlayback = false,
 }: PhotoLightboxProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -115,11 +119,18 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [controlsVisible, setControlsVisible] = useState(true);
   const [infoVisible, setInfoVisible] = useState(false);
   const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
+
+  useEffect(() => {
+    if (open && showThumbnailsInitially) {
+      setThumbnailsVisible(true);
+    }
+  }, [open, showThumbnailsInitially]);
   const [moreOpen, setMoreOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [slideshowMode, setSlideshowMode] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [delay, setDelay] = useState<number>(5000);
+  const [delay, setDelay] = useState<number>(sequencePlayback ? 167 : 5000);
+  const playbackDelays = sequencePlayback ? [500, 167, 83] : SLIDESHOW_DELAYS;
   const [progress, setProgress] = useState(0);
   const [favoriteOverrides, setFavoriteOverrides] = useState<
     Record<number, boolean>
@@ -901,7 +912,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   <Play className="h-4 w-4" />
                 )}
               </ControlButton>
-              {SLIDESHOW_DELAYS.map((value) => (
+              {playbackDelays.map((value) => (
                 <button
                   className={`rounded-md px-2 py-1.5 text-[11px] transition-colors ${delay === value ? "bg-white/15 text-white" : "text-white/50 hover:bg-white/10 hover:text-white"}`}
                   key={value}
@@ -911,7 +922,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   }}
                   type="button"
                 >
-                  {value / 1000}s
+                  {sequencePlayback ? `${Math.round(1000 / value)} fps` : `${value / 1000}s`}
                 </button>
               ))}
               <div className="mx-1 h-5 border-white/10 border-l" />

@@ -9,6 +9,8 @@ import {
 import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
+import { SequenceCard } from "./SequenceCard";
+import type { PhotoSequence } from "@/types/photo-sequence";
 import { SortDropdown } from "./SortDropdown";
 import { LoadingSpinner } from "./ui/loading-spinner";
 import { Skeleton } from "./ui/skeleton";
@@ -68,6 +70,10 @@ interface PhotoGridProps {
    */
   routeKey: string;
   searchQuery?: string;
+  sequenceMode?: "photos" | "sequences";
+  sequences?: PhotoSequence[];
+  onOpenSequence?: (sequenceId: number) => void;
+  onSequenceModeChange?: (mode: "photos" | "sequences") => void;
   selectedIds: Set<number>;
   showToolbar?: boolean;
   sort?: SortField;
@@ -133,6 +139,10 @@ export const PhotoGrid = memo(
     onBackgroundClick,
     showToolbar = true,
     topInset = 0,
+    sequences = [],
+    sequenceMode = "photos",
+    onOpenSequence,
+    onSequenceModeChange,
   }: PhotoGridProps) {
     const { t, i18n } = useTranslation();
     const [internalColumnWidth, setInternalColumnWidth] =
@@ -152,6 +162,28 @@ export const PhotoGrid = memo(
     // 移除 deps 中的 Set 依赖 → 选中操作仅触发实际变化卡片的 memo 比较。
     const selectedIdsRef = useRef(selectedIds);
     selectedIdsRef.current = selectedIds;
+    const sequenceByRepresentative = useMemo(() => new Map(sequences.map((sequence) => [sequence.representativePhotoId ?? sequence.photo.id, sequence])), [sequences]);
+    const sequenceMemberIds = useMemo(() => new Set(sequences.flatMap((sequence) => sequence.memberPhotoIds ?? [])), [sequences]);
+    const displayPhotos = useMemo(() => {
+      if (sequenceMode === "sequences") {
+        return sequences.map((sequence) => sequence.photo);
+      }
+      const visible = photos.filter(
+        (photo) =>
+          !sequenceMemberIds.has(photo.id) ||
+          sequenceByRepresentative.has(photo.id)
+      );
+      const visibleIds = new Set(visible.map((photo) => photo.id));
+      for (const sequence of sequences) {
+        const hasMatchingMember = (sequence.memberPhotoIds ?? []).some((id) =>
+          photos.some((photo) => photo.id === id)
+        );
+        if (hasMatchingMember && !visibleIds.has(sequence.photo.id)) {
+          visible.push(sequence.photo);
+        }
+      }
+      return visible;
+    }, [photos, sequenceMode, sequenceMemberIds, sequenceByRepresentative, sequences]);
     const deletingIdsRef = useRef(deletingIds);
     deletingIdsRef.current = deletingIds;
     const itemStateVersion = useMemo(
@@ -235,7 +267,7 @@ export const PhotoGrid = memo(
 
     // Keyboard navigation (arrow keys)
     useEffect(() => {
-      if (!onKeyboardSelect || photos.length === 0) {
+      if (!onKeyboardSelect || displayPhotos.length === 0) {
         return;
       }
       function handleKeyDown(e: KeyboardEvent) {
@@ -253,7 +285,7 @@ export const PhotoGrid = memo(
         e.preventDefault();
         const currentId = selectedIds.size === 1 ? [...selectedIds][0] : null;
         let currentIdx = currentId
-          ? photos.findIndex((p) => p.id === currentId)
+          ? displayPhotos.findIndex((p) => p.id === currentId)
           : -1;
         if (currentIdx < 0) {
           currentIdx = 0;
@@ -261,22 +293,22 @@ export const PhotoGrid = memo(
 
         let nextIdx = currentIdx;
         if (e.key === "ArrowRight") {
-          nextIdx = Math.min(photos.length - 1, currentIdx + 1);
+          nextIdx = Math.min(displayPhotos.length - 1, currentIdx + 1);
         } else if (e.key === "ArrowLeft") {
           nextIdx = Math.max(0, currentIdx - 1);
         } else if (e.key === "ArrowDown") {
-          nextIdx = Math.min(photos.length - 1, currentIdx + columnCount);
+          nextIdx = Math.min(displayPhotos.length - 1, currentIdx + columnCount);
         } else if (e.key === "ArrowUp") {
           nextIdx = Math.max(0, currentIdx - columnCount);
         }
 
         if (nextIdx !== currentIdx || currentId === null) {
-          onKeyboardSelect!(photos[nextIdx].id);
+          onKeyboardSelect!(displayPhotos[nextIdx].id);
         }
       }
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [photos, selectedIds, columnCount, onKeyboardSelect]);
+    }, [displayPhotos, selectedIds, columnCount, onKeyboardSelect]);
 
     const skeletonAspects = useCallback(
       () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
@@ -295,6 +327,7 @@ export const PhotoGrid = memo(
         _style: React.CSSProperties,
         options: { renderImage: boolean }
       ) => {
+        const sequence = sequenceByRepresentative.get(photo.id);
         if (!options.renderImage) {
           return (
             <div
@@ -304,6 +337,9 @@ export const PhotoGrid = memo(
               data-photo-path={photo.path}
             />
           );
+        }
+        if (sequence && onOpenSequence) {
+          return <SequenceCard isSelected={selectedIdsRef.current.has(photo.id)} onClick={onSelect} onOpen={onOpenSequence} sequence={sequence} />;
         }
         return (
           <PhotoCard
@@ -336,12 +372,12 @@ export const PhotoGrid = memo(
         onToggleFavorite,
         searchQuery,
         getDragIds,
-        columnCount,
+        columnCount, sequenceByRepresentative, onOpenSequence,
       ]
     );
 
     const groupHeaders = useMemo((): GroupHeader[] => {
-      if (sort !== "date" || photos.length === 0) {
+      if (sort !== "date" || displayPhotos.length === 0) {
         groupHeaderCacheRef.current = null;
         return [];
       }
@@ -353,8 +389,8 @@ export const PhotoGrid = memo(
         cached.routeKey === routeKey;
       if (
         cacheContextMatches &&
-        cached.photoSnapshot.length === photos.length &&
-        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, photos)
+        cached.photoSnapshot.length === displayPhotos.length &&
+        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos)
       ) {
         return cached.headers;
       }
@@ -363,14 +399,14 @@ export const PhotoGrid = memo(
       let existingHeaders: GroupHeader[] = [];
       if (
         cacheContextMatches &&
-        cached.photoSnapshot.length < photos.length &&
-        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, photos)
+        cached.photoSnapshot.length < displayPhotos.length &&
+        hasMatchingPhotoGroupPrefix(cached.photoSnapshot, displayPhotos)
       ) {
         existingHeaders = cached.headers;
         startIndex = cached.photoSnapshot.length;
       }
       const headers = buildPhotoGroupHeaders(
-        photos,
+        displayPhotos,
         i18n.language,
         startIndex,
         existingHeaders
@@ -378,14 +414,14 @@ export const PhotoGrid = memo(
       groupHeaderCacheRef.current = {
         headers,
         language: i18n.language,
-        photoSnapshot: snapshotPhotoGroupInputs(photos),
+        photoSnapshot: snapshotPhotoGroupInputs(displayPhotos),
         routeKey,
         sort,
       };
       return headers;
-    }, [photos, sort, i18n.language, routeKey]);
+    }, [displayPhotos, sort, i18n.language, routeKey]);
 
-    if (loading && photos.length === 0) {
+    if (loading && displayPhotos.length === 0) {
       const skelCols = Array.from({ length: columnCount }, (_, ci) =>
         Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
       );
@@ -422,7 +458,7 @@ export const PhotoGrid = memo(
       );
     }
 
-    if (!loading && photos.length === 0) {
+    if (!loading && displayPhotos.length === 0) {
       const isError = !!error;
       return (
         <div className="flex flex-1 flex-col">
@@ -487,11 +523,17 @@ export const PhotoGrid = memo(
             onClick={(event) => event.stopPropagation()}
           >
             <span className="truncate text-[12px] text-muted-foreground">
-              {t("photosCount", { count: photos.length.toLocaleString() })}
+              {t("photosCount", { count: displayPhotos.length.toLocaleString() })}
               {selectedIds.size > 0 &&
                 t("photosSelected", { count: selectedIds.size })}
             </span>
             <div className="flex items-center gap-2">
+              {onSequenceModeChange && (
+                <div className="flex rounded-md border border-border p-0.5 text-[11px]">
+                  <button className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`} onClick={() => onSequenceModeChange("photos")} type="button">照片</button>
+                  <button className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`} onClick={() => onSequenceModeChange("sequences")} type="button">序列</button>
+                </div>
+              )}
               {onSortChange && (
                 <SortDropdown
                   onChange={onSortChange}
@@ -545,7 +587,7 @@ export const PhotoGrid = memo(
             isLoadingMore={isLoadingMore}
             isPlaceholderData={isPlaceholderData}
             itemStateVersion={itemStateVersion}
-            items={photos}
+            items={displayPhotos}
             onEndReached={onEndReached}
             onMarqueeSelect={onMarqueeSelect}
             onScrollTopChange={onScrollTopChange}
@@ -559,7 +601,7 @@ export const PhotoGrid = memo(
         </div>
 
         {/* Loading overlay */}
-        {loading && photos.length > 0 && (
+        {loading && displayPhotos.length > 0 && (
           <div className="pointer-events-none absolute top-0 right-0 bottom-0 left-0 flex items-start justify-center bg-background/30 pt-4">
             <LoadingSpinner size="lg" />
           </div>
@@ -572,6 +614,15 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.photos !== nextProps.photos) {
+      return false;
+    }
+    if (prevProps.sequences !== nextProps.sequences) {
+      return false;
+    }
+    if (prevProps.sequenceMode !== nextProps.sequenceMode) {
+      return false;
+    }
+    if (prevProps.onOpenSequence !== nextProps.onOpenSequence) {
       return false;
     }
     if (prevProps.loading !== nextProps.loading) {

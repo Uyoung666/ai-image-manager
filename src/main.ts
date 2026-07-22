@@ -1231,6 +1231,13 @@ app.whenReady().then(async () => {
         );
     }, 8000);
 
+    // Existing libraries may already have completed EXIF enrichment.
+    setTimeout(() => {
+      import("@/services/photo-sequences")
+        .then(({ detectPhotoSequences }) => detectPhotoSequences())
+        .catch((err) => log.warn({ err }, "[Sequences] Startup detection failed"));
+    }, 12_000);
+
     // Forward system theme changes to renderer
     nativeTheme.on("updated", () => {
       mainWindow?.webContents.send(

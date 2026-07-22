@@ -241,6 +241,72 @@ export const advancedExifData = sqliteTable(
   })
 );
 
+/** A visually related run of photos, detected from EXIF and capture time. */
+export const photoSequences = sqliteTable(
+  "photo_sequences",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    folderId: integer("folder_id").references(() => folders.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").notNull(), // burst | timelapse
+    source: text("source").notNull().default("auto"), // auto | manual
+    representativePhotoId: integer("representative_photo_id").references(
+      () => photos.id,
+      { onDelete: "set null" }
+    ),
+    startedAt: integer("started_at").notNull(),
+    endedAt: integer("ended_at").notNull(),
+    frameCount: integer("frame_count").notNull(),
+    userLocked: integer("user_locked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at").notNull().$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    folderTimeIdx: index("idx_sequence_folder_time").on(
+      table.folderId,
+      table.startedAt
+    ),
+    representativeIdx: index("idx_sequence_representative").on(
+      table.representativePhotoId
+    ),
+  })
+);
+
+export const photoSequenceMembers = sqliteTable(
+  "photo_sequence_members",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sequenceId: integer("sequence_id")
+      .notNull()
+      .references(() => photoSequences.id, { onDelete: "cascade" }),
+    photoId: integer("photo_id")
+      .notNull()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+  },
+  (table) => ({
+    sequencePositionIdx: uniqueIndex("idx_sequence_member_position").on(
+      table.sequenceId,
+      table.position
+    ),
+    photoIdx: uniqueIndex("idx_sequence_member_photo").on(table.photoId),
+  })
+);
+
+/** Permanent exclusions for photos a user explicitly removed from auto grouping. */
+export const photoSequenceExclusions = sqliteTable(
+  "photo_sequence_exclusions",
+  {
+    photoId: integer("photo_id")
+      .primaryKey()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+  }
+);
+
 export const tags = sqliteTable(
   "tags",
   {

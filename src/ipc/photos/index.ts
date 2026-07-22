@@ -84,6 +84,7 @@ import {
   setPhotoTag,
   suggestTags,
 } from "./handlers/tags";
+import { createSequence, getSequence, ignoreSequencePhotos, listSequences, rebuildSequences } from "./handlers/sequences";
 
 export const photos = {
   addTag,
@@ -125,9 +126,14 @@ export const photos = {
   getStats,
   getTags,
   getWatermarkSettings,
+  getSequence,
   listDeletedPhotos,
   listPhotos,
+  listSequences,
   migrateColors,
+  createSequence,
+  ignoreSequencePhotos,
+  rebuildSequences,
   movePhotos,
   pauseAiIndexing,
   pauseAdvancedExif,

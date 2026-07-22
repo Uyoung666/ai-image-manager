@@ -202,6 +202,14 @@ export async function runAdvancedExifEnrichment(): Promise<AdvancedExifProgress>
   }
 
   running = false;
+  // Sequence detection is deliberately deferred until enrichment has yielded all
+  // EXIF signals, so it never competes with import or exiftool work.
+  try {
+    const { detectPhotoSequences } = await import("@/services/photo-sequences");
+    detectPhotoSequences();
+  } catch {
+    // Sequence detection is an enhancement; an EXIF pass must still succeed.
+  }
   broadcast();
   if (rescanRequested) {
     rescanRequested = false;

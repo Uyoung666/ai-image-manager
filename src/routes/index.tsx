@@ -57,6 +57,7 @@ import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
+import type { PhotoSequence, PhotoSequenceDetail } from "@/types/photo-sequence";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
   loadSortField,
@@ -116,6 +117,11 @@ function HomePage() {
   } | null>(null);
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">("photos");
+  const [sequences, setSequences] = useState<PhotoSequence[]>([]);
+  const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(null);
+  const [sequenceRefresh, setSequenceRefresh] = useState(0);
+  const [rebuildingSequences, setRebuildingSequences] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -423,6 +429,40 @@ function HomePage() {
   prevIsSearching.current = isSearching;
   const photosRef = useRef(rawPhotos);
   photosRef.current = rawPhotos;
+
+  useEffect(() => {
+    let cancelled = false;
+    const photoIds = rawPhotos.map((photo) => photo.id);
+    if (!photoIds.length) {
+      setSequences([]);
+      return;
+    }
+    ipc.client.photos.listSequences({ photoIds }).then((result) => {
+      if (!cancelled) setSequences(result as PhotoSequence[]);
+    }).catch(() => { if (!cancelled) setSequences([]); });
+    return () => { cancelled = true; };
+  }, [rawPhotos, sequenceRefresh]);
+
+  const handleOpenSequence = useCallback((sequenceId: number) => {
+    ipc.client.photos.getSequence({ id: sequenceId }).then((sequence) => {
+      if (sequence) setOpenSequence(sequence as unknown as PhotoSequenceDetail);
+    }).catch(() => toast.error("无法打开序列"));
+  }, []);
+
+  const handleRebuildSequences = useCallback(async () => {
+    setRebuildingSequences(true);
+    try {
+      await ipc.client.photos.rebuildSequences({
+        folderId: filter.activeFolderId ?? undefined,
+      });
+      setSequenceRefresh((value) => value + 1);
+      toast.success("序列识别完成");
+    } catch {
+      toast.error("序列识别失败");
+    } finally {
+      setRebuildingSequences(false);
+    }
+  }, [filter.activeFolderId]);
 
   useEffect(() => {
     const missingIds: number[] = [];
@@ -1551,6 +1591,30 @@ function HomePage() {
             searchTime={searchTime}
             trailingContent={
               <>
+                <div className="flex rounded-md border border-border p-0.5 text-[11px]">
+                  <button
+                    className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                    onClick={() => setSequenceMode("photos")}
+                    type="button"
+                  >
+                    照片
+                  </button>
+                  <button
+                    className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                    onClick={() => setSequenceMode("sequences")}
+                    type="button"
+                  >
+                    序列{sequences.length > 0 ? ` ${sequences.length}` : ""}
+                  </button>
+                </div>
+                <button
+                  className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  disabled={rebuildingSequences}
+                  onClick={handleRebuildSequences}
+                  type="button"
+                >
+                  {rebuildingSequences ? "识别中…" : "识别序列"}
+                </button>
                 <SortDropdown
                   onChange={handleSortChange}
                   order={sortOrder}
@@ -1656,6 +1720,7 @@ function HomePage() {
                 }}
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
+                onOpenSequence={handleOpenSequence}
                 onEndReached={handleEndReached}
                 onKeyboardSelect={handleKeyboardSelect}
                 onMarqueeSelect={wrappedMarqueeSelect}
@@ -1663,6 +1728,8 @@ function HomePage() {
                 onSelect={handleSelect}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
+                sequences={sequences}
+                sequenceMode={sequenceMode}
                 isStale={isPhotosStale}
                 routeKey={routeKey}
                 searchQuery={searchQuery}
@@ -1763,7 +1830,7 @@ function HomePage() {
           />
         )}
       </div>
-      {lightboxIndex >= 0 && (
+        {lightboxIndex >= 0 && (
         <PhotoLightbox
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
@@ -1776,7 +1843,18 @@ function HomePage() {
           open={lightboxIndex >= 0}
           photos={photos}
         />
-      )}
+        )}
+        {openSequence && (
+          <PhotoLightbox
+            initialIndex={0}
+            onClose={() => setOpenSequence(null)}
+            onToggleFavorite={handleToggleFavorite}
+            open={true}
+            photos={openSequence.members}
+            sequencePlayback={true}
+            showThumbnailsInitially={true}
+          />
+        )}
       {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
