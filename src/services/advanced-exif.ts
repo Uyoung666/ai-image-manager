@@ -13,7 +13,7 @@ import type {
   PhotoMetadata,
 } from "@/types/photo-metadata";
 
-export const ADVANCED_EXIF_PARSER_VERSION = 1;
+export const ADVANCED_EXIF_PARSER_VERSION = 3;
 const YIELD_MS = 150;
 
 let running = false;

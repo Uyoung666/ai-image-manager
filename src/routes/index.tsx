@@ -13,7 +13,9 @@ import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { CullStartDialog } from "@/components/CullStartDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MasonryGridHandle } from "@/components/MasonryGrid";
@@ -24,7 +26,6 @@ import {
   loadPhotoDetailPanelWidth,
   PhotoDetailPanel,
 } from "@/components/PhotoDetailPanel";
-import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import {
   GRID_COLUMN_WIDTH_KEY,
   GRID_COLUMN_WIDTH_MAX,
@@ -37,20 +38,19 @@ import {
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
 import { SearchBar } from "@/components/SearchBar";
-import type { ExifFilters, SearchMode } from "@/types/search";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
-import { SortDropdown } from "@/components/SortDropdown";
-import { CullStartDialog } from "@/components/CullStartDialog";
+import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
+import { SortDropdown } from "@/components/SortDropdown";
 import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useAiStatus } from "@/hooks/useAiStatus";
-import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { useFolders } from "@/hooks/useFolders";
+import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
@@ -58,7 +58,11 @@ import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
-import type { PhotoSequence, PhotoSequenceDetail } from "@/types/photo-sequence";
+import type {
+  PhotoSequence,
+  PhotoSequenceDetail,
+} from "@/types/photo-sequence";
+import type { ExifFilters, SearchMode } from "@/types/search";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
   loadSortField,
@@ -72,6 +76,19 @@ interface SemanticSearchMeta {
   state: "ready" | "partial" | "unavailable" | "error";
   totalPhotos: number;
   used: boolean;
+}
+
+interface SequenceSuggestion {
+  firstSequenceId: number;
+  id: number;
+  secondSequenceId: number;
+}
+
+interface SequenceRebuildPreview {
+  existingAutomatic: number;
+  folderId?: number;
+  nextAutomatic: number;
+  timelapseSegments: number;
 }
 
 const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
@@ -118,13 +135,25 @@ function HomePage() {
   } | null>(null);
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">("photos");
+  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
+    "photos"
+  );
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
-  const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(null);
-  const [selectedSequence, setSelectedSequence] = useState<PhotoSequenceDetail | null>(null);
+  const [sequenceSuggestions, setSequenceSuggestions] = useState<
+    SequenceSuggestion[]
+  >([]);
+  const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(
+    null
+  );
+  const [selectedSequence, setSelectedSequence] =
+    useState<PhotoSequenceDetail | null>(null);
   const [sequenceDetailsLoading, setSequenceDetailsLoading] = useState(false);
   const [sequenceRefresh, setSequenceRefresh] = useState(0);
   const [rebuildingSequences, setRebuildingSequences] = useState(false);
+  const [sequenceRebuildPreview, setSequenceRebuildPreview] =
+    useState<SequenceRebuildPreview | null>(null);
+  const [pendingSequenceMerge, setPendingSequenceMerge] =
+    useState<SequenceSuggestion | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -440,34 +469,107 @@ function HomePage() {
       setSequences([]);
       return;
     }
-    ipc.client.photos.listSequences({ photoIds }).then((result) => {
-      if (!cancelled) setSequences(result as PhotoSequence[]);
-    }).catch(() => { if (!cancelled) setSequences([]); });
-    return () => { cancelled = true; };
+    ipc.client.photos
+      .listSequences({ photoIds })
+      .then((result) => {
+        if (!cancelled) {
+          setSequences(result as PhotoSequence[]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSequences([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [rawPhotos, sequenceRefresh]);
 
-  const handleOpenSequence = useCallback((sequenceId: number) => {
-    ipc.client.photos.getSequence({ id: sequenceId }).then((sequence) => {
-      if (sequence) setOpenSequence(sequence as unknown as PhotoSequenceDetail);
-    }).catch(() => toast.error(t("sequenceOpenFailed")));
-  }, [t]);
+  useEffect(() => {
+    let cancelled = false;
+    ipc.client.photos
+      .listSequenceSuggestions({
+        folderId: filter.activeFolderId ?? undefined,
+      })
+      .then((result) => {
+        if (!cancelled) {
+          setSequenceSuggestions(result as SequenceSuggestion[]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSequenceSuggestions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filter.activeFolderId, sequenceRefresh]);
 
-  const handleOpenSequenceDetails = useCallback((sequenceId: number) => {
-    setSequenceDetailsLoading(true);
-    ipc.client.photos.getSequence({ id: sequenceId }).then((sequence) => {
-      if (sequence) {
-        setSelectedSequence(sequence as unknown as PhotoSequenceDetail);
-      }
-    }).catch(() => toast.error(t("sequenceDetailOpenFailed"))).finally(() => {
-      setSequenceDetailsLoading(false);
-    });
-  }, [t]);
+  const handleOpenSequence = useCallback(
+    (sequenceId: number) => {
+      ipc.client.photos
+        .getSequence({ id: sequenceId })
+        .then((sequence) => {
+          if (sequence) {
+            setOpenSequence(sequence as unknown as PhotoSequenceDetail);
+          }
+        })
+        .catch(() => toast.error(t("sequenceOpenFailed")));
+    },
+    [t]
+  );
+
+  const handleOpenSequenceDetails = useCallback(
+    (sequenceId: number) => {
+      setSequenceDetailsLoading(true);
+      ipc.client.photos
+        .getSequence({ id: sequenceId })
+        .then((sequence) => {
+          if (sequence) {
+            setSelectedSequence(sequence as unknown as PhotoSequenceDetail);
+          }
+        })
+        .catch(() => toast.error(t("sequenceDetailOpenFailed")))
+        .finally(() => {
+          setSequenceDetailsLoading(false);
+        });
+    },
+    [t]
+  );
 
   const handleRebuildSequences = useCallback(async () => {
     setRebuildingSequences(true);
     try {
+      const folderId = filter.activeFolderId ?? undefined;
+      const preview = (await ipc.client.photos.rebuildSequences({
+        folderId,
+        dryRun: true,
+      })) as {
+        existingAutomatic: number;
+        nextAutomatic: number;
+        timelapseSegments: number;
+      };
+      if (!("nextAutomatic" in preview)) {
+        throw new Error("Sequence dry-run did not return a preview");
+      }
+      setSequenceRebuildPreview({
+        existingAutomatic: preview.existingAutomatic,
+        folderId,
+        nextAutomatic: preview.nextAutomatic,
+        timelapseSegments: preview.timelapseSegments,
+      });
+      return;
+      if (
+        !window.confirm(
+          `将替换 ${preview.existingAutomatic} 个未锁定自动片段，预计生成 ${preview.nextAutomatic} 个片段（其中延时 ${preview.timelapseSegments} 个）。手动或锁定序列不会受到影响。继续吗？`
+        )
+      ) {
+        return;
+      }
       await ipc.client.photos.rebuildSequences({
-        folderId: filter.activeFolderId ?? undefined,
+        folderId,
       });
       setSequenceRefresh((value) => value + 1);
       toast.success(t("sequenceDetectComplete"));
@@ -732,15 +834,21 @@ function HomePage() {
   } = usePhotoSelection(routeKey, photos);
   const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
-  const handlePhotoSelect = useCallback((id: number, event: React.MouseEvent) => {
-    setSelectedSequence(null);
-    setSequenceDetailsLoading(false);
-    handleSelect(id, event);
-  }, [handleSelect]);
-  const handleSequenceDetails = useCallback((sequenceId: number) => {
-    clearSelection();
-    handleOpenSequenceDetails(sequenceId);
-  }, [clearSelection, handleOpenSequenceDetails]);
+  const handlePhotoSelect = useCallback(
+    (id: number, event: React.MouseEvent) => {
+      setSelectedSequence(null);
+      setSequenceDetailsLoading(false);
+      handleSelect(id, event);
+    },
+    [handleSelect]
+  );
+  const handleSequenceDetails = useCallback(
+    (sequenceId: number) => {
+      clearSelection();
+      handleOpenSequenceDetails(sequenceId);
+    },
+    [clearSelection, handleOpenSequenceDetails]
+  );
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
   const showAiTaskStatus = Boolean(
@@ -873,14 +981,20 @@ function HomePage() {
       // 搜索模式下：首次返回 200 条后，滚动到底自动加载更多
       // 直接调 IPC 追加结果，不触发 loading 状态避免闪烁
       const p = lastSearchParamsRef.current;
-      if (!p) return;
+      if (!p) {
+        return;
+      }
       searchExpandedRef.current = true;
       const generation = searchGenerationRef.current;
 
       const startTime = performance.now();
       const searchParams: any = { limit: 1000 };
-      if (p.query.trim()) searchParams.query = p.query.trim();
-      if (p.colorHex) searchParams.colorHex = p.colorHex;
+      if (p.query.trim()) {
+        searchParams.query = p.query.trim();
+      }
+      if (p.colorHex) {
+        searchParams.colorHex = p.colorHex;
+      }
       if (p.filters?.dateFrom) {
         const [y, m, d] = p.filters.dateFrom.split("-").map(Number);
         searchParams.dateFrom = new Date(y, m - 1, d, 0, 0, 0).getTime();
@@ -895,28 +1009,45 @@ function HomePage() {
         const [y, m, d] = p.filters.dateTo.split("-").map(Number);
         searchParams.dateTo = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
       }
-      if (p.filters?.cameraModel)
+      if (p.filters?.cameraModel) {
         searchParams.cameraModel = p.filters.cameraModel;
-      if (p.filters?.creator) searchParams.creator = p.filters.creator;
-      if (p.filters?.lensModel) searchParams.lensModel = p.filters.lensModel;
-      if (p.filters?.advancedField)
+      }
+      if (p.filters?.creator) {
+        searchParams.creator = p.filters.creator;
+      }
+      if (p.filters?.lensModel) {
+        searchParams.lensModel = p.filters.lensModel;
+      }
+      if (p.filters?.advancedField) {
         searchParams.advancedField = p.filters.advancedField;
-      if (p.filters?.advancedValue)
+      }
+      if (p.filters?.advancedValue) {
         searchParams.advancedValue = p.filters.advancedValue;
-      if (p.filters?.focalMin)
+      }
+      if (p.filters?.focalMin) {
         searchParams.focalMin = Number(p.filters.focalMin);
-      if (p.filters?.focalMax)
+      }
+      if (p.filters?.focalMax) {
         searchParams.focalMax = Number(p.filters.focalMax);
-      if (p.filters?.apertureMin)
+      }
+      if (p.filters?.apertureMin) {
         searchParams.apertureMin = Number(p.filters.apertureMin);
-      if (p.filters?.apertureMax)
+      }
+      if (p.filters?.apertureMax) {
         searchParams.apertureMax = Number(p.filters.apertureMax);
-      if (p.filters?.isoMin) searchParams.isoMin = Number(p.filters.isoMin);
-      if (p.filters?.isoMax) searchParams.isoMax = Number(p.filters.isoMax);
-      if (p.filters?.shutterMin)
+      }
+      if (p.filters?.isoMin) {
+        searchParams.isoMin = Number(p.filters.isoMin);
+      }
+      if (p.filters?.isoMax) {
+        searchParams.isoMax = Number(p.filters.isoMax);
+      }
+      if (p.filters?.shutterMin) {
         searchParams.shutterMin = Number(p.filters.shutterMin);
-      if (p.filters?.shutterMax)
+      }
+      if (p.filters?.shutterMax) {
         searchParams.shutterMax = Number(p.filters.shutterMax);
+      }
 
       ipc.client.photos
         .searchCompound(searchParams)
@@ -942,40 +1073,40 @@ function HomePage() {
     searchResults,
   ]);
 
-  const handleToggleFavorite = useCallback(async (
-    id: number,
-    requestedValue?: boolean
-  ) => {
-    const photo = photosRef.current.find((p) => p.id === id);
-    if (!photo) {
-      return;
-    }
-    const prevVal = !!photo.isFavorite;
-    const newVal = requestedValue ?? !prevVal;
-    await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
-    queryClient.invalidateQueries({
-      queryKey: ["photos"],
-      refetchType: "active",
-    });
-    toast.success(
-      newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
-      {
-        action: {
-          label: t("toastUndo"),
-          onClick: async () => {
-            await ipc.client.photos.toggleFavorite({
-              ids: [id],
-              favorite: prevVal,
-            });
-            queryClient.invalidateQueries({
-              queryKey: ["photos"],
-              refetchType: "active",
-            });
-          },
-        },
+  const handleToggleFavorite = useCallback(
+    async (id: number, requestedValue?: boolean) => {
+      const photo = photosRef.current.find((p) => p.id === id);
+      if (!photo) {
+        return;
       }
-    );
-  }, []);
+      const prevVal = !!photo.isFavorite;
+      const newVal = requestedValue ?? !prevVal;
+      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+      toast.success(
+        newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
+        {
+          action: {
+            label: t("toastUndo"),
+            onClick: async () => {
+              await ipc.client.photos.toggleFavorite({
+                ids: [id],
+                favorite: prevVal,
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["photos"],
+                refetchType: "active",
+              });
+            },
+          },
+        }
+      );
+    },
+    []
+  );
 
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photosRef.current.findIndex((p) => p.id === id);
@@ -1582,7 +1713,12 @@ function HomePage() {
         <div
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
           ref={galleryToolbarRef}
-          style={{ right: detailPhoto || selectedSequence || sequenceDetailsLoading ? detailPanelWidth : 0 }}
+          style={{
+            right:
+              detailPhoto || selectedSequence || sequenceDetailsLoading
+                ? detailPanelWidth
+                : 0,
+          }}
         >
           <SearchBar
             aiStatus={aiStatus ?? null}
@@ -1627,7 +1763,8 @@ function HomePage() {
                     onClick={() => setSequenceMode("sequences")}
                     type="button"
                   >
-                    {t("sequenceViewSequences")}{sequences.length > 0 ? ` ${sequences.length}` : ""}
+                    {t("sequenceViewSequences")}
+                    {sequences.length > 0 ? ` ${sequences.length}` : ""}
                   </button>
                 </div>
                 <button
@@ -1636,8 +1773,45 @@ function HomePage() {
                   onClick={handleRebuildSequences}
                   type="button"
                 >
-                  {rebuildingSequences ? t("sequenceDetecting") : t("sequenceDetect")}
+                  {rebuildingSequences
+                    ? t("sequenceDetecting")
+                    : t("sequenceDetect")}
                 </button>
+                {sequenceSuggestions.length > 0 && (
+                  <button
+                    className="rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
+                    onClick={() => {
+                      const suggestion = sequenceSuggestions[0];
+                      if (!suggestion) {
+                        return;
+                      }
+                      setPendingSequenceMerge(suggestion);
+                      return;
+                      if (
+                        !window.confirm(
+                          "检测到暂停后恢复同一节奏的两个片段。确认合并为锁定的手动序列吗？"
+                        )
+                      ) {
+                        return;
+                      }
+                      ipc.client.photos
+                        .mergeSequences({
+                          sequenceIds: [
+                            suggestion.firstSequenceId,
+                            suggestion.secondSequenceId,
+                          ],
+                        })
+                        .then(() => {
+                          setSequenceRefresh((value) => value + 1);
+                          toast.success("已合并为手动锁定序列");
+                        })
+                        .catch(() => toast.error("合并序列失败"));
+                    }}
+                    type="button"
+                  >
+                    续段建议 {sequenceSuggestions.length}
+                  </button>
+                )}
                 <SortDropdown
                   onChange={handleSortChange}
                   order={sortOrder}
@@ -1733,6 +1907,7 @@ function HomePage() {
                 hasMore={hasNextPage}
                 isLoadingMore={isFetchingNextPage}
                 isPlaceholderData={photosIsPlaceholder}
+                isStale={isPhotosStale}
                 loading={loading}
                 onBackgroundClick={() => {
                   if (marqueeJustCompleted.current) {
@@ -1743,21 +1918,20 @@ function HomePage() {
                 }}
                 onContextMenu={handleContextMenu}
                 onDoubleClick={handleDoubleClick}
-                onOpenSequence={handleOpenSequence}
-                onOpenSequenceDetails={handleSequenceDetails}
                 onEndReached={handleEndReached}
                 onKeyboardSelect={handleKeyboardSelect}
                 onMarqueeSelect={wrappedMarqueeSelect}
+                onOpenSequence={handleOpenSequence}
+                onOpenSequenceDetails={handleSequenceDetails}
                 onScrollTopChange={handleGalleryScrollTopChange}
                 onSelect={handlePhotoSelect}
                 onToggleFavorite={handleToggleFavorite}
                 photos={photos}
-                sequences={sequences}
-                sequenceMode={sequenceMode}
-                isStale={isPhotosStale}
                 routeKey={routeKey}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
+                sequenceMode={sequenceMode}
+                sequences={sequences}
                 showToolbar={false}
                 sort={sortField}
                 sortOrder={sortOrder}
@@ -1770,12 +1944,31 @@ function HomePage() {
                     (id) => photos.find((p) => p.id === id)?.isFavorite
                   )
                 }
+                bottomOffset={showAiTaskStatus ? 44 : 16}
                 onAddToAlbum={() => {
                   setAddToAlbumIds(Array.from(selectedIds));
                   setAddToAlbumOpen(true);
                 }}
                 onClearSelection={clearSelection}
                 onConvert={() => setConvertDialogOpen(true)}
+                onCreateBurstSequence={async () => {
+                  await ipc.client.photos.createSequence({
+                    type: "burst",
+                    photoIds: Array.from(selectedIds),
+                  });
+                  clearSelection();
+                  setSequenceRefresh((value) => value + 1);
+                  toast.success("已创建连拍序列");
+                }}
+                onCreateTimelapseSequence={async () => {
+                  await ipc.client.photos.createSequence({
+                    type: "timelapse",
+                    photoIds: Array.from(selectedIds),
+                  });
+                  clearSelection();
+                  setSequenceRefresh((value) => value + 1);
+                  toast.success("已创建延时序列");
+                }}
                 onDelete={handleDeleteSelected}
                 onExport={handleExportSelected}
                 onRename={() => setRenameDialogOpen(true)}
@@ -1823,7 +2016,6 @@ function HomePage() {
                 }}
                 onUploadToCloud={handleUploadSelectedToCloud}
                 selectedCount={selectedIds.size}
-                bottomOffset={showAiTaskStatus ? 44 : 16}
               />
             </div>
             {selectedSequence || sequenceDetailsLoading ? (
@@ -1832,12 +2024,51 @@ function HomePage() {
                   setSelectedSequence(null);
                   setSequenceDetailsLoading(false);
                 }}
+                onDeleteManual={(id) => {
+                  ipc.client.photos
+                    .deleteManualSequence({ id })
+                    .then(() => {
+                      setSelectedSequence(null);
+                      setSequenceRefresh((value) => value + 1);
+                      toast.success("已删除手动序列");
+                    })
+                    .catch(() => toast.error("无法删除手动序列"));
+                }}
                 onOpenPhoto={(photoId) => {
                   setSelectedSequence(null);
                   handleKeyboardSelect(photoId);
                 }}
                 onPlay={() => {
                   setOpenSequence(selectedSequence);
+                }}
+                onRestoreAutomatic={(id) => {
+                  ipc.client.photos
+                    .restoreAutomaticSequence({ id })
+                    .then(() => {
+                      setSelectedSequence(null);
+                      setSequenceRefresh((value) => value + 1);
+                      toast.success("已恢复自动识别");
+                    })
+                    .catch(() => toast.error("恢复自动识别失败"));
+                }}
+                onSetRepresentative={(sequenceId, photoId) => {
+                  ipc.client.photos
+                    .setSequenceRepresentative({ id: sequenceId, photoId })
+                    .then(() => {
+                      handleOpenSequenceDetails(sequenceId);
+                      setSequenceRefresh((value) => value + 1);
+                    })
+                  .catch(() => toast.error("设置代表帧失败"));
+                }}
+                onSplit={(sequenceId, position) => {
+                  ipc.client.photos
+                    .splitSequence({ id: sequenceId, position })
+                    .then(() => {
+                      setSelectedSequence(null);
+                      setSequenceRefresh((value) => value + 1);
+                      toast.success("已拆分为两个手动锁定序列");
+                    })
+                    .catch(() => toast.error("拆分序列失败"));
                 }}
                 sequence={selectedSequence}
                 width={detailPanelWidth}
@@ -1872,7 +2103,60 @@ function HomePage() {
           />
         )}
       </div>
-        {lightboxIndex >= 0 && (
+      <ConfirmDialog
+        confirmText="开始重新识别"
+        description={
+          sequenceRebuildPreview
+            ? `将替换 ${sequenceRebuildPreview.existingAutomatic} 个未锁定自动片段，预计生成 ${sequenceRebuildPreview.nextAutomatic} 个片段（其中延时 ${sequenceRebuildPreview.timelapseSegments} 个）。手动或锁定序列不会受到影响。`
+            : undefined
+        }
+        onCancel={() => setSequenceRebuildPreview(null)}
+        onConfirm={() => {
+          const preview = sequenceRebuildPreview;
+          if (!preview) {
+            return;
+          }
+          setSequenceRebuildPreview(null);
+          setRebuildingSequences(true);
+          ipc.client.photos
+            .rebuildSequences({ folderId: preview.folderId })
+            .then(() => {
+              setSequenceRefresh((value) => value + 1);
+              toast.success(t("sequenceDetectComplete"));
+            })
+            .catch(() => toast.error(t("sequenceDetectFailed")))
+            .finally(() => setRebuildingSequences(false));
+        }}
+        open={sequenceRebuildPreview !== null}
+        title="确认重新识别序列"
+      />
+      <ConfirmDialog
+        confirmText="合并为手动序列"
+        description="检测到暂停后恢复同一节奏的两个片段。合并后会锁定，后续自动重建不会覆盖。"
+        onCancel={() => setPendingSequenceMerge(null)}
+        onConfirm={() => {
+          const suggestion = pendingSequenceMerge;
+          if (!suggestion) {
+            return;
+          }
+          setPendingSequenceMerge(null);
+          ipc.client.photos
+            .mergeSequences({
+              sequenceIds: [
+                suggestion.firstSequenceId,
+                suggestion.secondSequenceId,
+              ],
+            })
+            .then(() => {
+              setSequenceRefresh((value) => value + 1);
+              toast.success("已合并为手动锁定序列");
+            })
+            .catch(() => toast.error("合并序列失败"));
+        }}
+        open={pendingSequenceMerge !== null}
+        title="确认合并续段"
+      />
+      {lightboxIndex >= 0 && (
         <PhotoLightbox
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
@@ -1885,19 +2169,19 @@ function HomePage() {
           open={lightboxIndex >= 0}
           photos={photos}
         />
-        )}
-        {openSequence && (
-          <PhotoLightbox
-            initialIndex={0}
-            onClose={() => setOpenSequence(null)}
-            onToggleFavorite={handleToggleFavorite}
-            open={true}
-            photos={openSequence.members}
-            autoPlay={true}
-            sequencePlayback={true}
-            showThumbnailsInitially={true}
-          />
-        )}
+      )}
+      {openSequence && (
+        <PhotoLightbox
+          autoPlay={true}
+          initialIndex={0}
+          onClose={() => setOpenSequence(null)}
+          onToggleFavorite={handleToggleFavorite}
+          open={true}
+          photos={openSequence.members}
+          sequencePlayback={true}
+          showThumbnailsInitially={true}
+        />
+      )}
       {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}

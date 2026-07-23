@@ -23,6 +23,10 @@ import {
   folders,
   photos,
   photoTags,
+  photoSequenceExclusions,
+  photoSequenceMembers,
+  photoSequenceSuggestions,
+  photoSequences,
   tags,
 } from "./schema";
 
@@ -43,6 +47,10 @@ const schema = {
   folders,
   photos,
   photoTags,
+  photoSequenceExclusions,
+  photoSequenceMembers,
+  photoSequenceSuggestions,
+  photoSequences,
   tags,
 };
 

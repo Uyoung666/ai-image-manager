@@ -60,6 +60,20 @@ import {
   searchCompound,
   searchSpotlight,
 } from "./handlers/search";
+import {
+  createSequence,
+  deleteManualSequence,
+  getSequence,
+  ignoreSequencePhotos,
+  listSequenceSuggestions,
+  listSequences,
+  mergeSequences,
+  rebuildSequences,
+  restoreAutomaticSequence,
+  setSequenceRepresentative,
+  splitSequence,
+  updateSequenceMembers,
+} from "./handlers/sequences";
 import { generateAndUploadShare } from "./handlers/share";
 import {
   dismissDuplicate,
@@ -84,7 +98,6 @@ import {
   setPhotoTag,
   suggestTags,
 } from "./handlers/tags";
-import { createSequence, getSequence, ignoreSequencePhotos, listSequences, rebuildSequences } from "./handlers/sequences";
 
 export const photos = {
   addTag,
@@ -127,13 +140,17 @@ export const photos = {
   getTags,
   getWatermarkSettings,
   getSequence,
+  deleteManualSequence,
   listDeletedPhotos,
   listPhotos,
+  listSequenceSuggestions,
   listSequences,
+  mergeSequences,
   migrateColors,
   createSequence,
   ignoreSequencePhotos,
   rebuildSequences,
+  restoreAutomaticSequence,
   movePhotos,
   pauseAiIndexing,
   pauseAdvancedExif,
@@ -153,13 +170,16 @@ export const photos = {
   searchCompound,
   searchSpotlight,
   setPhotoTag,
+  setSequenceRepresentative,
   setWatermarkSettings,
   startAiIndexing,
   startAdvancedExif,
   stopAiIndexing,
   stopScanning,
   suggestTags,
+  splitSequence,
   toggleFavorite,
   updateFolderAppearance,
+  updateSequenceMembers,
   generateAndUploadShare,
 };

@@ -246,6 +246,13 @@
       "when": 1786500000010,
       "tag": "0034_add_photo_sequences",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1786500000011,
+      "tag": "0035_add_photo_sequence_suggestions",
+      "breakpoints": true
     }
   ]
 }

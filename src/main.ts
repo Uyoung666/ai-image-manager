@@ -1231,7 +1231,8 @@ app.whenReady().then(async () => {
         );
     }, 8000);
 
-    // Existing libraries may already have completed EXIF enrichment.
+    // Cached MakerNotes allow sequence detection to run before a background
+    // re-enrichment finishes, while the enrichment pass performs the final rebuild.
     setTimeout(() => {
       import("@/services/photo-sequences")
         .then(({ detectPhotoSequences }) => detectPhotoSequences())

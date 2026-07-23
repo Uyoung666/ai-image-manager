@@ -261,8 +261,12 @@ export const photoSequences = sqliteTable(
     userLocked: integer("user_locked", { mode: "boolean" })
       .notNull()
       .default(false),
-    createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
-    updatedAt: integer("updated_at").notNull().$defaultFn(() => Date.now()),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
   },
   (table) => ({
     folderTimeIdx: index("idx_sequence_folder_time").on(
@@ -303,8 +307,39 @@ export const photoSequenceExclusions = sqliteTable(
     photoId: integer("photo_id")
       .primaryKey()
       .references(() => photos.id, { onDelete: "cascade" }),
-    createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
   }
+);
+
+/** A conservative, user-confirmed bridge between two automatically detected runs. */
+export const photoSequenceSuggestions = sqliteTable(
+  "photo_sequence_suggestions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    firstSequenceId: integer("first_sequence_id")
+      .notNull()
+      .references(() => photoSequences.id, { onDelete: "cascade" }),
+    secondSequenceId: integer("second_sequence_id")
+      .notNull()
+      .references(() => photoSequences.id, { onDelete: "cascade" }),
+    confidence: real("confidence").notNull(),
+    status: text("status").notNull().default("pending"), // pending | accepted | dismissed
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    pairIdx: uniqueIndex("idx_sequence_suggestion_pair").on(
+      table.firstSequenceId,
+      table.secondSequenceId
+    ),
+    statusIdx: index("idx_sequence_suggestion_status").on(table.status),
+  })
 );
 
 export const tags = sqliteTable(

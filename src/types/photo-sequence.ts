@@ -13,6 +13,7 @@ export interface PhotoSequence {
   source: "auto" | "manual";
   startedAt: number;
   type: PhotoSequenceType;
+  userLocked?: boolean;
 }
 
 export interface PhotoSequenceDetail {
@@ -22,6 +23,9 @@ export interface PhotoSequenceDetail {
   id: number;
   lensModel?: string | null;
   members: Photo[];
+  representativePhotoId: number | null;
+  source: "auto" | "manual";
   startedAt: number;
   type: PhotoSequenceType;
+  userLocked: boolean;
 }

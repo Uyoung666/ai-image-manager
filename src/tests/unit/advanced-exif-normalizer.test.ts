@@ -87,4 +87,47 @@ describe("advanced EXIF normalization", () => {
       })
     ).toEqual({ "IFD0:Make": "Canon" });
   });
+
+  it("only promotes an explicit burst group identifier to high-confidence evidence", () => {
+    const result = normalizeAdvancedExif({
+      DateTimeOriginal: "2026:07:23 12:00:01",
+      SubSecTimeOriginal: "123",
+      SequenceNumber: "42",
+      BurstMode: "On",
+      BurstUUID: "burst-abc",
+    });
+
+    expect(result.capture.burstSequence).toBe("42");
+    expect(result.capture.burstGroupId).toBe("burst-abc");
+    expect(result.capture.burstSignalSource).toBe("BurstUUID");
+    expect(result.capture.burstSignalConfidence).toBe("high");
+    expect(result.capture.captureTimestampMs).toBeTypeOf("number");
+  });
+
+  it("records continuous-drive frame numbers as corroborating, not group-id, evidence", () => {
+    const result = normalizeAdvancedExif({
+      DateTimeOriginal: "2026:07:23 12:00:01",
+      SubSecTimeOriginal: "123",
+      "Sony:ReleaseMode": "Continuous",
+      "Sony:SequenceNumber": 2,
+    });
+
+    expect(result.capture.burstGroupId).toBeNull();
+    expect(result.capture.burstFrameNumber).toBe(2);
+    expect(result.capture.isContinuousDrive).toBe(true);
+    expect(result.capture.burstSignalConfidence).toBe("medium");
+  });
+
+  it("does not infer a burst group or precise timestamp from weak or second-only tags", () => {
+    const result = normalizeAdvancedExif({
+      DateTimeOriginal: "2026:07:23 12:00:01",
+      SequenceNumber: "42",
+      BurstMode: "On",
+      DriveMode: "Continuous",
+    });
+
+    expect(result.capture.burstGroupId).toBeNull();
+    expect(result.capture.burstSignalConfidence).toBe("medium");
+    expect(result.capture.captureTimestampMs).toBeNull();
+  });
 });
