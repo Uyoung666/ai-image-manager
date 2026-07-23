@@ -46,4 +46,27 @@ describe("SequenceCard", () => {
     expect(onOpen).toHaveBeenCalledWith(sequence.id);
     expect(onOpenDetails).not.toHaveBeenCalled();
   });
+
+  it("expands from its top-right control without opening details", () => {
+    const onOpen = vi.fn();
+    const onOpenDetails = vi.fn();
+    const onToggleExpand = vi.fn();
+
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={vi.fn()}
+        onOpen={onOpen}
+        onOpenDetails={onOpenDetails}
+        onToggleExpand={onToggleExpand}
+        sequence={sequence}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sequenceExpand" }));
+
+    expect(onToggleExpand).toHaveBeenCalledWith(sequence.id);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onOpenDetails).not.toHaveBeenCalled();
+  });
 });

@@ -150,6 +150,15 @@ function HomePage() {
     null
   );
   const [sequenceAutoPlay, setSequenceAutoPlay] = useState(false);
+  const [expandedSequence, setExpandedSequence] =
+    useState<PhotoSequenceDetail | null>(null);
+  const [expandingSequenceId, setExpandingSequenceId] = useState<
+    number | null
+  >(null);
+  const expandedSequenceCacheRef = useRef<
+    Map<number, PhotoSequenceDetail>
+  >(new Map());
+  const expandSequenceRequestRef = useRef(0);
   const [selectedSequence, setSelectedSequence] =
     useState<PhotoSequenceDetail | null>(null);
   const [sequenceReturnTarget, setSequenceReturnTarget] =
@@ -468,8 +477,18 @@ function HomePage() {
   const isPhotosStale =
     rawPhotos !== photos && prevIsSearching.current !== isSearching;
   prevIsSearching.current = isSearching;
-  const photosRef = useRef(rawPhotos);
-  photosRef.current = rawPhotos;
+  const actionPhotos = useMemo(() => {
+    if (!expandedSequence) {
+      return photos;
+    }
+    const existingIds = new Set(photos.map((photo) => photo.id));
+    return [
+      ...photos,
+      ...expandedSequence.members.filter((photo) => !existingIds.has(photo.id)),
+    ];
+  }, [photos, expandedSequence]);
+  const photosRef = useRef(actionPhotos);
+  photosRef.current = actionPhotos;
 
   useEffect(() => {
     let cancelled = false;
@@ -547,6 +566,48 @@ function HomePage() {
         });
     },
     [t]
+  );
+
+  const handleToggleSequenceExpand = useCallback(
+    (sequenceId: number) => {
+      if (expandedSequence?.id === sequenceId) {
+        expandSequenceRequestRef.current += 1;
+        setExpandedSequence(null);
+        setExpandingSequenceId(null);
+        return;
+      }
+
+      const requestId = ++expandSequenceRequestRef.current;
+      const cached = expandedSequenceCacheRef.current.get(sequenceId);
+      if (cached) {
+        setExpandedSequence(cached);
+        setExpandingSequenceId(null);
+        return;
+      }
+
+      setExpandingSequenceId(sequenceId);
+      ipc.client.photos
+        .getSequence({ id: sequenceId })
+        .then((sequence) => {
+          if (!sequence || requestId !== expandSequenceRequestRef.current) {
+            return;
+          }
+          const detail = sequence as unknown as PhotoSequenceDetail;
+          expandedSequenceCacheRef.current.set(sequenceId, detail);
+          setExpandedSequence(detail);
+        })
+        .catch(() => {
+          if (requestId === expandSequenceRequestRef.current) {
+            toast.error(t("sequenceOpenFailed"));
+          }
+        })
+        .finally(() => {
+          if (requestId === expandSequenceRequestRef.current) {
+            setExpandingSequenceId(null);
+          }
+        });
+    },
+    [expandedSequence?.id, t]
   );
 
   const handleRebuildSequences = useCallback(async () => {
@@ -791,6 +852,13 @@ function HomePage() {
     sortOrder,
   ]);
 
+  useEffect(() => {
+    expandSequenceRequestRef.current += 1;
+    setExpandedSequence(null);
+    setExpandingSequenceId(null);
+    expandedSequenceCacheRef.current.clear();
+  }, [routeKey]);
+
   // ── 网格 ref（用于原子化滚动定位）─────────────────────────────
   const gridRef = useRef<MasonryGridHandle>(null);
 
@@ -841,9 +909,14 @@ function HomePage() {
     clearSelection,
     removeFromSelection,
     selectAll: selectAllPhotos,
-  } = usePhotoSelection(routeKey, photos);
+  } = usePhotoSelection(routeKey, actionPhotos);
   const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
-    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+    usePhotoDetailPanel(
+      selectedIds,
+      actionPhotos,
+      routeKey,
+      handleKeyboardSelect
+    );
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
       setSelectedSequence(null);
@@ -1936,6 +2009,9 @@ function HomePage() {
                 onScrollTopChange={handleGalleryScrollTopChange}
                 onSelect={handlePhotoSelect}
                 onToggleFavorite={handleToggleFavorite}
+                expandedSequence={expandedSequence}
+                expandingSequenceId={expandingSequenceId}
+                onToggleSequenceExpand={handleToggleSequenceExpand}
                 photos={photos}
                 routeKey={routeKey}
                 searchQuery={searchQuery}
@@ -2242,7 +2318,7 @@ function HomePage() {
           }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={photos}
+          photos={actionPhotos}
         />
       )}
       {openSequence && (

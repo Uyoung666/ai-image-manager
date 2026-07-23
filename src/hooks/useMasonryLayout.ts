@@ -27,12 +27,14 @@ export interface GroupHeaderInput {
 }
 
 export interface MasonryLayoutInput {
+  fullWidth?: boolean;
   height: number;
   id: number;
   width: number;
 }
 
 interface MasonryLayoutInputSnapshot {
+  fullWidth?: boolean;
   height: number;
   id: number;
   width: number;
@@ -54,7 +56,12 @@ interface MasonryLayoutCache {
 function snapshotLayoutInputs(
   items: MasonryLayoutInput[]
 ): MasonryLayoutInputSnapshot[] {
-  return items.map(({ height, id, width }) => ({ height, id, width }));
+  return items.map(({ fullWidth, height, id, width }) => ({
+    fullWidth,
+    height,
+    id,
+    width,
+  }));
 }
 
 function hasMatchingLayoutPrefix(
@@ -69,6 +76,7 @@ function hasMatchingLayoutPrefix(
     const current = items[i];
     if (
       previous.id !== current.id ||
+      previous.fullWidth !== current.fullWidth ||
       previous.width !== current.width ||
       previous.height !== current.height
     ) {
@@ -98,7 +106,7 @@ function hasMatchingHeaderPrefix(
 
 /** Core masonry calculation. `groupHeaders` always use global item indexes. */
 function computeLayout(
-  items: Array<{ width: number; height: number }>,
+  items: Array<{ fullWidth?: boolean; width: number; height: number }>,
   colWidth: number,
   columnCount: number,
   gap: number,
@@ -134,6 +142,18 @@ function computeLayout(
     }
 
     const item = items[i];
+    if (item.fullWidth) {
+      const top = Math.max(...columnHeights);
+      const width = colWidth * columnCount + gap * (columnCount - 1);
+      positions.push({
+        height: item.height,
+        left: 0,
+        top,
+        width,
+      });
+      columnHeights.fill(top + item.height + gap);
+      continue;
+    }
     const rawAspect =
       item.width && item.height ? item.width / item.height : 4 / 3;
     const aspect = Math.max(0.6, Math.min(rawAspect, 3));

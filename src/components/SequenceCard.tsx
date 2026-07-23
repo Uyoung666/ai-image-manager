@@ -1,14 +1,18 @@
-import { Layers, Timer } from "lucide-react";
+import { ChevronDown, ChevronUp, Layers, Timer } from "lucide-react";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface SequenceCardProps {
   isSelected: boolean;
   onClick: (id: number, event: React.MouseEvent) => void;
   onOpenDetails: (sequenceId: number) => void;
   onOpen: (sequenceId: number) => void;
+  onToggleExpand?: (sequenceId: number) => void;
+  expanded?: boolean;
+  expanding?: boolean;
   sequence: PhotoSequence;
 }
 
@@ -20,6 +24,9 @@ export const SequenceCard = memo(function SequenceCard({
   onClick,
   onOpenDetails,
   onOpen,
+  onToggleExpand,
+  expanded = false,
+  expanding = false,
 }: SequenceCardProps) {
   const { t } = useTranslation();
   const { photo } = sequence;
@@ -84,17 +91,36 @@ export const SequenceCard = memo(function SequenceCard({
           src={toLocalMediaUrl(photo.thumbnailPath)}
         />
       ) : null}
-      <div className="pointer-events-none absolute top-2 right-2 flex -space-x-3 opacity-90">
-        {[0, 1, 2].map((offset) => (
-          <span
-            className="h-8 w-6 rounded border border-white/30 bg-white/20 shadow"
-            key={offset}
-            style={{
-              transform: `translate(${offset * -2}px, ${offset * 2}px)`,
-            }}
-          />
-        ))}
-      </div>
+      {onToggleExpand && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t(expanded ? "sequenceCollapse" : "sequenceExpand")}
+              aria-pressed={expanded}
+              className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-md bg-black/65 text-white shadow backdrop-blur transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              disabled={expanding}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                cancelPendingClick();
+                onToggleExpand(sequence.id);
+              }}
+              type="button"
+            >
+              {expanding ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              ) : expanded ? (
+                <ChevronUp size={17} />
+              ) : (
+                <ChevronDown size={17} />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {t(expanded ? "sequenceCollapse" : "sequenceExpand")}
+          </TooltipContent>
+        </Tooltip>
+      )}
       <button
         className="absolute right-2 bottom-2 left-2 flex items-center gap-1 rounded bg-black/65 px-2 py-1 text-left text-[11px] text-white backdrop-blur"
         onClick={(event) => {

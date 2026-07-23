@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronUp, Layers, Timer } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   buildPhotoGroupHeaders,
@@ -10,10 +11,11 @@ import type { GroupHeader, MasonryGridHandle } from "./MasonryGrid";
 import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
 import { SequenceCard } from "./SequenceCard";
-import type { PhotoSequence } from "@/types/photo-sequence";
+import type { PhotoSequence, PhotoSequenceDetail } from "@/types/photo-sequence";
 import { SortDropdown } from "./SortDropdown";
 import { LoadingSpinner } from "./ui/loading-spinner";
 import { Skeleton } from "./ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface Photo {
   dominantColors?: string | null;
@@ -30,6 +32,14 @@ interface Photo {
   thumbnailPath: string | null;
   width: number;
 }
+
+interface SequenceTrayPhoto extends Photo {
+  fullWidth: true;
+  sequenceTray: PhotoSequenceDetail;
+  trayColumns: number;
+}
+
+type DisplayPhoto = Photo | SequenceTrayPhoto;
 export type SortField = "date" | "name" | "size";
 export type SortOrder = "asc" | "desc";
 
@@ -75,6 +85,9 @@ interface PhotoGridProps {
   onOpenSequence?: (sequenceId: number) => void;
   onOpenSequenceDetails?: (sequenceId: number) => void;
   onSequenceModeChange?: (mode: "photos" | "sequences") => void;
+  expandedSequence?: PhotoSequenceDetail | null;
+  expandingSequenceId?: number | null;
+  onToggleSequenceExpand?: (sequenceId: number) => void;
   selectedIds: Set<number>;
   showToolbar?: boolean;
   sort?: SortField;
@@ -90,6 +103,50 @@ const GAP = 8;
 const INITIAL_EAGER_ROWS = 2;
 
 export const GRID_COLUMN_WIDTH_KEY = "grid_column_width";
+
+function createSequenceTray(
+  sequence: PhotoSequenceDetail,
+  containerWidth: number,
+  columns: number
+): SequenceTrayPhoto | null {
+  const representative =
+    sequence.members.find((photo) => photo.id === sequence.representativePhotoId) ??
+    sequence.members[0];
+  if (!representative) {
+    return null;
+  }
+  const gap = 8;
+  const padding = 24;
+  const tileWidth = Math.max(
+    1,
+    (containerWidth - padding - gap * (columns - 1)) / columns
+  );
+  const gridHeight = sequence.members.reduce((total, photo, index) => {
+    if (index % columns !== 0) {
+      return total;
+    }
+    const row = sequence.members.slice(index, index + columns);
+    const rowHeight = Math.max(
+      ...row.map((member) => {
+        const aspect = Math.max(
+          0.6,
+          Math.min(member.width / member.height || 4 / 3, 3)
+        );
+        return tileWidth / aspect;
+      })
+    );
+    return total + rowHeight + (index === 0 ? 0 : gap);
+  }, 0);
+  return {
+    ...representative,
+    fullWidth: true,
+    height: 56 + padding + gridHeight,
+    id: -sequence.id,
+    sequenceTray: sequence,
+    trayColumns: columns,
+    width: containerWidth,
+  };
+}
 
 export function loadGridColumnWidth(): number {
   try {
@@ -108,6 +165,96 @@ export function loadGridColumnWidth(): number {
     /* ignore */
   }
   return GRID_COLUMN_WIDTH_DEFAULT;
+}
+
+interface SequenceFocusTrayProps {
+  columns: number;
+  getDragIds: (id: number) => number[];
+  onDoubleClick: (id: number) => void;
+  onSelect: (id: number, event: React.MouseEvent) => void;
+  onToggleFavorite?: (id: number) => void;
+  onToggleSequenceExpand?: (sequenceId: number) => void;
+  renderImage: boolean;
+  searchQuery?: string;
+  selectedIds: Set<number>;
+  sequence: PhotoSequenceDetail;
+}
+
+function SequenceFocusTray({
+  columns,
+  getDragIds,
+  onDoubleClick,
+  onSelect,
+  onToggleFavorite,
+  onToggleSequenceExpand,
+  renderImage,
+  searchQuery,
+  selectedIds,
+  sequence,
+}: SequenceFocusTrayProps) {
+  const { t } = useTranslation();
+  return (
+    <section className="animate-in fade-in-0 slide-in-from-top-2 rounded-[10px] border-2 border-primary/50 bg-primary/[0.06] p-3 shadow-sm duration-200">
+      <header className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 text-primary">
+          {sequence.type === "burst" ? (
+            <Layers className="h-4 w-4 shrink-0" />
+          ) : (
+            <Timer className="h-4 w-4 shrink-0" />
+          )}
+          <span className="truncate font-medium text-[13px]">
+            {t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse")}
+            {` · ${sequence.frameCount} ${t("sequenceFrames")}`}
+          </span>
+        </div>
+        {onToggleSequenceExpand && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("sequenceCollapse")}
+                className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-background/80 px-2 text-[12px] text-foreground hover:bg-primary/10"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleSequenceExpand(sequence.id);
+                }}
+                type="button"
+              >
+                <ChevronUp size={16} />
+                {t("sequenceCollapse")}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sequenceCollapse")}</TooltipContent>
+          </Tooltip>
+        )}
+      </header>
+      <div
+        className="grid gap-2"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      >
+        {sequence.members.map((member, index) => (
+          <PhotoCard
+            dominantColors={member.dominantColors}
+            filename={member.filename}
+            getDragIds={getDragIds}
+            height={member.height}
+            id={member.id}
+            isFavorite={member.isFavorite}
+            isSelected={selectedIds.has(member.id)}
+            key={member.id}
+            loading={index < columns * INITIAL_EAGER_ROWS ? "eager" : "lazy"}
+            onClick={onSelect}
+            onDoubleClick={onDoubleClick}
+            onToggleFavorite={onToggleFavorite}
+            path={member.path}
+            renderImage={renderImage}
+            searchQuery={searchQuery}
+            thumbnailPath={member.thumbnailPath}
+            width={member.width}
+          />
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export const PhotoGrid = memo(
@@ -145,6 +292,9 @@ export const PhotoGrid = memo(
     onOpenSequence,
     onOpenSequenceDetails,
     onSequenceModeChange,
+    expandedSequence,
+    expandingSequenceId,
+    onToggleSequenceExpand,
   }: PhotoGridProps) {
     const { t, i18n } = useTranslation();
     const [internalColumnWidth, setInternalColumnWidth] =
@@ -166,9 +316,30 @@ export const PhotoGrid = memo(
     selectedIdsRef.current = selectedIds;
     const sequenceByRepresentative = useMemo(() => new Map(sequences.map((sequence) => [sequence.representativePhotoId ?? sequence.photo.id, sequence])), [sequences]);
     const sequenceMemberIds = useMemo(() => new Set(sequences.flatMap((sequence) => sequence.memberPhotoIds ?? [])), [sequences]);
-    const displayPhotos = useMemo(() => {
+    const displayPhotos = useMemo<DisplayPhoto[]>(() => {
+      const trayColumns = Math.max(2, Math.min(columnCount, 6));
+      const tray = expandedSequence
+        ? createSequenceTray(expandedSequence, containerWidth, trayColumns)
+        : null;
       if (sequenceMode === "sequences") {
-        return sequences.map((sequence) => sequence.photo);
+        const visible = sequences.map((sequence) => sequence.photo);
+        if (!expandedSequence || !tray) {
+          return visible;
+        }
+        const representativeId =
+          expandedSequence.representativePhotoId ??
+          expandedSequence.members[0]?.id;
+        const representativeIndex = visible.findIndex(
+          (photo) => photo.id === representativeId
+        );
+        if (representativeIndex < 0) {
+          return visible;
+        }
+        return [
+          ...visible.slice(0, representativeIndex),
+          tray,
+          ...visible.slice(representativeIndex + 1),
+        ];
       }
       const visible = photos.filter(
         (photo) =>
@@ -184,8 +355,30 @@ export const PhotoGrid = memo(
           visible.push(sequence.photo);
         }
       }
-      return visible;
-    }, [photos, sequenceMode, sequenceMemberIds, sequenceByRepresentative, sequences]);
+      if (!expandedSequence || !tray) {
+        return visible;
+      }
+      const representativeId =
+        expandedSequence.representativePhotoId ?? expandedSequence.members[0]?.id;
+      const representativeIndex = visible.findIndex(
+        (photo) => photo.id === representativeId
+      );
+      if (representativeIndex < 0) {
+        return visible;
+      }
+      return [
+        ...visible.slice(0, representativeIndex),
+        tray,
+        ...visible.slice(representativeIndex + 1),
+      ];
+    }, [photos, sequenceMode, sequenceMemberIds, sequenceByRepresentative, sequences, expandedSequence, columnCount, containerWidth]);
+    const keyboardPhotos = useMemo(
+      () =>
+        displayPhotos.flatMap((photo) =>
+          "sequenceTray" in photo ? photo.sequenceTray.members : [photo]
+        ),
+      [displayPhotos]
+    );
     const deletingIdsRef = useRef(deletingIds);
     deletingIdsRef.current = deletingIds;
     const itemStateVersion = useMemo(
@@ -261,15 +454,18 @@ export const PhotoGrid = memo(
 
     // Track the single selected photo id for scroll-to behavior
     const scrollToId = useMemo(() => {
+      if (expandedSequence) {
+        return -expandedSequence.id;
+      }
       if (selectedIds.size === 1) {
         return [...selectedIds][0];
       }
       return null;
-    }, [selectedIds]);
+    }, [expandedSequence, selectedIds]);
 
     // Keyboard navigation (arrow keys)
     useEffect(() => {
-      if (!onKeyboardSelect || displayPhotos.length === 0) {
+      if (!onKeyboardSelect || keyboardPhotos.length === 0) {
         return;
       }
       function handleKeyDown(e: KeyboardEvent) {
@@ -287,7 +483,7 @@ export const PhotoGrid = memo(
         e.preventDefault();
         const currentId = selectedIds.size === 1 ? [...selectedIds][0] : null;
         let currentIdx = currentId
-          ? displayPhotos.findIndex((p) => p.id === currentId)
+          ? keyboardPhotos.findIndex((p) => p.id === currentId)
           : -1;
         if (currentIdx < 0) {
           currentIdx = 0;
@@ -295,22 +491,22 @@ export const PhotoGrid = memo(
 
         let nextIdx = currentIdx;
         if (e.key === "ArrowRight") {
-          nextIdx = Math.min(displayPhotos.length - 1, currentIdx + 1);
+          nextIdx = Math.min(keyboardPhotos.length - 1, currentIdx + 1);
         } else if (e.key === "ArrowLeft") {
           nextIdx = Math.max(0, currentIdx - 1);
         } else if (e.key === "ArrowDown") {
-          nextIdx = Math.min(displayPhotos.length - 1, currentIdx + columnCount);
+          nextIdx = Math.min(keyboardPhotos.length - 1, currentIdx + columnCount);
         } else if (e.key === "ArrowUp") {
           nextIdx = Math.max(0, currentIdx - columnCount);
         }
 
         if (nextIdx !== currentIdx || currentId === null) {
-          onKeyboardSelect!(displayPhotos[nextIdx].id);
+          onKeyboardSelect!(keyboardPhotos[nextIdx].id);
         }
       }
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [displayPhotos, selectedIds, columnCount, onKeyboardSelect]);
+    }, [keyboardPhotos, selectedIds, columnCount, onKeyboardSelect]);
 
     const skeletonAspects = useCallback(
       () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
@@ -324,11 +520,27 @@ export const PhotoGrid = memo(
 
     const renderItem = useCallback(
       (
-        photo: Photo,
+        photo: DisplayPhoto,
         index: number,
         _style: React.CSSProperties,
         options: { renderImage: boolean }
       ) => {
+        if ("sequenceTray" in photo) {
+          return (
+            <SequenceFocusTray
+              columns={photo.trayColumns}
+              getDragIds={getDragIds}
+              onDoubleClick={onDoubleClick}
+              onSelect={onSelect}
+              onToggleFavorite={onToggleFavorite}
+              onToggleSequenceExpand={onToggleSequenceExpand}
+              renderImage={options.renderImage}
+              searchQuery={searchQuery}
+              selectedIds={selectedIdsRef.current}
+              sequence={photo.sequenceTray}
+            />
+          );
+        }
         const sequence = sequenceByRepresentative.get(photo.id);
         if (!options.renderImage) {
           return (
@@ -340,10 +552,15 @@ export const PhotoGrid = memo(
             />
           );
         }
-        if (sequence && onOpenSequence && onOpenSequenceDetails) {
-          return <SequenceCard isSelected={selectedIdsRef.current.has(photo.id)} onClick={onSelect} onOpen={onOpenSequence} onOpenDetails={onOpenSequenceDetails} sequence={sequence} />;
+        if (
+          sequence &&
+          sequence.id !== expandedSequence?.id &&
+          onOpenSequence &&
+          onOpenSequenceDetails
+        ) {
+          return <SequenceCard expanded={false} expanding={expandingSequenceId === sequence.id} isSelected={selectedIdsRef.current.has(photo.id)} onClick={onSelect} onOpen={onOpenSequence} onOpenDetails={onOpenSequenceDetails} onToggleExpand={onToggleSequenceExpand} sequence={sequence} />;
         }
-        return (
+        const photoCard = (
           <PhotoCard
             deleting={deletingIdsRef.current?.has(photo.id)}
             dominantColors={photo.dominantColors}
@@ -367,6 +584,38 @@ export const PhotoGrid = memo(
             width={photo.width}
           />
         );
+        const representativeId =
+          expandedSequence?.representativePhotoId ??
+          expandedSequence?.members[0]?.id;
+        if (
+          expandedSequence &&
+          photo.id === representativeId &&
+          onToggleSequenceExpand
+        ) {
+          return (
+            <div className="relative h-full w-full">
+              {photoCard}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("sequenceCollapse")}
+                    className="absolute top-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-black/65 text-white shadow backdrop-blur transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onToggleSequenceExpand(expandedSequence.id);
+                    }}
+                    type="button"
+                  >
+                    <ChevronUp size={17} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("sequenceCollapse")}</TooltipContent>
+              </Tooltip>
+            </div>
+          );
+        }
+        return photoCard;
       },
       [
         onSelect,
@@ -375,6 +624,7 @@ export const PhotoGrid = memo(
         searchQuery,
         getDragIds,
         columnCount, sequenceByRepresentative, onOpenSequence, onOpenSequenceDetails,
+        expandedSequence, expandingSequenceId, onToggleSequenceExpand, sequenceMode, t,
       ]
     );
 
@@ -628,6 +878,15 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.onOpenSequenceDetails !== nextProps.onOpenSequenceDetails) {
+      return false;
+    }
+    if (prevProps.expandedSequence !== nextProps.expandedSequence) {
+      return false;
+    }
+    if (prevProps.expandingSequenceId !== nextProps.expandingSequenceId) {
+      return false;
+    }
+    if (prevProps.onToggleSequenceExpand !== nextProps.onToggleSequenceExpand) {
       return false;
     }
     if (prevProps.loading !== nextProps.loading) {

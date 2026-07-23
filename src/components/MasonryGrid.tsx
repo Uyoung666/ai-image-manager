@@ -73,6 +73,7 @@ interface MasonryGridProps {
   isPlaceholderData?: boolean;
   itemStateVersion?: unknown;
   items: Array<{
+    fullWidth?: boolean;
     id: number;
     width: number;
     height: number;
