@@ -90,6 +90,7 @@ interface MasonryGridProps {
     options: { renderImage: boolean }
   ) => ReactNode;
   routeKey: string;
+  scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
   selectionActive?: boolean;
   topInset?: number;
@@ -110,6 +111,7 @@ export const MasonryGrid = memo(
       isLoadingMore = false,
       onMarqueeSelect,
       onScrollTopChange,
+      scrollToAlignment = "center",
       scrollToId,
       className,
       selectionActive = false,
@@ -352,16 +354,19 @@ export const MasonryGrid = memo(
     }, []);
 
     const prevPositionsRef = useRef(positions);
+    const prevScrollToAlignmentRef = useRef(scrollToAlignment);
     const prevScrollToIdRef = useRef(scrollToId);
     const prevRouteKeyRef = useRef(routeKey);
     const prevContainerWidthRef = useRef(containerWidth);
 
     useLayoutEffect(() => {
       const prevPositions = prevPositionsRef.current;
+      const prevScrollToAlignment = prevScrollToAlignmentRef.current;
       const prevScrollToId = prevScrollToIdRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
       const prevWidth = prevContainerWidthRef.current;
       prevPositionsRef.current = positions;
+      prevScrollToAlignmentRef.current = scrollToAlignment;
       prevScrollToIdRef.current = scrollToId;
       prevRouteKeyRef.current = routeKey;
       prevContainerWidthRef.current = containerWidth;
@@ -376,6 +381,8 @@ export const MasonryGrid = memo(
 
       const positionsChanged = positions !== prevPositions;
       const scrollToIdChanged = scrollToId !== prevScrollToId;
+      const scrollToAlignmentChanged =
+        scrollToAlignment !== prevScrollToAlignment;
       const widthChanged =
         containerWidth !== prevWidth && containerWidth > 0 && prevWidth > 0;
 
@@ -391,7 +398,10 @@ export const MasonryGrid = memo(
       // the same frame. Resolve the requested item against the final positions
       // before preserving the previous width anchor, otherwise the resize
       // branch consumes the one-shot scroll request.
-      if (scrollToId != null && scrollToIdChanged) {
+      if (
+        scrollToId != null &&
+        (scrollToIdChanged || scrollToAlignmentChanged)
+      ) {
         const idx = idToIndexMap.get(scrollToId);
         if (idx !== undefined && positions[idx]) {
           const pos = positions[idx];
@@ -401,7 +411,9 @@ export const MasonryGrid = memo(
           const viewBottom = el.scrollTop + el.clientHeight;
           if (itemTop < viewTop || itemBottom > viewBottom) {
             syncScrollTopBeforePaint(
-              itemTop - (el.clientHeight - pos.height) / 2
+              scrollToAlignment === "start"
+                ? itemTop
+                : itemTop - (el.clientHeight - pos.height) / 2
             );
           }
         }
@@ -434,7 +446,14 @@ export const MasonryGrid = memo(
         }
         return;
       }
-    }, [positions, scrollToId, routeKey, containerWidth, idToIndexMap]);
+    }, [
+      positions,
+      scrollToAlignment,
+      scrollToId,
+      routeKey,
+      containerWidth,
+      idToIndexMap,
+    ]);
 
     const { visibleHeaders, visibleItems } = useMasonryVirtualWindow({
       columnCount,

@@ -846,6 +846,7 @@ export const PhotoGrid = memo(
             ref={gridRef}
             renderItem={renderItem}
             routeKey={routeKey}
+            scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
             topInset={topInset}
