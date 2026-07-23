@@ -803,7 +803,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               )}
             <img
               alt={photo.filename}
-              className={`max-h-full max-w-full select-none object-contain shadow-2xl transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+              className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
               data-lightbox-image
               draggable={zoom <= 1}
               height={photo.height || undefined}

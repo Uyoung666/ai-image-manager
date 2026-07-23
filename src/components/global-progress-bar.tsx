@@ -116,7 +116,7 @@ export function GlobalProgressBar() {
       className={`overflow-hidden transition-all duration-300 ease-out ${visible ? "max-h-12 opacity-100" : "max-h-0 opacity-0"}
       `}
     >
-      <div className="glass-surface flex items-center gap-2 border-border/40 border-b px-3 py-1.5">
+      <div className="flex items-center gap-2 px-4 py-1.5">
         {showSpinner && <LoadingSpinner size="xs" />}
 
         <span
@@ -154,7 +154,7 @@ export function GlobalProgressBar() {
         )}
       </div>
 
-      <div className="h-[2px] w-full bg-secondary">
+      <div className="mx-4 h-px rounded-full bg-foreground/10">
         <div
           className={`h-full bg-primary transition-[width] duration-300 ease-out ${isIndeterminate ? "animate-indeterminate-bar" : ""}
           `}

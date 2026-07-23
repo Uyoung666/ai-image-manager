@@ -55,19 +55,20 @@ const photos = [
 
 describe("PhotoLightbox", () => {
   it("keeps secondary review surfaces collapsed by default", () => {
-    render(
-      <PhotoLightbox
-        initialIndex={0}
-        onClose={vi.fn()}
-        open
-        photos={photos}
-      />
-    );
+    render(<PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />);
 
     expect(screen.getByRole("dialog", { name: "lightboxReview" })).toBeInTheDocument();
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "2: second.jpg" })).not.toBeInTheDocument();
+  });
+
+  it("renders the reviewed image without a drop shadow", () => {
+    render(<PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />);
+
+    expect(screen.getByRole("img", { name: "first.jpg" })).not.toHaveClass(
+      "shadow-2xl"
+    );
   });
 
   it("makes the information panel and thumbnail strip mutually exclusive", async () => {
