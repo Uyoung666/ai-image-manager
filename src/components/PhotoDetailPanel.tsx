@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ChevronDown,
   ChevronUp,
   FolderOpen,
@@ -78,6 +79,7 @@ interface PhotoDetailPanelProps {
   onClose: () => void;
   onNavigate?: (direction: "prev" | "next") => void;
   onOpenExplorer: (path: string) => void;
+  onReturnToSequence?: () => void;
   onWidthChange?: (width: number) => void;
   photo: PhotoDetail | null;
 }
@@ -127,6 +129,7 @@ export function PhotoDetailPanel({
   onClose,
   onNavigate,
   onOpenExplorer,
+  onReturnToSequence,
   onWidthChange,
 }: PhotoDetailPanelProps) {
   const { t, i18n } = useTranslation();
@@ -542,6 +545,21 @@ export function PhotoDetailPanel({
             {t("photoDetail")}
           </h3>
           <div className="flex items-center gap-1">
+            {onReturnToSequence && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("returnToSequence")}
+                    className="flex h-6 w-6 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                    onClick={onReturnToSequence}
+                    type="button"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("returnToSequence")}</TooltipContent>
+              </Tooltip>
+            )}
             {onNavigate && (
               <>
                 <Tooltip>

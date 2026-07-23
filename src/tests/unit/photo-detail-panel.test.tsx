@@ -53,6 +53,24 @@ describe("PhotoDetailPanel preview", () => {
     expect(image).toHaveClass("opacity-100");
   });
 
+  it("shows a return-to-sequence action when provided", () => {
+    const onReturnToSequence = vi.fn();
+    render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        onReturnToSequence={onReturnToSequence}
+        photo={basePhoto}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "returnToSequence" })
+    );
+
+    expect(onReturnToSequence).toHaveBeenCalledOnce();
+  });
+
   it("does not reuse the previous preview while the next image loads", () => {
     const { container, rerender } = render(
       <PhotoDetailPanel

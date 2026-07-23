@@ -64,7 +64,7 @@ export const SequenceCard = memo(function SequenceCard({
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
-          onOpen(sequence.id);
+          onOpenDetails(sequence.id);
         }
       }}
       role="button"
@@ -99,7 +99,7 @@ export const SequenceCard = memo(function SequenceCard({
         className="absolute right-2 bottom-2 left-2 flex items-center gap-1 rounded bg-black/65 px-2 py-1 text-left text-[11px] text-white backdrop-blur"
         onClick={(event) => {
           event.stopPropagation();
-          onOpen(sequence.id);
+          onOpenDetails(sequence.id);
         }}
         type="button"
       >

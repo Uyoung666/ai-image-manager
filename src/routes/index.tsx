@@ -145,7 +145,10 @@ function HomePage() {
   const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(
     null
   );
+  const [sequenceAutoPlay, setSequenceAutoPlay] = useState(false);
   const [selectedSequence, setSelectedSequence] =
+    useState<PhotoSequenceDetail | null>(null);
+  const [sequenceReturnTarget, setSequenceReturnTarget] =
     useState<PhotoSequenceDetail | null>(null);
   const [sequenceDetailsLoading, setSequenceDetailsLoading] = useState(false);
   const [sequenceRefresh, setSequenceRefresh] = useState(0);
@@ -513,6 +516,7 @@ function HomePage() {
         .getSequence({ id: sequenceId })
         .then((sequence) => {
           if (sequence) {
+            setSequenceAutoPlay(false);
             setOpenSequence(sequence as unknown as PhotoSequenceDetail);
           }
         })
@@ -2035,10 +2039,12 @@ function HomePage() {
                     .catch(() => toast.error("无法删除手动序列"));
                 }}
                 onOpenPhoto={(photoId) => {
+                  setSequenceReturnTarget(selectedSequence);
                   setSelectedSequence(null);
                   handleKeyboardSelect(photoId);
                 }}
                 onPlay={() => {
+                  setSequenceAutoPlay(true);
                   setOpenSequence(selectedSequence);
                 }}
                 onRestoreAutomatic={(id) => {
@@ -2078,9 +2084,20 @@ function HomePage() {
                 onClose={() => {
                   dismissDetail();
                   clearSelection();
+                  setSequenceReturnTarget(null);
                 }}
                 onNavigate={navigateDetail}
                 onOpenExplorer={handleOpenExplorer}
+                onReturnToSequence={
+                  sequenceReturnTarget
+                    ? () => {
+                        dismissDetail();
+                        clearSelection();
+                        setSelectedSequence(sequenceReturnTarget);
+                        setSequenceReturnTarget(null);
+                      }
+                    : undefined
+                }
                 onWidthChange={setDetailPanelWidth}
                 photo={detailPhoto}
               />
@@ -2172,7 +2189,7 @@ function HomePage() {
       )}
       {openSequence && (
         <PhotoLightbox
-          autoPlay={true}
+          autoPlay={sequenceAutoPlay}
           initialIndex={0}
           onClose={() => setOpenSequence(null)}
           onToggleFavorite={handleToggleFavorite}
