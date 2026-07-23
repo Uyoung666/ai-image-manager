@@ -91,6 +91,10 @@ interface SequenceRebuildPreview {
   timelapseSegments: number;
 }
 
+type PendingSequenceAction =
+  | { id: number; type: "restore" }
+  | { id: number; type: "ungroup" };
+
 const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
 
 function isSearchMode(value: string | null): value is SearchMode {
@@ -157,6 +161,8 @@ function HomePage() {
     useState<SequenceRebuildPreview | null>(null);
   const [pendingSequenceMerge, setPendingSequenceMerge] =
     useState<SequenceSuggestion | null>(null);
+  const [pendingSequenceAction, setPendingSequenceAction] =
+    useState<PendingSequenceAction | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -2029,6 +2035,8 @@ function HomePage() {
                   setSequenceDetailsLoading(false);
                 }}
                 onDeleteManual={(id) => {
+                  setPendingSequenceAction({ id, type: "ungroup" });
+                  return;
                   ipc.client.photos
                     .deleteManualSequence({ id })
                     .then(() => {
@@ -2048,6 +2056,8 @@ function HomePage() {
                   setOpenSequence(selectedSequence);
                 }}
                 onRestoreAutomatic={(id) => {
+                  setPendingSequenceAction({ id, type: "restore" });
+                  return;
                   ipc.client.photos
                     .restoreAutomaticSequence({ id })
                     .then(() => {
@@ -2172,6 +2182,54 @@ function HomePage() {
         }}
         open={pendingSequenceMerge !== null}
         title="确认合并续段"
+      />
+      <ConfirmDialog
+        confirmText={
+          pendingSequenceAction?.type === "restore"
+            ? "恢复自动识别"
+            : "解除分组"
+        }
+        description={
+          pendingSequenceAction?.type === "restore"
+            ? "将撤销手动编辑、清除成员的排除记录，并按当前规则重新识别所在文件夹。"
+            : "仅解除这条手动分组；照片保持可浏览，但不会立即重新参加自动识别。"
+        }
+        destructive={pendingSequenceAction?.type === "ungroup"}
+        onCancel={() => setPendingSequenceAction(null)}
+        onConfirm={() => {
+          const action = pendingSequenceAction;
+          if (!action) {
+            return;
+          }
+          setPendingSequenceAction(null);
+          const request =
+            action.type === "restore"
+              ? ipc.client.photos.restoreAutomaticSequence({ id: action.id })
+              : ipc.client.photos.deleteManualSequence({ id: action.id });
+          request
+            .then(() => {
+              setSelectedSequence(null);
+              setSequenceRefresh((value) => value + 1);
+              toast.success(
+                action.type === "restore"
+                  ? "已恢复自动识别"
+                  : "已解除手动分组"
+              );
+            })
+            .catch(() =>
+              toast.error(
+                action.type === "restore"
+                  ? "恢复自动识别失败"
+                  : "解除手动分组失败"
+              )
+            );
+        }}
+        open={pendingSequenceAction !== null}
+        title={
+          pendingSequenceAction?.type === "restore"
+            ? "恢复自动识别"
+            : "解除手动分组"
+        }
       />
       {lightboxIndex >= 0 && (
         <PhotoLightbox

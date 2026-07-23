@@ -1,6 +1,12 @@
-import { Layers, Play, Timer, X } from "lucide-react";
-import { memo } from "react";
+import { ChevronDown, Layers, Play, Timer, X } from "lucide-react";
+import { memo, useState, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -20,18 +26,26 @@ function formatDate(value: number, locale: string) {
   return new Date(value).toLocaleString(locale);
 }
 
+function handleFrameStripWheel(event: WheelEvent<HTMLDivElement>) {
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+    return;
+  }
+  event.preventDefault();
+  event.currentTarget.scrollLeft += event.deltaY;
+}
+
 export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   sequence,
   width,
   onClose,
   onPlay,
   onOpenPhoto,
-  onDeleteManual,
   onRestoreAutomatic,
   onSetRepresentative,
   onSplit,
 }: SequenceDetailPanelProps) {
   const { i18n, t } = useTranslation();
+  const [splitPosition, setSplitPosition] = useState(2);
   if (!sequence) {
     return (
       <aside
@@ -53,6 +67,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
     sequence.members.find(
       (photo) => photo.id === sequence.representativePhotoId
     ) ?? sequence.members[0];
+  const validSplitPosition = Math.min(
+    Math.max(2, splitPosition),
+    sequence.members.length - 2
+  );
   return (
     <aside
       className="photo-detail-panel-shell shrink-0 overflow-hidden"
@@ -128,103 +146,127 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
             <p className="mb-2 text-[11px] text-muted-foreground uppercase tracking-wider">
               {t("sequenceFramesTitle")}
             </p>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {sequence.members.map((photo) => (
-                <button
-                  className={`h-16 w-16 shrink-0 overflow-hidden rounded border ${photo.id === representative?.id ? "border-primary" : "border-border"}`}
-                  key={photo.id}
-                  onClick={() => onOpenPhoto(photo.id)}
-                  type="button"
-                >
-                  {photo.thumbnailPath && (
-                    <img
-                      alt={photo.filename}
-                      className="h-full w-full object-cover"
-                      height={64}
-                      src={toLocalMediaUrl(photo.thumbnailPath)}
-                      width={64}
-                    />
-                  )}
-                </button>
+            <div
+              className="flex gap-2 overflow-x-auto pb-1"
+              onWheel={handleFrameStripWheel}
+            >
+              {sequence.members.map((photo, index) => (
+                <div className="w-16 shrink-0" key={photo.id}>
+                  <button
+                    aria-label={`打开第 ${index + 1} 帧：${photo.filename}`}
+                    className={`h-16 w-16 overflow-hidden rounded border ${photo.id === representative?.id ? "border-primary" : "border-border"}`}
+                    onClick={() => onOpenPhoto(photo.id)}
+                    type="button"
+                  >
+                    {photo.thumbnailPath && (
+                      <img
+                        alt={photo.filename}
+                        className="h-full w-full object-cover"
+                        height={64}
+                        src={toLocalMediaUrl(photo.thumbnailPath)}
+                        width={64}
+                      />
+                    )}
+                  </button>
+                  <p className="mt-1 text-center text-[10px] text-muted-foreground">
+                    第 {index + 1} 帧
+                  </p>
+                </div>
               ))}
             </div>
           </section>
-          <div className="flex gap-2">
+          <div>
             <button
-              className="flex flex-1 items-center justify-center gap-1 rounded bg-primary px-3 py-2 text-primary-foreground text-sm"
+              className="flex w-full items-center justify-center gap-1 rounded bg-primary px-3 py-2 text-primary-foreground text-sm"
               onClick={onPlay}
               type="button"
             >
               <Play className="h-4 w-4" />
               {t("sequencePlay")}
             </button>
-            <button
-              className="rounded border border-border px-3 py-2 text-sm"
-              onClick={() => representative && onOpenPhoto(representative.id)}
-              type="button"
-            >
-              {t("sequenceRepresentative")}
-            </button>
           </div>
           {onSetRepresentative && (
-            <label className="block text-muted-foreground text-sm">
-              代表帧
-              <select
-                className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-foreground"
-                onChange={(event) =>
-                  onSetRepresentative(sequence.id, Number(event.target.value))
-                }
-                value={representative?.id}
-              >
-                {sequence.members.map((photo) => (
-                  <option key={photo.id} value={photo.id}>
-                    {photo.filename}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {sequence.userLocked && (
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className="rounded border border-border px-3 py-2 text-sm hover:bg-foreground/5"
-                onClick={() => onRestoreAutomatic?.(sequence.id)}
-                type="button"
-              >
-                恢复自动识别
-              </button>
-              <button
-                className="rounded border border-destructive/40 px-3 py-2 text-destructive text-sm hover:bg-destructive/10"
-                onClick={() => onDeleteManual?.(sequence.id)}
-                type="button"
-              >
-                删除手动序列
-              </button>
+            <div className="space-y-1">
+              <p className="text-muted-foreground text-sm">选取代表帧</p>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button className="w-full justify-between" variant="outline">
+                    <span className="truncate">
+                      第{" "}
+                      {sequence.members.findIndex(
+                        (photo) => photo.id === representative?.id
+                      ) + 1}{" "}
+                      帧 · {representative?.filename}
+                    </span>
+                    <ChevronDown />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="max-h-64 w-[var(--radix-popover-trigger-width)] overflow-y-auto p-1"
+                >
+                  {sequence.members.map((photo, index) => (
+                    <Button
+                      className="w-full justify-start"
+                      key={photo.id}
+                      onClick={() => onSetRepresentative(sequence.id, photo.id)}
+                      variant={
+                        photo.id === representative?.id ? "secondary" : "ghost"
+                      }
+                    >
+                      第 {index + 1} 帧 · {photo.filename}
+                    </Button>
+                  ))}
+                </PopoverContent>
+              </Popover>
             </div>
           )}
           {onSplit && sequence.members.length >= 4 && (
             <div className="flex gap-2">
-              <select
-                className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-sm"
-                defaultValue={2}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    className="min-w-0 flex-1 justify-between"
+                    variant="outline"
+                  >
+                    <span>从第 {validSplitPosition} 帧开始拆分</span>
+                    <ChevronDown />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="max-h-64 w-[var(--radix-popover-trigger-width)] overflow-y-auto p-1"
+                >
+                  {sequence.members.slice(1, -1).map((photo, index) => (
+                    <Button
+                      className="w-full justify-start"
+                      key={photo.id}
+                      onClick={() => setSplitPosition(index + 2)}
+                      variant={
+                        validSplitPosition === index + 2 ? "secondary" : "ghost"
+                      }
+                    >
+                      从第 {index + 2} 帧开始拆分
+                    </Button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+              <Button
+                onClick={() => onSplit(sequence.id, validSplitPosition)}
+                variant="outline"
               >
-                {sequence.members.slice(1, -1).map((_, index) => (
-                  <option key={index + 2} value={index + 2}>
-                    从第 {index + 2} 帧拆分
-                  </option>
-                ))}
-              </select>
+                确认拆分
+              </Button>
+            </div>
+          )}
+          {sequence.userLocked && (
+            <div>
               <button
-                className="rounded border border-border px-3 py-1 text-sm hover:bg-foreground/5"
-                onClick={(event) => {
-                  const select = event.currentTarget
-                    .previousElementSibling as HTMLSelectElement | null;
-                  const position = Number(select?.value ?? 2);
-                  onSplit(sequence.id, position);
-                }}
+                className="w-full rounded border border-border px-3 py-2 text-sm hover:bg-foreground/5"
+                onClick={() => onRestoreAutomatic?.(sequence.id)}
                 type="button"
               >
-                拆分
+                恢复自动识别
               </button>
             </div>
           )}

@@ -408,12 +408,25 @@ function loadSequenceCandidates(
     .from(photoSequenceExclusions)
     .all()
     .map((row) => row.photoId);
+  const lockedSequencePhotoIds = db
+    .select({ photoId: photoSequenceMembers.photoId })
+    .from(photoSequenceMembers)
+    .innerJoin(
+      photoSequences,
+      eq(photoSequences.id, photoSequenceMembers.sequenceId)
+    )
+    .where(eq(photoSequences.userLocked, true))
+    .all()
+    .map((row) => row.photoId);
+  const unavailableIds = [
+    ...new Set([...excludedIds, ...lockedSequencePhotoIds]),
+  ];
   const conditions = [isNull(photos.deletedAt)];
   if (folderId != null) {
     conditions.push(eq(photos.folderId, folderId));
   }
-  if (excludedIds.length) {
-    conditions.push(notInArray(photos.id, excludedIds));
+  if (unavailableIds.length) {
+    conditions.push(notInArray(photos.id, unavailableIds));
   }
   const rows = db
     .select({
