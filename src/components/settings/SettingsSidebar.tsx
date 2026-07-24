@@ -7,11 +7,9 @@ import {
   Layers,
   Paintbrush,
   RefreshCw,
-  Search,
-  X,
   Zap,
 } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Tooltip,
@@ -98,23 +96,21 @@ const GROUP_ORDER = [
   "settingsGroupSystem",
 ];
 
-function HighlightLabel({ label, query }: { label: string; query: string }) {
-  const q = query.trim();
-  if (!q) {
-    return <>{label}</>;
+export { GROUP_ORDER as SETTINGS_GROUP_ORDER, NAV_ITEMS as SETTINGS_NAV_ITEMS };
+
+export function filterSettingsNavigationItems(
+  query: string,
+  translate: (key: string) => string
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return [];
   }
-  const index = label.toLowerCase().indexOf(q.toLowerCase());
-  if (index < 0) {
-    return <>{label}</>;
-  }
-  return (
-    <>
-      {label.slice(0, index)}
-      <mark className="rounded-sm bg-primary/20 px-0.5 text-primary">
-        {label.slice(index, index + q.length)}
-      </mark>
-      {label.slice(index + q.length)}
-    </>
+
+  return NAV_ITEMS.filter((item) =>
+    `${translate(item.labelKey)} ${translate(item.groupKey)} ${item.keywords}`
+      .toLowerCase()
+      .includes(normalizedQuery)
   );
 }
 
@@ -122,71 +118,13 @@ export function SettingsSidebar() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-
-  const filteredItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
-      return NAV_ITEMS;
-    }
-    return NAV_ITEMS.filter((item) => {
-      const haystack =
-        `${t(item.labelKey)} ${t(item.groupKey)} ${item.keywords}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [query, t]);
-
-  const groupedItems = useMemo(
-    () =>
-      GROUP_ORDER.map((groupKey) => ({
-        groupKey,
-        items: filteredItems.filter((item) => item.groupKey === groupKey),
-      })).filter((group) => group.items.length > 0),
-    [filteredItems]
-  );
+  const groupedItems = GROUP_ORDER.map((groupKey) => ({
+    groupKey,
+    items: NAV_ITEMS.filter((item) => item.groupKey === groupKey),
+  })).filter((group) => group.items.length > 0);
 
   return (
     <nav className="flex w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-border border-r p-3 max-[760px]:w-[60px] max-[760px]:items-center max-[760px]:px-2">
-      <div className="relative mb-2 w-full max-[760px]:hidden">
-        <Search className="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/40" />
-        <input
-          className="h-8 w-full rounded-[6px] border border-input bg-background py-1 pr-7 pl-7 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary"
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("settingsSearchPlaceholder")}
-          value={query}
-        />
-        {query && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
-                onClick={() => setQuery("")}
-                type="button"
-              >
-                <X className="h-3 w-3" />
-                <span className="sr-only">{t("clearSearch")}</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t("clearSearch")}</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      {filteredItems.length === 0 && (
-        <div className="px-1 py-3 text-center max-[760px]:hidden">
-          <p className="text-[11px] text-muted-foreground/50">
-            {t("noResults")}
-          </p>
-          <button
-            className="mt-2 rounded-[4px] px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
-            onClick={() => setQuery("")}
-            type="button"
-          >
-            {t("clearSearch")}
-          </button>
-        </div>
-      )}
-
       {groupedItems.map((group) => (
         <Fragment key={group.groupKey}>
           <div className="px-3 pt-2 pb-1 font-medium text-[10px] text-muted-foreground/45 uppercase tracking-wide first:pt-0 max-[760px]:hidden">
@@ -206,13 +144,12 @@ export function SettingsSidebar() {
                     }`}
                     onClick={() => {
                       navigate({ to: item.to });
-                      setQuery("");
                     }}
                     type="button"
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
                     <span className="min-w-0 truncate max-[760px]:hidden">
-                      <HighlightLabel label={label} query={query} />
+                      {label}
                     </span>
                   </button>
                 </TooltipTrigger>

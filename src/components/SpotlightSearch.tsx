@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { useAiStatus } from "@/hooks/useAiStatus";
@@ -300,6 +301,7 @@ export function SpotlightSearch() {
       group: t("spotlightNavigationGroup"),
     },
   ];
+  const settingResults = filterSettingsNavigationItems(query, t);
 
   if (!open) {
     return null;
@@ -478,6 +480,36 @@ export function SpotlightSearch() {
                     <span>{album.name}</span>
                   </Command.Item>
                 ))}
+              </Command.Group>
+            )}
+
+            {settingResults.length > 0 && (
+              <Command.Group
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                heading={t("settingsTitle")}
+              >
+                {settingResults.map((item) => {
+                  const label = t(item.labelKey);
+                  const subtitle = t(item.groupKey);
+                  const Icon = item.icon;
+
+                  return (
+                    <Command.Item
+                      className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                      key={`setting-${item.to}`}
+                      onSelect={() =>
+                        handleSelect(() => navigate({ to: item.to }))
+                      }
+                      value={`settings ${label} ${subtitle} ${item.keywords}`}
+                    >
+                      <Icon className="h-4 w-4 text-muted-foreground" />
+                      <span>{label}</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">
+                        {subtitle}
+                      </span>
+                    </Command.Item>
+                  );
+                })}
               </Command.Group>
             )}
 
