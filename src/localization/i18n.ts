@@ -519,7 +519,8 @@ i18n.use(initReactI18next).init({
         settingsDependencies: "开源依赖",
         settingsIndexing: "索引",
         settingsThumbnailCache: "缩略图缓存",
-        settingsThumbnailCacheHint: "清除缓存以释放磁盘空间",
+        settingsThumbnailCacheHint:
+          "用于快速显示照片预览；同一照片可能因不同尺寸或对比预览占用多个文件。",
         settingsThumbnailCacheLocation: "缓存位置",
         settingsThumbnailCacheSize: "占用大小",
         settingsIndexDbLocation: "数据库位置",
@@ -558,7 +559,7 @@ i18n.use(initReactI18next).init({
         clearCacheFailed: "清理失败",
         clearThumbConfirmTitle: "确认清除缩略图缓存",
         clearThumbConfirmDesc:
-          "清除后所有缩略图需要重新生成，瀑布流中的图片将暂时无法显示。确定要清除吗？",
+          "这将删除所有照片预览缓存以释放空间。照片原件和索引不会受影响；再次浏览时会自动重新生成。确定清除吗？",
         cleanupInvalidIndex: "清理无效索引记录",
         lastCleanupCount: "（上次清理: {{count}} 条）",
         cleanupInvalidRecords: "清理无效记录",
@@ -2077,7 +2078,7 @@ i18n.use(initReactI18next).init({
         settingsIndexing: "Indexing",
         settingsThumbnailCache: "Thumbnail Cache",
         settingsThumbnailCacheHint:
-          "Clear cached thumbnails to free disk space",
+          "Used for fast photo previews; one photo may have multiple files for different sizes or comparison previews.",
         settingsThumbnailCacheLocation: "Cache Location",
         settingsThumbnailCacheSize: "Size",
         settingsIndexDbLocation: "Database Location",
@@ -2119,7 +2120,7 @@ i18n.use(initReactI18next).init({
         clearCacheFailed: "Clear failed",
         clearThumbConfirmTitle: "Clear Thumbnail Cache",
         clearThumbConfirmDesc:
-          "After clearing, all thumbnails will need to be regenerated and images in the grid will temporarily not display. Continue?",
+          "This deletes all photo preview cache files to free space. Your original photos and index are unaffected; previews regenerate automatically when viewed. Continue?",
         cleanupInvalidIndex: "Clean Invalid Index Records",
         lastCleanupCount: "(Last cleanup: {{count}} records)",
         cleanupInvalidRecords: "Clean Invalid Records",
