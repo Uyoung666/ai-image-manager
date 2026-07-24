@@ -1579,27 +1579,25 @@ function ColorContent({
           ))}
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="hue-distribution-scroll">
         <h3 className="mb-2 text-[11px] text-muted-foreground uppercase">
           {t("colorHueDistribution")}
         </h3>
-        <div className="flex min-w-[640px] gap-1">
+        <div className="hue-distribution-items">
           {data.hueDistribution.map((hue) => (
             <AppTooltip key={hue.hueRange[0]}>
               <AppTooltipTrigger asChild>
                 <button
-                  className="flex-1 rounded-[4px] px-1 py-4 font-medium text-[10px] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={() => drill({ colorHex: hue.hex.replace("#", "") })}
+                  aria-disabled={hue.count === 0}
+                  aria-label={`${hue.hex} ${t("dashboardPhotoCount", { count: hue.count })}`}
+                  className="hue-distribution-item rounded-[4px] px-1 py-4 font-medium text-[10px] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-ring"
+                  onClick={
+                    hue.count > 0
+                      ? () => drill({ colorHex: hue.hex.replace("#", "") })
+                      : undefined
+                  }
                   style={{
                     backgroundColor: hue.hex,
-                    opacity:
-                      0.35 +
-                      0.65 *
-                        (hue.count /
-                          Math.max(
-                            ...data.hueDistribution.map((item) => item.count),
-                            1
-                          )),
                   }}
                   type="button"
                 >
