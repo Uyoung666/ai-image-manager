@@ -4,6 +4,7 @@ import {
   HardDrive,
   Image,
   Info,
+  Layers,
   Paintbrush,
   RefreshCw,
   Search,
@@ -34,6 +35,14 @@ const NAV_ITEMS: NavItem[] = [
       "主题 深色 浅色 暗色 语言 中文 英文 开机自启 启动 侧边栏 折叠 theme dark light language startup sidebar collapse",
     labelKey: "settingsAppearance",
     to: "/settings/appearance",
+  },
+  {
+    groupKey: "settingsGroupSystem",
+    icon: Layers,
+    keywords:
+      "序列 识别 连拍 延时摄影 burst timelapse sequence detection recognition",
+    labelKey: "settingsSequenceDetection",
+    to: "/settings/sequences",
   },
   {
     groupKey: "settingsGroupSystem",

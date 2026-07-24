@@ -386,6 +386,7 @@ export const SearchBar = memo(
       const inputRef = useRef<HTMLInputElement>(null);
       const fileInputRef = useRef<HTMLInputElement>(null);
       const dropdownRef = useRef<HTMLDivElement>(null);
+      const toolbarRef = useRef<HTMLDivElement>(null);
       const suggestionListRef = useRef<HTMLDivElement>(null);
       const [locallyDragging, setLocallyDragging] = useState(false);
       const [suggestionIndex, setSuggestionIndex] = useState(-1);
@@ -478,6 +479,29 @@ export const SearchBar = memo(
         window.addEventListener("message", handleGlobalShortcut);
         return () => {
           window.removeEventListener("message", handleGlobalShortcut);
+        };
+      }, []);
+
+      useEffect(() => {
+        function closeMenus(event: PointerEvent) {
+          if (!toolbarRef.current?.contains(event.target as Node)) {
+            setShowSuggestions(false);
+            setShowFilters(false);
+            setSuggestionIndex(-1);
+          }
+        }
+        function handleEscape(event: KeyboardEvent) {
+          if (event.key === "Escape") {
+            setShowSuggestions(false);
+            setShowFilters(false);
+            setSuggestionIndex(-1);
+          }
+        }
+        document.addEventListener("pointerdown", closeMenus);
+        document.addEventListener("keydown", handleEscape);
+        return () => {
+          document.removeEventListener("pointerdown", closeMenus);
+          document.removeEventListener("keydown", handleEscape);
         };
       }, []);
 
@@ -801,6 +825,7 @@ export const SearchBar = memo(
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
+          ref={toolbarRef}
           role="search"
         >
           {dragOver && (
@@ -842,7 +867,10 @@ export const SearchBar = memo(
                   }}
                   onFocus={() => {
                     setInputFocused(true);
-                    if (!(imageSearchActive || showFilters)) {
+                    if (showFilters) {
+                      setShowFilters(false);
+                    }
+                    if (!imageSearchActive) {
                       setShowSuggestions(true);
                     }
                   }}
@@ -855,7 +883,8 @@ export const SearchBar = memo(
                 />
                 {(query || imageSearchActive) && (
                   <button
-                    className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-muted-foreground/70 hover:text-foreground"
+                    aria-label={t("clearSearch")}
+                    className="absolute top-1/2 right-1 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[5px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                     onClick={handleClear}
                     type="button"
                   >
@@ -1127,7 +1156,7 @@ export const SearchBar = memo(
                   />
                 )}
                 <button
-                  className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/70 hover:text-foreground"
+                  className="min-h-8 rounded-[4px] px-2 text-[11px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                   onClick={clearFilters}
                 >
                   {t("clearAll")}
@@ -1697,7 +1726,7 @@ export const SearchBar = memo(
                   </span>
                   <div className="flex items-center gap-2">
                     <button
-                      className="rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+                      className="min-h-8 rounded-[4px] px-2 text-[11px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
                       onClick={() => {
                         clearFilters();
                         setShowFilters(false);
@@ -1706,7 +1735,7 @@ export const SearchBar = memo(
                       {t("reset")}
                     </button>
                     <button
-                      className="rounded-[4px] bg-primary/10 px-2 py-1 font-medium text-[11px] text-primary hover:bg-primary/20"
+                      className="min-h-8 rounded-[4px] bg-primary/10 px-2 text-[11px] font-medium text-primary hover:bg-primary/20"
                       onClick={() => {
                         onSearch(
                           query.trim(),
@@ -2026,8 +2055,8 @@ function FilterChip({
   return (
     <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
       {label}
-      <button className="ml-0.5 hover:text-foreground" onClick={onRemove}>
-        <X className="h-2.5 w-2.5" />
+      <button aria-label="移除筛选条件" className="-mr-1 ml-0.5 flex h-6 w-6 items-center justify-center rounded hover:bg-primary/15 hover:text-foreground" onClick={onRemove} type="button">
+        <X className="h-3 w-3" />
       </button>
     </span>
   );

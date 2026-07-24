@@ -487,6 +487,23 @@ i18n.use(initReactI18next).init({
         settingsGroupSystem: "系统",
         settingsAppearance: "外观",
         settingsStorage: "存储",
+        settingsSequenceDetection: "序列识别",
+        settingsSequenceDetectionHint:
+          "自动识别连拍和延时摄影；仅会生成连续且可验证的片段。",
+        sequencePreset: "识别预设",
+        sequencePresetHint: "严格优先避免误判；平衡为默认；宽松可提高召回。",
+        sequencePresetStrict: "严格",
+        sequencePresetBalanced: "平衡",
+        sequencePresetRelaxed: "宽松",
+        sequencePresetCustom: "自定义",
+        sequenceTimelapseMinFrames: "延时最少帧数",
+        sequenceTimelapseMinFramesHint: "少于此数量的照片不会自动识别为延时摄影。",
+        sequenceRhythmTolerance: "节奏容差 (%)",
+        sequenceRhythmToleranceHint:
+          "控制拍摄间隔能相差多少。数值越小，照片需要拍得越规律才会归为同一序列。",
+        sequencePHashDistance: "画面距离阈值",
+        sequencePHashDistanceHint:
+          "控制相邻照片需要多相似才会归为同一序列。数值越小，要求画面越相似。",
         settingsTheme: "主题",
         settingsLanguage: "语言",
         openAtLogin: "开机自启",
@@ -2024,6 +2041,25 @@ i18n.use(initReactI18next).init({
         settingsGroupSystem: "System",
         settingsAppearance: "Appearance",
         settingsStorage: "Storage",
+        settingsSequenceDetection: "Sequence Detection",
+        settingsSequenceDetectionHint:
+          "Automatically recognize bursts and time-lapses from continuous, verifiable frames.",
+        sequencePreset: "Detection preset",
+        sequencePresetHint:
+          "Strict avoids false positives; Balanced is the default; Relaxed improves recall.",
+        sequencePresetStrict: "Strict",
+        sequencePresetBalanced: "Balanced",
+        sequencePresetRelaxed: "Relaxed",
+        sequencePresetCustom: "Custom",
+        sequenceTimelapseMinFrames: "Minimum time-lapse frames",
+        sequenceTimelapseMinFramesHint:
+          "Groups with fewer frames are not automatically recognized as time-lapses.",
+        sequenceRhythmTolerance: "Rhythm tolerance (%)",
+        sequenceRhythmToleranceHint:
+          "Controls how much the time between shots may vary. Lower values require a more regular shooting rhythm.",
+        sequencePHashDistance: "Frame-distance threshold",
+        sequencePHashDistanceHint:
+          "Controls how similar adjacent photos must look. Lower values require more similar frames.",
         settingsTheme: "Theme",
         settingsLanguage: "Language",
         openAtLogin: "Launch at startup",

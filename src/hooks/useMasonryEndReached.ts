@@ -2,6 +2,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
 } from "react";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
@@ -22,6 +23,7 @@ export function getEndReachedDebounceMs(velocity: number): number {
 }
 
 interface UseMasonryEndReachedOptions {
+  containerWidth?: number;
   hasMore: boolean;
   isLoadingMore: boolean;
   onEndReached?: () => void;
@@ -31,6 +33,7 @@ interface UseMasonryEndReachedOptions {
 }
 
 export function useMasonryEndReached({
+  containerWidth = 0,
   hasMore,
   isLoadingMore,
   onEndReached,
@@ -52,13 +55,30 @@ export function useMasonryEndReached({
   hasMoreRef.current = hasMore;
   const isLoadingMoreRef = useRef(isLoadingMore);
   isLoadingMoreRef.current = isLoadingMore;
+  const previousContainerWidthRef = useRef(containerWidth);
+  const suspendUntilRef = useRef(0);
+
+  useLayoutEffect(() => {
+    const previousWidth = previousContainerWidthRef.current;
+    if (
+      previousWidth > 0 &&
+      containerWidth > 0 &&
+      previousWidth !== containerWidth
+    ) {
+      // Opening or closing the detail panel changes the grid width. Its
+      // sentinel can briefly intersect during relayout, which is not a user
+      // scroll and should not start a new paged request or show skeletons.
+      suspendUntilRef.current = Date.now() + 500;
+    }
+    previousContainerWidthRef.current = containerWidth;
+  }, [containerWidth]);
 
   const triggerEndReached = useCallback((velocity = 0) => {
     if (
-      !onEndReachedRef.current ||
-      !hasMoreRef.current ||
+      !(onEndReachedRef.current && hasMoreRef.current) ||
       isLoadingMoreRef.current ||
-      endReachedLockedRef.current
+      endReachedLockedRef.current ||
+      Date.now() < suspendUntilRef.current
     ) {
       return;
     }

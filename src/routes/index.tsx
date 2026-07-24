@@ -1987,7 +1987,10 @@ function HomePage() {
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
                 gridRef={gridRef}
-                hasMore={hasNextPage}
+                hasMore={
+                  hasNextPage &&
+                  !(detailPhoto || selectedSequence || sequenceDetailsLoading)
+                }
                 isLoadingMore={isFetchingNextPage}
                 isPlaceholderData={photosIsPlaceholder}
                 isStale={isPhotosStale}

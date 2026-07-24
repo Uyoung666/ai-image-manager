@@ -20,6 +20,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsWatermarkRouteImport } from './routes/settings.watermark'
 import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
+import { Route as SettingsSequencesRouteImport } from './routes/settings.sequences'
 import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as SettingsAccelerationRouteImport } from './routes/settings.acceleration'
@@ -83,6 +84,11 @@ const SettingsStorageRoute = SettingsStorageRouteImport.update({
   path: '/storage',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsSequencesRoute = SettingsSequencesRouteImport.update({
+  id: '/sequences',
+  path: '/sequences',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsCloudSyncRoute = SettingsCloudSyncRouteImport.update({
   id: '/cloud-sync',
   path: '/cloud-sync',
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
@@ -176,6 +184,7 @@ export interface FileRoutesById {
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
@@ -198,6 +207,7 @@ export interface FileRouteTypes {
     | '/settings/acceleration'
     | '/settings/appearance'
     | '/settings/cloud-sync'
+    | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
     | '/settings/watermark'
@@ -218,6 +228,7 @@ export interface FileRouteTypes {
     | '/settings/acceleration'
     | '/settings/appearance'
     | '/settings/cloud-sync'
+    | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
     | '/settings/watermark'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/settings/acceleration'
     | '/settings/appearance'
     | '/settings/cloud-sync'
+    | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
     | '/settings/watermark'
@@ -333,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsStorageRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/sequences': {
+      id: '/settings/sequences'
+      path: '/sequences'
+      fullPath: '/settings/sequences'
+      preLoaderRoute: typeof SettingsSequencesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/cloud-sync': {
       id: '/settings/cloud-sync'
       path: '/cloud-sync'
@@ -422,6 +441,7 @@ interface SettingsRouteChildren {
   SettingsAccelerationRoute: typeof SettingsAccelerationRoute
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
+  SettingsSequencesRoute: typeof SettingsSequencesRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
   SettingsUpdateRoute: typeof SettingsUpdateRoute
   SettingsWatermarkRoute: typeof SettingsWatermarkRoute
@@ -432,6 +452,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAccelerationRoute: SettingsAccelerationRoute,
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsCloudSyncRoute: SettingsCloudSyncRoute,
+  SettingsSequencesRoute: SettingsSequencesRoute,
   SettingsStorageRoute: SettingsStorageRoute,
   SettingsUpdateRoute: SettingsUpdateRoute,
   SettingsWatermarkRoute: SettingsWatermarkRoute,

@@ -198,6 +198,7 @@ export const MasonryGrid = memo(
     }, [forceUnlock]);
 
     const { checkNearBottom } = useMasonryEndReached({
+      containerWidth,
       hasMore,
       isLoadingMore,
       onEndReached,
