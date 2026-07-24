@@ -248,7 +248,8 @@ function DashboardPage() {
       advancedExifActions.getStatus() as Promise<AdvancedExifProgress>,
     refetchInterval: 1500,
   });
-  const data = useDeferredValue(statsQuery.data ?? null);
+  const queryData = statsQuery.data ?? null;
+  const data = useDeferredValue(queryData);
   const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
   const colorQuery = useQuery({
     queryKey: ["dashboard", "colors", range.from, range.toExclusive],
@@ -417,7 +418,7 @@ function DashboardPage() {
       advancedValue: item.name,
     }));
 
-  if (statsQuery.isLoading) {
+  if (statsQuery.isLoading || (queryData !== null && data === null)) {
     return <DashboardSkeleton />;
   }
   if (statsQuery.isError || !data) {
