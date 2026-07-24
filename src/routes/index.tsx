@@ -498,6 +498,10 @@ function HomePage() {
     sequenceMode === "sequences" && sequenceViewReady
       ? "sequences"
       : "photos";
+  // The masonry end sentinel is based on the currently rendered items. When
+  // switching to the usually shorter sequence view it immediately intersects,
+  // so it must not continue paginating the underlying photo list.
+  const isPhotoPaginationActive = sequenceMode === "photos";
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
       setSequenceViewReady(mode === "photos");
@@ -2075,10 +2079,13 @@ function HomePage() {
                 emptyState={emptyStateContent}
                 gridRef={gridRef}
                 hasMore={
+                  isPhotoPaginationActive &&
                   hasNextPage &&
                   !(detailPhoto || selectedSequence || sequenceDetailsLoading)
                 }
-                isLoadingMore={isFetchingNextPage}
+                isLoadingMore={
+                  isPhotoPaginationActive && isFetchingNextPage
+                }
                 isPlaceholderData={photosIsPlaceholder}
                 isStale={isPhotosStale}
                 loading={loading}

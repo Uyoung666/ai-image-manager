@@ -673,7 +673,10 @@ export const PhotoGrid = memo(
       return headers;
     }, [displayPhotos, sort, i18n.language, routeKey]);
 
-    if (loading && displayPhotos.length === 0) {
+    // `displayPhotos` can be temporarily empty while changing presentation
+    // modes (for example, before the sequence query resolves). The full-grid
+    // skeleton is only for the initial photo query, not for a derived view.
+    if (loading && photos.length === 0) {
       const skelCols = Array.from({ length: columnCount }, (_, ci) =>
         Array.from({ length: 3 }, (_, ri) => ci * 3 + ri)
       );
