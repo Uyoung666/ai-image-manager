@@ -21,6 +21,9 @@ import {
 } from "recharts";
 import { advancedExifActions } from "@/actions/advanced-exif";
 import {
+  CalendarHeatmap,
+} from "@/components/dashboard/calendar-heatmap";
+import {
   ChartSection,
   DashboardBarChart,
   type DashboardPoint,
@@ -38,12 +41,14 @@ import { ipc } from "@/ipc/manager";
 import type { AdvancedExifProgress } from "@/types/photo-metadata";
 import {
   buildApertureChartData,
+  buildDateDrillParams,
   buildFocalChartData,
   buildMonthlyChartData,
   buildRangeSearchParams,
   buildShootingGuidance,
   buildYearDrillParams,
   calculateCoverage,
+  type DailyStat,
   type DashboardRangePreset,
   fillYearlyChartData,
   getDashboardTimeRange,
@@ -59,6 +64,7 @@ type DashboardTab =
   | "technique"
   | "time"
   | "places";
+type DashboardDisplayMode = "trend" | "heatmap";
 
 interface BucketStat {
   count: number;
@@ -99,6 +105,7 @@ interface DashboardData {
     exif: number;
     gps: number;
   };
+  dailyStats: DailyStat[];
   dateRange: { earliest: number; latest: number } | null;
   distributionMetadata: Record<string, DistributionMeta>;
   exifCompleteness: Completeness | null;
@@ -212,6 +219,10 @@ function DashboardPage() {
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set());
   const [startingAi, setStartingAi] = useState(false);
+  const [overviewDisplayMode, setOverviewDisplayMode] =
+    useState<DashboardDisplayMode>("trend");
+  const [timeDisplayMode, setTimeDisplayMode] =
+    useState<DashboardDisplayMode>("trend");
   useRouteScrollRestoration(scrollRef, {
     getRouteKey: () => `dashboard-${tab}`,
   });
@@ -275,6 +286,41 @@ function DashboardPage() {
       })
       .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    ipc.client.settings
+      .getAppSetting({ key: "dashboardOverviewDisplayMode" })
+      .then((result) => {
+        if (result?.value === "heatmap") {
+          setOverviewDisplayMode("heatmap");
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    ipc.client.settings
+      .getAppSetting({ key: "dashboardTimeDisplayMode" })
+      .then((result) => {
+        if (result?.value === "heatmap") {
+          setTimeDisplayMode("heatmap");
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+  const changeTimeDisplayMode = useCallback((mode: DashboardDisplayMode) => {
+    setTimeDisplayMode(mode);
+    ipc.client.settings
+      .setAppSetting({ key: "dashboardTimeDisplayMode", value: mode })
+      .catch(() => undefined);
+  }, []);
+  const changeOverviewDisplayMode = useCallback(
+    (mode: DashboardDisplayMode) => {
+      setOverviewDisplayMode(mode);
+      ipc.client.settings
+        .setAppSetting({ key: "dashboardOverviewDisplayMode", value: mode })
+        .catch(() => undefined);
+    },
+    []
+  );
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (
@@ -558,7 +604,13 @@ function DashboardPage() {
 
         {tab === "overview" && (
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-            <section className="order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
+            <section className="relative order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
+              <div className="absolute top-5 right-5 sm:top-6 sm:right-6">
+                <ChartDisplayModeToggle
+                  onChange={changeOverviewDisplayMode}
+                  value={overviewDisplayMode}
+                />
+              </div>
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
@@ -597,8 +649,11 @@ function DashboardPage() {
               </div>
               <div className="mt-6 border-primary/10 border-t pt-3">
                 <OverviewTrend
-                  color={DASHBOARD_COLORS.time}
+                  calendarData={data.dailyStats}
+                  color="var(--primary)"
                   data={yearlyData}
+                  displayMode={overviewDisplayMode}
+                  onDateClick={(date) => drill(buildDateDrillParams(date))}
                   title={t("yearlyDistribution")}
                 />
               </div>
@@ -1008,11 +1063,15 @@ function DashboardPage() {
         )}
 
         {tab === "time" && (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]">
             <TrendChart
+              calendarData={data.dailyStats}
               color={DASHBOARD_COLORS.time}
               data={yearlyData}
+              displayMode={timeDisplayMode}
               hint={t("dashboardHint_yearly")}
+              onDateClick={(date) => drill(buildDateDrillParams(date))}
+              onDisplayModeChange={changeTimeDisplayMode}
               onPointClick={(point) => {
                 const params = buildYearDrillParams(
                   Number(point.year),
@@ -1225,17 +1284,67 @@ function ChartWithExpand({
     </ChartSection>
   );
 }
+
+function ChartDisplayModeToggle({
+  onChange,
+  value,
+}: {
+  onChange?: (mode: DashboardDisplayMode) => void;
+  value: DashboardDisplayMode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <fieldset
+      aria-label={t("dashboardDisplayMode")}
+      className="m-0 flex min-w-0 rounded-[5px] border border-border p-0.5"
+    >
+      <button
+        aria-pressed={value === "trend"}
+        className={`rounded-[3px] px-2 py-1 text-[10px] focus-visible:outline-2 focus-visible:outline-ring ${
+          value === "trend"
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+        onClick={() => onChange?.("trend")}
+        type="button"
+      >
+        {t("dashboardDisplayTrend")}
+      </button>
+      <button
+        aria-pressed={value === "heatmap"}
+        className={`rounded-[3px] px-2 py-1 text-[10px] focus-visible:outline-2 focus-visible:outline-ring ${
+          value === "heatmap"
+            ? "bg-muted text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        }`}
+        onClick={() => onChange?.("heatmap")}
+        type="button"
+      >
+        {t("dashboardDisplayHeatmap")}
+      </button>
+    </fieldset>
+  );
+}
+
 function TrendChart({
+  calendarData,
   color,
   data,
+  displayMode = "trend",
   hint,
+  onDateClick,
+  onDisplayModeChange,
   onPointClick,
   sampleTotal,
   title,
 }: {
+  calendarData?: DailyStat[];
   color: string;
   data: DashboardPoint[];
+  displayMode?: DashboardDisplayMode;
   hint?: string;
+  onDateClick?: (date: string) => void;
+  onDisplayModeChange?: (mode: DashboardDisplayMode) => void;
   onPointClick?: (point: DashboardPoint) => void;
   sampleTotal: number;
   title: string;
@@ -1244,6 +1353,7 @@ function TrendChart({
   const noMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)"
   ).matches;
+  const hasCalendarData = calendarData && calendarData.length > 0;
   return (
     <ChartSection
       data={data}
@@ -1255,11 +1365,24 @@ function TrendChart({
           </p>
         </div>
       }
+      headerAction={
+        hasCalendarData ? (
+          <ChartDisplayModeToggle
+            onChange={onDisplayModeChange}
+            value={displayMode}
+          />
+        ) : undefined
+      }
       onPointClick={onPointClick}
       sampleTotal={sampleTotal}
       title={title}
     >
-      {data.some((point) => point.count > 0) ? (
+      {displayMode === "heatmap" && hasCalendarData ? (
+        <CalendarHeatmap
+          data={calendarData}
+          onDateClick={(date) => onDateClick?.(date)}
+        />
+      ) : data.some((point) => point.count > 0) ? (
         <ResponsiveContainer height={230} width="100%">
           <AreaChart
             data={data}
@@ -1519,23 +1642,37 @@ function HealthMetric({
 }
 
 function OverviewTrend({
+  calendarData,
   color,
   data,
+  displayMode,
+  onDateClick,
   title,
 }: {
+  calendarData: DailyStat[];
   color: string;
   data: DashboardPoint[];
+  displayMode: DashboardDisplayMode;
+  onDateClick: (date: string) => void;
   title: string;
 }) {
   const noMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)"
   ).matches;
-  if (!data.some((point) => point.count > 0)) {
+  if (!(data.some((point) => point.count > 0) || calendarData.length > 0)) {
     return null;
   }
   return (
-    <div aria-label={title} className="h-40 w-full" role="img">
-      <ResponsiveContainer height="100%" width="100%">
+    <div aria-label={title} className="w-full">
+      {displayMode === "heatmap" ? (
+        <CalendarHeatmap
+          color={color}
+          data={calendarData}
+          onDateClick={onDateClick}
+        />
+      ) : (
+        <div className="h-40" role="img">
+          <ResponsiveContainer height="100%" width="100%">
         <AreaChart
           data={data}
           margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
@@ -1569,7 +1706,9 @@ function OverviewTrend({
             type="linear"
           />
         </AreaChart>
-      </ResponsiveContainer>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

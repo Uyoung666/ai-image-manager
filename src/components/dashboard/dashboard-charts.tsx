@@ -10,6 +10,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export interface DashboardPoint {
   count: number;
@@ -186,6 +191,7 @@ export function ChartSection({
   children,
   data,
   description,
+  headerAction,
   onPointClick,
   sampleTotal,
   title,
@@ -193,12 +199,12 @@ export function ChartSection({
   children: React.ReactNode;
   data?: DashboardPoint[];
   description?: React.ReactNode;
+  headerAction?: React.ReactNode;
   onPointClick?: (point: DashboardPoint) => void;
   sampleTotal?: number;
   title: string;
 }) {
   const { t, i18n } = useTranslation();
-  const [showData, setShowData] = useState(false);
   return (
     <section
       aria-label={title}
@@ -218,65 +224,105 @@ export function ChartSection({
             </p>
           )}
         </div>
-        {data && data.length > 0 && (
-          <button
-            aria-expanded={showData}
-            className="rounded-[5px] px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            onClick={() => setShowData((value) => !value)}
-            type="button"
-          >
-            {showData ? t("dashboardHideData") : t("dashboardViewData")}
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {headerAction}
+          {data && data.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  className="rounded-[5px] px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                  type="button"
+                >
+                  {t("dashboardViewData")}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                className="w-[min(32rem,calc(100vw-2rem))] gap-0 p-0"
+              >
+                <div className="border-border border-b px-3 py-2">
+                  <p className="font-medium text-[12px] text-foreground">
+                    {title}
+                  </p>
+                </div>
+                <div className="max-h-[min(60vh,32rem)] overflow-auto">
+                  <ChartDataTable
+                    data={data}
+                    onPointClick={onPointClick}
+                    sampleTotal={sampleTotal}
+                  />
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
       </div>
       {children}
-      {showData && data && (
-        <div className="mt-4 max-h-72 overflow-auto rounded-[6px] border border-border">
-          <table className="w-full text-left text-[12px]">
-            <thead className="sticky top-0 bg-muted text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">
-                  {t("dashboardDataItem")}
-                </th>
-                <th className="px-3 py-2 text-right font-medium">
-                  {t("dashboardDataCount")}
-                </th>
-                <th className="px-3 py-2 text-right font-medium">
-                  {t("dashboardDataShare")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((point) => (
-                <tr className="border-border border-t" key={point.name}>
-                  <td className="px-3 py-2">
-                    {onPointClick && point.count > 0 ? (
-                      <button
-                        className="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-                        onClick={() => onPointClick(point)}
-                        type="button"
-                      >
-                        {point.name}
-                      </button>
-                    ) : (
-                      point.name
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {point.count.toLocaleString(i18n.language)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {sampleTotal
-                      ? `${((point.count / sampleTotal) * 100).toFixed(1)}%`
-                      : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </section>
+  );
+}
+
+function ChartDataTable({
+  data,
+  onPointClick,
+  sampleTotal,
+}: {
+  data: DashboardPoint[];
+  onPointClick?: (point: DashboardPoint) => void;
+  sampleTotal?: number;
+}) {
+  const { t, i18n } = useTranslation();
+  return (
+    <table className="w-full text-left text-[12px]">
+      <thead className="sticky top-0 bg-muted text-muted-foreground">
+        <tr>
+          <th className="px-3 py-2 font-medium">{t("dashboardDataItem")}</th>
+          <th className="px-3 py-2 text-right font-medium">
+            {t("dashboardDataCount")}
+          </th>
+          <th className="px-3 py-2 text-right font-medium">
+            {t("dashboardDataShare")}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.map((point) => (
+          <tr className="border-border border-t" key={point.name}>
+            <td className="px-3 py-2">
+              {onPointClick && point.count > 0 ? (
+                <button
+                  className="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                  onClick={() => onPointClick(point)}
+                  type="button"
+                >
+                  {point.isGap
+                    ? t("dashboardNoDataYears", {
+                        from: point.gapStart,
+                        to: point.gapEnd,
+                      })
+                    : point.name}
+                </button>
+              ) : (
+                point.isGap
+                  ? t("dashboardNoDataYears", {
+                      from: point.gapStart,
+                      to: point.gapEnd,
+                    })
+                  : point.name
+              )}
+            </td>
+            <td className="px-3 py-2 text-right tabular-nums">
+              {point.count.toLocaleString(i18n.language)}
+            </td>
+            <td className="px-3 py-2 text-right tabular-nums">
+              {sampleTotal
+                ? `${((point.count / sampleTotal) * 100).toFixed(1)}%`
+                : "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

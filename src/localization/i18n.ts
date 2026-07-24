@@ -318,6 +318,7 @@ i18n.use(initReactI18next).init({
         dashboardDataItem: "项目",
         dashboardDataCount: "照片数",
         dashboardDataShare: "占比",
+        dashboardNoDataYears: "{{from}}–{{to}} 年（无数据）",
         dashboardChartCoverage: "有效 {{valid}} 张 · 缺失 {{missing}} 张",
         dashboardChartClickHint: "点击分类可查看对应照片",
         dashboardCoverageGood: "覆盖良好",
@@ -357,6 +358,12 @@ i18n.use(initReactI18next).init({
         dashboardHint_provenanceStatus:
           "实验功能：这里只检测内容凭证线索；未经密码学验证，不代表照片内容真实。",
         dashboardHint_yearly: "观察长期拍摄数量变化，数量也会受导入范围影响。",
+        dashboardDisplayMode: "图表显示模式",
+        dashboardDisplayTrend: "趋势",
+        dashboardDisplayHeatmap: "热力图",
+        dashboardHeatmapLess: "少",
+        dashboardHeatmapMore: "多",
+        dashboardHeatmapTooltip: "{{date}}：{{count}} 张照片。点击查看。",
         dashboardHint_monthly:
           "用于发现季节性拍摄偏好，缺少拍摄日期的照片不会计入。",
         dashboardHint_time:
@@ -1862,6 +1869,7 @@ i18n.use(initReactI18next).init({
         dashboardDataItem: "Item",
         dashboardDataCount: "Photos",
         dashboardDataShare: "Share",
+        dashboardNoDataYears: "{{from}}–{{to}} (no data)",
         dashboardChartCoverage: "{{valid}} valid · {{missing}} missing",
         dashboardChartClickHint: "Click a category to view matching photos",
         dashboardCoverageGood: "Good coverage",
@@ -1902,6 +1910,12 @@ i18n.use(initReactI18next).init({
           "Experimental: this only detects credential clues; without cryptographic verification it does not prove authenticity.",
         dashboardHint_yearly:
           "Shows long-term shooting volume; imported library scope also affects the trend.",
+        dashboardDisplayMode: "Chart display mode",
+        dashboardDisplayTrend: "Trend",
+        dashboardDisplayHeatmap: "Heatmap",
+        dashboardHeatmapLess: "Less",
+        dashboardHeatmapMore: "More",
+        dashboardHeatmapTooltip: "{{date}}: {{count}} photos. Click to view.",
         dashboardHint_monthly:
           "Reveals seasonal habits; photos without capture dates are excluded.",
         dashboardHint_time:

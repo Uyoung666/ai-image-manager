@@ -21,6 +21,26 @@ export interface DashboardChartPoint {
   [key: string]: unknown;
 }
 
+export interface DailyStat {
+  count: number;
+  date: string;
+}
+
+export interface CalendarHeatmapDay extends DailyStat {
+  day: number;
+  level: number;
+}
+
+export interface CalendarHeatmapYear {
+  weeks: (CalendarHeatmapDay | null)[][];
+  year: number;
+}
+
+export interface CalendarHeatmapData {
+  maxCount: number;
+  weeks: (CalendarHeatmapDay | null)[][];
+}
+
 export type ShootingGuidanceKind =
   | "wideAngle"
   | "standardFocal"
@@ -180,10 +200,32 @@ export function fillYearlyChartData(
   const last = range?.toExclusive
     ? new Date(range.toExclusive - 1).getFullYear()
     : Math.max(...dataYears);
-  return Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => {
-    const year = first + index;
-    return { name: String(year), count: counts.get(year) ?? 0, year };
-  });
+  const result: DashboardChartPoint[] = [];
+  for (let year = first; year <= last; ) {
+    const count = counts.get(year) ?? 0;
+    if (count > 0) {
+      result.push({ name: String(year), count, year });
+      year += 1;
+      continue;
+    }
+    const gapStart = year;
+    while (year <= last && (counts.get(year) ?? 0) === 0) {
+      year += 1;
+    }
+    const gapEnd = year - 1;
+    if (gapEnd === gapStart) {
+      result.push({ name: String(gapStart), count: 0, year: gapStart });
+    } else {
+      result.push({
+        count: 0,
+        gapEnd,
+        gapStart,
+        isGap: true,
+        name: "…",
+      });
+    }
+  }
+  return result;
 }
 
 export function buildMonthlyChartData(
@@ -205,6 +247,82 @@ function formatLocalDate(timestamp: number): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(date: string): Date | null {
+  const parsed = new Date(`${date}T00:00:00`);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function startOfLocalDay(timestamp: number): Date {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function buildDailyCountMap(stats: DailyStat[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const stat of stats) {
+    const date = parseLocalDate(stat.date);
+    if (date && Number.isFinite(stat.count) && stat.count >= 0) {
+      counts.set(formatLocalDate(date.getTime()), stat.count);
+    }
+  }
+  return counts;
+}
+
+function buildCalendarWeeks(
+  start: Date,
+  end: Date,
+  counts: Map<string, number>,
+  maxCount: number
+): (CalendarHeatmapDay | null)[][] {
+  const gridStart = new Date(start);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const gridEnd = new Date(end);
+  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+  const weeks: (CalendarHeatmapDay | null)[][] = [];
+  for (
+    const weekStart = new Date(gridStart);
+    weekStart <= gridEnd;
+    weekStart.setDate(weekStart.getDate() + 7)
+  ) {
+    const week: (CalendarHeatmapDay | null)[] = [];
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const current = new Date(weekStart);
+      current.setDate(current.getDate() + weekday);
+      if (current < start || current > end) {
+        week.push(null);
+        continue;
+      }
+      const date = formatLocalDate(current.getTime());
+      const count = counts.get(date) ?? 0;
+      week.push({
+        count,
+        date,
+        day: current.getDate(),
+        level: count === 0 || maxCount === 0 ? 0 : Math.ceil((count / maxCount) * 4),
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+/** Builds a rolling 365-day GitHub-style calendar grid using local dates. */
+export function buildCalendarHeatmapData(
+  stats: DailyStat[],
+  now = new Date()
+): CalendarHeatmapData {
+  const counts = buildDailyCountMap(stats);
+  const end = startOfLocalDay(now.getTime());
+  const start = new Date(end);
+  start.setDate(start.getDate() - 364);
+  const maxCount = Math.max(...counts.values(), 0);
+  return { maxCount, weeks: buildCalendarWeeks(start, end, counts, maxCount) };
+}
+
+export function buildDateDrillParams(date: string): Record<string, string> {
+  return { dateFrom: date, dateTo: date };
 }
 
 export function buildYearDrillParams(

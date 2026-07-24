@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildApertureChartData,
+  buildCalendarHeatmapData,
+  buildDateDrillParams,
   buildFocalChartData,
   buildMonthlyChartData,
   buildRangeSearchParams,
@@ -106,12 +108,68 @@ describe("dashboard chart data", () => {
     ]);
   });
 
+  it("collapses long runs of empty years into one no-data marker", () => {
+    expect(
+      fillYearlyChartData([
+        { year: "2020", count: 4 },
+        { year: "2025", count: 7 },
+      ])
+    ).toEqual([
+      { name: "2020", count: 4, year: 2020 },
+      { count: 0, gapEnd: 2024, gapStart: 2021, isGap: true, name: "…" },
+      { name: "2025", count: 7, year: 2025 },
+    ]);
+  });
+
   it("fills all twelve month preference buckets", () => {
     const result = buildMonthlyChartData([{ month: "02", count: 9 }], "en");
     expect(result).toHaveLength(12);
     expect(result[1].count).toBe(9);
     expect(result[1].month).toBe(2);
     expect(result.reduce((sum, item) => sum + item.count, 0)).toBe(9);
+  });
+
+  it("builds a rolling one-year calendar grid across a year boundary", () => {
+    const result = buildCalendarHeatmapData(
+      [
+        { date: "2024-12-31", count: 2 },
+        { date: "2025-01-02", count: 8 },
+      ],
+      new Date(2025, 0, 3)
+    );
+
+    expect(result.maxCount).toBe(8);
+    expect(result.weeks).toHaveLength(53);
+    const days = result.weeks.flat();
+    expect(days.find((day) => day?.date === "2024-12-31")).toMatchObject({
+      count: 2,
+      level: 1,
+    });
+    expect(days.find((day) => day?.date === "2025-01-02")).toMatchObject({
+      count: 8,
+      level: 4,
+    });
+  });
+
+  it("keeps leap days and fills missing dates with zero-count cells", () => {
+    const result = buildCalendarHeatmapData(
+      [{ date: "2024-02-29", count: 3 }],
+      new Date(2024, 2, 1)
+    );
+    const days = result.weeks
+      .flat()
+      .filter((day): day is NonNullable<typeof day> => day !== null);
+
+    expect(days.map((day) => day.date)).toContain("2024-02-29");
+    expect(days.find((day) => day.date === "2024-02-28")?.count).toBe(0);
+    expect(days.find((day) => day.date === "2024-03-01")?.count).toBe(0);
+  });
+
+  it("creates a single-day drill-down query", () => {
+    expect(buildDateDrillParams("2026-07-24")).toEqual({
+      dateFrom: "2026-07-24",
+      dateTo: "2026-07-24",
+    });
   });
 
   it("intersects a drilled year with the active dashboard range", () => {

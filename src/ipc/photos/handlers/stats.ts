@@ -693,6 +693,23 @@ export const getStats = os
       .map((r) => ({ month: r.month, count: r.count }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
+    // Daily stats — local dates power the calendar heatmap in the dashboard.
+    const dailyRows = db
+      .select({
+        date: sql<string>`strftime('%Y-%m-%d', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime')`,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(exifData)
+      .innerJoin(photos, eq(exifData.photoId, photos.id))
+      .where(and(dashboardPhotoWhere(input), isNotNull(exifData.dateTaken)))
+      .groupBy(
+        sql`strftime('%Y-%m-%d', ${exifData.dateTaken} / 1000, 'unixepoch', 'localtime')`
+      )
+      .all();
+    const dailyStats = dailyRows
+      .map((row) => ({ date: row.date, count: row.count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
     // Date range in SQL
     const rangeRow = db
       .select({
@@ -851,6 +868,7 @@ export const getStats = os
       shutterSpeedDistribution: shutterResult,
       yearlyStats,
       monthlyStats,
+      dailyStats,
       dateRange,
       avgIso,
       advancedStats,
