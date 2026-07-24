@@ -41,6 +41,7 @@ import { ipc } from "@/ipc/manager";
 import type { AdvancedExifProgress } from "@/types/photo-metadata";
 import {
   buildApertureChartData,
+  buildDashboardReturnTarget,
   buildDateDrillParams,
   buildFocalChartData,
   buildMonthlyChartData,
@@ -346,9 +347,20 @@ function DashboardPage() {
 
   const drill = useCallback(
     (params: Record<string, string>) => {
-      navigate({ to: "/", search: mergeDashboardDrillParams(params, range) });
+      navigate({
+        to: "/",
+        search: {
+          ...mergeDashboardDrillParams(params, range),
+          dashboardReturn: buildDashboardReturnTarget({
+            from: search.from,
+            range: preset,
+            tab,
+            to: search.to,
+          }),
+        },
+      });
     },
-    [navigate, range]
+    [navigate, preset, range, search.from, search.to, tab]
   );
   const toggleExpanded = (key: string) =>
     setExpandedCharts((current) => {

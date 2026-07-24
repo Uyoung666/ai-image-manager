@@ -10,6 +10,21 @@ export interface FocalStatInput {
 
 export type DashboardRangePreset = "all" | "year" | "last12" | "custom";
 
+export type DashboardReturnTab =
+  | "overview"
+  | "gear"
+  | "exposure"
+  | "technique"
+  | "time"
+  | "places";
+
+export interface DashboardReturnTarget {
+  from?: string;
+  range?: DashboardRangePreset;
+  tab?: DashboardReturnTab;
+  to?: string;
+}
+
 export interface DashboardTimeRange {
   from?: number;
   toExclusive?: number;
@@ -19,6 +34,85 @@ export interface DashboardChartPoint {
   count: number;
   name: string;
   [key: string]: unknown;
+}
+
+const DASHBOARD_RETURN_TABS: DashboardReturnTab[] = [
+  "overview",
+  "gear",
+  "exposure",
+  "technique",
+  "time",
+  "places",
+];
+
+const DASHBOARD_RETURN_RANGES: DashboardRangePreset[] = [
+  "all",
+  "year",
+  "last12",
+  "custom",
+];
+
+const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Creates the only return path accepted from a dashboard drill-down. */
+export function buildDashboardReturnTarget(
+  target: DashboardReturnTarget
+): string {
+  const params = new URLSearchParams();
+  if (target.tab) {
+    params.set("tab", target.tab);
+  }
+  if (target.range) {
+    params.set("range", target.range);
+  }
+  if (target.from) {
+    params.set("from", target.from);
+  }
+  if (target.to) {
+    params.set("to", target.to);
+  }
+  const query = params.toString();
+  return query ? `/dashboard?${query}` : "/dashboard";
+}
+
+/**
+ * Parses an internal dashboard return path. Any other path or malformed field
+ * is discarded so URL search parameters cannot become an open redirect.
+ */
+export function parseDashboardReturnTarget(
+  value: unknown
+): DashboardReturnTarget | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const [pathname, query = ""] = value.split("?", 2);
+  if (pathname !== "/dashboard") {
+    return null;
+  }
+
+  const params = new URLSearchParams(query);
+  const tab = params.get("tab") ?? undefined;
+  const range = params.get("range") ?? undefined;
+  const from = params.get("from") ?? undefined;
+  const to = params.get("to") ?? undefined;
+
+  if (
+    (tab !== undefined &&
+      !DASHBOARD_RETURN_TABS.includes(tab as DashboardReturnTab)) ||
+    (range !== undefined &&
+      !DASHBOARD_RETURN_RANGES.includes(range as DashboardRangePreset)) ||
+    (from !== undefined && !LOCAL_DATE_PATTERN.test(from)) ||
+    (to !== undefined && !LOCAL_DATE_PATTERN.test(to))
+  ) {
+    return null;
+  }
+
+  return {
+    from,
+    range: range as DashboardRangePreset | undefined,
+    tab: tab as DashboardReturnTab | undefined,
+    to,
+  };
 }
 
 export interface DailyStat {

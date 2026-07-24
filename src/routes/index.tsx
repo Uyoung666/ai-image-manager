@@ -65,6 +65,10 @@ import type {
 import type { ExifFilters, SearchMode } from "@/types/search";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
+  type DashboardReturnTarget,
+  parseDashboardReturnTarget,
+} from "@/utils/dashboard-data";
+import {
   loadSortField,
   loadSortOrder,
   saveSortPreference,
@@ -210,6 +214,10 @@ function HomePage() {
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
   const [showDrillBanner, setShowDrillBanner] = useState(false);
   const [drillDownFilters, setDrillDownFilters] = useState<ExifFilters>();
+  const [dashboardReturnTarget, setDashboardReturnTarget] =
+    useState<DashboardReturnTarget | null>(
+      () => getBrowseSession("home-search").dashboardReturn ?? null
+    );
   const [showAiIndexHint, setShowAiIndexHint] = useState(false);
   const [searchResultFade, setSearchResultFade] = useState(false);
   const [parsedTimeFilter, setParsedTimeFilter] = useState<{
@@ -226,6 +234,11 @@ function HomePage() {
   const drillConsumed = useRef(false);
   const searchGenerationRef = useRef(0);
 
+  const clearDashboardReturnTarget = useCallback(() => {
+    setDashboardReturnTarget(null);
+    saveBrowseSession("home-search", { dashboardReturn: null });
+  }, [saveBrowseSession]);
+
   const resetHomeSearchState = useCallback(() => {
     searchGenerationRef.current += 1;
     pendingSemanticRefreshRef.current = null;
@@ -239,6 +252,7 @@ function HomePage() {
     setShowAiIndexHint(false);
     setShowDrillBanner(false);
     setDrillDownFilters(undefined);
+    clearDashboardReturnTarget();
     setSearchResultFade(false);
     saveBrowseSession("home-search", {
       colorHex: null,
@@ -246,7 +260,7 @@ function HomePage() {
       searchQuery: "",
     });
     navigate({ to: "/", search: {}, replace: true });
-  }, [navigate, saveBrowseSession]);
+  }, [clearDashboardReturnTarget, navigate, saveBrowseSession]);
 
   const handledSearchResetVersion = useRef(filter.searchResetVersion);
   useLayoutEffect(() => {
@@ -258,11 +272,16 @@ function HomePage() {
   }, [filter.searchResetVersion, resetHomeSearchState]);
 
   useEffect(() => {
-    const hasParams = Object.values(drillParams).some((v) => v !== undefined);
+    const hasParams = Object.entries(drillParams).some(
+      ([key, value]) => key !== "dashboardReturn" && value !== undefined
+    );
 
     if (!hasParams) {
-      drillConsumed.current = false;
-      setShowDrillBanner(false);
+      // 钻取参数会在触发搜索后从 URL 移除；此时保留本次钻取的
+      // 提示条和返回目标，直到用户主动清除筛选或开始新的搜索。
+      if (!drillConsumed.current) {
+        setShowDrillBanner(false);
+      }
       return;
     }
 
@@ -280,6 +299,7 @@ function HomePage() {
 
     // Handle tagId navigation from SpotlightSearch
     if (drillParams.tagId != null) {
+      clearDashboardReturnTarget();
       const tagId = drillParams.tagId;
       navigate({ to: "/", search: {}, replace: true });
       setSearchTime(undefined);
@@ -299,6 +319,7 @@ function HomePage() {
 
     // Handle favoriteOnly navigation from SpotlightSearch
     if (drillParams.favoriteOnly) {
+      clearDashboardReturnTarget();
       navigate({ to: "/", search: {}, replace: true });
       setSearchTime(undefined);
       setSearchResults(null);
@@ -307,6 +328,13 @@ function HomePage() {
     }
 
     setShowDrillBanner(true);
+    const dashboardReturnTarget = parseDashboardReturnTarget(
+      drillParams.dashboardReturn
+    );
+    setDashboardReturnTarget(dashboardReturnTarget);
+    saveBrowseSession("home-search", {
+      dashboardReturn: dashboardReturnTarget,
+    });
 
     // Build filters
     const filters: ExifFilters = {};
@@ -369,7 +397,7 @@ function HomePage() {
 
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
-    handleSearch(textQuery, filters, colorHexParam);
+    handleSearch(textQuery, filters, colorHexParam, true);
   }, [drillParams, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for photo-drop:album event from sidebar
@@ -451,7 +479,7 @@ function HomePage() {
       return;
     }
     pendingSemanticRefreshRef.current = null;
-    void handleSearch(pending.query, pending.filters, pending.colorHex);
+    void handleSearch(pending.query, pending.filters, pending.colorHex, true);
   }, [aiStatus?.coverageState, searchMode, searchQuery]);
 
   // Flatten paginated photos
@@ -905,7 +933,12 @@ function HomePage() {
       const trySearch = () => {
         attempts++;
         if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
-          handleSearch(q, undefined, saved.colorHex ?? undefined);
+          handleSearch(
+            q,
+            undefined,
+            saved.colorHex ?? undefined,
+            saved.dashboardReturn !== null
+          );
         } else {
           setTimeout(trySearch, 100);
         }
@@ -1289,8 +1322,14 @@ function HomePage() {
   async function handleSearch(
     query: string,
     filters?: ExifFilters,
-    paramColorHex?: string
+    paramColorHex?: string,
+    preserveDashboardReturn = false
   ) {
+    if (!preserveDashboardReturn) {
+      clearDashboardReturnTarget();
+      setDrillDownFilters(undefined);
+      setShowDrillBanner(false);
+    }
     // paramColorHex 未传时沿用当前 state（保留钻取来的色彩筛选）
     const effectiveColorHex =
       paramColorHex === undefined ? colorHex : paramColorHex;
@@ -2037,18 +2076,35 @@ function HomePage() {
                     filter.clearSearch();
                     setDrillDownFilters(undefined);
                     setShowDrillBanner(false);
+                    clearDashboardReturnTarget();
                   }}
                   type="button"
                 >
                   {t("clearAll")}
                 </button>
-                <button
-                  className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
-                  onClick={() => navigate({ to: "/dashboard" })}
-                  type="button"
-                >
-                  {t("backToDashboard")}
-                </button>
+                {dashboardReturnTarget && (
+                  <button
+                    aria-label={t(
+                      dashboardReturnTarget.tab === "places"
+                        ? "backToPlacesAndColors"
+                        : "backToDashboard"
+                    )}
+                    className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
+                    onClick={() =>
+                      navigate({
+                        to: "/dashboard",
+                        search: dashboardReturnTarget,
+                      })
+                    }
+                    type="button"
+                  >
+                    {t(
+                      dashboardReturnTarget.tab === "places"
+                        ? "backToPlacesAndColors"
+                        : "backToDashboard"
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -2591,6 +2647,7 @@ export const Route = createFileRoute("/")({
     lensModel?: string;
     advancedField?: string;
     advancedValue?: string;
+    dashboardReturn?: string;
     dateFrom?: string;
     dateMonth?: string;
     dateHour?: string;
@@ -2617,6 +2674,10 @@ export const Route = createFileRoute("/")({
     lensModel: search.lensModel as string | undefined,
     advancedField: search.advancedField as string | undefined,
     advancedValue: search.advancedValue as string | undefined,
+    dashboardReturn:
+      typeof search.dashboardReturn === "string"
+        ? search.dashboardReturn
+        : undefined,
     dateFrom: search.dateFrom as string | undefined,
     dateMonth: search.dateMonth as string | undefined,
     dateHour: search.dateHour as string | undefined,

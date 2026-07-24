@@ -965,6 +965,7 @@ i18n.use(initReactI18next).init({
           "确定要删除预设「{{name}}」吗？此操作不可撤销。",
         drillDownActiveHint: "已从仪表盘钻取，可在下方继续叠加筛选条件",
         backToDashboard: "返回仪表盘",
+        backToPlacesAndColors: "返回地点与色彩",
         dateRangeLabel: "日期范围",
         dateMonthLabel: "拍摄月份",
         dateHourLabel: "拍摄时段",
@@ -2556,6 +2557,7 @@ i18n.use(initReactI18next).init({
         drillDownActiveHint:
           "Drilled down from dashboard. You can add more filters below.",
         backToDashboard: "Back to Dashboard",
+        backToPlacesAndColors: "Back to Places & Colors",
         dateRangeLabel: "Date Range",
         dateMonthLabel: "Month Taken",
         dateHourLabel: "Hour Taken",

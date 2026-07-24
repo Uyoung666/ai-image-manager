@@ -23,6 +23,7 @@ describe("BrowseSessionContext", () => {
       expect(session.searchQuery).toBe("");
       expect(session.lastClickedIdx).toBe(-1);
       expect(session.detailDismissed).toBe(false);
+      expect(session.dashboardReturn).toBeNull();
     });
 
     it("should return new object each call for unknown route (not shared reference)", () => {
@@ -34,6 +35,23 @@ describe("BrowseSessionContext", () => {
   });
 
   describe("saveSession", () => {
+    it("stores the validated dashboard return context for the current session", () => {
+      const { result } = renderHook(() => useBrowseSession(), { wrapper });
+      const dashboardReturn = {
+        tab: "places" as const,
+        range: "custom" as const,
+        from: "2026-02-01",
+        to: "2026-02-28",
+      };
+
+      act(() => {
+        result.current.saveSession("home-search", { dashboardReturn });
+      });
+
+      expect(result.current.getSession("home-search").dashboardReturn).toEqual(
+        dashboardReturn
+      );
+    });
     it("should save and retrieve partial data", () => {
       const { result } = renderHook(() => useBrowseSession(), { wrapper });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildApertureChartData,
   buildCalendarHeatmapData,
+  buildDashboardReturnTarget,
   buildDateDrillParams,
   buildFocalChartData,
   buildMonthlyChartData,
@@ -13,6 +14,7 @@ import {
   getDashboardTimeRange,
   getTopItems,
   mergeDashboardDrillParams,
+  parseDashboardReturnTarget,
 } from "@/utils/dashboard-data";
 
 describe("dashboard chart data", () => {
@@ -251,5 +253,33 @@ describe("dashboard chart data", () => {
       dateFrom: "2026-01-01",
       dateTo: "2026-01-31",
     });
+  });
+
+  it("builds a places return target with the active custom range", () => {
+    expect(
+      buildDashboardReturnTarget({
+        tab: "places",
+        range: "custom",
+        from: "2026-02-01",
+        to: "2026-02-28",
+      })
+    ).toBe(
+      "/dashboard?tab=places&range=custom&from=2026-02-01&to=2026-02-28"
+    );
+  });
+
+  it("only accepts validated internal dashboard return targets", () => {
+    expect(
+      parseDashboardReturnTarget(
+        "/dashboard?tab=places&range=custom&from=2026-02-01&to=2026-02-28"
+      )
+    ).toEqual({
+      tab: "places",
+      range: "custom",
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+    expect(parseDashboardReturnTarget("https://example.com")).toBeNull();
+    expect(parseDashboardReturnTarget("/dashboard?tab=unknown")).toBeNull();
   });
 });

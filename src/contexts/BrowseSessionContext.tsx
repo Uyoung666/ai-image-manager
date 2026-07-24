@@ -5,6 +5,7 @@ import {
   useContext,
   useRef,
 } from "react";
+import type { DashboardReturnTarget } from "@/utils/dashboard-data";
 
 /**
  * 浏览上下文：按 routeKey 独立保存每个页面的浏览状态
@@ -19,6 +20,8 @@ import {
 interface BrowseSessionData {
   /** 颜色搜索的 hex 值 */
   colorHex: string | null;
+  /** 仪表盘钻取后可返回的受控目标 */
+  dashboardReturn: DashboardReturnTarget | null;
   /** 详情面板是否被用户手动关闭 */
   detailDismissed: boolean;
   /** 最后一次点击的索引（用于 Shift-多选） */
@@ -32,12 +35,13 @@ interface BrowseSessionData {
 }
 
 const DEFAULT_SESSION: BrowseSessionData = {
-  selectedIds: [],
-  searchQuery: "",
-  searchMode: null,
   colorHex: null,
+  dashboardReturn: null,
   lastClickedIdx: -1,
   detailDismissed: false,
+  searchMode: null,
+  searchQuery: "",
+  selectedIds: [],
 };
 
 interface BrowseSessionContextValue {
@@ -108,6 +112,7 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
       // 如果所有字段都是默认值，删除而不是保存
       const isDefault =
         updated.selectedIds.length === 0 &&
+        updated.dashboardReturn === null &&
         updated.searchQuery === "" &&
         updated.searchMode === null &&
         updated.colorHex === null &&
@@ -160,7 +165,10 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
             Array.isArray(parsed.selectedIds) &&
             typeof parsed.searchQuery === "string"
           ) {
-            cached = { data: parsed, lastAccess: Date.now() };
+            cached = {
+              data: { ...DEFAULT_SESSION, ...parsed },
+              lastAccess: Date.now(),
+            };
             sessionsRef.current.set(routeKey, cached);
           }
         }
