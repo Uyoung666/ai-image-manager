@@ -144,6 +144,7 @@ function HomePage() {
   );
   const [sequenceViewReady, setSequenceViewReady] = useState(true);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
+  const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
   const [sequenceSuggestions, setSequenceSuggestions] = useState<
     SequenceSuggestion[]
   >([]);
@@ -557,6 +558,46 @@ function HomePage() {
     sequenceMode,
     sequenceRefresh,
   ]);
+
+  // The grid only needs sequences represented by its currently loaded page,
+  // but the toolbar badge must not fluctuate as pagination catches up.
+  useEffect(() => {
+    if (isSearching) {
+      return;
+    }
+    let cancelled = false;
+    ipc.client.photos
+      .listSequences({
+        scope: "gallery",
+        folderId: filter.activeFolderId ?? undefined,
+        favoriteOnly: filter.favoriteOnly || undefined,
+        tagIds:
+          filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
+        tagMode: filter.tagMode,
+      })
+      .then((result) => {
+        if (!cancelled) {
+          setGallerySequenceCount(result.length);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGallerySequenceCount(0);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filter.activeFolderId,
+    filter.activeTagIds,
+    filter.favoriteOnly,
+    filter.tagMode,
+    isSearching,
+    sequenceRefresh,
+  ]);
+
+  const sequenceCount = isSearching ? sequences.length : gallerySequenceCount;
 
   useEffect(() => {
     let cancelled = false;
@@ -1891,7 +1932,7 @@ function HomePage() {
                     type="button"
                   >
                     {t("sequenceViewSequences")}
-                    {sequences.length > 0 ? ` ${sequences.length}` : ""}
+                    {sequenceCount > 0 ? ` ${sequenceCount}` : ""}
                   </button>
                 </div>
                 {sequenceMode === "sequences" && (
