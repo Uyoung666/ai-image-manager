@@ -100,6 +100,7 @@ type PendingSequenceAction =
   | { id: number; type: "ungroup" };
 
 const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
+const NO_PHOTO_IDS: number[] = [];
 
 function isSearchMode(value: string | null): value is SearchMode {
   return SEARCH_MODES.includes(value as SearchMode);
@@ -503,6 +504,10 @@ function HomePage() {
   // `rawPhotos` is the real-time array; `photos` is deferred to avoid
   // blocking the main thread when switching between 20K+ item lists.
   const rawPhotos = isSearching ? (searchResults ?? []) : pagedPhotos;
+  const sequencePhotoIds = useMemo(
+    () => (isSearching ? rawPhotos.map((photo) => photo.id) : NO_PHOTO_IDS),
+    [isSearching, rawPhotos]
+  );
   const photos = useDeferredValue(rawPhotos);
   // Only show stale overlay when the data *source* changes (search↔browse),
   // not during pagination or in-place refreshes.
@@ -540,9 +545,12 @@ function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    const photoIds = rawPhotos.map((photo) => photo.id);
-    const useGalleryScope = sequenceMode === "sequences" && !isSearching;
-    if (!useGalleryScope && !photoIds.length) {
+    // In browse mode, sequence cards must be resolved against the full filtered
+    // gallery rather than just the loaded photo page. Otherwise a page made up
+    // entirely of one collapsed sequence can hide later sequences in the same
+    // folder until pagination happens to reach one of their members.
+    const useGalleryScope = !isSearching;
+    if (!(useGalleryScope || sequencePhotoIds.length)) {
       setSequences([]);
       return;
     }
@@ -559,7 +567,7 @@ function HomePage() {
                   : undefined,
               tagMode: filter.tagMode,
             }
-          : { photoIds, scope: "members" }
+          : { photoIds: sequencePhotoIds, scope: "members" }
       )
       .then((result) => {
         if (!cancelled) {
@@ -586,13 +594,12 @@ function HomePage() {
     filter.favoriteOnly,
     filter.tagMode,
     isSearching,
-    rawPhotos,
-    sequenceMode,
+    sequencePhotoIds,
     sequenceRefresh,
   ]);
 
-  // The grid only needs sequences represented by its currently loaded page,
-  // but the toolbar badge must not fluctuate as pagination catches up.
+  // Keep the toolbar badge in sync independently of the currently rendered
+  // photo page.
   useEffect(() => {
     if (isSearching) {
       return;
