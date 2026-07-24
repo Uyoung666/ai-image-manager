@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import {
   advancedExifData,
@@ -319,6 +320,31 @@ export function detectSequenceCandidates(
 
 type Database = ReturnType<typeof getDatabase>;
 
+export type SequenceChangeReason =
+  | "detection"
+  | "manual"
+  | "rebuild"
+  | "restore";
+
+let sequenceVersion = 0;
+
+/** Notify every open renderer after a sequence mutation has committed. */
+export function notifySequencesChanged(
+  folderId: number | undefined,
+  reason: SequenceChangeReason
+): void {
+  sequenceVersion += 1;
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send("sequences-changed", {
+        folderId,
+        reason,
+        version: sequenceVersion,
+      });
+    }
+  }
+}
+
 function deleteUnlockedAutomaticSequences(db: Database, folderId?: number) {
   const conditions = [
     eq(photoSequences.source, "auto"),
@@ -502,7 +528,10 @@ export function previewPhotoSequences(folderId?: number) {
 }
 
 /** Rebuilds only automatic, unlocked sequences. Safe to call after EXIF enrichment. */
-export function detectPhotoSequences(folderId?: number): number {
+export function detectPhotoSequences(
+  folderId?: number,
+  reason: SequenceChangeReason = "detection"
+): number {
   const db = getDatabase();
   const candidates = loadSequenceCandidates(db, folderId);
 
@@ -511,5 +540,6 @@ export function detectPhotoSequences(folderId?: number): number {
     deleteUnlockedAutomaticSequences(db, folderId);
     rebuildDetectedSequences(db, candidates, settings);
   });
+  notifySequencesChanged(folderId, reason);
   return candidates.length;
 }

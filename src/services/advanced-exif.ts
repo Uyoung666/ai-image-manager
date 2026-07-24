@@ -156,7 +156,7 @@ async function enrichPhoto(photo: { id: number; path: string }): Promise<void> {
 function pendingPhotos() {
   const db = getDatabase();
   return db
-    .select({ id: photos.id, path: photos.path })
+    .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
     .from(photos)
     .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
     .where(
@@ -206,7 +206,14 @@ export async function runAdvancedExifEnrichment(): Promise<AdvancedExifProgress>
   // EXIF signals, so it never competes with import or exiftool work.
   try {
     const { detectPhotoSequences } = await import("@/services/photo-sequences");
-    detectPhotoSequences();
+    const folderIds = new Set(
+      candidates
+        .map((photo) => photo.folderId)
+        .filter((folderId): folderId is number => folderId != null)
+    );
+    for (const folderId of folderIds) {
+      detectPhotoSequences(folderId);
+    }
   } catch {
     // Sequence detection is an enhancement; an EXIF pass must still succeed.
   }

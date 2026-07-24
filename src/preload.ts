@@ -79,6 +79,10 @@ ipcRenderer.on("ai-status-changed", (_event, payload) => {
   window.postMessage({ channel: "ai-status-changed", ...payload }, "*");
 });
 
+ipcRenderer.on("sequences-changed", (_event, payload) => {
+  window.postMessage({ channel: "sequences-changed", ...payload }, "*");
+});
+
 ipcRenderer.on("import-queue-status", (_event, payload) => {
   window.postMessage({ channel: "import-queue-status", ...payload }, "*");
 });

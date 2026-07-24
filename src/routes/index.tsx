@@ -142,6 +142,7 @@ function HomePage() {
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
     "photos"
   );
+  const [sequenceViewReady, setSequenceViewReady] = useState(true);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [sequenceSuggestions, setSequenceSuggestions] = useState<
     SequenceSuggestion[]
@@ -405,6 +406,9 @@ function HomePage() {
       if (event.data?.channel === "ai-status-changed") {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
+      if (event.data?.channel === "sequences-changed") {
+        setSequenceRefresh((value) => value + 1);
+      }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
@@ -489,30 +493,70 @@ function HomePage() {
   }, [photos, expandedSequence]);
   const photosRef = useRef(actionPhotos);
   photosRef.current = actionPhotos;
+  const displayedSequenceMode =
+    sequenceMode === "sequences" && sequenceViewReady
+      ? "sequences"
+      : "photos";
+  const handleSequenceModeChange = useCallback(
+    (mode: "photos" | "sequences") => {
+      setSequenceViewReady(mode === "photos");
+      setSequenceMode(mode);
+    },
+    []
+  );
 
   useEffect(() => {
     let cancelled = false;
     const photoIds = rawPhotos.map((photo) => photo.id);
-    if (!photoIds.length) {
+    const useGalleryScope = sequenceMode === "sequences" && !isSearching;
+    if (!useGalleryScope && !photoIds.length) {
       setSequences([]);
       return;
     }
     ipc.client.photos
-      .listSequences({ photoIds })
+      .listSequences(
+        useGalleryScope
+          ? {
+              scope: "gallery",
+              folderId: filter.activeFolderId ?? undefined,
+              favoriteOnly: filter.favoriteOnly || undefined,
+              tagIds:
+                filter.activeTagIds.length > 0
+                  ? filter.activeTagIds
+                  : undefined,
+              tagMode: filter.tagMode,
+            }
+          : { photoIds, scope: "members" }
+      )
       .then((result) => {
         if (!cancelled) {
           setSequences(result as PhotoSequence[]);
+          if (sequenceMode === "sequences") {
+            setSequenceViewReady(true);
+          }
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSequences([]);
+          if (sequenceMode === "sequences") {
+            setSequenceViewReady(true);
+          }
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [rawPhotos, sequenceRefresh]);
+  }, [
+    filter.activeFolderId,
+    filter.activeTagIds,
+    filter.favoriteOnly,
+    filter.tagMode,
+    isSearching,
+    rawPhotos,
+    sequenceMode,
+    sequenceRefresh,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1836,31 +1880,33 @@ function HomePage() {
                 <div className="flex rounded-md border border-border p-0.5 text-[11px]">
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => setSequenceMode("photos")}
+                    onClick={() => handleSequenceModeChange("photos")}
                     type="button"
                   >
                     {t("sequenceViewPhotos")}
                   </button>
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => setSequenceMode("sequences")}
+                    onClick={() => handleSequenceModeChange("sequences")}
                     type="button"
                   >
                     {t("sequenceViewSequences")}
                     {sequences.length > 0 ? ` ${sequences.length}` : ""}
                   </button>
                 </div>
-                <button
-                  className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                  disabled={rebuildingSequences}
-                  onClick={handleRebuildSequences}
-                  type="button"
-                >
-                  {rebuildingSequences
-                    ? t("sequenceDetecting")
-                    : t("sequenceDetect")}
-                </button>
-                {sequenceSuggestions.length > 0 && (
+                {sequenceMode === "sequences" && (
+                  <button
+                    className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    disabled={rebuildingSequences}
+                    onClick={handleRebuildSequences}
+                    type="button"
+                  >
+                    {rebuildingSequences
+                      ? t("sequenceDetecting")
+                      : t("sequenceDetect")}
+                  </button>
+                )}
+                {sequenceMode === "sequences" && sequenceSuggestions.length > 0 && (
                   <button
                     className="rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
                     onClick={() => {
@@ -2019,7 +2065,7 @@ function HomePage() {
                 routeKey={routeKey}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
-                sequenceMode={sequenceMode}
+                sequenceMode={displayedSequenceMode}
                 sequences={sequences}
                 showToolbar={false}
                 sort={sortField}

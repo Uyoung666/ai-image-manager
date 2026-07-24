@@ -1231,14 +1231,6 @@ app.whenReady().then(async () => {
         );
     }, 8000);
 
-    // Cached MakerNotes allow sequence detection to run before a background
-    // re-enrichment finishes, while the enrichment pass performs the final rebuild.
-    setTimeout(() => {
-      import("@/services/photo-sequences")
-        .then(({ detectPhotoSequences }) => detectPhotoSequences())
-        .catch((err) => log.warn({ err }, "[Sequences] Startup detection failed"));
-    }, 12_000);
-
     // Forward system theme changes to renderer
     nativeTheme.on("updated", () => {
       mainWindow?.webContents.send(

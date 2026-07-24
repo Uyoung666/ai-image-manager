@@ -1,5 +1,5 @@
 import { os } from "@orpc/server";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import {
@@ -9,15 +9,19 @@ import {
   photoSequenceMembers,
   photoSequenceSuggestions,
   photoSequences,
+  photoTags,
   photos,
+  folders,
 } from "@/db/schema";
 import { hammingDistance } from "@/services/bk-tree";
 import {
   detectPhotoSequences,
+  notifySequencesChanged,
   previewPhotoSequences,
   readCaptureMetadata,
 } from "@/services/photo-sequences";
 import { getSequenceDetectionSettings } from "@/services/sequence-detection-settings";
+import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 
 const SequenceIdSchema = z.object({ id: z.number().int().positive() });
 const SequenceIdsSchema = z.object({
@@ -32,7 +36,11 @@ const UpdateSequenceMembersSchema = z.object({
 });
 const ListSequencesSchema = z.object({
   folderId: z.number().int().positive().optional(),
+  favoriteOnly: z.boolean().optional(),
   photoIds: z.array(z.number().int().positive()).optional(),
+  scope: z.enum(["gallery", "members"]).optional(),
+  tagIds: z.array(z.number().int().positive()).optional(),
+  tagMode: z.enum(["and", "or"]).optional(),
 });
 
 const photoFields = {
@@ -251,9 +259,19 @@ export const listSequences = os
   .input(ListSequencesSchema)
   .handler(({ input }) => {
     const db = getDatabase();
-    const conditions: ReturnType<typeof eq>[] = [];
+    const conditions: SQL[] = [];
+    let folderIds: number[] | undefined;
     if (input.folderId != null) {
-      conditions.push(eq(photoSequences.folderId, input.folderId));
+      const hierarchy = db
+        .select({ id: folders.id, parentId: folders.parentId })
+        .from(folders)
+        .all();
+      folderIds = getFolderSubtreeIds(hierarchy, input.folderId);
+      conditions.push(
+        folderIds.length > 0
+          ? inArray(photoSequences.folderId, folderIds)
+          : eq(photoSequences.folderId, input.folderId)
+      );
     }
     const sequences = db
       .select({ ...sequenceFields, photo: { ...photoFields } })
@@ -277,24 +295,51 @@ export const listSequences = os
           )
           .all()
       : [];
+    const scope = input.scope ?? (input.photoIds?.length ? "members" : "gallery");
+    const visiblePhotoIds = new Set<number>();
+    if (scope === "members" && input.photoIds?.length) {
+      for (const id of input.photoIds) visiblePhotoIds.add(id);
+    } else if (scope === "gallery") {
+      const photoConditions = [isNull(photos.deletedAt)];
+      if (input.folderId != null) {
+        photoConditions.push(
+          folderIds?.length
+            ? inArray(photos.folderId, folderIds)
+            : eq(photos.folderId, input.folderId)
+        );
+      }
+      if (input.favoriteOnly) photoConditions.push(eq(photos.isFavorite, true));
+      if (input.tagIds?.length) {
+        if (input.tagMode === "and") {
+          for (const tagId of input.tagIds) {
+            photoConditions.push(
+              sql`EXISTS (SELECT 1 FROM ${photoTags} WHERE ${photoTags.photoId} = ${photos.id} AND ${photoTags.tagId} = ${tagId})`
+            );
+          }
+        } else {
+          photoConditions.push(
+            sql`${photos.id} IN (SELECT ${photoTags.photoId} FROM ${photoTags} WHERE ${inArray(photoTags.tagId, input.tagIds)})`
+          );
+        }
+      }
+      for (const row of db
+        .select({ id: photos.id })
+        .from(photos)
+        .where(and(...photoConditions))
+        .all()) {
+        visiblePhotoIds.add(row.id);
+      }
+    }
     const withMembers = sequences.map((sequence) => ({
       ...sequence,
       memberPhotoIds: memberRows
         .filter((row) => row.sequenceId === sequence.id)
         .map((row) => row.photoId),
+    })).map((sequence) => ({
+      ...sequence,
+      matchedCount: sequence.memberPhotoIds.filter((id) => visiblePhotoIds.has(id)).length,
     }));
-    if (!input.photoIds?.length) {
-      return withMembers;
-    }
-    const matched = new Set(
-      db
-        .select({ sequenceId: photoSequenceMembers.sequenceId })
-        .from(photoSequenceMembers)
-        .where(inArray(photoSequenceMembers.photoId, input.photoIds))
-        .all()
-        .map((row) => row.sequenceId)
-    );
-    return withMembers.filter((sequence) => matched.has(sequence.id));
+    return withMembers.filter((sequence) => sequence.matchedCount > 0);
   });
 
 export const getSequence = os.input(SequenceIdSchema).handler(({ input }) => {
@@ -343,7 +388,7 @@ export const rebuildSequences = os
     if (input.dryRun) {
       return { dryRun: true, ...previewPhotoSequences(input.folderId) };
     }
-    const processed = detectPhotoSequences(input.folderId);
+    const processed = detectPhotoSequences(input.folderId, "rebuild");
     refreshSequenceSuggestions(input.folderId);
     return { processed };
   });
@@ -374,6 +419,7 @@ export const ignoreSequencePhotos = os
           .run();
       }
     });
+    notifySequencesChanged(undefined, "manual");
     return { success: true };
   });
 
@@ -396,14 +442,16 @@ export const createSequence = os
       .leftJoin(exifData, eq(exifData.photoId, photos.id))
       .where(and(inArray(photos.id, input.photoIds), isNull(photos.deletedAt)))
       .all();
-    return { id: insertManualSequence(db, input.type, members) };
+    const id = insertManualSequence(db, input.type, members);
+    notifySequencesChanged(members[0]?.folderId ?? undefined, "manual");
+    return { id };
   });
 
 export const mergeSequences = os
   .input(SequenceIdsSchema)
   .handler(({ input }) => {
     const db = getDatabase();
-    return db.transaction(() => {
+    const result = db.transaction(() => {
       const sequences = input.sequenceIds.map((id) =>
         db.select().from(photoSequences).where(eq(photoSequences.id, id)).get()
       );
@@ -440,6 +488,8 @@ export const mergeSequences = os
         .run();
       return merged;
     });
+    notifySequencesChanged(undefined, "manual");
+    return result;
   });
 
 export const splitSequence = os
@@ -451,7 +501,7 @@ export const splitSequence = os
   )
   .handler(({ input }) => {
     const db = getDatabase();
-    return db.transaction(() => {
+    const result = db.transaction(() => {
       const sequence = db
         .select()
         .from(photoSequences)
@@ -483,6 +533,8 @@ export const splitSequence = os
         ],
       };
     });
+    notifySequencesChanged(undefined, "manual");
+    return result;
   });
 
 export const setSequenceRepresentative = os
@@ -516,6 +568,7 @@ export const setSequenceRepresentative = os
       })
       .where(eq(photoSequences.id, input.id))
       .run();
+    notifySequencesChanged(undefined, "manual");
     return { ok: true };
   });
 
@@ -523,7 +576,7 @@ export const updateSequenceMembers = os
   .input(UpdateSequenceMembersSchema)
   .handler(({ input }) => {
     const db = getDatabase();
-    return db.transaction(() => {
+    const result = db.transaction(() => {
       const sequence = db
         .select()
         .from(photoSequences)
@@ -562,6 +615,8 @@ export const updateSequenceMembers = os
         ),
       };
     });
+    notifySequencesChanged(undefined, "manual");
+    return result;
   });
 
 export const deleteManualSequence = os
@@ -577,6 +632,7 @@ export const deleteManualSequence = os
       throw new Error("Only manual sequences can be deleted");
     }
     db.delete(photoSequences).where(eq(photoSequences.id, input.id)).run();
+    notifySequencesChanged(sequence.folderId ?? undefined, "manual");
     return { ok: true };
   });
 
@@ -605,7 +661,7 @@ export const restoreAutomaticSequence = os
           )
           .run();
       }
-      detectPhotoSequences(sequence.folderId ?? undefined);
+      detectPhotoSequences(sequence.folderId ?? undefined, "restore");
       refreshSequenceSuggestions(sequence.folderId ?? undefined);
     });
     return { ok: true };
