@@ -32,6 +32,13 @@ import {
 import { type GeoLocation, PhotoMap } from "@/components/PhotoMap";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
@@ -224,6 +231,10 @@ function DashboardPage() {
     useState<DashboardDisplayMode>("trend");
   const [timeDisplayMode, setTimeDisplayMode] =
     useState<DashboardDisplayMode>("trend");
+  const [isCustomRangeDialogOpen, setIsCustomRangeDialogOpen] =
+    useState(false);
+  const [customFrom, setCustomFrom] = useState(search.from ?? "");
+  const [customTo, setCustomTo] = useState(search.to ?? "");
   useRouteScrollRestoration(scrollRef, {
     getRouteKey: () => `dashboard-${tab}`,
   });
@@ -242,6 +253,19 @@ function DashboardPage() {
     },
     [navigate, search]
   );
+  const openCustomRangeDialog = () => {
+    setCustomFrom(search.from ?? "");
+    setCustomTo(search.to ?? "");
+    setIsCustomRangeDialogOpen(true);
+  };
+  const applyCustomRange = () => {
+    setSearch({
+      range: "custom",
+      from: customFrom || undefined,
+      to: customTo || undefined,
+    });
+    setIsCustomRangeDialogOpen(false);
+  };
 
   const statsQuery = useQuery({
     queryKey: ["dashboard", "stats", range.from, range.toExclusive],
@@ -541,13 +565,13 @@ function DashboardPage() {
               <button
                 className={`rounded-[6px] px-3 py-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-ring ${preset === item ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}
                 key={item}
-                onClick={() =>
-                  setSearch({
-                    range: item,
-                    from: item === "custom" ? search.from : undefined,
-                    to: item === "custom" ? search.to : undefined,
-                  })
-                }
+                onClick={() => {
+                  if (item === "custom") {
+                    openCustomRangeDialog();
+                    return;
+                  }
+                  setSearch({ range: item, from: undefined, to: undefined });
+                }}
                 type="button"
               >
                 {t(`dashboardRange_${item}`)}
@@ -555,35 +579,52 @@ function DashboardPage() {
             ))}
           </fieldset>
         </div>
-        {preset === "custom" && (
-          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[11px] text-muted-foreground">
-            <label>
-              {t("dashboardFromDate")}{" "}
+      </header>
+
+      <Dialog
+        onOpenChange={setIsCustomRangeDialogOpen}
+        open={isCustomRangeDialogOpen}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t("dashboardRange_custom")}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 text-[12px] text-muted-foreground">
+            <label className="grid gap-1.5">
+              <span>{t("dashboardFromDate")}</span>
               <input
-                className="ml-1 rounded-[5px] border border-border bg-background px-2 py-1 text-foreground"
-                max={search.to}
-                onChange={(event) =>
-                  setSearch({ from: event.target.value || undefined })
-                }
+                className="dashboard-date-input rounded-[5px] border border-border bg-background px-2 py-1.5 text-foreground"
+                max={customTo || undefined}
+                onChange={(event) => setCustomFrom(event.target.value)}
                 type="date"
-                value={search.from ?? ""}
+                value={customFrom}
               />
             </label>
-            <label>
-              {t("dashboardToDate")}{" "}
+            <label className="grid gap-1.5">
+              <span>{t("dashboardToDate")}</span>
               <input
-                className="ml-1 rounded-[5px] border border-border bg-background px-2 py-1 text-foreground"
-                min={search.from}
-                onChange={(event) =>
-                  setSearch({ to: event.target.value || undefined })
-                }
+                className="dashboard-date-input rounded-[5px] border border-border bg-background px-2 py-1.5 text-foreground"
+                min={customFrom || undefined}
+                onChange={(event) => setCustomTo(event.target.value)}
                 type="date"
-                value={search.to ?? ""}
+                value={customTo}
               />
             </label>
           </div>
-        )}
-      </header>
+          <DialogFooter>
+            <Button
+              onClick={() => setIsCustomRangeDialogOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              {t("cancel")}
+            </Button>
+            <Button onClick={applyCustomRange} type="button">
+              {t("confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <nav
         aria-label={t("dashboardSections")}

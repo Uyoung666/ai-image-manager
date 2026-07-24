@@ -6,6 +6,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Keep the native date-picker icon visible in both application themes. */
+.dashboard-date-input {
+  color-scheme: dark;
+}
+
+.light .dashboard-date-input {
+  color-scheme: light;
+}
+
 /* Linear Dark Theme — 对齐 PDR DESIGN.md 规范 */
 :root {
   /* 背景层级 (替代阴影) */
