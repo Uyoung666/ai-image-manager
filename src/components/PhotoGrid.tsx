@@ -12,6 +12,7 @@ import { MasonryGrid } from "./MasonryGrid";
 import { PhotoCard } from "./PhotoCard";
 import { SequenceCard } from "./SequenceCard";
 import type { PhotoSequence, PhotoSequenceDetail } from "@/types/photo-sequence";
+import type { SearchMatch } from "@/types/photo";
 import { SortDropdown } from "./SortDropdown";
 import { LoadingSpinner } from "./ui/loading-spinner";
 import { Skeleton } from "./ui/skeleton";
@@ -27,7 +28,7 @@ interface Photo {
   isFavorite?: boolean;
   isIndexed: boolean;
   path: string;
-  similarity?: number;
+  match?: SearchMatch;
   thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
   width: number;
@@ -578,7 +579,7 @@ export const PhotoGrid = memo(
             onToggleFavorite={onToggleFavorite}
             path={photo.path}
             searchQuery={searchQuery}
-            similarity={photo.similarity}
+            match={photo.match}
             thumbnailSmallPath={photo.thumbnailSmallPath}
             thumbnailPath={photo.thumbnailPath}
             width={photo.width}

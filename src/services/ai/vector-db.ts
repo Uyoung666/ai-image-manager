@@ -782,7 +782,7 @@ export async function searchByColorVector(
   g: number,
   b: number,
   limit: number
-): Promise<Array<{ photoId: number; distance: number }> | null> {
+): Promise<Array<{ photoId: number; distanceSquared: number }> | null> {
   if (!colorTable) {
     return null;
   }
@@ -799,7 +799,9 @@ export async function searchByColorVector(
 
     return rawResults.map((row) => ({
       photoId: row.photo_id as number,
-      distance: row._distance as number,
+      // LanceDB L2 exposes squared Euclidean distance, the same unit used by
+      // SQLite closest_color_dist.
+      distanceSquared: row._distance as number,
     }));
   } catch (err: any) {
     console.error("[AI] Color vector search failed:", err?.message);

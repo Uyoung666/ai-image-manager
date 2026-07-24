@@ -110,4 +110,27 @@ describe("PhotoCard", () => {
     expect(mark).toBeInTheDocument();
     expect(mark?.textContent).toBe("photo");
   });
+
+  it("labels a color result with color closeness instead of generic confidence", () => {
+    render(<PhotoCard {...baseProps} match={{ kind: "color", score: 0.5 }} />);
+    expect(screen.getByText("色彩接近度 50%")).toBeInTheDocument();
+  });
+
+  it("labels semantic results with their similarity", () => {
+    render(
+      <PhotoCard {...baseProps} match={{ kind: "semantic", score: 0.73 }} />
+    );
+    expect(screen.getByText("相似度 73%")).toBeInTheDocument();
+  });
+
+  it("labels exact tag matches without a percentage", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{ kind: "exact", source: "tag" }}
+      />
+    );
+    expect(screen.getByText("标签命中")).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
 });

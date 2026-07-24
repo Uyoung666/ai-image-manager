@@ -38,6 +38,7 @@ import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import { rerankWithCLIPScore } from "@/services/rerank";
 import {
+  COLOR_MATCH_MAX_DISTANCE_SQUARED,
   hydrateColorSearchResults,
   mergeColorSearchRanks,
 } from "@/utils/color-search";
@@ -81,6 +82,14 @@ const HEX_COLOR_RE = /^([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const HEX_COLOR_QUERY_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 const CHINESE_CHAR_RE = /[一-鿿]/;
 const GLOB_WILDCARD_RE = /[*?[]/;
+
+function withoutInternalSearchScores<
+  T extends { score?: number; similarity?: number },
+>(results: T[]): Omit<T, "score" | "similarity">[] {
+  return results.map(({ score: _score, similarity: _similarity, ...result }) =>
+    result
+  );
+}
 
 // ── 熔断与超时配置 ──────────────────────────────────────────────────
 const AI_SEARCH_TIMEOUT_MS = 2000;
@@ -174,7 +183,12 @@ export const searchByText = os
         if (!photo) {
           return null;
         }
-        return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+        return {
+          ...photo,
+          match: { kind: "semantic" as const, score: r.similarity },
+          similarity: r.similarity,
+          fileDate: photo.fileDate,
+        };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
@@ -187,7 +201,10 @@ export const searchByText = os
     }
 
     const scored = applyTimeDecay(merged, { temporalBoost });
-    return { results: scored, query: input.query };
+    return {
+      results: withoutInternalSearchScores(scored),
+      query: input.query,
+    };
   });
 
 export const searchByImage = os
@@ -231,12 +248,17 @@ export const searchByImage = os
         if (!photo) {
           return null;
         }
-        return { ...photo, similarity: r.similarity, fileDate: photo.fileDate };
+        return {
+          ...photo,
+          match: { kind: "image" as const, score: r.similarity },
+          similarity: r.similarity,
+          fileDate: photo.fileDate,
+        };
       })
       .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
 
     const scored = applyTimeDecay(merged);
-    return { results: scored };
+    return { results: withoutInternalSearchScores(scored) };
   });
 
 // ── 超时包装器 ──────────────────────────────────────────────────────
@@ -545,12 +567,12 @@ export const searchCompound = os
         const sqliteResults = db.all(
           sql`WITH color_candidates AS MATERIALIZED (${candidateSql})
               SELECT id, dist FROM color_candidates
-              WHERE dist < 10000
+              WHERE dist < ${COLOR_MATCH_MAX_DISTANCE_SQUARED}
               ORDER BY dist ASC
               LIMIT ${limit}`
         ) as Array<{ dist: number; id: number }>;
 
-        let lanceResults: Array<{ distance: number; photoId: number }> = [];
+        let lanceResults: Array<{ distanceSquared: number; photoId: number }> = [];
         if (sqliteResults.length < limit) {
           try {
             lanceResults = await withTimeout(
@@ -566,7 +588,7 @@ export const searchCompound = os
                 );
                 return (results ?? []).filter(
                   (result) =>
-                    result.distance < 10_000 &&
+                    result.distanceSquared < COLOR_MATCH_MAX_DISTANCE_SQUARED &&
                     (!creatorIds || creatorIds.has(result.photoId))
                 );
               })(),
@@ -581,7 +603,7 @@ export const searchCompound = os
         const ranks = mergeColorSearchRanks(
           sqliteResults.map((result) => ({
             photoId: result.id,
-            distance: result.dist,
+            distanceSquared: result.dist,
           })),
           lanceResults,
           limit
@@ -1082,6 +1104,11 @@ export const searchCompound = os
         // Rerank failed, continue with merged results
       }
 
+      const toSearchMatch = (result: (typeof rerankedList)[number]) =>
+        result._source === "ai"
+          ? ({ kind: "semantic" as const, score: result.similarity })
+          : ({ kind: "exact" as const, source: result._source });
+
       const hasExifOrTimeFilter =
         effectiveDateFrom ||
         effectiveDateTo ||
@@ -1116,6 +1143,7 @@ export const searchCompound = os
             }
             return {
               ...photo,
+              match: toSearchMatch(r),
               similarity: r.similarity,
               fileDate: photo.fileDate,
             };
@@ -1130,7 +1158,7 @@ export const searchCompound = os
         );
         const scored = applyTimeDecay(combined, { temporalBoost });
         return {
-          results: scored.slice(0, limit),
+          results: withoutInternalSearchScores(scored.slice(0, limit)),
           query: q,
           total: scored.length,
           semantic,
@@ -1234,6 +1262,7 @@ export const searchCompound = os
           }
           return {
             ...photo,
+            match: toSearchMatch(r),
             similarity: r.similarity,
             fileDate: photo.fileDate,
           };
@@ -1246,7 +1275,7 @@ export const searchCompound = os
       );
       const scored = applyTimeDecay(combined, { temporalBoost });
       return {
-        results: scored.slice(0, limit),
+        results: withoutInternalSearchScores(scored.slice(0, limit)),
         query: q,
         total: scored.length,
         semantic,

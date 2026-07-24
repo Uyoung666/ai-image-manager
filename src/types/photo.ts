@@ -1,3 +1,9 @@
+export type SearchMatch =
+  | { kind: "color"; score: number }
+  | { kind: "exact"; source: "filename" | "person" | "tag" }
+  | { kind: "image"; score: number }
+  | { kind: "semantic"; score: number };
+
 export interface Photo {
   dominantColors?: string | null;
   fileDate?: number | null;
@@ -9,7 +15,8 @@ export interface Photo {
   isIndexed: boolean;
   path: string;
   score?: number;
-  similarity?: number;
+  /** Search-result display metadata. Ranking scores stay internal to search. */
+  match?: SearchMatch;
   thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
   width: number;

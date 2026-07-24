@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import type { SearchMatch } from "@/types/photo";
 
 interface PhotoCardProps {
   deleting?: boolean;
@@ -19,7 +20,7 @@ interface PhotoCardProps {
   path: string;
   renderImage?: boolean;
   searchQuery?: string;
-  similarity?: number;
+  match?: SearchMatch;
   thumbnailSmallPath?: string | null;
   thumbnailPath: string | null;
   width: number;
@@ -121,7 +122,7 @@ export const PhotoCard = memo(function PhotoCard({
   isFavorite,
   deleting,
   searchQuery,
-  similarity,
+  match,
   renderImage = true,
   onClick,
   onDoubleClick,
@@ -165,6 +166,27 @@ export const PhotoCard = memo(function PhotoCard({
     }
     return undefined;
   }, [dominantColors]);
+
+  const searchMatchLabel = useMemo(() => {
+    if (!match) {
+      return null;
+    }
+    if (match.kind === "color") {
+      return t("searchMatchColor", { value: Math.round(match.score * 100) });
+    }
+    if (match.kind === "semantic" || match.kind === "image") {
+      return t("searchMatchSimilarity", {
+        value: Math.round(match.score * 100),
+      });
+    }
+    if (match.source === "person") {
+      return t("searchMatchExactPerson");
+    }
+    if (match.source === "tag") {
+      return t("searchMatchExactTag");
+    }
+    return t("searchMatchExactFilename");
+  }, [match, t]);
 
   // ── 事件处理 ──────────────────────────────────────────────────────
   const starRef = useRef<HTMLButtonElement>(null);
@@ -387,10 +409,9 @@ export const PhotoCard = memo(function PhotoCard({
         </button>
       )}
 
-      {/* Similarity badge — shown on AI search results */}
-      {similarity !== undefined && similarity > 0 && (
+      {searchMatchLabel && (
         <div className="absolute top-2 left-2 rounded-[4px] bg-primary/80 px-1.5 py-0.5 font-medium text-[10px] text-white backdrop-blur-sm">
-          {Math.round(similarity * 100)}%
+          {searchMatchLabel}
         </div>
       )}
 
