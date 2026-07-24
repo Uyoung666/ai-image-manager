@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
+import { preloadImage } from "@/utils/local-media-url";
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
@@ -27,6 +28,12 @@ vi.mock("@/ipc/manager", () => ({
       },
     },
   },
+}));
+
+vi.mock("@/utils/local-media-url", () => ({
+  preloadImage: vi.fn(),
+  toLocalMediaUrl: (filePath: string | null | undefined) =>
+    filePath ? `local-media://${filePath}` : "",
 }));
 
 const photos = [
@@ -164,6 +171,60 @@ describe("PhotoLightbox", () => {
     expect(screen.getByRole("button", { name: "pauseSlideshow" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(screen.getByRole("button", { name: "playSlideshow" })).toBeInTheDocument();
+  });
+
+  it("renders a single thumbnail frame while playing a sequence", async () => {
+    render(
+      <PhotoLightbox
+        autoPlay
+        initialIndex={0}
+        onClose={vi.fn()}
+        open
+        photos={photos}
+        sequencePlayback
+      />
+    );
+
+    const playbackFrame = await screen.findByRole("img", {
+      name: "first.jpg",
+    });
+    expect(playbackFrame).toHaveAttribute(
+      "data-lightbox-playback-frame",
+      "true"
+    );
+    expect(playbackFrame).toHaveAttribute(
+      "src",
+      expect.stringContaining("Thumbs/first.jpg")
+    );
+    expect(document.querySelectorAll("[data-lightbox-image]")).toHaveLength(1);
+
+    fireEvent.keyDown(window, { key: " " });
+
+    expect(
+      document.querySelector("[data-lightbox-playback-frame]")
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "first.jpg" })).toHaveAttribute(
+      "src",
+      expect.stringContaining("Photos/first.jpg")
+    );
+  });
+
+  it("preloads wrapped playback frames before the sequence loops", async () => {
+    vi.mocked(preloadImage).mockClear();
+    render(
+      <PhotoLightbox
+        autoPlay
+        initialIndex={1}
+        onClose={vi.fn()}
+        open
+        photos={photos}
+        sequencePlayback
+      />
+    );
+
+    await waitFor(() =>
+      expect(preloadImage).toHaveBeenCalledWith(photos[0].thumbnailPath)
+    );
   });
 
   it("defers Escape handling while a child modal is open", () => {

@@ -391,8 +391,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
     const ahead = previewPlayback ? 12 : 2;
     const behind = previewPlayback ? 1 : 2;
-    for (let index = Math.max(0, safeIndex - behind); index <= Math.min(photos.length - 1, safeIndex + ahead); index += 1) {
-      if (index !== safeIndex) preloadImage(photos[index].thumbnailPath ?? photos[index].path);
+    const preloadedIndices = new Set<number>();
+    for (let offset = -behind; offset <= ahead; offset += 1) {
+      const index = (safeIndex + offset + photos.length) % photos.length;
+      if (index === safeIndex || preloadedIndices.has(index)) {
+        continue;
+      }
+      preloadedIndices.add(index);
+      preloadImage(photos[index].thumbnailPath ?? photos[index].path);
     }
   }, [open, photo, photos, previewPlayback, safeIndex]);
 
@@ -789,94 +795,101 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               </div>
             </div>
           ) : (
-            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
-            <>
-              {sequencePlayback && previewUrl && (
-                <img
-                  alt=""
-                  aria-hidden="true"
-                  className={`absolute max-h-full max-w-full select-none object-contain transition-opacity duration-100 ${previewPlayback || !loaded ? "opacity-100" : "opacity-0"}`}
-                  height={photo.height || undefined}
-                  src={previewUrl}
-                  width={photo.width || undefined}
-                />
-              )}
-            <img
-              alt={photo.filename}
-              className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-              data-lightbox-image
-              draggable={zoom <= 1}
-              height={photo.height || undefined}
-              key={`${photo.id}-${sourceKey}`}
-              onDoubleClick={() => {
-                if (zoom > 1.05) {
-                  updateZoom(1);
-                } else {
-                  showActualPixels();
-                }
-              }}
-              onDragStart={(event) => {
-                event.preventDefault();
-                if (zoom > 1) {
-                  return;
-                }
-                window.electronAPI?.startDrag?.(photo.path);
-              }}
-              onError={() => {
-                setImageError(true);
-                setLoaded(false);
-              }}
-              onLoad={() => setLoaded(true)}
-              onPointerDown={(event) => {
-                if (zoom <= 1) {
-                  return;
-                }
-                event.currentTarget.setPointerCapture(event.pointerId);
-                dragRef.current = {
-                  pointerId: event.pointerId,
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  translateX: translate.x,
-                  translateY: translate.y,
-                };
-              }}
-              onPointerMove={(event) => {
-                const drag = dragRef.current;
-                if (!drag || drag.pointerId !== event.pointerId) {
-                  return;
-                }
-                setTranslate({
-                  x: drag.translateX + event.clientX - drag.startX,
-                  y: drag.translateY + event.clientY - drag.startY,
-                });
-              }}
-              onPointerUp={(event) => {
-                if (dragRef.current?.pointerId === event.pointerId) {
-                  dragRef.current = null;
-                }
-              }}
-              onWheel={handleWheelZoom}
-              ref={imageRef}
-              src={toLocalMediaUrl(previewPlayback && photo.thumbnailPath ? photo.thumbnailPath : photo.path)}
-              style={{
-                maxHeight:
-                  isQuarterTurn && canvasSize.width
-                    ? `${Math.max(1, canvasSize.width - 128)}px`
-                    : undefined,
-                maxWidth:
-                  isQuarterTurn && canvasSize.height
-                    ? `${Math.max(1, canvasSize.height - 112)}px`
-                    : undefined,
-                transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
-                backfaceVisibility: "hidden",
-                transition: dragRef.current || wheelActive
-                  ? "none"
-                  : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
-                willChange: "transform",
-              }}
-              width={photo.width || undefined}
-            />
-            </>
+            // biome-ignore lint/style/noNestedTernary: the mutually exclusive error, playback, and original-image surfaces keep only one frame mounted.
+            previewPlayback && previewUrl ? (
+              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the playback image retains error handling for unavailable thumbnails.
+              <img
+                alt={photo.filename}
+                className="max-h-full max-w-full select-none object-contain"
+                data-lightbox-image
+                data-lightbox-playback-frame
+                draggable={false}
+                height={photo.height || undefined}
+                onError={() => {
+                  setImageError(true);
+                  setLoaded(false);
+                }}
+                src={previewUrl}
+                width={photo.width || undefined}
+              />
+            ) : (
+              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
+              <img
+                alt={photo.filename}
+                className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+                data-lightbox-image
+                draggable={zoom <= 1}
+                height={photo.height || undefined}
+                key={`${photo.id}-${sourceKey}`}
+                onDoubleClick={() => {
+                  if (zoom > 1.05) {
+                    updateZoom(1);
+                  } else {
+                    showActualPixels();
+                  }
+                }}
+                onDragStart={(event) => {
+                  event.preventDefault();
+                  if (zoom > 1) {
+                    return;
+                  }
+                  window.electronAPI?.startDrag?.(photo.path);
+                }}
+                onError={() => {
+                  setImageError(true);
+                  setLoaded(false);
+                }}
+                onLoad={() => setLoaded(true)}
+                onPointerDown={(event) => {
+                  if (zoom <= 1) {
+                    return;
+                  }
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  dragRef.current = {
+                    pointerId: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    translateX: translate.x,
+                    translateY: translate.y,
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const drag = dragRef.current;
+                  if (!drag || drag.pointerId !== event.pointerId) {
+                    return;
+                  }
+                  setTranslate({
+                    x: drag.translateX + event.clientX - drag.startX,
+                    y: drag.translateY + event.clientY - drag.startY,
+                  });
+                }}
+                onPointerUp={(event) => {
+                  if (dragRef.current?.pointerId === event.pointerId) {
+                    dragRef.current = null;
+                  }
+                }}
+                onWheel={handleWheelZoom}
+                ref={imageRef}
+                src={toLocalMediaUrl(photo.path)}
+                style={{
+                  maxHeight:
+                    isQuarterTurn && canvasSize.width
+                      ? `${Math.max(1, canvasSize.width - 128)}px`
+                      : undefined,
+                  maxWidth:
+                    isQuarterTurn && canvasSize.height
+                      ? `${Math.max(1, canvasSize.height - 112)}px`
+                      : undefined,
+                  transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
+                  backfaceVisibility: "hidden",
+                  transition: dragRef.current || wheelActive
+                    ? "none"
+                    : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+                  willChange: "transform",
+                }}
+                width={photo.width || undefined}
+              />
+            )
           )}
           {(!previewPlayback || !previewUrl) && !(loaded || imageError) && (
             <div className="absolute inset-0 flex items-center justify-center">
