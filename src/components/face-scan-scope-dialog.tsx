@@ -1,6 +1,7 @@
-import { ChevronRight, Folder as FolderIcon } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FolderBadge } from "@/components/FolderBadge";
 import {
   buildFolderTree,
   type FolderTreeNode,
@@ -125,14 +126,12 @@ export function FaceScanScopeDialog({
     return (
       <div key={node.folder.id}>
         <div
-          className={`flex min-h-9 items-center gap-1 rounded-[6px] px-1.5 ${
-            included ? "bg-primary/5" : "hover:bg-foreground/5"
-          }`}
+          className="flex min-h-9 items-center gap-1 rounded-[6px] px-1.5 transition-colors hover:bg-foreground/5 dark:hover:bg-white/[0.045]"
           style={{ paddingLeft: depth * 16 + 6 }}
         >
           <button
             aria-label={expanded ? t("collapseFolder") : t("expandFolder")}
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-[4px] text-muted-foreground disabled:invisible"
+            className="flex h-7 w-7 flex-none items-center justify-center rounded-[4px] text-muted-foreground transition-colors hover:text-foreground disabled:invisible"
             disabled={!hasChildren}
             onClick={() => toggleExpanded(node.folder.id)}
             type="button"
@@ -143,22 +142,55 @@ export function FaceScanScopeDialog({
               }`}
             />
           </button>
-          <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-1 text-left has-disabled:cursor-default">
+          <div className="checkbox-wrapper min-w-0 flex-1">
             <input
               checked={included}
-              className="h-4 w-4 flex-none accent-primary"
+              className="check"
               disabled={inherited}
+              id={`face-scan-folder-${node.folder.id}`}
               onChange={() => toggleFolder(node.folder.id)}
               type="checkbox"
             />
-            <FolderIcon className="h-4 w-4 flex-none text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-[13px]">
-              {node.folder.displayName}
-            </span>
-            <span className="flex-none text-[11px] text-muted-foreground">
-              {node.folder.totalPhotoCount ?? node.folder.photoCount}
-            </span>
-          </label>
+            <label
+              className={`label flex min-w-0 flex-1 items-center gap-2 py-1 text-left ${
+                inherited ? "cursor-default" : ""
+              }`}
+              htmlFor={`face-scan-folder-${node.folder.id}`}
+            >
+              <svg
+                aria-hidden="true"
+                className="flex-none text-foreground/55 dark:text-white/45"
+                height="45"
+                viewBox="0 0 95 95"
+                width="45"
+              >
+                <rect
+                  fill="none"
+                  height="50"
+                  stroke="currentColor"
+                  width="50"
+                  x="30"
+                  y="20"
+                />
+                <g transform="translate(0,-952.36222)">
+                  <path
+                    className="path1"
+                    d="m 56,963 c -102,122 6,9 7,9 17,-5 -66,69 -38,52 122,-77 -7,14 18,4 29,-11 45,-43 23,-4"
+                    fill="none"
+                    stroke="var(--danger)"
+                    strokeWidth="3"
+                  />
+                </g>
+              </svg>
+              <FolderBadge className="h-5 w-5" folder={node.folder} />
+              <span className="min-w-0 flex-1 truncate font-medium text-[13px] text-foreground/90">
+                {node.folder.displayName}
+              </span>
+              <span className="flex-none rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-muted-foreground dark:bg-white/[0.055]">
+                {node.folder.totalPhotoCount ?? node.folder.photoCount}
+              </span>
+            </label>
+          </div>
         </div>
         {expanded && node.children.map((child) => renderNode(child, depth + 1))}
       </div>
@@ -186,12 +218,20 @@ export function FaceScanScopeDialog({
       }}
       open={open}
     >
-      <DialogContent className="grid-rows-[auto_minmax(0,1fr)_auto]" size="lg">
-        <DialogHeader>
-          <DialogTitle>{t("faceScanScopeTitle")}</DialogTitle>
-          <DialogDescription>{t("faceScanScopeDescription")}</DialogDescription>
+      <DialogContent
+        className="grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border/80 bg-popover p-0 shadow-2xl dark:border-white/[0.09] dark:bg-[#121318] dark:ring-white/[0.04]"
+        overlayClassName="bg-black/70 backdrop-blur-[2px]"
+        size="lg"
+      >
+        <DialogHeader className="px-5 pt-5 pb-4">
+          <DialogTitle className="text-[16px]">
+            {t("faceScanScopeTitle")}
+          </DialogTitle>
+          <DialogDescription className="leading-relaxed dark:text-white/50">
+            {t("faceScanScopeDescription")}
+          </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[55vh] min-h-48 overflow-y-auto rounded-[8px] border border-border bg-background p-1">
+        <div className="mx-5 max-h-[55vh] min-h-48 overflow-y-auto rounded-[8px] border border-border/80 bg-background/70 p-1.5 shadow-inner dark:border-white/[0.07] dark:bg-[#090a0e]">
           {tree.length > 0 ? (
             tree.map((node) => renderNode(node))
           ) : (
@@ -200,8 +240,8 @@ export function FaceScanScopeDialog({
             </div>
           )}
         </div>
-        <DialogFooter className="items-center sm:justify-between">
-          <p className="text-[12px] text-muted-foreground">
+        <DialogFooter className="mt-4 items-center border-border/70 border-t bg-muted/20 px-5 py-4 sm:justify-between dark:border-white/[0.07] dark:bg-white/[0.018]">
+          <p className="text-[12px] text-muted-foreground dark:text-white/45">
             {selectedRoots.size > 0
               ? t("faceScanScopeSummary", {
                   count: selectedRoots.size,
@@ -211,7 +251,7 @@ export function FaceScanScopeDialog({
           </p>
           <div className="flex justify-end gap-2">
             <button
-              className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
+              className="rounded-[6px] border border-transparent px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-foreground/5 hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/5"
               disabled={saving}
               onClick={onClose}
               type="button"
@@ -219,7 +259,7 @@ export function FaceScanScopeDialog({
               {t("cancel")}
             </button>
             <button
-              className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground disabled:opacity-50"
+              className="rounded-[6px] bg-primary px-4 py-2 font-medium text-[12px] text-primary-foreground shadow-sm transition-colors hover:bg-[var(--primary-hover)] disabled:opacity-50"
               disabled={selectedRoots.size === 0 || saving}
               onClick={save}
               type="button"

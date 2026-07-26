@@ -85,4 +85,26 @@ describe("FaceScanScopeDialog", () => {
 
     expect(screen.getByText("保存")).toBeDisabled();
   });
+
+  it("uses the customized folder appearance", () => {
+    render(
+      <FaceScanScopeDialog
+        folders={[
+          {
+            ...folders[0],
+            appearanceColor: "#DC2626",
+            appearanceIcon: "camera",
+          },
+        ]}
+        initialFolderIds={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        open
+      />
+    );
+
+    const badge = document.querySelector('[data-folder-badge="true"]');
+    expect(badge).toHaveAttribute("data-folder-color", "#DC2626");
+    expect(badge).toHaveAttribute("data-folder-icon", "camera");
+  });
 });
