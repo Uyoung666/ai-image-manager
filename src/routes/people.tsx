@@ -8,6 +8,7 @@ import {
 import {
   ArrowLeft,
   Check,
+  FolderCog,
   Merge,
   Pencil,
   Play,
@@ -27,6 +28,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FaceScanScopeDialog } from "@/components/face-scan-scope-dialog";
 import { RouteError } from "@/components/RouteError";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -35,6 +37,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import { useFolders } from "@/hooks/useFolders";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -49,6 +52,11 @@ interface FaceIdentity {
   id: number;
   name: string | null;
   representativePhotoId: number | null;
+}
+
+interface FaceScanScope {
+  configured: boolean;
+  folderIds: number[];
 }
 
 // Person cover image with intersection-observer lazy loading + fade-in + error fallback
@@ -315,6 +323,7 @@ function PeoplePage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { data: folders = [] } = useFolders();
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "people-list" });
 
@@ -331,11 +340,22 @@ function PeoplePage() {
     },
     staleTime: 30_000,
   });
+  const { data: scanScope, isLoading: isScanScopeLoading } = useQuery({
+    queryKey: ["faces", "scan-scope"],
+    queryFn: async () =>
+      (await ipc.client.faces.getScanScope({})) as FaceScanScope,
+    staleTime: 30_000,
+  });
 
   // Face detection state
   const [detecting, setDetecting] = useState(false);
   const [progress, setProgress] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [pendingScanAfterScope, setPendingScanAfterScope] = useState<
+    "incremental" | "rescan" | null
+  >(null);
+  const [confirmRescan, setConfirmRescan] = useState(false);
 
   const loadIdentities = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
@@ -429,17 +449,59 @@ function PeoplePage() {
     try {
       const result = (await ipc.client.faces.startFaceDetection({
         rescan,
-      })) as { started: boolean; photoCount?: number; message?: string };
+      })) as {
+        started: boolean;
+        photoCount?: number;
+        message?: string;
+        requiresScope?: boolean;
+      };
       if (result.started) {
         setProgress(t("detectingFacesCount", { count: result.photoCount }));
         startPolling();
       } else {
         setProgress(result.message || t("startFailed"));
         setDetecting(false);
+        if (result.requiresScope) {
+          setPendingScanAfterScope(rescan ? "rescan" : "incremental");
+          setScopeDialogOpen(true);
+        }
       }
     } catch {
       setProgress(t("startFaceDetectionFailed"));
       setDetecting(false);
+    }
+  }
+
+  function requestDetection(rescan: boolean) {
+    if (!scanScope?.configured) {
+      setPendingScanAfterScope(rescan ? "rescan" : "incremental");
+      setScopeDialogOpen(true);
+      return;
+    }
+    if (rescan) {
+      setConfirmRescan(true);
+    } else {
+      handleStartDetection(false);
+    }
+  }
+
+  async function saveScanScope(folderIds: number[]) {
+    try {
+      const saved = (await ipc.client.faces.setScanScope({
+        folderIds,
+      })) as FaceScanScope;
+      queryClient.setQueryData(["faces", "scan-scope"], saved);
+      setScopeDialogOpen(false);
+      const pending = pendingScanAfterScope;
+      setPendingScanAfterScope(null);
+      toast.success(t("faceScanScopeSaved"));
+      if (pending === "incremental") {
+        await handleStartDetection(false);
+      } else if (pending === "rescan") {
+        setConfirmRescan(true);
+      }
+    } catch {
+      toast.error(t("faceScanScopeSaveFailed"));
     }
   }
 
@@ -711,7 +773,7 @@ function PeoplePage() {
                       <button
                         className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
                         disabled={detecting}
-                        onClick={() => handleStartDetection(true)}
+                        onClick={() => requestDetection(true)}
                         type="button"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
@@ -722,10 +784,27 @@ function PeoplePage() {
                   </Tooltip>
                 </>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+                    disabled={detecting || isScanScopeLoading}
+                    onClick={() => {
+                      setPendingScanAfterScope(null);
+                      setScopeDialogOpen(true);
+                    }}
+                    type="button"
+                  >
+                    <FolderCog className="h-3.5 w-3.5" />
+                    {t("faceScanScope")}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("faceScanScopeHint")}</TooltipContent>
+              </Tooltip>
               <button
                 className="flex items-center gap-1.5 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                disabled={detecting}
-                onClick={() => handleStartDetection(false)}
+                disabled={detecting || isScanScopeLoading}
+                onClick={() => requestDetection(false)}
                 type="button"
               >
                 <Play className="h-3.5 w-3.5" />
@@ -825,8 +904,8 @@ function PeoplePage() {
             </p>
             <button
               className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
-              disabled={detecting}
-              onClick={() => handleStartDetection(false)}
+              disabled={detecting || isScanScopeLoading}
+              onClick={() => requestDetection(false)}
               type="button"
             >
               {t("startFaceDetectionShort")}
@@ -875,6 +954,27 @@ function PeoplePage() {
         onConfirm={performDeleteIdentity}
         open={confirmDelete !== null}
         title={t("deletePersonTitle")}
+      />
+      <ConfirmDialog
+        confirmText={t("confirmRescanFaces")}
+        description={t("rescanFacesDescription")}
+        onCancel={() => setConfirmRescan(false)}
+        onConfirm={() => {
+          setConfirmRescan(false);
+          handleStartDetection(true);
+        }}
+        open={confirmRescan}
+        title={t("rescanFacesTitle")}
+      />
+      <FaceScanScopeDialog
+        folders={folders}
+        initialFolderIds={scanScope?.folderIds ?? []}
+        onClose={() => {
+          setScopeDialogOpen(false);
+          setPendingScanAfterScope(null);
+        }}
+        onSave={saveScanScope}
+        open={scopeDialogOpen}
       />
     </div>
   );

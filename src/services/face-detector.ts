@@ -167,17 +167,22 @@ export async function detectFaces(
 
   try {
     // Skip photos that are already face-processed
-    const photoRows = db
-      .select({ id: photos.id, path: photos.path })
-      .from(photos)
-      .where(
-        and(
-          inArray(photos.id, photoIds),
-          eq(photos.isFaceProcessed, false),
-          isNull(photos.deletedAt)
-        )
-      )
-      .all();
+    const photoRows: Array<{ id: number; path: string }> = [];
+    for (let index = 0; index < photoIds.length; index += 500) {
+      photoRows.push(
+        ...db
+          .select({ id: photos.id, path: photos.path })
+          .from(photos)
+          .where(
+            and(
+              inArray(photos.id, photoIds.slice(index, index + 500)),
+              eq(photos.isFaceProcessed, false),
+              isNull(photos.deletedAt)
+            )
+          )
+          .all()
+      );
+    }
 
     if (!photoRows.length) {
       // Still need to cluster any unassigned faces
@@ -431,7 +436,65 @@ function updateIdentityCentroid(identityId: number): void {
       .set({ centroidEmbedding: JSON.stringify(centroid) })
       .where(eq(faceIdentities.id, identityId))
       .run();
+  } else {
+    db.update(faceIdentities)
+      .set({ centroidEmbedding: null })
+      .where(eq(faceIdentities.id, identityId))
+      .run();
   }
+}
+
+/** Rebuild denormalized identity fields after scoped face-vector removal. */
+export function refreshFaceIdentityMetadata(identityId: number): void {
+  const db = getDatabase();
+  const identity = db
+    .select({ id: faceIdentities.id })
+    .from(faceIdentities)
+    .where(eq(faceIdentities.id, identityId))
+    .get();
+  if (!identity) {
+    return;
+  }
+
+  const members = db
+    .select({
+      confidence: faceVectors.confidence,
+      photoId: faceVectors.photoId,
+      vectorId: faceVectors.id,
+    })
+    .from(faceIdentityMembers)
+    .innerJoin(
+      faceVectors,
+      eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+    )
+    .where(eq(faceIdentityMembers.identityId, identityId))
+    .all();
+
+  if (members.length === 0) {
+    db.update(faceIdentities)
+      .set({
+        centroidEmbedding: null,
+        faceCount: 0,
+        representativePhotoId: null,
+        representativeVectorId: null,
+      })
+      .where(eq(faceIdentities.id, identityId))
+      .run();
+    return;
+  }
+
+  const representative = [...members].sort(
+    (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)
+  )[0];
+  db.update(faceIdentities)
+    .set({
+      faceCount: new Set(members.map((member) => member.photoId)).size,
+      representativePhotoId: representative.photoId,
+      representativeVectorId: String(representative.vectorId),
+    })
+    .where(eq(faceIdentities.id, identityId))
+    .run();
+  updateIdentityCentroid(identityId);
 }
 
 export async function reclusterAllFaces(): Promise<{ merged: number }> {

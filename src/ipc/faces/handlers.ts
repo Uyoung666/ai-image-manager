@@ -14,101 +14,163 @@ import {
   getFaceDetectionProgress,
   isFaceDetectionRunning,
   reclusterAllFaces,
+  refreshFaceIdentityMetadata,
 } from "@/services/face-detector";
+import {
+  getFaceScanScope,
+  resolveFaceScanFolderIds,
+  setFaceScanScope,
+} from "@/services/face-scan-scope";
 
 const IdSchema = z.object({ id: z.number() });
 
 export const startFaceDetection = os
   .input(
     z.object({
-      photoIds: z.array(z.number()).optional(),
       rescan: z.boolean().optional(),
     })
   )
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     if (isFaceDetectionRunning()) {
       return { started: false, message: "人脸检测已在运行中" };
     }
 
     const db = getDatabase();
-    let ids = input.photoIds;
+    const scopeFolderIds = resolveFaceScanFolderIds();
+    if (scopeFolderIds.length === 0) {
+      return {
+        started: false,
+        requiresScope: true,
+        message: "请先选择人脸识别扫描范围",
+      };
+    }
+
+    const targetPhoto = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.folderId, scopeFolderIds),
+          isNull(photos.deletedAt)
+        )
+      )
+      .limit(1)
+      .get();
+    if (!targetPhoto) {
+      return { started: false, message: "扫描范围内没有照片" };
+    }
 
     if (input.rescan) {
-      // Preserve confirmed identities, re-detect everything else
-      const confirmedIds = db
-        .select({ id: faceIdentities.id })
-        .from(faceIdentities)
-        .where(eq(faceIdentities.isConfirmed, true))
-        .all()
-        .map((r) => r.id);
-
-      if (confirmedIds.length > 0) {
-        const unconfirmedIdentities = db
-          .select({ id: faceIdentities.id })
-          .from(faceIdentities)
-          .where(eq(faceIdentities.isConfirmed, false))
-          .all();
-        for (const ui of unconfirmedIdentities) {
-          db.delete(faceIdentityMembers)
-            .where(eq(faceIdentityMembers.identityId, ui.id))
-            .run();
-        }
-        db.delete(faceIdentities)
-          .where(eq(faceIdentities.isConfirmed, false))
-          .run();
-        // Keep confirmed identities + their members + their face vectors
-        const confirmedFaceVectorIds = db
-          .select({ faceVectorId: faceIdentityMembers.faceVectorId })
+      const scopedVectorRows = db
+        .select({ id: faceVectors.id, photoId: faceVectors.photoId })
+        .from(faceVectors)
+        .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+        .where(
+          and(
+            inArray(photos.folderId, scopeFolderIds),
+            isNull(photos.deletedAt)
+          )
+        )
+        .all();
+      const confirmedRows = db
+        .select({
+          photoId: faceVectors.photoId,
+        })
+        .from(faceIdentityMembers)
+        .innerJoin(
+          faceIdentities,
+          eq(faceIdentities.id, faceIdentityMembers.identityId)
+        )
+        .innerJoin(
+          faceVectors,
+          eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+        )
+        .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+        .where(
+          and(
+            eq(faceIdentities.isConfirmed, true),
+            inArray(photos.folderId, scopeFolderIds),
+            isNull(photos.deletedAt)
+          )
+        )
+        .all();
+      const preservedPhotoIds = new Set(
+        confirmedRows.map((row) => row.photoId)
+      );
+      const removableVectorIds = scopedVectorRows
+        .filter((row) => !preservedPhotoIds.has(row.photoId))
+        .map((row) => row.id);
+      const affectedIdentityIds = new Set<number>();
+      for (let index = 0; index < removableVectorIds.length; index += 500) {
+        const chunk = removableVectorIds.slice(index, index + 500);
+        for (const row of db
+          .select({ id: faceIdentityMembers.identityId })
           .from(faceIdentityMembers)
-          .all()
-          .map((r) => r.faceVectorId);
-        const allFaceVectors = db
-          .select({ id: faceVectors.id })
-          .from(faceVectors)
-          .all();
-        for (const fv of allFaceVectors) {
-          if (!confirmedFaceVectorIds.includes(fv.id)) {
-            db.delete(faceVectors).where(eq(faceVectors.id, fv.id)).run();
-          }
+          .where(inArray(faceIdentityMembers.faceVectorId, chunk))
+          .all()) {
+          affectedIdentityIds.add(row.id);
         }
-        // Reset isFaceProcessed for photos whose face vectors were removed
-        const remainingFaceVectorPhotoIds = db
-          .select({ photoId: faceVectors.photoId })
-          .from(faceVectors)
-          .all()
-          .map((r) => r.photoId);
-        const allPhotoIds = db
-          .select({ id: photos.id })
-          .from(photos)
-          .all()
-          .map((r) => r.id);
-        for (const pid of allPhotoIds) {
-          if (!remainingFaceVectorPhotoIds.includes(pid)) {
-            db.update(photos)
-              .set({ isFaceProcessed: false })
-              .where(eq(photos.id, pid))
-              .run();
-          }
-        }
-      } else {
-        // No confirmed identities — clear everything
-        db.delete(faceIdentityMembers).run();
-        db.delete(faceIdentities).run();
-        db.delete(faceVectors).run();
-        db.update(photos).set({ isFaceProcessed: false }).run();
       }
 
-      const all = db.select({ id: photos.id }).from(photos).all();
-      ids = all.map((p) => p.id);
-    } else if (!(ids && ids.length)) {
-      // Default: detect faces in all unprocessed photos
-      const unprocessed = db
-        .select({ id: photos.id })
-        .from(photos)
-        .where(and(eq(photos.isFaceProcessed, false), isNull(photos.deletedAt)))
-        .all();
-      ids = unprocessed.map((p) => p.id);
+      db.transaction(() => {
+        for (let index = 0; index < removableVectorIds.length; index += 500) {
+          const chunk = removableVectorIds.slice(index, index + 500);
+          db.delete(faceVectors)
+            .where(inArray(faceVectors.id, chunk))
+            .run();
+        }
+
+        db.update(photos)
+          .set({ isFaceProcessed: false })
+          .where(
+            and(
+              inArray(photos.folderId, scopeFolderIds),
+              isNull(photos.deletedAt)
+            )
+          )
+          .run();
+        const preservedIds = [...preservedPhotoIds];
+        for (let index = 0; index < preservedIds.length; index += 500) {
+          db.update(photos)
+            .set({ isFaceProcessed: true })
+            .where(inArray(photos.id, preservedIds.slice(index, index + 500)))
+            .run();
+        }
+
+        for (const identityId of affectedIdentityIds) {
+          const identity = db
+            .select({ isConfirmed: faceIdentities.isConfirmed })
+            .from(faceIdentities)
+            .where(eq(faceIdentities.id, identityId))
+            .get();
+          const remainingMember = db
+            .select({ id: faceIdentityMembers.id })
+            .from(faceIdentityMembers)
+            .where(eq(faceIdentityMembers.identityId, identityId))
+            .get();
+          if (identity && !identity.isConfirmed && !remainingMember) {
+            db.delete(faceIdentities)
+              .where(eq(faceIdentities.id, identityId))
+              .run();
+          } else {
+            refreshFaceIdentityMetadata(identityId);
+          }
+        }
+      });
     }
+
+    const ids = db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(
+        and(
+          inArray(photos.folderId, scopeFolderIds),
+          eq(photos.isFaceProcessed, false),
+          isNull(photos.deletedAt)
+        )
+      )
+      .all()
+      .map((photo) => photo.id);
 
     if (!ids.length) {
       return { started: false, message: "没有需要检测的照片" };
@@ -139,6 +201,16 @@ export const startFaceDetection = os
 
     return { started: true, photoCount: ids.length };
   });
+
+export const getScanScope = os.handler(() => getFaceScanScope());
+
+export const setScanScope = os
+  .input(
+    z.object({
+      folderIds: z.array(z.number().int().positive()).min(1),
+    })
+  )
+  .handler(({ input }) => setFaceScanScope(input.folderIds));
 
 export const getDetectionProgress = os.handler(() => {
   return getFaceDetectionProgress();
@@ -423,7 +495,8 @@ export const updateFaceIdentity = os
           .orderBy(desc(faceVectors.confidence))
           .limit(1)
           .get();
-        setData.representativeVectorId = memberFace?.vectorId ?? null;
+        setData.representativeVectorId =
+          memberFace?.vectorId == null ? null : String(memberFace.vectorId);
       }
     }
     db.update(faceIdentities)
@@ -499,7 +572,10 @@ export const mergeIdentities = os
         .get();
 
       db.update(faceIdentities)
-        .set({ representativeVectorId: bestFace?.vectorId ?? null })
+        .set({
+          representativeVectorId:
+            bestFace?.vectorId == null ? null : String(bestFace.vectorId),
+        })
         .where(eq(faceIdentities.id, input.targetId))
         .run();
     }
