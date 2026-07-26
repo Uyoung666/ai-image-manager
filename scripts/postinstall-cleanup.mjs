@@ -1,4 +1,4 @@
-// Removes the nested @xenova/transformers/node_modules/sharp directory.
+// Removes dependency files that should not enter the Electron runtime/package.
 //
 // Why: @xenova/transformers ships with `sharp ^0.32.0` as a regular dep,
 // which npm installs into `@xenova/transformers/node_modules/sharp` because
@@ -10,6 +10,10 @@
 // Removing the nested sharp lets `import sharp from 'sharp'` inside
 // transformers/src/utils/image.js resolve to the top-level sharp@0.34
 // (which IS rebuilt for the Electron Node ABI).
+//
+// update-electron-app also ships a README-only screenshot with a malformed
+// iCCP profile. Removing that unused image prevents libpng warnings when
+// development or packaging tools inspect dependency image assets.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -26,6 +30,12 @@ const nestedSharp = path.join(
   "node_modules",
   "sharp"
 );
+const updateElectronAppScreenshot = path.join(
+  repoRoot,
+  "node_modules",
+  "update-electron-app",
+  "screenshot.png"
+);
 
 if (fs.existsSync(nestedSharp)) {
   fs.rmSync(nestedSharp, { recursive: true, force: true });
@@ -34,4 +44,11 @@ if (fs.existsSync(nestedSharp)) {
   );
 } else {
   console.log("[postinstall-cleanup] No nested sharp found, nothing to do");
+}
+
+if (fs.existsSync(updateElectronAppScreenshot)) {
+  fs.rmSync(updateElectronAppScreenshot, { force: true });
+  console.log(
+    "[postinstall-cleanup] Removed update-electron-app README screenshot with invalid iCCP profile"
+  );
 }
