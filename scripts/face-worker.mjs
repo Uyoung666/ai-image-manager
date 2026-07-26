@@ -12,15 +12,12 @@
  *   Then worker exits with code 0.
  */
 
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 // --- ONNX Runtime (native Node.js binding for speed) ---
 import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
-
-const faceRequire = createRequire(import.meta.url);
-const exiftoolPath = faceRequire("exiftool-vendored.exe");
+import { extractRawPreview } from "./raw-preview.mjs";
 
 const RAW_EXTENSIONS = new Set([
   ".cr2",
@@ -42,28 +39,6 @@ const RAW_EXTENSIONS = new Set([
 
 function isRawFile(filePath) {
   return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
-}
-
-function extractRawPreview(filePath) {
-  try {
-    const buf = execFileSync(exiftoolPath, ["-b", "-JpgFromRaw", filePath], {
-      timeout: 15_000,
-      maxBuffer: 50 * 1024 * 1024,
-    });
-    if (buf && buf.length > 0) {
-      return buf;
-    }
-  } catch {}
-  try {
-    const buf = execFileSync(exiftoolPath, ["-b", "-PreviewImage", filePath], {
-      timeout: 15_000,
-      maxBuffer: 50 * 1024 * 1024,
-    });
-    if (buf && buf.length > 0) {
-      return buf;
-    }
-  } catch {}
-  return null;
 }
 
 let ort = null;
