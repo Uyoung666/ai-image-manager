@@ -2,10 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { abortAllWorkers } from "@/services/embed-worker-pool";
-import { getSetting } from "@/services/settings-manager";
 import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
-import { disposeTensors } from "./constants";
 import {
   getActiveEmbeddingModel,
   getEmbeddingModelFile,
@@ -29,83 +27,10 @@ import {
   setLocalModelPath,
   setPoolCancelled,
 } from "./state";
-
-function detectDefaultMirror(): string | null {
-  const locale = app.getLocale();
-
-  if (locale.startsWith("zh")) {
-    return "https://hf-mirror.com";
-  }
-
-  return null;
-}
-
-function resolveMirrorUrl(): string | null {
-  // 1. 环境变量最高优先级
-  const envMirror = process.env.HF_MIRROR || process.env.HF_ENDPOINT;
-  if (envMirror) {
-    console.log(`[AI] Using mirror from env: ${envMirror}`);
-    return envMirror;
-  }
-
-  // 2. 读取用户保存的设置
-  try {
-    const savedMirror = getSetting("ai.mirror") || "auto";
-
-    if (savedMirror === "official") {
-      console.log("[AI] Using official HuggingFace");
-      return null;
-    }
-    if (savedMirror === "hf-mirror") {
-      console.log("[AI] Using hf-mirror.com from settings");
-      return "https://hf-mirror.com";
-    }
-    if (savedMirror === "modelscope") {
-      console.log("[AI] Using modelscope.cn from settings");
-      return "https://modelscope.cn";
-    }
-    if (savedMirror === "custom") {
-      const customUrl = getSetting("ai.mirror.customUrl") || "";
-      if (customUrl) {
-        console.log(`[AI] Using custom mirror: ${customUrl}`);
-        return customUrl;
-      }
-    }
-    // "auto" → 走自动检测
-  } catch {
-    // settings-manager 不可用时跳过
-  }
-
-  // 3. 自动检测
-  return detectDefaultMirror();
-}
-
-// 解析一次，缓存结果，同时设置环境变量供 worker 进程继承
-function getResolvedMirror(): string | null {
-  const mirror = resolveMirrorUrl();
-  if (mirror) {
-    process.env.HF_MIRROR = mirror;
-  }
-  return mirror;
-}
-
-function configureTransformersEnv(env: any, localModelPath: string): void {
-  env.localModelPath = localModelPath;
-  env.allowLocalModels = true;
-  env.useFS = true;
-  env.useFSCache = true;
-  env.cacheDir = path.join(getDataPath(), "hf-cache");
-
-  const mirror = getResolvedMirror();
-
-  if (mirror) {
-    env.remoteHost = mirror;
-    env.remotePathTemplate = "{model}/resolve/main/";
-    console.log(`[AI] Using HF mirror: ${mirror}`);
-  }
-
-  env.allowRemoteModels = true;
-}
+import {
+  embedTextsInWorker,
+  initTextWorker,
+} from "./text-worker-client";
 
 async function copyDir(src: string, dest: string): Promise<void> {
   // 验证源路径和目标路径的安全性
@@ -291,83 +216,11 @@ async function initializeModel(): Promise<void> {
     throw new Error("CLIP 本地模型路径解析失败");
   }
 
-  try {
-    (process.release as any).name = "browser";
-  } catch {
-    try {
-      Object.defineProperty(process.release, "name", { value: "browser" });
-    } catch {
-      console.error(
-        "[AI] Cannot override process.release.name, ONNX backend may fail"
-      );
-    }
-  }
-
-  const {
-    AutoTokenizer,
-    CLIPTextModelWithProjection,
-    SiglipTextModel,
-    env,
-  } = await import("@xenova/transformers");
-
-  try {
-    (process.release as any).name = "node";
-  } catch {
-    /* ignore */
-  }
-
-  configureTransformersEnv(env, localModelPath);
-
-  // Single-threaded WASM to avoid SharedArrayBuffer issues in Electron main process.
-  // Only loading the text model (~64MB quantized ONNX) — vision model is isolated
-  // in child processes via embed-worker.mjs to prevent WASM heap exhaustion.
-  env.backends.onnx.wasm.numThreads = 1;
-  console.log(
-    "[AI] Using ONNX Web (WASM) backend — single-threaded, text-model only"
-  );
-
   const model = getActiveEmbeddingModel();
-  const tokenizer = await AutoTokenizer.from_pretrained(model.modelId);
-  const TextModel =
-    model.kind === "siglip" ? SiglipTextModel : CLIPTextModelWithProjection;
-  const textModel = await TextModel.from_pretrained(model.modelId, {
-    quantized: true,
-  });
+  await initTextWorker(localModelPath, model.kind);
 
-  const embedTexts = async (texts: string[]): Promise<number[][]> => {
-    if (texts.length === 0) {
-      return [];
-    }
-
-    const inputs = await tokenizer(texts, {
-      padding: model.kind === "siglip" ? "max_length" : true,
-      truncation: true,
-    });
-    const output = await textModel(inputs);
-    try {
-      const textEmbeds = output[model.textOutputName];
-      if (!textEmbeds) {
-        throw new Error(
-          `${model.displayName} text output "${model.textOutputName}" missing`
-        );
-      }
-      const data = Array.from(textEmbeds.data as Float32Array);
-      const vectorSize = data.length / texts.length;
-      if (!Number.isInteger(vectorSize) || vectorSize <= 0) {
-        throw new Error("CLIP 文本向量维度无效");
-      }
-
-      return texts.map((_, index) => {
-        const vec = data.slice(index * vectorSize, (index + 1) * vectorSize);
-        const norm = Math.sqrt(
-          vec.reduce((sum: number, value: number) => sum + value * value, 0)
-        );
-        return vec.map((value: number) => value / (norm || 1));
-      });
-    } finally {
-      disposeTensors(output);
-    }
-  };
+  const embedTexts = (texts: string[]): Promise<number[][]> =>
+    embedTextsInWorker(texts, localModelPath);
 
   setEmbeddingModel({
     // embedImage is intentionally NOT provided here — image embedding goes
@@ -386,7 +239,7 @@ async function initializeModel(): Promise<void> {
 
   setIsModelLoaded(true);
   console.log(
-    `[AI] ${model.displayName} text model loaded (vision model isolated in worker processes)`
+    `[AI] ${model.displayName} text model loaded in isolated worker process`
   );
 }
 

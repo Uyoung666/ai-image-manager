@@ -62,6 +62,10 @@ import type {
   PhotoSequence,
   PhotoSequenceDetail,
 } from "@/types/photo-sequence";
+import {
+  canPaginateGalleryPhotos,
+  getDisplayedSequenceMode,
+} from "@/utils/gallery-view-state";
 import type { ExifFilters, SearchMode } from "@/types/search";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
@@ -527,17 +531,19 @@ function HomePage() {
   }, [photos, expandedSequence]);
   const photosRef = useRef(actionPhotos);
   photosRef.current = actionPhotos;
-  const displayedSequenceMode =
-    sequenceMode === "sequences" && sequenceViewReady
-      ? "sequences"
-      : "photos";
+  const displayedSequenceMode = getDisplayedSequenceMode(
+    sequenceMode,
+    sequenceViewReady
+  );
   // The masonry end sentinel is based on the currently rendered items. When
   // switching to the usually shorter sequence view it immediately intersects,
   // so it must not continue paginating the underlying photo list.
-  const isPhotoPaginationActive = sequenceMode === "photos";
+  const isPhotoPaginationActive = canPaginateGalleryPhotos(
+    sequenceMode,
+    Boolean(hasNextPage)
+  );
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
-      setSequenceViewReady(mode === "photos");
       setSequenceMode(mode);
     },
     []
@@ -550,8 +556,10 @@ function HomePage() {
     // entirely of one collapsed sequence can hide later sequences in the same
     // folder until pagination happens to reach one of their members.
     const useGalleryScope = !isSearching;
+    setSequenceViewReady(false);
     if (!(useGalleryScope || sequencePhotoIds.length)) {
       setSequences([]);
+      setSequenceViewReady(true);
       return;
     }
     ipc.client.photos
@@ -572,17 +580,13 @@ function HomePage() {
       .then((result) => {
         if (!cancelled) {
           setSequences(result as PhotoSequence[]);
-          if (sequenceMode === "sequences") {
-            setSequenceViewReady(true);
-          }
+          setSequenceViewReady(true);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSequences([]);
-          if (sequenceMode === "sequences") {
-            setSequenceViewReady(true);
-          }
+          setSequenceViewReady(true);
         }
       });
     return () => {
@@ -2141,11 +2145,7 @@ function HomePage() {
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
                 gridRef={gridRef}
-                hasMore={
-                  isPhotoPaginationActive &&
-                  hasNextPage &&
-                  !(detailPhoto || selectedSequence || sequenceDetailsLoading)
-                }
+                hasMore={isPhotoPaginationActive}
                 isLoadingMore={
                   isPhotoPaginationActive && isFetchingNextPage
                 }

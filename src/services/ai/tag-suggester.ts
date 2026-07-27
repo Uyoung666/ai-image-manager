@@ -406,7 +406,10 @@ let cachedTagEmbeddings: Array<{
   vector: number[];
 }> | null = null;
 let cachedTagEmbeddingKey: string | null = null;
+let tagEmbeddingPromise: Promise<void> | null = null;
+let tagEmbeddingPromiseKey: string | null = null;
 const TAG_PROMPT_VERSION = 2;
+const TAG_EMBEDDING_BATCH_SIZE = 16;
 
 // In-memory LRU cache for recently queried image vectors
 const imageVecCache = new Map<number, number[]>();
@@ -418,42 +421,89 @@ function getTagPrompt(tag: CandidateTag): string {
     : tag.en;
 }
 
-async function ensureTagEmbeddings(): Promise<void> {
+export function _ensureTagEmbeddingsForTest(): Promise<void> {
   if (!embeddingModel) {
-    return;
+    return Promise.resolve();
   }
   const model = getActiveEmbeddingModel();
   const cacheKey = getTagEmbeddingCacheKey(model.kind, TAG_PROMPT_VERSION);
   if (cachedTagEmbeddings && cachedTagEmbeddingKey === cacheKey) {
-    return;
+    return Promise.resolve();
+  }
+  if (tagEmbeddingPromise && tagEmbeddingPromiseKey === cacheKey) {
+    return tagEmbeddingPromise;
   }
 
-  const fresh: Array<{
-    tag: string;
-    displayName: string;
-    category: TagCategory;
-    vector: number[];
-  }> = [];
-  for (const tag of CANDIDATE_TAGS) {
-    const prompt = getTagPrompt(tag);
-    try {
-      const textVec = await embeddingModel.embedText(prompt);
-      fresh.push({
-        tag: tag.en,
-        displayName: tag.zh,
-        category: tag.category,
-        vector: textVec,
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[AI] Tag embedding failed for "${prompt}":`, message);
+  const activeEmbeddingModel = embeddingModel;
+  tagEmbeddingPromiseKey = cacheKey;
+  const pending = (async () => {
+    const fresh: Array<{
+      tag: string;
+      displayName: string;
+      category: TagCategory;
+      vector: number[];
+    }> = [];
+
+    for (
+      let offset = 0;
+      offset < CANDIDATE_TAGS.length;
+      offset += TAG_EMBEDDING_BATCH_SIZE
+    ) {
+      const batch = CANDIDATE_TAGS.slice(
+        offset,
+        offset + TAG_EMBEDDING_BATCH_SIZE
+      );
+      const prompts = batch.map(getTagPrompt);
+      const vectors = activeEmbeddingModel.embedTexts
+        ? await activeEmbeddingModel.embedTexts(prompts)
+        : await Promise.all(
+            prompts.map((prompt) => activeEmbeddingModel.embedText(prompt))
+          );
+      if (vectors.length !== batch.length) {
+        throw new Error(
+          `Tag embedding batch mismatch: expected=${batch.length} actual=${vectors.length}`
+        );
+      }
+      for (let index = 0; index < batch.length; index++) {
+        const tag = batch[index];
+        const vector = vectors[index];
+        if (
+          vector.length !== model.vectorDimensions ||
+          vector.some((value) => !Number.isFinite(value))
+        ) {
+          throw new Error(
+            `Invalid ${model.displayName} tag vector for "${prompts[index]}"`
+          );
+        }
+        fresh.push({
+          tag: tag.en,
+          displayName: tag.zh,
+          category: tag.category,
+          vector,
+        });
+      }
     }
-  }
-  cachedTagEmbeddings = fresh.length > 0 ? fresh : null;
-  cachedTagEmbeddingKey = fresh.length > 0 ? cacheKey : null;
-  console.log(
-    `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (${cacheKey})`
-  );
+
+    cachedTagEmbeddings = fresh;
+    cachedTagEmbeddingKey = cacheKey;
+    console.log(
+      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (${cacheKey})`
+    );
+  })().finally(() => {
+    if (tagEmbeddingPromise === pending) {
+      tagEmbeddingPromise = null;
+      tagEmbeddingPromiseKey = null;
+    }
+  });
+  tagEmbeddingPromise = pending;
+  return pending;
+}
+
+export function _resetTagEmbeddingCacheForTest(): void {
+  cachedTagEmbeddings = null;
+  cachedTagEmbeddingKey = null;
+  tagEmbeddingPromise = null;
+  tagEmbeddingPromiseKey = null;
 }
 
 export async function suggestTags(
@@ -482,7 +532,7 @@ export async function suggestTags(
   if (cachedTagEmbeddings === null) {
     console.log("[AI] suggestTags: computing tag text embeddings...");
   }
-  await ensureTagEmbeddings();
+  await _ensureTagEmbeddingsForTest();
 
   // Resolve image vector
   let imageVec: number[] | null = null;
@@ -621,7 +671,7 @@ async function runBatchSuggestTags(
     return { tagged: 0, skipped: photoIds.length };
   }
 
-  await ensureTagEmbeddings();
+  await _ensureTagEmbeddingsForTest();
 
   if (!cachedTagEmbeddings) {
     throw new Error("Could not generate candidate tag embeddings");

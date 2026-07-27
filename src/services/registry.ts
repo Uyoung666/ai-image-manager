@@ -14,6 +14,7 @@ import {
   wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
+import { shutdownTextWorker } from "@/services/ai/text-worker-client";
 import {
   cleanupOrphanedRecordsAsync,
   startWatching,
@@ -362,6 +363,7 @@ registry.register({
     setIsModelLoaded(false);
     setEmbeddingModel(null);
     setLocalModelPath(null);
+    shutdownTextWorker();
     try {
       shutdownPool();
     } catch {
