@@ -2,7 +2,9 @@ import { eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photoTags, tags } from "@/db/schema";
 import { cosineSimilarity } from "./constants";
+import { getActiveEmbeddingModel } from "./model-config";
 import { ensureLocalModel, loadModel } from "./model-loader";
+import { getTagEmbeddingCacheKey, selectTagScores } from "./scoring";
 import { embedImageInWorker } from "./search";
 import {
   _localModelPath,
@@ -28,20 +30,9 @@ export type TagCategory =
 export interface CandidateTag {
   category: TagCategory;
   en: string;
+  siglipLabel: string;
   zh: string;
 }
-
-const CATEGORY_THRESHOLD_MULTIPLIERS: Record<TagCategory, number> = {
-  scene: 1.2,
-  lighting: 1.1,
-  color: 1.1,
-  weather: 1.1,
-  style: 1.0,
-  subject: 1.0,
-  animal: 1.0,
-  object: 1.0,
-  activity: 1.0,
-};
 
 const CATEGORY_PARENTS: Record<TagCategory, string> = {
   scene: "场景",
@@ -55,7 +46,7 @@ const CATEGORY_PARENTS: Record<TagCategory, string> = {
   weather: "天气",
 };
 
-export const CANDIDATE_TAGS: CandidateTag[] = [
+const CANDIDATE_TAG_DEFINITIONS: Omit<CandidateTag, "siglipLabel">[] = [
   // === SCENES (25) ===
   { en: "indoor room interior", zh: "室内", category: "scene" },
   { en: "outdoor outside", zh: "户外", category: "scene" },
@@ -219,6 +210,194 @@ export const CANDIDATE_TAGS: CandidateTag[] = [
   { en: "cloudy overcast grey sky", zh: "多云", category: "weather" },
 ];
 
+const SIGLIP_LABELS_BY_CATEGORY: Record<TagCategory, string[]> = {
+  scene: [
+    "an indoor room",
+    "an outdoor scene",
+    "a city",
+    "a countryside village",
+    "a natural landscape",
+    "a beach by the ocean",
+    "a mountain",
+    "a forest",
+    "a street",
+    "a building",
+    "a flower garden",
+    "a grassy field",
+    "a lake",
+    "a river",
+    "a desert",
+    "a snowy winter landscape",
+    "the sky and clouds",
+    "a city at night",
+    "an underwater scene",
+    "an airport",
+    "a train station",
+    "a market",
+    "a restaurant or cafe",
+    "an office workspace",
+    "a classroom",
+    "a field of flowers",
+  ],
+  subject: [
+    "a person",
+    "a close-up portrait",
+    "a group of people",
+    "a child",
+    "a baby",
+    "a couple",
+    "a family",
+    "a woman",
+    "a man",
+    "an elderly person",
+    "a selfie",
+    "a person seen from behind",
+    "a smiling person",
+    "a wedding",
+    "a close-up of hands",
+  ],
+  animal: [
+    "a cat",
+    "a dog",
+    "a bird",
+    "a fish",
+    "an insect",
+    "a horse",
+    "a rabbit",
+    "a deer",
+    "a panda",
+    "a squirrel",
+    "a pet",
+    "a wild animal",
+  ],
+  object: [
+    "a plate of food",
+    "a dessert or cake",
+    "a cup of coffee",
+    "a flower",
+    "a tree or plant",
+    "a car",
+    "a bicycle",
+    "a boat",
+    "an airplane",
+    "a book",
+    "a smartphone",
+    "a computer",
+    "a camera",
+    "a pair of glasses",
+    "a hat",
+    "a bag",
+    "an umbrella",
+    "a candle",
+    "a mirror",
+    "a clock or watch",
+  ],
+  activity: [
+    "a person exercising",
+    "a person running",
+    "a person swimming",
+    "a person hiking",
+    "a person riding a bicycle",
+    "a person dancing",
+    "a person cooking",
+    "a person reading a book",
+    "a music performance",
+    "a person painting",
+    "a travel scene",
+    "a camping scene",
+    "a party",
+    "a person shopping",
+    "a person doing yoga",
+  ],
+  lighting: [
+    "a bright daytime scene",
+    "a dark nighttime scene",
+    "a sunset",
+    "a sunrise",
+    "a backlit silhouette",
+    "an overcast scene",
+    "a misty scene",
+    "neon lights at night",
+    "a candlelit scene",
+    "a rainbow",
+  ],
+  style: [
+    "a black and white image",
+    "a vivid colorful image",
+    "a dark moody image",
+    "a bright airy image",
+    "a macro close-up",
+    "a shallow depth of field with bokeh",
+    "a panoramic wide-angle view",
+    "an aerial view",
+    "a long-exposure photograph",
+    "a reflection",
+    "a silhouette",
+    "a vintage photograph",
+    "a minimalist image",
+    "a symmetrical composition",
+    "an abstract pattern",
+    "a double-exposure image",
+    "a flat-lay arrangement",
+    "a candid street photograph",
+  ],
+  color: [
+    "a predominantly red image",
+    "a predominantly blue image",
+    "a predominantly green image",
+    "a predominantly yellow image",
+    "a predominantly white image",
+    "a predominantly black image",
+    "a predominantly purple image",
+    "a predominantly orange image",
+    "a predominantly pink image",
+    "a predominantly golden image",
+  ],
+  weather: [
+    "rainy weather",
+    "snowy weather",
+    "foggy weather",
+    "windy weather",
+    "sunny weather",
+    "cloudy weather",
+  ],
+};
+
+const siglipLabelOffsets: Record<TagCategory, number> = {
+  scene: 0,
+  subject: 0,
+  animal: 0,
+  object: 0,
+  activity: 0,
+  lighting: 0,
+  style: 0,
+  color: 0,
+  weather: 0,
+};
+
+export const CANDIDATE_TAGS: CandidateTag[] = CANDIDATE_TAG_DEFINITIONS.map(
+  (tag) => {
+    const index = siglipLabelOffsets[tag.category]++;
+    const siglipLabel = SIGLIP_LABELS_BY_CATEGORY[tag.category][index];
+    if (!siglipLabel) {
+      throw new Error(`Missing SigLIP label for ${tag.category}:${tag.en}`);
+    }
+    return { ...tag, siglipLabel };
+  }
+);
+
+for (const category of Object.keys(
+  SIGLIP_LABELS_BY_CATEGORY
+) as TagCategory[]) {
+  if (
+    siglipLabelOffsets[category] !== SIGLIP_LABELS_BY_CATEGORY[category].length
+  ) {
+    throw new Error(
+      `Unexpected SigLIP label count for ${category}: expected ${siglipLabelOffsets[category]}, received ${SIGLIP_LABELS_BY_CATEGORY[category].length}`
+    );
+  }
+}
+
 // Pre-computed text embeddings for candidate tags (computed once after model load)
 let cachedTagEmbeddings: Array<{
   tag: string;
@@ -226,75 +405,60 @@ let cachedTagEmbeddings: Array<{
   category: TagCategory;
   vector: number[];
 }> | null = null;
+let cachedTagEmbeddingKey: string | null = null;
+const TAG_PROMPT_VERSION = 2;
 
 // In-memory LRU cache for recently queried image vectors
 const imageVecCache = new Map<number, number[]>();
 const IMAGE_VEC_CACHE_MAX = 100;
 
-const ABSOLUTE_MIN_SIMILARITY = 0.15;
+function getTagPrompt(tag: CandidateTag): string {
+  return getActiveEmbeddingModel().kind === "siglip"
+    ? `This is a photo of ${tag.siglipLabel}.`
+    : tag.en;
+}
 
-function selectTagsAdaptive(
-  scores: Array<{
+async function ensureTagEmbeddings(): Promise<void> {
+  if (!embeddingModel) {
+    return;
+  }
+  const model = getActiveEmbeddingModel();
+  const cacheKey = getTagEmbeddingCacheKey(model.kind, TAG_PROMPT_VERSION);
+  if (cachedTagEmbeddings && cachedTagEmbeddingKey === cacheKey) {
+    return;
+  }
+
+  const fresh: Array<{
+    tag: string;
     displayName: string;
-    similarity: number;
     category: TagCategory;
-  }>,
-  maxTags: number
-): Array<{ tag: string; confidence: number; category: TagCategory }> {
-  if (scores.length === 0) {
-    return [];
+    vector: number[];
+  }> = [];
+  for (const tag of CANDIDATE_TAGS) {
+    const prompt = getTagPrompt(tag);
+    try {
+      const textVec = await embeddingModel.embedText(prompt);
+      fresh.push({
+        tag: tag.en,
+        displayName: tag.zh,
+        category: tag.category,
+        vector: textVec,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[AI] Tag embedding failed for "${prompt}":`, message);
+    }
   }
-
-  const sorted = [...scores].sort((a, b) => b.similarity - a.similarity);
-  const candidates = sorted.filter(
-    (s) => s.similarity >= ABSOLUTE_MIN_SIMILARITY
+  cachedTagEmbeddings = fresh.length > 0 ? fresh : null;
+  cachedTagEmbeddingKey = fresh.length > 0 ? cacheKey : null;
+  console.log(
+    `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings (${cacheKey})`
   );
-  if (candidates.length === 0) {
-    return [];
-  }
-
-  const selected: typeof candidates = [];
-
-  for (let i = 0; i < Math.min(candidates.length, maxTags * 2); i++) {
-    const current = candidates[i];
-    const multiplier = CATEGORY_THRESHOLD_MULTIPLIERS[current.category] || 1.0;
-    const effectiveMin = ABSOLUTE_MIN_SIMILARITY * multiplier;
-
-    if (current.similarity < effectiveMin) {
-      break;
-    }
-
-    // Gap check: stop if gap from previous is too large (and we have at least 2)
-    if (selected.length > 0) {
-      const prevSim = selected[selected.length - 1].similarity;
-      const gap = prevSim - current.similarity;
-      if (gap > 0.08 && selected.length >= 3) {
-        break;
-      }
-    }
-
-    // Relative threshold: must reach 60% of the top score
-    const relativeThreshold = candidates[0].similarity * 0.6;
-    if (current.similarity < relativeThreshold) {
-      break;
-    }
-
-    selected.push(current);
-    if (selected.length >= maxTags) {
-      break;
-    }
-  }
-
-  return selected.map((s) => ({
-    tag: s.displayName,
-    confidence: Math.round(s.similarity * 100) / 100,
-    category: s.category,
-  }));
 }
 
 export async function suggestTags(
   imagePath: string,
-  threshold = 0.25,
+  _threshold = 0.25,
   photoId?: number
 ): Promise<Array<{ tag: string; confidence: number }>> {
   try {
@@ -317,27 +481,8 @@ export async function suggestTags(
 
   if (cachedTagEmbeddings === null) {
     console.log("[AI] suggestTags: computing tag text embeddings...");
-    const fresh: Array<{
-      tag: string;
-      displayName: string;
-      category: TagCategory;
-      vector: number[];
-    }> = [];
-    for (const { en, zh, category } of CANDIDATE_TAGS) {
-      try {
-        const textVec = await embeddingModel.embedText(en);
-        fresh.push({ tag: en, displayName: zh, category, vector: textVec });
-      } catch (err: any) {
-        console.error(`[AI] Tag embedding failed for "${en}":`, err?.message);
-      }
-    }
-    if (fresh.length > 0) {
-      cachedTagEmbeddings = fresh;
-    }
-    console.log(
-      `[AI] Pre-computed ${fresh.length}/${CANDIDATE_TAGS.length} tag embeddings`
-    );
   }
+  await ensureTagEmbeddings();
 
   // Resolve image vector
   let imageVec: number[] | null = null;
@@ -404,15 +549,27 @@ export async function suggestTags(
   }
 
   // Score all tags
+  const resolvedImageVec = imageVec;
   const scores = cachedTagEmbeddings.map(
     ({ displayName, category, vector }) => ({
       displayName,
       category,
-      similarity: cosineSimilarity(imageVec!, vector),
+      similarity: cosineSimilarity(resolvedImageVec, vector),
     })
   );
 
-  return selectTagsAdaptive(scores, 10);
+  const selected = selectTagScores(
+    scores,
+    MAX_AUTO_TAGS_PER_PHOTO,
+    getActiveEmbeddingModel()
+  );
+  const sortedScores = [...scores].sort(
+    (left, right) => right.similarity - left.similarity
+  );
+  console.log(
+    `[AI] suggestTags: model=${getActiveEmbeddingModel().kind} top=${sortedScores[0]?.similarity.toFixed(4) ?? "n/a"} selected=${selected.length}`
+  );
+  return selected;
 }
 
 const MAX_AUTO_TAGS_PER_PHOTO = 5;
@@ -464,25 +621,7 @@ async function runBatchSuggestTags(
     return { tagged: 0, skipped: photoIds.length };
   }
 
-  if (cachedTagEmbeddings === null) {
-    const fresh: Array<{
-      tag: string;
-      displayName: string;
-      category: TagCategory;
-      vector: number[];
-    }> = [];
-    for (const { en, zh, category } of CANDIDATE_TAGS) {
-      try {
-        const textVec = await embeddingModel.embedText(en);
-        fresh.push({ tag: en, displayName: zh, category, vector: textVec });
-      } catch {
-        /* skip */
-      }
-    }
-    if (fresh.length > 0) {
-      cachedTagEmbeddings = fresh;
-    }
-  }
+  await ensureTagEmbeddings();
 
   if (!cachedTagEmbeddings) {
     throw new Error("Could not generate candidate tag embeddings");
@@ -544,7 +683,11 @@ async function runBatchSuggestTags(
           })
         );
 
-        const topTags = selectTagsAdaptive(scores, MAX_AUTO_TAGS_PER_PHOTO);
+        const topTags = selectTagScores(
+          scores,
+          MAX_AUTO_TAGS_PER_PHOTO,
+          getActiveEmbeddingModel()
+        );
 
         for (const s of topTags) {
           // Relative confirmation: top score's 85% or fallback 0.38

@@ -39,29 +39,91 @@ export interface DownloadProgress {
 
 export const MODEL_MANIFEST: ModelManifestEntry[] = [
   {
-    name: "CLIP 视觉编码器",
+    name: "SigLIP 视觉编码器",
     fileName: "vision_model_quantized.onnx",
-    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    subPath: "Xenova/siglip-base-patch16-224/onnx",
     urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/onnx/vision_model_quantized.onnx",
     ],
-    sha256: "",
-    // Exact byte count from actual model file — using approximation
-    // (e.g. 85 * 1024 * 1024 = 89128960) differs from the true size
-    // by a few KB, which causes isFileValid's strict === comparison
-    // to delete correctly-downloaded models.
-    sizeBytes: 89_104_085,
+    sha256: "ef14a954f3d57e1806666432bd9785004c1dc27100aa260eee0cb0f10a5de058",
+    sizeBytes: 99_499_129,
     required: true,
   },
   {
-    name: "CLIP 文本编码器",
+    name: "SigLIP 文本编码器",
     fileName: "text_model_quantized.onnx",
-    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    subPath: "Xenova/siglip-base-patch16-224/onnx",
     urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/onnx/text_model_quantized.onnx",
     ],
-    sha256: "",
-    sizeBytes: 64_893_708,
+    sha256: "ad0329b1f35acc66d8953ff2559ce358da8eb0a7011794cf951523d63a4dbce2",
+    sizeBytes: 111_475_220,
+    required: true,
+  },
+  {
+    name: "SigLIP 模型配置",
+    fileName: "config.json",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/config.json",
+    ],
+    sha256: "e6de71291f181b0b81adc93098787bb4597a79dc18f59737feda8f41671fb6a2",
+    sizeBytes: 457,
+    required: true,
+  },
+  {
+    name: "SigLIP 图像处理配置",
+    fileName: "preprocessor_config.json",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/preprocessor_config.json",
+    ],
+    sha256: "21ee046a8a52a65e5f9c177bf840bfb39ea66c9c54cf2760630efd58e0a3ec80",
+    sizeBytes: 368,
+    required: true,
+  },
+  {
+    name: "SigLIP 特殊词元配置",
+    fileName: "special_tokens_map.json",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/special_tokens_map.json",
+    ],
+    sha256: "22f82d1c19654c9552ff1368c2c236ebb34f457dbdbc7510d304cebfeb96f3bf",
+    sizeBytes: 406,
+    required: true,
+  },
+  {
+    name: "SigLIP SentencePiece 词表",
+    fileName: "spiece.model",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/spiece.model",
+    ],
+    sha256: "1e5036bed065526c3c212dfbe288752391797c4bb1a284aa18c9a0b23fcaf8ec",
+    sizeBytes: 798_330,
+    required: true,
+  },
+  {
+    name: "SigLIP 分词器",
+    fileName: "tokenizer.json",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/tokenizer.json",
+    ],
+    sha256: "4a17c975210be5ab4c36b47d8dae4eefb866dbfb1e676e394aad85dc30a3ae08",
+    sizeBytes: 2_398_744,
+    required: true,
+  },
+  {
+    name: "SigLIP 分词器配置",
+    fileName: "tokenizer_config.json",
+    subPath: "Xenova/siglip-base-patch16-224",
+    urls: [
+      "{mirror}/Xenova/siglip-base-patch16-224/resolve/main/tokenizer_config.json",
+    ],
+    sha256: "9a38d3c6b5e26fe5dcc607eda95e38d78d30d9291835bb9e8116e8174c1d4ba2",
+    sizeBytes: 739,
     required: true,
   },
   {
@@ -94,7 +156,7 @@ const TMP_EXT = ".tmp";
  * and is a real download target, giving accurate TTFB measurements.
  */
 export const PROBE_FILE_PATH =
-  "Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx";
+  "Xenova/siglip-base-patch16-224/resolve/main/onnx/vision_model_quantized.onnx";
 
 // ── Transform: Pass-through hash computation ────────────────────────────
 

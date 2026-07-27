@@ -417,17 +417,17 @@ describe("Pipeline Integration Test (500 images)", () => {
           TEST_DATA_DIR,
           "models",
           "Xenova",
-          "clip-vit-base-patch32",
+          "siglip-base-patch16-224",
           "onnx",
-          "model_quantized.onnx"
+          "vision_model_quantized.onnx"
         ),
         path.join(
           process.cwd(),
           "models",
           "Xenova",
-          "clip-vit-base-patch32",
+          "siglip-base-patch16-224",
           "onnx",
-          "model_quantized.onnx"
+          "vision_model_quantized.onnx"
         ),
         path.join(
           os.homedir(),
@@ -436,9 +436,9 @@ describe("Pipeline Integration Test (500 images)", () => {
           "ai-image-manager",
           "models",
           "Xenova",
-          "clip-vit-base-patch32",
+          "siglip-base-patch16-224",
           "onnx",
-          "model_quantized.onnx"
+          "vision_model_quantized.onnx"
         ),
       ];
 

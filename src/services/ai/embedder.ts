@@ -9,6 +9,7 @@ import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { ensureLocalModel } from "./model-loader";
+import { getActiveEmbeddingModel } from "./model-config";
 import type { EmbedProgress, EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
@@ -239,7 +240,12 @@ function runEmbedBatch(
       }
     });
 
-    child.send({ type: "embed", modelPath, photos: batchPhotos });
+    child.send({
+      type: "embed",
+      modelKind: getActiveEmbeddingModel().kind,
+      modelPath,
+      photos: batchPhotos,
+    });
   });
 }
 

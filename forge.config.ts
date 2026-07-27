@@ -121,7 +121,13 @@ const config: ForgeConfig = {
       unpack:
         "**/{better-sqlite3,sharp,@lancedb,@lancedb/lancedb-win32-x64-msvc,@lancedb/lancedb-win32-arm64-msvc,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exiftool-vendored,exiftool-vendored.exe}/**",
     },
-    extraResource: ["models", "drizzle", "assets/icon.png"],
+    extraResource: [
+      "models",
+      "drizzle",
+      "assets/icon.png",
+      "THIRD_PARTY_MODEL_NOTICES.md",
+      "licenses",
+    ],
     name: "AI Image Manager",
     executableName: "ai-image-manager",
     appBundleId: "com.uyoung.ai-image-manager",

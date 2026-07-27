@@ -22,6 +22,7 @@ import {
   photos,
 } from "@/db/schema";
 import { getPhotoVectors } from "@/services/ai-embedder";
+import { getActiveEmbeddingModel } from "@/services/ai/model-config";
 import { BKTree } from "@/services/bk-tree";
 import {
   aggregateFromStoredColors,
@@ -130,7 +131,9 @@ export const getExifCandidates = os.handler(() => {
     .map((row) => row.val)
     .filter((value): value is string => Boolean(value));
 
-  const advancedCreator = sql<string | null>`json_extract(${advancedExifData.normalizedJson}, '$.workflow.artist')`;
+  const advancedCreator = sql<
+    string | null
+  >`json_extract(${advancedExifData.normalizedJson}, '$.workflow.artist')`;
   const advancedCreators = db
     .selectDistinct({ val: advancedCreator })
     .from(advancedExifData)
@@ -1252,6 +1255,8 @@ export const findDuplicates = os
     }
 
     const confirmedPairs: CandidatePair[] = [];
+    const duplicateConfirmationSimilarity =
+      getActiveEmbeddingModel().scoring.duplicateConfirmationSimilarity;
 
     for (const c of candidates) {
       if (c.matchType === "exact") {
@@ -1265,7 +1270,7 @@ export const findDuplicates = os
 
       if (vecA && vecB && vecA.length === vecB.length) {
         const sim = cosineSimilarity(vecA, vecB);
-        if (sim > 0.95) {
+        if (sim >= duplicateConfirmationSimilarity) {
           c.clipSimilarity = Math.round(sim * 10_000) / 10_000;
           c.matchType = "clip_confirmed";
           confirmedPairs.push(c);

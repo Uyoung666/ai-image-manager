@@ -1,6 +1,3 @@
-import { inArray } from "drizzle-orm";
-import { getDatabase } from "@/db";
-import { photos } from "@/db/schema";
 import { embeddingModel } from "./ai/state";
 
 // 晚期融合：S_final = α·S_exact·sourceBoost + β·S_clip
@@ -39,77 +36,63 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (normA * normB);
 }
 
+function toNumberVector(rawVector: unknown): number[] | null {
+  if (Array.isArray(rawVector)) {
+    return rawVector.every((value) => typeof value === "number")
+      ? rawVector
+      : null;
+  }
+  if (
+    rawVector &&
+    typeof rawVector === "object" &&
+    "toArray" in rawVector &&
+    typeof rawVector.toArray === "function"
+  ) {
+    return Array.from(rawVector.toArray() as Iterable<number>);
+  }
+  if (ArrayBuffer.isView(rawVector) && !(rawVector instanceof DataView)) {
+    return Array.from(rawVector as unknown as ArrayLike<number>);
+  }
+  return null;
+}
+
 // 从 LanceDB 批量读取向量
 async function getPhotoVectors(
   photoIds: number[]
 ): Promise<Map<number, number[]>> {
   const { photoTable } = await import("./ai/state");
 
-  if (!photoTable || photoIds.length === 0) {
+  const validPhotoIds = [
+    ...new Set(
+      photoIds.filter((photoId) => Number.isSafeInteger(photoId) && photoId > 0)
+    ),
+  ];
+  if (!photoTable || validPhotoIds.length === 0) {
     return new Map();
   }
 
   try {
-    const db = getDatabase();
-
-    // 获取 vectorId
-    const photoRecords = db
-      .select({ id: photos.id, vectorId: photos.vectorId })
-      .from(photos)
-      .where(inArray(photos.id, photoIds))
-      .all();
-
-    const vectorIdMap = new Map<string, number>();
-    for (const record of photoRecords) {
-      if (record.vectorId) {
-        vectorIdMap.set(record.vectorId, record.id);
-      }
-    }
-
-    if (vectorIdMap.size === 0) {
-      return new Map();
-    }
-
-    // 从 LanceDB 批量查询向量
-    const vectorIds = Array.from(vectorIdMap.keys());
     const results = new Map<number, number[]>();
 
     // 分批查询（每批 50 个）
     const BATCH_SIZE = 50;
-    for (let i = 0; i < vectorIds.length; i += BATCH_SIZE) {
-      const batch = vectorIds.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < validPhotoIds.length; i += BATCH_SIZE) {
+      const batch = validPhotoIds.slice(i, i + BATCH_SIZE);
 
       try {
-        const photoIdsBatch = batch
-          .map((vectorId) => vectorIdMap.get(vectorId))
-          .filter((id): id is number => id !== undefined);
-
-        if (photoIdsBatch.length === 0) {
-          continue;
-        }
-
         const rows = await photoTable
           .query()
-          .where(`photo_id IN (${photoIdsBatch.join(",")})`)
+          .where(`photo_id IN (${batch.join(",")})`)
           .toArray();
 
-        for (const row of rows as Array<Record<string, unknown>>) {
+        for (const row of rows as Record<string, unknown>[]) {
           const photoId = row.photo_id as number;
           if (!photoId) {
             continue;
           }
 
-          const rawVec = row.vector;
-          let vec: number[];
-
-          // 标准化 LanceDB 向量格式
-          if (Array.isArray(rawVec)) {
-            vec = rawVec as number[];
-          } else if (typeof (rawVec as any).toArray === "function") {
-            vec = Array.from((rawVec as any).toArray());
-          } else if (ArrayBuffer.isView(rawVec)) {
-            vec = Array.from(rawVec as Float32Array);
-          } else {
+          const vec = toNumberVector(row.vector);
+          if (!vec) {
             continue;
           }
 
@@ -153,8 +136,9 @@ export async function rerankWithCLIPScore(
     let queryVector: number[];
     try {
       queryVector = await embeddingModel.embedText(query.trim());
-    } catch (err: any) {
-      console.error("[Rerank] embedText failed:", err?.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Rerank] embedText failed:", message);
       return candidates.slice(0, topK);
     }
 

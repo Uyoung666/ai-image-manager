@@ -6,6 +6,10 @@ import { getSetting } from "@/services/settings-manager";
 import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
 import { disposeTensors } from "./constants";
+import {
+  getActiveEmbeddingModel,
+  getEmbeddingModelFile,
+} from "./model-config";
 import type { EmbedProgress } from "./state";
 import {
   _localModelPath,
@@ -155,18 +159,12 @@ let _modelCopyPromise: Promise<void> | null = null;
 export async function copyModelsOnce(): Promise<void> {
   const dataPath = getDataPath();
   const modelsDir = path.join(dataPath, "models");
-  const visionMarker = path.join(
+  const visionMarker = getEmbeddingModelFile(
     modelsDir,
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
     "vision_model_quantized.onnx"
   );
-  const textMarker = path.join(
+  const textMarker = getEmbeddingModelFile(
     modelsDir,
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
     "text_model_quantized.onnx"
   );
 
@@ -184,11 +182,8 @@ export async function copyModelsOnce(): Promise<void> {
     try {
       if (app.isPackaged) {
         const bundledModels = path.join(process.resourcesPath, "models");
-        const bundledMarker = path.join(
+        const bundledMarker = getEmbeddingModelFile(
           bundledModels,
-          "Xenova",
-          "clip-vit-base-patch32",
-          "onnx",
           "vision_model_quantized.onnx"
         );
         if (!fs.existsSync(bundledMarker)) {
@@ -213,18 +208,12 @@ export async function copyModelsOnce(): Promise<void> {
 export async function ensureLocalModel(): Promise<string> {
   const localModelPath = path.join(getDataPath(), "models");
 
-  const visionMarker = path.join(
+  const visionMarker = getEmbeddingModelFile(
     localModelPath,
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
     "vision_model_quantized.onnx"
   );
-  const textMarker = path.join(
+  const textMarker = getEmbeddingModelFile(
     localModelPath,
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
     "text_model_quantized.onnx"
   );
   if (fs.existsSync(visionMarker) && fs.existsSync(textMarker)) {
@@ -260,14 +249,15 @@ export async function ensureLocalModel(): Promise<string> {
   ];
 
   for (const candidate of devCandidates) {
-    const marker = path.join(
+    const visionCandidate = getEmbeddingModelFile(
       candidate,
-      "Xenova",
-      "clip-vit-base-patch32",
-      "onnx",
       "vision_model_quantized.onnx"
     );
-    if (fs.existsSync(marker)) {
+    const textCandidate = getEmbeddingModelFile(
+      candidate,
+      "text_model_quantized.onnx"
+    );
+    if (fs.existsSync(visionCandidate) && fs.existsSync(textCandidate)) {
       console.log(`[AI] Found model at: ${candidate}`);
       return candidate;
     }
@@ -313,9 +303,12 @@ async function initializeModel(): Promise<void> {
     }
   }
 
-  const { AutoTokenizer, CLIPTextModelWithProjection, env } = await import(
-    "@xenova/transformers"
-  );
+  const {
+    AutoTokenizer,
+    CLIPTextModelWithProjection,
+    SiglipTextModel,
+    env,
+  } = await import("@xenova/transformers");
 
   try {
     (process.release as any).name = "node";
@@ -333,9 +326,11 @@ async function initializeModel(): Promise<void> {
     "[AI] Using ONNX Web (WASM) backend — single-threaded, text-model only"
   );
 
-  const modelId = "Xenova/clip-vit-base-patch32";
-  const tokenizer = await AutoTokenizer.from_pretrained(modelId);
-  const textModel = await CLIPTextModelWithProjection.from_pretrained(modelId, {
+  const model = getActiveEmbeddingModel();
+  const tokenizer = await AutoTokenizer.from_pretrained(model.modelId);
+  const TextModel =
+    model.kind === "siglip" ? SiglipTextModel : CLIPTextModelWithProjection;
+  const textModel = await TextModel.from_pretrained(model.modelId, {
     quantized: true,
   });
 
@@ -345,12 +340,17 @@ async function initializeModel(): Promise<void> {
     }
 
     const inputs = await tokenizer(texts, {
-      padding: true,
+      padding: model.kind === "siglip" ? "max_length" : true,
       truncation: true,
     });
     const output = await textModel(inputs);
     try {
-      const { text_embeds: textEmbeds } = output;
+      const textEmbeds = output[model.textOutputName];
+      if (!textEmbeds) {
+        throw new Error(
+          `${model.displayName} text output "${model.textOutputName}" missing`
+        );
+      }
       const data = Array.from(textEmbeds.data as Float32Array);
       const vectorSize = data.length / texts.length;
       if (!Number.isInteger(vectorSize) || vectorSize <= 0) {
@@ -386,7 +386,7 @@ async function initializeModel(): Promise<void> {
 
   setIsModelLoaded(true);
   console.log(
-    "[AI] CLIP text model loaded (vision model isolated in worker processes)"
+    `[AI] ${model.displayName} text model loaded (vision model isolated in worker processes)`
   );
 }
 

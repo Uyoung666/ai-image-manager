@@ -48,10 +48,27 @@ function isRawFile(filePath) {
   return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-// --- CLIP ViT-B/32 preprocessing constants ---
-const CLIP_SIZE = 224;
-const CLIP_MEAN = [0.481_454_66, 0.457_827_5, 0.408_210_73];
-const CLIP_STD = [0.268_629_54, 0.261_302_58, 0.275_777_11];
+const MODEL_CONFIGS = {
+  clip: {
+    directory: "clip-vit-base-patch32",
+    displayName: "CLIP ViT-B/32",
+    imageMean: [0.481_454_66, 0.457_827_5, 0.408_210_73],
+    imageOutputName: "image_embeds",
+    imageSize: 224,
+    imageStd: [0.268_629_54, 0.261_302_58, 0.275_777_11],
+    resizeFit: "cover",
+  },
+  siglip: {
+    directory: "siglip-base-patch16-224",
+    displayName: "SigLIP Base Patch16-224",
+    imageMean: [0.5, 0.5, 0.5],
+    imageOutputName: "pooler_output",
+    imageSize: 224,
+    imageStd: [0.5, 0.5, 0.5],
+    resizeFit: "fill",
+  },
+};
+let activeModel = MODEL_CONFIGS.siglip;
 
 // --- Abort flag for mid-batch cancellation ---
 let aborted = false;
@@ -84,29 +101,34 @@ function loadOrt() {
  * Preprocess image: sharp decode + resize + normalize → Float32Array(NCHW).
  */
 async function preprocessCLIP(filePath) {
+  const imageSize = activeModel.imageSize;
   const { data, info } = await sharp(filePath, { failOn: "none" })
     .rotate()
-    .resize(CLIP_SIZE, CLIP_SIZE, { fit: "cover", position: "center" })
+    .resize(imageSize, imageSize, {
+      fit: activeModel.resizeFit,
+      position: "center",
+    })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
   const { width, height, channels } = info;
-  if (width !== CLIP_SIZE || height !== CLIP_SIZE) {
+  if (width !== imageSize || height !== imageSize) {
     throw new Error(`sharp resize mismatch: ${width}x${height}`);
   }
 
   const rgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const pixelsPerChannel = CLIP_SIZE * CLIP_SIZE;
+  const pixelsPerChannel = imageSize * imageSize;
   const floatData = new Float32Array(3 * pixelsPerChannel);
 
-  for (let y = 0; y < CLIP_SIZE; y++) {
-    for (let x = 0; x < CLIP_SIZE; x++) {
-      const srcIdx = (y * CLIP_SIZE + x) * channels;
+  for (let y = 0; y < imageSize; y++) {
+    for (let x = 0; x < imageSize; x++) {
+      const srcIdx = (y * imageSize + x) * channels;
       for (let c = 0; c < 3; c++) {
         const pixel = rgb[srcIdx + c] / 255.0;
-        const normalized = (pixel - CLIP_MEAN[c]) / CLIP_STD[c];
-        floatData[c * pixelsPerChannel + y * CLIP_SIZE + x] = normalized;
+        const normalized =
+          (pixel - activeModel.imageMean[c]) / activeModel.imageStd[c];
+        floatData[c * pixelsPerChannel + y * imageSize + x] = normalized;
       }
     }
   }
@@ -116,6 +138,8 @@ async function preprocessCLIP(filePath) {
 // --- Init handler: load CLIP vision ONNX model directly ---
 async function handleInit(msg) {
   const { modelPath } = msg;
+  const modelKind = msg.modelKind === "clip" ? "clip" : "siglip";
+  activeModel = MODEL_CONFIGS[modelKind];
   const intraOpNumThreads = Math.max(
     1,
     Number.parseInt(
@@ -126,11 +150,13 @@ async function handleInit(msg) {
   const onnxPath = path.join(
     modelPath,
     "Xenova",
-    "clip-vit-base-patch32",
+    activeModel.directory,
     "onnx",
     "vision_model_quantized.onnx"
   );
-  console.error(`[Worker] Loading CLIP vision ONNX: ${onnxPath}`);
+  console.error(
+    `[Worker] Loading ${activeModel.displayName} vision ONNX: ${onnxPath}`
+  );
 
   // Phase 1: load onnxruntime binding (~10%)
   process.send?.({
@@ -163,10 +189,22 @@ async function handleInit(msg) {
     interOpNumThreads: 1,
     intraOpNumThreads,
   });
-  console.error("[Worker] CLIP model loaded, ready for batches");
+  console.error(
+    `[Worker] ${activeModel.displayName} loaded, ready for batches`
+  );
 
   process.send?.({ type: "init-progress", percent: 100, stage: "ready" });
   process.send?.({ type: "ready" });
+}
+
+function getImageEmbedding(output) {
+  const imageEmbedding = output[activeModel.imageOutputName];
+  if (!imageEmbedding) {
+    throw new Error(
+      `${activeModel.displayName} output "${activeModel.imageOutputName}" missing`
+    );
+  }
+  return imageEmbedding;
 }
 
 // --- Embed handler: process a batch ---
@@ -175,7 +213,7 @@ async function handleEmbed(msg) {
 
   // Auto-init if model not loaded yet
   if (!ortSession && modelPath) {
-    await handleInit({ modelPath });
+    await handleInit({ modelPath, modelKind: msg.modelKind });
   }
   if (!ortSession) {
     process.send?.({
@@ -214,13 +252,13 @@ async function handleEmbed(msg) {
       const pixelValues = new ort.Tensor("float32", floatData, [
         1,
         3,
-        CLIP_SIZE,
-        CLIP_SIZE,
+        activeModel.imageSize,
+        activeModel.imageSize,
       ]);
       const output = await ortSession.run({ pixel_values: pixelValues });
 
-      const { image_embeds } = output;
-      const vec = Array.from(image_embeds.data);
+      const imageEmbeds = getImageEmbedding(output);
+      const vec = Array.from(imageEmbeds.data);
       const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
       const vector = vec.map((v) => v / (norm || 1));
 

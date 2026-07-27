@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getActiveEmbeddingModel } from "@/services/ai/model-config";
 import {
   isAiSearchReady,
   searchByText,
@@ -27,6 +28,10 @@ function createVectorTable(results: Record<string, unknown>[] = []) {
   };
 }
 
+function createEmbeddingVector(): number[] {
+  return new Array(getActiveEmbeddingModel().vectorDimensions).fill(0.1);
+}
+
 function installReadyAi(
   table: ReturnType<typeof createVectorTable>,
   embedTexts: (texts: string[]) => Promise<number[][]>
@@ -53,7 +58,7 @@ afterEach(() => {
 describe("AI semantic search warmup", () => {
   it("预热模型和向量查询后才报告搜索就绪", async () => {
     const table = createVectorTable();
-    const embedTexts = vi.fn().mockResolvedValue([new Array(512).fill(0.1)]);
+    const embedTexts = vi.fn().mockResolvedValue([createEmbeddingVector()]);
     installReadyAi(table, embedTexts);
 
     expect(isAiSearchReady()).toBe(false);
@@ -68,7 +73,7 @@ describe("AI semantic search warmup", () => {
     const table = createVectorTable([{ photo_id: 7, _distance: 0.2 }]);
     const embedTexts = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return [new Array(512).fill(0.1)];
+      return [createEmbeddingVector()];
     });
     installReadyAi(table, embedTexts);
 
@@ -84,7 +89,7 @@ describe("AI semantic search warmup", () => {
   it("中文多 Prompt 使用一次批量推理并复用行数查询", async () => {
     const table = createVectorTable([{ photo_id: 8, _distance: 0.2 }]);
     const embedTexts = vi.fn(async (texts: string[]) =>
-      texts.map(() => new Array(512).fill(0.1))
+      texts.map(() => createEmbeddingVector())
     );
     installReadyAi(table, embedTexts);
 

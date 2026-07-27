@@ -13,6 +13,7 @@ import { getDatabase } from "@/db";
 import { appSettings, photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
+import { getActiveEmbeddingModel } from "./model-config";
 import {
   isVectorDBReady,
   photoTable,
@@ -117,7 +118,8 @@ async function initializeVectorDB(): Promise<void> {
     throw new Error(`Failed to connect to vector database: ${err?.message}`);
   }
   setVectordb(db);
-  const VECTOR_DIM = 512;
+  const model = getActiveEmbeddingModel();
+  const vectorDimensions = model.vectorDimensions;
 
   const tableNames = await db.tableNames();
 
@@ -140,14 +142,14 @@ async function initializeVectorDB(): Promise<void> {
     if (table) {
       setPhotoTable(table);
 
-      // Validate schema: vector column must be FixedSizeList<Float32>[512]
+      // Model changes also change the vector schema and require re-indexing.
       const schema = await table.schema();
       const vectorField = schema.fields.find((f: any) => f.name === "vector");
       const schemaValid =
         vectorField &&
         vectorField.type !== null &&
         typeof vectorField.type === "object" &&
-        (vectorField.type as any).listSize === VECTOR_DIM;
+        (vectorField.type as any).listSize === vectorDimensions;
 
       if (schemaValid) {
         console.log("[AI] Opened existing photo_embeddings table (schema OK)");
@@ -222,19 +224,24 @@ async function initializeVectorDB(): Promise<void> {
         );
       }
       console.log(
-        "[AI] Schema mismatch — vector column not FixedSizeList<512>. Recreating..."
+        `[AI] Schema mismatch — expected FixedSizeList<${vectorDimensions}> for ${model.displayName}. Recreating...`
       );
       await db.dropTable("photo_embeddings");
       setPhotoTable(null as any);
+      const resetCount = resetAllAiProcessedFlags();
+      console.log(
+        `[AI] Model migration: ${resetCount} photos marked for ${model.displayName} re-index`
+      );
+      setWasAutoRepaired(true);
     }
   }
 
-  // Create fresh table with explicit FixedSizeList<Float32>[512] schema
+  // Create a fresh table matching the active embedding model.
   const schema = new Schema([
     new Field("photo_id", new Int32()),
     new Field(
       "vector",
-      new FixedSizeList(VECTOR_DIM, new Field("item", new Float32()))
+      new FixedSizeList(vectorDimensions, new Field("item", new Float32()))
     ),
     new Field("created_at", new Float64()),
   ]);
@@ -242,7 +249,7 @@ async function initializeVectorDB(): Promise<void> {
   const newTable = await db.createEmptyTable("photo_embeddings", schema);
   setPhotoTable(newTable);
   console.log(
-    "[AI] Created photo_embeddings table (explicit FixedSizeList<Float32>[512] schema)"
+    `[AI] Created photo_embeddings table (FixedSizeList<Float32>[${vectorDimensions}], ${model.displayName})`
   );
   markIndexDirty(); // New table has no data — will be set to ready after index build completes
 

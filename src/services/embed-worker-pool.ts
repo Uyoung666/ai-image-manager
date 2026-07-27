@@ -3,6 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
+import {
+  type EmbeddingModelKind,
+  getActiveEmbeddingModel,
+} from "@/services/ai/model-config";
 
 interface EmbedResult {
   error?: string;
@@ -14,6 +18,7 @@ type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
 
 interface WorkerSlot {
   consecutiveFailures: number;
+  generation: number;
   index: number;
   pendingReject: ((err: Error) => void) | null;
   pendingResolve: ((results: EmbedResult[]) => void) | null;
@@ -47,11 +52,16 @@ const RESPAWN_DELAY_MS = 1000;
 let slots: WorkerSlot[] = [];
 let requestQueue: QueuedRequest[] = [];
 let modelPath: string | null = null;
+let poolModelKind: EmbeddingModelKind = getActiveEmbeddingModel().kind;
 let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
 let poolBatchSize = DEFAULT_BATCH_SIZE;
 let poolIntraOpNumThreads = 1;
+let poolGeneration = 0;
+let activePoolKey: string | null = null;
+let initializationKey: string | null = null;
+let initializationPromise: Promise<void> | null = null;
 
 /** Per-worker init progress: Map<workerIndex, percent 0-100> */
 const workerInitProgress = new Map<number, number>();
@@ -150,15 +160,19 @@ function findWorkerScript(): string {
   throw new Error("embed-worker.mjs not found");
 }
 
-function spawnWorker(index: number): WorkerSlot {
+function isCurrentSlot(slot: WorkerSlot): boolean {
+  return slot.generation === poolGeneration && slots[slot.index] === slot;
+}
+
+function spawnWorker(index: number, generation: number): WorkerSlot {
   const workerScript = findWorkerScript();
   const child = fork(workerScript, [], {
     stdio: ["ignore", "inherit", "pipe", "ipc"],
-    timeout: WORKER_TIMEOUT,
   });
 
   const slot: WorkerSlot = {
     process: child,
+    generation,
     index,
     status: "initializing",
     pendingResolve: null,
@@ -197,6 +211,9 @@ function spawnWorker(index: number): WorkerSlot {
       slot.timeoutId = null;
     }
     if (message.type === "init-progress") {
+      if (!isCurrentSlot(slot)) {
+        return;
+      }
       const pct = Number(message.percent ?? 0);
       workerInitProgress.set(index, pct);
       return;
@@ -209,6 +226,9 @@ function spawnWorker(index: number): WorkerSlot {
       return;
     }
     if (message.type === "ready") {
+      if (!isCurrentSlot(slot)) {
+        return;
+      }
       workerInitProgress.set(index, 100);
       slot.status = "idle";
       drainQueue();
@@ -256,6 +276,12 @@ function handleWorkerDeath(slot: WorkerSlot): void {
     reject(new Error(`Worker ${slot.index} died during processing`));
   }
 
+  // A previous pool generation may exit after shutdown or replacement. It must
+  // never mutate or respawn into the current pool.
+  if (!isCurrentSlot(slot)) {
+    return;
+  }
+
   const aliveCount = slots.filter((s) => s.status !== "dead").length;
   if (aliveCount === 0) {
     initialized = false;
@@ -267,26 +293,38 @@ function handleWorkerDeath(slot: WorkerSlot): void {
     return;
   }
 
-  // Auto-respawn if under failure limit
+  // Initialization failures are handled by startWorkerPool(). Only a fully
+  // initialized generation may replace one failed worker in place.
+  if (!initialized) {
+    return;
+  }
+
   if (slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES && modelPath) {
+    const generation = slot.generation;
     setTimeout(() => {
-      if (slot.status !== "dead") {
+      if (
+        slot.status !== "dead" ||
+        generation !== poolGeneration ||
+        slots[slot.index] !== slot ||
+        !initialized
+      ) {
         return;
       }
       console.log(
         `[Pool] Respawning worker ${slot.index} (attempt ${slot.consecutiveFailures})`
       );
-      const newSlot = spawnWorker(slot.index);
+      const newSlot = spawnWorker(slot.index, generation);
       newSlot.consecutiveFailures = slot.consecutiveFailures;
       slots[slot.index] = newSlot;
       newSlot.process.send({
         type: "init",
         modelPath,
+        modelKind: poolModelKind,
         useGPU: poolUseGPU,
         intraOpNumThreads: poolIntraOpNumThreads,
       });
     }, RESPAWN_DELAY_MS);
-  } else {
+  } else if (slot.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
     console.warn(
       `[Pool] Worker ${slot.index} exceeded max failures (${MAX_CONSECUTIVE_FAILURES}), not respawning`
     );
@@ -333,19 +371,22 @@ function dispatchToSlot(
     }
   }, WORKER_TIMEOUT);
 
-  slot.process.send({ type: "embed", modelPath, photos });
+  slot.process.send({
+    type: "embed",
+    modelKind: poolModelKind,
+    modelPath,
+    photos,
+  });
 }
 
-/** Start worker pool. Workers load the CLIP model once and stay alive. */
-export async function initWorkerPool(
+async function startWorkerPool(
   mp: string,
-  useGPU = false
+  useGPU: boolean,
+  key: string
 ): Promise<void> {
-  if (initialized && slots.some((s) => s.status !== "dead")) {
-    return;
-  }
-
+  const generation = ++poolGeneration;
   modelPath = mp;
+  poolModelKind = getActiveEmbeddingModel().kind;
   poolUseGPU = useGPU;
   slots = [];
   requestQueue = [];
@@ -365,7 +406,7 @@ export async function initWorkerPool(
   const readyPromises: Promise<void>[] = [];
 
   for (let i = 0; i < poolSize; i++) {
-    const slot = spawnWorker(i);
+    const slot = spawnWorker(i, generation);
     slots.push(slot);
 
     readyPromises.push(
@@ -394,14 +435,74 @@ export async function initWorkerPool(
     slot.process.send({
       type: "init",
       modelPath,
+      modelKind: poolModelKind,
       useGPU: poolUseGPU,
       intraOpNumThreads: poolIntraOpNumThreads,
     });
   }
 
-  await Promise.all(readyPromises);
-  console.log(`[Pool] All ${poolSize} workers ready`);
-  initialized = true;
+  try {
+    await Promise.all(readyPromises);
+    if (generation !== poolGeneration) {
+      throw new Error("Worker pool initialization superseded");
+    }
+    console.log(`[Pool] All ${poolSize} workers ready`);
+    initialized = true;
+    activePoolKey = key;
+  } catch (error) {
+    if (generation === poolGeneration) {
+      initialized = false;
+      activePoolKey = null;
+      for (const slot of slots) {
+        slot.status = "dead";
+        try {
+          slot.process.kill();
+        } catch {
+          /* best-effort */
+        }
+      }
+      slots = [];
+      workerInitProgress.clear();
+    }
+    throw error;
+  }
+}
+
+/** Start the persistent worker pool exactly once for a given configuration. */
+export function initWorkerPool(mp: string, useGPU = false): Promise<void> {
+  const modelKind = getActiveEmbeddingModel().kind;
+  const key = JSON.stringify({ modelKind, mp, useGPU });
+
+  if (
+    initialized &&
+    activePoolKey === key &&
+    slots.some((slot) => slot.status !== "dead")
+  ) {
+    return Promise.resolve();
+  }
+
+  if (initializationPromise) {
+    if (initializationKey === key) {
+      return initializationPromise;
+    }
+    return initializationPromise
+      .catch(() => undefined)
+      .then(() => initWorkerPool(mp, useGPU));
+  }
+
+  if (initialized || slots.length > 0) {
+    shutdownPool();
+  }
+
+  initializationKey = key;
+  const pending = startWorkerPool(mp, useGPU, key).finally(() => {
+    if (initializationPromise === pending) {
+      initializationPromise = null;
+      initializationKey = null;
+    }
+  });
+  initializationPromise = pending;
+  return pending;
 }
 
 /** Send a batch of photos to an available worker for embedding. */
@@ -450,19 +551,41 @@ export function abortAllWorkers(): void {
 
 /** Shut down all workers gracefully. */
 export function shutdownPool(): void {
+  const oldSlots = slots;
+  const shutdownError = new Error("Worker pool shut down");
+
+  // Detach the old generation immediately. This lets a new initialization
+  // start safely during the grace period and makes old exit events inert.
+  poolGeneration++;
+  slots = [];
+  initialized = false;
+  activePoolKey = null;
+  initializationPromise = null;
+  initializationKey = null;
+  workerInitProgress.clear();
+  for (const request of requestQueue) {
+    request.reject(shutdownError);
+  }
+  requestQueue = [];
+
   // Send abort first so workers can stop mid-batch if idle enough
   // to receive the message, then send shutdown + kill.
-  for (const slot of slots) {
+  for (const slot of oldSlots) {
+    if (slot.timeoutId) {
+      clearTimeout(slot.timeoutId);
+      slot.timeoutId = null;
+    }
+    const reject = slot.pendingReject;
+    slot.pendingResolve = null;
+    slot.pendingReject = null;
+    slot.status = "dead";
+    reject?.(shutdownError);
     try {
       slot.process.send({ type: "abort" });
     } catch {
       /* ignore */
     }
   }
-  // Capture the current slots reference so setTimeout(killAll)
-  // doesn't accidentally kill workers spawned by a subsequent
-  // initWorkerPool() call (which reassigns the module-level `slots`).
-  const oldSlots = slots;
   // Small grace period for abort messages to be processed
   const killAll = () => {
     for (const slot of oldSlots) {
@@ -471,12 +594,6 @@ export function shutdownPool(): void {
       } catch {
         /* ignore */
       }
-    }
-    // Only clear the module-level vars if still pointing to oldSlots
-    if (slots === oldSlots) {
-      slots = [];
-      requestQueue = [];
-      initialized = false;
     }
   };
   // Give workers a brief chance to process abort, then kill

@@ -16,8 +16,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const modelsDir = path.join(__dirname, "..", "models");
 
 const FILES = [
-  "Xenova/clip-vit-base-patch32/onnx/vision_model_quantized.onnx",
-  "Xenova/clip-vit-base-patch32/onnx/text_model_quantized.onnx",
+  "Xenova/siglip-base-patch16-224/onnx/vision_model_quantized.onnx",
+  "Xenova/siglip-base-patch16-224/onnx/text_model_quantized.onnx",
   "face/w600k_r50.onnx",
   "face/ultraface-320.onnx",
 ];

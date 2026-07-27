@@ -3,12 +3,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { WORKER_TIMEOUT } from "./constants";
+import {
+  getActiveEmbeddingModel,
+  getTextSearchMaxCosineDistance,
+} from "./model-config";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import {
   generateSearchPrompts,
   getQueryCoverage,
   parseChineseQuery,
 } from "./query-parser";
+import {
+  filterCosineSearchResults,
+  fuseRankedSearchResults,
+  isValidEmbeddingVector,
+} from "./scoring";
 import {
   _localModelPath,
   embeddingModel,
@@ -79,6 +88,7 @@ export function embedImageInWorker(
       if (msg.type === "ready") {
         child.send({
           type: "embed",
+          modelKind: getActiveEmbeddingModel().kind,
           modelPath,
           photos: [{ id: 1, path: imagePath }],
         });
@@ -119,7 +129,11 @@ export function embedImageInWorker(
       }
     });
 
-    child.send({ type: "init", modelPath });
+    child.send({
+      type: "init",
+      modelKind: getActiveEmbeddingModel().kind,
+      modelPath,
+    });
   });
 }
 
@@ -127,7 +141,7 @@ export function embedImageInWorker(
 // 中文 CLIP 零样本余弦距离天然偏高（0.4–0.7），过严阈值会导致全部过滤。
 // 放宽下限确保抽象词汇也能返回结果，同时保留覆盖率越高阈值越严的趋势。
 function adaptiveThreshold(coverage: number): number {
-  return 0.22 + coverage * 0.33;
+  return getTextSearchMaxCosineDistance(coverage, "zh");
 }
 
 async function fallbackSearch(
@@ -137,6 +151,13 @@ async function fallbackSearch(
   knownRowCount?: number
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!photoTable) {
+    return [];
+  }
+  const model = getActiveEmbeddingModel();
+  if (!isValidEmbeddingVector(queryVector, model)) {
+    console.error(
+      `[AI] fallbackSearch rejected invalid ${model.displayName} query vector: expected=${model.vectorDimensions} actual=${queryVector.length}`
+    );
     return [];
   }
 
@@ -180,12 +201,13 @@ async function fallbackSearch(
           (rawVec as any).length
         );
       }
-      if (vec && vec.length === 512) {
+      const vectorDimensions = getActiveEmbeddingModel().vectorDimensions;
+      if (vec && vec.length === vectorDimensions) {
         const photoId = row.photo_id as number;
         let dot = 0;
         let normQ = 0;
         let normV = 0;
-        for (let i = 0; i < 512; i++) {
+        for (let i = 0; i < vectorDimensions; i++) {
           dot += queryVector[i] * vec[i];
           normQ += queryVector[i] * queryVector[i];
           normV += vec[i] * vec[i];
@@ -222,18 +244,27 @@ async function searchVector(
   if (!photoTable) {
     return [];
   }
+  const model = getActiveEmbeddingModel();
+  if (!isValidEmbeddingVector(queryVector, model)) {
+    console.error(
+      `[AI] searchVector rejected invalid ${model.displayName} query vector: expected=${model.vectorDimensions} actual=${queryVector.length}`
+    );
+    return [];
+  }
   const adaptiveRefine = Math.min(
     10,
     Math.max(3, Math.ceil(100 / Math.sqrt(Math.max(rowCount, 1))))
   );
 
   let rawResults: Record<string, unknown>[] = [];
+  const queryLimit =
+    model.kind === "siglip" ? Math.min(Math.max(limit * 4, limit), 200) : limit;
   try {
     const vq = photoTable
       .vectorSearch(queryVector)
       .distanceType("cosine")
       .refineFactor(adaptiveRefine)
-      .limit(limit);
+      .limit(queryLimit);
     rawResults = (await vq.toArray()) as Record<string, unknown>[];
   } catch (err: any) {
     console.error("[AI] vectorSearch failed:", err?.message);
@@ -243,25 +274,24 @@ async function searchVector(
     return fallbackSearch(queryVector, limit, maxCosineDistance, rowCount);
   }
 
-  const filtered = rawResults.filter(
-    (r) => (r._distance as number) <= maxCosineDistance
+  const filtered = filterCosineSearchResults(
+    rawResults.map((result) => ({
+      distance: result._distance as number,
+      photoId: result.photo_id as number,
+    })),
+    maxCosineDistance,
+    limit
   );
 
   if (filtered.length === 0) {
+    const nearestDistance = rawResults[0]?._distance as number | undefined;
     console.log(
-      `[AI] All ${rawResults.length} results above threshold ${maxCosineDistance}, returning empty`
+      `[AI] All ${rawResults.length} ${model.displayName} results above distance threshold ${maxCosineDistance}; nearest=${nearestDistance?.toFixed(4) ?? "n/a"}`
     );
     return [];
   }
 
-  return filtered.map((r) => {
-    const cosDist = r._distance as number;
-    const similarity = Math.max(0, 1 - cosDist);
-    return {
-      photoId: r.photo_id as number,
-      similarity: Math.round(similarity * 10_000) / 10_000,
-    };
-  });
+  return filtered;
 }
 
 interface EmbeddingCacheEntry {
@@ -334,9 +364,15 @@ async function embedSearchTexts(
       throw new Error("CLIP 批量文本向量数量不匹配");
     }
 
+    const model = getActiveEmbeddingModel();
     for (let index = 0; index < missing.length; index++) {
       const item = missing[index];
       const vector = generated[index];
+      if (!isValidEmbeddingVector(vector, model)) {
+        throw new Error(
+          `${model.displayName} 文本向量无效: expected=${model.vectorDimensions} actual=${vector.length}`
+        );
+      }
       vectors[item.index] = vector;
       setCachedEmbedding(item.text, vector);
     }
@@ -397,27 +433,7 @@ async function multiPromptSearch(
   );
   timings.vectorMs += Date.now() - vectorStartedAt;
 
-  const weights = [1.0, 0.7, 0.5];
-  const k = 60;
-  const scores = new Map<number, number>();
-
-  for (let i = 0; i < resultSets.length; i++) {
-    const w = weights[Math.min(i, weights.length - 1)];
-    for (let rank = 0; rank < resultSets[i].length; rank++) {
-      const { photoId, similarity } = resultSets[i][rank];
-      const rrfScore = w / (k + rank + 1);
-      const combined = rrfScore + similarity * w * 0.05;
-      scores.set(photoId, (scores.get(photoId) || 0) + combined);
-    }
-  }
-
-  return [...scores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
-    .map(([photoId, score]) => ({
-      photoId,
-      similarity: Math.round(score * 10_000) / 10_000,
-    }));
+  return fuseRankedSearchResults(resultSets, limit);
 }
 
 // ── AI 文本搜索 TTL 缓存 ────────────────────────────────────────────
@@ -493,10 +509,7 @@ export async function searchByText(
     return pending;
   }
 
-  if (
-    searchCacheModel !== embeddingModel ||
-    searchCacheTable !== photoTable
-  ) {
+  if (searchCacheModel !== embeddingModel || searchCacheTable !== photoTable) {
     textSearchCache.clear();
     searchCacheModel = embeddingModel;
     searchCacheTable = photoTable;
@@ -572,7 +585,12 @@ async function performTextSearch(
     const searchText = `a photo of ${query.trim()}`;
     parseMs = Date.now() - parseStartedAt;
     console.log(`[AI] searchByText: en query → "${searchText}"`);
-    results = await singleVectorSearch(searchText, limit, 0.75, timings);
+    results = await singleVectorSearch(
+      searchText,
+      limit,
+      getTextSearchMaxCosineDistance(1, "en"),
+      timings
+    );
   }
 
   setCachedSearch(cacheKey, results);
@@ -665,6 +683,14 @@ export async function searchByImage(
     }
   }
 
+  const model = getActiveEmbeddingModel();
+  if (!isValidEmbeddingVector(queryVector, model)) {
+    console.error(
+      `[AI] searchByImage rejected invalid ${model.displayName} query vector: expected=${model.vectorDimensions} actual=${queryVector.length}`
+    );
+    return [];
+  }
+
   const rowCount = await photoTable.countRows();
   const adaptiveRefine = Math.min(
     10,
@@ -687,12 +713,12 @@ export async function searchByImage(
     return fallbackSearch(queryVector, limit);
   }
 
-  return rawResults.map((r) => {
-    const cosDist = r._distance as number;
-    const similarity = Math.max(0, 1 - cosDist);
-    return {
-      photoId: r.photo_id as number,
-      similarity: Math.round(similarity * 10_000) / 10_000,
-    };
-  });
+  return filterCosineSearchResults(
+    rawResults.map((result) => ({
+      distance: result._distance as number,
+      photoId: result.photo_id as number,
+    })),
+    Number.POSITIVE_INFINITY,
+    limit
+  );
 }

@@ -31,6 +31,7 @@ import {
   getOrphanPhotoIds,
 } from "@/ipc/photos/handlers/mutations";
 import { copyModelsOnce } from "@/services/ai/model-loader";
+import { getEmbeddingModelFile } from "@/services/ai/model-config";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
   getHttpServerPort,
@@ -196,23 +197,15 @@ function logPackagedPathDiagnostics() {
     ),
     summarizePathState(
       "resource-model",
-      path.join(
-        process.resourcesPath,
-        "models",
-        "Xenova",
-        "clip-vit-base-patch32",
-        "onnx",
+      getEmbeddingModelFile(
+        path.join(process.resourcesPath, "models"),
         "vision_model_quantized.onnx"
       )
     ),
     summarizePathState(
       "cached-model",
-      path.join(
-        getDataPath(),
-        "models",
-        "Xenova",
-        "clip-vit-base-patch32",
-        "onnx",
+      getEmbeddingModelFile(
+        path.join(getDataPath(), "models"),
         "vision_model_quantized.onnx"
       )
     ),
@@ -481,11 +474,8 @@ export { invalidateFoldersCache } from "@/utils/folder-paths";
 async function ensureModelAvailable(): Promise<void> {
   const dataPath = getDataPath();
   const modelsDir = path.join(dataPath, "models");
-  const visionMarker = path.join(
+  const visionMarker = getEmbeddingModelFile(
     modelsDir,
-    "Xenova",
-    "clip-vit-base-patch32",
-    "onnx",
     "vision_model_quantized.onnx"
   );
 
@@ -497,11 +487,8 @@ async function ensureModelAvailable(): Promise<void> {
   // ── Production: use shared single-flight copy (fixes Issue #25 race) ──
   if (app.isPackaged) {
     const bundledModels = path.join(process.resourcesPath, "models");
-    const bundledMarker = path.join(
+    const bundledMarker = getEmbeddingModelFile(
       bundledModels,
-      "Xenova",
-      "clip-vit-base-patch32",
-      "onnx",
       "vision_model_quantized.onnx"
     );
 
@@ -550,11 +537,8 @@ async function ensureModelAvailable(): Promise<void> {
   ];
 
   for (const candidate of devCandidates) {
-    const marker = path.join(
+    const marker = getEmbeddingModelFile(
       candidate,
-      "Xenova",
-      "clip-vit-base-patch32",
-      "onnx",
       "vision_model_quantized.onnx"
     );
     log.debug({ marker }, "Checking for AI model");

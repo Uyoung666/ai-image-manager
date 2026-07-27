@@ -18,8 +18,8 @@ async function checkSingleMirror(
   baseUrl: string,
   timeout = 8000
 ): Promise<MirrorHealth> {
-  // 使用 CLIP 模型的 config.json 作为探测文件（小文件，所有镜像都有）
-  const testPath = "/Xenova/clip-vit-base-patch32/resolve/main/config.json";
+  // Use the active embedding model's small config file for connectivity checks.
+  const testPath = "/Xenova/siglip-base-patch16-224/resolve/main/config.json";
   const fullUrl = `${baseUrl}${testPath}`;
 
   return new Promise((resolve) => {
