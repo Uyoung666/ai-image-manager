@@ -1,10 +1,11 @@
-import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderBadge } from "@/components/FolderBadge";
 import {
   buildFolderTree,
-  type FolderTreeNode,
+  FolderTreeBranch,
+  flattenVisibleFolderTree,
+  type VisibleFolderNode,
 } from "@/components/sidebar-trees";
 import {
   Dialog,
@@ -42,6 +43,10 @@ export function FaceScanScopeDialog({
   const [selectedRoots, setSelectedRoots] = useState<Set<number>>(new Set());
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
+  const visibleNodes = useMemo(
+    () => flattenVisibleFolderTree(tree, expandedIds),
+    [expandedIds, tree]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -116,83 +121,80 @@ export function FaceScanScopeDialog({
     });
   }
 
-  function renderNode(node: FolderTreeNode, depth = 0): React.ReactNode {
+  function renderNode(item: VisibleFolderNode): React.ReactNode {
+    const { node } = item;
     const hasChildren = node.children.length > 0;
     const expanded = expandedIds.has(node.folder.id);
     const selected = selectedRoots.has(node.folder.id);
     const inherited = hasSelectedAncestor(node.folder.id);
     const included = selected || inherited;
+    let toggleLabel: string | undefined;
+    if (hasChildren) {
+      toggleLabel = expanded ? t("collapseFolder") : t("expandFolder");
+    }
 
     return (
-      <div key={node.folder.id}>
-        <div
-          className="flex min-h-9 items-center gap-1 rounded-[6px] px-1.5 transition-colors hover:bg-foreground/5 dark:hover:bg-white/[0.045]"
-          style={{ paddingLeft: depth * 16 + 6 }}
-        >
-          <button
-            aria-label={expanded ? t("collapseFolder") : t("expandFolder")}
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-[4px] text-muted-foreground transition-colors hover:text-foreground disabled:invisible"
-            disabled={!hasChildren}
-            onClick={() => toggleExpanded(node.folder.id)}
-            type="button"
+      <div
+        className="flex min-h-9 items-center rounded-[6px] px-1.5 transition-colors hover:bg-foreground/5 dark:hover:bg-white/[0.045]"
+        data-face-scan-folder-id={node.folder.id}
+        key={node.folder.id}
+      >
+        <FolderTreeBranch
+          expanded={expanded}
+          isActive={included}
+          item={item}
+          onToggle={toggleExpanded}
+          toggleLabel={toggleLabel}
+        />
+        <div className="checkbox-wrapper min-w-0 flex-1">
+          <input
+            checked={included}
+            className="check"
+            disabled={inherited}
+            id={`face-scan-folder-${node.folder.id}`}
+            onChange={() => toggleFolder(node.folder.id)}
+            type="checkbox"
+          />
+          <label
+            className={`label flex min-w-0 flex-1 items-center gap-2 py-1 text-left ${
+              inherited ? "cursor-default" : ""
+            }`}
+            htmlFor={`face-scan-folder-${node.folder.id}`}
           >
-            <ChevronRight
-              className={`h-3.5 w-3.5 transition-transform ${
-                expanded ? "rotate-90" : ""
-              }`}
-            />
-          </button>
-          <div className="checkbox-wrapper min-w-0 flex-1">
-            <input
-              checked={included}
-              className="check"
-              disabled={inherited}
-              id={`face-scan-folder-${node.folder.id}`}
-              onChange={() => toggleFolder(node.folder.id)}
-              type="checkbox"
-            />
-            <label
-              className={`label flex min-w-0 flex-1 items-center gap-2 py-1 text-left ${
-                inherited ? "cursor-default" : ""
-              }`}
-              htmlFor={`face-scan-folder-${node.folder.id}`}
+            <svg
+              aria-hidden="true"
+              className="flex-none text-foreground/55 dark:text-white/45"
+              height="45"
+              viewBox="0 0 95 95"
+              width="45"
             >
-              <svg
-                aria-hidden="true"
-                className="flex-none text-foreground/55 dark:text-white/45"
-                height="45"
-                viewBox="0 0 95 95"
-                width="45"
-              >
-                <rect
+              <rect
+                fill="none"
+                height="50"
+                stroke="currentColor"
+                width="50"
+                x="30"
+                y="20"
+              />
+              <g transform="translate(0,-952.36222)">
+                <path
+                  className="path1"
+                  d="m 56,963 c -102,122 6,9 7,9 17,-5 -66,69 -38,52 122,-77 -7,14 18,4 29,-11 45,-43 23,-4"
                   fill="none"
-                  height="50"
-                  stroke="currentColor"
-                  width="50"
-                  x="30"
-                  y="20"
+                  stroke="var(--danger)"
+                  strokeWidth="3"
                 />
-                <g transform="translate(0,-952.36222)">
-                  <path
-                    className="path1"
-                    d="m 56,963 c -102,122 6,9 7,9 17,-5 -66,69 -38,52 122,-77 -7,14 18,4 29,-11 45,-43 23,-4"
-                    fill="none"
-                    stroke="var(--danger)"
-                    strokeWidth="3"
-                  />
-                </g>
-              </svg>
-              <FolderBadge className="h-5 w-5" folder={node.folder} />
-              <span className="min-w-0 flex-1 truncate font-medium text-[13px] text-foreground/90">
-                {node.folder.displayName}
-              </span>
-              <span className="flex-none rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-muted-foreground dark:bg-white/[0.055]">
-                {node.folder.totalPhotoCount ?? node.folder.photoCount}
-              </span>
-            </label>
-          </div>
+              </g>
+            </svg>
+            <FolderBadge className="h-5 w-5" folder={node.folder} />
+            <span className="min-w-0 flex-1 truncate font-medium text-[13px] text-foreground/90">
+              {node.folder.displayName}
+            </span>
+            <span className="flex-none rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-muted-foreground dark:bg-white/[0.055]">
+              {node.folder.totalPhotoCount ?? node.folder.photoCount}
+            </span>
+          </label>
         </div>
-        {expanded && node.children.map((child) => renderNode(child, depth + 1))}
       </div>
     );
   }
@@ -233,7 +235,7 @@ export function FaceScanScopeDialog({
         </DialogHeader>
         <div className="mx-5 max-h-[55vh] min-h-48 overflow-y-auto rounded-[8px] border border-border/80 bg-background/70 p-1.5 shadow-inner dark:border-white/[0.07] dark:bg-[#090a0e]">
           {tree.length > 0 ? (
-            tree.map((node) => renderNode(node))
+            visibleNodes.map((item) => renderNode(item))
           ) : (
             <div className="flex h-40 items-center justify-center text-[13px] text-muted-foreground">
               {t("faceScanScopeNoFolders")}

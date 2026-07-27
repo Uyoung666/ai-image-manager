@@ -163,6 +163,89 @@ export function flattenVisibleFolderTree(
   return visible;
 }
 
+interface FolderTreeBranchProps {
+  expanded: boolean;
+  isActive?: boolean;
+  item: VisibleFolderNode;
+  onToggle: (id: number) => void;
+  toggleLabel?: string;
+}
+
+export function FolderTreeBranch({
+  expanded,
+  isActive = false,
+  item,
+  onToggle,
+  toggleLabel,
+}: FolderTreeBranchProps) {
+  const { ancestorContinuations, depth, isLastSibling, node } = item;
+  const hasChildren = node.children.length > 0;
+  const visibleDepth = Math.min(depth, MAX_VISIBLE_FOLDER_DEPTH);
+
+  return (
+    <div
+      aria-hidden={toggleLabel ? undefined : "true"}
+      className="relative flex-shrink-0 self-stretch"
+      style={{ width: visibleDepth * FOLDER_INDENT_PX + 20 }}
+    >
+      {Array.from(
+        { length: Math.max(0, visibleDepth - 1) },
+        (_, guideIndex) => {
+          const ancestorId = ancestorContinuations[guideIndex];
+          return ancestorId !== null && ancestorId !== undefined ? (
+            <span
+              className="pointer-events-none absolute top-0 bottom-0 w-px bg-foreground/20"
+              data-tree-guide="ancestor"
+              key={ancestorId}
+              style={{
+                left: guideIndex * FOLDER_INDENT_PX + 10,
+              }}
+            />
+          ) : null;
+        }
+      )}
+      {visibleDepth > 0 && (
+        <>
+          <span
+            className={`pointer-events-none absolute top-0 w-px ${isActive ? "bg-primary/70" : "bg-foreground/25"}`}
+            data-tree-guide="branch"
+            style={{
+              height: isLastSibling ? "50%" : "100%",
+              left: (visibleDepth - 1) * FOLDER_INDENT_PX + 10,
+            }}
+          />
+          <span
+            className={`pointer-events-none absolute top-1/2 h-px ${isActive ? "bg-primary/70" : "bg-foreground/25"}`}
+            data-tree-guide="elbow"
+            style={{
+              left: (visibleDepth - 1) * FOLDER_INDENT_PX + 10,
+              width: FOLDER_INDENT_PX,
+            }}
+          />
+        </>
+      )}
+      {hasChildren && (
+        <button
+          aria-hidden={toggleLabel ? undefined : "true"}
+          aria-label={toggleLabel}
+          className="absolute top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle(node.folder.id);
+          }}
+          style={{ left: visibleDepth * FOLDER_INDENT_PX }}
+          tabIndex={toggleLabel ? 0 : -1}
+          type="button"
+        >
+          <ChevronRight
+            className={`h-3 w-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface FolderTreeProps {
   activeId: number | null;
   dragOverId: number | null;
@@ -211,6 +294,7 @@ export function FolderTree({
   const virtualItems = virtualizer.getVirtualItems();
   const virtualStartIndex = virtualItems[0]?.index ?? -1;
   const virtualEndIndex = virtualItems.at(-1)?.index ?? -1;
+  const visibleNodeCount = visibleNodes.length;
 
   const updateBottomFade = useCallback(() => {
     const element = scrollRef.current;
@@ -224,6 +308,10 @@ export function FolderTree({
   }, []);
 
   useEffect(() => {
+    if (visibleNodeCount === 0) {
+      setHasMoreBelow(false);
+      return;
+    }
     const element = scrollRef.current;
     if (!element) {
       return;
@@ -235,7 +323,7 @@ export function FolderTree({
     const observer = new ResizeObserver(updateBottomFade);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [updateBottomFade, visibleNodes]);
+  }, [updateBottomFade, visibleNodeCount]);
 
   useEffect(() => {
     if (visibleNodes.some((item) => item.node.folder.id === focusedId)) {
@@ -340,74 +428,20 @@ export function FolderTree({
   }
 
   function renderRow(item: VisibleFolderNode, index: number) {
-    const { ancestorContinuations, depth, isLastSibling, node } = item;
+    const { depth, node } = item;
     const hasChildren = node.children.length > 0;
     const isExpanded = expandedIds.has(node.folder.id);
     const isActive = activeId === node.folder.id;
     const isDragOver = dragOverId === node.folder.id;
-    const visibleDepth = Math.min(depth, MAX_VISIBLE_FOLDER_DEPTH);
 
     return (
       <div className="flex h-8 items-center" key={node.folder.id}>
-        <div
-          aria-hidden="true"
-          className="relative h-8 flex-shrink-0"
-          style={{ width: visibleDepth * FOLDER_INDENT_PX + 20 }}
-        >
-          {Array.from(
-            { length: Math.max(0, visibleDepth - 1) },
-            (_, guideIndex) => {
-              const ancestorId = ancestorContinuations[guideIndex];
-              return ancestorId !== null && ancestorId !== undefined ? (
-                <span
-                  className="pointer-events-none absolute top-0 bottom-0 w-px bg-foreground/20"
-                  data-tree-guide="ancestor"
-                  key={ancestorId}
-                  style={{
-                    left: guideIndex * FOLDER_INDENT_PX + 10,
-                  }}
-                />
-              ) : null;
-            }
-          )}
-          {visibleDepth > 0 && (
-            <>
-              <span
-                className={`pointer-events-none absolute top-0 w-px ${isActive ? "bg-primary/70" : "bg-foreground/25"}`}
-                data-tree-guide="branch"
-                style={{
-                  height: isLastSibling ? "50%" : "100%",
-                  left: (visibleDepth - 1) * FOLDER_INDENT_PX + 10,
-                }}
-              />
-              <span
-                className={`pointer-events-none absolute top-1/2 h-px ${isActive ? "bg-primary/70" : "bg-foreground/25"}`}
-                data-tree-guide="elbow"
-                style={{
-                  left: (visibleDepth - 1) * FOLDER_INDENT_PX + 10,
-                  width: FOLDER_INDENT_PX,
-                }}
-              />
-            </>
-          )}
-          {hasChildren && (
-            <button
-              aria-hidden="true"
-              className="absolute top-1.5 flex h-5 w-5 items-center justify-center rounded-[4px] text-muted-foreground/70 hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggle(node.folder.id);
-              }}
-              style={{ left: visibleDepth * FOLDER_INDENT_PX }}
-              tabIndex={-1}
-              type="button"
-            >
-              <ChevronRight
-                className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-              />
-            </button>
-          )}
-        </div>
+        <FolderTreeBranch
+          expanded={isExpanded}
+          isActive={isActive}
+          item={item}
+          onToggle={onToggle}
+        />
         <Tooltip>
           <TooltipTrigger asChild>
             <button

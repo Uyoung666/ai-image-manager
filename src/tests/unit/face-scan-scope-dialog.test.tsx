@@ -49,6 +49,11 @@ describe("FaceScanScopeDialog", () => {
     expect(screen.getByRole("checkbox", { name: FAMILY_NAME })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: YEAR_NAME })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: YEAR_NAME })).toBeDisabled();
+    expect(
+      document.querySelector(
+        '[data-face-scan-folder-id="2"] [data-tree-guide="elbow"]'
+      )
+    ).toBeInTheDocument();
   });
 
   it("saves independent selected roots", async () => {
