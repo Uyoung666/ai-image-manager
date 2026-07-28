@@ -13,6 +13,8 @@ import { findLatestBuild, parseElectronApp } from "electron-playwright-helpers";
  */
 
 let electronApp: ElectronApplication;
+const FIRST_EMPTY_STATE_TITLE =
+  /^(添加照片文件夹开始整理|Add a photo folder to get started)$/;
 
 test.beforeAll(async () => {
   const latestBuild = findLatestBuild();
@@ -46,7 +48,5 @@ test("renders the first page", async () => {
   const title = await page.waitForSelector("h1");
   const text = await title.textContent();
   // 语言自动检测：CI 环境为英文，本地开发通常为中文
-  expect(text).toMatch(
-    /^(欢迎使用 AI 图片管理器|Welcome to AI Image Manager)$/
-  );
+  expect(text).toMatch(FIRST_EMPTY_STATE_TITLE);
 });

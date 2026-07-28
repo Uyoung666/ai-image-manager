@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";
@@ -24,6 +33,18 @@ export interface GlobalAiProgress {
   /** Human-readable status line for the UI. */
   statusText: string;
 }
+
+const IDLE_GLOBAL_AI_PROGRESS: GlobalAiProgress = {
+  canCancel: false,
+  isRunning: false,
+  percent: 0,
+  phase: "idle",
+  statusText: "",
+};
+
+const GlobalAiStatusContext = createContext<GlobalAiProgress>(
+  IDLE_GLOBAL_AI_PROGRESS
+);
 
 interface ScanPayload {
   channel: "scan-progress";
@@ -322,7 +343,7 @@ function deriveStatus(snap: ProgressSnapshot): GlobalAiProgress {
 
 // ── Hook ───────────────────────────────────────────────────────────
 
-export function useGlobalAiStatus(): GlobalAiProgress {
+function useGlobalAiStatusState(): GlobalAiProgress {
   const { t } = useTranslation();
   const [scan, setScan] = useState<ScanPayload | null>(null);
   const [ai, setAi] = useState<AiProgressPayload | null>(null);
@@ -541,4 +562,17 @@ export function useGlobalAiStatus(): GlobalAiProgress {
 
   const snap = buildSnapshot(scan, ai, face, faceRunning, queue, queueRunning);
   return deriveStatus(snap);
+}
+
+export function GlobalAiStatusProvider({ children }: { children: ReactNode }) {
+  const status = useGlobalAiStatusState();
+  return createElement(
+    GlobalAiStatusContext.Provider,
+    { value: status },
+    children
+  );
+}
+
+export function useGlobalAiStatus(): GlobalAiProgress {
+  return useContext(GlobalAiStatusContext);
 }

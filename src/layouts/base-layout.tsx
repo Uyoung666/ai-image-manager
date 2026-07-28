@@ -24,6 +24,7 @@ import {
   useSidebarFilter,
 } from "@/contexts/SidebarFilterContext";
 import { useFolders } from "@/hooks/useFolders";
+import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
 
 function isPerfMonitorEnabled() {
   try {
@@ -103,10 +104,11 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
   return (
     <ScrollPositionProvider>
       <OnboardingProvider>
-        <OnboardingOverlay />
-        <AppContentGate>
-          <BrowseSessionProvider>
-            <SidebarFilterProvider>
+        <GlobalAiStatusProvider>
+          <OnboardingOverlay />
+          <AppContentGate>
+            <BrowseSessionProvider>
+              <SidebarFilterProvider>
               <div
                 className={`flex h-screen flex-col overflow-hidden ${
                   isHomePage ? "home-workspace" : ""
@@ -135,9 +137,10 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
                 />
                 {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
               </div>
-            </SidebarFilterProvider>
-          </BrowseSessionProvider>
-        </AppContentGate>
+              </SidebarFilterProvider>
+            </BrowseSessionProvider>
+          </AppContentGate>
+        </GlobalAiStatusProvider>
       </OnboardingProvider>
     </ScrollPositionProvider>
   );

@@ -145,12 +145,11 @@ i18n.use(initReactI18next).init({
         noPhotos: "还没有照片，请先添加文件夹",
         loadingPhotos: "正在加载照片…",
 
-        // Welcome / Onboarding
-        welcomeTitle: "欢迎使用 AI 图片管理器",
-        welcomeStep1: "选择一个照片文件夹开始整理",
-        welcomeStep2: "等待扫描完成，照片将出现在这里",
-        welcomeStep3: "点击「AI 智能索引」启用自然语言搜索",
-        welcomeTip: "💡 提示: 所有处理都在本地完成，不会上传任何数据",
+        // Gallery empty states
+        emptyWelcomeTitle: "添加照片文件夹开始整理",
+        emptyWelcomeDescription: "选择包含照片的文件夹。所有处理都在本地完成。",
+        emptyImportingTitle: "正在导入照片",
+        emptyImportingDescription: "正在扫描文件夹并生成缩略图，照片很快会出现在这里。",
 
         // Folder scanning
         scanningTitle: "正在扫描文件夹",
@@ -725,12 +724,13 @@ i18n.use(initReactI18next).init({
         emptyAiNotIndexedDesc:
           "当前只能匹配文件名和标签。启用 AI 索引后可使用语义搜索和自然语言查询。",
         emptyGoToAiSettings: "前往 AI 设置",
+        emptyAiPartialTitle: "AI 索引尚未完成（{{indexed}} / {{total}}）",
         emptyBrowseAll: "浏览全部照片",
         emptyTimeFilterTitle: "「{{keyword}}」内未找到匹配照片",
         emptyTimeFilterDesc:
           "系统已识别时间范围：{{from}} – {{to}}。试试扩大时间范围或修改关键词。",
         emptyTimeRangeFallback: "该时间范围",
-        emptyClearTimeFilter: "清除时间过滤",
+        emptyClearTimeFilter: "清除搜索条件",
         emptyExpandTimeRange: "扩大日期范围",
         emptyFilterAndQueryTitle: "当前过滤条件下无匹配结果",
         emptyFilterAndQueryDesc:
@@ -1716,13 +1716,12 @@ i18n.use(initReactI18next).init({
         noPhotos: "No photos yet. Add a folder to get started.",
         loadingPhotos: "Loading photos...",
 
-        welcomeTitle: "Welcome to AI Image Manager",
-        welcomeStep1: "Choose a photo folder to get started",
-        welcomeStep2: "Wait for scanning to complete, photos will appear here",
-        welcomeStep3:
-          "Click 'AI Smart Index' to enable natural language search",
-        welcomeTip:
-          "Tip: All processing is done locally. No data is ever uploaded.",
+        emptyWelcomeTitle: "Add a photo folder to get started",
+        emptyWelcomeDescription:
+          "Choose a folder containing photos. All processing stays on this device.",
+        emptyImportingTitle: "Importing photos",
+        emptyImportingDescription:
+          "Scanning the folder and generating thumbnails. Your photos will appear here shortly.",
 
         scanningTitle: "Scanning Folder",
         scanningPath: "Path: {{path}}",
@@ -2324,12 +2323,13 @@ i18n.use(initReactI18next).init({
         emptyAiNotIndexedDesc:
           "Currently only filename and tag matching is available. Enable AI indexing for semantic and natural language search.",
         emptyGoToAiSettings: "Go to AI Settings",
+        emptyAiPartialTitle: "AI indexing is not complete ({{indexed}} / {{total}})",
         emptyBrowseAll: "Browse All Photos",
         emptyTimeFilterTitle: 'No photos found in "{{keyword}}"',
         emptyTimeFilterDesc:
           "System detected time range: {{from}} – {{to}}. Try expanding the range or changing keywords.",
         emptyTimeRangeFallback: "this time range",
-        emptyClearTimeFilter: "Clear Time Filter",
+        emptyClearTimeFilter: "Clear Search",
         emptyExpandTimeRange: "Expand Date Range",
         emptyFilterAndQueryTitle: "No results under current filters",
         emptyFilterAndQueryDesc:

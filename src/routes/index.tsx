@@ -16,6 +16,7 @@ import { CloudUploadDialog } from "@/components/CloudUploadDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { CullStartDialog } from "@/components/CullStartDialog";
+import { EmptyStateCard } from "@/components/EmptyStateCard";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MasonryGridHandle } from "@/components/MasonryGrid";
@@ -50,6 +51,7 @@ import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
+import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
@@ -223,7 +225,6 @@ function HomePage() {
     useState<DashboardReturnTarget | null>(
       () => getBrowseSession("home-search").dashboardReturn ?? null
     );
-  const [showAiIndexHint, setShowAiIndexHint] = useState(false);
   const [searchResultFade, setSearchResultFade] = useState(false);
   const [parsedTimeFilter, setParsedTimeFilter] = useState<{
     dateFrom: string;
@@ -254,7 +255,6 @@ function HomePage() {
     setSearchSemantic(null);
     setSearchLoading(false);
     setParsedTimeFilter(null);
-    setShowAiIndexHint(false);
     setShowDrillBanner(false);
     setDrillDownFilters(undefined);
     clearDashboardReturnTarget();
@@ -465,6 +465,7 @@ function HomePage() {
     enabled: !isSearching,
   });
   const { data: folders = [] } = useFolders();
+  const globalAiStatus = useGlobalAiStatus();
 
   const { data: aiStatus } = useAiStatus();
   const previousCoverageStateRef = useRef(aiStatus?.coverageState);
@@ -1146,27 +1147,33 @@ function HomePage() {
     }
     if (filter.favoriteOnly) {
       return (
-        <div className="flex flex-col items-center gap-3 text-center">
-          <svg
-            className="h-10 w-10 text-muted-foreground/40"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            viewBox="0 0 24 24"
-          >
-            <path
-              d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <p className="font-medium text-[14px] text-foreground">
-            {t("emptyFavoritesTitle")}
-          </p>
-          <p className="max-w-[280px] text-[12px] text-muted-foreground/70">
-            {t("emptyFavoritesDescription")}
-          </p>
-        </div>
+        <EmptyStateCard
+          actions={[
+            {
+              label: t("emptyBrowseAll"),
+              onClick: () => filter.setFavoriteOnly(false),
+              primary: true,
+            },
+          ]}
+          description={t("emptyFavoritesDescription")}
+          icon={
+            <svg
+              aria-hidden="true"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              viewBox="0 0 24 24"
+            >
+              <path
+                d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          }
+          title={t("emptyFavoritesTitle")}
+        />
       );
     }
     return undefined;
@@ -1511,17 +1518,6 @@ function HomePage() {
         });
       } else {
         setParsedTimeFilter(null);
-      }
-
-      if (
-        results.length === 0 &&
-        aiStatus &&
-        !aiStatus.hasVectors &&
-        query.trim()
-      ) {
-        setShowAiIndexHint(true);
-      } else {
-        setShowAiIndexHint(false);
       }
 
       setSearchResults(results);
@@ -1924,6 +1920,11 @@ function HomePage() {
     (loading && photos.length === 0) ||
     isSearching ||
     filter.favoriteOnly;
+  const isImportingFirstFolder =
+    folders.length > 0 &&
+    photos.length === 0 &&
+    (globalAiStatus.phase === "import-queue" ||
+      globalAiStatus.phase === "scanning");
 
   return (
     <>
@@ -2354,7 +2355,10 @@ function HomePage() {
             className="flex min-h-0 flex-1"
             style={{ paddingTop: galleryToolbarHeight }}
           >
-            <Welcome disabled={false} onAddFolder={filter.handleAddFolder} />
+            <Welcome
+              isImporting={isImportingFirstFolder}
+              onAddFolder={filter.handleAddFolder}
+            />
           </div>
         )}
         {showAiTaskStatus && (
