@@ -5,6 +5,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -224,6 +225,7 @@ function DashboardPage() {
   const tab = search.tab ?? "overview";
   const preset = search.range ?? "all";
   const scrollRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [mapSource, setMapSource] = useState<"offline" | "online">("offline");
   const [expandedCharts, setExpandedCharts] = useState<Set<string>>(new Set());
   const [startingAi, setStartingAi] = useState(false);
@@ -235,6 +237,8 @@ function DashboardPage() {
     useState(false);
   const [customFrom, setCustomFrom] = useState(search.from ?? "");
   const [customTo, setCustomTo] = useState(search.to ?? "");
+  const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
   useRouteScrollRestoration(scrollRef, {
     getRouteKey: () => `dashboard-${tab}`,
   });
@@ -286,6 +290,19 @@ function DashboardPage() {
   });
   const queryData = statsQuery.data ?? null;
   const data = useDeferredValue(queryData);
+
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) {
+      return;
+    }
+    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [data]);
+
   const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
   const colorQuery = useQuery({
     queryKey: ["dashboard", "colors", range.from, range.toExclusive],
@@ -539,7 +556,9 @@ function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <header className="border-border border-b px-4 py-3 sm:px-6">
+      <header
+        className="border-border border-b px-4 py-3 sm:px-6"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
@@ -626,9 +645,13 @@ function DashboardPage() {
         </DialogContent>
       </Dialog>
 
+      <div className="relative flex min-h-0 flex-1">
       <nav
         aria-label={t("dashboardSections")}
-        className="flex shrink-0 gap-1 overflow-x-auto border-border border-b px-4 py-2 sm:px-6"
+        className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex gap-1 overflow-x-auto border-b px-4 py-2 sm:px-6 ${
+          isToolbarScrolled ? "is-scrolled" : ""
+        }`}
+        ref={toolbarRef}
       >
         {TABS.map((item) => (
           <button
@@ -643,7 +666,12 @@ function DashboardPage() {
         ))}
       </nav>
 
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <main
+        className="flex-1 overflow-y-auto p-4 sm:p-6"
+        onScroll={(event) => setIsToolbarScrolled(event.currentTarget.scrollTop > 4)}
+        ref={scrollRef}
+        style={{ paddingTop: toolbarHeight }}
+      >
         {range.from !== undefined && data.scope.excludedUndated > 0 && (
           <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
@@ -1184,6 +1212,7 @@ function DashboardPage() {
           />
         )}
       </main>
+      </div>
     </div>
   );
 }

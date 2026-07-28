@@ -1,6 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, RotateCcw, Search, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -82,6 +89,8 @@ function TrashPage() {
   const [searchInput, setSearchInput] = useState("");
   const [sort, setSort] = useState<"deletedAt" | "name" | "size">("deletedAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
   const {
     selectedIds,
     handleSelect,
@@ -101,6 +110,7 @@ function TrashPage() {
     y: number;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
@@ -265,6 +275,19 @@ function TrashPage() {
       return cardRect.top - containerRect.top + el.scrollTop;
     },
   });
+
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) {
+      setToolbarHeight(0);
+      return;
+    }
+    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [loading, query, trashTotalCount]);
 
   function toggleSelect(id: number, e: React.MouseEvent) {
     handleSelect(id, e);
@@ -1003,7 +1026,9 @@ function TrashPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
+      <div
+        className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4"
+      >
         <div className="flex items-center gap-3">
           <button
             aria-label={t("backToHome")}
@@ -1081,9 +1106,15 @@ function TrashPage() {
         </div>
       </div>
 
+      <div className="relative flex min-h-0 flex-1">
       {/* Selection bar */}
       {!loading && (trashTotalCount > 0 || query) && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-2">
+          <div
+            className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b px-6 py-2 ${
+              isToolbarScrolled ? "is-scrolled" : ""
+            }`}
+            ref={toolbarRef}
+          >
           <div className="flex items-center gap-3">
             {photos.length > 0 && (
               <button
@@ -1200,7 +1231,6 @@ function TrashPage() {
           </button>
         </div>
       )}
-
       {/* Photo grid */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users select individual semantic card buttons */}
@@ -1219,8 +1249,11 @@ function TrashPage() {
           }
         }}
         onMouseDown={handleMarqueeStart}
+        onScroll={(event) =>
+          setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
+        }
         ref={scrollRef}
-        style={{ userSelect: "none" }}
+        style={{ paddingTop: toolbarHeight, userSelect: "none" }}
       >
         {/* Marquee selection overlay */}
         {marquee && (
@@ -1235,6 +1268,7 @@ function TrashPage() {
           />
         )}
         {renderTrashContent()}
+      </div>
       </div>
 
       {/* Context menu */}

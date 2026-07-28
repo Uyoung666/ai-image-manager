@@ -303,6 +303,7 @@ export const PhotoGrid = memo(
     const targetColWidth = columnWidth ?? internalColumnWidth;
     const [columnCount, setColumnCount] = useState(4);
     const [containerWidth, setContainerWidth] = useState(0);
+    const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const observerRef = useRef<ResizeObserver | null>(null);
     const targetColWidthRef = useRef(targetColWidth);
@@ -311,6 +312,16 @@ export const PhotoGrid = memo(
       columnCount: 4,
       width: 0,
     });
+    const handleGridScrollTopChange = useCallback(
+      (scrollTop: number) => {
+        setIsToolbarScrolled((previous) => {
+          const next = scrollTop > 4;
+          return previous === next ? previous : next;
+        });
+        onScrollTopChange?.(scrollTop);
+      },
+      [onScrollTopChange]
+    );
     // selectedIds/deletingIds 通过 ref 传递，稳定 renderItem 引用。
     // 移除 deps 中的 Set 依赖 → 选中操作仅触发实际变化卡片的 memo 比较。
     const selectedIdsRef = useRef(selectedIds);
@@ -775,7 +786,9 @@ export const PhotoGrid = memo(
         {/* Masonry grid */}
         {showToolbar && (
           <div
-            className="glass-surface absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-border border-b px-4 py-2"
+            className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between border-b px-4 py-2 ${
+              isToolbarScrolled ? "is-scrolled" : ""
+            }`}
             onClick={(event) => event.stopPropagation()}
           >
             <span className="truncate text-[12px] text-muted-foreground">
@@ -846,7 +859,7 @@ export const PhotoGrid = memo(
             items={displayPhotos}
             onEndReached={onEndReached}
             onMarqueeSelect={onMarqueeSelect}
-            onScrollTopChange={onScrollTopChange}
+            onScrollTopChange={handleGridScrollTopChange}
             ref={gridRef}
             renderItem={renderItem}
             routeKey={routeKey}

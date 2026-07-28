@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -228,12 +228,27 @@ export function DuplicatesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<GroupFilter>("all");
   const [keeperByGroup, setKeeperByGroup] = useState<Record<string, number>>(
     {}
   );
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) {
+      return;
+    }
+    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const { data, isLoading } = useQuery({
     queryKey: ["duplicates"],
@@ -385,8 +400,8 @@ export function DuplicatesPage() {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <header className="border-border border-b px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
+      <header className="border-border border-b px-6 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
           <div className="flex items-center gap-3">
             <button
               className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
@@ -396,7 +411,7 @@ export function DuplicatesPage() {
               <ArrowLeft className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="font-semibold text-[24px] text-foreground tracking-tight">
+              <h1 className="font-semibold text-[20px] text-foreground tracking-tight">
                 {t("duplicatesTitle")}
               </h1>
               {isLoading ? null : (
@@ -409,7 +424,29 @@ export function DuplicatesPage() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          {!isLoading && activeGroups.length > 0 ? (
+            <div className="flex items-center divide-x divide-border overflow-x-auto rounded-[7px] border border-border bg-muted/35">
+              {[
+                [t("duplicateGroupStat"), activeGroups.length],
+                [t("duplicatePhotoStat"), involvedPhotos],
+                [t("duplicatePendingStat"), cleanupCount],
+                [t("duplicateReclaimStat"), formatFileSize(reclaimBytes)],
+              ].map(([label, value]) => (
+                <div
+                  className="flex shrink-0 items-baseline gap-1.5 px-3 py-1.5"
+                  key={label}
+                >
+                  <p className="text-[10px] text-muted-foreground">{label}</p>
+                  <p className="font-semibold text-[13px] text-foreground tabular-nums">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div />
+          )}
+          <div className="flex items-center justify-self-end gap-2">
             <button
               className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
               disabled={rescan.isPending}
@@ -432,26 +469,15 @@ export function DuplicatesPage() {
             </button>
           </div>
         </div>
-        {!isLoading && activeGroups.length > 0 ? (
-          <div className="mt-4 grid grid-cols-4 gap-3">
-            {[
-              [t("duplicateGroupStat"), activeGroups.length],
-              [t("duplicatePhotoStat"), involvedPhotos],
-              [t("duplicatePendingStat"), cleanupCount],
-              [t("duplicateReclaimStat"), formatFileSize(reclaimBytes)],
-            ].map(([label, value]) => (
-              <div className="rounded-[7px] bg-muted/60 px-3 py-2" key={label}>
-                <p className="text-[10px] text-muted-foreground">{label}</p>
-                <p className="mt-0.5 font-semibold text-[14px] text-foreground">
-                  {value}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : null}
       </header>
 
-      <nav className="flex items-center justify-between gap-4 overflow-x-auto border-border border-b px-6 py-3">
+      <div className="relative flex min-h-0 flex-1">
+        <nav
+          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between gap-4 overflow-x-auto border-b px-6 py-1.5 ${
+          isToolbarScrolled ? "is-scrolled" : ""
+        }`}
+          ref={toolbarRef}
+        >
         <div className="inline-flex shrink-0 rounded-[8px] border border-border bg-secondary p-1">
           {filters.map(([key, label, count]) => (
             <button
@@ -476,9 +502,14 @@ export function DuplicatesPage() {
           <ShieldCheck className="h-3.5 w-3.5 text-success" />
           {t("duplicateSafetyHint")}
         </span>
-      </nav>
+        </nav>
 
-      <main className="flex-1 overflow-y-auto p-6" ref={parentRef}>
+        <main
+        className="flex-1 overflow-y-auto p-6"
+        onScroll={(event) => setIsToolbarScrolled(event.currentTarget.scrollTop > 4)}
+        ref={parentRef}
+        style={{ paddingTop: toolbarHeight }}
+      >
         {isLoading ? (
           <div className="space-y-4">
             {[0, 1, 2].map((item) => (
@@ -552,7 +583,8 @@ export function DuplicatesPage() {
             })}
           </div>
         ) : null}
-      </main>
+        </main>
+      </div>
 
       <ConfirmDialog
         confirmText={

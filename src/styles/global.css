@@ -368,6 +368,25 @@
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
+  /* 页面功能条在顶部融入画布；滚动后恢复悬浮毛玻璃层级。 */
+  .page-toolbar {
+    background: transparent;
+    border-color: transparent;
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      backdrop-filter 160ms ease;
+  }
+
+  .page-toolbar.is-scrolled {
+    background: color-mix(in srgb, var(--surface) 85%, transparent);
+    border-color: var(--border);
+    box-shadow: 0 8px 24px -20px rgb(0 0 0 / 0.75);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
+  }
+
   .draglayer {
     -webkit-app-region: drag;
   }
