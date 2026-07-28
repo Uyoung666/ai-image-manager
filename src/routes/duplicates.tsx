@@ -15,6 +15,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { ipc } from "@/ipc/manager";
 import type {
   DuplicateGroup,
@@ -236,6 +237,7 @@ export function DuplicatesPage() {
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const [toolbarHeight, setToolbarHeight] = useState(0);
 
   useLayoutEffect(() => {
@@ -506,7 +508,11 @@ export function DuplicatesPage() {
 
         <main
         className="flex-1 overflow-y-auto p-6"
-        onScroll={(event) => setIsToolbarScrolled(event.currentTarget.scrollTop > 4)}
+        onScroll={(event) => {
+          const isScrolled = event.currentTarget.scrollTop > 4;
+          setIsToolbarScrolled(isScrolled);
+          setShowBackToTop(isScrolled);
+        }}
         ref={parentRef}
         style={{ paddingTop: toolbarHeight }}
       >
@@ -584,6 +590,25 @@ export function DuplicatesPage() {
           </div>
         ) : null}
         </main>
+        <MasonryBackToTop
+          label={t("backToTop")}
+          onClick={(event) => {
+            event.stopPropagation();
+            const element = parentRef.current;
+            if (!element) {
+              return;
+            }
+            element.scrollTo({
+              top: 0,
+              behavior:
+                element.scrollTop > element.clientHeight * 4
+                  ? "auto"
+                  : "smooth",
+            });
+          }}
+          selectionActive={false}
+          show={showBackToTop}
+        />
       </div>
 
       <ConfirmDialog

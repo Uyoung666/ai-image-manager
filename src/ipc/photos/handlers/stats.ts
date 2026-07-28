@@ -19,10 +19,11 @@ import {
   detectionRuns,
   duplicatePairs,
   exifData,
+  photoSequenceMembers,
   photos,
 } from "@/db/schema";
-import { getPhotoVectors } from "@/services/ai-embedder";
 import { getActiveEmbeddingModel } from "@/services/ai/model-config";
+import { getPhotoVectors } from "@/services/ai-embedder";
 import { BKTree } from "@/services/bk-tree";
 import {
   aggregateFromStoredColors,
@@ -1001,6 +1002,57 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
 }
 
+function getPhotoSequenceIds(
+  db: ReturnType<typeof getDatabase>
+): Map<number, number> {
+  return new Map(
+    db
+      .select({
+        photoId: photoSequenceMembers.photoId,
+        sequenceId: photoSequenceMembers.sequenceId,
+      })
+      .from(photoSequenceMembers)
+      .all()
+      .map(({ photoId, sequenceId }) => [photoId, sequenceId])
+  );
+}
+
+export function isSameSequenceVisualPair(
+  photoAId: number,
+  photoBId: number,
+  matchType: string,
+  sequenceByPhoto: ReadonlyMap<number, number>
+): boolean {
+  if (matchType === "exact") {
+    return false;
+  }
+  const sequenceAId = sequenceByPhoto.get(photoAId);
+  return (
+    sequenceAId !== undefined && sequenceAId === sequenceByPhoto.get(photoBId)
+  );
+}
+
+export function getStaleSequenceVisualPairIds(
+  pairs: ReadonlyArray<{
+    id: number;
+    matchType: string;
+    photoAId: number;
+    photoBId: number;
+  }>,
+  sequenceByPhoto: ReadonlyMap<number, number>
+): number[] {
+  return pairs
+    .filter((pair) =>
+      isSameSequenceVisualPair(
+        pair.photoAId,
+        pair.photoBId,
+        pair.matchType,
+        sequenceByPhoto
+      )
+    )
+    .map((pair) => pair.id);
+}
+
 type PersistedDuplicatePair = typeof duplicatePairs.$inferSelect;
 
 function hydrateDuplicateGroups(
@@ -1062,14 +1114,28 @@ export const findDuplicates = os
   )
   .handler(async ({ input }) => {
     const db = getDatabase();
+    const sequenceByPhoto = getPhotoSequenceIds(db);
 
     // If not forcing rescan, return persisted results
     if (!input.forceRescan) {
       const existing = db.select().from(duplicatePairs).all();
+      const stalePairIds = getStaleSequenceVisualPairIds(
+        existing,
+        sequenceByPhoto
+      );
+      if (stalePairIds.length > 0) {
+        db.delete(duplicatePairs)
+          .where(inArray(duplicatePairs.id, stalePairIds))
+          .run();
+      }
+      const current =
+        stalePairIds.length > 0
+          ? existing.filter((pair) => !stalePairIds.includes(pair.id))
+          : existing;
 
-      if (existing.length > 0) {
+      if (current.length > 0) {
         return {
-          groups: hydrateDuplicateGroups(db, existing),
+          groups: hydrateDuplicateGroups(db, current),
           fromCache: true,
         };
       }
@@ -1222,6 +1288,9 @@ export const findDuplicates = os
           continue;
         }
         seenPairs.add(key);
+        if (isSameSequenceVisualPair(aId, bId, "phash", sequenceByPhoto)) {
+          continue;
+        }
         candidates.push({
           photoAId: aId,
           photoBId: bId,

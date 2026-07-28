@@ -11,6 +11,17 @@ const mocks = vi.hoisted(() => ({
 }));
 const PHOTO_FIVE_NAME = /5\.jpg/;
 
+class ResizeObserverMock {
+  disconnect() {
+    // The page only needs this observer to exist in jsdom.
+  }
+  observe() {
+    // The page only needs this observer to exist in jsdom.
+  }
+}
+
+vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
 vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
@@ -140,5 +151,31 @@ describe("DuplicatesPage", () => {
         ],
       });
     });
+  });
+
+  it("shows the shared back-to-top control after scrolling and returns the list to the top", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const scrollTo = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <DuplicatesPage />
+      </QueryClientProvider>
+    );
+
+    await screen.findByText("1.jpg");
+    const scrollContainer = screen.getByText("1.jpg").closest("main");
+    expect(scrollContainer).not.toBeNull();
+    Object.defineProperties(scrollContainer as HTMLElement, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollTo: { configurable: true, value: scrollTo },
+      scrollTop: { configurable: true, value: 10 },
+    });
+
+    fireEvent.scroll(scrollContainer as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "backToTop" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 });
