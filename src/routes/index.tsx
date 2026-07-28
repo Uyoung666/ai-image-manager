@@ -1991,7 +1991,7 @@ function HomePage() {
                 </div>
                 {sequenceMode === "sequences" && (
                   <button
-                    className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    className="order-first rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
                     disabled={rebuildingSequences}
                     onClick={handleRebuildSequences}
                     type="button"
@@ -2003,7 +2003,7 @@ function HomePage() {
                 )}
                 {sequenceMode === "sequences" && sequenceSuggestions.length > 0 && (
                   <button
-                    className="rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
+                    className="order-first rounded px-2 py-1 text-[11px] text-primary hover:bg-muted"
                     onClick={() => {
                       const suggestion = sequenceSuggestions[0];
                       if (!suggestion) {

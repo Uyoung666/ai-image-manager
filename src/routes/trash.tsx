@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { RouteError } from "@/components/RouteError";
 import {
@@ -1177,18 +1178,20 @@ function TrashPage() {
                 </button>
               )}
             </label>
-            <select
+            <FilterDropdown
               aria-label={t("sortBy")}
               className="h-8 rounded-[6px] border border-border bg-background px-2 text-[12px]"
-              onChange={(event) =>
-                setSort(event.target.value as "deletedAt" | "name" | "size")
+              onChange={(value) =>
+                setSort(value as "deletedAt" | "name" | "size")
               }
+              options={[
+                { label: t("trashSortDeletedAt"), value: "deletedAt" },
+                { label: t("trashSortName"), value: "name" },
+                { label: t("trashSortSize"), value: "size" },
+              ]}
+              placeholder={t("sortBy")}
               value={sort}
-            >
-              <option value="deletedAt">{t("trashSortDeletedAt")}</option>
-              <option value="name">{t("trashSortName")}</option>
-              <option value="size">{t("trashSortSize")}</option>
-            </select>
+            />
             <button
               aria-label={
                 order === "desc" ? t("sortDescending") : t("sortAscending")
