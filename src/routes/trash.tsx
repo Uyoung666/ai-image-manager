@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { RouteError } from "@/components/RouteError";
 import {
   Dialog,
@@ -90,6 +91,7 @@ function TrashPage() {
   const [sort, setSort] = useState<"deletedAt" | "name" | "size">("deletedAt");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const {
     selectedIds,
@@ -1249,9 +1251,11 @@ function TrashPage() {
           }
         }}
         onMouseDown={handleMarqueeStart}
-        onScroll={(event) =>
-          setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
-        }
+        onScroll={(event) => {
+          const isScrolled = event.currentTarget.scrollTop > 4;
+          setIsToolbarScrolled(isScrolled);
+          setShowBackToTop(isScrolled);
+        }}
         ref={scrollRef}
         style={{ paddingTop: toolbarHeight, userSelect: "none" }}
       >
@@ -1269,6 +1273,23 @@ function TrashPage() {
         )}
         {renderTrashContent()}
       </div>
+      <MasonryBackToTop
+        label={t("backToTop")}
+        onClick={(event) => {
+          event.stopPropagation();
+          const element = scrollRef.current;
+          if (!element) {
+            return;
+          }
+          element.scrollTo({
+            top: 0,
+            behavior:
+              element.scrollTop > element.clientHeight * 4 ? "auto" : "smooth",
+          });
+        }}
+        selectionActive={selectedIds.size > 0}
+        show={showBackToTop}
+      />
       </div>
 
       {/* Context menu */}
