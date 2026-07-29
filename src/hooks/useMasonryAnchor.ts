@@ -132,6 +132,10 @@ export function useMasonryAnchor<T extends { id: number }>({
             expiresAt: Date.now() + ENFORCE_LOCK_MS,
           };
 
+          // Apply the restored position before the browser can paint the grid
+          // at scrollTop=0. The RAF loop remains as a short geometry lock.
+          enforceScroll();
+
           const frameLoop = () => {
             const lock = enforceLockRef.current;
             if (!lock) {

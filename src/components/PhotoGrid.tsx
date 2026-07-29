@@ -70,6 +70,7 @@ interface PhotoGridProps {
   onEndReached?: () => void;
   onKeyboardSelect?: (id: number) => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
+  onRestoreSettled?: (routeKey: string) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
@@ -80,6 +81,7 @@ interface PhotoGridProps {
    * 例如: "home" | "album-123" | "person-456"
    */
   routeKey: string;
+  restoreGateReady?: boolean;
   searchQuery?: string;
   sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
@@ -284,10 +286,12 @@ export const PhotoGrid = memo(
     onToggleFavorite,
     onKeyboardSelect,
     onMarqueeSelect,
+    onRestoreSettled,
     onScrollTopChange,
     onBackgroundClick,
     showToolbar = true,
     topInset = 0,
+    restoreGateReady = true,
     sequences = [],
     sequenceMode = "photos",
     onOpenSequence,
@@ -859,10 +863,12 @@ export const PhotoGrid = memo(
             items={displayPhotos}
             onEndReached={onEndReached}
             onMarqueeSelect={onMarqueeSelect}
+            onRestoreSettled={onRestoreSettled}
             onScrollTopChange={handleGridScrollTopChange}
             ref={gridRef}
             renderItem={renderItem}
             routeKey={routeKey}
+            restoreGateReady={restoreGateReady}
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
@@ -920,6 +926,12 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.routeKey !== nextProps.routeKey) {
+      return false;
+    }
+    if (prevProps.restoreGateReady !== nextProps.restoreGateReady) {
+      return false;
+    }
+    if (prevProps.onRestoreSettled !== nextProps.onRestoreSettled) {
       return false;
     }
     if (prevProps.searchQuery !== nextProps.searchQuery) {

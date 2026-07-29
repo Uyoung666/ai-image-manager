@@ -107,6 +107,57 @@ type PendingSequenceAction =
 
 const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
 const NO_PHOTO_IDS: number[] = [];
+const RESTORE_OVERLAY_FADE_MS = 180;
+const RESTORE_OVERLAY_LABEL_DELAY_MS = 120;
+
+function GalleryRestoreOverlay({ active }: { active: boolean }) {
+  const { t } = useTranslation();
+  const [rendered, setRendered] = useState(active);
+  const [exiting, setExiting] = useState(false);
+  const [showLabel, setShowLabel] = useState(false);
+
+  useEffect(() => {
+    if (active) {
+      setRendered(true);
+      setExiting(false);
+      const labelTimer = setTimeout(
+        () => setShowLabel(true),
+        RESTORE_OVERLAY_LABEL_DELAY_MS
+      );
+      return () => clearTimeout(labelTimer);
+    }
+
+    setShowLabel(false);
+    if (!rendered) {
+      return;
+    }
+    setExiting(true);
+    const exitTimer = setTimeout(() => {
+      setRendered(false);
+      setExiting(false);
+    }, RESTORE_OVERLAY_FADE_MS);
+    return () => clearTimeout(exitTimer);
+  }, [active, rendered]);
+
+  if (!rendered) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-live="polite"
+      className={`home-gallery-restore-overlay ${exiting ? "is-exiting" : ""}`}
+      role="status"
+    >
+      <div
+        className={`home-gallery-restore-status ${showLabel ? "is-visible" : ""}`}
+      >
+        <span aria-hidden="true" className="home-gallery-restore-pulse" />
+        <span>{t("restoringBrowsePosition")}</span>
+      </div>
+    </div>
+  );
+}
 
 function isSearchMode(value: string | null): value is SearchMode {
   return SEARCH_MODES.includes(value as SearchMode);
@@ -962,7 +1013,7 @@ function HomePage() {
   // 动态 routeKey：区分搜索/筛选/排序状态
   // ⚠️ 所有 filter 字段必须做 ?? fallback，防止卸载期 SidebarFilterContext
   // 重置导致 "undefined" 字符串窜入 Key（如 home-all-undefined vs home-all）
-  const { markRouteDirty } = useScrollPosition();
+  const { clearScrollPosition, markRouteDirty } = useScrollPosition();
   const routeKey = useMemo(() => {
     const filterPart = [
       filter.activeFolderId ?? "all",
@@ -995,20 +1046,32 @@ function HomePage() {
 
   // ── 网格 ref（用于原子化滚动定位）─────────────────────────────
   const gridRef = useRef<MasonryGridHandle>(null);
+  const [restoredRouteKey, setRestoredRouteKey] = useState<string | null>(null);
+  const handleRestoreSettled = useCallback((settledRouteKey: string) => {
+    setRestoredRouteKey(settledRouteKey);
+  }, []);
 
   // ── 原子化预加载：数据未就位时不渲染 MasonryGrid ──────────────
-  const { preloadState } = useScrollRestorePreloader({
+  const { hasSavedPosition, preloadState } = useScrollRestorePreloader({
     routeKey,
     pageSize: 100,
     currentItemCount: pagedPhotos.length,
     hasMore: hasNextPage ?? false,
-    isFetchingNextPage,
+    isInitialLoading: photosLoading && pagedPhotos.length === 0,
     onTimeout: () => {
-      toast.info(t("scrollPositionReset", "视图位置已重置"), {
+      clearScrollPosition(routeKey);
+      setRestoredRouteKey(routeKey);
+      toast.info(t("scrollPositionReset"), {
         duration: 2500,
       });
     },
   });
+  const restoreGateReady =
+    preloadState === "positioning" ||
+    preloadState === "not-needed" ||
+    preloadState === "aborted";
+  const restorePending =
+    hasSavedPosition && restoredRouteKey !== routeKey;
 
   // 预加载期间自动推进分页加载（顺序拉取，避免并发乱序）
   useEffect(() => {
@@ -2129,19 +2192,12 @@ function HomePage() {
               }`}
               onAnimationEnd={() => setSearchResultFade(false)}
             >
-              {/* 预加载进度条：顶部极细扫描线，不遮挡底层 UI */}
-              {preloadState === "preloading" && (
-                <div className="absolute top-0 right-0 left-0 z-30 h-[2px] overflow-hidden bg-transparent">
-                  <div
-                    className="h-full rounded-full bg-primary/70"
-                    style={{
-                      width: "35%",
-                      animation: "indeterminate 1.4s ease-in-out infinite",
-                    }}
-                  />
-                </div>
-              )}
-              <PhotoGrid
+              <div
+                className={`home-gallery-restore-content flex min-w-0 flex-1 ${
+                  restorePending ? "is-restoring" : ""
+                }`}
+              >
+                <PhotoGrid
                 columnWidth={gridColumnWidth}
                 deletingIds={deletingIds}
                 emptyState={emptyStateContent}
@@ -2167,6 +2223,7 @@ function HomePage() {
                 onMarqueeSelect={wrappedMarqueeSelect}
                 onOpenSequence={handleOpenSequence}
                 onOpenSequenceDetails={handleSequenceDetails}
+                onRestoreSettled={handleRestoreSettled}
                 onScrollTopChange={handleGalleryScrollTopChange}
                 onSelect={handlePhotoSelect}
                 onToggleFavorite={handleToggleFavorite}
@@ -2175,6 +2232,7 @@ function HomePage() {
                 onToggleSequenceExpand={handleToggleSequenceExpand}
                 photos={photos}
                 routeKey={routeKey}
+                restoreGateReady={restoreGateReady}
                 searchQuery={searchQuery}
                 selectedIds={selectedIds}
                 sequenceMode={displayedSequenceMode}
@@ -2183,7 +2241,9 @@ function HomePage() {
                 sort={sortField}
                 sortOrder={sortOrder}
                 topInset={galleryToolbarHeight}
-              />
+                />
+              </div>
+              <GalleryRestoreOverlay active={restorePending} key={routeKey} />
               <SelectionActionBar
                 allFavorite={
                   selectedIds.size > 0 &&

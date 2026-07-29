@@ -115,10 +115,12 @@ describe("useMasonryAnchor", () => {
 
     act(() => {
       forwardedRef.current.scrollToItem(20, 0.5);
-      vi.advanceTimersByTime(1);
     });
     expect(el.scrollTop).toBe(220);
 
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
     act(() => {
       el.dispatchEvent(new WheelEvent("wheel"));
     });

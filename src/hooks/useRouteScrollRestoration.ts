@@ -81,6 +81,7 @@ export function useRouteScrollRestoration(
     isPlaceholderData?: boolean;
     onLoadMore?: () => void;
     hasMore?: boolean;
+    onRestoreSettled?: (routeKey: string) => void;
     /** MasonryGrid 的命令式 ref，用于原子定位（scrollToItem）与锁解除 */
     gridRef?: React.RefObject<{
       scrollToItem: (itemId: number, offsetRatio: number) => void;
@@ -239,6 +240,16 @@ export function useRouteScrollRestoration(
   const itemCount = options?.itemCount ?? 0;
   const onLoadMore = options?.onLoadMore;
   const hasMore = options?.hasMore ?? false;
+  const onRestoreSettledRef = useRef(options?.onRestoreSettled);
+  onRestoreSettledRef.current = options?.onRestoreSettled;
+  const settledRouteKeyRef = useRef<string | null>(null);
+  const notifyRestoreSettled = useCallback(() => {
+    if (settledRouteKeyRef.current === routeKey) {
+      return;
+    }
+    settledRouteKeyRef.current = routeKey;
+    onRestoreSettledRef.current?.(routeKey);
+  }, [routeKey]);
 
   // ── 种子函数：将恢复成功后的位置写入快照 ──────────────────
   const seedSnapshotAfterRestore = useCallback(
@@ -372,6 +383,7 @@ export function useRouteScrollRestoration(
 
     // 重置所有恢复相关 refs（为新一轮恢复做准备）
     hasRestoredRef.current = false;
+    settledRouteKeyRef.current = null;
     lastRestoredItemCountRef.current = 0;
     lastLoadMoreItemCountRef.current = 0;
     hasInitialPositionedRef.current = false;
@@ -722,6 +734,7 @@ export function useRouteScrollRestoration(
           hasPending: false,
         });
 
+        notifyRestoreSettled();
         scheduleUnlock();
         return;
       }
@@ -855,6 +868,34 @@ export function useRouteScrollRestoration(
       }
 
       if (newPending) {
+        if (!hasMore) {
+          const bestAvailableScrollTop = Math.max(
+            0,
+            Math.min(
+              newPending.targetScrollTop,
+              el.scrollHeight - el.clientHeight
+            )
+          );
+          if (gridRef?.current?.scrollToPixel) {
+            gridRef.current.scrollToPixel(bestAvailableScrollTop);
+          } else {
+            el.scrollTop = bestAvailableScrollTop;
+          }
+          pendingRestoreRef.current = null;
+          hasRestoredRef.current = true;
+          hasInitialPositionedRef.current = true;
+          lastRestoredItemCountRef.current = itemCount;
+          seedSnapshotAfterRestore(
+            el.scrollTop,
+            el.scrollHeight,
+            undefined,
+            undefined
+          );
+          notifyRestoreSettled();
+          scheduleUnlock();
+          return;
+        }
+
         pendingRestoreRef.current = newPending;
         hasRestoredRef.current = true;
         hasInitialPositionedRef.current = true;
@@ -897,6 +938,7 @@ export function useRouteScrollRestoration(
           hasPending: false,
         });
 
+        notifyRestoreSettled();
         scheduleUnlock();
         return;
       }
@@ -919,6 +961,7 @@ export function useRouteScrollRestoration(
       hasPending: false,
     });
 
+    notifyRestoreSettled();
     scheduleUnlock();
   }, [
     scrollRef,
@@ -931,6 +974,7 @@ export function useRouteScrollRestoration(
     onLoadMore,
     hasMore,
     seedSnapshotAfterRestore,
+    notifyRestoreSettled,
   ]);
 
   return { initialScrollTop, hasInitialPositionedRef, forceUnlock };

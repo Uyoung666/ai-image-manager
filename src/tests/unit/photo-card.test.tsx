@@ -92,6 +92,23 @@ describe("PhotoCard", () => {
     expect(img?.srcset).toContain("512w");
   });
 
+  it("reveals a thumbnail only after its image load event", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+      />
+    );
+    const img = screen.getByRole("img", { name: "test-photo.jpg" });
+    expect(img).toHaveAttribute("data-load-state", "loading");
+    expect(img).toHaveClass("opacity-0");
+
+    fireEvent.load(img);
+
+    expect(img).toHaveAttribute("data-load-state", "loaded");
+    expect(img).toHaveClass("opacity-100");
+  });
+
   it("does not render image element when renderImage is false", () => {
     render(
       <PhotoCard

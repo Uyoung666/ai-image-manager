@@ -82,6 +82,8 @@ function PhotoCardImage({
   url,
   width,
 }: PhotoCardImageProps) {
+  const [loaded, setLoaded] = useState(false);
+
   if (!(hasThumbnail && renderImage)) {
     return (
       <div className="absolute inset-0 bg-muted/70">
@@ -91,14 +93,19 @@ function PhotoCardImage({
   }
 
   return (
+    // biome-ignore lint/a11y/noNoninteractiveElementInteractions: image load state controls the thumbnail reveal transition
     <img
       alt={filename}
-      className="h-full w-full object-cover"
+      className={`h-full w-full object-cover transition-opacity duration-150 motion-reduce:transition-none ${
+        loaded ? "opacity-100" : "opacity-0"
+      }`}
+      data-load-state={loaded ? "loaded" : "loading"}
       decoding="async"
       fetchPriority={loading === "eager" ? "high" : "auto"}
       height={height || undefined}
       loading={loading}
       onError={onError}
+      onLoad={() => setLoaded(true)}
       sizes="(max-width: 900px) 160px, 220px"
       src={url}
       srcSet={srcSet}
@@ -350,6 +357,7 @@ export const PhotoCard = memo(function PhotoCard({
         filename={filename}
         hasThumbnail={hasThumbnail}
         height={height}
+        key={url}
         loading={loading}
         onError={handleImageError}
         renderImage={renderImage}

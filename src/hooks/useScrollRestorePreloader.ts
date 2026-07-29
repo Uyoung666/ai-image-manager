@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 
-/** 预加载超时（毫秒），超时后强制 ready，走降级像素恢复路径 */
 const PRELOAD_TIMEOUT_MS = 1500;
-
-/** 额外预加载的页数余量，防止 estimatedGlobalIndex 微小偏差 */
 const PRELOAD_PAGE_MARGIN = 1;
 
 export function calculateScrollRestorePagesNeeded(
@@ -18,150 +15,159 @@ export function calculateScrollRestorePagesNeeded(
   return Math.max(1, targetPage + 1 + pageMargin);
 }
 
-export type PreloadState = "idle" | "preloading" | "ready";
+export type PreloadState =
+  | "not-needed"
+  | "checking"
+  | "preloading"
+  | "positioning"
+  | "aborted";
 
 interface UseScrollRestorePreloaderParams {
-  /** 当前已加载 item 总数（用于判断是否已有足够数据） */
   currentItemCount: number;
-  /** 是否还有更多数据可加载 */
   hasMore: boolean;
-  /** 是否正在加载下一页 */
-  isFetchingNextPage: boolean;
-  /** 超时降级回调：预加载超时后触发，用于通知用户位置已重置 */
+  isInitialLoading: boolean;
   onTimeout?: () => void;
-  /** 每页数据量（须与 usePhotos 中的 PAGE_SIZE 一致） */
   pageSize: number;
-  /** 当前路由 routeKey */
   routeKey: string;
 }
 
 interface UseScrollRestorePreloaderResult {
-  fallbackScrollTop: number;
-  preloadedAnchor: {
-    itemId: number;
-    offsetRatio: number;
-    offsetFromTop: number;
-  } | null;
+  hasSavedPosition: boolean;
   preloadState: PreloadState;
 }
 
-/**
- * 信号驱动预加载：检查锚点 → 计算所需页数 → 父组件顺序 fetchNextPage。
- * 3 秒超时逃生舱，避免 TanStack Query 内部并发竞态。
- */
+interface ResolvePreloadStateParams {
+  currentItemCount: number;
+  estimatedGlobalIndex?: number;
+  hasMore: boolean;
+  isInitialLoading: boolean;
+  pageSize: number;
+  savedScrollTop: number;
+}
+
+export function resolveScrollRestorePreloadState({
+  currentItemCount,
+  estimatedGlobalIndex,
+  hasMore,
+  isInitialLoading,
+  pageSize,
+  savedScrollTop,
+}: ResolvePreloadStateParams): PreloadState {
+  if (savedScrollTop <= 0) {
+    return "not-needed";
+  }
+  if (isInitialLoading && currentItemCount === 0) {
+    return "checking";
+  }
+  if (estimatedGlobalIndex === undefined) {
+    return "positioning";
+  }
+
+  const needed = calculateScrollRestorePagesNeeded(
+    estimatedGlobalIndex,
+    pageSize
+  );
+  const currentPages = Math.ceil(currentItemCount / pageSize) || 1;
+  return currentPages < needed && hasMore ? "preloading" : "positioning";
+}
+
 export function useScrollRestorePreloader({
   routeKey,
   pageSize,
   currentItemCount,
   hasMore,
-  isFetchingNextPage,
+  isInitialLoading,
   onTimeout,
 }: UseScrollRestorePreloaderParams): UseScrollRestorePreloaderResult {
-  const scrollPosition = useScrollPosition();
-  const [preloadState, setPreloadState] = useState<PreloadState>("idle");
-  const preloadedAnchorRef = useRef<{
-    itemId: number;
-    offsetRatio: number;
-    offsetFromTop: number;
-  } | null>(null);
-  const fallbackScrollTopRef = useRef(0);
-  const pagesNeededRef = useRef(0);
+  const { getScrollPosition } = useScrollPosition();
+  const readState = () => {
+    const saved = getScrollPosition(routeKey);
+    return resolveScrollRestorePreloadState({
+      currentItemCount,
+      estimatedGlobalIndex: saved?.anchor?.estimatedGlobalIndex,
+      hasMore,
+      isInitialLoading,
+      pageSize,
+      savedScrollTop: saved?.scrollTop ?? 0,
+    });
+  };
+  const [preloadState, setPreloadState] =
+    useState<PreloadState>(readState);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const routeKeyAtStartRef = useRef(routeKey);
+  const timeoutRouteKeyRef = useRef<string | null>(null);
+  const onTimeoutRef = useRef(onTimeout);
+  onTimeoutRef.current = onTimeout;
 
-  // 清理超时
-  const clearPreloadTimeout = () => {
+  const clearPreloadTimeout = useCallback(() => {
     if (timeoutRef.current !== null) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-  };
+    timeoutRouteKeyRef.current = null;
+  }, []);
 
-  useEffect(() => {
-    clearPreloadTimeout();
-    routeKeyAtStartRef.current = routeKey;
-
-    const saved = scrollPosition.getScrollPosition(routeKey);
-    if (!saved || saved.scrollTop <= 0) {
-      fallbackScrollTopRef.current = 0;
-      setPreloadState("ready");
-      return;
-    }
-
-    const hasAnchor = saved.anchor && saved.anchor.itemId;
-    const estimatedIndex = saved.anchor?.estimatedGlobalIndex;
-
-    if (!hasAnchor || estimatedIndex === undefined) {
-      // 无锚点 → 降级像素恢复，直接 ready
-      preloadedAnchorRef.current = null;
-      fallbackScrollTopRef.current = saved.scrollTop;
-      setPreloadState("ready");
-      return;
-    }
-
-    // 计算需要的页数
-    const anchor = saved.anchor!;
-    const needed = calculateScrollRestorePagesNeeded(estimatedIndex, pageSize);
-    pagesNeededRef.current = needed;
-
-    const currentPages = Math.ceil(currentItemCount / pageSize) || 1;
-    recordGalleryPerf("scrollRestorePagesNeeded", needed);
-    recordGalleryPerf("scrollRestoreCurrentPages", currentPages);
-
-    if (currentPages >= needed) {
-      // 已有足够数据 → 直接 ready
-      preloadedAnchorRef.current = {
-        itemId: anchor.itemId,
-        offsetRatio: anchor.offsetRatio,
-        offsetFromTop: anchor.offsetFromTop,
-      };
-      fallbackScrollTopRef.current = saved.scrollTop;
-      setPreloadState("ready");
-      return;
-    }
-
-    preloadedAnchorRef.current = {
-      itemId: anchor.itemId,
-      offsetRatio: anchor.offsetRatio,
-      offsetFromTop: anchor.offsetFromTop,
-    };
-    fallbackScrollTopRef.current = saved.scrollTop;
-
-    if (hasMore) {
-      setPreloadState("preloading");
-
-      // 超时逃生舱：强制 ready，降级像素恢复
-      timeoutRef.current = setTimeout(() => {
-        preloadedAnchorRef.current = null;
-        onTimeout?.();
-        setPreloadState("ready");
-      }, PRELOAD_TIMEOUT_MS);
-    } else {
-      // 没有更多数据可加载 → 直接 ready（能恢复多少算多少）
-      setPreloadState("ready");
-    }
-
-    return clearPreloadTimeout;
-  }, [routeKey]); // 仅 routeKey 变化时重新评估
-
-  // Step 2: 当 currentItemCount 增长时，检查是否已加载足够
-  useEffect(() => {
-    if (preloadState !== "preloading") {
-      return;
-    }
-
-    const currentPages = Math.ceil(currentItemCount / pageSize) || 1;
-    recordGalleryPerf("scrollRestoreCurrentPages", currentPages);
-    if (currentPages >= pagesNeededRef.current) {
-      // 已加载足够页数 → ready
+  useLayoutEffect(() => {
+    if (
+      timeoutRouteKeyRef.current !== null &&
+      timeoutRouteKeyRef.current !== routeKey
+    ) {
       clearPreloadTimeout();
-      setPreloadState("ready");
     }
-  }, [currentItemCount, preloadState, pageSize]);
+
+    const saved = getScrollPosition(routeKey);
+    const nextState = resolveScrollRestorePreloadState({
+      currentItemCount,
+      estimatedGlobalIndex: saved?.anchor?.estimatedGlobalIndex,
+      hasMore,
+      isInitialLoading,
+      pageSize,
+      savedScrollTop: saved?.scrollTop ?? 0,
+    });
+
+    if (
+      nextState === "preloading" &&
+      saved?.anchor?.estimatedGlobalIndex !== undefined
+    ) {
+      const needed = calculateScrollRestorePagesNeeded(
+        saved.anchor.estimatedGlobalIndex,
+        pageSize
+      );
+      recordGalleryPerf("scrollRestorePagesNeeded", needed);
+      recordGalleryPerf(
+        "scrollRestoreCurrentPages",
+        Math.ceil(currentItemCount / pageSize) || 1
+      );
+      if (timeoutRef.current === null) {
+        timeoutRouteKeyRef.current = routeKey;
+        timeoutRef.current = setTimeout(() => {
+          timeoutRef.current = null;
+          timeoutRouteKeyRef.current = null;
+          onTimeoutRef.current?.();
+          setPreloadState("aborted");
+        }, PRELOAD_TIMEOUT_MS);
+      }
+    } else {
+      clearPreloadTimeout();
+    }
+
+    setPreloadState((current) =>
+      current === nextState ? current : nextState
+    );
+  }, [
+    clearPreloadTimeout,
+    currentItemCount,
+    getScrollPosition,
+    hasMore,
+    isInitialLoading,
+    pageSize,
+    routeKey,
+  ]);
+
+  useEffect(() => clearPreloadTimeout, [clearPreloadTimeout]);
 
   return {
+    hasSavedPosition:
+      preloadState !== "not-needed" && preloadState !== "aborted",
     preloadState,
-    preloadedAnchor: preloadedAnchorRef.current,
-    fallbackScrollTop: fallbackScrollTopRef.current,
   };
 }

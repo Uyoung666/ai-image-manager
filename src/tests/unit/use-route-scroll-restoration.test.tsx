@@ -191,6 +191,34 @@ describe("useRouteScrollRestoration", () => {
 
       expect(el.scrollTop).toBe(400);
     });
+
+    it("should report the route only after its position is applied", () => {
+      const el = createScrollContainer();
+      const ref = createRef(el);
+      const onRestoreSettled = vi.fn();
+
+      sessionStorage.setItem(
+        "scroll_position_test-settled",
+        JSON.stringify({
+          scrollTop: 420,
+          timestamp: Date.now(),
+        })
+      );
+
+      renderHook(
+        () =>
+          useRouteScrollRestoration(ref, {
+            getRouteKey: () => "test-settled",
+            onRestoreSettled,
+            restoreReady: true,
+          }),
+        { wrapper }
+      );
+
+      expect(el.scrollTop).toBe(420);
+      expect(onRestoreSettled).toHaveBeenCalledTimes(1);
+      expect(onRestoreSettled).toHaveBeenCalledWith("test-settled");
+    });
   });
 
   describe("itemCount retry", () => {
@@ -512,6 +540,7 @@ describe("useRouteScrollRestoration", () => {
             getRouteKey: () => routeKey,
             restoreReady: true,
             restoreFromAnchor,
+            hasMore: true,
             itemCount: 100,
           }),
         {

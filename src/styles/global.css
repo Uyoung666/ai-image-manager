@@ -519,6 +519,81 @@
   background: color-mix(in srgb, var(--gallery-canvas) 86%, transparent);
 }
 
+.home-gallery-restore-content {
+  opacity: 1;
+  transition: opacity 180ms ease-out;
+}
+
+.home-gallery-restore-content.is-restoring {
+  pointer-events: none;
+  opacity: 0;
+}
+
+.home-gallery-restore-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background:
+    radial-gradient(
+      circle at 50% 38%,
+      color-mix(in srgb, var(--primary) 5%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--gallery-canvas) 91%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.08);
+  opacity: 1;
+  transition: opacity 180ms ease-out;
+}
+
+.home-gallery-restore-overlay.is-exiting {
+  pointer-events: none;
+  opacity: 0;
+}
+
+.home-gallery-restore-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 8px 28px -20px rgb(0 0 0 / 0.7);
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+}
+
+.home-gallery-restore-status.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.home-gallery-restore-pulse {
+  width: 6px;
+  height: 6px;
+  background: var(--primary);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 30%, transparent);
+  animation: gallery-restore-pulse 1.2s ease-out infinite;
+}
+
+@keyframes gallery-restore-pulse {
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
 .home-search-input {
   background: color-mix(in srgb, var(--card) 90%, transparent);
   -webkit-backdrop-filter: blur(8px) saturate(1.1);
@@ -623,6 +698,16 @@ html.transitioning [data-theme-sensitive] {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-page-enter {
+    animation: none;
+  }
+
+  .home-gallery-restore-content,
+  .home-gallery-restore-overlay,
+  .home-gallery-restore-status {
+    transition: none;
+  }
+
+  .home-gallery-restore-pulse {
     animation: none;
   }
 }

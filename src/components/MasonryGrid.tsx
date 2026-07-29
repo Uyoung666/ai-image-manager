@@ -81,6 +81,7 @@ interface MasonryGridProps {
   }>;
   onEndReached?: () => void;
   onMarqueeSelect?: (ids: Set<number>) => void;
+  onRestoreSettled?: (routeKey: string) => void;
   onScrollTopChange?: (scrollTop: number) => void;
   overscan?: number;
   renderItem: (
@@ -90,6 +91,7 @@ interface MasonryGridProps {
     options: { renderImage: boolean }
   ) => ReactNode;
   routeKey: string;
+  restoreGateReady?: boolean;
   scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
   selectionActive?: boolean;
@@ -110,12 +112,14 @@ export const MasonryGrid = memo(
       hasMore = false,
       isLoadingMore = false,
       onMarqueeSelect,
+      onRestoreSettled,
       onScrollTopChange,
       scrollToAlignment = "center",
       scrollToId,
       className,
       selectionActive = false,
       routeKey,
+      restoreGateReady = true,
       isPlaceholderData = false,
       topInset = 0,
     }: MasonryGridProps,
@@ -168,7 +172,8 @@ export const MasonryGrid = memo(
       visibilityIndex,
     });
 
-    const restoreReady = positions.length > 0 && !isPlaceholderData;
+    const restoreReady =
+      positions.length > 0 && !isPlaceholderData && restoreGateReady;
     const getRouteKey = useCallback(() => routeKey, [routeKey]);
     const restoreFromAnchor = useCallback(
       (anchorItemId: number) => {
@@ -191,6 +196,7 @@ export const MasonryGrid = memo(
         onLoadMore: onEndReached,
         hasMore,
         gridRef,
+        onRestoreSettled,
       });
 
     useEffect(() => {
@@ -659,6 +665,8 @@ export const MasonryGrid = memo(
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.scrollToId === nextProps.scrollToId &&
     prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
+    prevProps.onRestoreSettled === nextProps.onRestoreSettled &&
     prevProps.topInset === nextProps.topInset &&
-    prevProps.routeKey === nextProps.routeKey
+    prevProps.routeKey === nextProps.routeKey &&
+    prevProps.restoreGateReady === nextProps.restoreGateReady
 );
