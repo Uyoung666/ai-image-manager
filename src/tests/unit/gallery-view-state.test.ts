@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canPaginateGalleryPhotos,
   getDisplayedSequenceMode,
+  isGalleryRevealPending,
 } from "@/utils/gallery-view-state";
 
 describe("gallery view state", () => {
@@ -14,5 +15,36 @@ describe("gallery view state", () => {
     expect(canPaginateGalleryPhotos("photos", true)).toBe(true);
     expect(canPaginateGalleryPhotos("photos", false)).toBe(false);
     expect(canPaginateGalleryPhotos("sequences", true)).toBe(false);
+  });
+
+  it("keeps the gallery hidden until delayed sequence structure is ready", () => {
+    expect(
+      isGalleryRevealPending({
+        hasSavedPosition: true,
+        restoredRouteKey: "home-all",
+        routeKey: "home-all",
+        sequenceViewReady: false,
+      })
+    ).toBe(true);
+
+    expect(
+      isGalleryRevealPending({
+        hasSavedPosition: true,
+        restoredRouteKey: "home-all",
+        routeKey: "home-all",
+        sequenceViewReady: true,
+      })
+    ).toBe(false);
+  });
+
+  it("waits for sequence structure even without a saved scroll position", () => {
+    expect(
+      isGalleryRevealPending({
+        hasSavedPosition: false,
+        restoredRouteKey: null,
+        routeKey: "home-all",
+        sequenceViewReady: false,
+      })
+    ).toBe(true);
   });
 });

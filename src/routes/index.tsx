@@ -67,6 +67,7 @@ import type {
 import {
   canPaginateGalleryPhotos,
   getDisplayedSequenceMode,
+  isGalleryRevealPending,
 } from "@/utils/gallery-view-state";
 import type { ExifFilters, SearchMode } from "@/types/search";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
@@ -110,8 +111,13 @@ const NO_PHOTO_IDS: number[] = [];
 const RESTORE_OVERLAY_FADE_MS = 180;
 const RESTORE_OVERLAY_LABEL_DELAY_MS = 120;
 
-function GalleryRestoreOverlay({ active }: { active: boolean }) {
-  const { t } = useTranslation();
+function GalleryRestoreOverlay({
+  active,
+  label,
+}: {
+  active: boolean;
+  label: string;
+}) {
   const [rendered, setRendered] = useState(active);
   const [exiting, setExiting] = useState(false);
   const [showLabel, setShowLabel] = useState(false);
@@ -153,7 +159,7 @@ function GalleryRestoreOverlay({ active }: { active: boolean }) {
         className={`home-gallery-restore-status ${showLabel ? "is-visible" : ""}`}
       >
         <span aria-hidden="true" className="home-gallery-restore-pulse" />
-        <span>{t("restoringBrowsePosition")}</span>
+        <span>{label}</span>
       </div>
     </div>
   );
@@ -202,9 +208,9 @@ function HomePage() {
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
-    "photos"
+    () => getBrowseSession("home-search").sequenceMode
   );
-  const [sequenceViewReady, setSequenceViewReady] = useState(true);
+  const [sequenceViewReady, setSequenceViewReady] = useState(false);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
   const [sequenceSuggestions, setSequenceSuggestions] = useState<
@@ -597,8 +603,9 @@ function HomePage() {
   const handleSequenceModeChange = useCallback(
     (mode: "photos" | "sequences") => {
       setSequenceMode(mode);
+      saveBrowseSession("home-search", { sequenceMode: mode });
     },
-    []
+    [saveBrowseSession]
   );
 
   useEffect(() => {
@@ -632,12 +639,18 @@ function HomePage() {
       .then((result) => {
         if (!cancelled) {
           setSequences(result as PhotoSequence[]);
+          if (useGalleryScope) {
+            setGallerySequenceCount(result.length);
+          }
           setSequenceViewReady(true);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setSequences([]);
+          if (useGalleryScope) {
+            setGallerySequenceCount(0);
+          }
           setSequenceViewReady(true);
         }
       });
@@ -651,44 +664,6 @@ function HomePage() {
     filter.tagMode,
     isSearching,
     sequencePhotoIds,
-    sequenceRefresh,
-  ]);
-
-  // Keep the toolbar badge in sync independently of the currently rendered
-  // photo page.
-  useEffect(() => {
-    if (isSearching) {
-      return;
-    }
-    let cancelled = false;
-    ipc.client.photos
-      .listSequences({
-        scope: "gallery",
-        folderId: filter.activeFolderId ?? undefined,
-        favoriteOnly: filter.favoriteOnly || undefined,
-        tagIds:
-          filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
-        tagMode: filter.tagMode,
-      })
-      .then((result) => {
-        if (!cancelled) {
-          setGallerySequenceCount(result.length);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setGallerySequenceCount(0);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    filter.activeFolderId,
-    filter.activeTagIds,
-    filter.favoriteOnly,
-    filter.tagMode,
-    isSearching,
     sequenceRefresh,
   ]);
 
@@ -1067,11 +1042,16 @@ function HomePage() {
     },
   });
   const restoreGateReady =
-    preloadState === "positioning" ||
-    preloadState === "not-needed" ||
-    preloadState === "aborted";
-  const restorePending =
-    hasSavedPosition && restoredRouteKey !== routeKey;
+    sequenceViewReady &&
+    (preloadState === "positioning" ||
+      preloadState === "not-needed" ||
+      preloadState === "aborted");
+  const restorePending = isGalleryRevealPending({
+    hasSavedPosition,
+    restoredRouteKey,
+    routeKey,
+    sequenceViewReady,
+  });
 
   // 预加载期间自动推进分页加载（顺序拉取，避免并发乱序）
   useEffect(() => {
@@ -2243,7 +2223,15 @@ function HomePage() {
                 topInset={galleryToolbarHeight}
                 />
               </div>
-              <GalleryRestoreOverlay active={restorePending} key={routeKey} />
+              <GalleryRestoreOverlay
+                active={restorePending}
+                key={routeKey}
+                label={t(
+                  hasSavedPosition
+                    ? "restoringBrowsePosition"
+                    : "preparingGallery"
+                )}
+              />
               <SelectionActionBar
                 allFavorite={
                   selectedIds.size > 0 &&

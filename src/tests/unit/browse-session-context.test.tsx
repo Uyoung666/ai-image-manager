@@ -24,6 +24,7 @@ describe("BrowseSessionContext", () => {
       expect(session.lastClickedIdx).toBe(-1);
       expect(session.detailDismissed).toBe(false);
       expect(session.dashboardReturn).toBeNull();
+      expect(session.sequenceMode).toBe("photos");
     });
 
     it("should return new object each call for unknown route (not shared reference)", () => {
@@ -97,6 +98,22 @@ describe("BrowseSessionContext", () => {
       const parsed = JSON.parse(stored!);
       expect(parsed.selectedIds).toEqual([42]);
       expect(parsed.searchQuery).toBe("test");
+    });
+
+    it("should preserve the sequence gallery mode across remounts", () => {
+      const first = renderHook(() => useBrowseSession(), { wrapper });
+
+      act(() => {
+        first.result.current.saveSession("home-search", {
+          sequenceMode: "sequences",
+        });
+      });
+      first.unmount();
+
+      const second = renderHook(() => useBrowseSession(), { wrapper });
+      expect(second.result.current.getSession("home-search").sequenceMode).toBe(
+        "sequences"
+      );
     });
 
     it("should delete session from storage when all fields are default", () => {

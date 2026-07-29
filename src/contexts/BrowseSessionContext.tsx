@@ -32,6 +32,8 @@ interface BrowseSessionData {
   searchQuery: string;
   /** 选中的照片 ID 集合 */
   selectedIds: number[];
+  /** 首页瀑布流展示模式 */
+  sequenceMode: "photos" | "sequences";
 }
 
 const DEFAULT_SESSION: BrowseSessionData = {
@@ -41,6 +43,7 @@ const DEFAULT_SESSION: BrowseSessionData = {
   detailDismissed: false,
   searchMode: null,
   searchQuery: "",
+  sequenceMode: "photos",
   selectedIds: [],
 };
 
@@ -77,6 +80,10 @@ const SESSION_EXPIRY_MS = 30 * 60 * 1000;
 interface CachedSession {
   data: BrowseSessionData;
   lastAccess: number;
+}
+
+function normalizeSequenceMode(value: unknown): "photos" | "sequences" {
+  return value === "sequences" ? "sequences" : "photos";
 }
 
 export function BrowseSessionProvider({ children }: { children: ReactNode }) {
@@ -116,6 +123,7 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
         updated.searchQuery === "" &&
         updated.searchMode === null &&
         updated.colorHex === null &&
+        updated.sequenceMode === "photos" &&
         updated.lastClickedIdx === -1 &&
         updated.detailDismissed === false;
 
@@ -166,7 +174,11 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
             typeof parsed.searchQuery === "string"
           ) {
             cached = {
-              data: { ...DEFAULT_SESSION, ...parsed },
+              data: {
+                ...DEFAULT_SESSION,
+                ...parsed,
+                sequenceMode: normalizeSequenceMode(parsed.sequenceMode),
+              },
               lastAccess: Date.now(),
             };
             sessionsRef.current.set(routeKey, cached);
