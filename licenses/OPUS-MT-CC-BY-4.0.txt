@@ -1,0 +1,16 @@
+OPUS-MT Chinese-to-English model attribution
+
+Model: Helsinki-NLP/opus-mt-zh-en
+Authors: Language Technology Research Group, University of Helsinki
+Conversion: Xenova/opus-mt-zh-en
+Source: https://huggingface.co/Helsinki-NLP/opus-mt-zh-en
+
+Licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0).
+
+License summary and legal code:
+https://creativecommons.org/licenses/by/4.0/
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+No endorsement by the model authors or dataset contributors is implied.
+The model is redistributed without warranties.

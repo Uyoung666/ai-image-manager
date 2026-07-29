@@ -4,7 +4,9 @@ import {
   getTextSearchMaxCosineDistance,
 } from "@/services/ai/model-config";
 import {
+  applyNegativeSemanticPenalty,
   filterCosineSearchResults,
+  fuseRankedSearchEvidence,
   fuseRankedSearchResults,
   isValidEmbeddingVector,
   selectTagScores,
@@ -170,5 +172,27 @@ describe("embedding prompts and ranked fusion", () => {
       { photoId: 1, similarity: 0.03 },
       { photoId: 2, similarity: 0.02 },
     ]);
+  });
+
+  it("只在正向召回候选上应用 0.25 否定惩罚", () => {
+    const positive = fuseRankedSearchEvidence(
+      [
+        [
+          { photoId: 1, similarity: 0.2 },
+          { photoId: 2, similarity: 0.19 },
+        ],
+      ],
+      10,
+      [1]
+    );
+    const reranked = applyNegativeSemanticPenalty(
+      positive,
+      [[{ photoId: 1, similarity: 0.2 }]],
+      10
+    );
+
+    expect(reranked.map((result) => result.photoId)).toEqual([2, 1]);
+    expect(reranked[1].similarity).toBe(0.15);
+    expect(reranked).toHaveLength(2);
   });
 });

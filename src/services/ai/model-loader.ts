@@ -7,6 +7,7 @@ import { isSafePath } from "@/utils/path-security";
 import {
   getActiveEmbeddingModel,
   getEmbeddingModelFile,
+  getTranslationModelFile,
 } from "./model-config";
 import type { EmbedProgress } from "./state";
 import {
@@ -27,10 +28,7 @@ import {
   setLocalModelPath,
   setPoolCancelled,
 } from "./state";
-import {
-  embedTextsInWorker,
-  initTextWorker,
-} from "./text-worker-client";
+import { embedTextsInWorker, initTextWorker } from "./text-worker-client";
 
 async function copyDir(src: string, dest: string): Promise<void> {
   // 验证源路径和目标路径的安全性
@@ -92,9 +90,22 @@ export async function copyModelsOnce(): Promise<void> {
     modelsDir,
     "text_model_quantized.onnx"
   );
+  const translationEncoder = getTranslationModelFile(
+    modelsDir,
+    "encoder_model_quantized.onnx"
+  );
+  const translationDecoder = getTranslationModelFile(
+    modelsDir,
+    "decoder_model_merged_quantized.onnx"
+  );
 
   // Already cached from a previous run — no work needed.
-  if (fs.existsSync(visionMarker) && fs.existsSync(textMarker)) {
+  if (
+    fs.existsSync(visionMarker) &&
+    fs.existsSync(textMarker) &&
+    fs.existsSync(translationEncoder) &&
+    fs.existsSync(translationDecoder)
+  ) {
     return;
   }
 

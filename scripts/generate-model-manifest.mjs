@@ -18,6 +18,16 @@ const modelsDir = path.join(__dirname, "..", "models");
 const FILES = [
   "Xenova/siglip-base-patch16-224/onnx/vision_model_quantized.onnx",
   "Xenova/siglip-base-patch16-224/onnx/text_model_quantized.onnx",
+  "Xenova/opus-mt-zh-en/config.json",
+  "Xenova/opus-mt-zh-en/generation_config.json",
+  "Xenova/opus-mt-zh-en/source.spm",
+  "Xenova/opus-mt-zh-en/special_tokens_map.json",
+  "Xenova/opus-mt-zh-en/target.spm",
+  "Xenova/opus-mt-zh-en/tokenizer.json",
+  "Xenova/opus-mt-zh-en/tokenizer_config.json",
+  "Xenova/opus-mt-zh-en/vocab.json",
+  "Xenova/opus-mt-zh-en/onnx/encoder_model_quantized.onnx",
+  "Xenova/opus-mt-zh-en/onnx/decoder_model_merged_quantized.onnx",
   "face/w600k_r50.onnx",
   "face/ultraface-320.onnx",
 ];

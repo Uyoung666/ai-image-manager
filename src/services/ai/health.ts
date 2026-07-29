@@ -3,8 +3,8 @@ import { sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
-import { type AiCoverageState, deriveAiCoverageState } from "./coverage";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
+import { type AiCoverageState, deriveAiCoverageState } from "./coverage";
 import { loadModel } from "./model-loader";
 import {
   currentProgress,
@@ -16,6 +16,10 @@ import {
   setVectordb,
   vectordb,
 } from "./state";
+import {
+  getTranslationState,
+  type TranslationState,
+} from "./translation-worker-client";
 import { initVectorDB } from "./vector-db";
 
 export interface AiHealthStatus {
@@ -23,6 +27,7 @@ export interface AiHealthStatus {
   lancedbDetail: string;
   overall: "healthy" | "degraded" | "unhealthy";
   textModel: "ok" | "not_loaded" | "error";
+  translationState: TranslationState;
   vectorIndex: "ok" | "missing" | "error";
   vectorTable: "ok" | "missing" | "error";
   vectorTableRows: number;
@@ -36,6 +41,7 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     vectorTableRows: 0,
     vectorIndex: "error",
     textModel: "not_loaded",
+    translationState: getTranslationState(),
     overall: "unhealthy",
   };
 
@@ -146,13 +152,14 @@ export interface AiReadiness {
     total: number;
   };
   hasVectors: boolean;
-  indexReady: boolean;
   indexedPhotos: number;
+  indexReady: boolean;
   isEmbedding: boolean;
   lastError?: string;
   model: "loading" | "ready" | "error";
   pendingPhotos: number;
   totalPhotos: number;
+  translationState: TranslationState;
   vectorCount: number;
   vectorDB: "loading" | "ready" | "error";
 }
@@ -170,6 +177,7 @@ export async function getAiReadiness(options?: {
     indexedPhotos: 0,
     pendingPhotos: 0,
     totalPhotos: 0,
+    translationState: getTranslationState(),
     isEmbedding,
     lastError:
       currentProgress.phase === "error" ? currentProgress.error : undefined,
@@ -236,6 +244,7 @@ export async function getAiReadiness(options?: {
         readiness.vectorDB === "error"
     )
   );
+  readiness.translationState = getTranslationState();
 
   return readiness;
 }

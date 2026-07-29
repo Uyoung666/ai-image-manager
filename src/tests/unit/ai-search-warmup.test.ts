@@ -13,6 +13,14 @@ import {
   setVectordb,
 } from "@/services/ai/state";
 
+const CJK_RE = /[一-鿿]/;
+
+vi.mock("@/services/ai/translation-worker-client", () => ({
+  getTranslationModelVersion: () => "translation-test-v1",
+  translateChineseToEnglish: vi.fn().mockResolvedValue("cute kitten"),
+  warmupTranslationWorker: vi.fn().mockResolvedValue(undefined),
+}));
+
 function createVectorTable(results: Record<string, unknown>[] = []) {
   const toArray = vi.fn().mockResolvedValue(results);
   const query = {
@@ -97,6 +105,11 @@ describe("AI semantic search warmup", () => {
 
     expect(embedTexts).toHaveBeenCalledOnce();
     expect(embedTexts.mock.calls[0][0]).toHaveLength(2);
+    expect(
+      embedTexts.mock.calls[0][0].every(
+        (prompt: string) => !CJK_RE.test(prompt)
+      )
+    ).toBe(true);
     expect(table.countRows).toHaveBeenCalledOnce();
     expect(table.vectorSearch).toHaveBeenCalledTimes(2);
   });

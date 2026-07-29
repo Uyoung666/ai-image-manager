@@ -330,7 +330,7 @@ describe("SearchBar", () => {
     const input = screen.getByRole("combobox");
 
     await user.type(input, "x");
-    await user.click(screen.getByRole("button", { name: "" }));
+    await user.click(screen.getByRole("button", { name: "clearSearch" }));
 
     expect(onClear).toHaveBeenCalled();
   });

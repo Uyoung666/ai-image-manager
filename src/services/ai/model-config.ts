@@ -107,3 +107,12 @@ export function getEmbeddingModelFile(
   const model = getActiveEmbeddingModel();
   return path.join(modelsRoot, "Xenova", model.directory, "onnx", fileName);
 }
+
+export function getTranslationModelFile(
+  modelsRoot: string,
+  fileName:
+    | "decoder_model_merged_quantized.onnx"
+    | "encoder_model_quantized.onnx"
+): string {
+  return path.join(modelsRoot, "Xenova", "opus-mt-zh-en", "onnx", fileName);
+}

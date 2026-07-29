@@ -15,6 +15,7 @@ import {
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
 import { shutdownTextWorker } from "@/services/ai/text-worker-client";
+import { shutdownTranslationWorker } from "@/services/ai/translation-worker-client";
 import {
   cleanupOrphanedRecordsAsync,
   startWatching,
@@ -364,6 +365,7 @@ registry.register({
     setEmbeddingModel(null);
     setLocalModelPath(null);
     shutdownTextWorker();
+    shutdownTranslationWorker();
     try {
       shutdownPool();
     } catch {

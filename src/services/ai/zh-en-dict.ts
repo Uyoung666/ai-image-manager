@@ -178,7 +178,6 @@ export const ZH_TO_EN_SEARCH: Record<string, DictEntry> = {
   气球: { en: "balloon colorful celebration party", category: "object" },
   礼物: { en: "gift present box package", category: "object" },
   旗帜: { en: "flag banner symbol wind", category: "object" },
-  灯笼: { en: "lantern light decoration red festive", category: "object" },
   雕塑: { en: "sculpture statue art monument", category: "object" },
   喷泉: { en: "fountain water spray garden", category: "object" },
   风车: { en: "windmill wind turbine tower", category: "object" },

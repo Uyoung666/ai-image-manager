@@ -127,10 +127,7 @@ function translateSlot(terms: string[]): string {
   return unique.join(" ");
 }
 
-export function generateSearchPrompts(
-  parsed: ParsedQuery,
-  rawQuery?: string
-): string[] {
+export function generateSearchPrompts(parsed: ParsedQuery): string[] {
   const prompts: string[] = [];
 
   // Prompt 1: Full natural language description combining all slots
@@ -191,24 +188,6 @@ export function generateSearchPrompts(
     }
   }
 
-  // ── Zero-Shot 兜底：始终将原始查询作为高权重 Prompt ──────────────
-  // 即使词典覆盖率为 0%，CLIP 的跨模态零样本能力仍然可以捕捉抽象、
-  // 新兴词汇（如 "赛博朋克"、"孤独的"）的视觉语义特征。
-  // 此 Prompt 作为 safety net，权重 0.9，仅次于完整结构化 Prompt。
-  if (rawQuery && rawQuery.trim() && prompts.length === 0) {
-    // 完全没有结构化 prompts：原始查询作为唯一 prompt，权重最高
-    const cleaned = rawQuery.trim();
-    if (cleaned) {
-      prompts.push(`a photo of ${cleaned}`);
-    }
-  } else if (rawQuery && rawQuery.trim() && prompts.length > 0) {
-    // 已有结构化 prompts：原始查询作为补充 prompt
-    const cleaned = rawQuery.trim();
-    if (cleaned && !prompts.some((p) => p.includes(cleaned))) {
-      prompts.push(cleaned);
-    }
-  }
-
   return prompts;
 }
 
@@ -238,8 +217,8 @@ const CJK_FUNCTION_WORDS = new Set([
   "也",
 ]);
 
-// 计算中文查询中被词典覆盖的字符比例（0.0~1.0）
-// 用于自适应调整向量搜索的余弦距离阈值：覆盖率越低，阈值越严格
+// 计算中文查询中被词典覆盖的字符比例（0.0~1.0）。
+// 覆盖率仅用于诊断与降级说明，不再用于插值调整 SigLIP 阈值。
 export function getQueryCoverage(query: string, parsed: ParsedQuery): number {
   const trimmed = query.trim();
   // 只统计有意义的中文字符（排除虚词）

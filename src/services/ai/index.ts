@@ -21,12 +21,24 @@ export {
   generateSearchPrompts,
   parseChineseQuery,
 } from "./query-parser";
+export type { SemanticTextSearchResult } from "./search";
 export {
   isAiSearchReady,
   searchByImage,
   searchByText,
+  searchByTextWithPlan,
   warmupAiSearch,
 } from "./search";
+export type {
+  SemanticQueryPlan,
+  SemanticQueryPrompt,
+  SemanticTranslationMode,
+} from "./semantic-query-plan";
+export {
+  getSemanticQueryPlan,
+  prepareSemanticQueryPlan,
+  SEMANTIC_QUERY_PLAN_VERSION,
+} from "./semantic-query-plan";
 export type { EmbedProgress, EmbedProgressCallback } from "./state";
 export {
   activeEmbeddingRunId,

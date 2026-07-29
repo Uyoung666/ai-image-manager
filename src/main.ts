@@ -30,8 +30,11 @@ import {
   cleanupExpiredTrash,
   getOrphanPhotoIds,
 } from "@/ipc/photos/handlers/mutations";
+import {
+  getEmbeddingModelFile,
+  getTranslationModelFile,
+} from "@/services/ai/model-config";
 import { copyModelsOnce } from "@/services/ai/model-loader";
-import { getEmbeddingModelFile } from "@/services/ai/model-config";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
   getHttpServerPort,
@@ -56,6 +59,14 @@ const log = createLogger("main");
 // ── Squirrel startup event handling ──────────────────────────────────
 if (started) {
   app.quit();
+}
+
+// E2E runs must not share the real profile or its single-instance lock.
+// Set this before requestSingleInstanceLock() and before any userData access.
+const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
+if (process.env.CI === "e2e" && e2eUserDataDir) {
+  app.setPath("userData", path.resolve(e2eUserDataDir));
+  app.disableHardwareAcceleration();
 }
 
 // ── Single instance lock ─────────────────────────────────────────────
@@ -478,8 +489,20 @@ async function ensureModelAvailable(): Promise<void> {
     modelsDir,
     "vision_model_quantized.onnx"
   );
+  const translationEncoder = getTranslationModelFile(
+    modelsDir,
+    "encoder_model_quantized.onnx"
+  );
+  const translationDecoder = getTranslationModelFile(
+    modelsDir,
+    "decoder_model_merged_quantized.onnx"
+  );
 
-  if (fs.existsSync(visionMarker)) {
+  if (
+    fs.existsSync(visionMarker) &&
+    fs.existsSync(translationEncoder) &&
+    fs.existsSync(translationDecoder)
+  ) {
     log.info("AI models already cached at %s", modelsDir);
     return;
   }

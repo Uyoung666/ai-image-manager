@@ -13,12 +13,12 @@ export interface Photo {
   id: number;
   isFavorite?: boolean;
   isIndexed: boolean;
-  path: string;
-  score?: number;
   /** Search-result display metadata. Ranking scores stay internal to search. */
   match?: SearchMatch;
-  thumbnailSmallPath?: string | null;
+  path: string;
+  score?: number;
   thumbnailPath: string | null;
+  thumbnailSmallPath?: string | null;
   width: number;
 }
 
@@ -61,13 +61,14 @@ export interface AiStatus {
   coverageState: "ready" | "partial" | "unavailable" | "error";
   embeddingProgress: { processed: number; total: number; phase: string };
   hasVectors: boolean;
-  indexReady: boolean;
   indexedPhotos: number;
+  indexReady: boolean;
   isEmbedding: boolean;
   lastError?: string;
   model: string;
   pendingPhotos: number;
   totalPhotos: number;
+  translationState?: "ready" | "loading" | "degraded" | "error";
   vectorCount: number;
   vectorDB: string;
 }

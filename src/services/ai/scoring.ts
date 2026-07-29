@@ -175,11 +175,17 @@ export function filterCosineSearchResults(
     }));
 }
 
-export function fuseRankedSearchResults(
+export interface FusedRankedSearchResult {
+  photoId: number;
+  rankScore: number;
+  similarity: number;
+}
+
+export function fuseRankedSearchEvidence(
   resultSets: Array<Array<{ photoId: number; similarity: number }>>,
-  limit: number
-): Array<{ photoId: number; similarity: number }> {
-  const weights = [1, 0.7, 0.5];
+  limit: number,
+  weights: number[] = [1, 0.7, 0.5]
+): FusedRankedSearchResult[] {
   const reciprocalRankConstant = 60;
   const scores = new Map<
     number,
@@ -194,19 +200,90 @@ export function fuseRankedSearchResults(
         bestSimilarity: Number.NEGATIVE_INFINITY,
         rankScore: 0,
       };
-      current.rankScore +=
-        weight / (reciprocalRankConstant + rank + 1) +
-        similarity * weight * 0.05;
+      current.rankScore += weight / (reciprocalRankConstant + rank + 1);
       current.bestSimilarity = Math.max(current.bestSimilarity, similarity);
       scores.set(photoId, current);
     }
   }
 
   return [...scores.entries()]
-    .sort((left, right) => right[1].rankScore - left[1].rankScore)
+    .sort(
+      (left, right) =>
+        right[1].rankScore - left[1].rankScore ||
+        right[1].bestSimilarity - left[1].bestSimilarity ||
+        left[0] - right[0]
+    )
     .slice(0, limit)
     .map(([photoId, score]) => ({
       photoId,
+      rankScore: score.rankScore,
       similarity: Math.round(score.bestSimilarity * 10_000) / 10_000,
     }));
+}
+
+export function fuseRankedSearchResults(
+  resultSets: Array<Array<{ photoId: number; similarity: number }>>,
+  limit: number,
+  weights: number[] = [1, 0.7, 0.5]
+): Array<{ photoId: number; similarity: number }> {
+  return fuseRankedSearchEvidence(resultSets, limit, weights).map(
+    ({ photoId, similarity }) => ({ photoId, similarity })
+  );
+}
+
+export function applyNegativeSemanticPenalty(
+  positiveResults: FusedRankedSearchResult[],
+  negativeResultSets: Array<
+    Array<{ photoId: number; similarity: number }>
+  >,
+  limit: number,
+  penaltyWeight = 0.25
+): FusedRankedSearchResult[] {
+  if (negativeResultSets.length === 0) {
+    return positiveResults.slice(0, limit);
+  }
+
+  const reciprocalRankConstant = 60;
+  const negativeSimilarity = new Map<number, number>();
+  const negativeRankScore = new Map<number, number>();
+  for (const resultSet of negativeResultSets) {
+    for (let rank = 0; rank < resultSet.length; rank++) {
+      const result = resultSet[rank];
+      negativeSimilarity.set(
+        result.photoId,
+        Math.max(negativeSimilarity.get(result.photoId) ?? 0, result.similarity)
+      );
+      negativeRankScore.set(
+        result.photoId,
+        Math.max(
+          negativeRankScore.get(result.photoId) ?? 0,
+          1 / (reciprocalRankConstant + rank + 1)
+        )
+      );
+    }
+  }
+
+  return positiveResults
+    .map((result) => ({
+      photoId: result.photoId,
+      rankScore:
+        result.rankScore -
+        penaltyWeight * (negativeRankScore.get(result.photoId) ?? 0),
+      similarity:
+        Math.round(
+          Math.max(
+            0,
+            result.similarity -
+              penaltyWeight *
+                (negativeSimilarity.get(result.photoId) ?? 0)
+          ) * 10_000
+        ) / 10_000,
+    }))
+    .sort(
+      (left, right) =>
+        right.rankScore - left.rankScore ||
+        right.similarity - left.similarity ||
+        left.photoId - right.photoId
+    )
+    .slice(0, limit);
 }

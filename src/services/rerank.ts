@@ -1,183 +1,193 @@
-import { embeddingModel } from "./ai/state";
+export type SearchEvidenceSource = "person" | "tag" | "filename" | "ai";
 
-// 晚期融合：S_final = α·S_exact·sourceBoost + β·S_clip
-const ALPHA_EXACT = 0.35;
-const BETA_CLIP = 0.65;
-const SOURCE_BOOST: Record<string, number> = {
-  person: 1.5, // 人脸识别强信号
-  tag: 1.2,
-  filename: 1.1,
-  ai: 1.0,
-};
-
-// 计算余弦相似度
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length) {
-    return 0;
-  }
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-
-  normA = Math.sqrt(normA);
-  normB = Math.sqrt(normB);
-
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-
-  return dotProduct / (normA * normB);
+export interface ExactSearchEvidence {
+  exact: boolean;
+  photoId: number;
+  source: Exclude<SearchEvidenceSource, "ai">;
 }
 
-function toNumberVector(rawVector: unknown): number[] | null {
-  if (Array.isArray(rawVector)) {
-    return rawVector.every((value) => typeof value === "number")
-      ? rawVector
-      : null;
-  }
-  if (
-    rawVector &&
-    typeof rawVector === "object" &&
-    "toArray" in rawVector &&
-    typeof rawVector.toArray === "function"
-  ) {
-    return Array.from(rawVector.toArray() as Iterable<number>);
-  }
-  if (ArrayBuffer.isView(rawVector) && !(rawVector instanceof DataView)) {
-    return Array.from(rawVector as unknown as ArrayLike<number>);
-  }
-  return null;
+export interface HybridSearchResult {
+  _source: SearchEvidenceSource;
+  evidence: SearchEvidenceSource[];
+  exact: boolean;
+  photoId: number;
+  rankScore: number;
+  similarity: number;
 }
 
-// 从 LanceDB 批量读取向量
-async function getPhotoVectors(
-  photoIds: number[]
-): Promise<Map<number, number[]>> {
-  const { photoTable } = await import("./ai/state");
+interface RankedSemanticResult {
+  photoId: number;
+  rankScore?: number;
+  similarity: number;
+}
 
-  const validPhotoIds = [
-    ...new Set(
-      photoIds.filter((photoId) => Number.isSafeInteger(photoId) && photoId > 0)
-    ),
-  ];
-  if (!photoTable || validPhotoIds.length === 0) {
-    return new Map();
+interface MutableEvidence {
+  bestSemanticSimilarity: number;
+  exact: boolean;
+  rankScore: number;
+  sources: Set<SearchEvidenceSource>;
+}
+
+const RRF_K = 60;
+const SOURCE_WEIGHTS = {
+  filename: 0.8,
+  personExact: 1.5,
+  personPartial: 1.2,
+  semantic: 1,
+  tagExact: 1.25,
+  tagPartial: 1,
+} as const;
+
+function sourcePriority(source: SearchEvidenceSource): number {
+  switch (source) {
+    case "person":
+      return 4;
+    case "tag":
+      return 3;
+    case "filename":
+      return 2;
+    default:
+      return 1;
   }
+}
 
-  try {
-    const results = new Map<number, number[]>();
+function bestSource(sources: Set<SearchEvidenceSource>): SearchEvidenceSource {
+  return [...sources].sort(
+    (left, right) => sourcePriority(right) - sourcePriority(left)
+  )[0];
+}
 
-    // 分批查询（每批 50 个）
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < validPhotoIds.length; i += BATCH_SIZE) {
-      const batch = validPhotoIds.slice(i, i + BATCH_SIZE);
+function mutableEvidence(
+  evidence: Map<number, MutableEvidence>,
+  photoId: number
+): MutableEvidence {
+  const existing = evidence.get(photoId);
+  if (existing) {
+    return existing;
+  }
+  const created: MutableEvidence = {
+    bestSemanticSimilarity: 0,
+    exact: false,
+    rankScore: 0,
+    sources: new Set(),
+  };
+  evidence.set(photoId, created);
+  return created;
+}
 
-      try {
-        const rows = await photoTable
-          .query()
-          .where(`photo_id IN (${batch.join(",")})`)
-          .toArray();
+function addRrf(target: MutableEvidence, weight: number, rank = 0): void {
+  target.rankScore += weight / (RRF_K + rank + 1);
+}
 
-        for (const row of rows as Record<string, unknown>[]) {
-          const photoId = row.photo_id as number;
-          if (!photoId) {
-            continue;
-          }
+function exactEvidenceWeight(result: ExactSearchEvidence): number {
+  if (result.source === "person") {
+    return result.exact
+      ? SOURCE_WEIGHTS.personExact
+      : SOURCE_WEIGHTS.personPartial;
+  }
+  if (result.source === "tag") {
+    return result.exact ? SOURCE_WEIGHTS.tagExact : SOURCE_WEIGHTS.tagPartial;
+  }
+  return SOURCE_WEIGHTS.filename;
+}
 
-          const vec = toNumberVector(row.vector);
-          if (!vec) {
-            continue;
-          }
+/**
+ * Fuse semantic and exact retrieval evidence without mixing incomparable raw
+ * scores. Exact rows receive a source weight; semantic rows retain their rank
+ * and raw cosine only as a deterministic tie-break/display value.
+ */
+export function fuseHybridSearchEvidence(
+  semanticResults: RankedSemanticResult[],
+  exactResults: ExactSearchEvidence[],
+  topK: number
+): HybridSearchResult[] {
+  const evidence = new Map<number, MutableEvidence>();
 
-          results.set(photoId, vec);
-        }
-      } catch (err) {
-        console.error("[Rerank] Batch query failed:", err);
-      }
+  for (let rank = 0; rank < semanticResults.length; rank++) {
+    const result = semanticResults[rank];
+    const target = mutableEvidence(evidence, result.photoId);
+    target.sources.add("ai");
+    target.bestSemanticSimilarity = Math.max(
+      target.bestSemanticSimilarity,
+      result.similarity
+    );
+    if (result.rankScore === undefined) {
+      addRrf(target, SOURCE_WEIGHTS.semantic, rank);
+    } else {
+      target.rankScore += result.rankScore;
     }
-
-    return results;
-  } catch (err) {
-    console.error("[Rerank] Get vectors failed:", err);
-    return new Map();
   }
+
+  const seenExact = new Set<string>();
+  for (const result of exactResults) {
+    const key = `${result.source}:${result.photoId}:${result.exact}`;
+    if (seenExact.has(key)) {
+      continue;
+    }
+    seenExact.add(key);
+    const target = mutableEvidence(evidence, result.photoId);
+    target.sources.add(result.source);
+    target.exact ||= result.exact;
+    addRrf(target, exactEvidenceWeight(result));
+  }
+
+  const ranked = [...evidence.entries()].sort(
+    (left, right) =>
+      right[1].rankScore - left[1].rankScore ||
+      Number(right[1].exact) - Number(left[1].exact) ||
+      right[1].bestSemanticSimilarity - left[1].bestSemanticSimilarity ||
+      left[0] - right[0]
+  );
+  const maxRankScore = ranked[0]?.[1].rankScore || 1;
+
+  return ranked.slice(0, topK).map(([photoId, score]) => ({
+    _source: bestSource(score.sources),
+    evidence: [...score.sources].sort(
+      (left, right) => sourcePriority(right) - sourcePriority(left)
+    ),
+    exact: score.exact,
+    photoId,
+    rankScore: score.rankScore,
+    similarity:
+      Math.round(
+        (score.bestSemanticSimilarity ||
+          (score.exact ? 1 : score.rankScore / maxRankScore)) * 10_000
+      ) / 10_000,
+  }));
 }
 
-/** 跨模态晚期融合：S_final = α·S_exact·sourceBoost + β·S_clip，不覆盖精确语义 */
-export async function rerankWithCLIPScore(
-  query: string,
+/**
+ * Compatibility wrapper for older callers. It intentionally performs no text
+ * embedding; candidates are treated as the already-ranked semantic list.
+ */
+export function rerankWithCLIPScore(
+  _query: string,
   candidates: Array<{
+    _source?: SearchEvidenceSource;
     photoId: number;
     similarity: number;
-    /** 可选：召回来源标记，用于语义提权 */
-    _source?: "person" | "tag" | "filename" | "ai";
   }>,
   topK = 50
 ): Promise<Array<{ photoId: number; similarity: number }>> {
-  if (candidates.length === 0 || !query.trim()) {
-    return candidates;
-  }
-
-  try {
-    // 确保模型已加载
-    if (!embeddingModel) {
-      console.warn("[Rerank] Embedding model not loaded, skip reranking");
-      return candidates.slice(0, topK);
-    }
-
-    // 1. 获取查询向量
-    let queryVector: number[];
-    try {
-      queryVector = await embeddingModel.embedText(query.trim());
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[Rerank] embedText failed:", message);
-      return candidates.slice(0, topK);
-    }
-
-    // 2. 批量获取候选照片的向量
-    const photoIds = candidates.map((c) => c.photoId);
-    const photoVectors = await getPhotoVectors(photoIds);
-
-    if (photoVectors.size === 0) {
-      console.warn(
-        "[Rerank] No photo vectors found, returning original scores"
-      );
-      return candidates.slice(0, topK);
-    }
-
-    // 3. 晚期融合
-    const scored = candidates.map((candidate) => {
-      const photoVector = photoVectors.get(candidate.photoId);
-      const sExact = candidate.similarity;
-
-      if (!photoVector) {
-        return { photoId: candidate.photoId, similarity: sExact };
-      }
-
-      const sClip = Math.max(0, cosineSimilarity(queryVector, photoVector));
-      const boost = SOURCE_BOOST[candidate._source ?? "ai"] ?? 1.0;
-      const sFinal = ALPHA_EXACT * sExact * boost + BETA_CLIP * sClip;
-
-      return {
-        photoId: candidate.photoId,
-        similarity: Math.round(sFinal * 10_000) / 10_000,
-      };
-    });
-
-    // 4. 按融合分数降序排列
-    scored.sort((a, b) => b.similarity - a.similarity);
-
-    return scored.slice(0, topK);
-  } catch (err) {
-    console.error("[Rerank] Failed:", err);
-    return candidates.slice(0, topK);
-  }
+  const semantic = candidates.filter(
+    (candidate) => !candidate._source || candidate._source === "ai"
+  );
+  const exact: ExactSearchEvidence[] = candidates
+    .filter(
+      (
+        candidate
+      ): candidate is typeof candidate & {
+        _source: Exclude<SearchEvidenceSource, "ai">;
+      } => Boolean(candidate._source && candidate._source !== "ai")
+    )
+    .map((candidate) => ({
+      exact: true,
+      photoId: candidate.photoId,
+      source: candidate._source,
+    }));
+  return Promise.resolve(
+    fuseHybridSearchEvidence(semantic, exact, topK).map(
+      ({ photoId, similarity }) => ({ photoId, similarity })
+    )
+  );
 }

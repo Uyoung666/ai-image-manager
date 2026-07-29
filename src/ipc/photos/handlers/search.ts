@@ -32,11 +32,15 @@ import {
 import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
+  searchByTextWithPlan as aiSearchByTextWithPlan,
   isAiSearchReady,
 } from "@/services/ai-embedder";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
-import { rerankWithCLIPScore } from "@/services/rerank";
+import {
+  type ExactSearchEvidence,
+  fuseHybridSearchEvidence,
+} from "@/services/rerank";
 import {
   COLOR_MATCH_MAX_DISTANCE_SQUARED,
   hydrateColorSearchResults,
@@ -84,10 +88,23 @@ const CHINESE_CHAR_RE = /[一-鿿]/;
 const GLOB_WILDCARD_RE = /[*?[]/;
 
 function withoutInternalSearchScores<
-  T extends { score?: number; similarity?: number },
->(results: T[]): Omit<T, "score" | "similarity">[] {
-  return results.map(({ score: _score, similarity: _similarity, ...result }) =>
-    result
+  T extends {
+    exactMatch?: boolean;
+    rankScore?: number;
+    score?: number;
+    similarity?: number;
+  },
+>(
+  results: T[]
+): Omit<T, "exactMatch" | "rankScore" | "score" | "similarity">[] {
+  return results.map(
+    ({
+      exactMatch: _exactMatch,
+      rankScore: _rankScore,
+      score: _score,
+      similarity: _similarity,
+      ...result
+    }) => result
   );
 }
 
@@ -572,7 +589,8 @@ export const searchCompound = os
               LIMIT ${limit}`
         ) as Array<{ dist: number; id: number }>;
 
-        let lanceResults: Array<{ distanceSquared: number; photoId: number }> = [];
+        let lanceResults: Array<{ distanceSquared: number; photoId: number }> =
+          [];
         if (sqliteResults.length < limit) {
           try {
             lanceResults = await withTimeout(
@@ -862,7 +880,7 @@ export const searchCompound = os
         // 路 1：CLIP 文本推理 + LanceDB 向量召回
         semanticAvailable
           ? withTimeout(
-              aiSearchByText(q, 200),
+              aiSearchByTextWithPlan(q, 200),
               aiSearchTimeoutMs,
               aiSearchWasReady
                 ? "AI semantic search"
@@ -871,7 +889,7 @@ export const searchCompound = os
           : Promise.resolve([]),
         // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
         db
-          .select({ id: photos.id })
+          .select({ id: photos.id, name: tags.name })
           .from(photos)
           .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
           .innerJoin(tags, eq(tags.id, photoTags.tagId))
@@ -915,7 +933,7 @@ export const searchCompound = os
         })(),
         // 路 4：人脸识别名搜索（token 化匹配中文姓名）
         db
-          .select({ id: photos.id })
+          .select({ id: photos.id, name: faceIdentities.name })
           .from(photos)
           .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
           .innerJoin(
@@ -936,22 +954,35 @@ export const searchCompound = os
       ]);
 
       // 拆解 allSettled 结果，记录降级日志
-      const aiResults =
+      const aiSearch =
         settled[0].status === "fulfilled"
-          ? (settled[0].value as Awaited<ReturnType<typeof aiSearchByText>>)
-          : [];
+          ? (settled[0].value as Awaited<
+              ReturnType<typeof aiSearchByTextWithPlan>
+            >)
+          : null;
+      const aiResults = aiSearch?.results ?? [];
+      let semanticReason = semantic.reason;
+      if (settled[0].status === "rejected") {
+        semanticReason =
+          (settled[0].reason as Error)?.message ??
+          "semantic-search-failed";
+      } else if (
+        aiSearch?.plan.translationMode === "dictionary-fallback" &&
+        aiSearch.plan.language !== "en"
+      ) {
+        semanticReason = "advanced-chinese-search-degraded";
+      }
       semantic = {
         ...semantic,
-        reason:
-          settled[0].status === "rejected"
-            ? ((settled[0].reason as Error)?.message ??
-              "semantic-search-failed")
-            : semantic.reason,
-        used: semanticAvailable && settled[0].status === "fulfilled",
+        reason: semanticReason,
+        used:
+          semanticAvailable &&
+          settled[0].status === "fulfilled" &&
+          (aiSearch?.plan.prompts.length ?? 0) > 0,
       };
       const tagPhotoRows =
         settled[1].status === "fulfilled"
-          ? (settled[1].value as { id: number }[])
+          ? (settled[1].value as { id: number; name: string }[])
           : [];
       const filenamePhotoRows =
         settled[2].status === "fulfilled"
@@ -959,7 +990,7 @@ export const searchCompound = os
           : [];
       const personPhotoRows =
         settled[3].status === "fulfilled"
-          ? (settled[3].value as { id: number }[])
+          ? (settled[3].value as { id: number; name: string }[])
           : [];
 
       if (settled[0].status === "rejected") {
@@ -986,58 +1017,33 @@ export const searchCompound = os
         );
       }
 
-      // ── 合并去重（保留来源标记供晚期融合使用） ────────────────────
-      // Merge with dedup priority: person > tag > filename > AI
-      const merged = new Map<
-        number,
-        {
-          photoId: number;
-          similarity: number;
-          _source: "person" | "tag" | "filename" | "ai";
-        }
-      >();
+      const normalizedExactQuery = q.trim().toLocaleLowerCase();
+      const isFullMatch = (value: string): boolean =>
+        value.trim().toLocaleLowerCase() === normalizedExactQuery;
+      const exactEvidence: ExactSearchEvidence[] = [
+        ...personPhotoRows.map((row) => ({
+          exact: isFullMatch(row.name),
+          photoId: row.id,
+          source: "person" as const,
+        })),
+        ...tagPhotoRows.map((row) => ({
+          exact: isFullMatch(row.name),
+          photoId: row.id,
+          source: "tag" as const,
+        })),
+        ...filenamePhotoRows.map((row) => ({
+          exact: false,
+          photoId: row.id,
+          source: "filename" as const,
+        })),
+      ];
+      const rerankedList = fuseHybridSearchEvidence(
+        aiResults,
+        exactEvidence,
+        Math.max(limit, 200)
+      );
 
-      for (const r of personPhotoRows) {
-        merged.set(r.id, {
-          photoId: r.id,
-          similarity: 1.0,
-          _source: "person",
-        });
-      }
-      for (const r of tagPhotoRows) {
-        const existing = merged.get(r.id);
-        if (!existing || existing.similarity < 0.95) {
-          merged.set(r.id, {
-            photoId: r.id,
-            similarity: 0.95,
-            _source: "tag",
-          });
-        }
-      }
-      for (const r of filenamePhotoRows) {
-        const existing = merged.get(r.id);
-        if (!existing || existing.similarity < 0.7) {
-          merged.set(r.id, {
-            photoId: r.id,
-            similarity: 0.7,
-            _source: "filename",
-          });
-        }
-      }
-      for (const r of aiResults) {
-        const existing = merged.get(r.photoId);
-        if (!existing || existing.similarity < r.similarity) {
-          merged.set(r.photoId, {
-            photoId: r.photoId,
-            similarity: r.similarity,
-            _source: "ai",
-          });
-        }
-      }
-
-      const mergedList = [...merged.values()];
-
-      if (mergedList.length === 0) {
+      if (rerankedList.length === 0) {
         // If time filter was parsed from query, skip AI and do plain date filter
         if (
           effectiveDateFrom ||
@@ -1086,28 +1092,10 @@ export const searchCompound = os
         return { results: [], query: q, total: 0, semantic };
       }
 
-      let rerankedList = mergedList;
-      try {
-        if (mergedList.length > 20 && q) {
-          const rerankTopK = Math.max(limit, 200);
-          const sources = new Map(
-            mergedList.map((item) => [item.photoId, item._source])
-          );
-          rerankedList = (
-            await rerankWithCLIPScore(q, mergedList, rerankTopK)
-          ).map((item) => ({
-            ...item,
-            _source: sources.get(item.photoId) ?? "ai",
-          }));
-        }
-      } catch {
-        // Rerank failed, continue with merged results
-      }
-
       const toSearchMatch = (result: (typeof rerankedList)[number]) =>
         result._source === "ai"
-          ? ({ kind: "semantic" as const, score: result.similarity })
-          : ({ kind: "exact" as const, source: result._source });
+          ? { kind: "semantic" as const, score: result.similarity }
+          : { kind: "exact" as const, source: result._source };
 
       const hasExifOrTimeFilter =
         effectiveDateFrom ||
@@ -1143,7 +1131,9 @@ export const searchCompound = os
             }
             return {
               ...photo,
+              exactMatch: r.exact,
               match: toSearchMatch(r),
+              rankScore: r.rankScore,
               similarity: r.similarity,
               fileDate: photo.fileDate,
             };
@@ -1151,16 +1141,19 @@ export const searchCompound = os
           .filter(
             (p): p is NonNullable<typeof p> => p !== null && p.id != null
           );
-
-        const temporalBoost = buildTemporalBoost(
-          effectiveDateFrom,
-          effectiveDateTo
+        combined.sort(
+          (left, right) =>
+            right.rankScore - left.rankScore ||
+            Number(right.exactMatch) - Number(left.exactMatch) ||
+            right.similarity - left.similarity ||
+            (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
+            left.id - right.id
         );
-        const scored = applyTimeDecay(combined, { temporalBoost });
+
         return {
-          results: withoutInternalSearchScores(scored.slice(0, limit)),
+          results: withoutInternalSearchScores(combined.slice(0, limit)),
           query: q,
-          total: scored.length,
+          total: combined.length,
           semantic,
           ...(rewrittenTimeFilter
             ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
@@ -1217,10 +1210,7 @@ export const searchCompound = os
                 .select({ photoId: exifData.photoId })
                 .from(exifData)
                 .where(
-                  and(
-                    inArray(exifData.photoId, allIds),
-                    ...exifConditions
-                  )
+                  and(inArray(exifData.photoId, allIds), ...exifConditions)
                 )
                 .all()
                 .map((row) => row.photoId)
@@ -1262,22 +1252,27 @@ export const searchCompound = os
           }
           return {
             ...photo,
+            exactMatch: r.exact,
             match: toSearchMatch(r),
+            rankScore: r.rankScore,
             similarity: r.similarity,
             fileDate: photo.fileDate,
           };
         })
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
-
-      const temporalBoost = buildTemporalBoost(
-        effectiveDateFrom,
-        effectiveDateTo
+      combined.sort(
+        (left, right) =>
+          right.rankScore - left.rankScore ||
+          Number(right.exactMatch) - Number(left.exactMatch) ||
+          right.similarity - left.similarity ||
+          (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
+          left.id - right.id
       );
-      const scored = applyTimeDecay(combined, { temporalBoost });
+
       return {
-        results: withoutInternalSearchScores(scored.slice(0, limit)),
+        results: withoutInternalSearchScores(combined.slice(0, limit)),
         query: q,
-        total: scored.length,
+        total: combined.length,
         semantic,
         ...(rewrittenTimeFilter
           ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
@@ -1336,9 +1331,7 @@ export const searchCompound = os
       exifConditions.push(like(exifData.lensModel, `%${lensModel}%`));
     }
     if (creatorIds) {
-      exifConditions.push(
-        inArray(exifData.photoId, Array.from(creatorIds))
-      );
+      exifConditions.push(inArray(exifData.photoId, Array.from(creatorIds)));
     }
     if (focalMin !== undefined) {
       exifConditions.push(gte(exifData.focalLengthNum, focalMin));
