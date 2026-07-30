@@ -4,7 +4,10 @@ export const photoSequenceActions = {
   create: (input: { type: "burst" | "timelapse"; photoIds: number[] }) =>
     ipc.client.photos.createSequence(input),
   deleteManual: (id: number) => ipc.client.photos.deleteManualSequence({ id }),
+  clearExclusions: () => ipc.client.photos.clearSequenceExclusions(),
   dissolve: (id: number) => ipc.client.photos.dissolveSequence({ id }),
+  dissolveAndExclude: (id: number) =>
+    ipc.client.photos.dissolveAndExcludeSequence({ id }),
   get: (id: number) => ipc.client.photos.getSequence({ id }),
   ignore: (photoIds: number[]) =>
     ipc.client.photos.ignoreSequencePhotos({ photoIds }),

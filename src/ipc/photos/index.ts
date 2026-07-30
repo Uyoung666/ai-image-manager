@@ -61,8 +61,10 @@ import {
   searchSpotlight,
 } from "./handlers/search";
 import {
+  clearSequenceExclusions,
   createSequence,
   deleteManualSequence,
+  dissolveAndExcludeSequence,
   dissolveSequence,
   getSequence,
   ignoreSequencePhotos,
@@ -145,7 +147,9 @@ export const photos = {
   getWatermarkSettings,
   getSequence,
   deleteManualSequence,
+  clearSequenceExclusions,
   dissolveSequence,
+  dissolveAndExcludeSequence,
   listDeletedPhotos,
   listPhotos,
   listSequenceSuggestions,

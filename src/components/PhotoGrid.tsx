@@ -295,11 +295,12 @@ export function SequenceFocusTray({
   const [isMutating, setIsMutating] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     confirmText: string;
-    description: string;
+    description: React.ReactNode;
     operation: () => Promise<unknown>;
     successText: string;
     title: string;
   } | null>(null);
+  const dissolveExcludeRef = useRef(false);
   const finishMutation = useCallback(
     async (operation: () => Promise<unknown>, successText: string) => {
       setIsMutating(true);
@@ -477,15 +478,68 @@ export function SequenceFocusTray({
         <button
           className="h-7 shrink-0 rounded-md border border-destructive/30 bg-background/80 px-2 text-[11px] text-destructive disabled:opacity-40"
           disabled={isMutating}
-          onClick={() =>
+          onClick={() => {
+            dissolveExcludeRef.current = false;
             setConfirmation({
               confirmText: "解散序列",
-              description: `解散这个 ${fullMembers.length} 张照片的序列。照片文件不会被删除。`,
-              operation: () => photoSequenceActions.dissolve(sequence.id),
+              description: (
+                <>
+                  <p className="mb-3">
+                    解散这个 {fullMembers.length}{" "}
+                    张照片的序列。照片文件不会被删除。
+                  </p>
+                  <div className="checkbox-wrapper flex items-center gap-2">
+                    <input
+                      className="check"
+                      defaultChecked={false}
+                      id="dissolve-exclude-check"
+                      onChange={(e) => {
+                        dissolveExcludeRef.current = e.target.checked;
+                      }}
+                      type="checkbox"
+                    />
+                    <label
+                      className="label flex cursor-pointer items-center gap-2 text-[13px] text-muted-foreground"
+                      htmlFor="dissolve-exclude-check"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="flex-none text-foreground/55"
+                        height="40"
+                        viewBox="0 0 95 95"
+                        width="40"
+                      >
+                        <rect
+                          fill="none"
+                          height="50"
+                          stroke="currentColor"
+                          width="50"
+                          x="30"
+                          y="20"
+                        />
+                        <g transform="translate(0,-952.36222)">
+                          <path
+                            className="path1"
+                            d="m 56,963 c -102,122 6,9 7,9 17,-5 -66,69 -38,52 122,-77 -7,14 18,4 29,-11 45,-43 23,-4"
+                            fill="none"
+                            stroke="var(--danger)"
+                            strokeWidth="3"
+                          />
+                        </g>
+                      </svg>
+                      不再将此组照片识别为序列
+                    </label>
+                  </div>
+                </>
+              ),
+              operation: () =>
+                dissolveExcludeRef.current
+                  ? photoSequenceActions.dissolveAndExclude(sequence.id)
+                  : photoSequenceActions.dissolve(sequence.id),
               successText: "序列已解散",
               title: "确认解散序列",
-            })
-          }
+            });
+          }}
           type="button"
         >
           <Unlink className="mr-1 inline size-3.5" />
@@ -493,7 +547,7 @@ export function SequenceFocusTray({
         </button>
       </div>
       <div
-        className="overflow-y-auto overscroll-contain"
+        className="overflow-y-auto overscroll-contain px-1 pt-1"
         data-sequence-virtual-scroll=""
         ref={scrollRef}
         style={{ height: Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT) }}
@@ -543,7 +597,6 @@ export function SequenceFocusTray({
                     path={member.path}
                     renderImage={renderImage}
                     searchQuery={searchQuery}
-                    selectionInset
                     thumbnailPath={member.thumbnailPath}
                     width={member.width}
                   />

@@ -846,6 +846,25 @@ export const dissolveSequence = os
     if (!sequence) {
       return { ok: true };
     }
+    db.transaction(() => {
+      db.delete(photoSequences).where(eq(photoSequences.id, input.id)).run();
+    });
+    notifySequencesChanged(sequence.folderId ?? undefined, "manual");
+    return { ok: true };
+  });
+
+export const dissolveAndExcludeSequence = os
+  .input(SequenceIdSchema)
+  .handler(({ input }) => {
+    const db = getDatabase();
+    const sequence = db
+      .select({ folderId: photoSequences.folderId })
+      .from(photoSequences)
+      .where(eq(photoSequences.id, input.id))
+      .get();
+    if (!sequence) {
+      return { ok: true };
+    }
     const memberIds = activeSequenceMemberIds(db, input.id);
     db.transaction(() => {
       if (memberIds.length) {
@@ -858,6 +877,15 @@ export const dissolveSequence = os
     });
     notifySequencesChanged(sequence.folderId ?? undefined, "manual");
     return { ok: true };
+  });
+
+export const clearSequenceExclusions = os
+  .input(z.object({}).optional())
+  .handler(() => {
+    const db = getDatabase();
+    const result = db.delete(photoSequenceExclusions).run();
+    notifySequencesChanged(undefined, "manual");
+    return { cleared: result.changes };
   });
 
 export const keepSequencePhotos = os

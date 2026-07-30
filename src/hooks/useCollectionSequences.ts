@@ -235,6 +235,34 @@ export function useCollectionSequences({
     setRefreshVersion((value) => value + 1);
   }, []);
 
+  const updateMemberFavorite = useCallback(
+    (id: number, isFavorite: boolean) => {
+      setExpandedSequence((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.id === id ? { ...m, isFavorite } : m
+          ),
+        };
+      });
+      setExpandedSequenceComplete((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.id === id ? { ...m, isFavorite } : m
+          ),
+        };
+      });
+    },
+    []
+  );
+
   return {
     expandedSequence,
     expandedSequenceComplete,
@@ -250,5 +278,6 @@ export function useCollectionSequences({
     setOpenSequence,
     setSelectedSequence,
     toggleExpand,
+    updateMemberFavorite,
   };
 }

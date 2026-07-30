@@ -208,7 +208,7 @@ function PersonDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
+  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
 
   const marqueeJustCompleted = useRef(false);
@@ -298,6 +298,7 @@ function PersonDetailPage() {
           ),
         };
       });
+      sequenceView.updateMemberFavorite(id, newVal);
       queryClient.invalidateQueries({
         queryKey: ["photos"],
         refetchType: "active",
@@ -323,6 +324,7 @@ function PersonDetailPage() {
                   ),
                 };
               });
+              sequenceView.updateMemberFavorite(id, prevVal);
               queryClient.invalidateQueries({
                 queryKey: ["photos"],
                 refetchType: "active",
@@ -700,6 +702,9 @@ function PersonDetailPage() {
               ),
             };
           });
+          for (const favId of ids) {
+            sequenceView.updateMemberFavorite(favId, newVal);
+          }
           queryClient.invalidateQueries({
             queryKey: ["photos"],
             refetchType: "active",
@@ -927,6 +932,9 @@ function PersonDetailPage() {
                       ),
                     };
                   });
+                  for (const favId of ids) {
+                    sequenceView.updateMemberFavorite(favId, newVal);
+                  }
                   queryClient.invalidateQueries({
                     queryKey: ["photos"],
                     refetchType: "active",
@@ -960,8 +968,14 @@ function PersonDetailPage() {
           <SequenceDetailPanel
             onClose={() => sequenceView.setSelectedSequence(null)}
             onOpenPhoto={(photoId) => {
+              const member = sequenceView.selectedSequence?.members.find(
+                (m) => m.id === photoId
+              );
               sequenceView.setSelectedSequence(null);
               handleKeyboardSelect(photoId);
+              if (member) {
+                showPhoto(member);
+              }
             }}
             onPlay={() => {
               if (sequenceView.selectedSequence) {
@@ -1007,10 +1021,7 @@ function PersonDetailPage() {
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
           onAddToAlbum={handleAddToAlbum}
-          onClose={({ photoId }) => {
-            setLightboxIndex(-1);
-            handleKeyboardSelect(photoId);
-          }}
+          onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={photos as any}
@@ -1068,6 +1079,9 @@ function PersonDetailPage() {
           ipc.client.photos
             .toggleFavorite({ ids, favorite: newVal })
             .then(() => {
+              for (const favId of ids) {
+                sequenceView.updateMemberFavorite(favId, newVal);
+              }
               queryClient.invalidateQueries({
                 queryKey: ["photos"],
                 refetchType: "active",

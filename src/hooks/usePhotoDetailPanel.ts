@@ -11,6 +11,7 @@ interface UsePhotoDetailPanelReturn {
   detailPhoto: Photo | null;
   dismissDetail: () => void;
   navigateDetail: (direction: "prev" | "next") => void;
+  showPhoto: (photo: Photo) => void;
 }
 
 /**
@@ -126,10 +127,27 @@ export function usePhotoDetailPanel(
     [detailPhoto, photos, routeKey, saveSession, onSelect]
   );
 
+  /**
+   * 直接显示指定照片的详情面板，绕过 actionPhotos 查找。
+   * 用于序列详情面板中点击成员帧等场景，此时照片可能不在当前 actionPhotos 中。
+   */
+  const showPhoto = useCallback(
+    (photo: Photo) => {
+      userDismissedRef.current = false;
+      setDetailDismissed(false);
+      prevSelectedIdRef.current = photo.id;
+      detailPhotoIdRef.current = photo.id;
+      setDetailPhoto(photo);
+      saveSession(routeKey, { detailDismissed: false });
+    },
+    [routeKey, saveSession]
+  );
+
   return {
     detailPhoto,
     detailDismissed,
     dismissDetail,
     navigateDetail,
+    showPhoto,
   };
 }

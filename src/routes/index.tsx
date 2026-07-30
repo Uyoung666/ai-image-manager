@@ -1275,7 +1275,7 @@ function HomePage() {
     setExpandedSequenceComplete(null);
     setSequenceRefresh((value) => value + 1);
   }, []);
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
+  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
     usePhotoDetailPanel(
       selectedIds,
       actionPhotos,
@@ -1571,6 +1571,26 @@ function HomePage() {
       const prevVal = !!photo.isFavorite;
       const newVal = requestedValue ?? !prevVal;
       await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      // 同步更新展开的序列成员状态，因为 expandedSequence 是本地状态，
+      // 不会随 TanStack Query 重新获取而更新
+      setExpandedSequence((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.id === id ? { ...m, isFavorite: newVal } : m
+          ),
+        };
+      });
+      setExpandedSequenceComplete((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.id === id ? { ...m, isFavorite: newVal } : m
+          ),
+        };
+      });
       queryClient.invalidateQueries({
         queryKey: ["photos"],
         refetchType: "active",
@@ -1584,6 +1604,25 @@ function HomePage() {
               await ipc.client.photos.toggleFavorite({
                 ids: [id],
                 favorite: prevVal,
+              });
+              // 撤销时同步恢复序列成员状态
+              setExpandedSequence((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  members: prev.members.map((m) =>
+                    m.id === id ? { ...m, isFavorite: prevVal } : m
+                  ),
+                };
+              });
+              setExpandedSequenceComplete((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  members: prev.members.map((m) =>
+                    m.id === id ? { ...m, isFavorite: prevVal } : m
+                  ),
+                };
               });
               queryClient.invalidateQueries({
                 queryKey: ["photos"],
@@ -2136,6 +2175,26 @@ function HomePage() {
         );
         const newVal = !allFav;
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
+          for (const favId of ids) {
+            setExpandedSequence((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                members: prev.members.map((m) =>
+                  m.id === favId ? { ...m, isFavorite: newVal } : m
+                ),
+              };
+            });
+            setExpandedSequenceComplete((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                members: prev.members.map((m) =>
+                  m.id === favId ? { ...m, isFavorite: newVal } : m
+                ),
+              };
+            });
+          }
           queryClient.invalidateQueries({
             queryKey: ["photos"],
             refetchType: "active",
@@ -2152,6 +2211,26 @@ function HomePage() {
                     ids,
                     favorite: allFav,
                   });
+                  for (const favId of ids) {
+                    setExpandedSequence((prev) => {
+                      if (!prev) return prev;
+                      return {
+                        ...prev,
+                        members: prev.members.map((m) =>
+                          m.id === favId ? { ...m, isFavorite: allFav } : m
+                        ),
+                      };
+                    });
+                    setExpandedSequenceComplete((prev) => {
+                      if (!prev) return prev;
+                      return {
+                        ...prev,
+                        members: prev.members.map((m) =>
+                          m.id === favId ? { ...m, isFavorite: allFav } : m
+                        ),
+                      };
+                    });
+                  }
                   queryClient.invalidateQueries({
                     queryKey: ["photos"],
                     refetchType: "active",
@@ -2619,9 +2698,16 @@ function HomePage() {
                     .catch(() => toast.error("无法删除手动序列"));
                 }}
                 onOpenPhoto={(photoId) => {
+                  const member = selectedSequence?.members.find(
+                    (m) => m.id === photoId
+                  );
                   setSequenceReturnTarget(selectedSequence);
                   setSelectedSequence(null);
                   handleKeyboardSelect(photoId);
+                  // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
+                  if (member) {
+                    showPhoto(member);
+                  }
                 }}
                 onPlay={() => {
                   setSequenceAutoPlay(true);
@@ -2809,10 +2895,7 @@ function HomePage() {
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
           onAddToAlbum={handleAddToAlbum}
-          onClose={({ photoId }) => {
-            setLightboxIndex(-1);
-            handleKeyboardSelect(photoId);
-          }}
+          onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={actionPhotos}

@@ -205,7 +205,7 @@ function AlbumDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
+  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
 
   // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
@@ -232,6 +232,9 @@ function AlbumDetailPage() {
       console.error("[handleFavoriteSelected] failed:", err);
     }
     setAllFavorite(nextFav);
+    for (const favId of ids) {
+      sequenceView.updateMemberFavorite(favId, nextFav);
+    }
     queryClient.invalidateQueries({
       queryKey: ["photos"],
       refetchType: "active",
@@ -258,6 +261,7 @@ function AlbumDetailPage() {
           ),
         };
       });
+      sequenceView.updateMemberFavorite(id, newVal);
       queryClient.invalidateQueries({
         queryKey: ["photos"],
         refetchType: "active",
@@ -283,6 +287,7 @@ function AlbumDetailPage() {
                   ),
                 };
               });
+              sequenceView.updateMemberFavorite(id, prevVal);
               queryClient.invalidateQueries({
                 queryKey: ["photos"],
                 refetchType: "active",
@@ -966,8 +971,14 @@ function AlbumDetailPage() {
           <SequenceDetailPanel
             onClose={() => sequenceView.setSelectedSequence(null)}
             onOpenPhoto={(photoId) => {
+              const member = sequenceView.selectedSequence?.members.find(
+                (m) => m.id === photoId
+              );
               sequenceView.setSelectedSequence(null);
               handleKeyboardSelect(photoId);
+              if (member) {
+                showPhoto(member);
+              }
             }}
             onPlay={() => {
               if (sequenceView.selectedSequence) {
@@ -1013,10 +1024,7 @@ function AlbumDetailPage() {
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
           onAddToAlbum={handleAddToAlbum}
-          onClose={({ photoId }) => {
-            setLightboxIndex(-1);
-            handleKeyboardSelect(photoId);
-          }}
+          onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={photos as any}

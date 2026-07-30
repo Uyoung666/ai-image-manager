@@ -428,6 +428,8 @@ export const PhotoCard = memo(function PhotoCard({
             }
             onToggleFavorite(id);
           }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          ref={starRef}
         >
           <svg
             className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
