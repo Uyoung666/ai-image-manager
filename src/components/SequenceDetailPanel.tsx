@@ -7,9 +7,10 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { memo, useEffect, useState, type WheelEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { photoSequenceActions } from "@/actions/photo-sequences";
+import { loadPhotoDetailPanelWidth } from "@/components/PhotoDetailPanel";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -28,9 +29,15 @@ interface SequenceDetailPanelProps {
   onRestoreAutomatic?: (id: number) => void;
   onSetRepresentative?: (sequenceId: number, photoId: number) => void;
   onSplit?: (sequenceId: number, position: number) => void;
+  onWidthChange?: (width: number) => void;
   sequence: PhotoSequenceDetail | null;
   width: number;
 }
+
+const PANEL_WIDTH_KEY = "detail_panel_width";
+const MIN_PANEL_WIDTH = 280;
+const MAX_PANEL_WIDTH = 480;
+const DEFAULT_PANEL_WIDTH = 300;
 
 function formatDate(value: number, locale: string) {
   return new Date(value).toLocaleString(locale);
@@ -69,14 +76,70 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   onRestoreAutomatic,
   onSetRepresentative,
   onSplit,
+  onWidthChange,
 }: SequenceDetailPanelProps) {
   const { i18n, t } = useTranslation();
   const [splitPosition, setSplitPosition] = useState(2);
+  const [panelWidth, setPanelWidth] = useState(loadPhotoDetailPanelWidth);
+  const [resizing, setResizing] = useState(false);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+  const currentWidth = useRef(panelWidth);
   const [recommendation, setRecommendation] = useState<{
     photoId: number;
     reasons: string[];
   } | null>(null);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const displayWidth = onWidthChange ? panelWidth : width;
+
+  // Keep ref in sync for resize callback closure
+  useEffect(() => {
+    currentWidth.current = panelWidth;
+    onWidthChange?.(panelWidth);
+  }, [onWidthChange, panelWidth]);
+
+  // Resize handling
+  useEffect(() => {
+    if (!resizing) {
+      return;
+    }
+    function handleMouseMove(e: MouseEvent) {
+      const delta = resizeStartX.current - e.clientX;
+      const newWidth = Math.max(
+        MIN_PANEL_WIDTH,
+        Math.min(MAX_PANEL_WIDTH, resizeStartWidth.current + delta)
+      );
+      currentWidth.current = newWidth;
+      setPanelWidth(newWidth);
+    }
+    function handleMouseUp() {
+      setResizing(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(currentWidth.current));
+      } catch {
+        /* ignore */
+      }
+    }
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizing]);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizing(true);
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = currentWidth.current;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
   useEffect(() => {
     if (!sequence) {
       setRecommendation(null);
@@ -117,9 +180,17 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
     return (
       <aside
         className="photo-detail-panel-shell shrink-0 overflow-hidden"
-        style={{ width }}
+        style={{ width: displayWidth }}
       >
-        <div className="glass-surface-heavy flex h-full items-center justify-center border-border border-l">
+        <div className="glass-surface-heavy relative flex h-full items-center justify-center border-border border-l">
+          {onWidthChange && (
+            <div
+              className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
+                resizing ? "bg-primary" : "hover:bg-primary/50"
+              }`}
+              onMouseDown={handleResizeStart}
+            />
+          )}
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
         </div>
       </aside>
@@ -141,9 +212,18 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   return (
     <aside
       className="photo-detail-panel-shell shrink-0 overflow-hidden"
-      style={{ width }}
+      style={{ width: displayWidth }}
     >
-      <div className="glass-surface-heavy flex h-full flex-col border-border border-l">
+      <div className="glass-surface-heavy relative flex h-full flex-col border-border border-l">
+        {/* Resize handle — drag left edge to resize */}
+        {onWidthChange && (
+          <div
+            className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
+              resizing ? "bg-primary" : "hover:bg-primary/50"
+            }`}
+            onMouseDown={handleResizeStart}
+          />
+        )}
         <header className="flex items-center justify-between border-border border-b px-4 py-3">
           <div className="flex items-center gap-2">
             {sequence.type === "burst" ? (

@@ -24,7 +24,7 @@ const sequence: PhotoSequence = {
 };
 
 describe("SequenceCard", () => {
-  it("opens sequence details on a normal click", () => {
+  it("selects and opens sequence details on a normal click", () => {
     vi.useFakeTimers();
     const onClick = vi.fn();
     const onOpenDetails = vi.fn();
@@ -40,10 +40,12 @@ describe("SequenceCard", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "sequenceCardLabel" }));
+    expect(onClick).toHaveBeenCalledWith(
+      sequence.photo.id,
+      expect.objectContaining({ ctrlKey: false })
+    );
     act(() => vi.advanceTimersByTime(250));
-
     expect(onOpenDetails).toHaveBeenCalledWith(sequence.id);
-    expect(onClick).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

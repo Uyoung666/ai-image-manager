@@ -193,7 +193,9 @@ function PersonDetailPage() {
   });
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
-      sequenceView.setSelectedSequence(null);
+      if (event.ctrlKey || event.metaKey) {
+        sequenceView.setSelectedSequence(null);
+      }
       handleSelectMany(memberIds, event);
     },
     [handleSelectMany, sequenceView.setSelectedSequence]

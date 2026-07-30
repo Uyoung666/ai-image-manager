@@ -818,6 +818,7 @@ export const PhotoGrid = memo(
       expandedSequence,
       columnCount,
       containerWidth,
+      selectedIds,
     ]);
     const keyboardPhotos = useMemo(
       () =>
@@ -1021,10 +1022,13 @@ export const PhotoGrid = memo(
                 memberIds.length > 0 &&
                 memberIds.every((id) => selectedIdsRef.current.has(id))
               }
-              onClick={(_id, event) =>
-                onSelectSequence?.(memberIds, event) ??
-                onSelect(photo.id, event)
-              }
+              onClick={(_id, event) => {
+                if (onSelectSequence) {
+                  onSelectSequence(memberIds, event);
+                } else {
+                  onSelect(photo.id, event);
+                }
+              }}
               onOpen={onOpenSequence}
               onOpenDetails={onOpenSequenceDetails}
               onToggleExpand={onToggleSequenceExpand}

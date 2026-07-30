@@ -64,11 +64,9 @@ export const SequenceCard = memo(function SequenceCard({
       data-photo-path={photo.path}
       data-sequence-id={sequence.id}
       onClick={(event) => {
-        if (event.ctrlKey || event.metaKey) {
-          cancelPendingClick();
-          onClick(photo.id, event);
-        } else {
-          cancelPendingClick();
+        cancelPendingClick();
+        onClick(photo.id, event);
+        if (!event.ctrlKey && !event.metaKey) {
           clickTimerRef.current = setTimeout(() => {
             clickTimerRef.current = null;
             onOpenDetails(sequence.id);
@@ -106,6 +104,20 @@ export const SequenceCard = memo(function SequenceCard({
           width={photo.width ?? 1}
         />
       ) : null}
+      {/* Selection indicator */}
+      {isSelected && (
+        <div className="absolute top-2 left-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-primary ring-1 ring-primary-foreground/20">
+          <svg fill="none" height="12" viewBox="0 0 12 12" width="12">
+            <path
+              d="M2.5 6L5 8.5L9.5 3.5"
+              stroke="white"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            />
+          </svg>
+        </div>
+      )}
       {onToggleExpand && (
         <Tooltip>
           <TooltipTrigger asChild>

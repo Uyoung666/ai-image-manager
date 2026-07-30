@@ -1292,10 +1292,9 @@ function HomePage() {
   );
   const handleSequenceDetails = useCallback(
     (sequenceId: number) => {
-      clearSelection();
       handleOpenSequenceDetails(sequenceId);
     },
-    [clearSelection, handleOpenSequenceDetails]
+    [handleOpenSequenceDetails]
   );
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
@@ -2290,9 +2289,15 @@ function HomePage() {
   );
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
-      setSelectedSequence(null);
-      setSequenceDetailsLoading(false);
-      handleSelectMany(memberIds, event);
+      if (event.ctrlKey || event.metaKey) {
+        setSelectedSequence(null);
+        setSequenceDetailsLoading(false);
+        handleSelectMany(memberIds, event);
+      } else {
+        // 立即显示加载状态，避免照片详情→序列详情切换时的空白间隙
+        setSequenceDetailsLoading(true);
+        handleSelectMany(memberIds, event);
+      }
     },
     [handleSelectMany]
   );
@@ -2679,96 +2684,126 @@ function HomePage() {
                 selectedCount={selectedIds.size}
               />
             </div>
-            {selectedSequence || sequenceDetailsLoading ? (
-              <SequenceDetailPanel
-                onClose={() => {
-                  setSelectedSequence(null);
-                  setSequenceDetailsLoading(false);
-                }}
-                onDeleteManual={(id) => {
-                  setPendingSequenceAction({ id, type: "ungroup" });
-                  return;
-                  ipc.client.photos
-                    .deleteManualSequence({ id })
-                    .then(() => {
-                      setSelectedSequence(null);
-                      setSequenceRefresh((value) => value + 1);
-                      toast.success("已删除手动序列");
-                    })
-                    .catch(() => toast.error("无法删除手动序列"));
-                }}
-                onOpenPhoto={(photoId) => {
-                  const member = selectedSequence?.members.find(
-                    (m) => m.id === photoId
-                  );
-                  setSequenceReturnTarget(selectedSequence);
-                  setSelectedSequence(null);
-                  handleKeyboardSelect(photoId);
-                  // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
-                  if (member) {
-                    showPhoto(member);
-                  }
-                }}
-                onPlay={() => {
-                  setSequenceAutoPlay(true);
-                  setOpenSequence(selectedSequence);
-                }}
-                onRestoreAutomatic={(id) => {
-                  setPendingSequenceAction({ id, type: "restore" });
-                  return;
-                  ipc.client.photos
-                    .restoreAutomaticSequence({ id })
-                    .then(() => {
-                      setSelectedSequence(null);
-                      setSequenceRefresh((value) => value + 1);
-                      toast.success("已恢复自动识别");
-                    })
-                    .catch(() => toast.error("恢复自动识别失败"));
-                }}
-                onSetRepresentative={(sequenceId, photoId) => {
-                  ipc.client.photos
-                    .setSequenceRepresentative({ id: sequenceId, photoId })
-                    .then(() => {
-                      handleOpenSequenceDetails(sequenceId);
-                      setSequenceRefresh((value) => value + 1);
-                    })
-                    .catch(() => toast.error("设置代表帧失败"));
-                }}
-                onSplit={(sequenceId, position) => {
-                  ipc.client.photos
-                    .splitSequence({ id: sequenceId, position })
-                    .then(() => {
-                      setSelectedSequence(null);
-                      setSequenceRefresh((value) => value + 1);
-                      toast.success("已拆分为两个手动锁定序列");
-                    })
-                    .catch(() => toast.error("拆分序列失败"));
-                }}
-                sequence={selectedSequence}
-                width={detailPanelWidth}
-              />
-            ) : (
-              <PhotoDetailPanel
-                onClose={() => {
-                  dismissDetail();
-                  clearSelection();
-                  setSequenceReturnTarget(null);
-                }}
-                onNavigate={navigateDetail}
-                onOpenExplorer={handleOpenExplorer}
-                onReturnToSequence={
-                  sequenceReturnTarget
-                    ? () => {
-                        dismissDetail();
-                        clearSelection();
-                        setSelectedSequence(sequenceReturnTarget);
-                        setSequenceReturnTarget(null);
-                      }
-                    : undefined
-                }
-                onWidthChange={setDetailPanelWidth}
-                photo={detailPhoto as any}
-              />
+            {(detailPhoto || selectedSequence || sequenceDetailsLoading) && (
+              <aside
+                className="photo-detail-panel-shell shrink-0 overflow-hidden relative"
+                style={{ width: detailPanelWidth }}
+              >
+                {/* 照片详情层 — 始终挂载，序列激活时交叉淡出 */}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    opacity: selectedSequence || sequenceDetailsLoading ? 0 : 1,
+                    pointerEvents:
+                      selectedSequence || sequenceDetailsLoading
+                        ? "none"
+                        : "auto",
+                    transition: "opacity 200ms ease",
+                  }}
+                >
+                  <PhotoDetailPanel
+                    onClose={() => {
+                      dismissDetail();
+                      clearSelection();
+                      setSequenceReturnTarget(null);
+                    }}
+                    onNavigate={navigateDetail}
+                    onOpenExplorer={handleOpenExplorer}
+                    onReturnToSequence={
+                      sequenceReturnTarget
+                        ? () => {
+                            dismissDetail();
+                            clearSelection();
+                            setSelectedSequence(sequenceReturnTarget);
+                            setSequenceReturnTarget(null);
+                          }
+                        : undefined
+                    }
+                    onWidthChange={setDetailPanelWidth}
+                    photo={detailPhoto as any}
+                  />
+                </div>
+
+                {/* 序列详情层 — 需要时才挂载，挂载后淡入 */}
+                {(selectedSequence || sequenceDetailsLoading) && (
+                  <div
+                    className="absolute inset-0"
+                    style={{ transition: "opacity 200ms ease" }}
+                  >
+                    <SequenceDetailPanel
+                      onClose={() => {
+                        setSelectedSequence(null);
+                        setSequenceDetailsLoading(false);
+                      }}
+                      onWidthChange={setDetailPanelWidth}
+                      onDeleteManual={(id) => {
+                        setPendingSequenceAction({ id, type: "ungroup" });
+                        return;
+                        ipc.client.photos
+                          .deleteManualSequence({ id })
+                          .then(() => {
+                            setSelectedSequence(null);
+                            setSequenceRefresh((value) => value + 1);
+                            toast.success("已删除手动序列");
+                          })
+                          .catch(() => toast.error("无法删除手动序列"));
+                      }}
+                      onOpenPhoto={(photoId) => {
+                        const member = selectedSequence?.members.find(
+                          (m) => m.id === photoId
+                        );
+                        setSequenceReturnTarget(selectedSequence);
+                        setSelectedSequence(null);
+                        handleKeyboardSelect(photoId);
+                        // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
+                        if (member) {
+                          showPhoto(member);
+                        }
+                      }}
+                      onPlay={() => {
+                        setSequenceAutoPlay(true);
+                        setOpenSequence(selectedSequence);
+                      }}
+                      onRestoreAutomatic={(id) => {
+                        setPendingSequenceAction({ id, type: "restore" });
+                        return;
+                        ipc.client.photos
+                          .restoreAutomaticSequence({ id })
+                          .then(() => {
+                            setSelectedSequence(null);
+                            setSequenceRefresh((value) => value + 1);
+                            toast.success("已恢复自动识别");
+                          })
+                          .catch(() => toast.error("恢复自动识别失败"));
+                      }}
+                      onSetRepresentative={(sequenceId, photoId) => {
+                        ipc.client.photos
+                          .setSequenceRepresentative({
+                            id: sequenceId,
+                            photoId,
+                          })
+                          .then(() => {
+                            handleOpenSequenceDetails(sequenceId);
+                            setSequenceRefresh((value) => value + 1);
+                          })
+                          .catch(() => toast.error("设置代表帧失败"));
+                      }}
+                      onSplit={(sequenceId, position) => {
+                        ipc.client.photos
+                          .splitSequence({ id: sequenceId, position })
+                          .then(() => {
+                            setSelectedSequence(null);
+                            setSequenceRefresh((value) => value + 1);
+                            toast.success("已拆分为两个手动锁定序列");
+                          })
+                          .catch(() => toast.error("拆分序列失败"));
+                      }}
+                      sequence={selectedSequence}
+                      width={detailPanelWidth}
+                    />
+                  </div>
+                )}
+              </aside>
             )}
           </div>
         ) : (
