@@ -1,17 +1,17 @@
-export type GallerySequenceMode = "photos" | "sequences";
+export type GallerySequenceMode = "all" | "collapsed" | "sequences";
 
 export function getDisplayedSequenceMode(
   mode: GallerySequenceMode,
   sequenceViewReady: boolean
 ): GallerySequenceMode {
-  return mode === "sequences" && sequenceViewReady ? "sequences" : "photos";
+  return mode === "all" || sequenceViewReady ? mode : "all";
 }
 
 export function canPaginateGalleryPhotos(
   mode: GallerySequenceMode,
   hasNextPage: boolean
 ): boolean {
-  return mode === "photos" && hasNextPage;
+  return mode !== "sequences" && hasNextPage;
 }
 
 export function getStableSearchAppendIds({
@@ -50,5 +50,7 @@ export function isGalleryRevealPending({
   routeKey: string;
   sequenceViewReady: boolean;
 }): boolean {
-  return !sequenceViewReady || (hasSavedPosition && restoredRouteKey !== routeKey);
+  return (
+    !sequenceViewReady || (hasSavedPosition && restoredRouteKey !== routeKey)
+  );
 }

@@ -6,13 +6,13 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface SequenceCardProps {
-  isSelected: boolean;
-  onClick: (id: number, event: React.MouseEvent) => void;
-  onOpenDetails: (sequenceId: number) => void;
-  onOpen: (sequenceId: number) => void;
-  onToggleExpand?: (sequenceId: number) => void;
   expanded?: boolean;
   expanding?: boolean;
+  isSelected: boolean;
+  onClick: (id: number, event: React.MouseEvent) => void;
+  onOpen: (sequenceId: number) => void;
+  onOpenDetails: (sequenceId: number) => void;
+  onToggleExpand?: (sequenceId: number) => void;
   sequence: PhotoSequence;
 }
 
@@ -46,24 +46,28 @@ export const SequenceCard = memo(function SequenceCard({
     duration >= 60_000
       ? t("sequenceMinutes", { count: Math.round(duration / 60_000) })
       : "";
+  const scopedCount =
+    sequence.matchedCount != null && sequence.matchedCount !== sequence.frameCount
+      ? `${sequence.matchedCount}/${sequence.frameCount}`
+      : String(sequence.frameCount);
   return (
     <div
-      aria-label={t("sequenceCardLabel", { count: sequence.frameCount, type: t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse") })}
-      aria-selected={isSelected}
+      aria-label={t("sequenceCardLabel", {
+        count: sequence.frameCount,
+        type: t(
+          sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse"
+        ),
+      })}
+      aria-pressed={isSelected}
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
       data-photo-id={photo.id}
       data-photo-path={photo.path}
       onClick={(event) => {
-        if (event.ctrlKey || event.metaKey) {
-          cancelPendingClick();
+        cancelPendingClick();
+        clickTimerRef.current = setTimeout(() => {
+          clickTimerRef.current = null;
           onClick(photo.id, event);
-        } else {
-          cancelPendingClick();
-          clickTimerRef.current = setTimeout(() => {
-            clickTimerRef.current = null;
-            onOpenDetails(sequence.id);
-          }, SINGLE_CLICK_DELAY_MS);
-        }
+        }, SINGLE_CLICK_DELAY_MS);
       }}
       onDoubleClick={() => {
         cancelPendingClick();
@@ -72,6 +76,9 @@ export const SequenceCard = memo(function SequenceCard({
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           onOpenDetails(sequence.id);
+        } else if (event.key === " ") {
+          event.preventDefault();
+          onClick(photo.id, event as unknown as React.MouseEvent);
         }
       }}
       role="button"
@@ -89,6 +96,8 @@ export const SequenceCard = memo(function SequenceCard({
           className="h-full w-full object-cover"
           loading="lazy"
           src={toLocalMediaUrl(photo.thumbnailPath)}
+          height={photo.height ?? 1}
+          width={photo.width ?? 1}
         />
       ) : null}
       {onToggleExpand && (
@@ -131,8 +140,9 @@ export const SequenceCard = memo(function SequenceCard({
       >
         {sequence.type === "burst" ? <Layers size={13} /> : <Timer size={13} />}
         <span>
-          {t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse")} · {sequence.frameCount}{" "}
-          {t("sequenceFrames")}{durationLabel ? ` · ${durationLabel}` : ""}
+          {t(sequence.type === "burst" ? "sequenceBurst" : "sequenceTimelapse")}{" "}
+          · {scopedCount} {t("sequenceFrames")}
+          {durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       </button>
     </div>

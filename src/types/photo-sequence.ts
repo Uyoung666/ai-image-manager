@@ -7,6 +7,8 @@ export interface PhotoSequence {
   frameCount: number;
   id: number;
   matchedCount?: number;
+  matchedPhoto?: Photo;
+  matchedPhotoIds?: number[];
   memberPhotoIds?: number[];
   photo: Photo;
   representativePhotoId: number | null;

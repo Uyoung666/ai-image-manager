@@ -7,10 +7,12 @@ interface Photo {
 }
 
 interface UsePhotoSelectionReturn {
+  addToSelection: (ids: number[]) => void;
   clearSelection: () => void;
   handleKeyboardSelect: (id: number) => void;
   handleMarqueeSelect: (ids: Set<number>) => void;
   handleSelect: (id: number, event: React.MouseEvent) => void;
+  handleSelectMany: (ids: number[], event: React.MouseEvent) => void;
   lastClickedIdx: number;
   removeFromSelection: (ids: number[]) => void;
   selectAll: () => void;
@@ -136,6 +138,58 @@ export function usePhotoSelection(
     [photos, routeKey, saveSession]
   );
 
+  const handleSelectMany = useCallback(
+    (ids: number[], event: React.MouseEvent) => {
+      const uniqueIds = [...new Set(ids)];
+      if (uniqueIds.length === 0) {
+        return;
+      }
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const allSelected = uniqueIds.every((id) => next.has(id));
+        if (event.ctrlKey || event.metaKey) {
+          for (const id of uniqueIds) {
+            if (allSelected) {
+              next.delete(id);
+            } else {
+              next.add(id);
+            }
+          }
+        } else {
+          next.clear();
+          for (const id of uniqueIds) {
+            next.add(id);
+          }
+        }
+        const anchorId = uniqueIds[0];
+        const idx = photos.findIndex((photo) => photo.id === anchorId);
+        if (idx >= 0) {
+          setLastClickedIdx(idx);
+        }
+        saveSession(routeKey, {
+          selectedIds: Array.from(next),
+          lastClickedIdx: idx >= 0 ? idx : lastClickedIdxRef.current,
+        });
+        return next;
+      });
+    },
+    [photos, routeKey, saveSession]
+  );
+
+  const addToSelection = useCallback(
+    (ids: number[]) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) {
+          next.add(id);
+        }
+        saveSession(routeKey, { selectedIds: Array.from(next) });
+        return next;
+      });
+    },
+    [routeKey, saveSession]
+  );
+
   const handleMarqueeSelect = useCallback(
     (ids: Set<number>) => {
       setSelectedIds(ids);
@@ -184,9 +238,11 @@ export function usePhotoSelection(
   }, [photos, routeKey, saveSession, clearSelection]);
 
   return {
+    addToSelection,
     selectedIds,
     lastClickedIdx,
     handleSelect,
+    handleSelectMany,
     handleKeyboardSelect,
     handleMarqueeSelect,
     clearSelection,

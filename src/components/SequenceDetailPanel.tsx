@@ -1,6 +1,16 @@
-import { ChevronDown, Layers, Play, Timer, X } from "lucide-react";
-import { memo, useState, type WheelEvent } from "react";
+// biome-ignore-all lint/style/useFilenamingConvention: React component files use the repository's PascalCase convention.
+import {
+  ChevronDown,
+  Layers,
+  Play,
+  Settings2,
+  Timer,
+  WandSparkles,
+  X,
+} from "lucide-react";
+import { memo, useEffect, useState, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { photoSequenceActions } from "@/actions/photo-sequences";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -13,6 +23,7 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 interface SequenceDetailPanelProps {
   onClose: () => void;
   onDeleteManual?: (id: number) => void;
+  onManage?: (id: number) => void;
   onOpenPhoto: (photoId: number) => void;
   onPlay: () => void;
   onRestoreAutomatic?: (id: number) => void;
@@ -34,18 +45,67 @@ function handleFrameStripWheel(event: WheelEvent<HTMLDivElement>) {
   event.currentTarget.scrollLeft += event.deltaY;
 }
 
+const REASON_LABELS: Record<string, string> = {
+  "sequence.representative.reason.analysisFailed": "部分画面无法分析",
+  "sequence.representative.reason.balancedExposure": "曝光有效",
+  "sequence.representative.reason.favorite": "已收藏",
+  "sequence.representative.reason.highRating": "评分较高",
+  "sequence.representative.reason.highResolution": "分辨率较高",
+  "sequence.representative.reason.manualPreference": "符合人工偏好",
+  "sequence.representative.reason.richDetail": "画面信息丰富",
+  "sequence.representative.reason.sharp": "画面清晰",
+  "sequence.representative.reason.stableFallback": "按序列顺序稳定选择",
+};
+
+function formatReason(reason: string) {
+  return REASON_LABELS[reason] ?? reason;
+}
+
 export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   sequence,
   width,
   onClose,
   onPlay,
   onOpenPhoto,
+  onManage,
   onRestoreAutomatic,
   onSetRepresentative,
   onSplit,
 }: SequenceDetailPanelProps) {
   const { i18n, t } = useTranslation();
   const [splitPosition, setSplitPosition] = useState(2);
+  const [recommendation, setRecommendation] = useState<{
+    photoId: number;
+    reasons: string[];
+  } | null>(null);
+  useEffect(() => {
+    if (!sequence) {
+      setRecommendation(null);
+      return;
+    }
+    let cancelled = false;
+    photoSequenceActions
+      .recommendRepresentative(
+        sequence.id,
+        sequence.members.map((photo) => photo.id)
+      )
+      .then((result) => {
+        if (!(cancelled || !result)) {
+          setRecommendation({
+            photoId: result.recommendedPhotoId,
+            reasons: result.reasonKeys,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecommendation(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sequence]);
   if (!sequence) {
     return (
       <aside
@@ -175,6 +235,33 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
               ))}
             </div>
           </section>
+          {recommendation && (
+            <section className="rounded-md border border-primary/20 bg-primary/5 p-3">
+              <p className="flex items-center gap-1 font-medium text-sm">
+                <WandSparkles className="size-4 text-primary" />
+                推荐第{" "}
+                {sequence.members.findIndex(
+                  (photo) => photo.id === recommendation.photoId
+                ) + 1}{" "}
+                帧作为代表帧
+              </p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                依据：{recommendation.reasons.map(formatReason).join("、")}
+              </p>
+              {onSetRepresentative &&
+                recommendation.photoId !== sequence.representativePhotoId && (
+                  <Button
+                    className="mt-2"
+                    onClick={() =>
+                      onSetRepresentative(sequence.id, recommendation.photoId)
+                    }
+                    size="sm"
+                  >
+                    采用推荐
+                  </Button>
+                )}
+            </section>
+          )}
           <div>
             <button
               className="flex w-full items-center justify-center gap-1 rounded bg-primary px-3 py-2 text-primary-foreground text-sm"
@@ -258,6 +345,16 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                 确认拆分
               </Button>
             </div>
+          )}
+          {onManage && (
+            <Button
+              className="w-full"
+              onClick={() => onManage(sequence.id)}
+              variant="outline"
+            >
+              <Settings2 />
+              管理完整序列
+            </Button>
           )}
           {sequence.userLocked && (
             <div>

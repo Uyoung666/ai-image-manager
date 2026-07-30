@@ -8,6 +8,7 @@ import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CullStartDialog } from "@/components/CullStartDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
 import type { MenuState } from "@/components/PhotoContextMenu";
@@ -17,16 +18,18 @@ import type { SortField, SortOrder } from "@/components/PhotoGrid";
 import { PhotoGrid } from "@/components/PhotoGrid";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { QuickPreview } from "@/components/QuickPreview";
+import { RouteError } from "@/components/RouteError";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
-import { CullStartDialog } from "@/components/CullStartDialog";
+import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
+import { SequenceWorkspace } from "@/components/SequenceWorkspace";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import { useCollectionSequences } from "@/hooks/useCollectionSequences";
 import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-import { RouteError } from "@/components/RouteError";
 
 interface PhotoInfo {
   filename: string;
@@ -170,12 +173,44 @@ function AlbumDetailPage() {
   const {
     selectedIds,
     handleSelect,
+    handleSelectMany,
+    addToSelection,
     handleKeyboardSelect,
     handleMarqueeSelect,
     clearSelection,
     removeFromSelection,
     selectAll: selectAllPhotos,
   } = usePhotoSelection(routeKey, photos);
+  const sequenceView = useCollectionSequences({
+    onClearSelection: clearSelection,
+    onRemoveSelection: removeFromSelection,
+    photos: photos as any,
+    storageKey: "album_sequence_view_mode",
+  });
+  const workspaceCurrentMembers = useMemo(
+    () =>
+      sequenceView.workspaceSequence?.members.filter((photo) =>
+        sequenceView.workspaceScopeIds.includes(photo.id)
+      ) ?? [],
+    [sequenceView.workspaceScopeIds, sequenceView.workspaceSequence]
+  );
+  const handleSequenceSelect = useCallback(
+    (memberIds: number[], event: React.MouseEvent) => {
+      sequenceView.setSelectedSequence(null);
+      handleSelectMany(memberIds, event);
+    },
+    [handleSelectMany, sequenceView.setSelectedSequence]
+  );
+  const handleSelectSequenceMembers = useCallback(
+    (memberIds: number[], selectAll: boolean) => {
+      if (selectAll) {
+        addToSelection(memberIds);
+      } else {
+        removeFromSelection(memberIds);
+      }
+    },
+    [addToSelection, removeFromSelection]
+  );
   const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
 
@@ -209,58 +244,62 @@ function AlbumDetailPage() {
     });
   }
 
-  const handleToggleFavorite = useCallback(async (
-    id: number,
-    requestedValue?: boolean
-  ) => {
-    const photo = photosRef.current.find((p) => p.id === id);
-    if (!photo) {
-      return;
-    }
-    const prevVal = !!photo.isFavorite;
-    const newVal = requestedValue ?? !prevVal;
-    await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
-    setAlbum((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        photos: prev.photos.map((p) =>
-          p.id === id ? { ...p, isFavorite: newVal } : p
-        ),
-      };
-    });
-    queryClient.invalidateQueries({
-      queryKey: ["photos"],
-      refetchType: "active",
-    });
-    toast.success(
-      newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
-      {
-        action: {
-          label: t("toastUndo"),
-          onClick: async () => {
-            await ipc.client.photos.toggleFavorite({
-              ids: [id],
-              favorite: prevVal,
-            });
-            setAlbum((prev) => {
-              if (!prev) return prev;
-              return {
-                ...prev,
-                photos: prev.photos.map((p) =>
-                  p.id === id ? { ...p, isFavorite: prevVal } : p
-                ),
-              };
-            });
-            queryClient.invalidateQueries({
-              queryKey: ["photos"],
-              refetchType: "active",
-            });
-          },
-        },
+  const handleToggleFavorite = useCallback(
+    async (id: number, requestedValue?: boolean) => {
+      const photo = photosRef.current.find((p) => p.id === id);
+      if (!photo) {
+        return;
       }
-    );
-  }, []);
+      const prevVal = !!photo.isFavorite;
+      const newVal = requestedValue ?? !prevVal;
+      await ipc.client.photos.toggleFavorite({ ids: [id], favorite: newVal });
+      setAlbum((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          photos: prev.photos.map((p) =>
+            p.id === id ? { ...p, isFavorite: newVal } : p
+          ),
+        };
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["photos"],
+        refetchType: "active",
+      });
+      toast.success(
+        newVal ? t("toastFavoriteAdded") : t("toastFavoriteRemoved"),
+        {
+          action: {
+            label: t("toastUndo"),
+            onClick: async () => {
+              await ipc.client.photos.toggleFavorite({
+                ids: [id],
+                favorite: prevVal,
+              });
+              setAlbum((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                return {
+                  ...prev,
+                  photos: prev.photos.map((p) =>
+                    p.id === id ? { ...p, isFavorite: prevVal } : p
+                  ),
+                };
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["photos"],
+                refetchType: "active",
+              });
+            },
+          },
+        }
+      );
+    },
+    []
+  );
 
   async function handleDeleteSelected() {
     setConfirmDeleteIds(Array.from(selectedIds));
@@ -810,6 +849,8 @@ function AlbumDetailPage() {
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-w-0 flex-1">
           <PhotoGrid
+            expandedSequence={sequenceView.expandedSequence}
+            expandingSequenceId={sequenceView.expandingSequenceId}
             isPlaceholderData={loading}
             loading={loading}
             onBackgroundClick={() => {
@@ -823,12 +864,24 @@ function AlbumDetailPage() {
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardSelect}
             onMarqueeSelect={wrappedMarqueeSelect}
+            onOpenSequence={sequenceView.openPlayback}
+            onOpenSequenceDetails={sequenceView.openDetails}
             onSelect={handleSelect}
+            onSelectSequence={handleSequenceSelect}
+            onSelectSequenceMembers={handleSelectSequenceMembers}
+            onSequenceModeChange={(mode) => {
+              if (mode !== "sequences") {
+                sequenceView.setMode(mode);
+              }
+            }}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
+            onToggleSequenceExpand={sequenceView.toggleExpand}
             photos={photos as any}
             routeKey={routeKey}
             selectedIds={selectedIds}
+            sequenceMode={sequenceView.mode}
+            sequences={sequenceView.sequences}
             sort={sortField}
             sortOrder={sortOrder}
           />
@@ -906,15 +959,51 @@ function AlbumDetailPage() {
             selectedCount={selectedIds.size}
           />
         </div>
-        <PhotoDetailPanel
-          onClose={() => {
-            dismissDetail();
-            clearSelection();
-          }}
-          onNavigate={navigateDetail}
-          onOpenExplorer={handleOpenExplorer}
-          photo={detailPhoto}
-        />
+        {sequenceView.selectedSequence ? (
+          <SequenceDetailPanel
+            onClose={() => sequenceView.setSelectedSequence(null)}
+            onManage={sequenceView.manageSequence}
+            onOpenPhoto={(photoId) => {
+              sequenceView.setSelectedSequence(null);
+              handleKeyboardSelect(photoId);
+            }}
+            onPlay={() => {
+              if (sequenceView.selectedSequence) {
+                sequenceView.setOpenSequence(sequenceView.selectedSequence);
+              }
+            }}
+            onSetRepresentative={(sequenceId, photoId) => {
+              ipc.client.photos
+                .setSequenceRepresentative({ id: sequenceId, photoId })
+                .then(() => {
+                  sequenceView.setSelectedSequence((current) =>
+                    current?.id === sequenceId
+                      ? {
+                          ...current,
+                          representativePhotoId: photoId,
+                          source: "manual",
+                          userLocked: true,
+                        }
+                      : current
+                  );
+                  toast.success("已设为手动代表帧");
+                })
+                .catch(() => toast.error("设置代表帧失败"));
+            }}
+            sequence={sequenceView.selectedSequence}
+            width={360}
+          />
+        ) : (
+          <PhotoDetailPanel
+            onClose={() => {
+              dismissDetail();
+              clearSelection();
+            }}
+            onNavigate={navigateDetail}
+            onOpenExplorer={handleOpenExplorer}
+            photo={detailPhoto as any}
+          />
+        )}
       </div>
 
       {lightboxIndex >= 0 && (
@@ -931,6 +1020,40 @@ function AlbumDetailPage() {
           photos={photos as any}
         />
       )}
+      {sequenceView.openSequence && (
+        <PhotoLightbox
+          initialIndex={0}
+          onClose={() => sequenceView.setOpenSequence(null)}
+          onToggleFavorite={handleToggleFavorite}
+          open={true}
+          photos={sequenceView.openSequence.members}
+          sequencePlayback={true}
+          showThumbnailsInitially={true}
+        />
+      )}
+      <SequenceWorkspace
+        completeMembers={(sequenceView.workspaceSequence?.members ?? []) as any}
+        currentMembers={workspaceCurrentMembers as any}
+        currentScopeLabel="当前相册"
+        onClose={sequenceView.closeWorkspace}
+        onOpenDetails={(photoId) => {
+          sequenceView.closeWorkspace();
+          handleKeyboardSelect(photoId);
+        }}
+        onPlay={(members) => {
+          if (sequenceView.workspaceSequence) {
+            sequenceView.setOpenSequence({
+              ...sequenceView.workspaceSequence,
+              frameCount: members.length,
+              members: [...members],
+            });
+          }
+        }}
+        onSelectionChange={handleMarqueeSelect}
+        open={sequenceView.workspaceSequence !== null}
+        selectedPhotoIds={selectedIds}
+        sequenceId={sequenceView.workspaceSequence?.id}
+      />
 
       {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
         <QuickPreview
