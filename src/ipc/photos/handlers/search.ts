@@ -38,9 +38,18 @@ import {
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import {
+  buildTagSearchEvidence,
   type ExactSearchEvidence,
+  fuseGatedHybridSearchEvidence,
   fuseHybridSearchEvidence,
+  type GatedHybridResult,
 } from "@/services/rerank";
+import {
+  appendToFrozenSearchPool,
+  createSearchFingerprint,
+  SearchSessionStore,
+  takeFrozenSearchPage,
+} from "@/services/search-session";
 import {
   COLOR_MATCH_MAX_DISTANCE_SQUARED,
   hydrateColorSearchResults,
@@ -49,6 +58,7 @@ import {
 import {
   applyTimeDecay,
   CompoundSearchSchema,
+  deferSearchBranch,
   ImageSearchSchema,
   SearchSchema,
 } from "./shared";
@@ -112,6 +122,10 @@ function withoutInternalSearchScores<
 const AI_SEARCH_TIMEOUT_MS = 2000;
 const AI_SEARCH_COLD_TIMEOUT_MS = 10_000;
 const COLOR_VECTOR_TIMEOUT_MS = 250;
+const SEARCH_PIPELINE_VERSION =
+  process.env.AI_SEARCH_PIPELINE === "v2" ? "v2" : "hybrid-v3";
+
+const searchSessions = new SearchSessionStore();
 const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
 // ── Hue bucket helper ──────────────────────────────────────────────────
@@ -360,8 +374,95 @@ export const searchCompound = os
       isoMax,
       shutterMin,
       shutterMax,
+      cursor,
       limit,
+      offset,
     } = input;
+    const fingerprint = createSearchFingerprint(input);
+    const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
+    if (
+      cursor &&
+      (!activeSearchSession || activeSearchSession.fingerprint !== fingerprint)
+    ) {
+      return {
+        cursorExpired: true,
+        hasMore: false,
+        nextCursor: null,
+        results: [],
+        snapshotVersion: activeSearchSession?.snapshotVersion,
+        total: 0,
+        totalExact: false,
+      };
+    }
+    if (
+      activeSearchSession?.responseBase &&
+      (activeSearchSession.rankedPool.length >= limit ||
+        (activeSearchSession.rankedPool.length > 0 &&
+          !activeSearchSession.upstreamHasMore))
+    ) {
+      const page = takeFrozenSearchPage(activeSearchSession, limit);
+      for (const result of page) {
+        activeSearchSession.emittedIds.add(result.id);
+      }
+      const hasMore =
+        activeSearchSession.upstreamHasMore ||
+        activeSearchSession.rankedPool.length > 0;
+      const cachedSemantic = activeSearchSession.responseBase.semantic;
+      return {
+        ...activeSearchSession.responseBase,
+        hasMore,
+        nextCursor: hasMore ? activeSearchSession.cursor : null,
+        nextOffset: hasMore ? activeSearchSession.candidateDepth : null,
+        results: page,
+        ...(cachedSemantic &&
+        typeof cachedSemantic === "object" &&
+        !Array.isArray(cachedSemantic)
+          ? {
+              semantic: {
+                ...cachedSemantic,
+                searchSessionHit: true,
+              },
+            }
+          : {}),
+        snapshotVersion: activeSearchSession.snapshotVersion,
+      };
+    }
+    const effectiveOffset = activeSearchSession?.candidateDepth ?? offset;
+    const resultWindowEnd = activeSearchSession
+      ? Math.max(effectiveOffset + limit, effectiveOffset * 2)
+      : offset + limit;
+    let searchSessionTagEvidence: unknown;
+    const finalizeSearchPage = <
+      T extends { id: number } & Record<string, unknown>,
+      R extends Record<string, unknown>,
+    >(
+      allResults: T[],
+      base: R,
+      upstreamHasMore: boolean
+    ) => {
+      const session =
+        activeSearchSession ??
+        searchSessions.create(fingerprint, resultWindowEnd);
+      appendToFrozenSearchPool(session, allResults);
+      const page = takeFrozenSearchPage<T>(session, limit);
+      for (const result of page) {
+        session.emittedIds.add(result.id);
+      }
+      session.candidateDepth = resultWindowEnd;
+      session.lastAccess = Date.now();
+      session.responseBase = base;
+      session.tagEvidence ??= searchSessionTagEvidence;
+      session.upstreamHasMore = upstreamHasMore;
+      const hasMore = upstreamHasMore || session.rankedPool.length > 0;
+      return {
+        ...base,
+        hasMore,
+        nextCursor: hasMore ? session.cursor : null,
+        nextOffset: hasMore ? resultWindowEnd : null,
+        results: page,
+        snapshotVersion: session.snapshotVersion,
+      };
+    };
     const periodicDateConditions = (): SQL[] => {
       const conditions: SQL[] = [];
       if (dateMonth !== undefined) {
@@ -793,9 +894,27 @@ export const searchCompound = os
       const q = searchText.trim();
       const aiReadiness = await getAiReadiness({ loadModel: false });
       let semantic = {
+        candidateDepth: 0,
+        consensusCutoff: 0,
+        cutoffReason: "not-run",
+        finalCutoff: 0,
+        hasMore: false,
         indexedPhotos: aiReadiness.indexedPhotos,
+        intent: "unknown" as "object" | "scene" | "composed" | "unknown",
+        promptGroupCount: 0,
         reason: aiReadiness.lastError as string | undefined,
+        rejectedWeak: 0,
         state: aiReadiness.coverageState,
+        strongAccepted: 0,
+        strongCutoff: 0,
+        supportedAccepted: 0,
+        supportCutoff: 0,
+        manualExactAccepted: 0,
+        semanticOnlyAccepted: 0,
+        tagSupportedAccepted: 0,
+        autoTagRescued: 0,
+        ignoredLowConfidenceTags: 0,
+        topSimilarity: 0,
         totalPhotos: aiReadiness.totalPhotos,
         used: false,
       };
@@ -880,7 +999,7 @@ export const searchCompound = os
         // 路 1：CLIP 文本推理 + LanceDB 向量召回
         semanticAvailable
           ? withTimeout(
-              aiSearchByTextWithPlan(q, 200),
+              aiSearchByTextWithPlan(q, resultWindowEnd),
               aiSearchTimeoutMs,
               aiSearchWasReady
                 ? "AI semantic search"
@@ -888,18 +1007,28 @@ export const searchCompound = os
             )
           : Promise.resolve([]),
         // 路 2：标签库 LIKE 搜索（原始 query token + 改写后 query 双路）
-        db
-          .select({ id: photos.id, name: tags.name })
-          .from(photos)
-          .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
-          .innerJoin(tags, eq(tags.id, photoTags.tagId))
-          .where(
-            and(
-              isNull(photos.deletedAt),
-              or(...buildTokenConditions(nameTokens, tags.name, q))
-            )
-          )
-          .all(),
+        activeSearchSession?.tagEvidence
+          ? Promise.resolve(activeSearchSession.tagEvidence)
+          : deferSearchBranch(() =>
+              db
+                .select({
+                  id: photos.id,
+                  name: tags.name,
+                  confidence: photoTags.confidence,
+                  origin: photoTags.origin,
+                  userConfirmed: photoTags.userConfirmed,
+                })
+                .from(photos)
+                .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
+                .innerJoin(tags, eq(tags.id, photoTags.tagId))
+                .where(
+                  and(
+                    isNull(photos.deletedAt),
+                    or(...buildTokenConditions(nameTokens, tags.name, q))
+                  )
+                )
+                .all()
+            ),
         // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
         (async () => {
           // FTS5 简单模式下仅 " 为特殊字符；
@@ -932,25 +1061,27 @@ export const searchCompound = os
             .all();
         })(),
         // 路 4：人脸识别名搜索（token 化匹配中文姓名）
-        db
-          .select({ id: photos.id, name: faceIdentities.name })
-          .from(photos)
-          .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
-          .innerJoin(
-            faceIdentityMembers,
-            eq(faceIdentityMembers.faceVectorId, faceVectors.id)
-          )
-          .innerJoin(
-            faceIdentities,
-            eq(faceIdentities.id, faceIdentityMembers.identityId)
-          )
-          .where(
-            and(
-              isNull(photos.deletedAt),
-              or(...buildTokenConditions(nameTokens, faceIdentities.name, q))
+        deferSearchBranch(() =>
+          db
+            .select({ id: photos.id, name: faceIdentities.name })
+            .from(photos)
+            .innerJoin(faceVectors, eq(faceVectors.photoId, photos.id))
+            .innerJoin(
+              faceIdentityMembers,
+              eq(faceIdentityMembers.faceVectorId, faceVectors.id)
             )
-          )
-          .all(),
+            .innerJoin(
+              faceIdentities,
+              eq(faceIdentities.id, faceIdentityMembers.identityId)
+            )
+            .where(
+              and(
+                isNull(photos.deletedAt),
+                or(...buildTokenConditions(nameTokens, faceIdentities.name, q))
+              )
+            )
+            .all()
+        ),
       ]);
 
       // 拆解 allSettled 结果，记录降级日志
@@ -964,8 +1095,7 @@ export const searchCompound = os
       let semanticReason = semantic.reason;
       if (settled[0].status === "rejected") {
         semanticReason =
-          (settled[0].reason as Error)?.message ??
-          "semantic-search-failed";
+          (settled[0].reason as Error)?.message ?? "semantic-search-failed";
       } else if (
         aiSearch?.plan.translationMode === "dictionary-fallback" &&
         aiSearch.plan.language !== "en"
@@ -974,7 +1104,20 @@ export const searchCompound = os
       }
       semantic = {
         ...semantic,
+        candidateDepth: aiSearch?.candidateDepth ?? 0,
+        consensusCutoff: aiSearch?.consensusCutoff ?? 0,
+        cutoffReason: aiSearch?.cutoffReason ?? "not-run",
+        finalCutoff: aiSearch?.finalCutoff ?? 0,
+        hasMore: aiSearch?.hasMore ?? false,
+        intent: aiSearch?.plan.intent ?? "unknown",
+        promptGroupCount: aiSearch?.promptGroupCount ?? 0,
         reason: semanticReason,
+        rejectedWeak: aiSearch?.rejectedWeak ?? 0,
+        strongAccepted: aiSearch?.strongAccepted ?? 0,
+        strongCutoff: aiSearch?.strongCutoff ?? 0,
+        supportedAccepted: aiSearch?.supportedAccepted ?? 0,
+        supportCutoff: aiSearch?.supportCutoff ?? 0,
+        topSimilarity: aiSearch?.topSimilarity ?? 0,
         used:
           semanticAvailable &&
           settled[0].status === "fulfilled" &&
@@ -982,8 +1125,15 @@ export const searchCompound = os
       };
       const tagPhotoRows =
         settled[1].status === "fulfilled"
-          ? (settled[1].value as { id: number; name: string }[])
+          ? (settled[1].value as Array<{
+              confidence: number | null;
+              id: number;
+              name: string;
+              origin: "manual" | "auto";
+              userConfirmed: boolean;
+            }>)
           : [];
+      searchSessionTagEvidence = tagPhotoRows;
       const filenamePhotoRows =
         settled[2].status === "fulfilled"
           ? (settled[2].value as { id: number }[])
@@ -1020,28 +1170,64 @@ export const searchCompound = os
       const normalizedExactQuery = q.trim().toLocaleLowerCase();
       const isFullMatch = (value: string): boolean =>
         value.trim().toLocaleLowerCase() === normalizedExactQuery;
+      const semanticPhotoIds = new Set(aiResults.map(({ photoId }) => photoId));
+      const semanticCandidates =
+        SEARCH_PIPELINE_VERSION === "hybrid-v3"
+          ? [
+              ...aiResults,
+              ...(aiSearch?.supportCandidates ?? []).filter(
+                (candidate) => !semanticPhotoIds.has(candidate.photoId)
+              ),
+            ]
+          : aiResults;
       const exactEvidence: ExactSearchEvidence[] = [
         ...personPhotoRows.map((row) => ({
           exact: isFullMatch(row.name),
           photoId: row.id,
           source: "person" as const,
         })),
-        ...tagPhotoRows.map((row) => ({
-          exact: isFullMatch(row.name),
-          photoId: row.id,
-          source: "tag" as const,
-        })),
+        ...buildTagSearchEvidence(
+          tagPhotoRows,
+          SEARCH_PIPELINE_VERSION === "hybrid-v3"
+            ? new Set<number>()
+            : semanticPhotoIds,
+          isFullMatch
+        ),
         ...filenamePhotoRows.map((row) => ({
           exact: false,
           photoId: row.id,
           source: "filename" as const,
         })),
       ];
-      const rerankedList = fuseHybridSearchEvidence(
-        aiResults,
-        exactEvidence,
-        Math.max(limit, 200)
-      );
+      const gated =
+        SEARCH_PIPELINE_VERSION === "hybrid-v3"
+          ? fuseGatedHybridSearchEvidence(
+              semanticCandidates,
+              exactEvidence,
+              tagPhotoRows,
+              {
+                acceptedSemanticPhotoIds: semanticPhotoIds,
+                intent: aiSearch?.plan.intent ?? "unknown",
+                promptGroupCount: aiSearch?.promptGroupCount ?? 0,
+                strongCutoff: aiSearch?.strongCutoff ?? 0,
+                supportCutoff: aiSearch?.supportCutoff ?? 0,
+                topSimilarity: aiSearch?.topSimilarity ?? 0,
+              }
+            )
+          : null;
+      const rerankedList =
+        gated?.results ??
+        fuseHybridSearchEvidence(
+          aiResults,
+          exactEvidence,
+          aiResults.length + exactEvidence.length
+        );
+      if (gated) {
+        semantic = { ...semantic, ...gated.diagnostics };
+        console.log(
+          `[Search] pipeline=hybrid-v3 manualExact=${gated.diagnostics.manualExactAccepted} semanticOnly=${gated.diagnostics.semanticOnlyAccepted} tagSupported=${gated.diagnostics.tagSupportedAccepted} autoRescued=${gated.diagnostics.autoTagRescued} ignoredLowConfidenceTags=${gated.diagnostics.ignoredLowConfidenceTags}`
+        );
+      }
 
       if (rerankedList.length === 0) {
         // If time filter was parsed from query, skip AI and do plain date filter
@@ -1092,10 +1278,29 @@ export const searchCompound = os
         return { results: [], query: q, total: 0, semantic };
       }
 
-      const toSearchMatch = (result: (typeof rerankedList)[number]) =>
-        result._source === "ai"
+      const toSearchMatch = (result: (typeof rerankedList)[number]) => {
+        if ("hybridEvidence" in result) {
+          const hybridResult = result as GatedHybridResult;
+          if (hybridResult.hybridEvidence.length === 0) {
+            return hybridResult._source === "person" ||
+              hybridResult._source === "tag" ||
+              hybridResult._source === "filename"
+              ? {
+                  kind: "exact" as const,
+                  source: hybridResult._source,
+                }
+              : { kind: "semantic" as const, score: result.similarity };
+          }
+          return {
+            kind: "hybrid" as const,
+            evidence: hybridResult.hybridEvidence,
+            tagNames: hybridResult.tagNames,
+          };
+        }
+        return result._source === "ai" || result._source === "autoTag"
           ? { kind: "semantic" as const, score: result.similarity }
           : { kind: "exact" as const, source: result._source };
+      };
 
       const hasExifOrTimeFilter =
         effectiveDateFrom ||
@@ -1143,22 +1348,30 @@ export const searchCompound = os
           );
         combined.sort(
           (left, right) =>
-            right.rankScore - left.rankScore ||
             Number(right.exactMatch) - Number(left.exactMatch) ||
+            right.rankScore - left.rankScore ||
             right.similarity - left.similarity ||
             (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
             left.id - right.id
         );
 
-        return {
-          results: withoutInternalSearchScores(combined.slice(0, limit)),
-          query: q,
-          total: combined.length,
-          semantic,
-          ...(rewrittenTimeFilter
-            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-            : {}),
-        };
+        return finalizeSearchPage(
+          withoutInternalSearchScores(combined),
+          {
+            query: q,
+            total: combined.length,
+            totalExact:
+              combined.length <= resultWindowEnd && !aiSearch?.hasMore,
+            semantic: {
+              ...semantic,
+              searchSessionHit: Boolean(activeSearchSession),
+            },
+            ...(rewrittenTimeFilter
+              ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+              : {}),
+          },
+          Boolean(aiSearch?.hasMore)
+        );
       }
 
       // 7) Apply EXIF/time filters on merged results
@@ -1262,22 +1475,29 @@ export const searchCompound = os
         .filter((p): p is NonNullable<typeof p> => p !== null && p.id != null);
       combined.sort(
         (left, right) =>
-          right.rankScore - left.rankScore ||
           Number(right.exactMatch) - Number(left.exactMatch) ||
+          right.rankScore - left.rankScore ||
           right.similarity - left.similarity ||
           (right.fileDate ?? 0) - (left.fileDate ?? 0) ||
           left.id - right.id
       );
 
-      return {
-        results: withoutInternalSearchScores(combined.slice(0, limit)),
-        query: q,
-        total: combined.length,
-        semantic,
-        ...(rewrittenTimeFilter
-          ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
-          : {}),
-      };
+      return finalizeSearchPage(
+        withoutInternalSearchScores(combined),
+        {
+          query: q,
+          total: combined.length,
+          totalExact: combined.length <= resultWindowEnd && !aiSearch?.hasMore,
+          semantic: {
+            ...semantic,
+            searchSessionHit: Boolean(activeSearchSession),
+          },
+          ...(rewrittenTimeFilter
+            ? { timeFilter: timeFilterToDateRange(rewrittenTimeFilter) }
+            : {}),
+        },
+        Boolean(aiSearch?.hasMore)
+      );
     }
 
     // No text query: EXIF-only filter
@@ -1446,7 +1666,16 @@ export const searchSpotlight = os
         .from(photos)
         .innerJoin(photoTags, eq(photoTags.photoId, photos.id))
         .innerJoin(tags, eq(tags.id, photoTags.tagId))
-        .where(and(isNull(photos.deletedAt), like(tags.name, `%${q}%`)))
+        .where(
+          and(
+            isNull(photos.deletedAt),
+            like(tags.name, `%${q}%`),
+            or(
+              eq(photoTags.origin, "manual"),
+              eq(photoTags.userConfirmed, true)
+            )
+          )
+        )
         .limit(limit)
         .all(),
     ]);

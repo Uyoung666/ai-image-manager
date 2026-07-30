@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "errorCategoryByContentHash": {
+    "camera-sample-content-hash": "camera"
+  },
+  "queries": [
+    {
+      "id": "object-bicycle",
+      "query": "自行车",
+      "intent": "object",
+      "category": "object",
+      "relevantContentHashes": [
+        "replace-with-stable-positive-content-hash"
+      ]
+    },
+    {
+      "id": "scene-sunset",
+      "query": "日落",
+      "intent": "scene",
+      "category": "scene",
+      "relevantContentHashes": [
+        "replace-with-stable-positive-content-hash"
+      ]
+    }
+  ]
+}

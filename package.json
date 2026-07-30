@@ -26,6 +26,8 @@
     "test:all": "node scripts/run-vitest.mjs run && playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node ./scripts/migrate.ts",
+    "benchmark:semantic-quality": "node scripts/evaluate-semantic-quality.mjs",
+    "benchmark:hybrid-calibration": "node scripts/calibrate-hybrid-search.mjs",
     "postinstall": "node scripts/postinstall-cleanup.mjs && electron-rebuild -f -w better-sqlite3,@lancedb/lancedb,@xenova/transformers"
   },
   "author": "Uyoung",

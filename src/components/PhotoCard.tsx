@@ -181,7 +181,27 @@ export const PhotoCard = memo(function PhotoCard({
     if (match.kind === "color") {
       return t("searchMatchColor", { value: Math.round(match.score * 100) });
     }
-    if (match.kind === "semantic" || match.kind === "image") {
+    if (match.kind === "semantic") {
+      return t("searchMatchSemantic");
+    }
+    if (match.kind === "hybrid") {
+      if (
+        match.evidence.includes("semantic") &&
+        match.evidence.includes("tag")
+      ) {
+        return t("searchMatchHybrid");
+      }
+      if (match.evidence.includes("tag")) {
+        return t("searchMatchExactTag");
+      }
+      return t("searchMatchSemantic");
+    }
+    if (match.kind === "tagFilter") {
+      return match.origin === "auto"
+        ? t("searchMatchAutoTag")
+        : t("searchMatchExactTag");
+    }
+    if (match.kind === "image") {
       return t("searchMatchSimilarity", {
         value: Math.round(match.score * 100),
       });

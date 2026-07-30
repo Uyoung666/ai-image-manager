@@ -798,6 +798,8 @@ async function runBatchSuggestTags(
                   tagId,
                   confidence: s.confidence,
                   isConfirmed,
+                  origin: "auto",
+                  userConfirmed: false,
                 })
                 .onConflictDoNothing()
                 .run();

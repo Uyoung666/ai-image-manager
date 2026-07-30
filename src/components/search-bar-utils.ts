@@ -17,6 +17,7 @@ export interface TimePreset {
 export interface SearchSuggestion {
   category?: string;
   color?: string;
+  tagId?: number;
   text: string;
   type: "example" | "person" | "dictionary" | "tag" | "history";
 }

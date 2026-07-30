@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canonicalizeSemanticPrompt,
   extractNegativeClauses,
   prepareSemanticQueryPlan,
   semanticQueryPlanCacheKey,
@@ -28,11 +29,11 @@ describe("SemanticQueryPlan", () => {
     expect(plan.language).toBe("en");
     expect(plan.translationMode).toBe("none");
     expect(plan.prompts).toEqual([
-      {
+      expect.objectContaining({
         role: "primary",
-        text: "a photo of three cats at sunset",
+        text: "This is a photo of three cats at sunset.",
         weight: 1,
-      },
+      }),
     ]);
     expect(translate).not.toHaveBeenCalled();
   });
@@ -46,11 +47,13 @@ describe("SemanticQueryPlan", () => {
 
     expect(plan.language).toBe("zh");
     expect(plan.translationMode).toBe("local");
-    expect(plan.prompts[0]).toEqual({
-      role: "primary",
-      text: "a photo of an astronaut repairing a robot under neon lights",
-      weight: 1,
-    });
+    expect(plan.prompts[0]).toEqual(
+      expect.objectContaining({
+        role: "primary",
+        text: "This is a photo of an astronaut repairing a robot under neon lights.",
+        weight: 1,
+      })
+    );
   });
 
   it("中英混合查询保留英文、数字和数量语义", async () => {
@@ -107,7 +110,7 @@ describe("SemanticQueryPlan", () => {
       "人物"
     );
     expect(plan.prompts[0].text).toContain("snow mountain");
-    expect(plan.negativePrompts).toEqual(["a photo of people"]);
+    expect(plan.negativePrompts).toEqual(["This is a photo of people."]);
   });
 
   it("翻译失败时使用词典，零覆盖时跳过语义分支", async () => {
@@ -144,6 +147,9 @@ describe("SemanticQueryPlan", () => {
           ...plan.negativePrompts,
         ].some((prompt) => CJK_RE.test(prompt))
       ).toBe(false);
+      expect(
+        plan.prompts.every((prompt) => prompt.text.startsWith("This is "))
+      ).toBe(true);
     }
   });
 
@@ -168,5 +174,21 @@ describe("SemanticQueryPlan", () => {
     expect(plan.prompts.every((prompt) => !CJK_RE.test(prompt.text))).toBe(
       true
     );
+  });
+
+  it("Bicycle and bicycle form one evidence group", async () => {
+    const plan = await prepareSemanticQueryPlan("\u81ea\u884c\u8f66", {
+      translate: vi.fn().mockResolvedValue("Bicycle"),
+    });
+
+    expect(canonicalizeSemanticPrompt("This is a photo of Bicycle.")).toBe(
+      canonicalizeSemanticPrompt("a photo of a bicycle")
+    );
+    expect(plan.rawPromptCount).toBeGreaterThanOrEqual(2);
+    expect(
+      new Set(plan.prompts.map(({ evidenceGroup }) => evidenceGroup))
+    ).toEqual(new Set(["whole-query"]));
+    expect(plan.prompts[0].canonicalKey).toBe("bicycle");
+    expect(plan.intent).toBe("object");
   });
 });

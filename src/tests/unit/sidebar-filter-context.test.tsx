@@ -83,4 +83,20 @@ describe("SidebarFilterContext", () => {
     expect(folderState.appliedSearch).toBeNull();
     expect(folderState.searchDraft).toEqual({ filters: {}, query: "" });
   });
+
+  it("atomically selects tag filters and clears free-text search state", () => {
+    const searched = browseCriteriaReducer(initialBrowseCriteriaState, {
+      type: "applySearch",
+      criteria: { filters: {}, mode: "text", query: "自行车" },
+    });
+    const tagState = browseCriteriaReducer(searched, {
+      type: "selectTags",
+      tagIds: [42, 42, 51],
+    });
+
+    expect(tagState.activeTagIds).toEqual([42, 51]);
+    expect(tagState.appliedSearch).toBeNull();
+    expect(tagState.searchDraft).toEqual({ filters: {}, query: "" });
+    expect(tagState.favoriteOnly).toBe(false);
+  });
 });

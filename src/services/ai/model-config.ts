@@ -19,6 +19,12 @@ export interface EmbeddingModelConfig {
 export interface EmbeddingScoringPolicy {
   duplicateConfirmationSimilarity: number;
   englishTextMaxCosineDistance: number;
+  semanticSearch?: {
+    absoluteMinimumSimilarity: number;
+    candidateMinimumSimilarity: number;
+    consensusThresholdRatio: number;
+    relativeToTopRatio: number;
+  };
   tag?: {
     candidateFromMedian: number;
     candidateFromTop: number;
@@ -64,6 +70,12 @@ const MODEL_CONFIGS: Record<EmbeddingModelKind, EmbeddingModelConfig> = {
     scoring: {
       duplicateConfirmationSimilarity: 0.95,
       englishTextMaxCosineDistance: 0.98,
+      semanticSearch: {
+        absoluteMinimumSimilarity: 0.04,
+        candidateMinimumSimilarity: 0.02,
+        consensusThresholdRatio: 0.75,
+        relativeToTopRatio: 0.4,
+      },
       textMaxCosineDistanceAtNoCoverage: 0.98,
       textMaxCosineDistanceAtFullCoverage: 0.98,
       tag: {
@@ -81,6 +93,14 @@ const MODEL_CONFIGS: Record<EmbeddingModelKind, EmbeddingModelConfig> = {
 export function getActiveEmbeddingModel(): EmbeddingModelConfig {
   const requested = process.env.AI_EMBEDDING_MODEL?.trim().toLowerCase();
   return requested === "clip" ? MODEL_CONFIGS.clip : MODEL_CONFIGS.siglip;
+}
+
+export type SemanticPolicyVersion = "legacy" | "v2";
+
+export function getSemanticPolicyVersion(): SemanticPolicyVersion {
+  return process.env.AI_SEMANTIC_POLICY?.trim().toLowerCase() === "legacy"
+    ? "legacy"
+    : "v2";
 }
 
 export function getTextSearchMaxCosineDistance(

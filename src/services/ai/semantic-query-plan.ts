@@ -1,15 +1,23 @@
 import { rewriteQuery } from "@/services/query-rewrite";
 import {
+  getActiveEmbeddingModel,
+  getSemanticPolicyVersion,
+} from "./model-config";
+import {
   generateSearchPrompts,
   getQueryCoverage,
   parseChineseQuery,
 } from "./query-parser";
 import { translateChineseToEnglish } from "./translation-worker-client";
 
-export const SEMANTIC_QUERY_PLAN_VERSION = 2;
+export const SEMANTIC_QUERY_PLAN_VERSION = 4;
 
 const CJK_RE = /[一-鿿]/;
 const LATIN_RE = /[A-Za-z]/;
+const WHITESPACE_RE = /\s+/g;
+const PHOTO_NOUN_RE = /\b(?:photo|photograph|picture|image)\b/i;
+const SIGLIP_PROMPT_PREFIX_RE = /^this\s+is\b/i;
+const TRAILING_PERIOD_RE = /[.]+$/;
 const SEARCH_COMMAND_RE =
   /(?:帮我找|找一下|查一下|搜索一下|搜索|看看|找找|帮我|找)/g;
 const PHOTO_SUFFIX_RE = /(?:的)?(?:照片|图片|相片|影像)$/;
@@ -21,10 +29,20 @@ const LATIN_TERM_RE = /[A-Za-z][A-Za-z0-9_.-]*/g;
 const QUOTED_CONTENT_RE = /["“]([^"”]+)["”]/g;
 
 export type SemanticPromptRole = "primary" | "structured" | "focused";
+export type SemanticEvidenceGroup = "whole-query" | "subject" | "scene";
+export type SemanticQueryIntent = "object" | "scene" | "composed" | "unknown";
 export type SemanticQueryLanguage = "en" | "zh" | "mixed";
 export type SemanticTranslationMode = "none" | "local" | "dictionary-fallback";
 
+const CANONICAL_TRAILING_PUNCTUATION_RE = /[.!?,;:]+$/g;
+const CANONICAL_PHOTO_WRAPPER_RE =
+  /^(?:this\s+is\s+)?(?:a|an|the)?\s*(?:photo|photograph|picture|image)\s+of\s+/;
+const CANONICAL_LEADING_ARTICLE_RE = /^(?:a|an|the)\s+/;
+const SCENE_FOCUSED_PROMPT_RE = /\bscenic\b|\bscene\b/i;
+
 export interface SemanticQueryPrompt {
+  canonicalKey: string;
+  evidenceGroup: SemanticEvidenceGroup;
   role: SemanticPromptRole;
   text: string;
   weight: number;
@@ -32,10 +50,12 @@ export interface SemanticQueryPrompt {
 
 export interface SemanticQueryPlan {
   coverage: number;
+  intent: SemanticQueryIntent;
   language: SemanticQueryLanguage;
   negativePrompts: string[];
   normalizedQuery: string;
   prompts: SemanticQueryPrompt[];
+  rawPromptCount: number;
   translationMode: SemanticTranslationMode;
   version: number;
 }
@@ -51,8 +71,77 @@ interface NegativeExtraction {
 
 const pendingQueryPlans = new Map<string, Promise<SemanticQueryPlan>>();
 
+const ENGLISH_SCENE_TERMS = new Set([
+  "beach",
+  "city",
+  "forest",
+  "fog",
+  "foggy",
+  "landscape",
+  "mountain",
+  "night",
+  "ocean",
+  "rain",
+  "rainy",
+  "sea",
+  "sky",
+  "snow",
+  "street",
+  "sunrise",
+  "sunset",
+]);
+
 function normalizeWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(WHITESPACE_RE, " ").trim();
+}
+
+export function canonicalizeSemanticPrompt(text: string): string {
+  let canonical = normalizeWhitespace(text)
+    .toLocaleLowerCase()
+    .replace(CANONICAL_TRAILING_PUNCTUATION_RE, "")
+    .replace(CANONICAL_PHOTO_WRAPPER_RE, "")
+    .replace(CANONICAL_LEADING_ARTICLE_RE, "");
+  canonical = canonical.replace(WHITESPACE_RE, " ").trim();
+  return canonical;
+}
+
+function classifyParsedIntent(
+  parsed: ReturnType<typeof parseChineseQuery>
+): SemanticQueryIntent {
+  const subjectCount = parsed.subject.length;
+  const sceneCount =
+    parsed.scene.length +
+    parsed.time.length +
+    parsed.weather.length +
+    parsed.style.length;
+  const modifierCount =
+    parsed.activity.length + parsed.color.length + sceneCount;
+  if (parsed.unknown.length > 0 && subjectCount + modifierCount === 0) {
+    return "unknown";
+  }
+  if (subjectCount > 0 && modifierCount === 0) {
+    return "object";
+  }
+  if (subjectCount === 0 && sceneCount > 0 && parsed.activity.length === 0) {
+    return "scene";
+  }
+  if (subjectCount + modifierCount > 1) {
+    return "composed";
+  }
+  return "unknown";
+}
+
+function classifyEnglishIntent(query: string): SemanticQueryIntent {
+  const words = canonicalizeSemanticPrompt(query)
+    .split(WHITESPACE_RE)
+    .filter(Boolean);
+  if (words.length === 0) {
+    return "unknown";
+  }
+  if (words.every((word) => ENGLISH_SCENE_TERMS.has(word))) {
+    return "scene";
+  }
+  return words.length <= 2 ? "object" : "composed";
 }
 
 function detectLanguage(text: string): SemanticQueryLanguage {
@@ -117,9 +206,18 @@ export function extractNegativeClauses(query: string): NegativeExtraction {
 }
 
 function ensurePhotoPrompt(text: string): string {
-  const normalized = normalizeWhitespace(text);
+  const normalized = normalizeWhitespace(text).replace(TRAILING_PERIOD_RE, "");
   if (!normalized) {
     return "";
+  }
+  if (getActiveEmbeddingModel().kind === "siglip") {
+    if (SIGLIP_PROMPT_PREFIX_RE.test(normalized)) {
+      return `${normalized}.`;
+    }
+    if (PHOTO_NOUN_RE.test(normalized)) {
+      return `This is ${normalized}.`;
+    }
+    return `This is a photo of ${normalized}.`;
   }
   return PHOTO_PROMPT_RE.test(normalized)
     ? normalized
@@ -169,27 +267,35 @@ async function translateSafely(
 }
 
 function dedupePrompts(prompts: SemanticQueryPrompt[]): SemanticQueryPrompt[] {
-  const seen = new Set<string>();
-  return prompts.filter((prompt) => {
-    const key = prompt.text.toLowerCase();
-    if (!(isEnglishPrompt(prompt.text) && !seen.has(key))) {
-      return false;
+  const deduped = new Map<string, SemanticQueryPrompt>();
+  for (const prompt of prompts) {
+    if (!isEnglishPrompt(prompt.text)) {
+      continue;
     }
-    seen.add(key);
-    return true;
-  });
+    const canonicalKey = canonicalizeSemanticPrompt(prompt.text);
+    if (!canonicalKey) {
+      continue;
+    }
+    const existing = deduped.get(canonicalKey);
+    if (!existing || prompt.weight > existing.weight) {
+      deduped.set(canonicalKey, { ...prompt, canonicalKey });
+    }
+  }
+  return [...deduped.values()];
 }
 
 function dictionaryPrompts(query: string): {
   coverage: number;
+  intent: SemanticQueryIntent;
   prompts: string[];
 } {
   if (!CJK_RE.test(query)) {
-    return { coverage: 1, prompts: [] };
+    return { coverage: 1, intent: classifyEnglishIntent(query), prompts: [] };
   }
   const parsed = parseChineseQuery(query);
   return {
     coverage: getQueryCoverage(query, parsed),
+    intent: classifyParsedIntent(parsed),
     prompts: generateSearchPrompts(parsed).filter(isEnglishPrompt),
   };
 }
@@ -211,9 +317,11 @@ export async function prepareSemanticQueryPlan(
   if (!normalizedQuery) {
     return {
       coverage: 0,
+      intent: "unknown",
       language,
       negativePrompts: [],
       normalizedQuery,
+      rawPromptCount: 0,
       prompts: [],
       translationMode: "none",
       version: SEMANTIC_QUERY_PLAN_VERSION,
@@ -223,13 +331,17 @@ export async function prepareSemanticQueryPlan(
   if (language === "en") {
     return {
       coverage: 1,
+      intent: classifyEnglishIntent(normalizedQuery),
       language,
       negativePrompts: negativeTerms
         .map(ensurePhotoPrompt)
         .filter(isEnglishPrompt),
       normalizedQuery,
+      rawPromptCount: 1,
       prompts: [
         {
+          canonicalKey: canonicalizeSemanticPrompt(normalizedQuery),
+          evidenceGroup: "whole-query",
           role: "primary",
           text: ensurePhotoPrompt(normalizedQuery),
           weight: 1,
@@ -256,6 +368,8 @@ export async function prepareSemanticQueryPlan(
   const promptCandidates: SemanticQueryPrompt[] = [];
   if (translated) {
     promptCandidates.push({
+      canonicalKey: canonicalizeSemanticPrompt(translated),
+      evidenceGroup: "whole-query",
       role: "primary",
       text: ensurePhotoPrompt(translated),
       weight: 1,
@@ -263,8 +377,10 @@ export async function prepareSemanticQueryPlan(
   }
   if (dictionary.prompts[0]) {
     promptCandidates.push({
+      canonicalKey: canonicalizeSemanticPrompt(dictionary.prompts[0]),
+      evidenceGroup: "whole-query",
       role: "structured",
-      text: dictionary.prompts[0],
+      text: ensurePhotoPrompt(dictionary.prompts[0]),
       weight: 0.75,
     });
   }
@@ -273,20 +389,26 @@ export async function prepareSemanticQueryPlan(
   );
   if (focused) {
     promptCandidates.push({
+      canonicalKey: canonicalizeSemanticPrompt(focused),
+      evidenceGroup: SCENE_FOCUSED_PROMPT_RE.test(focused)
+        ? "scene"
+        : "subject",
       role: "focused",
-      text: focused,
+      text: ensurePhotoPrompt(focused),
       weight: 0.5,
     });
   }
 
   return {
     coverage: dictionary.coverage,
+    intent: dictionary.intent,
     language,
     negativePrompts: translatedNegatives
       .filter(Boolean)
       .map(ensurePhotoPrompt)
       .filter(isEnglishPrompt),
     normalizedQuery,
+    rawPromptCount: promptCandidates.length,
     prompts: dedupePrompts(promptCandidates).slice(0, 3),
     translationMode: translated ? "local" : "dictionary-fallback",
     version: SEMANTIC_QUERY_PLAN_VERSION,
@@ -327,6 +449,7 @@ export function semanticQueryPlanCacheKey(
     negativePrompts: plan.negativePrompts,
     normalizedQuery: plan.normalizedQuery,
     prompts: plan.prompts,
+    policy: getSemanticPolicyVersion(),
     strategy: "hybrid-zh-v2",
     translationModelVersion,
     translationMode: plan.translationMode,

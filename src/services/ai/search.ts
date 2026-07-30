@@ -3,13 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { WORKER_TIMEOUT } from "./constants";
-import { getActiveEmbeddingModel } from "./model-config";
+import {
+  getActiveEmbeddingModel,
+  getSemanticPolicyVersion,
+} from "./model-config";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import {
   applyNegativeSemanticPenalty,
   filterCosineSearchResults,
   fuseRankedSearchEvidence,
   isValidEmbeddingVector,
+  selectRelevantSemanticResults,
 } from "./scoring";
 import {
   getSemanticQueryPlan,
@@ -234,8 +238,10 @@ interface SearchTimings {
 
 export interface RankedSemanticSearchResult {
   photoId: number;
+  primarySimilarity: number;
   rankScore: number;
   similarity: number;
+  supportingGroups: string[];
 }
 
 async function searchVector(
@@ -260,8 +266,7 @@ async function searchVector(
   );
 
   let rawResults: Record<string, unknown>[] = [];
-  const queryLimit =
-    model.kind === "siglip" ? Math.min(Math.max(limit * 4, limit), 200) : limit;
+  const queryLimit = Math.min(Math.max(limit, 1), Math.max(rowCount, 1));
   try {
     const vq = photoTable
       .vectorSearch(queryVector)
@@ -403,13 +408,45 @@ async function embedSearchTexts(
   return vectors.filter((vector): vector is number[] => vector !== null);
 }
 
+interface MultiPromptSearchResult {
+  candidateDepth: number;
+  consensusCutoff: number;
+  cutoffReason: string;
+  finalCutoff: number;
+  hasMore: boolean;
+  promptGroupCount: number;
+  rejectedWeak: number;
+  results: RankedSemanticSearchResult[];
+  strongAccepted: number;
+  strongCutoff: number;
+  supportCandidates: RankedSemanticSearchResult[];
+  supportCutoff: number;
+  supportedAccepted: number;
+  topSimilarity: number;
+}
+
 async function multiPromptSearch(
   plan: SemanticQueryPlan,
   limit: number,
   timings: SearchTimings = { embedMs: 0, vectorMs: 0 }
-): Promise<RankedSemanticSearchResult[]> {
+): Promise<MultiPromptSearchResult> {
   if (!(embeddingModel && photoTable) || plan.prompts.length === 0) {
-    return [];
+    return {
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: "no-prompts",
+      finalCutoff: 0,
+      hasMore: false,
+      promptGroupCount: 0,
+      rejectedWeak: 0,
+      results: [],
+      supportCandidates: [],
+      supportCutoff: 0,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      supportedAccepted: 0,
+      topSimilarity: 0,
+    };
   }
 
   const allTexts = [
@@ -419,31 +456,111 @@ async function multiPromptSearch(
   const vectors = await embedSearchTexts(allTexts, timings);
   const positiveVectors = vectors.slice(0, plan.prompts.length);
   const negativeVectors = vectors.slice(plan.prompts.length);
-  const vectorStartedAt = Date.now();
   const rowCount = await photoTable.countRows();
-  const candidateLimit = 200;
-  const resultSets = await Promise.all(
-    positiveVectors.map((vector) =>
-      searchVector(vector, candidateLimit, 0.98, rowCount)
-    )
+  const model = getActiveEmbeddingModel();
+  const evidenceGroups = plan.prompts.map((prompt) => prompt.evidenceGroup);
+  const promptGroupCount = new Set(evidenceGroups).size;
+  const primaryPromptIndex = Math.max(
+    0,
+    plan.prompts.findIndex((prompt) => prompt.role === "primary")
   );
-  const negativeResultSets = await Promise.all(
-    negativeVectors.map((vector) =>
-      searchVector(vector, candidateLimit, 0.98, rowCount)
-    )
-  );
-  timings.vectorMs += Date.now() - vectorStartedAt;
+  const candidateMinimum =
+    model.scoring.semanticSearch?.candidateMinimumSimilarity ?? 0.02;
+  const candidateMaxDistance = 1 - candidateMinimum;
+  let candidateDepth = Math.min(rowCount, Math.max(200, limit));
 
-  const fused = fuseRankedSearchEvidence(
-    resultSets,
-    Math.min(Math.max(limit * 2, limit), 200),
-    plan.prompts.map((prompt) => prompt.weight)
-  );
-  return applyNegativeSemanticPenalty(
-    fused,
-    negativeResultSets,
-    limit
-  );
+  while (candidateDepth > 0) {
+    const vectorStartedAt = Date.now();
+    const resultSets = await Promise.all(
+      positiveVectors.map((vector) =>
+        searchVector(vector, candidateDepth, candidateMaxDistance, rowCount)
+      )
+    );
+    const negativeResultSets = await Promise.all(
+      negativeVectors.map((vector) =>
+        searchVector(vector, candidateDepth, candidateMaxDistance, rowCount)
+      )
+    );
+    timings.vectorMs += Date.now() - vectorStartedAt;
+
+    const fused = fuseRankedSearchEvidence(
+      resultSets,
+      rowCount,
+      plan.prompts.map((prompt) => prompt.weight),
+      evidenceGroups,
+      primaryPromptIndex
+    );
+    const penalized = applyNegativeSemanticPenalty(
+      fused,
+      negativeResultSets,
+      rowCount
+    );
+    const selection = selectRelevantSemanticResults(
+      penalized,
+      model,
+      promptGroupCount,
+      limit,
+      {
+        candidateTails: resultSets.map((results, index) => ({
+          evidenceGroup: evidenceGroups[index],
+          similarity: results.at(-1)?.similarity ?? 0,
+        })),
+        intent: plan.intent,
+        primaryScores: resultSets[primaryPromptIndex]?.map(
+          ({ similarity }) => similarity
+        ),
+        promptGroupCount,
+      }
+    );
+    const exhausted = candidateDepth >= rowCount;
+    const enoughForPage = selection.results.length >= limit;
+    const hasMore =
+      selection.acceptedCount > limit || (!exhausted && selection.canContinue);
+
+    if (enoughForPage || exhausted || !selection.hasMoreCandidates) {
+      console.log(
+        `[AI] Semantic relevance: policy=${getSemanticPolicyVersion()} model=${model.kind} intent=${plan.intent} primary="${plan.prompts[primaryPromptIndex]?.text ?? ""}" prompts=${plan.rawPromptCount}->${plan.prompts.length} groups=${promptGroupCount} depth=${candidateDepth}/${rowCount} top=${selection.topSimilarity.toFixed(4)} cutoff=${selection.finalCutoff.toFixed(4)} reason=${selection.cutoffReason} strong=${selection.strongAccepted} supported=${selection.supportedAccepted} rejectedWeak=${selection.rejectedWeak} accepted=${selection.results.length} hasMore=${hasMore}`
+      );
+      return {
+        candidateDepth,
+        consensusCutoff: selection.consensusCutoff,
+        cutoffReason: selection.cutoffReason,
+        finalCutoff: selection.finalCutoff,
+        hasMore,
+        promptGroupCount,
+        rejectedWeak: selection.rejectedWeak,
+        results: selection.results,
+        supportCandidates: selection.supportCandidates,
+        supportCutoff: selection.supportCutoff,
+        strongAccepted: selection.strongAccepted,
+        strongCutoff: selection.strongCutoff,
+        supportedAccepted: selection.supportedAccepted,
+        topSimilarity: selection.topSimilarity,
+      };
+    }
+
+    candidateDepth = Math.min(
+      rowCount,
+      Math.max(candidateDepth + 200, candidateDepth * 2)
+    );
+  }
+
+  return {
+    candidateDepth: 0,
+    consensusCutoff: 0,
+    cutoffReason: "no-candidates",
+    finalCutoff: 0,
+    hasMore: false,
+    promptGroupCount,
+    rejectedWeak: 0,
+    results: [],
+    supportCandidates: [],
+    supportCutoff: 0,
+    strongAccepted: 0,
+    strongCutoff: 0,
+    supportedAccepted: 0,
+    topSimilarity: 0,
+  };
 }
 
 // ── AI 文本搜索 TTL 缓存 ────────────────────────────────────────────
@@ -512,8 +629,21 @@ export async function searchByText(
 }
 
 export interface SemanticTextSearchResult {
+  candidateDepth: number;
+  consensusCutoff: number;
+  cutoffReason: string;
+  finalCutoff: number;
+  hasMore: boolean;
   plan: SemanticQueryPlan;
+  promptGroupCount: number;
+  rejectedWeak: number;
   results: RankedSemanticSearchResult[];
+  strongAccepted: number;
+  strongCutoff: number;
+  supportCandidates: RankedSemanticSearchResult[];
+  supportCutoff: number;
+  supportedAccepted: number;
+  topSimilarity: number;
 }
 
 export async function searchByTextWithPlan(
@@ -522,14 +652,28 @@ export async function searchByTextWithPlan(
 ): Promise<SemanticTextSearchResult> {
   if (!query.trim()) {
     return {
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: "empty-query",
+      finalCutoff: 0,
+      hasMore: false,
       plan: await prepareSemanticQueryPlan(""),
+      promptGroupCount: 0,
+      rejectedWeak: 0,
       results: [],
+      supportCandidates: [],
+      supportCutoff: 0,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      supportedAccepted: 0,
+      topSimilarity: 0,
     };
   }
 
   const cacheKey = JSON.stringify({
     limit,
     model: getActiveEmbeddingModel().kind,
+    policy: getSemanticPolicyVersion(),
     query: query.trim(),
     strategy: "hybrid-zh-v2",
     translation: getTranslationModelVersion(),
@@ -579,10 +723,23 @@ async function performTextSearch(
   } catch (err: any) {
     console.error("[AI] searchByText: model load failed:", err?.message);
     return {
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: "model-load-failed",
+      finalCutoff: 0,
+      hasMore: false,
       plan: await prepareSemanticQueryPlan(query, {
         translate: async () => "",
       }),
+      promptGroupCount: 0,
+      rejectedWeak: 0,
       results: [],
+      supportCandidates: [],
+      supportCutoff: 0,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      supportedAccepted: 0,
+      topSimilarity: 0,
     };
   }
 
@@ -592,10 +749,23 @@ async function performTextSearch(
   if (!(embeddingModel && photoTable)) {
     console.warn("[AI] searchByText: AI not initialized");
     return {
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: "ai-not-initialized",
+      finalCutoff: 0,
+      hasMore: false,
       plan: await prepareSemanticQueryPlan(query, {
         translate: async () => "",
       }),
+      promptGroupCount: 0,
+      rejectedWeak: 0,
       results: [],
+      supportCandidates: [],
+      supportCutoff: 0,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      supportedAccepted: 0,
+      topSimilarity: 0,
     };
   }
 
@@ -613,11 +783,26 @@ async function performTextSearch(
     setCachedSearch(cacheKey, planCached);
     return planCached;
   }
-  const results =
+  const semanticSearch =
     plan.prompts.length > 0
       ? await multiPromptSearch(plan, limit, timings)
-      : [];
-  const searchResult = { plan, results };
+      : {
+          candidateDepth: 0,
+          consensusCutoff: 0,
+          cutoffReason: "no-prompts",
+          finalCutoff: 0,
+          hasMore: false,
+          promptGroupCount: 0,
+          rejectedWeak: 0,
+          results: [],
+          supportCandidates: [],
+          supportCutoff: 0,
+          strongAccepted: 0,
+          strongCutoff: 0,
+          supportedAccepted: 0,
+          topSimilarity: 0,
+        };
+  const searchResult = { plan, ...semanticSearch };
 
   setCachedSearch(cacheKey, searchResult);
   if (effectiveCacheKey !== cacheKey) {
@@ -628,7 +813,7 @@ async function performTextSearch(
   warmedModel = embeddingModel;
   warmedTable = photoTable;
   console.log(
-    `[AI] searchByText timing: language=${plan.language} translation=${plan.translationMode} coverage=${Math.round(plan.coverage * 100)} prompts=${plan.prompts.length} negatives=${plan.negativePrompts.length} results=${results.length} init=${initMs}ms parse=${parseMs}ms embed=${timings.embedMs}ms vector=${timings.vectorMs}ms total=${Date.now() - totalStartedAt}ms`
+    `[AI] searchByText timing: language=${plan.language} intent=${plan.intent} translation=${plan.translationMode} coverage=${Math.round(plan.coverage * 100)} prompts=${plan.rawPromptCount}->${plan.prompts.length} groups=${semanticSearch.promptGroupCount} negatives=${plan.negativePrompts.length} results=${semanticSearch.results.length} init=${initMs}ms parse=${parseMs}ms embed=${timings.embedMs}ms vector=${timings.vectorMs}ms total=${Date.now() - totalStartedAt}ms`
   );
   return searchResult;
 }

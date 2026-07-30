@@ -58,6 +58,65 @@ let dbInstance: ReturnType<typeof drizzle> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let sqliteConnection: any = null;
 
+interface SQLiteTableColumn {
+  name: string;
+}
+
+export interface PhotoTagProvenanceRepairResult {
+  addedOrigin: boolean;
+  addedUserConfirmed: boolean;
+}
+
+/**
+ * Repair databases whose migration journal says the provenance migration ran
+ * even though a timestamp collision caused SQLite to skip its SQL.
+ */
+export function repairPhotoTagProvenanceSchema(
+  sqlite: Database.Database
+): PhotoTagProvenanceRepairResult {
+  const columns = sqlite
+    .prepare("PRAGMA table_info('photo_tags')")
+    .all() as SQLiteTableColumn[];
+  if (columns.length === 0) {
+    return { addedOrigin: false, addedUserConfirmed: false };
+  }
+
+  const names = new Set(columns.map(({ name }) => name));
+  const addedOrigin = !names.has("origin");
+  const addedUserConfirmed = !names.has("user_confirmed");
+
+  if (addedOrigin || addedUserConfirmed) {
+    sqlite.transaction(() => {
+      if (addedOrigin) {
+        sqlite.exec(
+          "ALTER TABLE photo_tags ADD origin text DEFAULT 'manual' NOT NULL"
+        );
+        sqlite.exec(
+          `UPDATE photo_tags
+           SET origin = CASE
+             WHEN confidence IS NULL THEN 'manual'
+             ELSE 'auto'
+           END`
+        );
+      }
+      if (addedUserConfirmed) {
+        sqlite.exec(
+          "ALTER TABLE photo_tags ADD user_confirmed integer DEFAULT 0 NOT NULL"
+        );
+        sqlite.exec(
+          `UPDATE photo_tags
+           SET user_confirmed = CASE
+             WHEN confidence IS NULL THEN 1
+             ELSE 0
+           END`
+        );
+      }
+    })();
+  }
+
+  return { addedOrigin, addedUserConfirmed };
+}
+
 export function getDbPath(): string {
   const dataPath = getDataPath();
   const dbDir = path.join(dataPath, "data");
@@ -138,6 +197,15 @@ export function initDatabase(): ReturnType<typeof drizzle> {
     console.log(`[DB] Running migrations from: ${migrationsFolder}`);
     migrate(dbInstance, { migrationsFolder });
     console.log("[DB] Migrations complete");
+    const provenanceRepair = repairPhotoTagProvenanceSchema(sqlite);
+    if (
+      provenanceRepair.addedOrigin ||
+      provenanceRepair.addedUserConfirmed
+    ) {
+      console.warn(
+        `[DB] Repaired photo tag provenance columns: origin=${provenanceRepair.addedOrigin} userConfirmed=${provenanceRepair.addedUserConfirmed}`
+      );
+    }
   } catch (err) {
     closeDatabase();
     dbInstance = null;

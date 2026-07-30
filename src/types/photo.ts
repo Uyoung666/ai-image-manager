@@ -1,6 +1,12 @@
 export type SearchMatch =
   | { kind: "color"; score: number }
   | { kind: "exact"; source: "filename" | "person" | "tag" }
+  | {
+      kind: "hybrid";
+      evidence: ("semantic" | "tag")[];
+      tagNames: string[];
+    }
+  | { kind: "tagFilter"; origin: "manual" | "auto" }
   | { kind: "image"; score: number }
   | { kind: "semantic"; score: number };
 
@@ -44,17 +50,46 @@ export interface PhotoListResponse {
 }
 
 export interface SearchResponse {
+  cursorExpired?: boolean;
   fallback?: "filename" | "tags";
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  nextOffset?: number | null;
   query?: string;
   results: Photo[];
   semantic?: {
+    candidateDepth?: number;
+    autoTagRescued?: number;
+    consensusCutoff?: number;
+    cutoffReason?: string;
+    finalCutoff?: number;
+    hasMore?: boolean;
     indexedPhotos: number;
+    searchSessionHit?: boolean;
+    intent?: "object" | "scene" | "composed" | "unknown";
+    promptGroupCount?: number;
+    ignoredLowConfidenceTags?: number;
+    manualExactAccepted?: number;
     reason?: string;
+    rejectedWeak?: number;
     state: "ready" | "partial" | "unavailable" | "error";
+    strongAccepted?: number;
+    strongCutoff?: number;
+    semanticOnlyAccepted?: number;
+    supportCutoff?: number;
+    supportedAccepted?: number;
+    tagSupportedAccepted?: number;
+    topSimilarity?: number;
     totalPhotos: number;
     used: boolean;
   };
+  snapshotVersion?: string;
+  timeFilter?: {
+    dateFrom: string;
+    dateTo: string;
+  };
   total: number;
+  totalExact?: boolean;
 }
 
 export interface AiStatus {

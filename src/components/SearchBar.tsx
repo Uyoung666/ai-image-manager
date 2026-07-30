@@ -58,6 +58,7 @@ const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
 ];
 
 interface SearchBarProps {
+  activeTagIds?: number[];
   aiStatus?: {
     coverageState?: "ready" | "partial" | "unavailable" | "error";
     model: string;
@@ -80,6 +81,8 @@ interface SearchBarProps {
   onImageSearch?: (imagePath: string) => void;
   onQueryChange: (query: string) => void;
   onSearch: (query: string, filters?: ExifFilters) => void;
+  onTagRemove?: (tagId: number) => void;
+  onTagSelect?: (tag: TagInfo) => void;
   query: string;
   resetVersion?: number;
   resultCount?: number;
@@ -91,6 +94,7 @@ interface SearchBarProps {
 export const SearchBar = memo(
   forwardRef<never, SearchBarProps>(
     ({
+      activeTagIds,
       aiStatus,
       colorHex,
       drillDownFilters,
@@ -100,6 +104,8 @@ export const SearchBar = memo(
       onFiltersChange: setFilters,
       onQueryChange: setQuery,
       onSearch,
+      onTagRemove,
+      onTagSelect,
       onClear,
       onImageSearch,
       query,
@@ -236,6 +242,7 @@ export const SearchBar = memo(
           .slice(0, 4)
           .map((t) => ({
             type: "tag" as const,
+            tagId: t.id,
             text: t.name,
             color: t.color || "var(--primary)",
           }));
@@ -517,10 +524,25 @@ export const SearchBar = memo(
         inputRef.current?.focus();
       }
 
-      function handleSuggestionClick(suggestion: {
-        type: "example" | "person" | "dictionary" | "tag" | "history";
-        text: string;
-      }) {
+      function handleSuggestionClick(suggestion: SearchSuggestion) {
+        if (
+          suggestion.type === "tag" &&
+          suggestion.tagId !== undefined &&
+          onTagSelect
+        ) {
+          const tag = tags.find((item) => item.id === suggestion.tagId);
+          setQuery("");
+          onTagSelect(
+            tag ?? {
+              id: suggestion.tagId,
+              name: suggestion.text,
+              color: suggestion.color ?? null,
+            }
+          );
+          setShowSuggestions(false);
+          setSuggestionIndex(-1);
+          return;
+        }
         setQuery(suggestion.text);
         addToHistory(suggestion.text);
         onSearch(suggestion.text, hasActiveFilters ? filters : undefined);
@@ -714,6 +736,13 @@ export const SearchBar = memo(
 
       const filterInputClass =
         "h-8 w-full rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40";
+      const selectedTags = useMemo(() => {
+        if (!activeTagIds?.length) {
+          return [];
+        }
+        const selected = new Set(activeTagIds);
+        return tags.filter((tag) => selected.has(tag.id));
+      }, [activeTagIds, tags]);
 
       return (
         <div
@@ -925,6 +954,35 @@ export const SearchBar = memo(
                 </div>
               )}
             </div>
+
+            {selectedTags.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {selectedTags.map((tag) => (
+                  <span
+                    className="inline-flex h-6 items-center gap-1 rounded-[5px] border border-primary/20 bg-primary/10 px-2 text-[11px] font-medium text-primary"
+                    key={tag.id}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        backgroundColor: tag.color || "var(--primary)",
+                      }}
+                    />
+                    {t("tagFilterChip", { name: tag.name })}
+                    {onTagRemove && (
+                      <button
+                        aria-label={t("removeTagFilter", { name: tag.name })}
+                        className="-mr-1 flex h-5 w-5 items-center justify-center rounded hover:bg-primary/15"
+                        onClick={() => onTagRemove(tag.id)}
+                        type="button"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {aiStatus?.coverageState === "error" && (
               <div className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
@@ -1868,10 +1926,22 @@ export const SearchBar = memo(
     if (prevProps.aiStatus !== nextProps.aiStatus) {
       return false;
     }
+    if (
+      (prevProps.activeTagIds ?? []).join(",") !==
+      (nextProps.activeTagIds ?? []).join(",")
+    ) {
+      return false;
+    }
     if (prevProps.colorHex !== nextProps.colorHex) {
       return false;
     }
     if (prevProps.imageSearchActive !== nextProps.imageSearchActive) {
+      return false;
+    }
+    if (prevProps.onTagRemove !== nextProps.onTagRemove) {
+      return false;
+    }
+    if (prevProps.onTagSelect !== nextProps.onTagSelect) {
       return false;
     }
     if (prevProps.query !== nextProps.query) {

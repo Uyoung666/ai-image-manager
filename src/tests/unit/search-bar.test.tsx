@@ -5,6 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchBar } from "@/components/SearchBar";
 import type { ExifFilters } from "@/types/search";
 
+vi.mock("@/ipc/manager", () => ({
+  ipc: {
+    client: {
+      faces: { listFaceIdentities: vi.fn().mockResolvedValue([]) },
+      photos: {
+        getExifCandidates: vi.fn().mockResolvedValue({}),
+        getTags: vi.fn().mockResolvedValue([
+          { color: "#4f46e5", id: 42, name: "自行车" },
+        ]),
+      },
+    },
+  },
+}));
+
 const SEARCH_HISTORY_KEY = "search_history";
 const FILTER_COUNT_PATTERN = /· 1/;
 
@@ -277,6 +291,37 @@ describe("SearchBar", () => {
     fireEvent.submit(form);
 
     expect(onSearch).toHaveBeenCalledWith("test query", undefined);
+  });
+
+  it("selects a tag suggestion as a pure tag filter without text search", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    const onTagSelect = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        onSearch={onSearch}
+        onTagSelect={onTagSelect}
+      />
+    );
+
+    await user.type(screen.getByRole("combobox"), "自行车");
+    const tagOption = (await screen.findAllByRole("option")).find((option) =>
+      option.textContent?.includes("标签")
+    );
+    expect(tagOption).toBeDefined();
+    if (!tagOption) {
+      return;
+    }
+    await user.click(tagOption);
+
+    expect(onTagSelect).toHaveBeenCalledWith({
+      color: "#4f46e5",
+      id: 42,
+      name: "自行车",
+    });
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox")).toHaveValue("");
   });
 
   it("applies periodic month and hour filters", async () => {

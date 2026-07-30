@@ -670,6 +670,8 @@ i18n.use(initReactI18next).init({
         tagDeleteDescription: "确定要删除标签「{{name}}」吗？该操作不可撤销。",
         tagCreateChild: "创建子标签",
         tagFilterMode: "筛选模式",
+        tagFilterChip: "标签筛选 · {{name}}",
+        removeTagFilter: "移除标签筛选 {{name}}",
         andMore: "等 {{count}} 个",
 
         // Toasts / status
@@ -1172,6 +1174,10 @@ i18n.use(initReactI18next).init({
         retry: "重试",
         confidence: "置信度: {{value}}%",
         searchMatchColor: "色彩接近度 {{value}}%",
+        searchMatchSemantic: "语义匹配",
+        searchMatchHybrid: "语义 + 标签",
+        searchMatchAutoTag: "AI 标签",
+        searchCursorExpired: "搜索会话已过期，现有结果已保留；请重新搜索以继续加载",
         searchMatchSimilarity: "相似度 {{value}}%",
         searchMatchExactPerson: "人物命中",
         searchMatchExactTag: "标签命中",
@@ -2267,6 +2273,8 @@ i18n.use(initReactI18next).init({
           'Are you sure you want to delete tag "{{name}}"? This action cannot be undone.',
         tagCreateChild: "Create Child Tag",
         tagFilterMode: "Filter Mode",
+        tagFilterChip: "Tag filter · {{name}}",
+        removeTagFilter: "Remove tag filter {{name}}",
         andMore: "and {{count}} more",
 
         // Toasts / status
@@ -2794,6 +2802,11 @@ i18n.use(initReactI18next).init({
         retry: "Retry",
         confidence: "Confidence: {{value}}%",
         searchMatchColor: "Color closeness {{value}}%",
+        searchMatchSemantic: "Semantic match",
+        searchMatchHybrid: "Semantic + tag",
+        searchMatchAutoTag: "AI tag",
+        searchCursorExpired:
+          "The search session expired. Existing results were kept; search again to continue.",
         searchMatchSimilarity: "Similarity {{value}}%",
         searchMatchExactPerson: "Person match",
         searchMatchExactTag: "Tag match",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canPaginateGalleryPhotos,
   getDisplayedSequenceMode,
+  getStableSearchAppendIds,
   isGalleryRevealPending,
 } from "@/utils/gallery-view-state";
 
@@ -46,5 +47,28 @@ describe("gallery view state", () => {
         sequenceViewReady: false,
       })
     ).toBe(true);
+  });
+
+  it("treats cursor pagination as an append only when the rendered prefix is stable", () => {
+    expect(
+      getStableSearchAppendIds({
+        currentIds: [1, 2, 3, 4],
+        currentSearchKey: "text:自行车",
+        isSearching: true,
+        previousIds: [1, 2],
+        previousSearchKey: "text:自行车",
+        refreshUnchanged: true,
+      })
+    ).toEqual([3, 4]);
+    expect(
+      getStableSearchAppendIds({
+        currentIds: [2, 1, 3],
+        currentSearchKey: "text:自行车",
+        isSearching: true,
+        previousIds: [1, 2],
+        previousSearchKey: "text:自行车",
+        refreshUnchanged: true,
+      })
+    ).toBeNull();
   });
 });

@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+const ORIGIN_BACKFILL_RE =
+  /WHEN `confidence` IS NULL THEN 'manual'[\s\S]*ELSE 'auto'/;
+const CONFIRMATION_BACKFILL_RE =
+  /WHEN `confidence` IS NULL THEN 1[\s\S]*ELSE 0/;
+
 describe("migration journal", () => {
   it("keeps migration timestamps strictly increasing", () => {
     const journal = JSON.parse(
@@ -19,5 +24,17 @@ describe("migration journal", () => {
         `${current.tag} must be newer than ${previous.tag}`
       ).toBeGreaterThan(previous.when);
     }
+  });
+
+  it("backfills manual and automatic tag provenance deterministically", () => {
+    const migration = fs.readFileSync(
+      path.join(process.cwd(), "drizzle", "0036_add_photo_tag_provenance.sql"),
+      "utf8"
+    );
+
+    expect(migration).toContain("`origin` text DEFAULT 'manual' NOT NULL");
+    expect(migration).toContain("`user_confirmed` integer DEFAULT 0 NOT NULL");
+    expect(migration).toMatch(ORIGIN_BACKFILL_RE);
+    expect(migration).toMatch(CONFIRMATION_BACKFILL_RE);
   });
 });

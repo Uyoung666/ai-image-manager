@@ -53,6 +53,12 @@ export const FolderAppearanceSchema = z.object({
   icon: z.enum(FOLDER_APPEARANCE_ICONS).nullable(),
 });
 
+export function deferSearchBranch<T>(
+  task: () => T | PromiseLike<T>
+): Promise<T> {
+  return Promise.resolve().then(task);
+}
+
 export function applyTimeDecay<
   T extends { similarity: number; fileDate?: number | null },
 >(results: T[], options?: ScoringOptions): Array<T & { score: number }> {
@@ -113,5 +119,7 @@ export const CompoundSearchSchema = z.object({
   isoMax: z.number().optional(),
   shutterMin: z.number().optional(),
   shutterMax: z.number().optional(),
-  limit: z.number().optional().default(100),
+  cursor: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(200).optional().default(100),
+  offset: z.number().int().min(0).optional().default(0),
 });

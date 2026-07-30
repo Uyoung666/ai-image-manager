@@ -9,17 +9,24 @@ import {
   fuseRankedSearchEvidence,
   fuseRankedSearchResults,
   isValidEmbeddingVector,
+  selectRelevantSemanticResults,
   selectTagScores,
 } from "@/services/ai/scoring";
 import { CANDIDATE_TAGS } from "@/services/ai/tag-suggester";
 
 const originalModel = process.env.AI_EMBEDDING_MODEL;
+const originalPolicy = process.env.AI_SEMANTIC_POLICY;
 
 afterEach(() => {
   if (originalModel === undefined) {
     delete process.env.AI_EMBEDDING_MODEL;
   } else {
     process.env.AI_EMBEDDING_MODEL = originalModel;
+  }
+  if (originalPolicy === undefined) {
+    delete process.env.AI_SEMANTIC_POLICY;
+  } else {
+    process.env.AI_SEMANTIC_POLICY = originalPolicy;
   }
 });
 
@@ -172,6 +179,123 @@ describe("embedding prompts and ranked fusion", () => {
       { photoId: 1, similarity: 0.03 },
       { photoId: 2, similarity: 0.02 },
     ]);
+  });
+
+  it("uses the object floor and rejects weak camera-like candidates", () => {
+    const selection = selectRelevantSemanticResults(
+      [
+        {
+          photoId: 1,
+          primarySimilarity: 0.0916,
+          rankScore: 0.03,
+          similarity: 0.0916,
+          supportingGroups: ["whole-query"],
+        },
+        {
+          photoId: 2,
+          primarySimilarity: 0.0527,
+          rankScore: 0.02,
+          similarity: 0.0527,
+          supportingGroups: ["whole-query"],
+        },
+        {
+          photoId: 3,
+          primarySimilarity: 0.0482,
+          rankScore: 0.01,
+          similarity: 0.0482,
+          supportingGroups: ["whole-query"],
+        },
+        {
+          photoId: 4,
+          primarySimilarity: 0.0427,
+          rankScore: 0.005,
+          similarity: 0.0427,
+          supportingGroups: ["whole-query"],
+        },
+      ],
+      getActiveEmbeddingModel(),
+      1,
+      100,
+      {
+        intent: "object",
+        primaryScores: [0.0916, 0.08, 0.07, 0.065, 0.06, 0.0527, 0.0482],
+      }
+    );
+
+    expect(selection.strongCutoff).toBeGreaterThanOrEqual(0.055);
+    expect(selection.results.map((result) => result.photoId)).toEqual([1]);
+    expect(selection.supportCandidates.map((result) => result.photoId)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(selection.supportCutoff).toBeGreaterThan(0.045);
+    expect(selection.rejectedWeak).toBe(3);
+    expect(selection.hasMoreCandidates).toBe(false);
+  });
+
+  it("continues broad scene retrieval while the primary tail remains eligible", () => {
+    const selection = selectRelevantSemanticResults(
+      [
+        {
+          photoId: 1,
+          primarySimilarity: 0.1,
+          rankScore: 0.03,
+          similarity: 0.1,
+          supportingGroups: ["whole-query"],
+        },
+      ],
+      getActiveEmbeddingModel(),
+      1,
+      100,
+      {
+        candidateTails: [{ evidenceGroup: "whole-query", similarity: 0.05 }],
+        intent: "scene",
+        primaryScores: [0.1],
+      }
+    );
+
+    expect(selection.hasMoreCandidates).toBe(true);
+  });
+
+  it("does not double-count duplicate prompts in one evidence group", () => {
+    const fused = fuseRankedSearchEvidence(
+      [[{ photoId: 1, similarity: 0.09 }], [{ photoId: 1, similarity: 0.12 }]],
+      10,
+      [1, 0.75],
+      ["whole-query", "whole-query"]
+    );
+
+    expect(fused[0].supportingGroups).toEqual(["whole-query"]);
+    expect(fused[0].rankScore).toBeCloseTo(1 / 61);
+    expect(fused[0].primarySimilarity).toBe(0.09);
+  });
+
+  it("supports the legacy semantic policy rollback switch", () => {
+    process.env.AI_SEMANTIC_POLICY = "legacy";
+    const selection = selectRelevantSemanticResults(
+      [
+        {
+          photoId: 1,
+          primarySimilarity: 0.1,
+          rankScore: 0.03,
+          similarity: 0.1,
+          supportingGroups: ["whole-query"],
+        },
+        {
+          photoId: 2,
+          primarySimilarity: 0.041,
+          rankScore: 0.02,
+          similarity: 0.041,
+          supportingGroups: ["whole-query"],
+        },
+      ],
+      getActiveEmbeddingModel(),
+      1,
+      100
+    );
+
+    expect(selection.cutoffReason).toBe("legacy");
+    expect(selection.strongCutoff).toBeCloseTo(0.04);
+    expect(selection.results.map(({ photoId }) => photoId)).toEqual([1, 2]);
   });
 
   it("只在正向召回候选上应用 0.25 否定惩罚", () => {

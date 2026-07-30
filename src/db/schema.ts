@@ -369,7 +369,13 @@ export const photoTags = sqliteTable(
     }),
     tagId: integer("tag_id").references(() => tags.id, { onDelete: "cascade" }),
     confidence: real("confidence"),
+    origin: text("origin", { enum: ["manual", "auto"] })
+      .notNull()
+      .default("manual"),
     isConfirmed: integer("is_confirmed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    userConfirmed: integer("user_confirmed", { mode: "boolean" })
       .notNull()
       .default(false),
   },

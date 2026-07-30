@@ -55,6 +55,7 @@ export type BrowseCriteriaAction =
   | { type: "selectAllPhotos" }
   | { type: "selectFavorites"; value: boolean }
   | { type: "selectFolder"; id: number | null }
+  | { type: "selectTags"; tagIds: number[] }
   | { type: "setDraftFilters"; update: SetStateAction<ExifFilters> }
   | { type: "setDraftQuery"; query: string }
   | { type: "toggleTag"; tagId: number | null }
@@ -126,6 +127,14 @@ export function browseCriteriaReducer(
         favoriteOnly: false,
         ...withoutSearch(state),
       };
+    case "selectTags":
+      return {
+        ...state,
+        activeFolderId: null,
+        activeTagIds: [...new Set(action.tagIds)],
+        favoriteOnly: false,
+        ...withoutSearch(state),
+      };
     case "setDraftFilters":
       return {
         ...state,
@@ -170,6 +179,7 @@ interface SidebarFilterActions {
   handleDeleteFolder: (id: number) => void;
   selectAllPhotos: () => void;
   selectFolder: (id: number | null) => void;
+  selectTags: (tagIds: number[]) => void;
   setActiveFolderId: (id: number | null) => void;
   setFavoriteOnly: (v: boolean) => void;
   setSearchDraftFilters: Dispatch<SetStateAction<ExifFilters>>;
@@ -227,6 +237,10 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
 
   const selectAllPhotos = useCallback(() => {
     dispatchCriteria({ type: "selectAllPhotos" });
+  }, []);
+
+  const selectTags = useCallback((tagIds: number[]) => {
+    dispatchCriteria({ type: "selectTags", tagIds });
   }, []);
 
   const toggleFavorites = useCallback(() => {
@@ -365,6 +379,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       setFavoriteOnly,
       selectAllPhotos,
       selectFolder,
+      selectTags,
       toggleFavorites,
       toggleTag,
       toggleTagMode,
@@ -391,6 +406,7 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       setFavoriteOnly,
       selectAllPhotos,
       selectFolder,
+      selectTags,
       toggleFavorites,
       toggleTag,
       toggleTagMode,

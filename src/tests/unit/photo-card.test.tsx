@@ -133,11 +133,11 @@ describe("PhotoCard", () => {
     expect(screen.getByText("色彩接近度 50%")).toBeInTheDocument();
   });
 
-  it("labels semantic results with their similarity", () => {
+  it("labels semantic results without presenting raw cosine as a percentage", () => {
     render(
       <PhotoCard {...baseProps} match={{ kind: "semantic", score: 0.73 }} />
     );
-    expect(screen.getByText("相似度 73%")).toBeInTheDocument();
+    expect(screen.getByText("语义匹配")).toBeInTheDocument();
   });
 
   it("labels exact tag matches without a percentage", () => {
@@ -149,5 +149,15 @@ describe("PhotoCard", () => {
     );
     expect(screen.getByText("标签命中")).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it("labels an automatic tag source in pure tag-filter results", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{ kind: "tagFilter", origin: "auto" }}
+      />
+    );
+    expect(screen.getByText("AI 标签")).toBeInTheDocument();
   });
 });

@@ -329,6 +329,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     tagIds && tagIds.length > 0 ? tagIds : tagId == null ? null : [tagId];
   const effectiveTagMode =
     tagIds && tagIds.length > 0 ? (tagMode ?? "or") : "or";
+  let selectedDescendantIds: number[] = [];
 
   if (effectiveTagIds && effectiveTagIds.length > 0) {
     // Collect all descendant tag IDs for each root tag
@@ -375,6 +376,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
         }
       }
       const idArray = [...allDescendantIds];
+      selectedDescendantIds = idArray;
       if (idArray.length > 0) {
         // sql.join builds parameterized IN clause: pt.tag_id IN ($1, $2, $3)
         const inClause = sql.join(
@@ -387,6 +389,9 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
       }
     } else {
       // AND mode: photo must have at least one tag from each root tag's descendant set
+      selectedDescendantIds = [
+        ...new Set(rootDescendantSets.flatMap((set) => [...set])),
+      ];
       for (const descendantSet of rootDescendantSets) {
         const idArray = [...descendantSet];
         if (idArray.length > 0) {
@@ -456,7 +461,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     }
     totalCache.set(countCacheKey, { value: total, timestamp: Date.now() });
   }
-  const items = query
+  let items = query
     .limit(limit)
     .offset(offset)
     .all()
@@ -464,6 +469,39 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
       ...photo,
       thumbnailSmallPath: null,
     }));
+  if (items.length > 0 && selectedDescendantIds.length > 0) {
+    const selectedPhotoIds = items.map((photo) => photo.id);
+    const matchingTagSources = db
+      .select({
+        origin: photoTags.origin,
+        photoId: photoTags.photoId,
+        userConfirmed: photoTags.userConfirmed,
+      })
+      .from(photoTags)
+      .where(
+        and(
+          inArray(photoTags.photoId, selectedPhotoIds),
+          inArray(photoTags.tagId, selectedDescendantIds)
+        )
+      )
+      .all();
+    const trustedPhotoIds = new Set(
+      matchingTagSources
+        .filter(
+          (row) => row.origin === "manual" || Boolean(row.userConfirmed)
+        )
+        .map((row) => row.photoId)
+    );
+    items = items.map((photo) => ({
+      ...photo,
+      match: {
+        kind: "tagFilter" as const,
+        origin: trustedPhotoIds.has(photo.id)
+          ? ("manual" as const)
+          : ("auto" as const),
+      },
+    }));
+  }
 
   return { items, total, offset, limit };
 });

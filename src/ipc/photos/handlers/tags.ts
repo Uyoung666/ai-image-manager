@@ -193,6 +193,8 @@ export const getPhotoTags = os.input(IdSchema).handler(({ input }) => {
       color: tags.color,
       confidence: photoTags.confidence,
       isConfirmed: photoTags.isConfirmed,
+      origin: photoTags.origin,
+      userConfirmed: photoTags.userConfirmed,
     })
     .from(photoTags)
     .innerJoin(tags, eq(photoTags.tagId, tags.id))
@@ -243,9 +245,20 @@ export const setPhotoTag = os
       .values({
         photoId: input.photoId,
         tagId: input.tagId,
+        confidence: null,
         isConfirmed: true,
+        origin: "manual",
+        userConfirmed: true,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [photoTags.photoId, photoTags.tagId],
+        set: {
+          confidence: null,
+          isConfirmed: true,
+          origin: "manual",
+          userConfirmed: true,
+        },
+      })
       .run();
     return { ok: true };
   });
@@ -267,7 +280,7 @@ export const confirmPhotoTag = os
   .handler(({ input }) => {
     const db = getDatabase();
     db.update(photoTags)
-      .set({ isConfirmed: true })
+      .set({ isConfirmed: true, userConfirmed: true })
       .where(
         sql`${photoTags.photoId} = ${input.photoId} AND ${photoTags.tagId} = ${input.tagId}`
       )
