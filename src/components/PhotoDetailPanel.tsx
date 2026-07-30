@@ -155,7 +155,9 @@ export function PhotoDetailPanel({
   const currentWidth = useRef(panelWidth);
   const panelRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [hasMoreBelow, setHasMoreBelow] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
 
   if (photo) {
@@ -257,6 +259,31 @@ export function PhotoDetailPanel({
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   }
+
+  const updateBottomFade = useCallback(() => {
+    const element = contentScrollRef.current;
+    if (!element) {
+      setHasMoreBelow(false);
+      return;
+    }
+    setHasMoreBelow(
+      element.scrollHeight - element.scrollTop - element.clientHeight > 2
+    );
+  }, []);
+
+  useEffect(() => {
+    const element = contentScrollRef.current;
+    if (!element) {
+      return;
+    }
+    updateBottomFade();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateBottomFade);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [updateBottomFade, exif, loading, photo?.id, photoTags, aiSuggestions, aiTagTaskState]);
 
   const loadTags = useCallback(async () => {
     if (!photo) {
@@ -519,7 +546,7 @@ export function PhotoDetailPanel({
 
   return (
     <div
-      className="photo-detail-panel-shell shrink-0 overflow-hidden"
+      className="photo-detail-panel-shell h-full shrink-0 overflow-hidden"
       style={{ width: visible ? panelWidth : 0 }}
     >
       <div
@@ -621,7 +648,12 @@ export function PhotoDetailPanel({
         </div>
 
         {/* Content */}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div
+          className="resource-tree-scroll flex-1 space-y-4 overflow-y-auto p-4"
+          data-bottom-fade={hasMoreBelow}
+          onScroll={updateBottomFade}
+          ref={contentScrollRef}
+        >
           {/* Basic Info */}
           <section>
             <h4 className="mb-2 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">

@@ -179,7 +179,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   if (!sequence) {
     return (
       <aside
-        className="photo-detail-panel-shell shrink-0 overflow-hidden"
+        className="photo-detail-panel-shell h-full shrink-0 overflow-hidden"
         style={{ width: displayWidth }}
       >
         <div className="glass-surface-heavy relative flex h-full items-center justify-center border-border border-l">
@@ -211,7 +211,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   );
   return (
     <aside
-      className="photo-detail-panel-shell shrink-0 overflow-hidden"
+      className="photo-detail-panel-shell h-full shrink-0 overflow-hidden"
       style={{ width: displayWidth }}
     >
       <div className="glass-surface-heavy relative flex h-full flex-col border-border border-l">
