@@ -3,7 +3,6 @@ import {
   ChevronDown,
   Layers,
   Play,
-  Settings2,
   Timer,
   WandSparkles,
   X,
@@ -17,13 +16,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface SequenceDetailPanelProps {
   onClose: () => void;
   onDeleteManual?: (id: number) => void;
-  onManage?: (id: number) => void;
   onOpenPhoto: (photoId: number) => void;
   onPlay: () => void;
   onRestoreAutomatic?: (id: number) => void;
@@ -67,7 +66,6 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
   onClose,
   onPlay,
   onOpenPhoto,
-  onManage,
   onRestoreAutomatic,
   onSetRepresentative,
   onSplit,
@@ -78,12 +76,16 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
     photoId: number;
     reasons: string[];
   } | null>(null);
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
   useEffect(() => {
     if (!sequence) {
       setRecommendation(null);
+      setRecommendationLoading(false);
       return;
     }
     let cancelled = false;
+    setRecommendation(null);
+    setRecommendationLoading(true);
     photoSequenceActions
       .recommendRepresentative(
         sequence.id,
@@ -100,6 +102,11 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
       .catch(() => {
         if (!cancelled) {
           setRecommendation(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRecommendationLoading(false);
         }
       });
     return () => {
@@ -235,7 +242,17 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
               ))}
             </div>
           </section>
-          {recommendation && (
+          {recommendationLoading && (
+            <section
+              aria-label="正在加载推荐代表帧"
+              className="min-h-[106px] rounded-md border border-primary/20 bg-primary/5 p-3"
+            >
+              <Skeleton className="h-5 w-44" />
+              <Skeleton className="mt-2 h-4 w-full" />
+              <Skeleton className="mt-3 h-8 w-24" />
+            </section>
+          )}
+          {!recommendationLoading && recommendation && (
             <section className="rounded-md border border-primary/20 bg-primary/5 p-3">
               <p className="flex items-center gap-1 font-medium text-sm">
                 <WandSparkles className="size-4 text-primary" />
@@ -345,16 +362,6 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                 确认拆分
               </Button>
             </div>
-          )}
-          {onManage && (
-            <Button
-              className="w-full"
-              onClick={() => onManage(sequence.id)}
-              variant="outline"
-            >
-              <Settings2 />
-              管理完整序列
-            </Button>
           )}
           {sequence.userLocked && (
             <div>

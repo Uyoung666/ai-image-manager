@@ -24,7 +24,7 @@ describe("BrowseSessionContext", () => {
       expect(session.lastClickedIdx).toBe(-1);
       expect(session.detailDismissed).toBe(false);
       expect(session.dashboardReturn).toBeNull();
-      expect(session.sequenceMode).toBe("collapsed");
+      expect(session.sequenceMode).toBe("photos");
     });
 
     it("should return new object each call for unknown route (not shared reference)", () => {

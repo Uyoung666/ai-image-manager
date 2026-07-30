@@ -6,6 +6,7 @@ interface ConfirmDeleteDialogProps {
   onCancel: () => void;
   onConfirm: () => void;
   open: boolean;
+  sequenceGroup?: boolean;
 }
 
 /**
@@ -17,17 +18,22 @@ export function ConfirmDeleteDialog({
   onCancel,
   onConfirm,
   open,
+  sequenceGroup = false,
 }: ConfirmDeleteDialogProps) {
   const { t } = useTranslation();
   return (
     <ConfirmDialog
       confirmText={t("confirmDeleteAction")}
-      description={t("confirmDeleteDescription", {
-        target:
-          count > 1
-            ? t("confirmDeleteTargetPhotos", { count })
-            : t("confirmDeleteTargetPhoto"),
-      })}
+      description={
+        sequenceGroup
+          ? t("confirmDeleteSequenceGroupDescription", { count })
+          : t("confirmDeleteDescription", {
+              target:
+                count > 1
+                  ? t("confirmDeleteTargetPhotos", { count })
+                  : t("confirmDeleteTargetPhoto"),
+            })
+      }
       destructive
       onCancel={onCancel}
       onConfirm={onConfirm}

@@ -62,12 +62,18 @@ export const SequenceCard = memo(function SequenceCard({
       className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted ${isSelected ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : "hover:-translate-y-0.5 hover:shadow-lg"}`}
       data-photo-id={photo.id}
       data-photo-path={photo.path}
+      data-sequence-id={sequence.id}
       onClick={(event) => {
-        cancelPendingClick();
-        clickTimerRef.current = setTimeout(() => {
-          clickTimerRef.current = null;
+        if (event.ctrlKey || event.metaKey) {
+          cancelPendingClick();
           onClick(photo.id, event);
-        }, SINGLE_CLICK_DELAY_MS);
+        } else {
+          cancelPendingClick();
+          clickTimerRef.current = setTimeout(() => {
+            clickTimerRef.current = null;
+            onOpenDetails(sequence.id);
+          }, SINGLE_CLICK_DELAY_MS);
+        }
       }}
       onDoubleClick={() => {
         cancelPendingClick();

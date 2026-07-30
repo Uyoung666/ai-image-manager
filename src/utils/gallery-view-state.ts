@@ -1,10 +1,10 @@
-export type GallerySequenceMode = "all" | "collapsed" | "sequences";
+export type GallerySequenceMode = "photos" | "sequences";
 
 export function getDisplayedSequenceMode(
   mode: GallerySequenceMode,
   sequenceViewReady: boolean
 ): GallerySequenceMode {
-  return mode === "all" || sequenceViewReady ? mode : "all";
+  return mode === "photos" || sequenceViewReady ? mode : "photos";
 }
 
 export function canPaginateGalleryPhotos(

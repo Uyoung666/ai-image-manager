@@ -20,6 +20,7 @@ interface MenuState {
   photoId: number | null;
   photoPath: string | null;
   selectionCount: number;
+  sequenceMemberIds?: number[];
   x: number;
   y: number;
 }
@@ -36,6 +37,7 @@ interface PhotoContextMenuProps {
   onBatchUploadToCloud?: () => void;
   onClose: () => void;
   onDelete: (id: number) => void;
+  onDeleteSequenceGroup?: (ids: number[]) => void;
   onExport: (id: number) => void;
   onOpenExplorer: (path: string) => void;
   onRemoveFromAlbum?: (id: number) => void;
@@ -53,6 +55,7 @@ export function PhotoContextMenu({
   onAddToAlbum,
   onClose,
   onDelete,
+  onDeleteSequenceGroup,
   onExport,
   onOpenExplorer,
   onToggleFavorite,
@@ -106,6 +109,12 @@ export function PhotoContextMenu({
   // Clamp position to viewport
   const x = Math.min(menu.x, window.innerWidth - 190);
   const y = Math.min(menu.y, window.innerHeight - 160);
+  let deleteLabel = t("deletePhoto");
+  if (menu.sequenceMemberIds) {
+    deleteLabel = `删除整个序列（${menu.sequenceMemberIds.length}）`;
+  } else if (menu.isBatch) {
+    deleteLabel = `${t("deletePhoto")} (${menu.selectionCount})`;
+  }
 
   return (
     <div
@@ -315,7 +324,9 @@ export function PhotoContextMenu({
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-destructive hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
         disabled={menu.photoId === null && !menu.isBatch}
         onClick={() => {
-          if (menu.isBatch && onBatchDelete) {
+          if (menu.sequenceMemberIds && onDeleteSequenceGroup) {
+            onDeleteSequenceGroup(menu.sequenceMemberIds);
+          } else if (menu.isBatch && onBatchDelete) {
             onBatchDelete();
           } else if (menu.photoId !== null) {
             onDelete(menu.photoId);
@@ -325,9 +336,7 @@ export function PhotoContextMenu({
       >
         <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="flex-1 text-left">
-          {menu.isBatch
-            ? `${t("deletePhoto")} (${menu.selectionCount})`
-            : t("deletePhoto")}
+          {deleteLabel}
         </span>
         <span className="ml-2 rounded-[3px] border border-border bg-secondary px-1 py-0.5 font-medium text-[10px] text-muted-foreground/60">
           Delete

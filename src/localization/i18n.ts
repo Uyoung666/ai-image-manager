@@ -763,6 +763,8 @@ i18n.use(initReactI18next).init({
         confirmDeleteAction: "删除",
         confirmDeleteDescription:
           "将{{target}}移到系统回收站，可从回收站恢复。",
+        confirmDeleteSequenceGroupDescription:
+          "将整个序列中的 {{count}} 张照片移到系统回收站，可从回收站恢复。",
         confirmDeleteTargetPhoto: "该照片",
         confirmDeleteTargetPhotos: " {{count}} 张照片",
 
@@ -2372,6 +2374,8 @@ i18n.use(initReactI18next).init({
         confirmDeleteAction: "Delete",
         confirmDeleteDescription:
           "Move {{target}} to the system recycle bin. You can restore it there.",
+        confirmDeleteSequenceGroupDescription:
+          "Move all {{count}} photos in this sequence to the system recycle bin. You can restore them there.",
         confirmDeleteTargetPhoto: "this photo",
         confirmDeleteTargetPhotos: " {{count}} photos",
 

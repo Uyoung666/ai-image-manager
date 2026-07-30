@@ -31,7 +31,6 @@ import {
   GRID_COLUMN_WIDTH_KEY,
   GRID_COLUMN_WIDTH_MAX,
   GRID_COLUMN_WIDTH_MIN,
-  INLINE_SEQUENCE_MAX_FRAMES,
   loadGridColumnWidth,
   PhotoGrid,
   type SortField,
@@ -43,7 +42,6 @@ import { SearchBar } from "@/components/SearchBar";
 import { SearchEmptyState } from "@/components/SearchEmptyState";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
-import { SequenceWorkspace } from "@/components/SequenceWorkspace";
 import { ShareDialog } from "@/components/ShareDialog";
 import { SortDropdown } from "@/components/SortDropdown";
 import { StatusBar } from "@/components/StatusBar";
@@ -227,9 +225,9 @@ function HomePage() {
   } | null>(null);
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
-  const [sequenceMode, setSequenceMode] = useState<
-    "all" | "collapsed" | "sequences"
-  >(() => getBrowseSession("home-search").sequenceMode);
+  const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
+    () => getBrowseSession("home-search").sequenceMode
+  );
   const [sequenceViewReady, setSequenceViewReady] = useState(false);
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
   const [gallerySequenceCount, setGallerySequenceCount] = useState(0);
@@ -242,9 +240,8 @@ function HomePage() {
   const [sequenceAutoPlay, setSequenceAutoPlay] = useState(false);
   const [expandedSequence, setExpandedSequence] =
     useState<PhotoSequenceDetail | null>(null);
-  const [workspaceSequence, setWorkspaceSequence] =
+  const [expandedSequenceComplete, setExpandedSequenceComplete] =
     useState<PhotoSequenceDetail | null>(null);
-  const [workspaceScopeIds, setWorkspaceScopeIds] = useState<number[]>([]);
   const [expandingSequenceId, setExpandingSequenceId] = useState<number | null>(
     null
   );
@@ -252,6 +249,7 @@ function HomePage() {
     new Map()
   );
   const expandSequenceRequestRef = useRef(0);
+  const sequenceDetailsRequestRef = useRef(0);
   const [selectedSequence, setSelectedSequence] =
     useState<PhotoSequenceDetail | null>(null);
   const [sequenceReturnTarget, setSequenceReturnTarget] =
@@ -287,6 +285,8 @@ function HomePage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [cullPhotoIds, setCullPhotoIds] = useState<number[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
+  const [pendingDeleteSequenceGroup, setPendingDeleteSequenceGroup] =
+    useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [searchLoading, setSearchLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
@@ -616,13 +616,6 @@ function HomePage() {
   }, [photos, expandedSequence]);
   const photosRef = useRef(actionPhotos);
   photosRef.current = actionPhotos;
-  const workspaceCurrentMembers = useMemo(
-    () =>
-      workspaceSequence?.members.filter((photo) =>
-        workspaceScopeIds.includes(photo.id)
-      ) ?? [],
-    [workspaceScopeIds, workspaceSequence]
-  );
   const displayedSequenceMode = getDisplayedSequenceMode(
     sequenceMode,
     sequenceViewReady
@@ -638,7 +631,7 @@ function HomePage() {
   const previousSequenceSearchKeyRef = useRef("");
   const previousSequenceRefreshRef = useRef(sequenceRefresh);
   const handleSequenceModeChange = useCallback(
-    (mode: "all" | "collapsed" | "sequences") => {
+    (mode: "photos" | "sequences") => {
       setSequenceMode(mode);
       saveBrowseSession("home-search", { sequenceMode: mode });
     },
@@ -792,6 +785,9 @@ function HomePage() {
 
   const handleOpenSequence = useCallback(
     (sequenceId: number) => {
+      sequenceDetailsRequestRef.current += 1;
+      setSelectedSequence(null);
+      setSequenceDetailsLoading(false);
       const sequenceSummary = sequences.find(
         (sequence) => sequence.id === sequenceId
       );
@@ -828,17 +824,20 @@ function HomePage() {
 
   const handleOpenSequenceDetails = useCallback(
     (sequenceId: number) => {
+      const requestId = ++sequenceDetailsRequestRef.current;
       setSequenceDetailsLoading(true);
       ipc.client.photos
         .getSequence({ id: sequenceId })
         .then((sequence) => {
-          if (sequence) {
+          if (sequence && requestId === sequenceDetailsRequestRef.current) {
             setSelectedSequence(sequence as unknown as PhotoSequenceDetail);
           }
         })
         .catch(() => toast.error(t("sequenceDetailOpenFailed")))
         .finally(() => {
-          setSequenceDetailsLoading(false);
+          if (requestId === sequenceDetailsRequestRef.current) {
+            setSequenceDetailsLoading(false);
+          }
         });
     },
     [t]
@@ -849,6 +848,7 @@ function HomePage() {
       if (expandedSequence?.id === sequenceId) {
         expandSequenceRequestRef.current += 1;
         setExpandedSequence(null);
+        setExpandedSequenceComplete(null);
         setExpandingSequenceId(null);
         return;
       }
@@ -863,24 +863,27 @@ function HomePage() {
         [];
       const cached = expandedSequenceCacheRef.current.get(sequenceId);
       if (cached) {
-        if (memberIds.length > INLINE_SEQUENCE_MAX_FRAMES) {
-          setWorkspaceScopeIds(memberIds);
-          setWorkspaceSequence(cached);
-          setExpandedSequence(null);
-        } else {
-          setExpandedSequence({
-            ...cached,
-            frameCount: memberIds.length,
-            members: cached.members.filter((photo) =>
-              memberIds.includes(photo.id)
-            ),
-          });
-        }
+        setExpandedSequenceComplete(cached);
+        const scopedMemberIds = new Set(memberIds);
+        const members = cached.members.filter((photo) =>
+          scopedMemberIds.has(photo.id)
+        );
+        setExpandedSequence({
+          ...cached,
+          frameCount: members.length,
+          members,
+          representativePhotoId: scopedMemberIds.has(
+            cached.representativePhotoId ?? -1
+          )
+            ? cached.representativePhotoId
+            : (members[0]?.id ?? null),
+        });
         setExpandingSequenceId(null);
         return;
       }
 
       setExpandingSequenceId(sequenceId);
+      setExpandedSequenceComplete(null);
       ipc.client.photos
         .getSequence({ id: sequenceId })
         .then((sequence) => {
@@ -889,19 +892,21 @@ function HomePage() {
           }
           const detail = sequence as unknown as PhotoSequenceDetail;
           expandedSequenceCacheRef.current.set(sequenceId, detail);
-          if (memberIds.length > INLINE_SEQUENCE_MAX_FRAMES) {
-            setWorkspaceScopeIds(memberIds);
-            setWorkspaceSequence(detail);
-            setExpandedSequence(null);
-          } else {
-            setExpandedSequence({
-              ...detail,
-              frameCount: memberIds.length,
-              members: detail.members.filter((photo) =>
-                memberIds.includes(photo.id)
-              ),
-            });
-          }
+          setExpandedSequenceComplete(detail);
+          const scopedMemberIds = new Set(memberIds);
+          const members = detail.members.filter((photo) =>
+            scopedMemberIds.has(photo.id)
+          );
+          setExpandedSequence({
+            ...detail,
+            frameCount: members.length,
+            members,
+            representativePhotoId: scopedMemberIds.has(
+              detail.representativePhotoId ?? -1
+            )
+              ? detail.representativePhotoId
+              : (members[0]?.id ?? null),
+          });
         })
         .catch(() => {
           if (requestId === expandSequenceRequestRef.current) {
@@ -1167,6 +1172,7 @@ function HomePage() {
   useEffect(() => {
     expandSequenceRequestRef.current += 1;
     setExpandedSequence(null);
+    setExpandedSequenceComplete(null);
     setExpandingSequenceId(null);
     expandedSequenceCacheRef.current.clear();
   }, [routeKey]);
@@ -1250,9 +1256,8 @@ function HomePage() {
     clearSelection();
     expandSequenceRequestRef.current += 1;
     setExpandedSequence(null);
+    setExpandedSequenceComplete(null);
     setExpandingSequenceId(null);
-    setWorkspaceSequence(null);
-    setWorkspaceScopeIds([]);
   }, [clearSelection, sequenceMode]);
   const handleScopedSequenceExpand = useCallback(
     (sequenceId: number) => {
@@ -1264,27 +1269,12 @@ function HomePage() {
     },
     [handleToggleSequenceExpand, removeFromSelection, sequences]
   );
-  const handleManageSequence = useCallback(
-    (sequenceId: number) => {
-      const sequence = sequences.find((item) => item.id === sequenceId);
-      const memberIds =
-        sequence?.matchedPhotoIds ?? sequence?.memberPhotoIds ?? [];
-      removeFromSelection(memberIds);
-      ipc.client.photos
-        .getSequence({ id: sequenceId })
-        .then((detail) => {
-          if (!detail) {
-            throw new Error("Sequence not found");
-          }
-          setWorkspaceScopeIds(memberIds);
-          setWorkspaceSequence(detail as unknown as PhotoSequenceDetail);
-          setSelectedSequence(null);
-          setExpandedSequence(null);
-        })
-        .catch(() => toast.error("无法打开序列管理"));
-    },
-    [removeFromSelection, sequences]
-  );
+  const handleSequenceMutationComplete = useCallback(() => {
+    expandedSequenceCacheRef.current.clear();
+    setExpandedSequence(null);
+    setExpandedSequenceComplete(null);
+    setSequenceRefresh((value) => value + 1);
+  }, []);
   const { detailPhoto, detailDismissed, dismissDetail, navigateDetail } =
     usePhotoDetailPanel(
       selectedIds,
@@ -1610,9 +1600,11 @@ function HomePage() {
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photosRef.current.findIndex((p) => p.id === id);
     if (idx >= 0) {
+      clearSelection();
+      dismissDetail();
       setLightboxIndex(idx);
     }
-  }, []);
+  }, [clearSelection, dismissDetail]);
   async function handleSearch(
     query: string,
     filters?: ExifFilters,
@@ -1855,12 +1847,18 @@ function HomePage() {
       }
       const id = Number.parseInt(card.dataset.photoId || "", 10);
       const path = card.dataset.photoPath || null;
+      const sequenceId = Number.parseInt(card.dataset.sequenceId || "", 10);
       if (!id) {
         return;
       }
       e.preventDefault();
       const inSelection = selectedIds.has(id);
       const isBatch = selectedIds.size > 1 && inSelection;
+      const sequence = sequenceId
+        ? sequences.find((item) => item.id === sequenceId)
+        : undefined;
+      const sequenceMemberIds =
+        sequence?.matchedPhotoIds ?? sequence?.memberPhotoIds;
       setCtxMenu({
         open: true,
         x: e.clientX,
@@ -1869,9 +1867,10 @@ function HomePage() {
         photoPath: path,
         isBatch,
         selectionCount: isBatch ? selectedIds.size : 1,
+        sequenceMemberIds,
       });
     },
-    [selectedIds]
+    [selectedIds, sequences]
   );
 
   async function handleOpenExplorer(filePath: string) {
@@ -1879,6 +1878,7 @@ function HomePage() {
   }
 
   function handleDeletePhoto(id: number) {
+    setPendingDeleteSequenceGroup(false);
     setPendingDeleteIds([id]);
     setDeleteConfirmOpen(true);
   }
@@ -1923,6 +1923,7 @@ function HomePage() {
     if (ids.length === 0) {
       return;
     }
+    setPendingDeleteSequenceGroup(false);
     setPendingDeleteIds(ids);
     setDeleteConfirmOpen(true);
   }
@@ -1932,6 +1933,7 @@ function HomePage() {
     const count = ids.length;
     setDeleteConfirmOpen(false);
     setPendingDeleteIds([]);
+    setPendingDeleteSequenceGroup(false);
     // Trigger exit animation
     setDeletingIds(new Set(ids));
     await new Promise((r) => setTimeout(r, 180));
@@ -2295,18 +2297,11 @@ function HomePage() {
               <>
                 <div className="flex rounded-md border border-border p-0.5 text-[11px]">
                   <button
-                    className={`rounded px-2 py-1 ${sequenceMode === "all" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => handleSequenceModeChange("all")}
+                    className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                    onClick={() => handleSequenceModeChange("photos")}
                     type="button"
                   >
-                    全部照片
-                  </button>
-                  <button
-                    className={`rounded px-2 py-1 ${sequenceMode === "collapsed" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => handleSequenceModeChange("collapsed")}
-                    type="button"
-                  >
-                    折叠序列
+                    {t("sequenceViewPhotos")}
                   </button>
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
@@ -2467,6 +2462,7 @@ function HomePage() {
                   deletingIds={deletingIds}
                   emptyState={emptyStateContent}
                   expandedSequence={expandedSequence}
+                  expandedSequenceComplete={expandedSequenceComplete}
                   expandingSequenceId={expandingSequenceId}
                   gridRef={gridRef}
                   hasMore={isPhotoPaginationActive}
@@ -2498,6 +2494,7 @@ function HomePage() {
                   onSelect={handlePhotoSelect}
                   onSelectSequence={handleSequenceSelect}
                   onSelectSequenceMembers={handleSelectSequenceMembers}
+                  onSequenceMutationComplete={handleSequenceMutationComplete}
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
                   photos={photos}
@@ -2621,7 +2618,6 @@ function HomePage() {
                     })
                     .catch(() => toast.error("无法删除手动序列"));
                 }}
-                onManage={handleManageSequence}
                 onOpenPhoto={(photoId) => {
                   setSequenceReturnTarget(selectedSequence);
                   setSelectedSequence(null);
@@ -2834,35 +2830,6 @@ function HomePage() {
           showThumbnailsInitially={true}
         />
       )}
-      <SequenceWorkspace
-        completeMembers={workspaceSequence?.members ?? []}
-        currentMembers={workspaceCurrentMembers}
-        currentScopeLabel={galleryContextLabel}
-        onClose={() => {
-          setWorkspaceSequence(null);
-          setWorkspaceScopeIds([]);
-        }}
-        onMutationComplete={() => setSequenceRefresh((value) => value + 1)}
-        onOpenDetails={(photoId) => {
-          setWorkspaceSequence(null);
-          setWorkspaceScopeIds([]);
-          handleKeyboardSelect(photoId);
-        }}
-        onPlay={(members) => {
-          if (workspaceSequence) {
-            setSequenceAutoPlay(false);
-            setOpenSequence({
-              ...workspaceSequence,
-              frameCount: members.length,
-              members: [...members],
-            });
-          }
-        }}
-        onSelectionChange={handleMarqueeSelect}
-        open={workspaceSequence !== null}
-        selectedPhotoIds={selectedIds}
-        sequenceId={workspaceSequence?.id}
-      />
       {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
@@ -2932,6 +2899,11 @@ function HomePage() {
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
+        onDeleteSequenceGroup={(ids) => {
+          setPendingDeleteSequenceGroup(true);
+          setPendingDeleteIds(ids);
+          setDeleteConfirmOpen(true);
+        }}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
         onShare={handleShare}
@@ -2990,9 +2962,11 @@ function HomePage() {
         onCancel={() => {
           setDeleteConfirmOpen(false);
           setPendingDeleteIds([]);
+          setPendingDeleteSequenceGroup(false);
         }}
         onConfirm={executeDelete}
         open={deleteConfirmOpen}
+        sequenceGroup={pendingDeleteSequenceGroup}
       />
       <CullStartDialog
         defaultName={`${t("cullTitle")} · ${cullPhotoIds.length} ${t("photos")}`}

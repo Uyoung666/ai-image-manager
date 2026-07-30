@@ -9,12 +9,12 @@ import {
 describe("gallery view state", () => {
   it("shows already loaded sequences immediately after switching modes", () => {
     expect(getDisplayedSequenceMode("sequences", true)).toBe("sequences");
-    expect(getDisplayedSequenceMode("sequences", false)).toBe("all");
+    expect(getDisplayedSequenceMode("sequences", false)).toBe("photos");
   });
 
   it("keeps photo pagination enabled while a detail panel is handled separately", () => {
-    expect(canPaginateGalleryPhotos("all", true)).toBe(true);
-    expect(canPaginateGalleryPhotos("collapsed", false)).toBe(false);
+    expect(canPaginateGalleryPhotos("photos", true)).toBe(true);
+    expect(canPaginateGalleryPhotos("photos", false)).toBe(false);
     expect(canPaginateGalleryPhotos("sequences", true)).toBe(false);
   });
 

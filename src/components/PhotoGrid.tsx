@@ -1,6 +1,18 @@
-import { ChevronUp, Layers, Timer } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronUp,
+  Layers,
+  Scissors,
+  Timer,
+  Unlink,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { photoSequenceActions } from "@/actions/photo-sequences";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { SearchMatch } from "@/types/photo";
 import type {
   PhotoSequence,
@@ -53,6 +65,7 @@ interface PhotoGridProps {
   emptyState?: React.ReactNode;
   error?: string;
   expandedSequence?: PhotoSequenceDetail | null;
+  expandedSequenceComplete?: PhotoSequenceDetail | null;
   expandingSequenceId?: number | null;
   /** MasonryGrid 命令式 ref，用于原子化滚动定位 */
   gridRef?: React.RefObject<MasonryGridHandle | null>;
@@ -82,7 +95,8 @@ interface PhotoGridProps {
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequence?: (memberIds: number[], event: React.MouseEvent) => void;
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
-  onSequenceModeChange?: (mode: "all" | "collapsed" | "sequences") => void;
+  onSequenceMutationComplete?: () => void;
+  onSequenceModeChange?: (mode: "photos" | "sequences") => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
@@ -95,7 +109,7 @@ interface PhotoGridProps {
   routeKey: string;
   searchQuery?: string;
   selectedIds: Set<number>;
-  sequenceMode?: "all" | "collapsed" | "sequences";
+  sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
   showToolbar?: boolean;
   sort?: SortField;
@@ -109,10 +123,52 @@ export const GRID_COLUMN_WIDTH_MAX = 320;
 export const GRID_COLUMN_WIDTH_DEFAULT = 220;
 const GAP = 8;
 const INITIAL_EAGER_ROWS = 2;
-export const INLINE_SEQUENCE_MAX_FRAMES = 36;
+const SEQUENCE_TRAY_GAP = 8;
+const SEQUENCE_TRAY_MAX_HEIGHT = 560;
+const SEQUENCE_TRAY_MANAGEMENT_HEIGHT = 40;
+const SEQUENCE_TRAY_PADDING = 24;
 
 function scopedSequenceMemberIds(sequence: PhotoSequence): number[] {
   return sequence.matchedPhotoIds ?? sequence.memberPhotoIds ?? [];
+}
+
+function getSequenceRowHeight(
+  members: PhotoSequenceDetail["members"],
+  containerWidth: number,
+  columns: number,
+  rowIndex: number
+) {
+  const tileWidth = Math.max(
+    1,
+    (containerWidth -
+      SEQUENCE_TRAY_PADDING -
+      SEQUENCE_TRAY_GAP * (columns - 1)) /
+      columns
+  );
+  const row = members.slice(rowIndex * columns, (rowIndex + 1) * columns);
+  return (
+    Math.max(
+      ...row.map((member) => {
+        const aspect = Math.max(
+          0.6,
+          Math.min(member.width / member.height || 4 / 3, 3)
+        );
+        return tileWidth / aspect;
+      }),
+      1
+    ) + SEQUENCE_TRAY_GAP
+  );
+}
+
+function getSequenceGridHeight(
+  members: PhotoSequenceDetail["members"],
+  containerWidth: number,
+  columns: number
+) {
+  const rowCount = Math.ceil(members.length / columns);
+  return Array.from({ length: rowCount }, (_, rowIndex) =>
+    getSequenceRowHeight(members, containerWidth, columns, rowIndex)
+  ).reduce((total, height) => total + height, 0);
 }
 
 export const GRID_COLUMN_WIDTH_KEY = "grid_column_width";
@@ -129,32 +185,19 @@ function createSequenceTray(
   if (!representative) {
     return null;
   }
-  const gap = 8;
-  const padding = 24;
-  const tileWidth = Math.max(
-    1,
-    (containerWidth - padding - gap * (columns - 1)) / columns
+  const gridHeight = getSequenceGridHeight(
+    sequence.members,
+    containerWidth,
+    columns
   );
-  const gridHeight = sequence.members.reduce((total, photo, index) => {
-    if (index % columns !== 0) {
-      return total;
-    }
-    const row = sequence.members.slice(index, index + columns);
-    const rowHeight = Math.max(
-      ...row.map((member) => {
-        const aspect = Math.max(
-          0.6,
-          Math.min(member.width / member.height || 4 / 3, 3)
-        );
-        return tileWidth / aspect;
-      })
-    );
-    return total + rowHeight + (index === 0 ? 0 : gap);
-  }, 0);
   return {
     ...representative,
     fullWidth: true,
-    height: 56 + padding + gridHeight,
+    height:
+      56 +
+      SEQUENCE_TRAY_PADDING +
+      SEQUENCE_TRAY_MANAGEMENT_HEIGHT +
+      Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT),
     id: -sequence.id,
     sequenceTray: sequence,
     trayColumns: columns,
@@ -181,12 +224,15 @@ export function loadGridColumnWidth(): number {
   return GRID_COLUMN_WIDTH_DEFAULT;
 }
 
-interface SequenceFocusTrayProps {
+export interface SequenceFocusTrayProps {
   columns: number;
+  completeMembers?: readonly Photo[];
+  containerWidth: number;
   getDragIds: (id: number) => number[];
   onDoubleClick: (id: number) => void;
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
+  onSequenceMutationComplete?: () => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
   renderImage: boolean;
@@ -195,12 +241,15 @@ interface SequenceFocusTrayProps {
   sequence: PhotoSequenceDetail;
 }
 
-function SequenceFocusTray({
+export function SequenceFocusTray({
+  containerWidth,
   columns,
+  completeMembers,
   getDragIds,
   onDoubleClick,
   onSelect,
   onSelectSequenceMembers,
+  onSequenceMutationComplete,
   onToggleFavorite,
   onToggleSequenceExpand,
   renderImage,
@@ -209,12 +258,98 @@ function SequenceFocusTray({
   sequence,
 }: SequenceFocusTrayProps) {
   const { t } = useTranslation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowCount = Math.ceil(sequence.members.length / columns);
+  const gridHeight = getSequenceGridHeight(
+    sequence.members,
+    containerWidth,
+    columns
+  );
+  const virtualizer = useVirtualizer({
+    count: rowCount,
+    estimateSize: (rowIndex) =>
+      getSequenceRowHeight(
+        sequence.members,
+        containerWidth,
+        columns,
+        rowIndex
+      ),
+    getScrollElement: () => scrollRef.current,
+    initialRect: {
+      height: Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT),
+      width: containerWidth,
+    },
+    overscan: 2,
+  });
   const selectedMemberCount = sequence.members.filter((member) =>
     selectedIds.has(member.id)
   ).length;
+  const fullMembers = completeMembers ?? sequence.members;
+  const selectedMemberIds = sequence.members
+    .filter((member) => selectedIds.has(member.id))
+    .map((member) => member.id);
+  const selectedFullIndex =
+    selectedMemberIds.length === 1
+      ? fullMembers.findIndex((member) => member.id === selectedMemberIds[0])
+      : -1;
+  const [isMutating, setIsMutating] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    confirmText: string;
+    description: string;
+    operation: () => Promise<unknown>;
+    successText: string;
+    title: string;
+  } | null>(null);
+  const finishMutation = useCallback(
+    async (operation: () => Promise<unknown>, successText: string) => {
+      setIsMutating(true);
+      try {
+        await operation();
+        onSelectSequenceMembers?.(
+          fullMembers.map((member) => member.id),
+          false
+        );
+        onSequenceMutationComplete?.();
+        toast.success(successText);
+      } catch (error) {
+        console.error("[SequenceFocusTray] mutation failed", error);
+        toast.error("序列操作失败");
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [fullMembers, onSelectSequenceMembers, onSequenceMutationComplete]
+  );
+  const handleMove = useCallback(
+    (direction: -1 | 1) => {
+      if (selectedFullIndex < 0) {
+        return;
+      }
+      const targetIndex = selectedFullIndex + direction;
+      if (targetIndex < 0 || targetIndex >= fullMembers.length) {
+        return;
+      }
+      const orderedIds = fullMembers.map((member) => member.id);
+      [orderedIds[selectedFullIndex], orderedIds[targetIndex]] = [
+        orderedIds[targetIndex],
+        orderedIds[selectedFullIndex],
+      ];
+      finishMutation(
+        () => photoSequenceActions.updateMembers(sequence.id, orderedIds),
+        "已调整序列顺序"
+      );
+    },
+    [finishMutation, fullMembers, selectedFullIndex, sequence.id]
+  );
   const allMembersSelected =
     sequence.members.length > 0 &&
     selectedMemberCount === sequence.members.length;
+  let selectionLabel = `${t("selectAll")} (${sequence.members.length})`;
+  if (allMembersSelected) {
+    selectionLabel = t("clearSelection");
+  } else if (selectedMemberCount > 0) {
+    selectionLabel = `${selectedMemberCount}/${sequence.members.length}`;
+  }
   return (
     <section className="fade-in-0 slide-in-from-top-2 animate-in rounded-[10px] border-2 border-primary/50 bg-primary/[0.06] p-3 shadow-sm duration-200">
       <header className="mb-3 flex items-center justify-between gap-3">
@@ -244,11 +379,7 @@ function SequenceFocusTray({
               }}
               type="button"
             >
-              {allMembersSelected
-                ? t("clearSelection")
-                : selectedMemberCount > 0
-                  ? `${selectedMemberCount}/${sequence.members.length}`
-                  : `${t("selectAll")} (${sequence.members.length})`}
+              {selectionLabel}
             </button>
           )}
           {onToggleSequenceExpand && (
@@ -272,32 +403,173 @@ function SequenceFocusTray({
           )}
         </div>
       </header>
-      <div
-        className="grid gap-2"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
-      >
-        {sequence.members.map((member, index) => (
-          <PhotoCard
-            dominantColors={member.dominantColors}
-            filename={member.filename}
-            getDragIds={getDragIds}
-            height={member.height}
-            id={member.id}
-            isFavorite={member.isFavorite}
-            isSelected={selectedIds.has(member.id)}
-            key={member.id}
-            loading={index < columns * INITIAL_EAGER_ROWS ? "eager" : "lazy"}
-            onClick={onSelect}
-            onDoubleClick={onDoubleClick}
-            onToggleFavorite={onToggleFavorite}
-            path={member.path}
-            renderImage={renderImage}
-            searchQuery={searchQuery}
-            thumbnailPath={member.thumbnailPath}
-            width={member.width}
-          />
-        ))}
+      <div className="mb-3 flex h-7 items-center gap-2 overflow-x-auto">
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          序列管理
+        </span>
+        <button
+          className="h-7 shrink-0 rounded-md border border-border bg-background/80 px-2 text-[11px] disabled:opacity-40"
+          disabled={isMutating || selectedMemberIds.length === 0}
+          onClick={() =>
+            setConfirmation({
+              confirmText: "移出序列",
+              description: `从序列中移出已选 ${selectedMemberIds.length} 张照片。照片文件不会被删除；少于 2 张时序列会自动解散。`,
+              operation: () =>
+                photoSequenceActions.removeMembers(
+                  sequence.id,
+                  selectedMemberIds
+                ),
+              successText: "已移出序列成员",
+              title: "确认移出序列",
+            })
+          }
+          type="button"
+        >
+          <Unlink className="mr-1 inline size-3.5" />
+          移出
+        </button>
+        <button
+          aria-label="在序列中前移"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
+          disabled={isMutating || selectedFullIndex <= 0}
+          onClick={() => handleMove(-1)}
+          title="前移"
+          type="button"
+        >
+          <ArrowLeft className="size-3.5" />
+        </button>
+        <button
+          aria-label="在序列中后移"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
+          disabled={
+            isMutating ||
+            selectedFullIndex < 0 ||
+            selectedFullIndex >= fullMembers.length - 1
+          }
+          onClick={() => handleMove(1)}
+          title="后移"
+          type="button"
+        >
+          <ArrowRight className="size-3.5" />
+        </button>
+        <button
+          className="h-7 shrink-0 rounded-md border border-border bg-background/80 px-2 text-[11px] disabled:opacity-40"
+          disabled={
+            isMutating ||
+            selectedFullIndex < 2 ||
+            selectedFullIndex > fullMembers.length - 2
+          }
+          onClick={() =>
+            setConfirmation({
+              confirmText: "拆分序列",
+              description: `从已选照片前拆分，生成 ${selectedFullIndex} 张和 ${fullMembers.length - selectedFullIndex} 张两个序列。`,
+              operation: () =>
+                photoSequenceActions.split(sequence.id, selectedFullIndex),
+              successText: "已拆分序列",
+              title: "确认拆分序列",
+            })
+          }
+          type="button"
+        >
+          <Scissors className="mr-1 inline size-3.5" />
+          从此拆分
+        </button>
+        <button
+          className="h-7 shrink-0 rounded-md border border-destructive/30 bg-background/80 px-2 text-[11px] text-destructive disabled:opacity-40"
+          disabled={isMutating}
+          onClick={() =>
+            setConfirmation({
+              confirmText: "解散序列",
+              description: `解散这个 ${fullMembers.length} 张照片的序列。照片文件不会被删除。`,
+              operation: () => photoSequenceActions.dissolve(sequence.id),
+              successText: "序列已解散",
+              title: "确认解散序列",
+            })
+          }
+          type="button"
+        >
+          <Unlink className="mr-1 inline size-3.5" />
+          解散
+        </button>
       </div>
+      <div
+        className="overflow-y-auto overscroll-contain"
+        data-sequence-virtual-scroll=""
+        ref={scrollRef}
+        style={{ height: Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT) }}
+      >
+        <div
+          className="relative w-full"
+          data-sequence-virtual-grid=""
+          style={{ height: virtualizer.getTotalSize() }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const startIndex = virtualRow.index * columns;
+            const rowMembers = sequence.members.slice(
+              startIndex,
+              startIndex + columns
+            );
+            return (
+              <div
+                className="absolute top-0 left-0 grid w-full gap-2"
+                data-sequence-virtual-row={virtualRow.index}
+                key={virtualRow.key}
+                style={{
+                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  minHeight: virtualRow.size,
+                  paddingBottom: SEQUENCE_TRAY_GAP,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                {rowMembers.map((member, columnIndex) => (
+                  <PhotoCard
+                    dominantColors={member.dominantColors}
+                    filename={member.filename}
+                    getDragIds={getDragIds}
+                    height={member.height}
+                    id={member.id}
+                    isFavorite={member.isFavorite}
+                    isSelected={selectedIds.has(member.id)}
+                    key={member.id}
+                    loading={
+                      startIndex + columnIndex <
+                      columns * INITIAL_EAGER_ROWS
+                        ? "eager"
+                        : "lazy"
+                    }
+                    onClick={onSelect}
+                    onDoubleClick={onDoubleClick}
+                    onToggleFavorite={onToggleFavorite}
+                    path={member.path}
+                    renderImage={renderImage}
+                    searchQuery={searchQuery}
+                    selectionInset
+                    thumbnailPath={member.thumbnailPath}
+                    width={member.width}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <ConfirmDialog
+        confirmText={confirmation?.confirmText ?? "确认"}
+        description={confirmation?.description}
+        destructive
+        disabled={isMutating}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          const pending = confirmation;
+          if (!pending) {
+            return;
+          }
+          setConfirmation(null);
+          finishMutation(pending.operation, pending.successText);
+        }}
+        open={confirmation !== null}
+        title={confirmation?.title ?? "确认操作"}
+      />
     </section>
   );
 }
@@ -322,6 +594,7 @@ export const PhotoGrid = memo(
     onSelect,
     onSelectSequence,
     onSelectSequenceMembers,
+    onSequenceMutationComplete,
     onDoubleClick,
     onContextMenu,
     onEndReached,
@@ -337,11 +610,12 @@ export const PhotoGrid = memo(
     topInset = 0,
     restoreGateReady = true,
     sequences = [],
-    sequenceMode = "collapsed",
+    sequenceMode = "photos",
     onOpenSequence,
     onOpenSequenceDetails,
     onSequenceModeChange,
     expandedSequence,
+    expandedSequenceComplete,
     expandingSequenceId,
     onToggleSequenceExpand,
   }: PhotoGridProps) {
@@ -452,9 +726,6 @@ export const PhotoGrid = memo(
           tray,
           ...visible.slice(representativeIndex + 1),
         ];
-      }
-      if (sequenceMode === "all") {
-        return photos;
       }
       const visible = photos.filter(
         (photo) =>
@@ -655,10 +926,13 @@ export const PhotoGrid = memo(
           return (
             <SequenceFocusTray
               columns={photo.trayColumns}
+              completeMembers={expandedSequenceComplete?.members}
+              containerWidth={containerWidth}
               getDragIds={getDragIds}
               onDoubleClick={onDoubleClick}
               onSelect={onSelect}
               onSelectSequenceMembers={onSelectSequenceMembers}
+              onSequenceMutationComplete={onSequenceMutationComplete}
               onToggleFavorite={onToggleFavorite}
               onToggleSequenceExpand={onToggleSequenceExpand}
               renderImage={options.renderImage}
@@ -766,18 +1040,20 @@ export const PhotoGrid = memo(
         onSelect,
         onSelectSequence,
         onSelectSequenceMembers,
+        onSequenceMutationComplete,
         onDoubleClick,
         onToggleFavorite,
         searchQuery,
         getDragIds,
         columnCount,
+        containerWidth,
         sequenceByRepresentative,
         onOpenSequence,
         onOpenSequenceDetails,
         expandedSequence,
+        expandedSequenceComplete,
         expandingSequenceId,
         onToggleSequenceExpand,
-        sequenceMode,
         t,
       ]
     );
@@ -947,27 +1223,19 @@ export const PhotoGrid = memo(
               {onSequenceModeChange && (
                 <div className="flex rounded-md border border-border p-0.5 text-[11px]">
                   <button
-                    className={`rounded px-2 py-1 ${sequenceMode === "all" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => onSequenceModeChange("all")}
+                    className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                    onClick={() => onSequenceModeChange("photos")}
                     type="button"
                   >
-                    全部照片
+                    照片
                   </button>
                   <button
-                    className={`rounded px-2 py-1 ${sequenceMode === "collapsed" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                    onClick={() => onSequenceModeChange("collapsed")}
+                    className={`rounded px-2 py-1 ${sequenceMode === "sequences" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                    onClick={() => onSequenceModeChange("sequences")}
                     type="button"
                   >
-                    折叠序列
+                    序列
                   </button>
-                  {sequenceMode === "sequences" && (
-                    <button
-                      className="rounded bg-muted px-2 py-1 text-foreground"
-                      type="button"
-                    >
-                      仅序列
-                    </button>
-                  )}
                 </div>
               )}
               {onSortChange && (
@@ -1070,10 +1338,21 @@ export const PhotoGrid = memo(
     if (prevProps.expandedSequence !== nextProps.expandedSequence) {
       return false;
     }
+    if (
+      prevProps.expandedSequenceComplete !== nextProps.expandedSequenceComplete
+    ) {
+      return false;
+    }
     if (prevProps.expandingSequenceId !== nextProps.expandingSequenceId) {
       return false;
     }
     if (prevProps.onToggleSequenceExpand !== nextProps.onToggleSequenceExpand) {
+      return false;
+    }
+    if (
+      prevProps.onSequenceMutationComplete !==
+      nextProps.onSequenceMutationComplete
+    ) {
       return false;
     }
     if (prevProps.loading !== nextProps.loading) {

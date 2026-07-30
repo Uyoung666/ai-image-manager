@@ -33,7 +33,7 @@ interface BrowseSessionData {
   /** 选中的照片 ID 集合 */
   selectedIds: number[];
   /** 首页瀑布流展示模式 */
-  sequenceMode: "all" | "collapsed" | "sequences";
+  sequenceMode: "photos" | "sequences";
 }
 
 const DEFAULT_SESSION: BrowseSessionData = {
@@ -43,7 +43,7 @@ const DEFAULT_SESSION: BrowseSessionData = {
   detailDismissed: false,
   searchMode: null,
   searchQuery: "",
-  sequenceMode: "collapsed",
+  sequenceMode: "photos",
   selectedIds: [],
 };
 
@@ -82,13 +82,8 @@ interface CachedSession {
   lastAccess: number;
 }
 
-function normalizeSequenceMode(
-  value: unknown
-): "all" | "collapsed" | "sequences" {
-  if (value === "all" || value === "sequences") {
-    return value;
-  }
-  return "collapsed";
+function normalizeSequenceMode(value: unknown): "photos" | "sequences" {
+  return value === "sequences" ? "sequences" : "photos";
 }
 
 export function BrowseSessionProvider({ children }: { children: ReactNode }) {
@@ -128,7 +123,7 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
         updated.searchQuery === "" &&
         updated.searchMode === null &&
         updated.colorHex === null &&
-        updated.sequenceMode === "collapsed" &&
+        updated.sequenceMode === "photos" &&
         updated.lastClickedIdx === -1 &&
         updated.detailDismissed === false;
 

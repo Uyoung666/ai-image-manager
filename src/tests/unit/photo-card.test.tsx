@@ -92,6 +92,15 @@ describe("PhotoCard", () => {
     expect(img?.srcset).toContain("512w");
   });
 
+  it("keeps an inline selection outline inside the card bounds", () => {
+    render(
+      <PhotoCard {...baseProps} isSelected={true} selectionInset={true} />
+    );
+    const card = screen.getByText("test-photo.jpg").closest("[data-photo-id]");
+    expect(card).toHaveClass("ring-inset");
+    expect(card).not.toHaveClass("ring-offset-1");
+  });
+
   it("reveals a thumbnail only after its image load event", () => {
     render(
       <PhotoCard

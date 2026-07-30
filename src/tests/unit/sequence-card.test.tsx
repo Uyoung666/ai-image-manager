@@ -1,21 +1,21 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SequenceCard } from "@/components/SequenceCard";
 import type { PhotoSequence } from "@/types/photo-sequence";
 
 const sequence: PhotoSequence = {
-  endedAt: 1_000,
+  endedAt: 1000,
   frameCount: 3,
   id: 42,
   photo: {
     filename: "frame-1.jpg",
-    fileSize: 1_024,
-    height: 1_000,
+    fileSize: 1024,
+    height: 1000,
     id: 1,
     isIndexed: true,
     path: "C:/photos/frame-1.jpg",
     thumbnailPath: "C:/thumbnails/frame-1.jpg",
-    width: 1_500,
+    width: 1500,
   },
   representativePhotoId: 1,
   source: "auto",
@@ -24,6 +24,54 @@ const sequence: PhotoSequence = {
 };
 
 describe("SequenceCard", () => {
+  it("opens sequence details on a normal click", () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const onOpenDetails = vi.fn();
+
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={onClick}
+        onOpen={vi.fn()}
+        onOpenDetails={onOpenDetails}
+        sequence={sequence}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sequenceCardLabel" }));
+    act(() => vi.advanceTimersByTime(250));
+
+    expect(onOpenDetails).toHaveBeenCalledWith(sequence.id);
+    expect(onClick).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("selects the folded group on a modified click", () => {
+    const onClick = vi.fn();
+    const onOpenDetails = vi.fn();
+
+    render(
+      <SequenceCard
+        isSelected={false}
+        onClick={onClick}
+        onOpen={vi.fn()}
+        onOpenDetails={onOpenDetails}
+        sequence={sequence}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "sequenceCardLabel" }), {
+      ctrlKey: true,
+    });
+
+    expect(onClick).toHaveBeenCalledWith(
+      sequence.photo.id,
+      expect.objectContaining({ ctrlKey: true })
+    );
+    expect(onOpenDetails).not.toHaveBeenCalled();
+  });
+
   it("opens the sequence lightbox on double click", () => {
     const onOpen = vi.fn();
     const onOpenDetails = vi.fn();

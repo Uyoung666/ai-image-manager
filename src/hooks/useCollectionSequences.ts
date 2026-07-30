@@ -1,7 +1,6 @@
 // biome-ignore-all lint/style/useFilenamingConvention: hooks follow the repository's existing useXxx filename convention.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { INLINE_SEQUENCE_MAX_FRAMES } from "@/components/PhotoGrid";
 import { ipc } from "@/ipc/manager";
 import type { Photo } from "@/types/photo";
 import type {
@@ -9,15 +8,17 @@ import type {
   PhotoSequenceDetail,
 } from "@/types/photo-sequence";
 
-export type CollectionSequenceMode = "all" | "collapsed";
+export type CollectionSequenceMode = "photos" | "sequences";
 
 const EMPTY_IDS: number[] = [];
 
 function readMode(storageKey: string): CollectionSequenceMode {
   try {
-    return localStorage.getItem(storageKey) === "all" ? "all" : "collapsed";
+    return localStorage.getItem(storageKey) === "sequences"
+      ? "sequences"
+      : "photos";
   } catch {
-    return "collapsed";
+    return "photos";
   }
 }
 
@@ -64,6 +65,8 @@ export function useCollectionSequences({
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [expandedSequence, setExpandedSequence] =
     useState<PhotoSequenceDetail | null>(null);
+  const [expandedSequenceComplete, setExpandedSequenceComplete] =
+    useState<PhotoSequenceDetail | null>(null);
   const [expandingSequenceId, setExpandingSequenceId] = useState<number | null>(
     null
   );
@@ -72,11 +75,8 @@ export function useCollectionSequences({
   const [openSequence, setOpenSequence] = useState<PhotoSequenceDetail | null>(
     null
   );
-  const [workspaceSequence, setWorkspaceSequence] =
-    useState<PhotoSequenceDetail | null>(null);
-  const [workspaceScopeIds, setWorkspaceScopeIds] =
-    useState<number[]>(EMPTY_IDS);
   const requestRef = useRef(0);
+  const detailsRequestRef = useRef(0);
   const detailCacheRef = useRef(new Map<number, PhotoSequenceDetail>());
 
   const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
@@ -153,17 +153,19 @@ export function useCollectionSequences({
       onClearSelection();
       requestRef.current += 1;
       setExpandedSequence(null);
+      setExpandedSequenceComplete(null);
       setExpandingSequenceId(null);
       setSelectedSequence(null);
+      detailsRequestRef.current += 1;
       setOpenSequence(null);
-      setWorkspaceSequence(null);
-      setWorkspaceScopeIds(EMPTY_IDS);
     },
     [mode, onClearSelection, storageKey]
   );
 
   const openPlayback = useCallback(
     async (sequenceId: number) => {
+      detailsRequestRef.current += 1;
+      setSelectedSequence(null);
       try {
         const detail = await loadDetail(sequenceId);
         setOpenSequence(scopeDetail(detail, findScopeIds(sequenceId)));
@@ -176,9 +178,12 @@ export function useCollectionSequences({
 
   const openDetails = useCallback(
     async (sequenceId: number) => {
+      const requestId = ++detailsRequestRef.current;
       try {
         const detail = await loadDetail(sequenceId);
-        setSelectedSequence(scopeDetail(detail, findScopeIds(sequenceId)));
+        if (requestId === detailsRequestRef.current) {
+          setSelectedSequence(scopeDetail(detail, findScopeIds(sequenceId)));
+        }
       } catch {
         toast.error("无法打开序列详情");
       }
@@ -193,23 +198,20 @@ export function useCollectionSequences({
       if (expandedSequence?.id === sequenceId) {
         requestRef.current += 1;
         setExpandedSequence(null);
+        setExpandedSequenceComplete(null);
         setExpandingSequenceId(null);
         return;
       }
       const requestId = ++requestRef.current;
+      setExpandedSequenceComplete(null);
       setExpandingSequenceId(sequenceId);
       try {
         const detail = await loadDetail(sequenceId);
         if (requestId !== requestRef.current) {
           return;
         }
-        if (memberIds.length > INLINE_SEQUENCE_MAX_FRAMES) {
-          setWorkspaceScopeIds(memberIds);
-          setWorkspaceSequence(detail);
-          setExpandedSequence(null);
-        } else {
-          setExpandedSequence(scopeDetail(detail, memberIds));
-        }
+        setExpandedSequenceComplete(detail);
+        setExpandedSequence(scopeDetail(detail, memberIds));
       } catch {
         if (requestId === requestRef.current) {
           toast.error("无法展开序列");
@@ -223,44 +225,30 @@ export function useCollectionSequences({
     [expandedSequence?.id, findScopeIds, loadDetail, onRemoveSelection]
   );
 
-  const closeWorkspace = useCallback(() => {
-    setWorkspaceSequence(null);
-    setWorkspaceScopeIds(EMPTY_IDS);
+  const refreshSequences = useCallback(() => {
+    requestRef.current += 1;
+    detailCacheRef.current.clear();
+    setExpandedSequence(null);
+    setExpandedSequenceComplete(null);
+    setExpandingSequenceId(null);
+    setSelectedSequence(null);
+    setRefreshVersion((value) => value + 1);
   }, []);
 
-  const manageSequence = useCallback(
-    async (sequenceId: number) => {
-      const memberIds = findScopeIds(sequenceId);
-      onRemoveSelection(memberIds);
-      try {
-        const detail = await loadDetail(sequenceId);
-        setWorkspaceScopeIds(memberIds);
-        setWorkspaceSequence(detail);
-        setSelectedSequence(null);
-        setExpandedSequence(null);
-      } catch {
-        toast.error("无法打开序列管理");
-      }
-    },
-    [findScopeIds, loadDetail, onRemoveSelection]
-  );
-
   return {
-    closeWorkspace,
     expandedSequence,
+    expandedSequenceComplete,
     expandingSequenceId,
-    manageSequence,
     mode,
     openDetails,
     openPlayback,
     openSequence,
+    refreshSequences,
     selectedSequence,
     sequences,
     setMode,
     setOpenSequence,
     setSelectedSequence,
     toggleExpand,
-    workspaceScopeIds,
-    workspaceSequence,
   };
 }

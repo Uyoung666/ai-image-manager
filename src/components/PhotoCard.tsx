@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-import type { SearchMatch } from "@/types/photo";
 
 interface PhotoCardProps {
   deleting?: boolean;
@@ -14,15 +14,16 @@ interface PhotoCardProps {
   isFavorite?: boolean;
   isSelected: boolean;
   loading?: "eager" | "lazy";
+  match?: SearchMatch;
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   path: string;
   renderImage?: boolean;
   searchQuery?: string;
-  match?: SearchMatch;
-  thumbnailSmallPath?: string | null;
+  selectionInset?: boolean;
   thumbnailPath: string | null;
+  thumbnailSmallPath?: string | null;
   width: number;
 }
 
@@ -129,6 +130,7 @@ export const PhotoCard = memo(function PhotoCard({
   isFavorite,
   deleting,
   searchQuery,
+  selectionInset = false,
   match,
   renderImage = true,
   onClick,
@@ -257,6 +259,9 @@ export const PhotoCard = memo(function PhotoCard({
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       cancelPendingClick();
+      if (e.detail > 1) {
+        return;
+      }
       clickTimerRef.current = setTimeout(() => {
         clickTimerRef.current = null;
         onClick(id, e);
@@ -291,6 +296,15 @@ export const PhotoCard = memo(function PhotoCard({
   // Clamp extreme aspect ratios for visual consistency
   const rawAspect = width && height ? width / height : 4 / 3;
   const aspectRatio = Math.max(0.6, Math.min(rawAspect, 3.0));
+  let cardStateClass =
+    "hover:-translate-y-0.5 hover:shadow-lg hover:ring-1 hover:ring-foreground/10 hover:brightness-110";
+  if (deleting) {
+    cardStateClass = "scale-95 opacity-0 duration-180";
+  } else if (isSelected) {
+    cardStateClass = selectionInset
+      ? "ring-2 ring-primary ring-inset"
+      : "ring-2 ring-primary ring-offset-1 ring-offset-background";
+  }
 
   if (!renderImage) {
     return (
@@ -350,13 +364,7 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       aria-selected={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
-        deleting
-          ? "scale-95 opacity-0 duration-180"
-          : isSelected
-            ? "ring-2 ring-primary ring-offset-1 ring-offset-background"
-            : "hover:-translate-y-0.5 hover:shadow-lg hover:ring-1 hover:ring-foreground/10 hover:brightness-110"
-      }
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${cardStateClass}
       `}
       data-photo-id={id}
       data-photo-path={path}

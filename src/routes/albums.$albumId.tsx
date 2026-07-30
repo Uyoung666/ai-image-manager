@@ -21,7 +21,6 @@ import { QuickPreview } from "@/components/QuickPreview";
 import { RouteError } from "@/components/RouteError";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
-import { SequenceWorkspace } from "@/components/SequenceWorkspace";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useCollectionSequences } from "@/hooks/useCollectionSequences";
@@ -119,6 +118,8 @@ function AlbumDetailPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [cullPhotoIds, setCullPhotoIds] = useState<number[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<number[]>([]);
+  const [pendingDeleteSequenceGroup, setPendingDeleteSequenceGroup] =
+    useState(false);
 
   const cancelledRef = useRef(false);
 
@@ -187,13 +188,6 @@ function AlbumDetailPage() {
     photos: photos as any,
     storageKey: "album_sequence_view_mode",
   });
-  const workspaceCurrentMembers = useMemo(
-    () =>
-      sequenceView.workspaceSequence?.members.filter((photo) =>
-        sequenceView.workspaceScopeIds.includes(photo.id)
-      ) ?? [],
-    [sequenceView.workspaceScopeIds, sequenceView.workspaceSequence]
-  );
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
       sequenceView.setSelectedSequence(null);
@@ -337,6 +331,7 @@ function AlbumDetailPage() {
   }
 
   function handleDeletePhoto(id: number) {
+    setPendingDeleteSequenceGroup(false);
     setPendingDeleteIds([id]);
     setDeleteConfirmOpen(true);
   }
@@ -345,6 +340,7 @@ function AlbumDetailPage() {
     const ids = pendingDeleteIds;
     setDeleteConfirmOpen(false);
     setPendingDeleteIds([]);
+    setPendingDeleteSequenceGroup(false);
     try {
       await ipc.client.photos.deletePhotos({ ids });
       markRouteDirty(routeKey);
@@ -440,9 +436,11 @@ function AlbumDetailPage() {
   const handleDoubleClick = useCallback((id: number) => {
     const idx = photosRef.current.findIndex((p) => p.id === id);
     if (idx >= 0) {
+      clearSelection();
+      dismissDetail();
       setLightboxIndex(idx);
     }
-  }, []);
+  }, [clearSelection, dismissDetail]);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -454,12 +452,18 @@ function AlbumDetailPage() {
       }
       const id = Number.parseInt(card.dataset.photoId || "", 10);
       const path = card.dataset.photoPath || null;
+      const sequenceId = Number.parseInt(card.dataset.sequenceId || "", 10);
       if (!id) {
         return;
       }
       e.preventDefault();
       const inSelection = selectedIds.has(id);
       const isBatch = selectedIds.size > 1 && inSelection;
+      const sequence = sequenceId
+        ? sequenceView.sequences.find((item) => item.id === sequenceId)
+        : undefined;
+      const sequenceMemberIds =
+        sequence?.matchedPhotoIds ?? sequence?.memberPhotoIds;
       setCtxMenu({
         open: true,
         x: e.clientX,
@@ -468,9 +472,10 @@ function AlbumDetailPage() {
         photoPath: path,
         isBatch,
         selectionCount: isBatch ? selectedIds.size : 1,
+        sequenceMemberIds,
       });
     },
-    [selectedIds]
+    [selectedIds, sequenceView.sequences]
   );
 
   async function handleOpenExplorer(filePath: string) {
@@ -850,6 +855,7 @@ function AlbumDetailPage() {
         <div className="relative flex min-w-0 flex-1">
           <PhotoGrid
             expandedSequence={sequenceView.expandedSequence}
+            expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
             isPlaceholderData={loading}
             loading={loading}
@@ -869,11 +875,8 @@ function AlbumDetailPage() {
             onSelect={handleSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
-            onSequenceModeChange={(mode) => {
-              if (mode !== "sequences") {
-                sequenceView.setMode(mode);
-              }
-            }}
+            onSequenceMutationComplete={sequenceView.refreshSequences}
+            onSequenceModeChange={sequenceView.setMode}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
@@ -962,7 +965,6 @@ function AlbumDetailPage() {
         {sequenceView.selectedSequence ? (
           <SequenceDetailPanel
             onClose={() => sequenceView.setSelectedSequence(null)}
-            onManage={sequenceView.manageSequence}
             onOpenPhoto={(photoId) => {
               sequenceView.setSelectedSequence(null);
               handleKeyboardSelect(photoId);
@@ -1031,30 +1033,6 @@ function AlbumDetailPage() {
           showThumbnailsInitially={true}
         />
       )}
-      <SequenceWorkspace
-        completeMembers={(sequenceView.workspaceSequence?.members ?? []) as any}
-        currentMembers={workspaceCurrentMembers as any}
-        currentScopeLabel="当前相册"
-        onClose={sequenceView.closeWorkspace}
-        onOpenDetails={(photoId) => {
-          sequenceView.closeWorkspace();
-          handleKeyboardSelect(photoId);
-        }}
-        onPlay={(members) => {
-          if (sequenceView.workspaceSequence) {
-            sequenceView.setOpenSequence({
-              ...sequenceView.workspaceSequence,
-              frameCount: members.length,
-              members: [...members],
-            });
-          }
-        }}
-        onSelectionChange={handleMarqueeSelect}
-        open={sequenceView.workspaceSequence !== null}
-        selectedPhotoIds={selectedIds}
-        sequenceId={sequenceView.workspaceSequence?.id}
-      />
-
       {quickPreviewIndex >= 0 && photos[quickPreviewIndex] && (
         <QuickPreview
           onClose={() => setQuickPreviewIndex(-1)}
@@ -1128,6 +1106,11 @@ function AlbumDetailPage() {
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}
         onDelete={handleDeletePhoto}
+        onDeleteSequenceGroup={(ids) => {
+          setPendingDeleteSequenceGroup(true);
+          setPendingDeleteIds(ids);
+          setDeleteConfirmOpen(true);
+        }}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
         onRemoveFromAlbum={album?.isSmart ? undefined : handleRemoveFromAlbum}
@@ -1209,9 +1192,11 @@ function AlbumDetailPage() {
         onCancel={() => {
           setDeleteConfirmOpen(false);
           setPendingDeleteIds([]);
+          setPendingDeleteSequenceGroup(false);
         }}
         onConfirm={executeDelete}
         open={deleteConfirmOpen}
+        sequenceGroup={pendingDeleteSequenceGroup}
       />
       <CullStartDialog
         defaultName={`${t("cullTitle")} · ${cullPhotoIds.length} ${t("photos")}`}
