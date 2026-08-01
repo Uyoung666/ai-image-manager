@@ -108,9 +108,13 @@ out/
 data/
 thumbnails/
 models/
+models-release/
 models-lab/
 vectors/
 models/
+
+# Face model upgrade: isolated dev verification environment
+.face-dev/
 
 # Claude Code
 .claude/

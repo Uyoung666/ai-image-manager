@@ -8,8 +8,40 @@ import { MakerZIP } from "@electron-forge/maker-zip";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import type { ForgeConfig } from "@electron-forge/shared-types";
+import { MODEL_MANIFEST } from "./src/services/model-downloader";
 
 const packageTempSuffix = process.env.AIM_PACKAGE_TEMP_SUFFIX;
+const RELEASE_MODELS_DIR = path.resolve("models-release");
+
+/**
+ * Build the exact model payload that is allowed into a release.  The source
+ * models directory is intentionally ignored and may contain research-only
+ * rollback weights; never pass that directory directly to Electron Forge.
+ */
+function stageReleaseModels(): void {
+  fs.rmSync(RELEASE_MODELS_DIR, { recursive: true, force: true });
+  let stagedCount = 0;
+  for (const entry of MODEL_MANIFEST) {
+    if (entry.researchOnly || entry.bundled === false) {
+      continue;
+    }
+    const source = path.join("models", entry.subPath, entry.fileName);
+    const target = path.join(RELEASE_MODELS_DIR, entry.subPath, entry.fileName);
+    if (!fs.existsSync(source)) {
+      if (entry.required) {
+        throw new Error(`Required release model is missing: ${source}`);
+      }
+      console.warn(`[release-models] skipped optional model: ${source}`);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+    stagedCount += 1;
+  }
+  console.log(`[release-models] staged ${stagedCount} model files`);
+}
+
+stageReleaseModels();
 
 // 递归删除 node_modules 中指定后缀的开发文件
 function removeFilesByExt(dir: string, ext: string, label: string) {
@@ -122,7 +154,7 @@ const config: ForgeConfig = {
         "**/{better-sqlite3,sharp,@lancedb,@lancedb/lancedb-win32-x64-msvc,@lancedb/lancedb-win32-arm64-msvc,@img,node-*,detect-libc,semver,scripts,@xenova,@huggingface,onnxruntime-node,onnxruntime-common,onnxruntime-web,color,color-convert,color-name,color-string,simple-swizzle,is-arrayish,exiftool-vendored,exiftool-vendored.exe}/**",
     },
     extraResource: [
-      "models",
+      "models-release",
       "drizzle",
       "assets/icon.png",
       "THIRD_PARTY_MODEL_NOTICES.md",
@@ -287,7 +319,7 @@ const config: ForgeConfig = {
 
   // asar 打包后再清理一次 app.asar.unpacked，确保最终输出干净
   hooks: {
-    postPackage: async (_forgeConfig, packageResult) => {
+    postPackage: (_forgeConfig, packageResult) => {
       for (const outputPath of packageResult.outputPaths) {
         cleanBuildNodeModules(
           path.join(outputPath, "resources", "app.asar.unpacked")

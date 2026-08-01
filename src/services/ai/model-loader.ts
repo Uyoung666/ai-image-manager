@@ -117,7 +117,10 @@ export async function copyModelsOnce(): Promise<void> {
   _modelCopyPromise = (async () => {
     try {
       if (app.isPackaged) {
-        const bundledModels = path.join(process.resourcesPath, "models");
+        const bundledModels = path.join(
+          process.resourcesPath,
+          "models-release"
+        );
         const bundledMarker = getEmbeddingModelFile(
           bundledModels,
           "vision_model_quantized.onnx"

@@ -30,12 +30,17 @@ import {
   cleanupExpiredTrash,
   getOrphanPhotoIds,
 } from "@/ipc/photos/handlers/mutations";
+import { getActiveFaceModel } from "@/services/ai/face-model-config";
 import {
   getEmbeddingModelFile,
   getTranslationModelFile,
 } from "@/services/ai/model-config";
 import { copyModelsOnce } from "@/services/ai/model-loader";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
+import {
+  MODEL_MANIFEST,
+  verifyModelFile,
+} from "@/services/model-downloader";
 import {
   getHttpServerPort,
   startHttpServerEarly,
@@ -67,6 +72,15 @@ const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
 if (process.env.CI === "e2e" && e2eUserDataDir) {
   app.setPath("userData", path.resolve(e2eUserDataDir));
   app.disableHardwareAcceleration();
+}
+
+// Isolated verification env (e.g. face model upgrade A/B testing): an explicit
+// user-data override that works outside E2E runs, so the real profile and its
+// single-instance lock stay untouched. Set it, then add the same folder via
+// Settings → Storage or app-config.json dataPath.
+const devUserDataDir = process.env.AI_IMAGE_MANAGER_USER_DATA_DIR;
+if (devUserDataDir) {
+  app.setPath("userData", path.resolve(devUserDataDir));
 }
 
 // ── Single instance lock ─────────────────────────────────────────────
@@ -209,7 +223,7 @@ function logPackagedPathDiagnostics() {
     summarizePathState(
       "resource-model",
       getEmbeddingModelFile(
-        path.join(process.resourcesPath, "models"),
+        path.join(process.resourcesPath, "models-release"),
         "vision_model_quantized.onnx"
       )
     ),
@@ -482,6 +496,27 @@ export { invalidateFoldersCache } from "@/utils/folder-paths";
 
 // ── AI model availability (copy from resources or dev paths) ─────────
 
+async function verifyCurrentFaceModels(modelsDir: string): Promise<{
+  invalidFiles: string[];
+  valid: boolean;
+}> {
+  const activeFaceModel = getActiveFaceModel();
+  const invalidFiles: string[] = [];
+
+  for (const fileName of activeFaceModel.modelFiles) {
+    const entry = MODEL_MANIFEST.find(
+      (candidate) =>
+        candidate.subPath === "face" && candidate.fileName === fileName
+    );
+    const filePath = path.join(modelsDir, "face", fileName);
+    if (!entry || !(await verifyModelFile(filePath, entry.sha256, entry.sizeBytes))) {
+      invalidFiles.push(fileName);
+    }
+  }
+
+  return { invalidFiles, valid: invalidFiles.length === 0 };
+}
+
 async function ensureModelAvailable(): Promise<void> {
   const dataPath = getDataPath();
   const modelsDir = path.join(dataPath, "models");
@@ -498,56 +533,79 @@ async function ensureModelAvailable(): Promise<void> {
     "decoder_model_merged_quantized.onnx"
   );
 
+  // Face models are copied together with the model directory, so include them
+  // in the cache check — otherwise an existing SigLIP cache would skip copying
+  // a newly added face model (e.g. YuNet/SFace upgrade).
+  const faceValidation = await verifyCurrentFaceModels(modelsDir);
   if (
     fs.existsSync(visionMarker) &&
     fs.existsSync(translationEncoder) &&
-    fs.existsSync(translationDecoder)
+    fs.existsSync(translationDecoder) &&
+    faceValidation.valid
   ) {
-    log.info("AI models already cached at %s", modelsDir);
+    log.info("AI models already cached and face hashes verified at %s", modelsDir);
     return;
   }
 
   // ── Production: use shared single-flight copy (fixes Issue #25 race) ──
   if (app.isPackaged) {
-    const bundledModels = path.join(process.resourcesPath, "models");
+    const bundledModels = path.join(process.resourcesPath, "models-release");
     const bundledMarker = getEmbeddingModelFile(
       bundledModels,
       "vision_model_quantized.onnx"
     );
+    const bundledFaceValidation = await verifyCurrentFaceModels(bundledModels);
 
     log.info(
-      "[ensureModelAvailable] bundledModels=%s exists=%s bundledMarker=%s exists=%s",
+      "[ensureModelAvailable] bundledModels=%s exists=%s bundledMarker=%s exists=%s faceValid=%s",
       bundledModels,
       fs.existsSync(bundledModels),
       bundledMarker,
-      fs.existsSync(bundledMarker)
+      fs.existsSync(bundledMarker),
+      bundledFaceValidation.valid
     );
 
-    if (fs.existsSync(bundledMarker)) {
+    if (fs.existsSync(bundledMarker) && bundledFaceValidation.valid) {
       log.info("Copying AI models from bundled resources...");
       try {
         await copyModelsOnce();
+        // copyModelsOnce intentionally short-circuits when the text-model
+        // cache is already present. Face models still need to be refreshed
+        // independently after a model upgrade.
+        await fs.promises.cp(
+          path.join(bundledModels, "face"),
+          path.join(modelsDir, "face"),
+          { recursive: true }
+        );
         // Verify
-        const copied = fs.existsSync(visionMarker);
-        const size = copied ? fs.statSync(visionMarker).size : 0;
+        const copied =
+          fs.existsSync(visionMarker) &&
+          fs.existsSync(translationEncoder) &&
+          fs.existsSync(translationDecoder) &&
+          (await verifyCurrentFaceModels(modelsDir)).valid;
+        const size = fs.existsSync(visionMarker)
+          ? fs.statSync(visionMarker).size
+          : 0;
         log.info(
           "[ensureModelAvailable] copy done — marker exists=%s size=%d",
           copied,
           size
         );
         if (copied && size > 0) {
-          log.info("AI models copied to data directory");
+          log.info("AI models copied and current face model hashes verified");
           return;
         }
-        log.error(
-          "[ensureModelAvailable] copy verification FAILED — marker missing or empty"
+        throw new Error(
+          "Copied AI models failed startup verification, including the active face model"
         );
       } catch (err) {
         log.error({ err }, "Failed to copy AI models from resources");
+        throw err;
       }
     } else {
-      log.warn("Bundled models not found at %s", bundledModels);
-      return;
+      throw new Error(
+        `Bundled AI models are incomplete or failed hash verification; invalid face files: ${bundledFaceValidation.invalidFiles.join(", ") || "none"}`
+      );
     }
   }
 
@@ -569,8 +627,15 @@ async function ensureModelAvailable(): Promise<void> {
       log.info({ source: candidate }, "Copying AI models from dev path");
       try {
         await fs.promises.cp(candidate, modelsDir, { recursive: true });
-        log.info("AI models copied");
-        return;
+        const copiedFaceValidation = await verifyCurrentFaceModels(modelsDir);
+        if (copiedFaceValidation.valid) {
+          log.info("AI models copied and current face model hashes verified");
+          return;
+        }
+        log.warn(
+          { invalidFiles: copiedFaceValidation.invalidFiles, source: candidate },
+          "Dev model copy rejected because the active face model failed hash verification"
+        );
       } catch (err) {
         log.warn({ err, source: candidate }, "Failed to copy from dev path");
       }

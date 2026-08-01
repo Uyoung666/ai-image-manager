@@ -13,8 +13,10 @@ import {
   detectFaces,
   getFaceDetectionProgress,
   isFaceDetectionRunning,
+  isFaceModelMismatch,
   reclusterAllFaces,
   refreshFaceIdentityMetadata,
+  resetFaceDataForModelSwitch,
 } from "@/services/face-detector";
 import {
   getFaceScanScope,
@@ -35,6 +37,16 @@ export const startFaceDetection = os
       return { started: false, message: "人脸检测已在运行中" };
     }
 
+    // Stored vectors belong to a different model kind than the active one —
+    // they cannot be compared. Ask the renderer to reset before detecting.
+    if (isFaceModelMismatch()) {
+      return {
+        started: false,
+        requiresModelReset: true,
+        message: "人脸识别模型已变更，需重置人脸数据后重新检测",
+      };
+    }
+
     const db = getDatabase();
     const scopeFolderIds = resolveFaceScanFolderIds();
     if (scopeFolderIds.length === 0) {
@@ -49,10 +61,7 @@ export const startFaceDetection = os
       .select({ id: photos.id })
       .from(photos)
       .where(
-        and(
-          inArray(photos.folderId, scopeFolderIds),
-          isNull(photos.deletedAt)
-        )
+        and(inArray(photos.folderId, scopeFolderIds), isNull(photos.deletedAt))
       )
       .limit(1)
       .get();
@@ -115,9 +124,7 @@ export const startFaceDetection = os
       db.transaction(() => {
         for (let index = 0; index < removableVectorIds.length; index += 500) {
           const chunk = removableVectorIds.slice(index, index + 500);
-          db.delete(faceVectors)
-            .where(inArray(faceVectors.id, chunk))
-            .run();
+          db.delete(faceVectors).where(inArray(faceVectors.id, chunk)).run();
         }
 
         db.update(photos)
@@ -655,6 +662,16 @@ export const cancelFaceDetection_h = os.handler(() => {
   }
   cancelFaceDetection();
   return { cancelled: true };
+});
+
+export const resetFaceData = os.handler(() => {
+  if (isFaceDetectionRunning()) {
+    throw new Error(
+      "Face detection is running; cancel it before resetting face data"
+    );
+  }
+  resetFaceDataForModelSwitch();
+  return { ok: true };
 });
 
 export const recluster = os.handler(async () => {

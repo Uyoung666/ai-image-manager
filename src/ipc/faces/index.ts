@@ -9,6 +9,7 @@ import {
   mergeIdentities,
   recluster,
   removeFaceFromIdentity,
+  resetFaceData,
   setScanScope,
   startFaceDetection,
   updateFaceIdentity,
@@ -25,7 +26,8 @@ export const faces = {
   mergeIdentities,
   recluster,
   removeFaceFromIdentity,
-  startFaceDetection,
+  resetFaceData,
   setScanScope,
+  startFaceDetection,
   updateFaceIdentity,
 };

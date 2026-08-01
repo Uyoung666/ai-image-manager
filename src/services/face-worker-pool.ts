@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
+import { getActiveFaceModel } from "@/services/ai/face-model-config";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("face-worker-pool");
@@ -200,6 +201,7 @@ function handleWorkerDeath(slot: WorkerSlot): void {
         type: "init",
         modelsDir: poolModelsDir,
         useGPU: poolUseGPU,
+        kind: getActiveFaceModel().kind,
       });
     }, RESPAWN_DELAY_MS);
   } else {
@@ -301,7 +303,12 @@ export async function initFaceWorkerPool(
   }
 
   for (const slot of slots) {
-    slot.process.send({ type: "init", modelsDir, useGPU });
+    slot.process.send({
+      type: "init",
+      modelsDir,
+      useGPU,
+      kind: getActiveFaceModel().kind,
+    });
   }
 
   await Promise.all(readyPromises);

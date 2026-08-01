@@ -6,12 +6,28 @@ import https from "node:https";
 import path from "node:path";
 import { pipeline, Transform } from "node:stream";
 
+const HTTP_STATUS_PATTERN = /HTTP\s*(\d{3})/iu;
+const PATH_SEPARATOR_PATTERN = /[\\/]/u;
+const TRAILING_SLASH_PATTERN = /\/+$/u;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 // ── Types ───────────────────────────────────────────────────────────────
 
 export interface ModelManifestEntry {
+  /** Set false for assets that must never enter a normal release package. */
+  bundled?: boolean;
   fileName: string;
   name: string;
   required: boolean;
+  /** Research-only assets require an explicit opt-in. */
+  researchOnly?: boolean;
   sha256: string;
   sizeBytes: number;
   subPath: string;
@@ -33,6 +49,13 @@ export interface DownloadProgress {
   totalBytes: number;
   totalFiles: number;
   warnings: string[];
+}
+
+export interface ModelDownloadOptions {
+  /** Explicit opt-in for the legacy research-only fallback. */
+  allowResearchOnly?: boolean;
+  /** Include non-required, non-research assets such as optional CLIP files. */
+  includeOptional?: boolean;
 }
 
 // ── Model Manifest ──────────────────────────────────────────────────────
@@ -121,6 +144,97 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     sha256: "9a38d3c6b5e26fe5dcc607eda95e38d78d30d9291835bb9e8116e8174c1d4ba2",
     sizeBytes: 739,
     required: true,
+  },
+  {
+    name: "CLIP 图像编码器",
+    fileName: "vision_model_quantized.onnx",
+    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+    ],
+    sha256: "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299",
+    sizeBytes: 89_117_001,
+    required: false,
+  },
+  {
+    name: "CLIP 文本编码器",
+    fileName: "text_model_quantized.onnx",
+    subPath: "Xenova/clip-vit-base-patch32/onnx",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
+    ],
+    sha256: "73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a",
+    sizeBytes: 64_504_507,
+    required: false,
+  },
+  {
+    name: "CLIP 模型配置",
+    fileName: "config.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/config.json"],
+    sha256: "493ef57ff783e42d1530c91b53469b7fdf8db8a9c1408e86998fcb7899a4f495",
+    sizeBytes: 4524,
+    required: false,
+  },
+  {
+    name: "CLIP 图像处理配置",
+    fileName: "preprocessor_config.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/preprocessor_config.json",
+    ],
+    sha256: "6f638fb9401a6d6296feff533ee7efe657b787c49f954f82f5906b36ef2a1b1f",
+    sizeBytes: 520,
+    required: false,
+  },
+  {
+    name: "CLIP 特殊词元配置",
+    fileName: "special_tokens_map.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/special_tokens_map.json",
+    ],
+    sha256: "c4864a9376a8401918425bed71fc14fc0e81f9b59ec45c1cf96cccb2df508eac",
+    sizeBytes: 472,
+    required: false,
+  },
+  {
+    name: "CLIP 分词器",
+    fileName: "tokenizer.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json"],
+    sha256: "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd",
+    sizeBytes: 2_224_119,
+    required: false,
+  },
+  {
+    name: "CLIP 分词器配置",
+    fileName: "tokenizer_config.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: [
+      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/tokenizer_config.json",
+    ],
+    sha256: "60ba2912bc6344c94bc16bbdec27fa1209409167b6f2fdf3cfe9e65462ea3967",
+    sizeBytes: 775,
+    required: false,
+  },
+  {
+    name: "CLIP 词表",
+    fileName: "vocab.json",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/vocab.json"],
+    sha256: "5047b556ce86ccaf6aa22b3ffccfc52d391ea4accdab9c2f2407da5b742d4363",
+    sizeBytes: 862_328,
+    required: false,
+  },
+  {
+    name: "CLIP merges 词表",
+    fileName: "merges.txt",
+    subPath: "Xenova/clip-vit-base-patch32",
+    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/merges.txt"],
+    sha256: "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a",
+    sizeBytes: 524_619,
+    required: false,
   },
   {
     name: "OPUS-MT 翻译编码器",
@@ -233,22 +347,113 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     required: true,
   },
   {
-    name: "人脸识别模型",
+    name: "人脸识别模型 (旧版)",
+    bundled: false,
     fileName: "w600k_r50.onnx",
     subPath: "face",
     urls: [
       "{mirror}/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
       "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
     ],
-    sha256: "",
-    sizeBytes: 173_873_425,
+    researchOnly: true,
+    sha256: "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
+    sizeBytes: 174_383_860,
     required: false,
   },
-  // ultraface-320.onnx (~1.2 MB) is now bundled inside models-tokenizer
-  // and copied by ensureModelAvailable() on every startup — no need to
-  // include it in the download manifest.  The face/ directory will
-  // already contain it after the tokenizer copy step.
+  // w600k_r50 is InsightFace buffalo_l (research-only license). The model file
+  // is no longer bundled — the installer ships only YuNet+SFace. This entry
+  // remains purely as a manual rollback download for the legacy
+  // "ultraface-w600k" face kind; it is NOT included in the installer.
+  {
+    name: "YuNet 人脸检测",
+    fileName: "face_detection_yunet_2023mar.onnx",
+    subPath: "face",
+    urls: [
+      "{mirror}/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx",
+    ],
+    sha256: "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    sizeBytes: 232_589,
+    required: true,
+  },
+  {
+    name: "SFace 人脸识别",
+    fileName: "face_recognition_sface_2021dec.onnx",
+    subPath: "face",
+    urls: [
+      "{mirror}/opencv/face_recognition_sface/resolve/main/face_recognition_sface_2021dec.onnx",
+    ],
+    sha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+    sizeBytes: 38_696_353,
+    required: true,
+  },
+  {
+    name: "UltraFace 320 (legacy detector)",
+    bundled: false,
+    fileName: "ultraface-320.onnx",
+    subPath: "face",
+    urls: [
+      "https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB/raw/master/models/onnx/version-RFB-320.onnx",
+    ],
+    researchOnly: true,
+    sha256: "34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017",
+    sizeBytes: 1_270_727,
+    required: false,
+  },
 ];
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+
+function isSafeRelativePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !path.isAbsolute(value) &&
+    !value
+      .split(PATH_SEPARATOR_PATTERN)
+      .some((part) => part === ".." || part === "")
+  );
+}
+
+function validateManifestEntry(entry: ModelManifestEntry): void {
+  if (!entry.bundled && entry.urls.length === 0 && !entry.researchOnly) {
+    throw new Error(`Model manifest entry has no source: ${entry.fileName}`);
+  }
+  if (
+    !(isSafeRelativePath(entry.subPath) && isSafeRelativePath(entry.fileName))
+  ) {
+    throw new Error(
+      `Unsafe model manifest path: ${entry.subPath}/${entry.fileName}`
+    );
+  }
+  if (!Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes <= 0) {
+    throw new Error(`Invalid model size: ${entry.fileName}`);
+  }
+  if (!SHA256_PATTERN.test(entry.sha256)) {
+    throw new Error(`Missing or invalid SHA256: ${entry.fileName}`);
+  }
+  for (const url of entry.urls) {
+    const candidate = substituteMirror(url, "https://huggingface.co");
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+      throw new Error(`Unsafe model URL: ${url}`);
+    }
+  }
+}
+
+export function validateModelManifest(
+  manifest: readonly ModelManifestEntry[] = MODEL_MANIFEST
+): void {
+  const seenPaths = new Set<string>();
+  for (const entry of manifest) {
+    validateManifestEntry(entry);
+    const relativePath = path.join(entry.subPath, entry.fileName);
+    if (seenPaths.has(relativePath)) {
+      throw new Error(`Duplicate model manifest path: ${relativePath}`);
+    }
+    seenPaths.add(relativePath);
+  }
+}
+
+validateModelManifest();
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -268,6 +473,7 @@ export const PROBE_FILE_PATH =
 
 class HashTransform extends Transform {
   private hash = createHash("sha256");
+  private bytes = 0;
 
   _transform(
     chunk: Buffer,
@@ -275,6 +481,7 @@ class HashTransform extends Transform {
     callback: (error?: Error | null) => void
   ): void {
     this.hash.update(chunk);
+    this.bytes += chunk.length;
     this.push(chunk);
     callback();
   }
@@ -283,8 +490,13 @@ class HashTransform extends Transform {
     return this.hash.digest("hex");
   }
 
+  get byteLength(): number {
+    return this.bytes;
+  }
+
   reset(): void {
     this.hash = createHash("sha256");
+    this.bytes = 0;
   }
 }
 
@@ -311,12 +523,28 @@ function resolveMirrorLabel(url: string): string {
   }
 }
 
+function validateDownloadUrl(rawUrl: string): string {
+  const parsed = new URL(rawUrl);
+  const isLoopback =
+    parsed.hostname === "localhost" ||
+    parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "[::1]";
+  if (
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol !== "https:" &&
+      !(parsed.protocol === "http:" && isLoopback))
+  ) {
+    throw new Error(`Refusing unsafe model URL: ${rawUrl}`);
+  }
+  return parsed.href;
+}
+
 /**
- * Check whether a file exists on disk and its content passes SHA256
- * verification. If there is no sha256 check available (empty string),
- * we only check existence and file size.
+ * Check whether a file exists on disk and its content passes the manifest's
+ * size and SHA256 verification. A missing hash is never considered safe.
  */
-async function isFileValid(
+export async function verifyModelFile(
   filePath: string,
   expectedSha256: string,
   expectedSizeBytes: number
@@ -330,9 +558,8 @@ async function isFileValid(
   if (stat.size !== expectedSizeBytes) {
     return false;
   }
-  // Skip SHA256 if not configured (placeholder)
-  if (!expectedSha256) {
-    return true;
+  if (!SHA256_PATTERN.test(expectedSha256)) {
+    return false;
   }
   // Stream SHA256 verification — never fs.readFileSync
   try {
@@ -342,6 +569,8 @@ async function isFileValid(
     return false;
   }
 }
+
+const isFileValid = verifyModelFile;
 
 function sha256FileStream(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -373,6 +602,7 @@ interface DownloadFileResult {
  * Download a single model file with streaming, SHA256 verification,
  * .tmp atomic rename, mirror fallback, and retries.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Retry, mirror fallback, abort handling, and atomic verification form one download boundary.
 async function downloadOneFile(
   opts: DownloadFileOptions
 ): Promise<DownloadFileResult> {
@@ -479,17 +709,17 @@ async function downloadOneFile(
         // Atomic rename: .tmp → final filename
         await fsp.rename(tmpPath, destPath);
         return { warnings };
-      } catch (err: any) {
+      } catch (err: unknown) {
         // If the operation was aborted (by an external AbortController or
         // by our internal concurrent-error abort), re-throw immediately
         // instead of retrying — retries are pointless when the user or
         // the pool controller wants to stop.
-        if (signal?.aborted || err?.name === "AbortError") {
+        if (signal?.aborted || isAbortError(err)) {
           throw err;
         }
 
-        lastError = err;
-        warnings.push(`Mirror ${mirrorLabel}: ${err.message}`);
+        lastError = err instanceof Error ? err : new Error(errorMessage(err));
+        warnings.push(`Mirror ${mirrorLabel}: ${errorMessage(err)}`);
         // Clean up failed .tmp so next attempt starts fresh
         try {
           await fsp.unlink(tmpPath);
@@ -515,6 +745,7 @@ interface AttemptDownloadOptions {
   entry: ModelManifestEntry;
   mirrorLabel: string;
   onProgress?: (progress: DownloadProgress) => void;
+  redirectsRemaining?: number;
   signal?: AbortSignal;
   tmpPath: string;
   url: string;
@@ -531,7 +762,16 @@ interface AttemptDownloadOptions {
  * instead of freezing the download pool indefinitely.
  */
 function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
-  const { url, tmpPath, entry, mirrorLabel, signal, onProgress } = opts;
+  const {
+    url: rawUrl,
+    tmpPath,
+    entry,
+    mirrorLabel,
+    signal,
+    onProgress,
+    redirectsRemaining = 5,
+  } = opts;
+  const url = validateDownloadUrl(rawUrl);
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -562,15 +802,24 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
         ) {
           const redirectUrl = response.headers.location;
           if (redirectUrl) {
+            if (redirectsRemaining <= 0) {
+              response.resume();
+              onceSettle(() =>
+                reject(new Error("Too many model URL redirects"))
+              );
+              return;
+            }
             // Consume response to free socket
             response.resume();
+            const resolvedRedirect = new URL(redirectUrl, url).href;
             attemptDownload({
-              url: redirectUrl,
+              url: resolvedRedirect,
               tmpPath,
               entry,
               mirrorLabel,
               signal,
               onProgress,
+              redirectsRemaining: redirectsRemaining - 1,
             })
               .then((h) => onceSettle(() => resolve(h)))
               .catch((e) => onceSettle(() => reject(e)));
@@ -637,6 +886,17 @@ function attemptDownload(opts: AttemptDownloadOptions): Promise<string> {
             return;
           }
           // Return SHA256 computed in-stream — avoids re-reading the file from disk
+          if (hashTransform.byteLength !== entry.sizeBytes) {
+            writeStream.destroy();
+            onceSettle(() =>
+              reject(
+                new Error(
+                  `Model size mismatch: expected ${entry.sizeBytes}, got ${hashTransform.byteLength}`
+                )
+              )
+            );
+            return;
+          }
           onceSettle(() => resolve(hashTransform.digest()));
         });
       }
@@ -680,7 +940,7 @@ async function probeSingleMirror(
   signal: AbortSignal
 ): Promise<{ url: string; ttfb: number }> {
   // Strip trailing slash, then append the real model file path
-  const base = mirrorBaseUrl.replace(/\/+$/, "");
+  const base = mirrorBaseUrl.replace(TRAILING_SLASH_PATTERN, "");
   const probeUrl = `${base}/${PROBE_FILE_PATH}`;
 
   const startTime = Date.now();
@@ -689,16 +949,16 @@ async function probeSingleMirror(
   try {
     await headRequest(probeUrl, signal);
     return { url: mirrorBaseUrl, ttfb: Date.now() - startTime };
-  } catch (headErr: any) {
+  } catch (headErr: unknown) {
     // Only fall through to Range GET when HEAD was blocked by a
     // WAF/CDN policy (403 Forbidden, 405 Method Not Allowed).
     // Any other error (DNS, connection refused, 404, timeout)
     // means the mirror is genuinely unreachable — propagate it.
-    const statusCode = extractStatusCode(headErr?.message);
+    const headMessage = errorMessage(headErr);
+    const statusCode = extractStatusCode(headMessage);
     const isHeadBlocked = statusCode === 403 || statusCode === 405;
     const isTimeout =
-      headErr?.message?.includes("timeout") ||
-      headErr?.message?.includes("TIMEOUT");
+      headMessage.includes("timeout") || headMessage.includes("TIMEOUT");
 
     if (!(isHeadBlocked || isTimeout)) {
       throw headErr; // Fatal: mirror unreachable
@@ -711,7 +971,7 @@ async function probeSingleMirror(
 }
 
 function extractStatusCode(message: string): number | null {
-  const m = message?.match(/HTTP\s*(\d{3})/i);
+  const m = message.match(HTTP_STATUS_PATTERN);
   return m ? Number.parseInt(m[1], 10) : null;
 }
 
@@ -844,13 +1104,37 @@ function rangeGetRequest(url: string, signal: AbortSignal): Promise<number> {
 // ── Public API ──────────────────────────────────────────────────────────
 
 /**
- * Scan the models directory and return the list of models that are
- * missing or corrupted (wrong size / wrong hash).
+ * Scan the models directory and return candidates that are missing or have
+ * the wrong size. Hash verification is asynchronous and is completed by
+ * downloadAllModels before a file is considered usable.
  */
-export function getMissingModels(modelsDir: string): ModelManifestEntry[] {
+function shouldDownloadEntry(
+  entry: ModelManifestEntry,
+  options: ModelDownloadOptions
+): boolean {
+  if (entry.urls.length === 0) {
+    return false;
+  }
+  if (entry.researchOnly) {
+    return (
+      options.allowResearchOnly === true &&
+      process.env.FACE_MODEL_KIND?.trim().toLowerCase() === "ultraface-w600k" &&
+      process.env.FACE_MODEL_ALLOW_RESEARCH_ONLY?.trim() === "1"
+    );
+  }
+  return entry.required || options.includeOptional === true;
+}
+
+export function getMissingModels(
+  modelsDir: string,
+  options: ModelDownloadOptions = {}
+): ModelManifestEntry[] {
   const missing: ModelManifestEntry[] = [];
 
   for (const entry of MODEL_MANIFEST) {
+    if (!shouldDownloadEntry(entry, options)) {
+      continue;
+    }
     const destPath = resolveDestPath(modelsDir, entry);
 
     let valid = false;
@@ -858,11 +1142,9 @@ export function getMissingModels(modelsDir: string): ModelManifestEntry[] {
       // Synchronous size check (fast, no I/O storm)
       const stat = fs.statSync(destPath);
       if (stat.size === entry.sizeBytes) {
-        if (!entry.sha256) {
-          valid = true; // no hash to check, size matches = assume OK
-        }
-        // If sha256 is set, we cannot fully verify synchronously;
-        // treat as missing so downloadAllModels validates async.
+        // Hashes are mandatory. Keep hashed files in the queue so the async
+        // downloader performs the authoritative verification before skipping.
+        valid = false;
       }
     } catch {
       // File doesn't exist
@@ -927,7 +1209,8 @@ export async function downloadAllModels(
   modelsDir: string,
   mirrorBaseUrl: string,
   onProgress?: (progress: DownloadProgress) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: ModelDownloadOptions = {}
 ): Promise<{ success: boolean; downloaded: number; warnings: string[] }> {
   // Ensure models directory exists
   await fsp.mkdir(modelsDir, { recursive: true });
@@ -935,8 +1218,19 @@ export async function downloadAllModels(
   // Clean stale .tmp files from previous runs
   await cleanupTempFiles(modelsDir);
 
-  // Filter to actually missing files
-  const missing = getMissingModels(modelsDir);
+  // Filter to actually missing or hash-invalid files. The synchronous scan
+  // above deliberately avoids reading hundreds of megabytes into memory.
+  const candidates = getMissingModels(modelsDir, options);
+  const missing = (
+    await Promise.all(
+      candidates.map(async (entry) => {
+        const destPath = resolveDestPath(modelsDir, entry);
+        return (await verifyModelFile(destPath, entry.sha256, entry.sizeBytes))
+          ? null
+          : entry;
+      })
+    )
+  ).filter((entry): entry is ModelManifestEntry => entry !== null);
 
   if (missing.length === 0) {
     onProgress?.({
@@ -968,23 +1262,6 @@ export async function downloadAllModels(
 
   // Tracks which files failed so we can signal per-file errors to the UI
   const failedFileNames = new Set<string>();
-
-  // Emit a progress snapshot that reflects the current global state.
-  const emitGlobal = (): void => {
-    onProgress?.({
-      phase: "downloading",
-      totalFiles,
-      completedFiles,
-      currentFileName: "",
-      currentFilePercent: 0,
-      bytesPerSecond: 0,
-      remainingSeconds: 0,
-      mirrorLabel: "",
-      warnings: [...allWarnings],
-      totalBytes,
-      downloadedBytes: completedBytes, // only completed — no partial in global emit
-    });
-  };
 
   const downloadOne = async (entry: ModelManifestEntry): Promise<void> => {
     const destPath = resolveDestPath(modelsDir, entry);
@@ -1034,14 +1311,14 @@ export async function downloadAllModels(
         totalBytes,
         downloadedBytes: completedBytes,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // ── Per-file failure — do NOT abort siblings (问题 3) ─────
       if (signal?.aborted) {
         throw err; // external cancellation
       }
 
       failedFileNames.add(entry.name);
-      allWarnings.push(`${entry.name}: ${err?.message ?? String(err)}`);
+      allWarnings.push(`${entry.name}: ${errorMessage(err)}`);
 
       // Per-file error signal so the UI can mark this card red
       onProgress?.({

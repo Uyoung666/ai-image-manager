@@ -1,13 +1,16 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import {
+  appSettings,
   faceIdentities,
   faceIdentityMembers,
   faceVectors,
   photos,
 } from "@/db/schema";
+import { getActiveFaceModel } from "@/services/ai/face-model-config";
 import {
   abortAllFaceWorkers,
   detectFacesWithPool,
@@ -15,12 +18,18 @@ import {
   initFaceWorkerPool,
   shutdownFacePool,
 } from "@/services/face-worker-pool";
-import { getSetting } from "@/services/settings-manager";
+import { getSetting, setSetting } from "@/services/settings-manager";
 import { getDataPath } from "@/utils/data-path";
 
 const BATCH_SIZE = 40;
-const CLUSTERING_THRESHOLD = 0.55;
 let detectionRunning = false;
+
+export class FaceEmbeddingValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FaceEmbeddingValidationError";
+  }
+}
 
 /** Cancel a running face detection operation and abort all workers. */
 export function cancelFaceDetection(): void {
@@ -33,22 +42,281 @@ export function isFaceDetectionRunning(): boolean {
   return detectionRunning;
 }
 
+/**
+ * Whether the stored face vectors belong to a different model than the active
+ * one. First use (no stored kind) returns false — nothing to invalidate.
+ */
+export function isFaceModelMismatch(): boolean {
+  const stored = getSetting("face.model.kind");
+  const activeModel = getActiveFaceModel();
+  if (stored === null) {
+    const db = getDatabase();
+    return Boolean(
+      db.select({ id: faceVectors.id }).from(faceVectors).limit(1).get() ||
+        db
+          .select({ id: faceIdentities.id })
+          .from(faceIdentities)
+          .limit(1)
+          .get() ||
+        db
+          .select({ id: photos.id })
+          .from(photos)
+          .where(eq(photos.isFaceProcessed, true))
+          .limit(1)
+          .get()
+    );
+  }
+  if (stored !== activeModel.kind) {
+    return true;
+  }
+
+  const db = getDatabase();
+  const rows = db
+    .select({ embedding: faceVectors.embedding })
+    .from(faceVectors)
+    .all();
+  return rows.some((row) => {
+    if (!row.embedding) {
+      return false;
+    }
+    try {
+      const embedding: unknown = JSON.parse(row.embedding);
+      return (
+        !Array.isArray(embedding) ||
+        embedding.length !== activeModel.recognition.vectorDimensions ||
+        embedding.some(
+          (value) => typeof value !== "number" || !Number.isFinite(value)
+        )
+      );
+    } catch {
+      return true;
+    }
+  });
+}
+
+interface FaceDataBackupPayload {
+  backupOf: string;
+  checksum: string;
+  createdAt: number;
+  faceIdentities: Record<string, unknown>[];
+  faceIdentityMembers: Record<string, unknown>[];
+  faceModelKind: string | null;
+  faceProcessedPhotoIds: number[];
+  faceVectors: Record<string, unknown>[];
+  format: "ai-image-manager.face-backup";
+  version: 1;
+}
+
+const FACE_BACKUP_FORMAT = "ai-image-manager.face-backup" as const;
+const FACE_BACKUP_VERSION = 1 as const;
+
+function addFaceBackupChecksum(
+  payload: Omit<FaceDataBackupPayload, "checksum">
+): FaceDataBackupPayload {
+  const checksum = createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+  return { ...payload, checksum };
+}
+
+function validateFaceBackupPayload(payload: FaceDataBackupPayload): void {
+  const dimensions = new Set<number>();
+  const collect = (value: unknown, field: string) => {
+    if (value === null) {
+      return;
+    }
+    if (typeof value !== "string") {
+      throw new Error(`${field} must be a JSON string or null`);
+    }
+    const parsed: unknown = JSON.parse(value);
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length === 0 ||
+      parsed.some(
+        (component) =>
+          typeof component !== "number" || !Number.isFinite(component)
+      )
+    ) {
+      throw new Error(`${field} must contain finite numeric values`);
+    }
+    dimensions.add(parsed.length);
+  };
+
+  for (const row of payload.faceVectors) {
+    collect(row.embedding, "face vector embedding");
+  }
+  for (const row of payload.faceIdentities) {
+    collect(row.centroid_embedding, "face identity centroid");
+  }
+  if (dimensions.size > 1) {
+    throw new Error("Face backup contains mixed embedding dimensions");
+  }
+  let expected: number | null = null;
+  if (payload.faceModelKind === "yunet-sface") {
+    expected = 128;
+  } else if (payload.faceModelKind === "ultraface-w600k") {
+    expected = 512;
+  }
+  if (payload.faceModelKind !== null && expected === null) {
+    throw new Error(`Unsupported face model kind: ${payload.faceModelKind}`);
+  }
+  if (expected !== null && dimensions.size > 0 && !dimensions.has(expected)) {
+    throw new Error(
+      `Face backup embedding dimension does not match ${payload.faceModelKind}`
+    );
+  }
+}
+
+function writeBackupAtomically(
+  backupFile: string,
+  payload: FaceDataBackupPayload
+): void {
+  const temporaryFile = `${backupFile}.tmp-${process.pid}-${Math.random()
+    .toString(16)
+    .slice(2)}`;
+  try {
+    fs.writeFileSync(temporaryFile, JSON.stringify(payload, null, 2), "utf-8");
+    fs.renameSync(temporaryFile, backupFile);
+  } catch (error) {
+    try {
+      if (fs.existsSync(temporaryFile)) {
+        fs.unlinkSync(temporaryFile);
+      }
+    } catch {
+      /* Preserve the original backup error. */
+    }
+    throw error;
+  }
+}
+
+/**
+ * Create the same face-data backup format as scripts/backup-face-data.mjs.
+ * This uses the application's open database connection and is safe to invoke
+ * from the reset UI while the application is running.
+ */
+export function backupFaceData(): string {
+  const db = getDatabase();
+  const timestamp = Date.now();
+  const backupDir = path.join(getDataPath(), "data", "backups");
+  const backupFile = path.join(backupDir, `face-backup-${timestamp}.json`);
+
+  const payload = addFaceBackupChecksum({
+    format: FACE_BACKUP_FORMAT,
+    version: FACE_BACKUP_VERSION,
+    createdAt: timestamp,
+    backupOf: "ai-image-manager.db",
+    faceVectors: db
+      .select()
+      .from(faceVectors)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        photo_id: row.photoId,
+        face_index: row.faceIndex,
+        bbox_x: row.bboxX,
+        bbox_y: row.bboxY,
+        bbox_width: row.bboxWidth,
+        bbox_height: row.bboxHeight,
+        confidence: row.confidence,
+        embedding: row.embedding,
+        vector_id: row.vectorId,
+        is_rejected: row.isRejected,
+        created_at: row.createdAt,
+      })),
+    faceIdentities: db
+      .select()
+      .from(faceIdentities)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        representative_photo_id: row.representativePhotoId,
+        representative_vector_id: row.representativeVectorId,
+        centroid_embedding: row.centroidEmbedding,
+        face_count: row.faceCount,
+        is_confirmed: row.isConfirmed,
+        created_at: row.createdAt,
+      })),
+    faceIdentityMembers: db
+      .select()
+      .from(faceIdentityMembers)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        identity_id: row.identityId,
+        face_vector_id: row.faceVectorId,
+      })),
+    faceProcessedPhotoIds: db
+      .select({ id: photos.id })
+      .from(photos)
+      .where(eq(photos.isFaceProcessed, true))
+      .all()
+      .map((row) => row.id),
+    faceModelKind: getSetting("face.model.kind"),
+  });
+
+  validateFaceBackupPayload(payload);
+  fs.mkdirSync(backupDir, { recursive: true });
+  writeBackupAtomically(backupFile, payload);
+  console.log(`[FaceDetector] Face data backup created: ${backupFile}`);
+  return backupFile;
+}
+
+/**
+ * Wipe all face data and reset processing flags in one transaction, then record
+ * the active model kind so future runs know which vectors belong to it.
+ *
+ * Model vectors from different kinds live in different metric spaces and cannot
+ * be compared, so this is a destructive full reset. Call ONLY after a backup has
+ * been taken (scripts/backup-face-data.mjs); rollback is possible via
+ * scripts/restore-face-data.mjs.
+ */
+export function resetFaceDataForModelSwitch(): void {
+  if (isFaceDetectionRunning()) {
+    throw new Error(
+      "Face detection is running; cancel it before resetting face data"
+    );
+  }
+
+  backupFaceData();
+  const activeModelKind = getActiveFaceModel().kind;
+  const db = getDatabase();
+  db.transaction((tx) => {
+    tx.delete(faceIdentityMembers).run();
+    tx.delete(faceIdentities).run();
+    tx.delete(faceVectors).run();
+    tx.update(photos)
+      .set({ isFaceProcessed: false })
+      .where(isNull(photos.deletedAt))
+      .run();
+    tx.insert(appSettings)
+      .values({
+        key: "face.model.kind",
+        value: activeModelKind,
+        updatedAt: Date.now(),
+      })
+      .onConflictDoUpdate({
+        target: appSettings.key,
+        set: { value: activeModelKind, updatedAt: Date.now() },
+      })
+      .run();
+  });
+}
+
 function findModelsDir(): string {
   // Models are copied from bundled resources to user data directory
   // by ensureModelAvailable() at startup.
   return path.join(getDataPath(), "models");
 }
 
-const FACE_MODEL_FILES = ["ultraface-320.onnx", "w600k_r50.onnx"];
-
-async function ensureFaceModels(): Promise<boolean> {
+function ensureFaceModels(): boolean {
   const faceDir = path.join(findModelsDir(), "face");
   if (!fs.existsSync(faceDir)) {
     fs.mkdirSync(faceDir, { recursive: true });
   }
 
   let allPresent = true;
-  for (const filename of FACE_MODEL_FILES) {
+  for (const filename of getActiveFaceModel().modelFiles) {
     if (!fs.existsSync(path.join(faceDir, filename))) {
       allPresent = false;
       break;
@@ -134,12 +402,36 @@ function assignToIdentity(
     }
   }
 
-  if (bestId >= 0 && bestSim >= CLUSTERING_THRESHOLD) {
+  if (bestId >= 0 && bestSim >= getActiveFaceModel().clustering.threshold) {
     return { identityId: bestId, similarity: bestSim };
   }
   return null;
 }
 
+function validateFaceEmbeddings(
+  results: FaceDetectionResult[],
+  expectedDimensions: number
+): void {
+  for (const result of results) {
+    for (const face of result.faces) {
+      const embedding = face.embedding;
+      if (
+        !Array.isArray(embedding) ||
+        embedding.length !== expectedDimensions ||
+        embedding.some((value) => !Number.isFinite(value))
+      ) {
+        const actualDimensions = Array.isArray(embedding)
+          ? embedding.length
+          : "missing";
+        throw new FaceEmbeddingValidationError(
+          `Face embedding dimension mismatch for photo ${result.id}, face ${face.faceIndex}: got ${actualDimensions}, expected ${expectedDimensions}; write rejected`
+        );
+      }
+    }
+  }
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Detection coordinates worker lifecycle, batch writes, progress, and clustering as one operation.
 export async function detectFaces(
   photoIds: number[],
   onProgress?: (progress: DetectionProgress) => void
@@ -147,25 +439,35 @@ export async function detectFaces(
   if (detectionRunning) {
     return 0;
   }
+  if (isFaceModelMismatch()) {
+    throw new Error(
+      "Face model is incompatible with stored vectors; reset face data first"
+    );
+  }
   detectionRunning = true;
+  const activeModel = getActiveFaceModel();
 
   const pushProgress = (p: DetectionProgress) => {
     currentProgress = p;
     onProgress?.(p);
   };
 
-  const modelsReady = await ensureFaceModels();
-  if (!modelsReady) {
-    console.error("[FaceDetector] Models not available, aborting");
-    pushProgress({ processed: 0, total: 0, phase: "idle" });
-    detectionRunning = false;
-    return 0;
-  }
-
-  const db = getDatabase();
   let totalFaces = 0;
 
   try {
+    const modelsReady = ensureFaceModels();
+    if (!modelsReady) {
+      console.error("[FaceDetector] Models not available, aborting");
+      pushProgress({ processed: 0, total: 0, phase: "idle" });
+      return 0;
+    }
+
+    // Only mark the model after its files are available and the run has
+    // successfully started. This marker guards later incremental runs.
+    setSetting("face.model.kind", activeModel.kind);
+
+    const db = getDatabase();
+
     // Skip photos that are already face-processed
     const photoRows: Array<{ id: number; path: string }> = [];
     for (let index = 0; index < photoIds.length; index += 500) {
@@ -186,9 +488,9 @@ export async function detectFaces(
 
     if (!photoRows.length) {
       // Still need to cluster any unassigned faces
-      await clusterUnassignedFaces();
+      clusterUnassignedFaces();
+      setSetting("face.model.kind", activeModel.kind);
       pushProgress({ processed: 0, total: 0, phase: "complete" });
-      detectionRunning = false;
       return 0;
     }
 
@@ -228,6 +530,14 @@ export async function detectFaces(
           pushProgress({ processed, total, phase: "running" });
         },
         () => !detectionRunning
+      );
+
+      // Validate the complete batch before inserting any row. A malformed or
+      // legacy-dimension result must never partially enter the active model's
+      // vector space.
+      validateFaceEmbeddings(
+        poolResults,
+        activeModel.recognition.vectorDimensions
       );
 
       for (const r of poolResults) {
@@ -273,16 +583,21 @@ export async function detectFaces(
     }
 
     // --- Clustering: assign faces to identities ---
-    await clusterUnassignedFaces();
+    clusterUnassignedFaces();
+    setSetting("face.model.kind", activeModel.kind);
 
     pushProgress({
       processed: totalFaces,
       total: photoRows.length,
       phase: "complete",
     });
-  } catch (err: any) {
-    console.error(`[FaceDetector] Fatal error: ${err.message}`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[FaceDetector] Fatal error: ${message}`);
     pushProgress({ processed: 0, total: 0, phase: "idle" });
+    if (err instanceof FaceEmbeddingValidationError) {
+      throw err;
+    }
   } finally {
     detectionRunning = false;
   }
@@ -290,7 +605,7 @@ export async function detectFaces(
   return totalFaces;
 }
 
-async function clusterUnassignedFaces(): Promise<void> {
+function clusterUnassignedFaces(): void {
   const db = getDatabase();
 
   const existingIdentities = db
@@ -331,7 +646,7 @@ async function clusterUnassignedFaces(): Promise<void> {
         isNull(faceIdentityMembers.id),
         eq(faceVectors.isRejected, false),
         // Filter out low-confidence detections, but keep null (legacy data)
-        sql`(${faceVectors.confidence} IS NULL OR ${faceVectors.confidence} >= 0.88)`
+        sql`(${faceVectors.confidence} IS NULL OR ${faceVectors.confidence} >= ${getActiveFaceModel().clustering.confidenceFilter})`
       )
     )
     .all();
@@ -497,7 +812,7 @@ export function refreshFaceIdentityMetadata(identityId: number): void {
   updateIdentityCentroid(identityId);
 }
 
-export async function reclusterAllFaces(): Promise<{ merged: number }> {
+export function reclusterAllFaces(): { merged: number } {
   const db = getDatabase();
 
   // Preserve confirmed identities (manually merged/named by user)
@@ -530,7 +845,7 @@ export async function reclusterAllFaces(): Promise<{ merged: number }> {
   }
 
   // Re-cluster unassigned faces (confirmed members stay intact)
-  await clusterUnassignedFaces();
+  clusterUnassignedFaces();
 
   const count = db
     .select({ id: faceIdentities.id })

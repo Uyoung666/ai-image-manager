@@ -17,14 +17,7 @@ import {
   User,
   X,
 } from "lucide-react";
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -36,8 +29,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { useFolders } from "@/hooks/useFolders";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -356,6 +349,7 @@ function PeoplePage() {
     "incremental" | "rescan" | null
   >(null);
   const [confirmRescan, setConfirmRescan] = useState(false);
+  const [confirmModelReset, setConfirmModelReset] = useState(false);
 
   const loadIdentities = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
@@ -454,7 +448,14 @@ function PeoplePage() {
         photoCount?: number;
         message?: string;
         requiresScope?: boolean;
+        requiresModelReset?: boolean;
       };
+      if (result.requiresModelReset) {
+        // Stored vectors are from a different model kind — ask before resetting.
+        setDetecting(false);
+        setConfirmModelReset(true);
+        return;
+      }
       if (result.started) {
         setProgress(t("detectingFacesCount", { count: result.photoCount }));
         startPolling();
@@ -540,9 +541,9 @@ function PeoplePage() {
   // Inline rename state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameInput, setNameInput] = useState("");
-  const [personFilter, setPersonFilter] = useState<
-    "all" | "unnamed" | "named"
-  >("all");
+  const [personFilter, setPersonFilter] = useState<"all" | "unnamed" | "named">(
+    "all"
+  );
   const composingRef = useRef(false);
 
   const unnamedCount = useMemo(
@@ -834,11 +835,7 @@ function PeoplePage() {
                 [
                   ["all", t("peopleAll"), identities.length],
                   ["unnamed", t("peopleNeedsName"), unnamedCount],
-                  [
-                    "named",
-                    t("peopleNamed"),
-                    identities.length - unnamedCount,
-                  ],
+                  ["named", t("peopleNamed"), identities.length - unnamedCount],
                 ] as const
               ).map(([value, label, count]) => (
                 <button
@@ -965,6 +962,28 @@ function PeoplePage() {
         }}
         open={confirmRescan}
         title={t("rescanFacesTitle")}
+      />
+      <ConfirmDialog
+        confirmText={t("confirmModelReset")}
+        description={t("modelResetDescription")}
+        destructive
+        onCancel={() => setConfirmModelReset(false)}
+        onConfirm={async () => {
+          setConfirmModelReset(false);
+          setDetecting(true);
+          setProgress(t("modelResetProgress"));
+          try {
+            await ipc.client.faces.resetFaceData({});
+            toast.success(t("modelResetComplete"));
+            loadIdentities();
+            await handleStartDetection(false);
+          } catch {
+            toast.error(t("modelResetFailed"));
+            setDetecting(false);
+          }
+        }}
+        open={confirmModelReset}
+        title={t("modelResetTitle")}
       />
       <FaceScanScopeDialog
         folders={folders}

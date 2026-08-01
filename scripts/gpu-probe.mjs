@@ -114,7 +114,10 @@ function loadOrt() {
 async function handleProbe(modelsDir) {
   const probeStart = Date.now();
 
-  const faceModel = path.join(modelsDir, "face", "ultraface-320.onnx");
+  // Probe with YuNet (active detector) when present; fall back to UltraFace.
+  const yunetModel = path.join(modelsDir, "face", "face_detection_yunet_2023mar.onnx");
+  const ultrafaceModel = path.join(modelsDir, "face", "ultraface-320.onnx");
+  const faceModel = fs.existsSync(yunetModel) ? yunetModel : ultrafaceModel;
 
   if (!fs.existsSync(faceModel)) {
     process.send?.({

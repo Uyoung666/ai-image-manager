@@ -29,7 +29,7 @@ export interface GpuProbeResult {
 
 export function findModelsDir(): string {
   if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, "models");
+    const bundled = path.join(process.resourcesPath, "models-release");
     if (fs.existsSync(bundled)) {
       return bundled;
     }
