@@ -1,5 +1,5 @@
 // Chinese -> English search keyword mapping with semantic categories.
-// CLIP ViT-B/32 was trained on English image-text pairs, so Chinese queries
+// SigLIP uses English image-text prompts, so Chinese queries
 // produce poor alignment. We translate known Chinese terms to English before
 // embedding to improve search accuracy.
 

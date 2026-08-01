@@ -2,8 +2,8 @@
  * GPU capability probe worker.
  *
  * Lightweight one-shot worker that probes DirectML GPU availability.
- * Uses the smallest available ONNX model (ultraface-320.onnx, ~300KB)
- * via onnxruntime-node to test whether the DML execution provider works.
+ * Uses the bundled YuNet ONNX model via onnxruntime-node to test whether the
+ * DML execution provider works.
  *
  * IPC Protocol:
  *   Parent → { type: "probe", modelsDir: "..." }
@@ -114,10 +114,9 @@ function loadOrt() {
 async function handleProbe(modelsDir) {
   const probeStart = Date.now();
 
-  // Probe with YuNet (active detector) when present; fall back to UltraFace.
+  // Probe with the active YuNet detector.
   const yunetModel = path.join(modelsDir, "face", "face_detection_yunet_2023mar.onnx");
-  const ultrafaceModel = path.join(modelsDir, "face", "ultraface-320.onnx");
-  const faceModel = fs.existsSync(yunetModel) ? yunetModel : ultrafaceModel;
+  const faceModel = yunetModel;
 
   if (!fs.existsSync(faceModel)) {
     process.send?.({

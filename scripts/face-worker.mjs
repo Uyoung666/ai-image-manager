@@ -1,16 +1,13 @@
 /**
  * Face detection + embedding worker.
  *
- * Runs as a child process via fork(). Two model kinds (set by the `kind`
- * field of the "init" message):
- *   - "yunet-sface"   (default): YuNet detection (640x640, BGR) + SFace
- *                      embedding (112x112, 128-d, 5-point landmark alignment)
- *   - "ultraface-w600k" (legacy): UltraFace detection + w600k_r50 ArcFace
- *                      embedding (512-d, bbox-center crop)
+ * Runs as a child process via fork(). The product runtime uses YuNet
+ * detection (640x640, BGR) + SFace embedding (112x112, 128-d, 5-point
+ * landmark alignment).
  *   - sharp for image preprocessing
  *
  * IPC Protocol:
- *   Parent sends: { type: "init", modelsDir, useGPU, kind }
+ *   Parent sends: { type: "init", modelsDir, useGPU }
  *                 { type: "detect", photos: [{ id, path }, ...] }
  *   Worker sends: { type: "ready" | "init-progress" }
  *                 { type: "result", results: [{ id, faces: [{ faceIndex, bbox, confidence, embedding }] }] }
@@ -83,15 +80,6 @@ let embeddingSession = null;
 // --- Abort flag for mid-batch cancellation ---
 let aborted = false;
 
-// --- Model kind (set by init message; matches src/services/ai/face-model-config.ts) ---
-let activeKind = "yunet-sface"; // "yunet-sface" | "ultraface-w600k"
-
-// --- UltraFace + w600k (legacy kind) constants ---
-const ULTRAFACE_INPUT_W = 320;
-const ULTRAFACE_INPUT_H = 240;
-const ULTRAFACE_CONFIDENCE = 0.85;
-const ULTRAFACE_IOU = 0.3;
-
 // --- YuNet + SFace (new kind) constants ---
 // YuNet 2023mar has a FIXED 640x640 input (verified via onnxruntime).
 // SFace expects 0-255 RGB; normalization is inside the graph.
@@ -110,20 +98,18 @@ const EMBED_SIZE = 112; // SFace / ArcFace both expect 112x112 input
  * Load ONNX models for detection and embedding.
  * Reports init-progress messages so the UI can show real loading progress.
  */
-async function initModels(modelsDir, useGPU = false, kind = "yunet-sface") {
-  activeKind = kind === "ultraface-w600k" ? kind : "yunet-sface";
+async function initModels(modelsDir, useGPU = false) {
   const { InferenceSession } = await loadOrt();
 
-  const isNew = activeKind !== "ultraface-w600k";
   const detModelPath = path.join(
     modelsDir,
     "face",
-    isNew ? "face_detection_yunet_2023mar.onnx" : "ultraface-320.onnx"
+    "face_detection_yunet_2023mar.onnx"
   );
   const embModelPath = path.join(
     modelsDir,
     "face",
-    isNew ? "face_recognition_sface_2021dec.onnx" : "w600k_r50.onnx"
+    "face_recognition_sface_2021dec.onnx"
   );
 
   if (!fs.existsSync(detModelPath)) {
@@ -212,153 +198,6 @@ async function initModels(modelsDir, useGPU = false, kind = "yunet-sface") {
 }
 
 /**
- * Preprocess image for UltraFace detection.
- * Input: 320x240 RGB, normalized to [0,1], NCHW layout.
- */
-async function preprocessForDetection(input) {
-  const { data, info } = await sharp(input, { failOn: "none" })
-    .rotate()
-    .resize(ULTRAFACE_INPUT_W, ULTRAFACE_INPUT_H, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const rgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const pixels = ULTRAFACE_INPUT_W * ULTRAFACE_INPUT_H;
-  const floatData = new Float32Array(3 * pixels);
-
-  // NCHW layout, normalize to [0, 1] with mean subtraction
-  const mean = [127.0, 127.0, 127.0];
-  const div = 128.0;
-  for (let i = 0; i < pixels; i++) {
-    floatData[i] = (rgb[i * 3] - mean[0]) / div;
-    floatData[pixels + i] = (rgb[i * 3 + 1] - mean[1]) / div;
-    floatData[2 * pixels + i] = (rgb[i * 3 + 2] - mean[2]) / div;
-  }
-
-  return floatData;
-}
-
-/**
- * Non-Maximum Suppression to remove overlapping detections.
- */
-function nms(boxes, scores, iouThreshold) {
-  const indices = scores.map((s, i) => i).sort((a, b) => scores[b] - scores[a]);
-
-  const kept = [];
-  const suppressed = new Set();
-
-  for (let pos = 0; pos < indices.length; pos++) {
-    const i = indices[pos];
-    if (suppressed.has(i)) {
-      continue;
-    }
-    kept.push(i);
-
-    for (let pos2 = pos + 1; pos2 < indices.length; pos2++) {
-      const j = indices[pos2];
-      if (suppressed.has(j)) {
-        continue;
-      }
-      const iou = computeIoU(boxes[i], boxes[j]);
-      if (iou > iouThreshold) {
-        suppressed.add(j);
-      }
-    }
-  }
-  return kept;
-}
-
-function computeIoU(a, b) {
-  const x1 = Math.max(a[0], b[0]);
-  const y1 = Math.max(a[1], b[1]);
-  const x2 = Math.min(a[2], b[2]);
-  const y2 = Math.min(a[3], b[3]);
-  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-  const areaA = (a[2] - a[0]) * (a[3] - a[1]);
-  const areaB = (b[2] - b[0]) * (b[3] - b[1]);
-  return inter / (areaA + areaB - inter + 1e-6);
-}
-
-/**
- * Run UltraFace detection on a single image (legacy kind).
- * Returns array of { bbox: {x, y, width, height}, confidence }.
- */
-async function detectFacesUltraFace(input) {
-  const { Tensor } = await loadOrt();
-
-  const meta = await sharp(input, { failOn: "none" }).rotate().metadata();
-  const imgW = meta.width || 0;
-  const imgH = meta.height || 0;
-  if (imgW < 32 || imgH < 32) {
-    return [];
-  }
-
-  const inputData = await preprocessForDetection(input);
-  const inputTensor = new Tensor("float32", inputData, [
-    1,
-    3,
-    ULTRAFACE_INPUT_H,
-    ULTRAFACE_INPUT_W,
-  ]);
-
-  const feeds = {};
-  feeds[detectionSession.inputNames[0]] = inputTensor;
-
-  const output = await detectionSession.run(feeds);
-  const outputNames = detectionSession.outputNames;
-
-  // UltraFace outputs: scores [1, N, 2] and boxes [1, N, 4]
-  const scoresData = output[outputNames[0]].data;
-  const boxesData = output[outputNames[1]].data;
-  const numAnchors = scoresData.length / 2;
-
-  const candidateBoxes = [];
-  const candidateScores = [];
-
-  for (let i = 0; i < numAnchors; i++) {
-    const confidence = scoresData[i * 2 + 1]; // face confidence
-    if (confidence < ULTRAFACE_CONFIDENCE) {
-      continue;
-    }
-
-    // Boxes are in [x1, y1, x2, y2] normalized format
-    candidateBoxes.push([
-      boxesData[i * 4],
-      boxesData[i * 4 + 1],
-      boxesData[i * 4 + 2],
-      boxesData[i * 4 + 3],
-    ]);
-    candidateScores.push(confidence);
-  }
-
-  if (candidateBoxes.length === 0) {
-    return [];
-  }
-
-  // Apply NMS
-  const kept = nms(candidateBoxes, candidateScores, ULTRAFACE_IOU);
-
-  return kept
-    .slice(0, MAX_FACES_PER_IMAGE)
-    .map((idx) => {
-      const [x1, y1, x2, y2] = candidateBoxes[idx];
-      return {
-        bbox: {
-          x: Math.max(0, Math.round(x1 * imgW)),
-          y: Math.max(0, Math.round(y1 * imgH)),
-          width: Math.round((x2 - x1) * imgW),
-          height: Math.round((y2 - y1) * imgH),
-        },
-        confidence: candidateScores[idx],
-      };
-    })
-    .filter(
-      (f) => f.bbox.width >= MIN_FACE_SIZE && f.bbox.height >= MIN_FACE_SIZE
-    );
-}
-
-/**
  * Run YuNet detection on a single image (new kind).
  * Resizes to the fixed 640x640 input (BGR 0-255), decodes the FPN outputs
  * (cls/obj/bbox/kps at strides 8/16/32) and applies NMS. Coordinates are
@@ -419,85 +258,6 @@ async function detectFacesYunet(input) {
     .filter(
       (f) => f.bbox.width >= MIN_FACE_SIZE && f.bbox.height >= MIN_FACE_SIZE
     );
-}
-
-/**
- * Dispatch to the active model kind.
- * Returns array of { bbox, confidence, landmarks? }.
- */
-async function detectFacesInImage(input) {
-  if (activeKind !== "ultraface-w600k") {
-    return detectFacesYunet(input);
-  }
-  return detectFacesUltraFace(input);
-}
-
-/**
- * Generate face embedding using ArcFace model.
- * Crops the face region, resizes to 112x112, normalizes, and runs inference.
- */
-async function generateEmbedding(input, bbox) {
-  if (!embeddingSession) {
-    return null;
-  }
-
-  const { Tensor } = await loadOrt();
-
-  // Expand bbox by 20% for better face coverage
-  const expand = 0.2;
-  const meta = await sharp(input, { failOn: "none" }).rotate().metadata();
-  const imgW = meta.width || 0;
-  const imgH = meta.height || 0;
-
-  const expandW = bbox.width * expand;
-  const expandH = bbox.height * expand;
-  const left = Math.max(0, Math.round(bbox.x - expandW));
-  const top = Math.max(0, Math.round(bbox.y - expandH));
-  const width = Math.min(imgW - left, Math.round(bbox.width + expandW * 2));
-  const height = Math.min(imgH - top, Math.round(bbox.height + expandH * 2));
-
-  if (width < 20 || height < 20) {
-    return null;
-  }
-
-  const { data } = await sharp(input, { failOn: "none" })
-    .rotate()
-    .extract({ left, top, width, height })
-    .resize(EMBED_SIZE, EMBED_SIZE, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const rgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const pixels = EMBED_SIZE * EMBED_SIZE;
-  const floatData = new Float32Array(3 * pixels);
-
-  // ArcFace normalization: (pixel - 127.5) / 127.5
-  for (let i = 0; i < pixels; i++) {
-    floatData[i] = (rgb[i * 3] - 127.5) / 127.5;
-    floatData[pixels + i] = (rgb[i * 3 + 1] - 127.5) / 127.5;
-    floatData[2 * pixels + i] = (rgb[i * 3 + 2] - 127.5) / 127.5;
-  }
-
-  const inputTensor = new Tensor("float32", floatData, [
-    1,
-    3,
-    EMBED_SIZE,
-    EMBED_SIZE,
-  ]);
-  const feeds = {};
-  feeds[embeddingSession.inputNames[0]] = inputTensor;
-
-  const output = await embeddingSession.run(feeds);
-  const embeddingData = output[embeddingSession.outputNames[0]].data;
-
-  // L2 normalize
-  const vec = Array.from(embeddingData);
-  if (vec.length !== 512) {
-    throw new Error(`Legacy embedding dimension mismatch: expected 512, got ${vec.length}`);
-  }
-  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
-  return vec.map((v) => v / (norm || 1));
 }
 
 /**
@@ -601,31 +361,27 @@ async function processPhoto(photo) {
     }
   }
 
-  const isNew = activeKind !== "ultraface-w600k";
-
-  const faces = await detectFacesInImage(imageInput);
+  const faces = await detectFacesYunet(imageInput);
   if (faces.length === 0) {
     return { id: photo.id, faces: [] };
   }
 
-  // New kind: decode the full image once so all faces can be alignment-warped
+  // Decode the full image once so all faces can be alignment-warped
   // from shared raw pixels (avoids per-face re-decoding).
   let rawRgb = null;
   let imgW = 0;
   let imgH = 0;
-  if (isNew) {
-    try {
-      const { data, info } = await sharp(imageInput, { failOn: "none" })
-        .rotate()
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      rawRgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-      imgW = info.width;
-      imgH = info.height;
-    } catch (err) {
-      console.error(`[FaceWorker] Full-decode failed: ${err.message}`);
-    }
+  try {
+    const { data, info } = await sharp(imageInput, { failOn: "none" })
+      .rotate()
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    rawRgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    imgW = info.width;
+    imgH = info.height;
+  } catch (err) {
+    console.error(`[FaceWorker] Full-decode failed: ${err.message}`);
   }
 
   const results = [];
@@ -633,10 +389,8 @@ async function processPhoto(photo) {
     const face = faces[i];
     let embedding = null;
     try {
-      if (isNew && rawRgb) {
+      if (rawRgb) {
         embedding = await generateEmbeddingAligned(rawRgb, imgW, imgH, face);
-      } else {
-        embedding = await generateEmbedding(imageInput, face.bbox);
       }
     } catch (err) {
       console.error(
@@ -665,10 +419,10 @@ let modelsReady = false;
 process.on("message", async (msg) => {
   try {
     if (msg.type === "init") {
-      const { modelsDir: md, useGPU, kind } = msg;
+      const { modelsDir: md, useGPU } = msg;
       modelsDir = md || path.join(process.cwd(), "models");
       try {
-        await initModels(modelsDir, useGPU, kind);
+        await initModels(modelsDir, useGPU);
         modelsReady = true;
         process.send?.({ type: "ready" });
       } catch (err) {

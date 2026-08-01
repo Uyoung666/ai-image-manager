@@ -15,14 +15,14 @@ const RELEASE_MODELS_DIR = path.resolve("models-release");
 
 /**
  * Build the exact model payload that is allowed into a release.  The source
- * models directory is intentionally ignored and may contain research-only
- * rollback weights; never pass that directory directly to Electron Forge.
+ * models directory is intentionally ignored; never pass that directory
+ * directly to Electron Forge.
  */
 function stageReleaseModels(): void {
   fs.rmSync(RELEASE_MODELS_DIR, { recursive: true, force: true });
   let stagedCount = 0;
   for (const entry of MODEL_MANIFEST) {
-    if (entry.researchOnly || entry.bundled === false) {
+    if (entry.bundled === false) {
       continue;
     }
     const source = path.join("models", entry.subPath, entry.fileName);
@@ -41,6 +41,19 @@ function stageReleaseModels(): void {
   console.log(`[release-models] staged ${stagedCount} model files`);
 }
 
+function cleanSourceModelCaches(): void {
+  for (const cacheDir of [
+    path.join("node_modules", "@xenova", "transformers", ".cache"),
+    path.join("node_modules", "@huggingface", ".cache"),
+  ]) {
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+      console.log(`[cleanup] removed source model cache ${cacheDir}`);
+    }
+  }
+}
+
+cleanSourceModelCaches();
 stageReleaseModels();
 
 // 递归删除 node_modules 中指定后缀的开发文件
@@ -85,6 +98,19 @@ function cleanBuildNodeModules(buildPath: string) {
   const nmPath = path.join(buildPath, "node_modules");
   if (!fs.existsSync(nmPath)) {
     return;
+  }
+
+  // Transformers may contain a developer-side model cache. It is never a
+  // release dependency; shipping it could accidentally include retired model
+  // weights that are not part of the product manifest.
+  for (const cacheDir of [
+    path.join(nmPath, "@xenova", "transformers", ".cache"),
+    path.join(nmPath, "@huggingface", ".cache"),
+  ]) {
+    if (fs.existsSync(cacheDir)) {
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+      console.log(`[cleanup] removed model cache ${cacheDir}`);
+    }
   }
 
   // 删除 onnxruntime 非 Windows 平台二进制

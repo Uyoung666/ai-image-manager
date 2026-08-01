@@ -227,7 +227,7 @@ async function initializeModel(): Promise<void> {
   }
   const localModelPath = _localModelPath;
   if (!localModelPath) {
-    throw new Error("CLIP 本地模型路径解析失败");
+    throw new Error("AI embedding 本地模型路径解析失败");
   }
 
   const model = getActiveEmbeddingModel();

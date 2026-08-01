@@ -3,9 +3,8 @@
  * Face detection/embedding benchmark + smoke test (forks face-worker.mjs).
  *
  * Usage:
- *   node scripts/bench-face.mjs <dir> [kind] [maxPhotos]
+ *   node scripts/bench-face.mjs <dir> [maxPhotos]
  *     dir      — directory of images (flat) or subdirs; subdir name = identity
- *     kind     — "yunet-sface" (default) | "ultraface-w600k"
  *     maxPhotos — optional cap on how many photos to process
  *
  * Reports: model init time, per-photo latency, detected-face counts, embedding
@@ -29,16 +28,15 @@ function collectImages(dir, out = []) {
   return out;
 }
 
-const [dirArg, kindArg, maxArg] = process.argv.slice(2);
-const kind = kindArg || "yunet-sface";
+const [dirArg, maxArg] = process.argv.slice(2);
 if (!dirArg || !fs.existsSync(dirArg)) {
-  console.error("Usage: node scripts/bench-face.mjs <dir> [kind] [maxPhotos]");
+  console.error("Usage: node scripts/bench-face.mjs <dir> [maxPhotos]");
   process.exit(1);
 }
 
 const allImages = collectImages(dirArg);
 const images = maxArg ? allImages.slice(0, Number(maxArg)) : allImages;
-console.log(`[bench-face] ${images.length}/${allImages.length} images in ${dirArg}, kind=${kind}`);
+console.log(`[bench-face] ${images.length}/${allImages.length} images in ${dirArg}`);
 
 const worker = fork(path.resolve("scripts/face-worker.mjs"), [], { stdio: "ignore" });
 const BATCH = 40;
@@ -94,7 +92,7 @@ function finish() {
   const faceCounts = results.map((r) => r.faces.length);
   const withFaces = faceCounts.filter((c) => c > 0).length;
 
-  console.log(`\n[bench-face] results (kind=${kind}, ${results.length} photos):`);
+  console.log(`\n[bench-face] results (YuNet+SFace, ${results.length} photos):`);
   console.log(`  detect+embed time: ${detectMs}ms (${(detectMs / Math.max(1, results.length)).toFixed(0)}ms/photo)`);
   console.log(`  total faces: ${totalFaces} (avg ${(totalFaces / Math.max(1, results.length)).toFixed(2)}/photo)`);
   console.log(`  photos with >=1 face: ${withFaces}/${results.length}`);
@@ -108,7 +106,7 @@ function finish() {
 // Init
 const photos = images.map((p) => ({ id: ++idCounter, path: p }));
 photoQueue = [...photos];
-worker.send({ type: "init", modelsDir: path.resolve("models"), useGPU: false, kind });
+  worker.send({ type: "init", modelsDir: path.resolve("models"), useGPU: false });
 
 setTimeout(() => {
   console.error("[bench-face] TIMEOUT");

@@ -148,7 +148,7 @@ function findHueName(h: number): [string, string] {
   return [best[1], best[2]];
 }
 
-// hex → CLIP-friendly search prompt (for AI fallback)
+// hex → SigLIP-friendly search prompt (for AI fallback)
 export function hexToSearchPrompt(hex: string): string {
   const hsl = hexToHsl(hex);
   const [zhHue, enHue] = findHueName(hsl.h);

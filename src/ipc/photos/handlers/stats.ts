@@ -1306,7 +1306,7 @@ export const findDuplicates = os
       }
     }
 
-    // --- Phase 2: CLIP vector verification ---
+    // --- Phase 2: SigLIP vector verification ---
     // Sort by distance (lower = more likely duplicate)
     candidates.sort((a, b) => a.phashDistance - b.phashDistance);
 

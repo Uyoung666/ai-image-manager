@@ -84,7 +84,7 @@ export function resolveEmbedPoolConfig(
   env: NodeJS.ProcessEnv = process.env
 ): EmbedPoolConfig {
   const safeCpuCount = Math.max(1, cpuCount);
-  // CLIP vision currently runs CPU-only in embed-worker.mjs because DirectML
+  // SigLIP vision currently runs CPU-only in embed-worker.mjs because DirectML
   // crashes on this model. Keep defaults conservative and allow opt-in tuning
   // with AI_EMBED_WORKERS / AI_EMBED_THREADS.
   let defaultWorkers = 1;

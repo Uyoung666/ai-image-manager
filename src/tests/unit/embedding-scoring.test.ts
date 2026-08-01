@@ -41,12 +41,12 @@ describe("SigLIP scoring policy", () => {
     expect(model.scoring.duplicateConfirmationSimilarity).toBe(0.95);
   });
 
-  it("keeps the legacy CLIP distance policy for rollback", () => {
+  it("keeps the SigLIP distance policy when the removed CLIP selector is set", () => {
     process.env.AI_EMBEDDING_MODEL = "clip";
 
-    expect(getTextSearchMaxCosineDistance(0, "zh")).toBe(0.22);
-    expect(getTextSearchMaxCosineDistance(1, "zh")).toBe(0.55);
-    expect(getTextSearchMaxCosineDistance(1, "en")).toBe(0.75);
+    expect(getTextSearchMaxCosineDistance(0, "zh")).toBe(0.98);
+    expect(getTextSearchMaxCosineDistance(1, "zh")).toBe(0.98);
+    expect(getTextSearchMaxCosineDistance(1, "en")).toBe(0.98);
   });
 
   it("selects separated SigLIP tags, limits categories, and calibrates confidence", () => {

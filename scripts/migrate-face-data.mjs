@@ -31,10 +31,6 @@ const CONFIGS = {
     clusteringThreshold: 0.363,
     confidenceFilter: 0.5,
   },
-  "ultraface-w600k": {
-    clusteringThreshold: 0.55,
-    confidenceFilter: 0.88,
-  },
 };
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +41,6 @@ const MODEL_FILES = {
     "face_detection_yunet_2023mar.onnx",
     "face_recognition_sface_2021dec.onnx",
   ],
-  "ultraface-w600k": ["ultraface-320.onnx", "w600k_r50.onnx"],
 };
 
 function usageError() {

@@ -185,12 +185,12 @@ function runEmbedBatch(
         setCurrentProgress({
           ...currentProgress,
           phase: "loading",
-          currentFile: msg.file ?? "CLIP model",
+          currentFile: msg.file ?? "SigLIP model",
           downloadPercent,
         });
         if (total > 0) {
           console.log(
-            `[AI] CLIP download ${downloadPercent}% (${loaded}/${total})`
+            `[AI] SigLIP download ${downloadPercent}% (${loaded}/${total})`
           );
         }
         return;
@@ -649,7 +649,7 @@ export async function embedAllPhotos(
       const useGPU = getSetting("gpu.enabled") === "true";
 
       // Poll real pool init progress while workers load ONNX models.
-      // Replaces the old time-based getClipProgressPercent() fake progress.
+      // Replaces the old time-based fake progress with worker-reported progress.
       const poolProgressInterval = setInterval(() => {
         if (!isCurrentEmbeddingRun(runId)) {
           return;

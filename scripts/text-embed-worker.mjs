@@ -6,12 +6,6 @@
  */
 
 const MODEL_CONFIGS = {
-  clip: {
-    displayName: "CLIP ViT-B/32",
-    modelId: "Xenova/clip-vit-base-patch32",
-    outputName: "text_embeds",
-    vectorDimensions: 512,
-  },
   siglip: {
     displayName: "SigLIP Base Patch16-224",
     modelId: "Xenova/siglip-base-patch16-224",
@@ -33,11 +27,11 @@ function disposeOutput(output) {
 }
 
 async function initialize(message) {
-  const modelKind = message.modelKind === "clip" ? "clip" : "siglip";
-  activeModel = MODEL_CONFIGS[modelKind];
+  activeModel = MODEL_CONFIGS.siglip;
 
-  const { AutoTokenizer, CLIPTextModelWithProjection, SiglipTextModel, env } =
-    await import("@xenova/transformers");
+  const { AutoTokenizer, SiglipTextModel, env } = await import(
+    "@xenova/transformers"
+  );
 
   env.localModelPath = message.modelPath;
   env.allowLocalModels = true;
@@ -46,9 +40,7 @@ async function initialize(message) {
   env.useFSCache = true;
 
   tokenizer = await AutoTokenizer.from_pretrained(activeModel.modelId);
-  const TextModel =
-    modelKind === "siglip" ? SiglipTextModel : CLIPTextModelWithProjection;
-  textModel = await TextModel.from_pretrained(activeModel.modelId, {
+  textModel = await SiglipTextModel.from_pretrained(activeModel.modelId, {
     quantized: true,
   });
 
@@ -71,7 +63,7 @@ async function embed(message) {
   }
 
   const inputs = await tokenizer(texts, {
-    padding: activeModel === MODEL_CONFIGS.siglip ? "max_length" : true,
+    padding: "max_length",
     truncation: true,
   });
   const output = await textModel(inputs);

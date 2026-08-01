@@ -1,23 +1,18 @@
 // Compare image/text retrieval quality on the repository's test image set.
 //
 // Usage:
-//   node scripts/bench-embedding-quality.mjs clip [test-data-dir]
-//   node scripts/bench-embedding-quality.mjs siglip [test-data-dir] [model-root]
+//   node scripts/bench-embedding-quality.mjs [test-data-dir] [model-root]
 
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const modelKind = process.argv[2] || "clip";
 const testDataDir = path.resolve(
   process.argv[3] || "D:\\8806\\ai-image-manager测试用例"
 );
 const modelRoot = path.resolve(
-  process.argv[4] ||
-    (modelKind === "siglip"
-      ? path.join(repoRoot, "models-lab")
-      : path.join(repoRoot, "models"))
+  process.argv[3] || path.join(repoRoot, "models-lab")
 );
 
 const CASES = [
@@ -55,8 +50,6 @@ const transformers = await import("@xenova/transformers");
 const {
   AutoProcessor,
   AutoTokenizer,
-  CLIPTextModelWithProjection,
-  CLIPVisionModelWithProjection,
   RawImage,
   SiglipTextModel,
   SiglipVisionModel,
@@ -68,24 +61,12 @@ env.allowLocalModels = true;
 env.allowRemoteModels = false;
 env.backends.onnx.wasm.numThreads = 1;
 
-const config =
-  modelKind === "siglip"
-    ? {
-        id: "Xenova/siglip-base-patch16-224",
-        TextModel: SiglipTextModel,
-        VisionModel: SiglipVisionModel,
-        outputName: "pooler_output",
-      }
-    : {
-        id: "Xenova/clip-vit-base-patch32",
-        TextModel: CLIPTextModelWithProjection,
-        VisionModel: CLIPVisionModelWithProjection,
-        outputName: null,
-      };
-
-if (!["clip", "siglip"].includes(modelKind)) {
-  throw new Error(`Unknown model kind: ${modelKind}`);
-}
+const config = {
+  id: "Xenova/siglip-base-patch16-224",
+  TextModel: SiglipTextModel,
+  VisionModel: SiglipVisionModel,
+  outputName: "pooler_output",
+};
 
 function normalize(values) {
   const vector = Array.from(values);
@@ -108,7 +89,7 @@ const loadMs = performance.now() - loadStartedAt;
 
 const texts = CASES.map(([, caption]) => caption);
 const textInputs = await tokenizer(texts, {
-  padding: modelKind === "siglip" ? "max_length" : true,
+  padding: "max_length",
   truncation: true,
 });
 const textOutput = await textModel(textInputs);
@@ -138,7 +119,7 @@ let recallAt1 = 0;
 let recallAt3 = 0;
 let nonEmptyQueries = 0;
 const misses = [];
-const minimumSimilarity = modelKind === "siglip" ? 0.02 : 0.25;
+const minimumSimilarity = 0.02;
 
 for (let queryIndex = 0; queryIndex < textVectors.length; queryIndex++) {
   const ranked = imageVectors

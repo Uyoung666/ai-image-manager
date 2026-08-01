@@ -996,7 +996,7 @@ export const searchCompound = os
         aiReadiness.coverageState === "ready" ||
         aiReadiness.coverageState === "partial";
       const settled = await Promise.allSettled([
-        // 路 1：CLIP 文本推理 + LanceDB 向量召回
+        // 路 1：SigLIP 文本推理 + LanceDB 向量召回
         semanticAvailable
           ? withTimeout(
               aiSearchByTextWithPlan(q, resultWindowEnd),
@@ -1623,7 +1623,7 @@ export const searchCompound = os
 
 // ── Spotlight 轻量搜索 ───────────────────────────────────────────────
 // 专为 Ctrl+K 全局搜索设计：仅返回 id + filename + thumbnailPath，
-// 跳过 LanceDB CLIP 推理和四路并行重排，延迟极低（通常 < 30ms）。
+// 跳过 LanceDB SigLIP 推理和四路并行重排，延迟极低（通常 < 30ms）。
 export const searchSpotlight = os
   .input(SearchSchema)
   .handler(async ({ input }) => {

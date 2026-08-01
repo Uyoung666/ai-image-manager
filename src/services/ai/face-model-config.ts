@@ -1,24 +1,15 @@
 /**
  * Face model configuration — single source of truth for the face pipeline.
  *
- * Two kinds:
- *   - "yunet-sface"   (default): YuNet detection (MIT) + SFace embedding
- *                      (Apache-2.0), 128-d, 5-point landmark alignment.
- *   - "ultraface-w600k" (legacy): UltraFace + w600k_r50 ArcFace (512-d, no
- *                      alignment). InsightFace weights are research-only, so
- *                      this kind is retained strictly as a rollback path.
- *
- * YuNet+SFace is the only normal runtime model. The legacy kind requires the
- * explicit `FACE_MODEL_ALLOW_RESEARCH_ONLY=1` opt-in in addition to
- * `FACE_MODEL_KIND=ultraface-w600k`; this keeps rollback tooling available
- * without leaving the research model on the normal application path.
+ * YuNet detection (MIT) + SFace embedding (Apache-2.0), 128-d, with
+ * 5-point landmark alignment. This is the only product face runtime.
  * The detection confidence / clustering thresholds here are calibration seeds;
  * the worker embeds its own copy of the detection constants (scripts/*.mjs
  * cannot import TS), so keep them in sync when recalibrating.
  */
 import path from "node:path";
 
-export type FaceModelKind = "yunet-sface" | "ultraface-w600k";
+export type FaceModelKind = "yunet-sface";
 
 export interface FaceModelConfig {
   clustering: {
@@ -47,8 +38,7 @@ export interface FaceModelConfig {
   };
 }
 
-const FACE_MODEL_CONFIGS: Record<FaceModelKind, FaceModelConfig> = {
-  "yunet-sface": {
+const ACTIVE_FACE_MODEL: FaceModelConfig = {
     kind: "yunet-sface",
     displayName: "YuNet + SFace",
     detection: {
@@ -78,40 +68,10 @@ const FACE_MODEL_CONFIGS: Record<FaceModelKind, FaceModelConfig> = {
       "face_detection_yunet_2023mar.onnx",
       "face_recognition_sface_2021dec.onnx",
     ],
-  },
-  "ultraface-w600k": {
-    kind: "ultraface-w600k",
-    displayName: "UltraFace + ArcFace (legacy)",
-    detection: {
-      fileName: "ultraface-320.onnx",
-      inputSizeW: 320,
-      inputSizeH: 240,
-      confidenceThreshold: 0.85,
-      nmsIoU: 0.3,
-      maxFaces: 20,
-      minFaceSize: 40,
-    },
-    recognition: {
-      fileName: "w600k_r50.onnx",
-      inputSize: 112,
-      vectorDimensions: 512,
-      useLandmarkAlign: false,
-    },
-    clustering: {
-      threshold: 0.55,
-      confidenceFilter: 0.88,
-    },
-    modelFiles: ["ultraface-320.onnx", "w600k_r50.onnx"],
-  },
 };
 
 export function getActiveFaceModel(): FaceModelConfig {
-  const requested = process.env.FACE_MODEL_KIND?.trim().toLowerCase();
-  const researchOptIn =
-    process.env.FACE_MODEL_ALLOW_RESEARCH_ONLY?.trim() === "1";
-  return requested === "ultraface-w600k" && researchOptIn
-    ? FACE_MODEL_CONFIGS["ultraface-w600k"]
-    : FACE_MODEL_CONFIGS["yunet-sface"];
+  return ACTIVE_FACE_MODEL;
 }
 
 export function getFaceModelFile(modelsRoot: string, fileName: string): string {

@@ -40,36 +40,6 @@ Source:
 The required attribution and a link to the license are included at
 `licenses/OPUS-MT-CC-BY-4.0.txt`.
 
-## CLIP ViT-B/32
-
-- Upstream model: `openai/clip-vit-base-patch32`
-- ONNX conversion: `Xenova/clip-vit-base-patch32`
-- Purpose: local image/text embeddings for compatibility and auxiliary search
-- License: MIT
-
-The model weights are redistributed under the MIT License. A copy of that
-license is included at `licenses/CLIP-MIT.txt`.
-
-Source:
-
-- https://github.com/openai/CLIP
-- https://huggingface.co/Xenova/clip-vit-base-patch32
-
-## UltraFace 320 (legacy detector)
-
-- Upstream: Linzaer's Ultra-Light-Fast-Generic-Face-Detector-1MB
-- File: `face/ultraface-320.onnx`
-- Purpose: explicit legacy detector fallback only; it is not the old w600k
-  recognition model
-- License: MIT
-
-A copy of the upstream MIT license is included at
-`licenses/UltraFace-MIT.txt`.
-
-Source:
-
-- https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
-
 ## YuNet Face Detection
 
 - Upstream: Shiqi Yu's libfacedetection training (YuNet)

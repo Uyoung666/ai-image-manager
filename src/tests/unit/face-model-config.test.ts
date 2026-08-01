@@ -22,14 +22,13 @@ describe("getActiveFaceModel", () => {
     expect(getActiveFaceModel().kind).toBe("yunet-sface");
   });
 
-  it("switches to ultraface-w600k only with explicit research opt-in", () => {
+  it("ignores the removed legacy model even with the old opt-in variables", () => {
     process.env.FACE_MODEL_KIND = "ultraface-w600k";
     process.env.FACE_MODEL_ALLOW_RESEARCH_ONLY = "1";
     const m = getActiveFaceModel();
-    expect(m.kind).toBe("ultraface-w600k");
-    expect(m.recognition.vectorDimensions).toBe(512);
-    expect(m.recognition.useLandmarkAlign).toBe(false);
-    expect(m.clustering.threshold).toBe(0.55);
+    expect(m.kind).toBe("yunet-sface");
+    expect(m.recognition.vectorDimensions).toBe(128);
+    expect(m.recognition.useLandmarkAlign).toBe(true);
   });
 
   it("ignores unknown values and falls back to the default", () => {

@@ -309,14 +309,17 @@ describe("face migration safety", () => {
     const before = readState(dbPath);
     const modelsDir = path.join(path.dirname(dbPath), "models");
     fs.mkdirSync(path.join(modelsDir, "face"), { recursive: true });
-    for (const fileName of ["ultraface-320.onnx", "w600k_r50.onnx"]) {
+    for (const fileName of [
+      "face_detection_yunet_2023mar.onnx",
+      "face_recognition_sface_2021dec.onnx",
+    ]) {
       fs.writeFileSync(path.join(modelsDir, "face", fileName), "invalid");
     }
     const previousModelsDir = process.env.FACE_MIGRATION_MODELS_DIR;
     process.env.FACE_MIGRATION_MODELS_DIR = modelsDir;
 
     try {
-      await expect(runMigration([dbPath, "ultraface-w600k"])).rejects.toThrow(
+      await expect(runMigration([dbPath, "yunet-sface"])).rejects.toThrow(
         ROLLED_BACK
       );
     } finally {

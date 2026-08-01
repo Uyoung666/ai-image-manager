@@ -36,54 +36,6 @@ function median(values: number[]): number {
   return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function selectClipTags<TCategory extends string>(
-  scores: TagScore<TCategory>[],
-  maxTags: number
-): SelectedTag<TCategory>[] {
-  const absoluteMinimum = 0.15;
-  const categoryMultipliers: Record<string, number> = {
-    scene: 1.2,
-    lighting: 1.1,
-    color: 1.1,
-    weather: 1.1,
-  };
-  const candidates = [...scores]
-    .sort((left, right) => right.similarity - left.similarity)
-    .filter((score) => score.similarity >= absoluteMinimum);
-  if (candidates.length === 0) {
-    return [];
-  }
-
-  const selected: TagScore<TCategory>[] = [];
-  for (const current of candidates.slice(0, maxTags * 2)) {
-    const multiplier = categoryMultipliers[current.category] ?? 1;
-    if (current.similarity < absoluteMinimum * multiplier) {
-      continue;
-    }
-    if (current.similarity < candidates[0].similarity * 0.6) {
-      break;
-    }
-    const previous = selected.at(-1);
-    if (
-      selected.length >= 3 &&
-      previous &&
-      previous.similarity - current.similarity > 0.08
-    ) {
-      break;
-    }
-    selected.push(current);
-    if (selected.length >= maxTags) {
-      break;
-    }
-  }
-
-  return selected.map((score) => ({
-    tag: score.displayName,
-    confidence: Math.round(score.similarity * 100) / 100,
-    category: score.category,
-  }));
-}
-
 function selectSiglipTags<TCategory extends string>(
   scores: TagScore<TCategory>[],
   maxTags: number,
@@ -142,9 +94,7 @@ export function selectTagScores<TCategory extends string>(
   maxTags: number,
   model: EmbeddingModelConfig
 ): SelectedTag<TCategory>[] {
-  return model.kind === "siglip"
-    ? selectSiglipTags(scores, maxTags, model)
-    : selectClipTags(scores, maxTags);
+  return selectSiglipTags(scores, maxTags, model);
 }
 
 export function isValidEmbeddingVector(

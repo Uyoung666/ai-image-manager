@@ -26,8 +26,6 @@ export interface ModelManifestEntry {
   fileName: string;
   name: string;
   required: boolean;
-  /** Research-only assets require an explicit opt-in. */
-  researchOnly?: boolean;
   sha256: string;
   sizeBytes: number;
   subPath: string;
@@ -52,9 +50,7 @@ export interface DownloadProgress {
 }
 
 export interface ModelDownloadOptions {
-  /** Explicit opt-in for the legacy research-only fallback. */
-  allowResearchOnly?: boolean;
-  /** Include non-required, non-research assets such as optional CLIP files. */
+  /** Include non-required assets when a caller explicitly requests them. */
   includeOptional?: boolean;
 }
 
@@ -144,97 +140,6 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     sha256: "9a38d3c6b5e26fe5dcc607eda95e38d78d30d9291835bb9e8116e8174c1d4ba2",
     sizeBytes: 739,
     required: true,
-  },
-  {
-    name: "CLIP 图像编码器",
-    fileName: "vision_model_quantized.onnx",
-    subPath: "Xenova/clip-vit-base-patch32/onnx",
-    urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
-    ],
-    sha256: "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299",
-    sizeBytes: 89_117_001,
-    required: false,
-  },
-  {
-    name: "CLIP 文本编码器",
-    fileName: "text_model_quantized.onnx",
-    subPath: "Xenova/clip-vit-base-patch32/onnx",
-    urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx",
-    ],
-    sha256: "73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a",
-    sizeBytes: 64_504_507,
-    required: false,
-  },
-  {
-    name: "CLIP 模型配置",
-    fileName: "config.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/config.json"],
-    sha256: "493ef57ff783e42d1530c91b53469b7fdf8db8a9c1408e86998fcb7899a4f495",
-    sizeBytes: 4524,
-    required: false,
-  },
-  {
-    name: "CLIP 图像处理配置",
-    fileName: "preprocessor_config.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/preprocessor_config.json",
-    ],
-    sha256: "6f638fb9401a6d6296feff533ee7efe657b787c49f954f82f5906b36ef2a1b1f",
-    sizeBytes: 520,
-    required: false,
-  },
-  {
-    name: "CLIP 特殊词元配置",
-    fileName: "special_tokens_map.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/special_tokens_map.json",
-    ],
-    sha256: "c4864a9376a8401918425bed71fc14fc0e81f9b59ec45c1cf96cccb2df508eac",
-    sizeBytes: 472,
-    required: false,
-  },
-  {
-    name: "CLIP 分词器",
-    fileName: "tokenizer.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json"],
-    sha256: "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd",
-    sizeBytes: 2_224_119,
-    required: false,
-  },
-  {
-    name: "CLIP 分词器配置",
-    fileName: "tokenizer_config.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: [
-      "{mirror}/Xenova/clip-vit-base-patch32/resolve/main/tokenizer_config.json",
-    ],
-    sha256: "60ba2912bc6344c94bc16bbdec27fa1209409167b6f2fdf3cfe9e65462ea3967",
-    sizeBytes: 775,
-    required: false,
-  },
-  {
-    name: "CLIP 词表",
-    fileName: "vocab.json",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/vocab.json"],
-    sha256: "5047b556ce86ccaf6aa22b3ffccfc52d391ea4accdab9c2f2407da5b742d4363",
-    sizeBytes: 862_328,
-    required: false,
-  },
-  {
-    name: "CLIP merges 词表",
-    fileName: "merges.txt",
-    subPath: "Xenova/clip-vit-base-patch32",
-    urls: ["{mirror}/Xenova/clip-vit-base-patch32/resolve/main/merges.txt"],
-    sha256: "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a",
-    sizeBytes: 524_619,
-    required: false,
   },
   {
     name: "OPUS-MT 翻译编码器",
@@ -347,24 +252,6 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     required: true,
   },
   {
-    name: "人脸识别模型 (旧版)",
-    bundled: false,
-    fileName: "w600k_r50.onnx",
-    subPath: "face",
-    urls: [
-      "{mirror}/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
-      "https://hf-mirror.com/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
-    ],
-    researchOnly: true,
-    sha256: "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43",
-    sizeBytes: 174_383_860,
-    required: false,
-  },
-  // w600k_r50 is InsightFace buffalo_l (research-only license). The model file
-  // is no longer bundled — the installer ships only YuNet+SFace. This entry
-  // remains purely as a manual rollback download for the legacy
-  // "ultraface-w600k" face kind; it is NOT included in the installer.
-  {
     name: "YuNet 人脸检测",
     fileName: "face_detection_yunet_2023mar.onnx",
     subPath: "face",
@@ -386,19 +273,6 @@ export const MODEL_MANIFEST: ModelManifestEntry[] = [
     sizeBytes: 38_696_353,
     required: true,
   },
-  {
-    name: "UltraFace 320 (legacy detector)",
-    bundled: false,
-    fileName: "ultraface-320.onnx",
-    subPath: "face",
-    urls: [
-      "https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB/raw/master/models/onnx/version-RFB-320.onnx",
-    ],
-    researchOnly: true,
-    sha256: "34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017",
-    sizeBytes: 1_270_727,
-    required: false,
-  },
 ];
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
@@ -414,7 +288,7 @@ function isSafeRelativePath(value: string): boolean {
 }
 
 function validateManifestEntry(entry: ModelManifestEntry): void {
-  if (!entry.bundled && entry.urls.length === 0 && !entry.researchOnly) {
+  if (!entry.bundled && entry.urls.length === 0) {
     throw new Error(`Model manifest entry has no source: ${entry.fileName}`);
   }
   if (
@@ -463,7 +337,7 @@ const TMP_EXT = ".tmp";
 
 /**
  * File path used for mirror speed probing.
- * Uses the CLIP vision model — it exists on all HuggingFace mirrors
+ * Uses the SigLIP vision model — it exists on all HuggingFace mirrors
  * and is a real download target, giving accurate TTFB measurements.
  */
 export const PROBE_FILE_PATH =
@@ -1115,13 +989,6 @@ function shouldDownloadEntry(
   if (entry.urls.length === 0) {
     return false;
   }
-  if (entry.researchOnly) {
-    return (
-      options.allowResearchOnly === true &&
-      process.env.FACE_MODEL_KIND?.trim().toLowerCase() === "ultraface-w600k" &&
-      process.env.FACE_MODEL_ALLOW_RESEARCH_ONLY?.trim() === "1"
-    );
-  }
   return entry.required || options.includeOptional === true;
 }
 
@@ -1339,7 +1206,7 @@ export async function downloadAllModels(
   };
 
   // ── Concurrent worker pool (问题 3: sorted by size ascending) ─────
-  // Smallest files first → 1 MB ultraface finishes immediately
+  // Smallest files first — metadata completes immediately
   // instead of waiting behind 166 MB face recognition model.
   const queue = [...missing].sort((a, b) => a.sizeBytes - b.sizeBytes);
 

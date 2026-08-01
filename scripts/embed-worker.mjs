@@ -1,7 +1,7 @@
 /**
- * Persistent CLIP image embedding worker (DirectML GPU accelerated).
+ * Persistent SigLIP image embedding worker.
  *
- * Runs as a child process via fork(). Loads the CLIP vision ONNX model once
+ * Runs as a child process via fork(). Loads the SigLIP vision ONNX model once
  * via onnxruntime-node (native, supports DirectML), then processes batches
  * as they arrive — no model reload per batch.
  *
@@ -49,15 +49,6 @@ function isRawFile(filePath) {
 }
 
 const MODEL_CONFIGS = {
-  clip: {
-    directory: "clip-vit-base-patch32",
-    displayName: "CLIP ViT-B/32",
-    imageMean: [0.481_454_66, 0.457_827_5, 0.408_210_73],
-    imageOutputName: "image_embeds",
-    imageSize: 224,
-    imageStd: [0.268_629_54, 0.261_302_58, 0.275_777_11],
-    resizeFit: "cover",
-  },
   siglip: {
     directory: "siglip-base-patch16-224",
     displayName: "SigLIP Base Patch16-224",
@@ -100,7 +91,7 @@ function loadOrt() {
 /**
  * Preprocess image: sharp decode + resize + normalize → Float32Array(NCHW).
  */
-async function preprocessCLIP(filePath) {
+async function preprocessSigLIP(filePath) {
   const imageSize = activeModel.imageSize;
   const { data, info } = await sharp(filePath, { failOn: "none" })
     .rotate()
@@ -135,11 +126,10 @@ async function preprocessCLIP(filePath) {
   return floatData;
 }
 
-// --- Init handler: load CLIP vision ONNX model directly ---
+// --- Init handler: load SigLIP vision ONNX model directly ---
 async function handleInit(msg) {
   const { modelPath } = msg;
-  const modelKind = msg.modelKind === "clip" ? "clip" : "siglip";
-  activeModel = MODEL_CONFIGS[modelKind];
+  activeModel = MODEL_CONFIGS.siglip;
   const intraOpNumThreads = Math.max(
     1,
     Number.parseInt(
@@ -248,7 +238,7 @@ async function handleEmbed(msg) {
       }
 
       // Preprocess + run ONNX inference directly (no transformers overhead)
-      const floatData = await preprocessCLIP(imageInput);
+      const floatData = await preprocessSigLIP(imageInput);
       const pixelValues = new ort.Tensor("float32", floatData, [
         1,
         3,

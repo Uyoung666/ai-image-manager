@@ -12,7 +12,7 @@ import { fork } from "node:child_process";
  * similarities.
  *
  * Usage:
- *   node scripts/bench-face-quality.mjs <dir> [kind]
+ *   node scripts/bench-face-quality.mjs <dir>
  *     [--labels <json>] [--report <file>] [--models-dir <dir>]
  */
 import { createHash } from "node:crypto";
@@ -28,14 +28,12 @@ const IMAGE_EXTENSIONS = new Set([
   ".webp",
 ]);
 const MODEL_FILES = {
-  "ultraface-w600k": ["face/ultraface-320.onnx", "face/w600k_r50.onnx"],
   "yunet-sface": [
     "face/face_detection_yunet_2023mar.onnx",
     "face/face_recognition_sface_2021dec.onnx",
   ],
 };
 const MODEL_CONFIDENCE_FILTER = {
-  "ultraface-w600k": 0.88,
   "yunet-sface": 0.85,
 };
 const LEADING_DOT_SLASH_PATTERN = /^\.\//u;
@@ -44,11 +42,10 @@ const MAX_RUNTIME_MS = 300_000;
 
 function usageError(message) {
   return new Error(
-    `${message}\nUsage: node scripts/bench-face-quality.mjs <dir> [kind] [--labels <json>] [--report <file>] [--models-dir <dir>]`
+    `${message}\nUsage: node scripts/bench-face-quality.mjs <dir> [--labels <json>] [--report <file>] [--models-dir <dir>]`
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: CLI parsing keeps all benchmark options and validation in one entry point.
 function parseArgs(argv) {
   const args = [...argv];
   const dirArg = args.shift();
@@ -56,13 +53,7 @@ function parseArgs(argv) {
     throw usageError("Dataset directory is required.");
   }
 
-  let kind = "yunet-sface";
-  if (args[0] && !args[0].startsWith("-")) {
-    kind = args.shift();
-  }
-  if (!Object.hasOwn(MODEL_FILES, kind)) {
-    throw usageError(`Unsupported model kind: ${kind}`);
-  }
+  const kind = "yunet-sface";
 
   let labelsFile = null;
   let reportFile = null;

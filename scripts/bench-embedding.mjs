@@ -1,7 +1,7 @@
-// Quick CLIP image embedding benchmark using the production embed-worker.
+// Quick SigLIP image embedding benchmark using the production embed-worker.
 //
 // Usage:
-//   node scripts/bench-embedding.mjs [image-or-directory] [count] [siglip|clip]
+//   node scripts/bench-embedding.mjs [image-or-directory] [count]
 
 import { fork } from "node:child_process";
 import fs from "node:fs";
@@ -17,7 +17,6 @@ const modelPath = path.join(repoRoot, "models");
 const defaultInput = "D:\\8806\\ai-image-manager测试用例";
 const inputPath = path.resolve(process.argv[2] || defaultInput);
 const count = Math.max(1, Number.parseInt(process.argv[3] || "12", 10) || 12);
-const modelKind = process.argv[4] === "clip" ? "clip" : "siglip";
 
 function listImages(targetPath) {
   const stat = fs.statSync(targetPath);
@@ -68,7 +67,7 @@ function runWorker(photos, intraOpNumThreads) {
       if (msg.type === "ready") {
         initMs = performance.now() - initStartedAt;
         embedStartedAt = performance.now();
-        child.send({ type: "embed", modelPath, photos });
+        child.send({ type: "embed", modelPath, modelKind: "siglip", photos });
         return;
       }
       if (msg.type === "init-error") {
@@ -110,7 +109,7 @@ function runWorker(photos, intraOpNumThreads) {
 
     child.send({
       type: "init",
-      modelKind,
+      modelKind: "siglip",
       modelPath,
       intraOpNumThreads,
       useGPU: false,
@@ -160,7 +159,7 @@ const defaultThreads = Math.max(
   Math.min(4, Math.floor(Math.max(1, cpuCount - 1) / defaultWorkers))
 );
 
-console.log(`=== ${modelKind.toUpperCase()} embedding benchmark ===`);
+console.log("=== SIGLIP embedding benchmark ===");
 console.log(`CPU: ${cpuCount} logical cores`);
 console.log(`Images: ${photos.length}`);
 console.log(`Model: ${modelPath}`);

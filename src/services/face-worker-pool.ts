@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
-import { getActiveFaceModel } from "@/services/ai/face-model-config";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("face-worker-pool");
@@ -201,7 +200,6 @@ function handleWorkerDeath(slot: WorkerSlot): void {
         type: "init",
         modelsDir: poolModelsDir,
         useGPU: poolUseGPU,
-        kind: getActiveFaceModel().kind,
       });
     }, RESPAWN_DELAY_MS);
   } else {
@@ -268,7 +266,7 @@ export async function initFaceWorkerPool(
   workerInitProgress.clear();
 
   const cpuCount = os.cpus().length;
-  // Face models are lighter than CLIP (~200MB per worker including DML context)
+  // Face models are lightweight (~200MB per worker including DML context)
   poolSize = cpuCount >= 8 ? 3 : 2;
   const workerScript = findWorkerScript();
   console.log(
@@ -307,7 +305,6 @@ export async function initFaceWorkerPool(
       type: "init",
       modelsDir,
       useGPU,
-      kind: getActiveFaceModel().kind,
     });
   }
 

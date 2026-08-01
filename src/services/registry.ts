@@ -378,7 +378,7 @@ registry.register({
     }
     return {
       status: "degraded" as const,
-      detail: "CLIP model not loaded",
+      detail: "AI embedding model not loaded",
     };
   },
 });

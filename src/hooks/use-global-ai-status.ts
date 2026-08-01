@@ -246,7 +246,7 @@ function buildSnapshot(
  * Resolution order (highest priority first):
  *   1. Queue running (import + AI) — the user's explicit action
  *   2. Face detection running
- *   3. CLIP model loading / embedding
+ *   3. SigLIP model loading / embedding
  *   4. File scan / indexing
  *   5. Idle
  */

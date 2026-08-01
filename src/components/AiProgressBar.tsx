@@ -296,8 +296,8 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   } else if (progress.phase === "loading") {
     phaseLabel =
       progress.downloadPercent == null
-        ? t("aiLoadingClip")
-        : t("aiLoadingClip", { percent: progress.downloadPercent });
+        ? t("aiLoadingEmbedding")
+        : t("aiLoadingEmbedding", { percent: progress.downloadPercent });
   } else if (progress.phase === "complete") {
     phaseLabel = t("aiComplete");
   }

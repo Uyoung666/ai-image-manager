@@ -492,7 +492,7 @@ export function fuseHybridSearchEvidence(
  * Compatibility wrapper for older callers. It intentionally performs no text
  * embedding; candidates are treated as the already-ranked semantic list.
  */
-export function rerankWithCLIPScore(
+export function rerankWithEmbeddingScore(
   _query: string,
   candidates: Array<{
     _source?: SearchEvidenceSource;

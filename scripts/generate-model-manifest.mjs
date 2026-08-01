@@ -28,8 +28,8 @@ const FILES = [
   "Xenova/opus-mt-zh-en/vocab.json",
   "Xenova/opus-mt-zh-en/onnx/encoder_model_quantized.onnx",
   "Xenova/opus-mt-zh-en/onnx/decoder_model_merged_quantized.onnx",
-  "face/w600k_r50.onnx",
-  "face/ultraface-320.onnx",
+  "face/face_detection_yunet_2023mar.onnx",
+  "face/face_recognition_sface_2021dec.onnx",
 ];
 
 async function sha256File(filePath) {

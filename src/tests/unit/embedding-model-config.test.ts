@@ -25,13 +25,13 @@ describe("embedding model configuration", () => {
     });
   });
 
-  it("keeps CLIP as an explicit rollback option", () => {
+  it("ignores the removed CLIP selector and keeps SigLIP active", () => {
     process.env.AI_EMBEDDING_MODEL = "clip";
 
     expect(getActiveEmbeddingModel()).toMatchObject({
-      kind: "clip",
-      modelId: "Xenova/clip-vit-base-patch32",
-      vectorDimensions: 512,
+      kind: "siglip",
+      modelId: "Xenova/siglip-base-patch16-224",
+      vectorDimensions: 768,
     });
   });
 

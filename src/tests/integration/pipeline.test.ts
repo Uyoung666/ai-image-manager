@@ -410,7 +410,7 @@ describe("Pipeline Integration Test (500 images)", () => {
   // Test 5: AI model availability check
   // ─────────────────────────────────────────────────────────────────
   describe("Step 5: AI 模型可用性检查", () => {
-    it("应能找到CLIP模型文件", () => {
+    it("应能找到SigLIP模型文件", () => {
       // Check multiple possible model locations
       const candidates = [
         path.join(
@@ -445,7 +445,7 @@ describe("Pipeline Integration Test (500 images)", () => {
       let found = false;
       for (const c of candidates) {
         if (fs.existsSync(c)) {
-          console.log(`[Test] CLIP model found at: ${c}`);
+          console.log(`[Test] SigLIP model found at: ${c}`);
           found = true;
           break;
         }
@@ -453,7 +453,7 @@ describe("Pipeline Integration Test (500 images)", () => {
 
       if (!found) {
         console.log(
-          "[Test] CLIP model not found locally — AI embedding and search tests will be skipped"
+          "[Test] SigLIP model not found locally — AI embedding and search tests will be skipped"
         );
         console.log(
           "[Test] The model will be downloaded automatically on first use (requires network)"

@@ -388,7 +388,7 @@ async function embedSearchTexts(
     }
     timings.embedMs += Date.now() - startedAt;
     if (generated.length !== missing.length) {
-      throw new Error("CLIP 批量文本向量数量不匹配");
+      throw new Error("SigLIP 批量文本向量数量不匹配");
     }
 
     const model = getActiveEmbeddingModel();
@@ -564,7 +564,7 @@ async function multiPromptSearch(
 }
 
 // ── AI 文本搜索 TTL 缓存 ────────────────────────────────────────────
-// 避免相同 query 短时间内反复触发 CLIP 文本推理（~50ms）+ LanceDB 搜索
+// 避免相同 query 短时间内反复触发 SigLIP 文本推理（~50ms）+ LanceDB 搜索
 interface SearchCacheEntry {
   result: SemanticTextSearchResult;
   timestamp: number;
@@ -691,7 +691,7 @@ export async function searchByTextWithPlan(
     searchCacheTable = photoTable;
   }
 
-  // TTL cache check — avoids redundant CLIP inference + LanceDB search
+  // TTL cache check — avoids redundant SigLIP inference + LanceDB search
   const cached = getCachedSearch(cacheKey);
   if (cached) {
     console.log(`[AI] searchByText CACHE HIT: limit=${limit}`);
