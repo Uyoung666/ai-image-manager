@@ -4,9 +4,47 @@ import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
+export interface FaceOverlay {
+  height: number;
+  label?: string;
+  width: number;
+  x: number;
+  y: number;
+}
+
+export function getFaceOverlayStyle(
+  faceOverlay: FaceOverlay,
+  photoWidth: number,
+  photoHeight: number,
+  containerAspect: number
+): React.CSSProperties {
+  const imageAspect = photoWidth / Math.max(photoHeight, 1);
+  if (imageAspect > containerAspect) {
+    const renderedWidth = imageAspect / containerAspect;
+    const crop = (renderedWidth - 1) / 2;
+    return {
+      height: `${Math.max(0, faceOverlay.height) * 100}%`,
+      left: `${(faceOverlay.x * renderedWidth - crop) * 100}%`,
+      top: `${Math.max(0, faceOverlay.y) * 100}%`,
+      width: `${Math.max(0, faceOverlay.width) * renderedWidth * 100}%`,
+    };
+  }
+  const renderedHeight = containerAspect / imageAspect;
+  const crop = (renderedHeight - 1) / 2;
+  return {
+    height: `${Math.max(0, faceOverlay.height) * renderedHeight * 100}%`,
+    left: `${Math.max(0, faceOverlay.x) * 100}%`,
+    top: `${(faceOverlay.y * renderedHeight - crop) * 100}%`,
+    width: `${Math.max(0, faceOverlay.width) * 100}%`,
+  };
+}
+
 interface PhotoCardProps {
   deleting?: boolean;
   dominantColors?: string | null;
+  faceOverlay?: FaceOverlay;
+  faceOverlays?: FaceOverlay[];
+  faceOverlaysVisible?: boolean;
   filename: string;
   getDragIds?: (id: number) => number[];
   height: number;
@@ -17,6 +55,7 @@ interface PhotoCardProps {
   match?: SearchMatch;
   onClick: (id: number, event: React.MouseEvent) => void;
   onDoubleClick: (id: number) => void;
+  onNameFace?: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   path: string;
   renderImage?: boolean;
@@ -69,6 +108,40 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
       </mark>
       {text.slice(idx + query.length)}
     </>
+  );
+}
+
+function FaceOverlayBox({
+  containerAspect,
+  faceOverlay,
+  faceOverlaysVisible,
+  photoHeight,
+  photoWidth,
+}: {
+  containerAspect: number;
+  faceOverlay: FaceOverlay;
+  faceOverlaysVisible: boolean;
+  photoHeight: number;
+  photoWidth: number;
+}) {
+  return (
+    <div
+      aria-label={faceOverlay.label ?? "人脸位置"}
+      className={`pointer-events-none absolute rounded border-2 border-primary shadow-[0_0_0_1px_rgba(255,255,255,0.5)] transition-opacity duration-200 ${faceOverlaysVisible ? "opacity-100" : "opacity-0"}`}
+      role="img"
+      style={getFaceOverlayStyle(
+        faceOverlay,
+        photoWidth,
+        photoHeight,
+        containerAspect
+      )}
+    >
+      {faceOverlay.label && (
+        <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">
+          {faceOverlay.label}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -129,12 +202,16 @@ export const PhotoCard = memo(function PhotoCard({
   getDragIds,
   isFavorite,
   deleting,
+  faceOverlay,
+  faceOverlays,
+  faceOverlaysVisible = true,
   searchQuery,
   selectionInset = false,
   match,
   renderImage = true,
   onClick,
   onDoubleClick,
+  onNameFace,
   onToggleFavorite,
 }: PhotoCardProps) {
   const { t } = useTranslation();
@@ -394,6 +471,19 @@ export const PhotoCard = memo(function PhotoCard({
         width={width}
       />
 
+      {[...(faceOverlay ? [faceOverlay] : []), ...(faceOverlays ?? [])].map(
+        (overlay) => (
+          <FaceOverlayBox
+            containerAspect={aspectRatio}
+            faceOverlay={overlay}
+            faceOverlaysVisible={faceOverlaysVisible}
+            key={`${overlay.x}-${overlay.y}-${overlay.width}-${overlay.height}-${overlay.label ?? ""}`}
+            photoHeight={height}
+            photoWidth={width}
+          />
+        )
+      )}
+
       {/* Hover overlay */}
       <div className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
@@ -408,6 +498,22 @@ export const PhotoCard = memo(function PhotoCard({
           )}
         </div>
       </div>
+
+      {onNameFace &&
+        faceOverlaysVisible &&
+        (faceOverlays?.length ?? 0) + (faceOverlay ? 1 : 0) === 1 && (
+          <button
+            className="absolute top-2 right-2 rounded-[4px] bg-black/65 px-2 py-1 text-[10px] text-white opacity-0 transition-opacity hover:bg-primary focus-visible:opacity-100 group-hover:opacity-100"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onNameFace(id);
+            }}
+            type="button"
+          >
+            {t("reassignFace")}
+          </button>
+        )}
 
       {/* Favorite star */}
       {onToggleFavorite && (
@@ -430,6 +536,7 @@ export const PhotoCard = memo(function PhotoCard({
           }}
           onDoubleClick={(e) => e.stopPropagation()}
           ref={starRef}
+          type="button"
         >
           <svg
             className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}

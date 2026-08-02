@@ -156,6 +156,7 @@ export function PhotoDetailPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
+  const photoRequestRef = useRef(0);
   const [visible, setVisible] = useState(false);
   const [hasMoreBelow, setHasMoreBelow] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
@@ -285,15 +286,19 @@ export function PhotoDetailPanel({
     return () => observer.disconnect();
   }, [updateBottomFade, exif, loading, photo?.id, photoTags, aiSuggestions, aiTagTaskState]);
 
-  const loadTags = useCallback(async () => {
+  const loadTags = useCallback(async (requestId = photoRequestRef.current) => {
     if (!photo) {
       return;
     }
+    const photoId = photo.id;
     try {
       const [pTags, aTags] = await Promise.all([
-        ipc.client.photos.getPhotoTags({ id: photo.id }),
+        ipc.client.photos.getPhotoTags({ id: photoId }),
         ipc.client.photos.getTags({}),
       ]);
+      if (photoRequestRef.current !== requestId) {
+        return;
+      }
       setPhotoTags((pTags as TagInfo[]) || []);
       setAllTags((aTags as unknown as TagInfo[]) || []);
     } catch (err) {
@@ -352,17 +357,31 @@ export function PhotoDetailPanel({
 
   useEffect(() => {
     if (!photo) {
+      photoRequestRef.current += 1;
       return;
     }
+    const requestId = ++photoRequestRef.current;
     setLoading(true);
     setExif(null);
     setPhotoTags([]);
     ipc.client.photos
       .getPhotoExif({ id: photo.id })
-      .then((result) => setExif(result as ExifData | null))
-      .catch(() => setExif(null))
-      .finally(() => setLoading(false));
-    loadTags();
+      .then((result) => {
+        if (photoRequestRef.current === requestId) {
+          setExif(result as ExifData | null);
+        }
+      })
+      .catch(() => {
+        if (photoRequestRef.current === requestId) {
+          setExif(null);
+        }
+      })
+      .finally(() => {
+        if (photoRequestRef.current === requestId) {
+          setLoading(false);
+        }
+      });
+    loadTags(requestId);
   }, [photo?.id, loadTags]);
 
   useEffect(() => {

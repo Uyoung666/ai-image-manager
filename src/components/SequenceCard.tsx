@@ -3,11 +3,14 @@ import { memo, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { PhotoSequence } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
+import { type FaceOverlay, getFaceOverlayStyle } from "./PhotoCard";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 interface SequenceCardProps {
   expanded?: boolean;
   expanding?: boolean;
+  faceOverlays?: FaceOverlay[];
+  faceOverlaysVisible?: boolean;
   isSelected: boolean;
   onClick: (id: number, event: React.MouseEvent) => void;
   onOpen: (sequenceId: number) => void;
@@ -27,6 +30,8 @@ export const SequenceCard = memo(function SequenceCard({
   onToggleExpand,
   expanded = false,
   expanding = false,
+  faceOverlays,
+  faceOverlaysVisible = true,
 }: SequenceCardProps) {
   const { t } = useTranslation();
   const { photo } = sequence;
@@ -47,9 +52,14 @@ export const SequenceCard = memo(function SequenceCard({
       ? t("sequenceMinutes", { count: Math.round(duration / 60_000) })
       : "";
   const scopedCount =
-    sequence.matchedCount != null && sequence.matchedCount !== sequence.frameCount
+    sequence.matchedCount != null &&
+    sequence.matchedCount !== sequence.frameCount
       ? `${sequence.matchedCount}/${sequence.frameCount}`
       : String(sequence.frameCount);
+  const containerAspect = Math.max(
+    0.6,
+    Math.min(photo.width / photo.height || 4 / 3, 3)
+  );
   return (
     <div
       aria-label={t("sequenceCardLabel", {
@@ -66,7 +76,7 @@ export const SequenceCard = memo(function SequenceCard({
       onClick={(event) => {
         cancelPendingClick();
         onClick(photo.id, event);
-        if (!event.ctrlKey && !event.metaKey) {
+        if (!(event.ctrlKey || event.metaKey)) {
           clickTimerRef.current = setTimeout(() => {
             clickTimerRef.current = null;
             onOpenDetails(sequence.id);
@@ -98,12 +108,26 @@ export const SequenceCard = memo(function SequenceCard({
         <img
           alt={photo.filename}
           className="h-full w-full object-cover"
+          height={photo.height ?? 1}
           loading="lazy"
           src={toLocalMediaUrl(photo.thumbnailPath)}
-          height={photo.height ?? 1}
           width={photo.width ?? 1}
         />
       ) : null}
+      {faceOverlays?.map((faceOverlay) => (
+        <div
+          aria-label={faceOverlay.label ?? t("faceReviewTitle")}
+          className={`pointer-events-none absolute rounded border-2 border-primary shadow-[0_0_0_1px_rgba(255,255,255,0.5)] transition-opacity duration-200 ${faceOverlaysVisible ? "opacity-100" : "opacity-0"}`}
+          key={`${faceOverlay.x}-${faceOverlay.y}-${faceOverlay.width}-${faceOverlay.height}-${faceOverlay.label ?? ""}`}
+          role="img"
+          style={getFaceOverlayStyle(
+            faceOverlay,
+            photo.width,
+            photo.height,
+            containerAspect
+          )}
+        />
+      ))}
       {/* Selection indicator */}
       {isSelected && (
         <div className="absolute top-2 left-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-primary ring-1 ring-primary-foreground/20">

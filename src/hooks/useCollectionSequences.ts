@@ -10,6 +10,18 @@ import type {
 
 export type CollectionSequenceMode = "photos" | "sequences";
 
+export function shouldShowSequenceEmptyState({
+  mode,
+  sequenceCount,
+  sequencesLoaded,
+}: {
+  mode: CollectionSequenceMode;
+  sequenceCount: number;
+  sequencesLoaded: boolean;
+}) {
+  return mode === "sequences" && sequencesLoaded && sequenceCount === 0;
+}
+
 const EMPTY_IDS: number[] = [];
 
 function readMode(storageKey: string): CollectionSequenceMode {
@@ -62,6 +74,10 @@ export function useCollectionSequences({
     readMode(storageKey)
   );
   const [sequences, setSequences] = useState<PhotoSequence[]>([]);
+  const [sequencesError, setSequencesError] = useState<string | null>(null);
+  const [loadedSequenceRequestKey, setLoadedSequenceRequestKey] = useState<
+    string | null
+  >(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [expandedSequence, setExpandedSequence] =
     useState<PhotoSequenceDetail | null>(null);
@@ -80,6 +96,9 @@ export function useCollectionSequences({
   const detailCacheRef = useRef(new Map<number, PhotoSequenceDetail>());
 
   const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
+  const sequenceRequestKey = `${refreshVersion}:${photoIds.join(",")}`;
+  const sequencesLoading =
+    photoIds.length > 0 && loadedSequenceRequestKey !== sequenceRequestKey;
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -97,25 +116,32 @@ export function useCollectionSequences({
     let cancelled = false;
     if (photoIds.length === 0) {
       setSequences([]);
+      setSequencesError(null);
+      setLoadedSequenceRequestKey(sequenceRequestKey);
       return;
     }
+    setSequences([]);
+    setSequencesError(null);
     ipc.client.photos
       .listSequences({ photoIds, scope: "members" })
       .then((result) => {
         if (!cancelled && requestedVersion === refreshVersion) {
           setSequences(result as PhotoSequence[]);
+          setLoadedSequenceRequestKey(sequenceRequestKey);
         }
       })
       .catch((error) => {
         console.error("[useCollectionSequences] list failed", error);
         if (!cancelled) {
           setSequences([]);
+          setSequencesError("Unable to load sequences");
+          setLoadedSequenceRequestKey(sequenceRequestKey);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [photoIds, refreshVersion]);
+  }, [photoIds, refreshVersion, sequenceRequestKey]);
 
   const loadDetail = useCallback(async (sequenceId: number) => {
     const cached = detailCacheRef.current.get(sequenceId);
@@ -164,13 +190,18 @@ export function useCollectionSequences({
 
   const openPlayback = useCallback(
     async (sequenceId: number) => {
-      detailsRequestRef.current += 1;
+      const requestId = ++detailsRequestRef.current;
       setSelectedSequence(null);
+      setOpenSequence(null);
       try {
         const detail = await loadDetail(sequenceId);
-        setOpenSequence(scopeDetail(detail, findScopeIds(sequenceId)));
+        if (requestId === detailsRequestRef.current) {
+          setOpenSequence(scopeDetail(detail, findScopeIds(sequenceId)));
+        }
       } catch {
-        toast.error("无法打开序列");
+        if (requestId === detailsRequestRef.current) {
+          toast.error("无法打开序列");
+        }
       }
     },
     [findScopeIds, loadDetail]
@@ -185,7 +216,9 @@ export function useCollectionSequences({
           setSelectedSequence(scopeDetail(detail, findScopeIds(sequenceId)));
         }
       } catch {
-        toast.error("无法打开序列详情");
+        if (requestId === detailsRequestRef.current) {
+          toast.error("无法打开序列详情");
+        }
       }
     },
     [findScopeIds, loadDetail]
@@ -273,6 +306,8 @@ export function useCollectionSequences({
     openSequence,
     refreshSequences,
     selectedSequence,
+    sequencesLoading,
+    sequencesError,
     sequences,
     setMode,
     setOpenSequence,

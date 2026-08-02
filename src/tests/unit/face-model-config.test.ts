@@ -13,8 +13,9 @@ describe("getActiveFaceModel", () => {
     expect(m.kind).toBe("yunet-sface");
     expect(m.recognition.vectorDimensions).toBe(128);
     expect(m.recognition.useLandmarkAlign).toBe(true);
-    expect(m.detection.confidenceThreshold).toBe(0.85);
+    expect(m.detection.confidenceThreshold).toBe(0.5);
     expect(m.clustering.confidenceFilter).toBe(0.85);
+    expect(m.clustering.reviewConfidenceFloor).toBe(0.5);
   });
 
   it("keeps the legacy model disabled without an explicit research opt-in", () => {

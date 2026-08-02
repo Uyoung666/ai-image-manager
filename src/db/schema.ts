@@ -65,6 +65,7 @@ export const photos = sqliteTable(
     isFaceProcessed: integer("is_face_processed", { mode: "boolean" })
       .notNull()
       .default(false),
+    faceProcessingError: text("face_processing_error"),
     isFavorite: integer("is_favorite", { mode: "boolean" })
       .notNull()
       .default(false),
@@ -468,6 +469,9 @@ export const faceIdentities = sqliteTable(
     isConfirmed: integer("is_confirmed", { mode: "boolean" })
       .notNull()
       .default(false),
+    isHidden: integer("is_hidden", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -496,7 +500,82 @@ export const faceIdentityMembers = sqliteTable(
       table.identityId,
       table.faceVectorId
     ),
+    uniqueFaceVectorMember: uniqueIndex("idx_face_id_member_unique_vector").on(
+      table.faceVectorId
+    ),
     faceVectorIdIdx: index("idx_face_id_member_fv_id").on(table.faceVectorId),
+  })
+);
+
+/**
+ * A user-level correction: this face is valid, but it does not belong to
+ * this particular identity. Keeping this separate from faceVectors.isRejected
+ * lets later scans reuse the face for another person without undoing the
+ * user's correction.
+ */
+export const faceIdentityExclusions = sqliteTable(
+  "face_identity_exclusions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    identityId: integer("identity_id")
+      .references(() => faceIdentities.id, { onDelete: "cascade" })
+      .notNull(),
+    faceVectorId: integer("face_vector_id")
+      .references(() => faceVectors.id, { onDelete: "cascade" })
+      .notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    uniqueIdentityFace: uniqueIndex("idx_face_identity_exclusion").on(
+      table.identityId,
+      table.faceVectorId
+    ),
+    identityIdIdx: index("idx_face_identity_exclusion_identity").on(
+      table.identityId
+    ),
+    faceVectorIdIdx: index("idx_face_identity_exclusion_vector").on(
+      table.faceVectorId
+    ),
+  })
+);
+
+/**
+ * Stable user decisions for a detected face. Face vector ids are regenerated
+ * during a rescan, so decisions must be keyed by the photo and detector face
+ * index instead of only by face_vectors.id.
+ */
+export const faceReviewDecisions = sqliteTable(
+  "face_review_decisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    photoId: integer("photo_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    faceIndex: integer("face_index").notNull(),
+    decision: text("decision").notNull(),
+    sourceIdentityId: integer("source_identity_id").references(
+      () => faceIdentities.id,
+      { onDelete: "set null" }
+    ),
+    sourceIdentityName: text("source_identity_name"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    uniquePhotoFace: uniqueIndex("idx_face_review_decision_photo_face").on(
+      table.photoId,
+      table.faceIndex
+    ),
+    photoIdIdx: index("idx_face_review_decision_photo_id").on(table.photoId),
+    sourceIdentityIdx: index("idx_face_review_decision_source_identity").on(
+      table.sourceIdentityId
+    ),
   })
 );
 

@@ -260,6 +260,41 @@
       "when": 1786500000012,
       "tag": "0036_add_photo_tag_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1786500000013,
+      "tag": "0037_add_face_identity_exclusions",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1786500000014,
+      "tag": "0038_add_hidden_face_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1786500000015,
+      "tag": "0039_add_face_review_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1786500000016,
+      "tag": "0040_unique_face_identity_member_vector",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1786500000017,
+      "tag": "0041_add_face_processing_error",
+      "breakpoints": true
     }
   ]
 }

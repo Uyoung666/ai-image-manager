@@ -45,6 +45,23 @@ function assertRequiredTables(db) {
   }
 }
 
+function hasTable(db, name) {
+  return Boolean(
+    db
+      .prepare(
+        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?"
+      )
+      .get(name)
+  );
+}
+
+function hasColumn(db, table, column) {
+  return db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((row) => row.name === column);
+}
+
 function validateRepresentativeReferences(payload, vectorIds, photoIds) {
   for (const identity of payload.faceIdentities) {
     if (
@@ -125,6 +142,27 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
     inTransaction = true;
 
     db.exec("DELETE FROM face_identity_members");
+    const hasExclusionTable = hasTable(db, "face_identity_exclusions");
+    const hasHiddenColumn = hasColumn(db, "face_identities", "is_hidden");
+    const exclusions = payload.faceIdentityExclusions ?? [];
+    if (!hasExclusionTable && exclusions.length > 0) {
+      throw new Error(
+        "Database is missing face_identity_exclusions required by this backup"
+      );
+    }
+    if (hasExclusionTable) {
+      db.exec("DELETE FROM face_identity_exclusions");
+    }
+    const hasReviewTable = hasTable(db, "face_review_decisions");
+    const reviewDecisions = payload.faceReviewDecisions ?? [];
+    if (!hasReviewTable && reviewDecisions.length > 0) {
+      throw new Error(
+        "Database is missing face_review_decisions required by this backup"
+      );
+    }
+    if (hasReviewTable) {
+      db.exec("DELETE FROM face_review_decisions");
+    }
     db.exec("DELETE FROM face_vectors");
     db.exec("DELETE FROM face_identities");
 
@@ -149,19 +187,35 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
     }
 
     const insIdentity = db.prepare(
-      "INSERT INTO face_identities (id, name, representative_photo_id, representative_vector_id, centroid_embedding, face_count, is_confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      hasHiddenColumn
+        ? "INSERT INTO face_identities (id, name, representative_photo_id, representative_vector_id, centroid_embedding, face_count, is_confirmed, is_hidden, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        : "INSERT INTO face_identities (id, name, representative_photo_id, representative_vector_id, centroid_embedding, face_count, is_confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
     for (const row of payload.faceIdentities) {
-      insIdentity.run(
-        row.id,
-        row.name,
-        row.representative_photo_id,
-        row.representative_vector_id,
-        row.centroid_embedding,
-        row.face_count,
-        row.is_confirmed,
-        row.created_at
-      );
+      if (hasHiddenColumn) {
+        insIdentity.run(
+          row.id,
+          row.name,
+          row.representative_photo_id,
+          row.representative_vector_id,
+          row.centroid_embedding,
+          row.face_count,
+          row.is_confirmed,
+          row.is_hidden ?? 0,
+          row.created_at
+        );
+      } else {
+        insIdentity.run(
+          row.id,
+          row.name,
+          row.representative_photo_id,
+          row.representative_vector_id,
+          row.centroid_embedding,
+          row.face_count,
+          row.is_confirmed,
+          row.created_at
+        );
+      }
     }
 
     const insMember = db.prepare(
@@ -169,6 +223,38 @@ export function restoreFaceData(dbPath, backupFile, { legacyKind } = {}) {
     );
     for (const row of payload.faceIdentityMembers) {
       insMember.run(row.id, row.identity_id, row.face_vector_id);
+    }
+
+    if (hasExclusionTable) {
+      const insExclusion = db.prepare(
+        "INSERT INTO face_identity_exclusions (id, identity_id, face_vector_id, created_at) VALUES (?, ?, ?, ?)"
+      );
+      for (const row of exclusions) {
+        insExclusion.run(
+          row.id,
+          row.identity_id,
+          row.face_vector_id,
+          row.created_at
+        );
+      }
+    }
+
+    if (hasReviewTable) {
+      const insReview = db.prepare(
+        "INSERT INTO face_review_decisions (id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+      for (const row of reviewDecisions) {
+        insReview.run(
+          row.id,
+          row.photo_id,
+          row.face_index,
+          row.decision,
+          row.source_identity_id ?? null,
+          row.source_identity_name ?? null,
+          row.created_at,
+          row.updated_at
+        );
+      }
     }
 
     const updateFlag = db.prepare(

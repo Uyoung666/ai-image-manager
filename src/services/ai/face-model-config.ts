@@ -17,6 +17,8 @@ export interface FaceModelConfig {
     threshold: number;
     /** Minimum detection confidence for a face to participate in clustering. */
     confidenceFilter: number;
+    /** Minimum detection confidence retained for manual review. */
+    reviewConfidenceFloor: number;
   };
   detection: {
     fileName: string;
@@ -45,10 +47,9 @@ const ACTIVE_FACE_MODEL: FaceModelConfig = {
       fileName: "face_detection_yunet_2023mar.onnx",
       inputSizeW: 640,
       inputSizeH: 640,
-      // OpenCV's demo uses 0.9. Open Images validation showed that 0.5
-      // produces too many non-face detections in photo archives; 0.85 is the
-      // precision-first operating point retained for this application.
-      confidenceThreshold: 0.85,
+      // Retain candidates at 0.5 so low-confidence detections can be reviewed;
+      // automatic grouping remains protected by clustering.confidenceFilter.
+      confidenceThreshold: 0.5,
       nmsIoU: 0.3,
       maxFaces: 20,
       minFaceSize: 40,
@@ -63,6 +64,8 @@ const ACTIVE_FACE_MODEL: FaceModelConfig = {
       threshold: 0.363, // SFace official cosine threshold (calibration seed)
       // Do not let low-confidence detector candidates create identities.
       confidenceFilter: 0.85,
+      // Keep lower-confidence detections for the review queue.
+      reviewConfidenceFloor: 0.5,
     },
     modelFiles: [
       "face_detection_yunet_2023mar.onnx",

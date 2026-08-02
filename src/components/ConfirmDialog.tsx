@@ -64,15 +64,18 @@ export function ConfirmDialog({
             <AlertDialogDescription>{description}</AlertDialogDescription>
           )}
         </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={disabled}>
+        <AlertDialogFooter className="[&>*]:w-full sm:[&>*]:w-auto">
+          <AlertDialogCancel
+            className="h-auto min-h-7 min-w-0 whitespace-normal text-center"
+            disabled={disabled}
+          >
             {cancelText ?? t("cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             className={
               destructive
-                ? "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/30"
-                : undefined
+                ? "h-auto min-h-7 min-w-0 whitespace-normal bg-destructive text-center text-white hover:bg-destructive/90 focus-visible:ring-destructive/30"
+                : "h-auto min-h-7 min-w-0 whitespace-normal text-center"
             }
             disabled={disabled}
             onClick={onConfirm}

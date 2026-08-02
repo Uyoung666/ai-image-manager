@@ -25,6 +25,7 @@ import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-s
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as SettingsAccelerationRouteImport } from './routes/settings.acceleration'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
+import { Route as PeopleReviewRouteImport } from './routes/people.review'
 import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityId'
 import { Route as CullSessionIdRouteImport } from './routes/cull.$sessionId'
 import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
@@ -109,6 +110,11 @@ const SettingsAboutRoute = SettingsAboutRouteImport.update({
   path: '/about',
   getParentRoute: () => SettingsRoute,
 } as any)
+const PeopleReviewRoute = PeopleReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => PeopleRoute,
+} as any)
 const PeopleIdentityIdRoute = PeopleIdentityIdRouteImport.update({
   id: '/$identityId',
   path: '/$identityId',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -158,6 +165,7 @@ export interface FileRoutesByTo {
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
+  '/people/review': typeof PeopleReviewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/acceleration': typeof SettingsAccelerationRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -203,6 +212,7 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
     | '/settings/appearance'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
     | '/settings/appearance'
@@ -245,6 +256,7 @@ export interface FileRouteTypes {
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
+    | '/people/review'
     | '/settings/about'
     | '/settings/acceleration'
     | '/settings/appearance'
@@ -380,6 +392,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAboutRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/people/review': {
+      id: '/people/review'
+      path: '/review'
+      fullPath: '/people/review'
+      preLoaderRoute: typeof PeopleReviewRouteImport
+      parentRoute: typeof PeopleRoute
+    }
     '/people/$identityId': {
       id: '/people/$identityId'
       path: '/$identityId'
@@ -427,10 +446,12 @@ const CullRouteWithChildren = CullRoute._addFileChildren(CullRouteChildren)
 
 interface PeopleRouteChildren {
   PeopleIdentityIdRoute: typeof PeopleIdentityIdRoute
+  PeopleReviewRoute: typeof PeopleReviewRoute
 }
 
 const PeopleRouteChildren: PeopleRouteChildren = {
   PeopleIdentityIdRoute: PeopleIdentityIdRoute,
+  PeopleReviewRoute: PeopleReviewRoute,
 }
 
 const PeopleRouteWithChildren =

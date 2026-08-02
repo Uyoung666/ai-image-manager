@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/db";
 import {
   appSettings,
   faceIdentities,
+  faceIdentityExclusions,
   faceIdentityMembers,
+  faceReviewDecisions,
   faceVectors,
   photos,
 } from "@/db/schema";
@@ -99,9 +101,11 @@ interface FaceDataBackupPayload {
   checksum: string;
   createdAt: number;
   faceIdentities: Record<string, unknown>[];
+  faceIdentityExclusions: Record<string, unknown>[];
   faceIdentityMembers: Record<string, unknown>[];
   faceModelKind: string | null;
   faceProcessedPhotoIds: number[];
+  faceReviewDecisions: Record<string, unknown>[];
   faceVectors: Record<string, unknown>[];
   format: "ai-image-manager.face-backup";
   version: 1;
@@ -235,6 +239,17 @@ export function backupFaceData(): string {
         centroid_embedding: row.centroidEmbedding,
         face_count: row.faceCount,
         is_confirmed: row.isConfirmed,
+        is_hidden: row.isHidden,
+        created_at: row.createdAt,
+      })),
+    faceIdentityExclusions: db
+      .select()
+      .from(faceIdentityExclusions)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        identity_id: row.identityId,
+        face_vector_id: row.faceVectorId,
         created_at: row.createdAt,
       })),
     faceIdentityMembers: db
@@ -245,6 +260,20 @@ export function backupFaceData(): string {
         id: row.id,
         identity_id: row.identityId,
         face_vector_id: row.faceVectorId,
+      })),
+    faceReviewDecisions: db
+      .select()
+      .from(faceReviewDecisions)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        photo_id: row.photoId,
+        face_index: row.faceIndex,
+        decision: row.decision,
+        source_identity_id: row.sourceIdentityId,
+        source_identity_name: row.sourceIdentityName,
+        created_at: row.createdAt,
+        updated_at: row.updatedAt,
       })),
     faceProcessedPhotoIds: db
       .select({ id: photos.id })
@@ -282,6 +311,7 @@ export function resetFaceDataForModelSwitch(): void {
   const activeModelKind = getActiveFaceModel().kind;
   const db = getDatabase();
   db.transaction((tx) => {
+    tx.delete(faceReviewDecisions).run();
     tx.delete(faceIdentityMembers).run();
     tx.delete(faceIdentities).run();
     tx.delete(faceVectors).run();
@@ -332,16 +362,20 @@ function ensureFaceModels(): boolean {
 interface FaceResult {
   bbox: { x: number; y: number; width: number; height: number };
   confidence: number;
-  embedding: number[] | null;
+  embedding?: number[] | null;
   faceIndex: number;
 }
 
-interface FaceDetectionResult {
+export interface FaceDetectionResult {
+  error?: string;
   faces: FaceResult[];
   id: number;
 }
 
 export interface DetectionProgress {
+  facesDetected?: number;
+  failedPhotos?: number;
+  invalidFaces?: number;
   phase: "idle" | "running" | "complete";
   processed: number;
   total: number;
@@ -357,7 +391,7 @@ export function getFaceDetectionProgress(): DetectionProgress {
   return { ...currentProgress };
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   let normA = 0;
   let normB = 0;
@@ -367,6 +401,58 @@ function cosineSimilarity(a: number[], b: number[]): number {
     normB += b[i] * b[i];
   }
   return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+}
+
+function applyStableReviewDecision(
+  faceVectorId: number,
+  photoId: number,
+  faceIndex: number
+): void {
+  const db = getDatabase();
+  const decision = db
+    .select()
+    .from(faceReviewDecisions)
+    .where(
+      and(
+        eq(faceReviewDecisions.photoId, photoId),
+        eq(faceReviewDecisions.faceIndex, faceIndex)
+      )
+    )
+    .get();
+  if (!decision) {
+    return;
+  }
+
+  if (decision.decision === "rejected") {
+    db.update(faceVectors)
+      .set({ isRejected: true })
+      .where(eq(faceVectors.id, faceVectorId))
+      .run();
+    return;
+  }
+
+  if (decision.decision === "removed_from_identity") {
+    db.delete(faceIdentityExclusions)
+      .where(
+        and(
+          eq(
+            faceIdentityExclusions.identityId,
+            decision.sourceIdentityId ?? -1
+          ),
+          eq(faceIdentityExclusions.faceVectorId, faceVectorId)
+        )
+      )
+      .run();
+    if (decision.sourceIdentityId !== null) {
+      db.insert(faceIdentityExclusions)
+        .values({
+          identityId: decision.sourceIdentityId,
+          faceVectorId,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+  }
 }
 
 function computeCentroid(embeddings: number[][]): number[] {
@@ -386,12 +472,16 @@ function computeCentroid(embeddings: number[][]): number[] {
 
 function assignToIdentity(
   embedding: number[],
-  identityCentroids: Array<{ id: number; centroid: number[] }>
+  identityCentroids: Array<{ id: number; centroid: number[] }>,
+  excludedIdentityIds?: ReadonlySet<number>
 ): { identityId: number; similarity: number } | null {
   let bestId = -1;
   let bestSim = -1;
 
   for (const { id, centroid } of identityCentroids) {
+    if (excludedIdentityIds?.has(id)) {
+      continue;
+    }
     if (centroid.length === 0) {
       continue;
     }
@@ -408,27 +498,56 @@ function assignToIdentity(
   return null;
 }
 
-function validateFaceEmbeddings(
+export interface FaceEmbeddingFilterResult {
+  invalidFaces: number;
+  results: FaceDetectionResult[];
+}
+
+/** Keep one malformed face local to its photo instead of aborting the batch. */
+export function filterValidFaceEmbeddings(
   results: FaceDetectionResult[],
   expectedDimensions: number
-): void {
-  for (const result of results) {
-    for (const face of result.faces) {
+): FaceEmbeddingFilterResult {
+  let invalidFaces = 0;
+  const filteredResults = results.map((result) => ({
+    ...result,
+    faces: result.faces.filter((face) => {
       const embedding = face.embedding;
-      if (
-        !Array.isArray(embedding) ||
-        embedding.length !== expectedDimensions ||
-        embedding.some((value) => !Number.isFinite(value))
-      ) {
+      const valid =
+        Array.isArray(embedding) &&
+        embedding.length === expectedDimensions &&
+        embedding.every((value) => Number.isFinite(value));
+      if (!valid) {
+        invalidFaces++;
         const actualDimensions = Array.isArray(embedding)
           ? embedding.length
           : "missing";
-        throw new FaceEmbeddingValidationError(
-          `Face embedding dimension mismatch for photo ${result.id}, face ${face.faceIndex}: got ${actualDimensions}, expected ${expectedDimensions}; write rejected`
+        console.warn(
+          `[FaceDetector] Skipping invalid embedding for photo ${result.id}, face ${face.faceIndex}: got ${actualDimensions}, expected ${expectedDimensions}`
         );
       }
-    }
-  }
+      return valid;
+    }),
+  }));
+  return { invalidFaces, results: filteredResults };
+}
+
+/** Only fully successful photos are safe to replace in persistent storage. */
+export function selectReplaceableFaceResults(
+  originalResults: FaceDetectionResult[],
+  filteredResults: FaceDetectionResult[]
+): FaceDetectionResult[] {
+  const originalById = new Map(
+    originalResults.map((result) => [result.id, result])
+  );
+  return filteredResults.filter((result) => {
+    const original = originalById.get(result.id);
+    return (
+      original !== undefined &&
+      !original.error &&
+      original.faces.length === result.faces.length
+    );
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Detection coordinates worker lifecycle, batch writes, progress, and clustering as one operation.
@@ -453,6 +572,9 @@ export async function detectFaces(
   };
 
   let totalFaces = 0;
+  let invalidFaces = 0;
+  let failedPhotos = 0;
+  let processedPhotos = 0;
 
   try {
     const modelsReady = ensureFaceModels();
@@ -490,7 +612,12 @@ export async function detectFaces(
       // Still need to cluster any unassigned faces
       clusterUnassignedFaces();
       setSetting("face.model.kind", activeModel.kind);
-      pushProgress({ processed: 0, total: 0, phase: "complete" });
+      pushProgress({
+        processed: 0,
+        total: 0,
+        phase: "complete",
+        facesDetected: 0,
+      });
       return 0;
     }
 
@@ -498,6 +625,9 @@ export async function detectFaces(
       processed: 0,
       total: photoRows.length,
       phase: "running",
+      facesDetected: 0,
+      invalidFaces: 0,
+      failedPhotos: 0,
     });
 
     // Start persistent face-worker pool (GPU context reused across batches)
@@ -513,6 +643,9 @@ export async function detectFaces(
           processed: 0,
           total: photoRows.length,
           phase: "running",
+          facesDetected: totalFaces,
+          invalidFaces,
+          failedPhotos,
         });
       }
     }, 500);
@@ -527,54 +660,125 @@ export async function detectFaces(
         photoRows,
         BATCH_SIZE,
         (processed, total) => {
-          pushProgress({ processed, total, phase: "running" });
+          pushProgress({
+            processed,
+            total,
+            phase: "running",
+            facesDetected: totalFaces,
+            invalidFaces,
+            failedPhotos,
+          });
         },
         () => !detectionRunning
       );
 
-      // Validate the complete batch before inserting any row. A malformed or
-      // legacy-dimension result must never partially enter the active model's
-      // vector space.
-      validateFaceEmbeddings(
+      const filtered = filterValidFaceEmbeddings(
         poolResults,
         activeModel.recognition.vectorDimensions
       );
+      invalidFaces = filtered.invalidFaces;
+      failedPhotos = poolResults.filter((result) => result.error).length;
 
-      for (const r of poolResults) {
+      const poolResultById = new Map(
+        poolResults.map((result) => [result.id, result])
+      );
+      const successfulResults = selectReplaceableFaceResults(
+        poolResults,
+        filtered.results
+      );
+      const invalidResultIds = new Set(
+        filtered.results
+          .filter((result) => {
+            const original = poolResultById.get(result.id);
+            return Boolean(
+              original && original.faces.length !== result.faces.length
+            );
+          })
+          .map((result) => result.id)
+      );
+
+      for (const result of poolResults) {
+        db.update(photos)
+          .set({
+            faceProcessingError:
+              result.error ??
+              (invalidResultIds.has(result.id)
+                ? "invalid face embedding"
+                : null),
+          })
+          .where(eq(photos.id, result.id))
+          .run();
+      }
+
+      // Replace only non-confirmed vectors before writing the fresh detection
+      // result. Confirmed memberships remain stable while retries cannot leave
+      // stale faces behind when a previous worker run failed halfway through.
+      for (const photo of successfulResults) {
+        const confirmedVectorIds = db
+          .select({ id: faceVectors.id })
+          .from(faceVectors)
+          .innerJoin(
+            faceIdentityMembers,
+            eq(faceIdentityMembers.faceVectorId, faceVectors.id)
+          )
+          .innerJoin(
+            faceIdentities,
+            eq(faceIdentities.id, faceIdentityMembers.identityId)
+          )
+          .where(
+            and(
+              eq(faceVectors.photoId, photo.id),
+              eq(faceIdentities.isConfirmed, true)
+            )
+          )
+          .all()
+          .map((row) => row.id);
+        const vectorCondition = confirmedVectorIds.length
+          ? and(
+              eq(faceVectors.photoId, photo.id),
+              notInArray(faceVectors.id, confirmedVectorIds)
+            )
+          : eq(faceVectors.photoId, photo.id);
+        db.delete(faceVectors).where(vectorCondition).run();
+      }
+
+      for (const r of successfulResults) {
         if (!r.faces.length) {
           continue;
         }
 
         for (const face of r.faces) {
-          try {
-            db.insert(faceVectors)
-              .values({
-                photoId: r.id,
-                faceIndex: face.faceIndex,
-                bboxX: face.bbox.x,
-                bboxY: face.bbox.y,
-                bboxWidth: face.bbox.width,
-                bboxHeight: face.bbox.height,
-                confidence: face.confidence,
-                embedding: face.embedding
-                  ? JSON.stringify(face.embedding)
-                  : null,
-              })
-              .run();
+          const inserted = db
+            .insert(faceVectors)
+            .values({
+              photoId: r.id,
+              faceIndex: face.faceIndex,
+              bboxX: face.bbox.x,
+              bboxY: face.bbox.y,
+              bboxWidth: face.bbox.width,
+              bboxHeight: face.bbox.height,
+              confidence: face.confidence,
+              embedding: face.embedding ? JSON.stringify(face.embedding) : null,
+            })
+            .onConflictDoNothing()
+            .returning({ insertedId: faceVectors.id })
+            .get();
+          const insertedId = inserted?.insertedId;
+          if (insertedId !== undefined) {
+            applyStableReviewDecision(insertedId, r.id, face.faceIndex);
             totalFaces++;
-          } catch {
-            /* skip duplicates */
           }
         }
       }
 
       // Mark all processed photos as face-processed
-      const processedIds = poolResults.map((r) => r.id);
+      const processedIds = successfulResults.map((r) => r.id);
+      processedPhotos = processedIds.length;
       // Batch the UPDATE: split into chunks to avoid SQLite variable limit
       for (let i = 0; i < processedIds.length; i += BATCH_SIZE) {
         const chunk = processedIds.slice(i, i + BATCH_SIZE);
         db.update(photos)
-          .set({ isFaceProcessed: true })
+          .set({ faceProcessingError: null, isFaceProcessed: true })
           .where(inArray(photos.id, chunk))
           .run();
       }
@@ -587,17 +791,18 @@ export async function detectFaces(
     setSetting("face.model.kind", activeModel.kind);
 
     pushProgress({
-      processed: totalFaces,
+      processed: processedPhotos,
       total: photoRows.length,
       phase: "complete",
+      facesDetected: totalFaces,
+      invalidFaces,
+      failedPhotos,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[FaceDetector] Fatal error: ${message}`);
     pushProgress({ processed: 0, total: 0, phase: "idle" });
-    if (err instanceof FaceEmbeddingValidationError) {
-      throw err;
-    }
+    throw err;
   } finally {
     detectionRunning = false;
   }
@@ -633,6 +838,7 @@ function clusterUnassignedFaces(): void {
   const unassignedFaces = db
     .select({
       id: faceVectors.id,
+      faceIndex: faceVectors.faceIndex,
       photoId: faceVectors.photoId,
       embedding: faceVectors.embedding,
     })
@@ -651,7 +857,43 @@ function clusterUnassignedFaces(): void {
     )
     .all();
 
+  const exclusionRows = db
+    .select({
+      identityId: faceIdentityExclusions.identityId,
+      faceVectorId: faceIdentityExclusions.faceVectorId,
+    })
+    .from(faceIdentityExclusions)
+    .all();
+  const exclusionsByFace = new Map<number, Set<number>>();
+  for (const exclusion of exclusionRows) {
+    const identities =
+      exclusionsByFace.get(exclusion.faceVectorId) ?? new Set<number>();
+    identities.add(exclusion.identityId);
+    exclusionsByFace.set(exclusion.faceVectorId, identities);
+  }
+
+  const reviewRows = db
+    .select({
+      decision: faceReviewDecisions.decision,
+      faceIndex: faceReviewDecisions.faceIndex,
+      photoId: faceReviewDecisions.photoId,
+      sourceIdentityId: faceReviewDecisions.sourceIdentityId,
+    })
+    .from(faceReviewDecisions)
+    .all();
+  const reviewByFace = new Map<string, (typeof reviewRows)[number]>();
+  for (const review of reviewRows) {
+    reviewByFace.set(`${review.photoId}:${review.faceIndex}`, review);
+  }
+
   for (const face of unassignedFaces) {
+    const review = reviewByFace.get(`${face.photoId}:${face.faceIndex}`);
+    if (
+      review?.decision === "rejected" ||
+      review?.decision === "removed_from_identity"
+    ) {
+      continue;
+    }
     if (!face.embedding) {
       // No valid embedding — mark as rejected, don't create identity
       db.update(faceVectors)
@@ -669,7 +911,11 @@ function clusterUnassignedFaces(): void {
     }
 
     // Try to match to existing identity
-    const match = assignToIdentity(embedding, identityCentroids);
+    const match = assignToIdentity(
+      embedding,
+      identityCentroids,
+      exclusionsByFace.get(face.id)
+    );
 
     if (match) {
       db.insert(faceIdentityMembers)

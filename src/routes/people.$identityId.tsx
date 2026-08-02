@@ -1,8 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, UserMinus } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, UserMinus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { faceActions } from "@/actions/faces";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -11,6 +13,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CullStartDialog } from "@/components/CullStartDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
+import { FaceReassignDialog } from "@/components/face-reassign-dialog";
+import type { FaceOverlay } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
@@ -23,20 +27,27 @@ import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
-import { useCollectionSequences } from "@/hooks/useCollectionSequences";
+import {
+  shouldShowSequenceEmptyState,
+  useCollectionSequences,
+} from "@/hooks/useCollectionSequences";
 import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo } from "@/types/photo";
+import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 
 interface FaceInfo {
   bboxHeight: number;
   bboxWidth: number;
   bboxX: number;
   bboxY: number;
+  detectionConfidence?: number | null;
   id: number;
+  identitySimilarity?: number | null;
+  isRejected?: boolean;
   photoId: number;
 }
 
@@ -50,6 +61,15 @@ interface IdentityDetail {
 
 const GRID_SORT_FIELD_KEY = "person_grid_sort_field";
 const GRID_SORT_ORDER_KEY = "person_grid_sort_order";
+const FACE_BOX_VISIBILITY_KEY = "person_face_boxes_visible";
+
+function loadFaceBoxVisibility(): boolean {
+  try {
+    return localStorage.getItem(FACE_BOX_VISIBILITY_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 function loadSortField(): SortField {
   try {
@@ -89,6 +109,11 @@ function PersonDetailPage() {
   const composingRef = useRef(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [quickPreviewIndex, setQuickPreviewIndex] = useState(-1);
+  const [showFaceBoxes, setShowFaceBoxes] = useState(loadFaceBoxVisibility);
+  const [faceNameTarget, setFaceNameTarget] = useState<{
+    faceVectorId: number;
+    photoId: number;
+  } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<MenuState>({
     open: false,
     x: 0,
@@ -126,9 +151,7 @@ function PersonDetailPage() {
 
   const loadIdentity = useCallback(async () => {
     try {
-      const result = await ipc.client.faces.getFaceIdentity({
-        id: Number(identityId),
-      });
+      const result = await faceActions.getIdentity(Number(identityId));
       if (!cancelledRef.current) {
         const data = result as unknown as IdentityDetail;
         setIdentity(data);
@@ -173,6 +196,52 @@ function PersonDetailPage() {
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
+  const { data: knownIdentities = [] } = useQuery({
+    queryKey: ["faces", "identities"],
+    queryFn: async () => {
+      const result = await faceActions.listIdentities();
+      return result as { id: number; name: string | null }[];
+    },
+    staleTime: 30_000,
+  });
+
+  const faceOverlayByPhotoId = useMemo<
+    ReadonlyMap<number, FaceOverlay[]>
+  >(() => {
+    const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
+    const overlays = new Map<number, FaceOverlay[]>();
+    for (const face of identity?.faces ?? []) {
+      const photo = photoMap.get(face.photoId);
+      if (!(photo && photo.width > 0 && photo.height > 0)) {
+        continue;
+      }
+      const current = overlays.get(face.photoId) ?? [];
+      current.push({
+        x: face.bboxX / photo.width,
+        y: face.bboxY / photo.height,
+        width: face.bboxWidth / photo.width,
+        height: face.bboxHeight / photo.height,
+        label: identity?.name || t("unnamedPerson"),
+      });
+      overlays.set(face.photoId, current);
+    }
+    return overlays;
+  }, [identity?.faces, identity?.name, photos, t]);
+
+  const faceIdByPhotoId = useMemo(() => {
+    const facesByPhoto = new Map<number, number[]>();
+    for (const face of identity?.faces ?? []) {
+      const ids = facesByPhoto.get(face.photoId) ?? [];
+      ids.push(face.id);
+      facesByPhoto.set(face.photoId, ids);
+    }
+    return new Map(
+      [...facesByPhoto].flatMap(([photoId, ids]) =>
+        ids.length === 1 ? [[photoId, ids[0]] as const] : []
+      )
+    );
+  }, [identity?.faces]);
+
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
@@ -210,8 +279,15 @@ function PersonDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
-    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+  const {
+    detailPhoto,
+    detailDismissed,
+    dismissDetail,
+    navigateDetail,
+    showPhoto,
+  } = usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+  const [returnSequence, setReturnSequence] =
+    useState<PhotoSequenceDetail | null>(null);
 
   const marqueeJustCompleted = useRef(false);
   const wrappedMarqueeSelect = useCallback(
@@ -228,14 +304,17 @@ function PersonDetailPage() {
 
   // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
 
-  const handleDoubleClick = useCallback((id: number) => {
-    const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      clearSelection();
-      dismissDetail();
-      setLightboxIndex(idx);
-    }
-  }, [clearSelection, dismissDetail]);
+  const handleDoubleClick = useCallback(
+    (id: number) => {
+      const idx = photosRef.current.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        clearSelection();
+        dismissDetail();
+        setLightboxIndex(idx);
+      }
+    },
+    [clearSelection, dismissDetail]
+  );
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -370,14 +449,67 @@ function PersonDetailPage() {
       return;
     }
     try {
-      await ipc.client.faces.updateFaceIdentity({
-        id: identity.id,
+      await faceActions.updateIdentity(identity.id, {
         representativePhotoId: id,
       });
       toast.success(t("setAsPersonCover"));
       queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
     } catch {
       // ignore
+    }
+  }
+
+  function handleNameFace(photoId: number) {
+    const faceVectorId = faceIdByPhotoId.get(photoId);
+    if (faceVectorId !== undefined) {
+      setFaceNameTarget({ faceVectorId, photoId });
+    }
+  }
+
+  async function refreshAfterFaceReassignment() {
+    setFaceNameTarget(null);
+    await Promise.all([
+      loadIdentity(),
+      queryClient.invalidateQueries({ queryKey: ["faces", "identities"] }),
+      queryClient.invalidateQueries({ queryKey: ["faces", "review-queue"] }),
+      queryClient.invalidateQueries({
+        queryKey: ["faces", "hidden-identities"],
+      }),
+    ]);
+  }
+
+  async function handleAssignFace(identityId: number) {
+    if (!faceNameTarget) {
+      return;
+    }
+    try {
+      await faceActions.confirm(faceNameTarget.faceVectorId, identityId);
+      toast.success("人脸已重新归类");
+      await refreshAfterFaceReassignment();
+    } catch {
+      toast.error("人脸重新归类失败");
+    }
+  }
+
+  async function handleCreateFaceIdentity(name: string) {
+    if (!faceNameTarget) {
+      return;
+    }
+    try {
+      await faceActions.createIdentity(name, [faceNameTarget.faceVectorId]);
+      toast.success("已创建人物并完成归类");
+      await refreshAfterFaceReassignment();
+    } catch {
+      toast.error("创建人物失败");
+    }
+  }
+
+  function handleFaceBoxVisibilityChange(visible: boolean) {
+    setShowFaceBoxes(visible);
+    try {
+      localStorage.setItem(FACE_BOX_VISIBILITY_KEY, String(visible));
+    } catch {
+      // Keep the in-memory preference.
     }
   }
 
@@ -421,12 +553,12 @@ function PersonDetailPage() {
     setConfirmRemoveIds([]);
     try {
       for (const photoId of ids) {
-        const face = identity.faces.find((f) => f.photoId === photoId);
-        if (face) {
-          const result = (await ipc.client.faces.removeFaceFromIdentity({
-            identityId: identity.id,
-            faceVectorId: face.id,
-          })) as { ok: boolean; remainingCount: number };
+        const faces = identity.faces.filter((f) => f.photoId === photoId);
+        for (const face of faces) {
+          const result = (await faceActions.removeFromIdentity(
+            identity.id,
+            face.id
+          )) as { ok: boolean; remainingCount: number };
           if (result.remainingCount === 0) {
             navigate({ to: "/people" as const });
             return;
@@ -434,7 +566,7 @@ function PersonDetailPage() {
         }
       }
       clearSelection();
-      loadIdentity();
+      await refreshAfterFaceReassignment();
     } catch {
       toast.error(t("removeFaceFailed"));
     }
@@ -450,14 +582,14 @@ function PersonDetailPage() {
       return;
     }
     try {
-      const result = (await ipc.client.faces.removeFaceFromIdentity({
-        identityId: identity.id,
-        faceVectorId: face.id,
-      })) as { ok: boolean; remainingCount: number };
+      const result = (await faceActions.removeFromIdentity(
+        identity.id,
+        face.id
+      )) as { ok: boolean; remainingCount: number };
       if (result.remainingCount === 0) {
         navigate({ to: "/people" as const });
       } else {
-        loadIdentity();
+        await refreshAfterFaceReassignment();
       }
     } catch {
       toast.error(t("removeFaceFailed"));
@@ -599,8 +731,7 @@ function PersonDetailPage() {
       return;
     }
     try {
-      await ipc.client.faces.updateFaceIdentity({
-        id: identity.id,
+      await faceActions.updateIdentity(identity.id, {
         name: nameInput.trim(),
       });
       setIdentity((prev) =>
@@ -839,27 +970,81 @@ function PersonDetailPage() {
             </p>
           </div>
         </div>
-        {/* Batch remove from person button */}
-        {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2">
           <button
-            className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
-            onClick={handleRemoveSelected}
+            aria-pressed={showFaceBoxes}
+            className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-foreground transition-colors hover:bg-foreground/5"
+            onClick={() => handleFaceBoxVisibilityChange(!showFaceBoxes)}
+            type="button"
           >
-            <UserMinus className="h-3.5 w-3.5" />
-            {t("removeFromPerson")} ({selectedIds.size})
+            {showFaceBoxes ? (
+              <Eye className="h-3.5 w-3.5" />
+            ) : (
+              <EyeOff className="h-3.5 w-3.5" />
+            )}
+            {showFaceBoxes ? t("faceBoxesHide") : t("faceBoxesShow")}
           </button>
-        )}
+          {selectedIds.size > 0 && (
+            <button
+              className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
+              onClick={handleRemoveSelected}
+              type="button"
+            >
+              <UserMinus className="h-3.5 w-3.5" />
+              {t("removeFromPerson")} ({selectedIds.size})
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content area */}
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-w-0 flex-1">
           <PhotoGrid
+            emptyState={
+              sequenceView.sequencesError ? (
+                <div className="flex flex-col items-center gap-3 px-6 text-center">
+                  <p className="text-[13px] text-muted-foreground/70">
+                    {sequenceView.sequencesError}
+                  </p>
+                  <button
+                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+                    onClick={sequenceView.refreshSequences}
+                    type="button"
+                  >
+                    {t("retry")}
+                  </button>
+                </div>
+              ) : shouldShowSequenceEmptyState({
+                  mode: sequenceView.mode,
+                  sequenceCount: sequenceView.sequences.length,
+                  sequencesLoaded: !sequenceView.sequencesLoading,
+                }) ? (
+                <div className="flex flex-col items-center gap-3 px-6 text-center">
+                  <p className="text-[13px] text-muted-foreground/70">
+                    暂无可用序列
+                  </p>
+                  <button
+                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+                    onClick={() => sequenceView.setMode("photos")}
+                    type="button"
+                  >
+                    查看照片
+                  </button>
+                </div>
+              ) : undefined
+            }
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
+            faceOverlayByPhotoId={faceOverlayByPhotoId}
+            faceOverlaysVisible={showFaceBoxes}
             isPlaceholderData={loading}
-            loading={loading}
+            loading={
+              loading ||
+              (sequenceView.mode === "sequences" &&
+                sequenceView.sequencesLoading)
+            }
             onBackgroundClick={() => {
               if (marqueeJustCompleted.current) {
                 marqueeJustCompleted.current = false;
@@ -871,13 +1056,14 @@ function PersonDetailPage() {
             onDoubleClick={handleDoubleClick}
             onKeyboardSelect={handleKeyboardSelect}
             onMarqueeSelect={wrappedMarqueeSelect}
+            onNameFace={handleNameFace}
             onOpenSequence={sequenceView.openPlayback}
             onOpenSequenceDetails={sequenceView.openDetails}
             onSelect={handleSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
-            onSequenceMutationComplete={sequenceView.refreshSequences}
             onSequenceModeChange={sequenceView.setMode}
+            onSequenceMutationComplete={sequenceView.refreshSequences}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
@@ -970,9 +1156,9 @@ function PersonDetailPage() {
           <SequenceDetailPanel
             onClose={() => sequenceView.setSelectedSequence(null)}
             onOpenPhoto={(photoId) => {
-              const member = sequenceView.selectedSequence?.members.find(
-                (m) => m.id === photoId
-              );
+              const sequence = sequenceView.selectedSequence;
+              const member = sequence?.members.find((m) => m.id === photoId);
+              setReturnSequence(sequence ?? null);
               sequenceView.setSelectedSequence(null);
               handleKeyboardSelect(photoId);
               if (member) {
@@ -1008,11 +1194,20 @@ function PersonDetailPage() {
         ) : (
           <PhotoDetailPanel
             onClose={() => {
+              setReturnSequence(null);
               dismissDetail();
               clearSelection();
             }}
             onNavigate={navigateDetail}
             onOpenExplorer={handleOpenExplorer}
+            onReturnToSequence={
+              returnSequence
+                ? () => {
+                    sequenceView.setSelectedSequence(returnSequence);
+                    setReturnSequence(null);
+                  }
+                : undefined
+            }
             photo={detailPhoto as any}
           />
         )}
@@ -1125,6 +1320,25 @@ function PersonDetailPage() {
         onToggleFavorite={handleToggleFavorite}
         onUploadToCloud={handleUploadToCloud}
       />
+
+      {faceNameTarget && (
+        <FaceReassignDialog
+          currentIdentityId={identity?.id ?? Number(identityId)}
+          identities={knownIdentities}
+          onAssign={handleAssignFace}
+          onCreate={handleCreateFaceIdentity}
+          onOpenChange={(open) => {
+            if (!open) {
+              setFaceNameTarget(null);
+            }
+          }}
+          open={true}
+          photoName={
+            photos.find((photo) => photo.id === faceNameTarget.photoId)
+              ?.filename ?? "当前照片"
+          }
+        />
+      )}
 
       <AddToAlbumDialog
         elevated={lightboxIndex >= 0}

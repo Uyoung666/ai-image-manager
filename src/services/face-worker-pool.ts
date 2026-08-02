@@ -15,6 +15,7 @@ export interface FaceDetectionResult {
     embedding?: number[] | null;
   }>;
   id: number;
+  error?: string;
 }
 
 interface FaceBatchError {
@@ -139,7 +140,12 @@ function spawnWorker(index: number): WorkerSlot {
       slot.pendingReject = null;
       slot.status = "idle";
       slot.consecutiveFailures = 0;
-      resolve?.(msg.results as FaceDetectionResult[]);
+      const results = (msg.results as FaceDetectionResult[]) ?? [];
+      resolve?.(
+        msg.error
+          ? results.map((result) => ({ ...result, error: String(msg.error) }))
+          : results
+      );
       drainQueue();
     }
   });
@@ -434,7 +440,7 @@ async function processResultsFallback(
       console.warn(
         `[FacePool] Skipping corrupted photo ${batch[0].id}: ${err.message}`
       );
-      return [{ id: batch[0].id, faces: [] }];
+      return [{ id: batch[0].id, faces: [], error: err.message }];
     }
     const mid = Math.floor(batch.length / 2);
     const left = await processResultsFallback(batch.slice(0, mid));
@@ -491,7 +497,11 @@ export async function detectFacesWithPool(
         // If cancelled, don't retry — just mark failed and move on
         if (shouldCancel?.()) {
           allResults.push(
-            ...batch.map((p) => ({ id: p.id, faces: [] as never[] }))
+            ...batch.map((p) => ({
+              id: p.id,
+              faces: [] as never[],
+              error: "cancelled",
+            }))
           );
         } else {
           const fallbackResults = await processResultsFallback(batch);

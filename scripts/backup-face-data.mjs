@@ -26,6 +26,8 @@ const VECTOR_COLUMNS =
   "id, photo_id, face_index, bbox_x, bbox_y, bbox_width, bbox_height, confidence, embedding, vector_id, is_rejected, created_at";
 const IDENTITY_COLUMNS =
   "id, name, representative_photo_id, representative_vector_id, centroid_embedding, face_count, is_confirmed, created_at";
+const IDENTITY_COLUMNS_WITH_HIDDEN =
+  "id, name, representative_photo_id, representative_vector_id, centroid_embedding, face_count, is_confirmed, is_hidden, created_at";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 const isFiniteNumber = (value) =>
@@ -35,6 +37,13 @@ const isInteger = (value) => Number.isInteger(value);
 
 function fail(message) {
   throw new Error(`Invalid face backup: ${message}`);
+}
+
+function hasColumn(db, table, column) {
+  return db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((row) => row.name === column);
 }
 
 function assertInteger(value, field) {
@@ -222,6 +231,9 @@ export function validateFaceBackupPayload(payload, options = {}) {
       row.is_confirmed,
       `faceIdentities[${row.id}].is_confirmed`
     );
+    if (row.is_hidden !== undefined) {
+      assertBinaryFlag(row.is_hidden, `faceIdentities[${row.id}].is_hidden`);
+    }
     assertInteger(row.created_at, `faceIdentities[${row.id}].created_at`);
   }
 
@@ -245,6 +257,95 @@ export function validateFaceBackupPayload(payload, options = {}) {
     if (!vectorIds.has(row.face_vector_id)) {
       fail(`member ${row.id} references missing vector ${row.face_vector_id}`);
     }
+  }
+
+  const exclusions = payload.faceIdentityExclusions ?? [];
+  if (!Array.isArray(exclusions)) {
+    fail("faceIdentityExclusions must be an array");
+  }
+  const exclusionKeys = new Set();
+  for (const row of exclusions) {
+    assertInteger(row.id, "faceIdentityExclusions.id");
+    assertInteger(
+      row.identity_id,
+      `faceIdentityExclusions[${row.id}].identity_id`
+    );
+    assertInteger(
+      row.face_vector_id,
+      `faceIdentityExclusions[${row.id}].face_vector_id`
+    );
+    const key = `${row.identity_id}:${row.face_vector_id}`;
+    if (exclusionKeys.has(key)) {
+      fail(`duplicate face identity exclusion ${key}`);
+    }
+    exclusionKeys.add(key);
+    if (!identityIds.has(row.identity_id)) {
+      fail(
+        `exclusion ${row.id} references missing identity ${row.identity_id}`
+      );
+    }
+    if (!vectorIds.has(row.face_vector_id)) {
+      fail(
+        `exclusion ${row.id} references missing vector ${row.face_vector_id}`
+      );
+    }
+    if (
+      payload.faceIdentityMembers.some(
+        (member) =>
+          member.identity_id === row.identity_id &&
+          member.face_vector_id === row.face_vector_id
+      )
+    ) {
+      fail(`exclusion ${row.id} duplicates an identity member`);
+    }
+  }
+
+  const reviewDecisions = payload.faceReviewDecisions ?? [];
+  if (!Array.isArray(reviewDecisions)) {
+    fail("faceReviewDecisions must be an array");
+  }
+  const reviewKeys = new Set();
+  for (const row of reviewDecisions) {
+    assertInteger(row.id, "faceReviewDecisions.id");
+    assertInteger(row.photo_id, `faceReviewDecisions[${row.id}].photo_id`);
+    assertInteger(row.face_index, `faceReviewDecisions[${row.id}].face_index`);
+    if (
+      row.decision !== "rejected" &&
+      row.decision !== "removed_from_identity"
+    ) {
+      fail(`faceReviewDecisions[${row.id}].decision is invalid`);
+    }
+    const key = `${row.photo_id}:${row.face_index}`;
+    if (reviewKeys.has(key)) {
+      fail(`duplicate face review decision ${key}`);
+    }
+    reviewKeys.add(key);
+    referencedPhotoIds.add(row.photo_id);
+    if (
+      row.source_identity_id !== null &&
+      row.source_identity_id !== undefined
+    ) {
+      assertInteger(
+        row.source_identity_id,
+        `faceReviewDecisions[${row.id}].source_identity_id`
+      );
+      if (!identityIds.has(row.source_identity_id)) {
+        fail(
+          `review decision ${row.id} references missing identity ${row.source_identity_id}`
+        );
+      }
+    }
+    if (
+      row.source_identity_name !== null &&
+      row.source_identity_name !== undefined &&
+      typeof row.source_identity_name !== "string"
+    ) {
+      fail(
+        `faceReviewDecisions[${row.id}].source_identity_name must be a string or null`
+      );
+    }
+    assertInteger(row.created_at, `faceReviewDecisions[${row.id}].created_at`);
+    assertInteger(row.updated_at, `faceReviewDecisions[${row.id}].updated_at`);
   }
 
   const processedIds = new Set();
@@ -293,6 +394,19 @@ export function createFaceBackupPayload(
   { backupOf, createdAt = Date.now() }
 ) {
   const dump = (sql) => db.prepare(sql).all();
+  const hasExclusionTable = db
+    .prepare(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'face_identity_exclusions'"
+    )
+    .get();
+  const hasHiddenColumn = hasColumn(db, "face_identities", "is_hidden");
+  const hasReviewTable = Boolean(
+    db
+      .prepare(
+        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'face_review_decisions'"
+      )
+      .get()
+  );
   const payload = {
     format: FACE_BACKUP_FORMAT,
     version: FACE_BACKUP_VERSION,
@@ -300,11 +414,23 @@ export function createFaceBackupPayload(
     backupOf: path.basename(backupOf),
     faceVectors: dump(`SELECT ${VECTOR_COLUMNS} FROM face_vectors ORDER BY id`),
     faceIdentities: dump(
-      `SELECT ${IDENTITY_COLUMNS} FROM face_identities ORDER BY id`
+      `SELECT ${
+        hasHiddenColumn ? IDENTITY_COLUMNS_WITH_HIDDEN : IDENTITY_COLUMNS
+      } FROM face_identities ORDER BY id`
     ),
     faceIdentityMembers: dump(
       "SELECT id, identity_id, face_vector_id FROM face_identity_members ORDER BY id"
     ),
+    faceIdentityExclusions: hasExclusionTable
+      ? dump(
+          "SELECT id, identity_id, face_vector_id, created_at FROM face_identity_exclusions ORDER BY id"
+        )
+      : [],
+    faceReviewDecisions: hasReviewTable
+      ? dump(
+          "SELECT id, photo_id, face_index, decision, source_identity_id, source_identity_name, created_at, updated_at FROM face_review_decisions ORDER BY id"
+        )
+      : [],
     faceProcessedPhotoIds: dump(
       "SELECT id FROM photos WHERE is_face_processed = 1 ORDER BY id"
     ).map((row) => row.id),

@@ -242,8 +242,8 @@ export function FaceScanScopeDialog({
             </div>
           )}
         </div>
-        <DialogFooter className="mt-4 items-center border-border/70 border-t bg-muted/20 px-5 py-4 sm:justify-between dark:border-white/[0.07] dark:bg-white/[0.018]">
-          <p className="text-[12px] text-muted-foreground dark:text-white/45">
+        <DialogFooter className="mt-4 items-stretch border-border/70 border-t bg-muted/20 px-5 py-4 sm:items-center sm:justify-between dark:border-white/[0.07] dark:bg-white/[0.018]">
+          <p className="min-w-0 flex-1 text-left text-[12px] text-muted-foreground dark:text-white/45">
             {selectedRoots.size > 0
               ? t("faceScanScopeSummary", {
                   count: selectedRoots.size,
@@ -251,7 +251,7 @@ export function FaceScanScopeDialog({
                 })
               : t("faceScanScopeRequired")}
           </p>
-          <div className="flex justify-end gap-2">
+          <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
             <button
               className="rounded-[6px] border border-transparent px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-foreground/5 hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/5"
               disabled={saving}

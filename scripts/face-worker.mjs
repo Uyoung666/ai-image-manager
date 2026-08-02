@@ -84,9 +84,9 @@ let aborted = false;
 // YuNet 2023mar has a FIXED 640x640 input (verified via onnxruntime).
 // SFace expects 0-255 RGB; normalization is inside the graph.
 const YUNET_INPUT_SIZE = 640;
-// Open Images validation showed that 0.5 creates too many non-face detections
-// in photo archives. 0.85 is the precision-first application operating point.
-const YUNET_CONFIDENCE = 0.85;
+// Retain candidates from 0.5 for human review. The main process still only
+// auto-groups detections at its configured 0.85 confidence filter.
+const YUNET_CONFIDENCE = 0.5;
 const YUNET_IOU = 0.3;
 
 // --- Shared constants ---
@@ -507,7 +507,7 @@ process.on("message", async (msg) => {
         console.error(
           `[FaceWorker] ${i + 1}/${photos.length} FAIL: ${photo.path} — ${err.message}`
         );
-        results.push({ id: photo.id, faces: [] });
+        results.push({ id: photo.id, faces: [], error: err.message });
       }
     }
 
