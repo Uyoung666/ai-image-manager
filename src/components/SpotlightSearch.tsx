@@ -51,6 +51,11 @@ interface AlbumResult {
 }
 
 interface PersonResult {
+  coverBbox: { x: number; y: number; width: number; height: number } | null;
+  coverPhotoHeight: number | null;
+  coverPhotoPath: string | null;
+  coverPhotoWidth: number | null;
+  coverThumbnailPath: string | null;
   faceCount: number;
   id: number;
   name: string;
@@ -437,16 +442,30 @@ export function SpotlightSearch() {
                     onSelect={() =>
                       handleSelect(() =>
                         navigate({
-                          to: "/",
-                          search: { searchQuery: person.name },
+                          to: "/people/$identityId",
+                          params: { identityId: String(person.id) },
                         })
                       )
                     }
                     value={`person ${person.name}`}
                   >
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10">
-                      <Users className="h-3.5 w-3.5 text-primary" />
-                    </div>
+                    {person.coverThumbnailPath || person.coverPhotoPath ? (
+                      <img
+                        alt=""
+                        className="h-7 w-7 rounded-full object-cover"
+                        height={28}
+                        src={toLocalMediaUrl(
+                          person.coverThumbnailPath ||
+                            person.coverPhotoPath ||
+                            ""
+                        )}
+                        width={28}
+                      />
+                    ) : (
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10">
+                        <Users className="h-3.5 w-3.5 text-primary" />
+                      </div>
+                    )}
                     <span>{person.name}</span>
                     <span className="ml-auto text-[10px] text-muted-foreground">
                       {person.faceCount} {t("photos")}

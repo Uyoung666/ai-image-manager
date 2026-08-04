@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Clock, Filter, ImageUp, Search, X } from "lucide-react";
 import {
   type Dispatch,
@@ -27,6 +28,7 @@ import {
   buildPersonTrie,
   getSearchSuggestions,
 } from "@/utils/search-suggestions";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 import { cn } from "@/utils/tailwind";
 import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterDropdown } from "./filter-dropdown";
@@ -56,6 +58,13 @@ const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
   "inCameraLook",
   "provenanceStatus",
 ];
+
+interface PersonOption {
+  id: number;
+  name: string;
+  coverThumbnailPath: string | null;
+  coverPhotoPath: string | null;
+}
 
 interface SearchBarProps {
   activeTagIds?: number[];
@@ -128,8 +137,9 @@ export const SearchBar = memo(
       const [advancedCategories, setAdvancedCategories] = useState<
         Record<string, string[]>
       >({});
-      // Person names for search suggestions and AI-powered dictionary suggestions
-      const [personNames, setPersonNames] = useState<string[]>([]);
+      // Person identities for search suggestions and AI-powered dictionary suggestions
+      const [personOptions, setPersonOptions] = useState<PersonOption[]>([]);
+      const navigate = useNavigate();
       const [dictSuggestionsEnabled, setDictSuggestionsEnabled] =
         useState(false);
 
@@ -152,10 +162,16 @@ export const SearchBar = memo(
               {}
             )) as any[];
             if (!cancelled && Array.isArray(result)) {
-              const names = result
+              const options: PersonOption[] = result
                 .filter((f: any) => f.name && f.name.trim())
-                .map((f: any) => f.name.trim());
-              setPersonNames(names);
+                .map((f: any) => ({
+                  id: Number(f.id),
+                  name: f.name.trim(),
+                  coverThumbnailPath: f.coverThumbnailPath ?? null,
+                  coverPhotoPath: f.coverPhotoPath ?? null,
+                }));
+              setPersonOptions(options);
+              const names = options.map((o) => o.name);
               if (names.length > 0) {
                 buildPersonTrie(names);
               }
@@ -211,13 +227,20 @@ export const SearchBar = memo(
         const all: SearchSuggestion[] = [];
 
         // 1) Person name matches
-        const matchingPersons = personNames
-          .filter((n) => n.toLowerCase().includes(q))
+        const matchingPersons = personOptions
+          .filter((p) => p.name.toLowerCase().includes(q))
           .slice(0, 3);
         const seen = new Set<string>();
-        for (const name of matchingPersons) {
-          all.push({ type: "person", text: name, category: "person" });
-          seen.add(name.toLowerCase());
+        for (const p of matchingPersons) {
+          all.push({
+            type: "person",
+            text: p.name,
+            category: "person",
+            id: p.id,
+            coverThumbnailPath: p.coverThumbnailPath,
+            coverPhotoPath: p.coverPhotoPath,
+          });
+          seen.add(p.name.toLowerCase());
         }
 
         // 2) AI dictionary suggestions (from search-suggestions)
@@ -256,7 +279,7 @@ export const SearchBar = memo(
         all.push(...matchingHistory);
 
         return all;
-      }, [query, tags, history, personNames, dictSuggestionsEnabled]);
+      }, [query, tags, history, personOptions, dictSuggestionsEnabled]);
 
       const examplesDisabled = Boolean(
         aiStatus &&
@@ -525,6 +548,15 @@ export const SearchBar = memo(
       }
 
       function handleSuggestionClick(suggestion: SearchSuggestion) {
+        if (suggestion.type === "person" && suggestion.id != null) {
+          navigate({
+            to: "/people/$identityId",
+            params: { identityId: String(suggestion.id) },
+          });
+          setShowSuggestions(false);
+          setSuggestionIndex(-1);
+          return;
+        }
         if (
           suggestion.type === "tag" &&
           suggestion.tagId !== undefined &&
@@ -1744,6 +1776,7 @@ export const SearchBar = memo(
                       {t("searchSuggestions")}
                     </span>
                   </div>
+                  {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: 建议列表按类型渲染多分支，person 头像条件使复杂度超阈值，结构清晰无需重构 */}
                   {suggestions.map((s, i) => (
                     <button
                       aria-selected={i === suggestionIndex}
@@ -1764,9 +1797,23 @@ export const SearchBar = memo(
                     >
                       {s.type === "person" ? (
                         <>
-                          <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[10px]">
-                            👤
-                          </span>
+                          {s.coverThumbnailPath || s.coverPhotoPath ? (
+                            <img
+                              alt=""
+                              className="h-6 w-6 flex-shrink-0 rounded-full object-cover"
+                              height={24}
+                              src={toLocalMediaUrl(
+                                s.coverThumbnailPath ||
+                                  s.coverPhotoPath ||
+                                  ""
+                              )}
+                              width={24}
+                            />
+                          ) : (
+                            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-[10px]">
+                              👤
+                            </span>
+                          )}
                           <span className="truncate">{s.text}</span>
                           <span className="ml-auto flex-shrink-0 rounded-[3px] bg-blue-500/10 px-1 text-[10px] text-blue-500">
                             人物

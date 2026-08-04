@@ -10,8 +10,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 export interface FaceReassignIdentity {
+  coverBbox: { x: number; y: number; width: number; height: number } | null;
+  coverPhotoHeight: number | null;
+  coverPhotoPath: string | null;
+  coverPhotoWidth: number | null;
+  coverThumbnailPath: string | null;
   id: number;
   name: string | null;
 }
@@ -103,9 +109,21 @@ export function FaceReassignDialog({
                 onClick={() => assign(identity.id)}
                 type="button"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
-                  <User className="h-4 w-4" />
-                </div>
+                {identity.coverThumbnailPath || identity.coverPhotoPath ? (
+                  <img
+                    alt=""
+                    className="h-8 w-8 rounded-[6px] object-cover"
+                    height={32}
+                    src={toLocalMediaUrl(
+                      identity.coverThumbnailPath || identity.coverPhotoPath || ""
+                    )}
+                    width={32}
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
+                    <User className="h-4 w-4" />
+                  </div>
+                )}
                 <span className="flex-1 truncate">{identity.name}</span>
                 {assigningId === identity.id && <LoadingSpinner size="sm" />}
               </button>

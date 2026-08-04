@@ -13,7 +13,10 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CullStartDialog } from "@/components/CullStartDialog";
 import { ExportDialog } from "@/components/ExportDialog";
 import { FormatConvertDialog } from "@/components/FormatConvertDialog";
-import { FaceReassignDialog } from "@/components/face-reassign-dialog";
+import {
+  FaceReassignDialog,
+  type FaceReassignIdentity,
+} from "@/components/face-reassign-dialog";
 import type { FaceOverlay } from "@/components/PhotoCard";
 import type { MenuState } from "@/components/PhotoContextMenu";
 import { PhotoContextMenu } from "@/components/PhotoContextMenu";
@@ -200,7 +203,7 @@ function PersonDetailPage() {
     queryKey: ["faces", "identities"],
     queryFn: async () => {
       const result = await faceActions.listIdentities();
-      return result as { id: number; name: string | null }[];
+      return result as FaceReassignIdentity[];
     },
     staleTime: 30_000,
   });

@@ -20,6 +20,10 @@ export interface SearchSuggestion {
   tagId?: number;
   text: string;
   type: "example" | "person" | "dictionary" | "tag" | "history";
+  /** 人物身份元数据（仅 type === "person" 时携带，用于头像渲染与精准导航） */
+  id?: number;
+  coverThumbnailPath?: string | null;
+  coverPhotoPath?: string | null;
 }
 
 function formatDate(d: Date): string {
