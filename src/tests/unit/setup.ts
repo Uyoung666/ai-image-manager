@@ -184,6 +184,7 @@ vi.mock("react-i18next", () => ({
         test: "测试",
         loading: "加载中…",
         backToHome: "返回主页",
+        sequenceLoadingRecommendationAria: "正在加载推荐代表帧",
       };
       const translated = translations[key];
       if (!translated) {

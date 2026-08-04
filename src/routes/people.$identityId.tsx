@@ -484,10 +484,10 @@ function PersonDetailPage() {
     }
     try {
       await faceActions.confirm(faceNameTarget.faceVectorId, identityId);
-      toast.success("人脸已重新归类");
+      toast.success(t("faceReassignAssigned"));
       await refreshAfterFaceReassignment();
     } catch {
-      toast.error("人脸重新归类失败");
+      toast.error(t("faceReassignAssignFailed"));
     }
   }
 
@@ -497,10 +497,10 @@ function PersonDetailPage() {
     }
     try {
       await faceActions.createIdentity(name, [faceNameTarget.faceVectorId]);
-      toast.success("已创建人物并完成归类");
+      toast.success(t("faceReviewCreated"));
       await refreshAfterFaceReassignment();
     } catch {
-      toast.error("创建人物失败");
+      toast.error(t("faceReassignCreateFailed"));
     }
   }
 
@@ -1022,14 +1022,14 @@ function PersonDetailPage() {
                 }) ? (
                 <div className="flex flex-col items-center gap-3 px-6 text-center">
                   <p className="text-[13px] text-muted-foreground/70">
-                    暂无可用序列
+                    {t("sequenceEmptyTitle")}
                   </p>
                   <button
                     className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
                     onClick={() => sequenceView.setMode("photos")}
                     type="button"
                   >
-                    查看照片
+                    {t("sequenceEmptyViewPhotos")}
                   </button>
                 </div>
               ) : undefined
@@ -1070,6 +1070,7 @@ function PersonDetailPage() {
             photos={photos as any}
             routeKey={routeKey}
             selectedIds={selectedIds}
+            sequenceCount={sequenceView.sequences.length}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
             sort={sortField}
@@ -1184,9 +1185,9 @@ function PersonDetailPage() {
                         }
                       : current
                   );
-                  toast.success("已设为手动代表帧");
+                  toast.success(t("sequenceManualRepresentativeSet"));
                 })
-                .catch(() => toast.error("设置代表帧失败"));
+                .catch(() => toast.error(t("sequenceRepresentativeSetFailed")));
             }}
             sequence={sequenceView.selectedSequence}
             width={360}
@@ -1335,7 +1336,7 @@ function PersonDetailPage() {
           open={true}
           photoName={
             photos.find((photo) => photo.id === faceNameTarget.photoId)
-              ?.filename ?? "当前照片"
+              ?.filename ?? t("currentPhoto")
           }
         />
       )}

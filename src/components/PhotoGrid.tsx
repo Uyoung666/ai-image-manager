@@ -112,6 +112,8 @@ interface PhotoGridProps {
   routeKey: string;
   searchQuery?: string;
   selectedIds: Set<number>;
+  /** 序列数量徽标；传给工具栏"序列"切换按钮。默认不显示。 */
+  sequenceCount?: number;
   sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
   showToolbar?: boolean;
@@ -685,6 +687,7 @@ export const PhotoGrid = memo(
     topInset = 0,
     restoreGateReady = true,
     sequences = [],
+    sequenceCount,
     sequenceMode = "photos",
     onOpenSequence,
     onOpenSequenceDetails,
@@ -1229,6 +1232,9 @@ export const PhotoGrid = memo(
           type="button"
         >
           {t("sequenceViewSequences")}
+          {sequenceCount !== undefined && sequenceCount > 0
+            ? ` ${sequenceCount}`
+            : ""}
         </button>
       </div>
     ) : null;
@@ -1439,6 +1445,9 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.sequences !== nextProps.sequences) {
+      return false;
+    }
+    if (prevProps.sequenceCount !== nextProps.sequenceCount) {
       return false;
     }
     if (prevProps.sequenceMode !== nextProps.sequenceMode) {

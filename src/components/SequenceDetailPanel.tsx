@@ -7,7 +7,14 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { photoSequenceActions } from "@/actions/photo-sequences";
 import { loadPhotoDetailPanelWidth } from "@/components/PhotoDetailPanel";
@@ -52,19 +59,27 @@ function handleFrameStripWheel(event: WheelEvent<HTMLDivElement>) {
 }
 
 const REASON_LABELS: Record<string, string> = {
-  "sequence.representative.reason.analysisFailed": "部分画面无法分析",
-  "sequence.representative.reason.balancedExposure": "曝光有效",
-  "sequence.representative.reason.favorite": "已收藏",
-  "sequence.representative.reason.highRating": "评分较高",
-  "sequence.representative.reason.highResolution": "分辨率较高",
-  "sequence.representative.reason.manualPreference": "符合人工偏好",
-  "sequence.representative.reason.richDetail": "画面信息丰富",
-  "sequence.representative.reason.sharp": "画面清晰",
-  "sequence.representative.reason.stableFallback": "按序列顺序稳定选择",
+  "sequence.representative.reason.analysisFailed":
+    "representativeReasonAnalysisFailed",
+  "sequence.representative.reason.balancedExposure":
+    "representativeReasonBalancedExposure",
+  "sequence.representative.reason.favorite": "representativeReasonFavorite",
+  "sequence.representative.reason.highRating": "representativeReasonHighRating",
+  "sequence.representative.reason.highResolution":
+    "representativeReasonHighResolution",
+  "sequence.representative.reason.manualPreference":
+    "representativeReasonManualPreference",
+  "sequence.representative.reason.richDetail": "representativeReasonRichDetail",
+  "sequence.representative.reason.sharp": "representativeReasonSharp",
+  "sequence.representative.reason.stableFallback":
+    "representativeReasonStableFallback",
 };
 
-function formatReason(reason: string) {
-  return REASON_LABELS[reason] ?? reason;
+function formatReason(
+  reason: string,
+  t: (k: string, o?: Record<string, unknown>) => string
+) {
+  return t(REASON_LABELS[reason] ?? reason);
 }
 
 export const SequenceDetailPanel = memo(function SequenceDetailPanel({
@@ -278,13 +293,13 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
             </div>
             {sequence.cameraModel && (
               <div>
-                <p className="text-muted-foreground">相机</p>
+                <p className="text-muted-foreground">{t("camera")}</p>
                 <p className="font-medium">{sequence.cameraModel}</p>
               </div>
             )}
             {sequence.lensModel && (
               <div>
-                <p className="text-muted-foreground">镜头</p>
+                <p className="text-muted-foreground">{t("lens")}</p>
                 <p className="font-medium">{sequence.lensModel}</p>
               </div>
             )}
@@ -300,7 +315,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
               {sequence.members.map((photo, index) => (
                 <div className="w-16 shrink-0" key={photo.id}>
                   <button
-                    aria-label={`打开第 ${index + 1} 帧：${photo.filename}`}
+                    aria-label={t("sequenceOpenFrameAria", {
+                      frame: index + 1,
+                      name: photo.filename,
+                    })}
                     className={`h-16 w-16 overflow-hidden rounded border ${photo.id === representative?.id ? "border-primary" : "border-border"}`}
                     onClick={() => onOpenPhoto(photo.id)}
                     type="button"
@@ -316,7 +334,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                     )}
                   </button>
                   <p className="mt-1 text-center text-[10px] text-muted-foreground">
-                    第 {index + 1} 帧
+                    {t("sequenceFrameLabel", { frame: index + 1 })}
                   </p>
                 </div>
               ))}
@@ -324,7 +342,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
           </section>
           {recommendationLoading && (
             <section
-              aria-label="正在加载推荐代表帧"
+              aria-label={t("sequenceLoadingRecommendationAria")}
               className="min-h-[106px] rounded-md border border-primary/20 bg-primary/5 p-3"
             >
               <Skeleton className="h-5 w-44" />
@@ -336,14 +354,19 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
             <section className="rounded-md border border-primary/20 bg-primary/5 p-3">
               <p className="flex items-center gap-1 font-medium text-sm">
                 <WandSparkles className="size-4 text-primary" />
-                推荐第{" "}
-                {sequence.members.findIndex(
-                  (photo) => photo.id === recommendation.photoId
-                ) + 1}{" "}
-                帧作为代表帧
+                {t("sequenceRecommendRepresentative", {
+                  frame:
+                    sequence.members.findIndex(
+                      (photo) => photo.id === recommendation.photoId
+                    ) + 1,
+                })}
               </p>
               <p className="mt-1 text-muted-foreground text-xs">
-                依据：{recommendation.reasons.map(formatReason).join("、")}
+                {t("sequenceRecommendBasis", {
+                  reasons: recommendation.reasons
+                    .map((reason) => formatReason(reason, t))
+                    .join(t("sequenceReasonJoin")),
+                })}
               </p>
               {onSetRepresentative &&
                 recommendation.photoId !== sequence.representativePhotoId && (
@@ -354,7 +377,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                     }
                     size="sm"
                   >
-                    采用推荐
+                    {t("sequenceApplyRecommendation")}
                   </Button>
                 )}
             </section>
@@ -371,16 +394,20 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
           </div>
           {onSetRepresentative && (
             <div className="space-y-1">
-              <p className="text-muted-foreground text-sm">选取代表帧</p>
+              <p className="text-muted-foreground text-sm">
+                {t("sequenceSetRepresentative")}
+              </p>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button className="w-full justify-between" variant="outline">
                     <span className="truncate">
-                      第{" "}
-                      {sequence.members.findIndex(
-                        (photo) => photo.id === representative?.id
-                      ) + 1}{" "}
-                      帧 · {representative?.filename}
+                      {t("sequenceFrameWithName", {
+                        frame:
+                          sequence.members.findIndex(
+                            (photo) => photo.id === representative?.id
+                          ) + 1,
+                        name: representative?.filename,
+                      })}
                     </span>
                     <ChevronDown />
                   </Button>
@@ -398,7 +425,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                         photo.id === representative?.id ? "secondary" : "ghost"
                       }
                     >
-                      第 {index + 1} 帧 · {photo.filename}
+                      {t("sequenceFrameWithName", {
+                        frame: index + 1,
+                        name: photo.filename,
+                      })}
                     </Button>
                   ))}
                 </PopoverContent>
@@ -413,7 +443,9 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                     className="min-w-0 flex-1 justify-between"
                     variant="outline"
                   >
-                    <span>从第 {validSplitPosition} 帧开始拆分</span>
+                    <span>
+                      {t("sequenceSplitFrom", { frame: validSplitPosition })}
+                    </span>
                     <ChevronDown />
                   </Button>
                 </PopoverTrigger>
@@ -430,7 +462,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                         validSplitPosition === index + 2 ? "secondary" : "ghost"
                       }
                     >
-                      从第 {index + 2} 帧开始拆分
+                      {t("sequenceSplitFrom", { frame: index + 2 })}
                     </Button>
                   ))}
                 </PopoverContent>
@@ -439,7 +471,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                 onClick={() => onSplit(sequence.id, validSplitPosition)}
                 variant="outline"
               >
-                确认拆分
+                {t("sequenceConfirmSplit")}
               </Button>
             </div>
           )}
@@ -450,7 +482,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
                 onClick={() => onRestoreAutomatic?.(sequence.id)}
                 type="button"
               >
-                恢复自动识别
+                {t("sequenceRestoreAutomatic")}
               </button>
             </div>
           )}

@@ -198,7 +198,7 @@ export function SelectionActionBar({
                 disabled={executing !== null}
                 executing={executing === "create-burst"}
                 icon={<Layers size={16} />}
-                label="创建连拍序列"
+                label={t("createBurstSequence")}
                 onClick={wrapAction("create-burst", onCreateBurstSequence, {
                   closeMore: true,
                 })}
@@ -209,7 +209,7 @@ export function SelectionActionBar({
                 disabled={executing !== null}
                 executing={executing === "create-timelapse"}
                 icon={<Timer size={16} />}
-                label="创建延时序列"
+                label={t("createTimelapseSequence")}
                 onClick={wrapAction(
                   "create-timelapse",
                   onCreateTimelapseSequence,

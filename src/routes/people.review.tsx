@@ -710,24 +710,43 @@ function FaceReviewPage() {
                     placeholder={t("peopleSearch")}
                     value={identityQuery}
                   />
-                  <select
-                    aria-label={t("faceReviewSelectPerson")}
-                    className="h-9 w-full rounded-[6px] border border-input bg-background px-2 text-[12px] outline-none focus-visible:border-primary"
-                    disabled={busy}
-                    onChange={(event) =>
-                      setSelectedIdentity(event.target.value)
-                    }
-                    value={selectedIdentity}
-                  >
-                    <option value="">{t("faceReviewSelectPerson")}</option>
-                    {identityOptions.map((identity) => (
-                      <option key={identity.id} value={identity.id}>
-                        {identity.name?.trim() ||
-                          `${t("unnamedPerson")} #${identity.id}`}{" "}
-                        · {identity.faceCount}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="-mx-1 max-h-[200px] overflow-y-auto">
+                    {identityOptions.length === 0 ? (
+                      <p className="px-3 py-6 text-center text-[13px] text-muted-foreground/70">
+                        {t("peopleSearchEmpty")}
+                      </p>
+                    ) : (
+                      identityOptions.map((identity) => {
+                        const isSelected =
+                          selectedIdentity === String(identity.id);
+                        return (
+                          <button
+                            className={`flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors disabled:opacity-50 ${isSelected ? "bg-primary/10" : "hover:bg-foreground/5"}`}
+                            disabled={busy}
+                            key={identity.id}
+                            onClick={() =>
+                              setSelectedIdentity(String(identity.id))
+                            }
+                            type="button"
+                          >
+                            <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
+                              <User className="h-4 w-4" />
+                            </div>
+                            <span className="flex-1 truncate">
+                              {identity.name?.trim() ||
+                                `${t("unnamedPerson")} #${identity.id}`}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {identity.faceCount}
+                            </span>
+                            {isSelected && (
+                              <Check className="h-4 w-4 text-primary" />
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                   <Button
                     className="mt-2 w-full"
                     disabled={busy || !selectedIdentity}

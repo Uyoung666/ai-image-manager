@@ -20,15 +20,23 @@ import {
   User,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { faceActions } from "@/actions/faces";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import type { FaceCandidate } from "@/components/face-candidate-dialog";
 import { FaceScanScopeDialog } from "@/components/face-scan-scope-dialog";
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Popover,
   PopoverContent,
@@ -39,6 +47,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useFolders } from "@/hooks/useFolders";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -360,6 +369,9 @@ function PeoplePage() {
   const { data: folders = [] } = useFolders();
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "people-list" });
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
 
   // TanStack Query data fetching
   const {
@@ -389,15 +401,34 @@ function PeoplePage() {
       (await faceActions.listHiddenIdentities()) as HiddenIdentity[],
     staleTime: 30_000,
   });
+  const { data: reviewQueue = [] } = useQuery({
+    queryKey: ["faces", "review-queue", "pending"],
+    queryFn: async () =>
+      (await faceActions.listReviewQueue({
+        status: "pending",
+        limit: 500,
+      })) as FaceCandidate[],
+    staleTime: 0,
+  });
 
-  // Face detection state
-  const [detecting, setDetecting] = useState(false);
-  const [progress, setProgress] = useState("");
-  const [detectionProgress, setDetectionProgress] = useState<{
-    processed: number;
-    total: number;
-  } | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 工具栏高度会随 nav 内容（搜索框随数据出现）变化；数据加载后重新测量，
+  // 确保滚动容器 paddingTop 始终不小于工具栏实际高度，避免遮挡卡片。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 数据长度作为重测触发器，函数体内不直接使用
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) {
+      return;
+    }
+    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [identities.length, hiddenIdentities.length]);
+
+  // Face detection state — progress/phase is driven by the global AI status hook
+  const { phase: globalAiPhase } = useGlobalAiStatus();
+  const detecting = globalAiPhase === "face-detection";
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
   const [pendingScanAfterScope, setPendingScanAfterScope] = useState<
     "incremental" | "rescan" | null
@@ -412,117 +443,56 @@ function PeoplePage() {
     queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
   }, [queryClient]);
 
-  const startPolling = useCallback(() => {
-    if (pollRef.current) {
-      return;
-    }
-    pollRef.current = setInterval(async () => {
-      try {
-        const p = (await faceActions.getDetectionProgress()) as {
-          failedPhotos?: number;
-          facesDetected?: number;
-          invalidFaces?: number;
-          phase: string;
-          processed: number;
-          total?: number;
-        };
-        if (p.phase === "complete") {
-          setDetectionProgress(null);
-          setProgress(
-            t("faceDetectionCompleteSummary", {
-              processed: p.processed,
-              total: p.total ?? 0,
-              faces: p.facesDetected ?? 0,
-              invalid: p.invalidFaces ?? 0,
-              failed: p.failedPhotos ?? 0,
-            })
-          );
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          setDetecting(false);
-          loadIdentities();
-        } else if (p.phase === "running") {
-          setDetectionProgress({
-            processed: p.processed,
-            total: p.total ?? 0,
-          });
-          setProgress(
-            t("faceDetectionProgressSummary", {
-              processed: p.processed,
-              total: p.total ?? 0,
-              faces: p.facesDetected ?? 0,
-            })
-          );
-        } else {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          setDetecting(false);
-          setProgress("");
-          setDetectionProgress(null);
-        }
-      } catch {
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-        setDetecting(false);
-        setDetectionProgress(null);
+  // Listen for the face-detection completion event and surface a summary toast.
+  // Progress (phase) itself is derived from the global AI status hook.
+  useEffect(() => {
+    function handleFaceDetectionDone(e: MessageEvent) {
+      const payload = e.data as {
+        channel?: string;
+        error?: string;
+        totalFaces?: number;
+      };
+      if (payload?.channel !== "face-detection-done") {
+        return;
       }
-    }, 2000);
+      if (payload.error) {
+        toast.error(t("faceDetectionFailed"));
+        return;
+      }
+      // 完整摘要（facesDetected/invalidFaces/failedPhotos）仅在 phase==="complete" 时返回
+      faceActions
+        .getDetectionProgress()
+        .then((p) => {
+          const progress = p as {
+            failedPhotos?: number;
+            facesDetected?: number;
+            invalidFaces?: number;
+            phase: string;
+            processed: number;
+            total?: number;
+          };
+          if (progress.phase === "complete") {
+            toast.success(
+              t("faceDetectionCompleteSummary", {
+                processed: progress.processed,
+                total: progress.total ?? 0,
+                faces: progress.facesDetected ?? 0,
+                invalid: progress.invalidFaces ?? 0,
+                failed: progress.failedPhotos ?? 0,
+              })
+            );
+            loadIdentities();
+          }
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }
+    window.addEventListener("message", handleFaceDetectionDone);
+    return () => window.removeEventListener("message", handleFaceDetectionDone);
   }, [loadIdentities, t]);
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  // 挂载时检查是否已有检测在运行
-  useEffect(() => {
-    faceActions
-      .getDetectionProgress()
-      .then((p: unknown) => {
-        const progress = p as {
-          facesDetected?: number;
-          phase: string;
-          processed: number;
-          total?: number;
-        };
-        if (progress.phase === "running") {
-          setDetecting(true);
-          setDetectionProgress({
-            processed: progress.processed,
-            total: progress.total ?? 0,
-          });
-          setProgress(
-            t("faceDetectionProgressSummary", {
-              processed: progress.processed,
-              total: progress.total ?? 0,
-              faces: progress.facesDetected ?? 0,
-            })
-          );
-          startPolling();
-        }
-      })
-      .catch(() => {
-        /* ignore */
-      });
-    return () => {
-      stopPolling();
-    };
-  }, [startPolling, stopPolling, t]);
-
   async function handleStartDetection(rescan = false) {
-    setDetecting(true);
-    setDetectionProgress(null);
-    setProgress(
-      rescan ? t("restartingFaceDetection") : t("startingFaceDetection")
-    );
     try {
       const result = (await faceActions.startDetection(rescan)) as {
         started: boolean;
@@ -533,24 +503,19 @@ function PeoplePage() {
       };
       if (result.requiresModelReset) {
         // Stored vectors are from a different model kind — ask before resetting.
-        setDetecting(false);
         setConfirmModelReset(true);
         return;
       }
       if (result.started) {
-        setProgress(t("detectingFacesCount", { count: result.photoCount }));
-        startPolling();
+        // 进度由全局进度条展示，无页面横幅
+      } else if (result.requiresScope) {
+        setPendingScanAfterScope(rescan ? "rescan" : "incremental");
+        setScopeDialogOpen(true);
       } else {
-        setProgress(result.message || t("startFailed"));
-        setDetecting(false);
-        if (result.requiresScope) {
-          setPendingScanAfterScope(rescan ? "rescan" : "incremental");
-          setScopeDialogOpen(true);
-        }
+        toast.error(result.message || t("startFailed"));
       }
     } catch {
-      setProgress(t("startFaceDetectionFailed"));
-      setDetecting(false);
+      toast.error(t("startFaceDetectionFailed"));
     }
   }
 
@@ -596,9 +561,9 @@ function PeoplePage() {
           queryKey: ["faces", "hidden-identities"],
         }),
       ]);
-      toast.success("人物已恢复显示");
+      toast.success(t("toastPersonRestored"));
     } catch {
-      toast.error("恢复人物失败");
+      toast.error(t("toastPersonRestoreFailed"));
     }
   }
 
@@ -910,111 +875,86 @@ function PeoplePage() {
         </div>
       </div>
 
-      {/* Progress bar */}
-      {progress && (
-        <div
-          aria-live="polite"
-          className="border-border border-b bg-primary/5 px-6 py-2.5 text-[12px] text-primary"
-        >
-          <div className="flex items-center gap-2">
-            {detecting && <LoadingSpinner size="xs" />}
-            <span className="min-w-0 flex-1 truncate">{progress}</span>
-            {detectionProgress && detectionProgress.total > 0 && (
-              <span className="shrink-0 text-primary/80 tabular-nums">
-                {Math.min(
-                  100,
-                  Math.round(
-                    (detectionProgress.processed / detectionProgress.total) *
-                      100
-                  )
-                )}
-                %
-              </span>
-            )}
-          </div>
-          {detectionProgress && detectionProgress.total > 0 && (
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-primary/15">
-              <div
-                className="h-full rounded-full bg-primary transition-[width] duration-500"
-                style={{
-                  width: `${Math.min(100, (detectionProgress.processed / detectionProgress.total) * 100)}%`,
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Grid area */}
-      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
-        {showContent && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <nav
-              aria-label={t("people")}
-              className="inline-flex rounded-[8px] border border-border bg-secondary p-1"
-            >
-              {(
-                [
-                  ["all", t("peopleAll"), identities.length],
-                  ["unnamed", t("peopleNeedsName"), unnamedCount],
-                  ["named", t("peopleNamed"), identities.length - unnamedCount],
-                ] as const
-              ).map(([value, label, count]) => (
-                <button
-                  aria-pressed={personFilter === value}
-                  className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
-                    personFilter === value
-                      ? "bg-card font-medium text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  key={value}
-                  onClick={() => setPersonFilter(value)}
-                  type="button"
-                >
-                  {label}
-                  <span className="ml-1.5 text-[10px] text-muted-foreground">
-                    {count}
-                  </span>
-                </button>
-              ))}
+      <div className="relative flex min-h-0 flex-1">
+        <nav
+          aria-label={t("people")}
+          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between gap-4 overflow-x-auto border-b px-6 py-1.5 ${isToolbarScrolled ? "is-scrolled" : ""}`}
+          ref={toolbarRef}
+        >
+          <div className="inline-flex shrink-0 rounded-[8px] border border-border bg-secondary p-1">
+            {(
+              [
+                ["all", t("peopleAll"), identities.length],
+                ["unnamed", t("peopleNeedsName"), unnamedCount],
+                ["named", t("peopleNamed"), identities.length - unnamedCount],
+              ] as const
+            ).map(([value, label, count]) => (
               <button
-                className="rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => navigate({ to: "/people/review" })}
-                type="button"
-              >
-                {t("faceReview")}
-              </button>
-              <button
-                aria-pressed={personFilter === "hidden"}
+                aria-pressed={personFilter === value}
                 className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
-                  personFilter === "hidden"
+                  personFilter === value
                     ? "bg-card font-medium text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
-                onClick={() => setPersonFilter("hidden")}
+                key={value}
+                onClick={() => setPersonFilter(value)}
                 type="button"
               >
-                {t("hiddenPeople")}
+                {label}
                 <span className="ml-1.5 text-[10px] text-muted-foreground">
-                  {hiddenIdentities.length}
+                  {count}
                 </span>
               </button>
-            </nav>
-            {(identities.length > 0 || hiddenIdentities.length > 0) && (
-              <label className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
-                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  aria-label={t("peopleSearch")}
-                  className="h-8 w-full rounded-[6px] border border-input bg-card pr-8 pl-8 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
-                  onChange={(event) => setPersonQuery(event.target.value)}
-                  placeholder={t("peopleSearch")}
-                  type="search"
-                  value={personQuery}
-                />
-              </label>
-            )}
+            ))}
+            <button
+              className="rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => navigate({ to: "/people/review" })}
+              type="button"
+            >
+              {t("faceReview")}
+              <span className="ml-1.5 text-[10px] text-muted-foreground">
+                {reviewQueue.length}
+              </span>
+            </button>
+            <button
+              aria-pressed={personFilter === "hidden"}
+              className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+                personFilter === "hidden"
+                  ? "bg-card font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setPersonFilter("hidden")}
+              type="button"
+            >
+              {t("hiddenPeople")}
+              <span className="ml-1.5 text-[10px] text-muted-foreground">
+                {hiddenIdentities.length}
+              </span>
+            </button>
           </div>
-        )}
+          {(identities.length > 0 || hiddenIdentities.length > 0) && (
+            <label className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                aria-label={t("peopleSearch")}
+                className="h-8 w-full rounded-[6px] border border-input bg-card pr-8 pl-8 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+                onChange={(event) => setPersonQuery(event.target.value)}
+                placeholder={t("peopleSearch")}
+                type="search"
+                value={personQuery}
+              />
+            </label>
+          )}
+        </nav>
+        <div
+          className="flex-1 overflow-y-auto p-6"
+          onScroll={(event) => {
+            setIsToolbarScrolled(event.currentTarget.scrollTop > 4);
+          }}
+          ref={scrollRef}
+          style={{ paddingTop: toolbarHeight }}
+        >
         {/* 加载骨架屏：填满视口的卡片矩阵 */}
         {isLoading && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
@@ -1105,7 +1045,7 @@ function PeoplePage() {
                   {hiddenIdentity.name || t("unnamedPerson")}
                 </button>
                 <p className="mt-1 text-[12px] text-muted-foreground">
-                  {hiddenIdentity.faceCount} 张照片
+                  {t("photosCount", { count: hiddenIdentity.faceCount })}
                 </p>
                 <button
                   className="mt-3 rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
@@ -1119,7 +1059,7 @@ function PeoplePage() {
             {!(isHiddenIdentitiesLoading || isHiddenIdentitiesError) &&
               filteredHiddenIdentities.length === 0 && (
                 <p className="col-span-full py-12 text-center text-[13px] text-muted-foreground">
-                  暂无已隐藏人物
+                  {t("noHiddenPeople")}
                 </p>
               )}
           </div>
@@ -1132,10 +1072,10 @@ function PeoplePage() {
               <User className="h-12 w-12 opacity-20" />
               <div className="max-w-md rounded-lg border border-primary/20 bg-primary/[0.04] px-4 py-3 text-center">
                 <p className="font-medium text-[13px] text-foreground">
-                  开启人物识别
+                  {t("peopleEnableTitle")}
                 </p>
                 <p className="mt-1 text-[11px] text-muted-foreground leading-5">
-                  人脸检测和识别仅在本机处理，不会修改原照片。你可以先选择扫描文件夹，之后随时清除人物识别数据。
+                  {t("peopleEnableDescription")}
                 </p>
               </div>
               <p className="text-[13px]">{t("noPeopleTitle")}</p>
@@ -1200,6 +1140,7 @@ function PeoplePage() {
             </div>
           </>
         )}
+        </div>
       </div>
 
       <ConfirmDialog
@@ -1230,8 +1171,6 @@ function PeoplePage() {
         onCancel={() => setConfirmModelReset(false)}
         onConfirm={async () => {
           setConfirmModelReset(false);
-          setDetecting(true);
-          setProgress(t("modelResetProgress"));
           try {
             await faceActions.reset();
             toast.success(t("modelResetComplete"));
@@ -1239,7 +1178,6 @@ function PeoplePage() {
             await handleStartDetection(false);
           } catch {
             toast.error(t("modelResetFailed"));
-            setDetecting(false);
           }
         }}
         open={confirmModelReset}
@@ -1261,7 +1199,6 @@ function PeoplePage() {
           setResettingFaceData(true);
           try {
             await faceActions.reset();
-            setProgress("");
             await Promise.all([
               queryClient.invalidateQueries({
                 queryKey: ["faces", "identities"],

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { User } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -7,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 export interface FaceReassignIdentity {
   id: number;
@@ -34,27 +37,28 @@ export function FaceReassignDialog({
   open,
   photoName,
 }: FaceReassignDialogProps) {
-  const [selectedIdentity, setSelectedIdentity] = useState("");
+  const { t } = useTranslation();
   const [newName, setNewName] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [assigningId, setAssigningId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const composingRef = useRef(false);
+  const busy = assigningId !== null || creating;
 
   useEffect(() => {
     if (open) {
-      setSelectedIdentity("");
       setNewName("");
+      setAssigningId(null);
+      setCreating(false);
+      composingRef.current = false;
     }
   }, [open]);
 
-  async function assign() {
-    const identityId = Number(selectedIdentity);
-    if (!identityId) {
-      return;
-    }
-    setBusy(true);
+  async function assign(identityId: number) {
+    setAssigningId(identityId);
     try {
       await onAssign(identityId);
     } finally {
-      setBusy(false);
+      setAssigningId(null);
     }
   }
 
@@ -63,11 +67,11 @@ export function FaceReassignDialog({
     if (!name) {
       return;
     }
-    setBusy(true);
+    setCreating(true);
     try {
       await onCreate(name);
     } finally {
-      setBusy(false);
+      setCreating(false);
     }
   }
 
@@ -79,61 +83,63 @@ export function FaceReassignDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent size="sm">
         <DialogHeader>
-          <DialogTitle>为这张照片中的人脸命名</DialogTitle>
+          <DialogTitle>{t("faceReassignTitle")}</DialogTitle>
           <DialogDescription className="truncate" title={photoName}>
             {photoName}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <label className="block text-[12px] text-muted-foreground">
-            <span className="mb-1.5 block">归入已有人物</span>
-            <select
-              className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-primary"
-              disabled={busy || loading || availableIdentities.length === 0}
-              onChange={(event) => setSelectedIdentity(event.target.value)}
-              value={selectedIdentity}
-            >
-              <option value="">
-                {availableIdentities.length === 0
-                  ? "暂无其他已命名人物"
-                  : "选择人物"}
-              </option>
-              {availableIdentities.map((identity) => (
-                <option key={identity.id} value={identity.id}>
-                  {identity.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="w-full rounded-md bg-primary px-3 py-2 text-[12px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-            disabled={busy || loading || !selectedIdentity}
-            onClick={assign}
-            type="button"
-          >
-            归入已有人物
-          </button>
-
-          <div className="border-border border-t pt-3">
-            <label className="block text-[12px] text-muted-foreground">
-              <span className="mb-1.5 block">创建新人物</span>
-              <input
-                autoFocus
-                className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-primary"
+        <div className="-mx-1 max-h-[300px] overflow-y-auto">
+          {availableIdentities.length === 0 ? (
+            <p className="px-3 py-6 text-center text-[13px] text-muted-foreground/70">
+              {t("faceReassignNoIdentities")}
+            </p>
+          ) : (
+            availableIdentities.map((identity) => (
+              <button
+                className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-50"
                 disabled={busy || loading}
-                onChange={(event) => setNewName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    create();
-                  }
-                }}
-                placeholder="输入人物名称"
-                value={newName}
-              />
-            </label>
-          </div>
+                key={identity.id}
+                onClick={() => assign(identity.id)}
+                type="button"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
+                  <User className="h-4 w-4" />
+                </div>
+                <span className="flex-1 truncate">{identity.name}</span>
+                {assigningId === identity.id && <LoadingSpinner size="sm" />}
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="border-border border-t pt-3">
+          <label className="block text-[12px] text-muted-foreground">
+            <span className="mb-1.5 block">{t("faceReassignCreateNew")}</span>
+            <input
+              autoFocus
+              className="w-full rounded-md border border-input bg-background px-2.5 py-2 text-[13px] text-foreground outline-none focus:border-primary"
+              disabled={busy || loading}
+              onChange={(event) => setNewName(event.target.value)}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+              }}
+              onCompositionStart={() => {
+                composingRef.current = true;
+              }}
+              onKeyDown={(event) => {
+                if (composingRef.current) {
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  create();
+                }
+              }}
+              placeholder={t("faceReassignNamePlaceholder")}
+              value={newName}
+            />
+          </label>
         </div>
 
         <DialogFooter>
@@ -143,7 +149,11 @@ export function FaceReassignDialog({
             onClick={create}
             type="button"
           >
-            创建并归类
+            {creating ? (
+              <LoadingSpinner size="sm" />
+            ) : (
+              t("faceReassignCreateAndAssign")
+            )}
           </button>
         </DialogFooter>
       </DialogContent>
