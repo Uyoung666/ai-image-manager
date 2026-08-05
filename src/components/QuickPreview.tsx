@@ -114,6 +114,7 @@ export function QuickPreview({
       className={`fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm transition-all duration-200 ease-out ${
         animState === "visible" ? "opacity-100" : "opacity-0"
       }`}
+      data-wander-blocking="true"
       onClick={handleClose}
       onTransitionEnd={() => {
         if (animState === "exiting") {

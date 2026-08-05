@@ -23,12 +23,13 @@ import {
   faceReviewDecisions,
   faceVectors,
   folders,
-  photos,
-  photoTags,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
   photoSequences,
+  photos,
+  photoTags,
+  photoViewStats,
   tags,
 } from "./schema";
 
@@ -49,12 +50,13 @@ const schema = {
   faceReviewDecisions,
   faceVectors,
   folders,
-  photos,
-  photoTags,
   photoSequenceExclusions,
   photoSequenceMembers,
   photoSequenceSuggestions,
   photoSequences,
+  photos,
+  photoTags,
+  photoViewStats,
   tags,
 };
 

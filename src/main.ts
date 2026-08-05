@@ -12,6 +12,7 @@ import {
   Notification,
   nativeImage,
   nativeTheme,
+  powerMonitor,
   protocol,
   screen,
   session,
@@ -52,6 +53,10 @@ import {
   setupSendToShortcut,
 } from "@/services/sendto-integration";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
+import {
+  createWanderLifecycleBridge,
+  type WanderLifecycleBridge,
+} from "@/services/wander-lifecycle";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
@@ -246,6 +251,7 @@ function logPackagedPathDiagnostics() {
 // ── Window & tray references ─────────────────────────────────────────
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let wanderLifecycleBridge: WanderLifecycleBridge | null = null;
 // True once before-quit fires — distinguishes "user clicked close" (hide to
 // tray) from "app actually quitting" (e.g. relaunch, tray menu Exit, OS
 // shutdown). Without this flag, every close is intercepted and app.quit()
@@ -683,6 +689,19 @@ function createWindow(httpPort: number) {
       process.platform === "darwin" ? { x: 12, y: 9 } : undefined,
   });
 
+  wanderLifecycleBridge?.dispose();
+  const lifecycleWindow = mainWindow;
+  const lifecycleBridge = createWanderLifecycleBridge({
+    powerMonitor,
+    send: (state) => {
+      if (!lifecycleWindow.isDestroyed()) {
+        lifecycleWindow.webContents.send(IPC_CHANNELS.WANDER_LIFECYCLE, state);
+      }
+    },
+    window: lifecycleWindow,
+  });
+  wanderLifecycleBridge = lifecycleBridge;
+
   if (store.get("isMaximized", false)) {
     mainWindow.maximize();
   }
@@ -738,6 +757,9 @@ function createWindow(httpPort: number) {
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
     mainWindow?.focus();
+  });
+  mainWindow.webContents.on("did-finish-load", () => {
+    lifecycleBridge.publish("initial");
   });
 
   ipcContext.setMainWindow(mainWindow);
@@ -1381,6 +1403,8 @@ app.on("will-quit", async () => {
     trashCleanupTimer = null;
   }
   globalShortcut.unregisterAll();
+  wanderLifecycleBridge?.dispose();
+  wanderLifecycleBridge = null;
   if (tray) {
     tray.destroy();
     tray = null;

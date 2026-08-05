@@ -1,0 +1,159 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { Compass } from "lucide-react";
+import { useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { FilterDropdown } from "@/components/filter-dropdown";
+import { SettingRow } from "@/components/settings/setting-row";
+import { Switch } from "@/components/ui/switch";
+import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import { useWander } from "@/providers/WanderProvider";
+import type { WanderContentMode, WanderSettings } from "@/types/wander";
+
+const IDLE_OPTIONS: WanderSettings["idleMinutes"][] = [10, 15, 30];
+const INTERVAL_OPTIONS: WanderSettings["intervalSeconds"][] = [3, 5, 10];
+const CONTENT_MODES: WanderContentMode[] = [
+  "timeCapsule",
+  "theme",
+  "rediscovery",
+];
+// Match the EXIF filter inputs (SearchBar's filterInputClass) so the dropdown
+// popup and closed control look identical to the EXIF filters.
+const dropdownClassName =
+  "h-8 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none focus:border-primary/40";
+
+function WanderSettingsPage() {
+  const { t } = useTranslation();
+  const {
+    active: wanderActive,
+    loading: wanderLoading,
+    preferences,
+    start: startWander,
+    updatePreference,
+  } = useWander();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useRouteScrollRestoration(scrollRef);
+
+  const toggleMode = (mode: WanderContentMode, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...preferences.modes, mode])]
+      : preferences.modes.filter((item) => item !== mode);
+    if (next.length > 0) {
+      updatePreference("modes", next).catch(() => undefined);
+    }
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+      <section className="mx-auto w-full max-w-[820px] space-y-3">
+        <div>
+          <h2 className="font-semibold text-[14px] text-foreground">
+            {t("settingsWander")}
+          </h2>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            {t("wander.startHint")}
+          </p>
+        </div>
+
+        <button
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          disabled={wanderActive || wanderLoading}
+          onClick={() => startWander()}
+          type="button"
+        >
+          <Compass className="h-4 w-4" />
+          {t("wander.startNow")}
+        </button>
+
+        <div className="rounded-[8px] border border-border bg-secondary p-4">
+          <SettingRow
+            action={
+              <Switch
+                checked={preferences.enabled}
+                onCheckedChange={(checked) =>
+                  updatePreference("enabled", checked).catch(() => undefined)
+                }
+              />
+            }
+            description={t("wander.enabledHint")}
+            title={t("wander.enabled")}
+          />
+          <SettingRow
+            action={
+              <FilterDropdown
+                aria-label={t("wander.idleMinutes")}
+                className={dropdownClassName}
+                onChange={(value) =>
+                  updatePreference(
+                    "idleMinutes",
+                    Number(value) as WanderSettings["idleMinutes"]
+                  ).catch(() => undefined)
+                }
+                options={IDLE_OPTIONS.map((value) => ({
+                  label: t("wander.minutes", { count: value }),
+                  value: String(value),
+                }))}
+                placeholder={t("wander.idleMinutes")}
+                value={String(preferences.idleMinutes)}
+              />
+            }
+            description={t("wander.idleMinutesHint")}
+            title={t("wander.idleMinutes")}
+          />
+          <SettingRow
+            action={
+              <FilterDropdown
+                aria-label={t("wander.intervalSeconds")}
+                className={dropdownClassName}
+                onChange={(value) =>
+                  updatePreference(
+                    "intervalSeconds",
+                    Number(value) as WanderSettings["intervalSeconds"]
+                  ).catch(() => undefined)
+                }
+                options={INTERVAL_OPTIONS.map((value) => ({
+                  label: t("wander.seconds", { count: value }),
+                  value: String(value),
+                }))}
+                placeholder={t("wander.intervalSeconds")}
+                value={String(preferences.intervalSeconds)}
+              />
+            }
+            description={t("wander.intervalSecondsHint")}
+            title={t("wander.intervalSeconds")}
+          />
+        </div>
+
+        <div className="rounded-[8px] border border-border bg-secondary p-4">
+          <div className="pb-2">
+            <div className="font-medium text-[13px] text-foreground">
+              {t("wander.contentMode")}
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {t("wander.contentModeHint")}
+            </div>
+          </div>
+          {CONTENT_MODES.map((mode) => (
+            <SettingRow
+              action={
+                <Switch
+                  checked={preferences.modes.includes(mode)}
+                  disabled={
+                    preferences.modes.length === 1 &&
+                    preferences.modes.includes(mode)
+                  }
+                  onCheckedChange={(checked) => toggleMode(mode, checked)}
+                />
+              }
+              key={mode}
+              title={t(`wander.mode.${mode}`)}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export const Route = createFileRoute("/settings/wander")({
+  component: WanderSettingsPage,
+});

@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Sparkles } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -57,6 +58,7 @@ import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
+import { useWander } from "@/providers/WanderProvider";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
 import type { Photo, SearchResponse } from "@/types/photo";
@@ -194,6 +196,11 @@ function resolveSearchMode(query: string, color?: string | null): SearchMode {
 
 function HomePage() {
   const { t } = useTranslation();
+  const {
+    active: wanderActive,
+    loading: wanderLoading,
+    start: startWander,
+  } = useWander();
   const navigate = useNavigate();
   const filter = useSidebarFilter();
   const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
@@ -2379,6 +2386,16 @@ function HomePage() {
             searchTime={searchTime}
             trailingContent={
               <>
+                <button
+                  className="flex items-center gap-1.5 rounded-md border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] text-primary transition-colors hover:bg-primary/15 disabled:opacity-50"
+                  disabled={wanderActive || wanderLoading || totalPhotos < 2}
+                  onClick={() => startWander()}
+                  title={t("wander.startHint")}
+                  type="button"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t("wander.label")}
+                </button>
                 <div className="flex rounded-md border border-border p-0.5 text-[11px]">
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}

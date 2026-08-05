@@ -108,6 +108,30 @@ export const photos = sqliteTable(
   })
 );
 
+/** Lightweight engagement signals used to keep ambient photo discovery fresh. */
+export const photoViewStats = sqliteTable(
+  "photo_view_stats",
+  {
+    photoId: integer("photo_id")
+      .primaryKey()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    viewCount: integer("view_count").notNull().default(0),
+    lastViewedAt: integer("last_viewed_at"),
+    wanderShownCount: integer("wander_shown_count").notNull().default(0),
+    lastWanderedAt: integer("last_wandered_at"),
+  },
+  (table) => ({
+    viewedIdx: index("idx_photo_view_stats_viewed").on(
+      table.viewCount,
+      table.lastViewedAt
+    ),
+    wanderedIdx: index("idx_photo_view_stats_wandered").on(
+      table.wanderShownCount,
+      table.lastWanderedAt
+    ),
+  })
+);
+
 export const exifData = sqliteTable(
   "exif_data",
   {

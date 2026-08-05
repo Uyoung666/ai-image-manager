@@ -18,8 +18,8 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ipc } from "@/ipc/manager";
 import { useAiStatus } from "@/hooks/useAiStatus";
+import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -166,7 +166,9 @@ export function SpotlightSearch() {
         facesPromise,
       ]);
       // 竞态保护：丢弃过时响应
-      if (gen !== searchGenRef.current) return;
+      if (gen !== searchGenRef.current) {
+        return;
+      }
       const failed = [photos, tags, albums, faces].filter(
         (r) => r.status === "rejected"
       ).length;
@@ -313,7 +315,7 @@ export function SpotlightSearch() {
   }
 
   return (
-    <div className="fixed inset-0 z-[9999]">
+    <div className="fixed inset-0 z-[9999]" data-wander-blocking="true">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"

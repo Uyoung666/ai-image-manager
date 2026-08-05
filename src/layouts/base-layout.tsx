@@ -19,6 +19,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
+import { WanderProvider } from "@/providers/WanderProvider";
 import {
   SidebarFilterProvider,
   useSidebarFilter,
@@ -105,41 +106,45 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
     <ScrollPositionProvider>
       <OnboardingProvider>
         <GlobalAiStatusProvider>
-          <OnboardingOverlay />
-          <AppContentGate>
-            <BrowseSessionProvider>
-              <SidebarFilterProvider>
-              <div
-                className={`flex h-screen flex-col overflow-hidden ${
-                  isHomePage ? "home-workspace" : ""
-                }`}
-              >
-                <DragWindowRegion title="AI Image Manager" />
-                <GlobalProgressBar />
-                <div
-                  className={`flex min-h-0 flex-1 overflow-hidden ${
-                    isHomePage ? "home-workspace-content" : ""
-                  }`}
-                >
-                  <SidebarSlot />
-                  <main
-                    className={`min-w-0 flex-1 overflow-hidden ${
-                      isHomePage ? "home-gallery-canvas" : ""
+          <WanderProvider>
+            <OnboardingOverlay />
+            <AppContentGate>
+              <BrowseSessionProvider>
+                <SidebarFilterProvider>
+                  <div
+                    className={`flex h-screen flex-col overflow-hidden ${
+                      isHomePage ? "home-workspace" : ""
                     }`}
                   >
-                    {children}
-                  </main>
-                </div>
-                <SpotlightSearch />
-                <KeyboardShortcuts
-                  onClose={() => setShortcutsOpen(false)}
-                  open={shortcutsOpen}
-                />
-                {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
-              </div>
-              </SidebarFilterProvider>
-            </BrowseSessionProvider>
-          </AppContentGate>
+                    <DragWindowRegion title="AI Image Manager" />
+                    <GlobalProgressBar />
+                    <div
+                      className={`flex min-h-0 flex-1 overflow-hidden ${
+                        isHomePage ? "home-workspace-content" : ""
+                      }`}
+                    >
+                      <SidebarSlot />
+                      <main
+                        className={`min-w-0 flex-1 overflow-hidden ${
+                          isHomePage ? "home-gallery-canvas" : ""
+                        }`}
+                      >
+                        {children}
+                      </main>
+                    </div>
+                    <SpotlightSearch />
+                    <KeyboardShortcuts
+                      onClose={() => setShortcutsOpen(false)}
+                      open={shortcutsOpen}
+                    />
+                    {perfOn && (
+                      <PerfOverlay memory={memory} metrics={metrics} />
+                    )}
+                  </div>
+                </SidebarFilterProvider>
+              </BrowseSessionProvider>
+            </AppContentGate>
+          </WanderProvider>
         </GlobalAiStatusProvider>
       </OnboardingProvider>
     </ScrollPositionProvider>

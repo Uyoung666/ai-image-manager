@@ -37,4 +37,18 @@ describe("migration journal", () => {
     expect(migration).toMatch(ORIGIN_BACKFILL_RE);
     expect(migration).toMatch(CONFIRMATION_BACKFILL_RE);
   });
+
+  it("creates durable photo view and wander exposure counters", () => {
+    const migration = fs.readFileSync(
+      path.join(process.cwd(), "drizzle", "0042_add_photo_view_stats.sql"),
+      "utf8"
+    );
+
+    expect(migration).toContain("CREATE TABLE `photo_view_stats`");
+    expect(migration).toContain("`view_count` integer DEFAULT 0 NOT NULL");
+    expect(migration).toContain(
+      "`wander_shown_count` integer DEFAULT 0 NOT NULL"
+    );
+    expect(migration).toContain("ON DELETE cascade");
+  });
 });

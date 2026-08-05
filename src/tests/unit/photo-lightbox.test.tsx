@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { preloadImage } from "@/utils/local-media-url";
 
+vi.mock("@/actions/wander", () => ({
+  wanderActions: {
+    recordExposure: vi.fn().mockResolvedValue({ ok: true }),
+  },
+}));
+
 vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {

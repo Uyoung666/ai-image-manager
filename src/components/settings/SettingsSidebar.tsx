@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Cloud,
+  Compass,
   HardDrive,
   Image,
   Info,
@@ -33,6 +34,13 @@ const NAV_ITEMS: NavItem[] = [
       "主题 深色 浅色 暗色 语言 中文 英文 开机自启 启动 侧边栏 折叠 theme dark light language startup sidebar collapse",
     labelKey: "settingsAppearance",
     to: "/settings/appearance",
+  },
+  {
+    groupKey: "settingsGroupGeneral",
+    icon: Compass,
+    keywords: "漫游 闲置 放映 回忆 主题 wander idle slideshow memories theme",
+    labelKey: "settingsWander",
+    to: "/settings/wander",
   },
   {
     groupKey: "settingsGroupSystem",

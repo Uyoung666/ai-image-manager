@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { IPC_CHANNELS } from "./constants";
+import { IPC_CHANNELS, type WanderLifecycleState } from "./constants";
+
+let latestWanderLifecycleState: WanderLifecycleState | null = null;
+
+ipcRenderer.on(IPC_CHANNELS.WANDER_LIFECYCLE, (_event, payload) => {
+  latestWanderLifecycleState = payload as WanderLifecycleState;
+  window.postMessage(latestWanderLifecycleState, "*");
+});
 
 window.addEventListener("message", (event) => {
   if (event.data === IPC_CHANNELS.START_ORPC_SERVER) {
@@ -25,6 +32,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   httpPort,
   // E2E 测试模式
   isE2E,
+  getWanderLifecycleState: (): WanderLifecycleState | null =>
+    latestWanderLifecycleState,
   startDrag: (filePath: string): void => {
     ipcRenderer.send(IPC_CHANNELS.NATIVE_FILE_DRAG, filePath);
   },

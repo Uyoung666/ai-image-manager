@@ -8,6 +8,7 @@ import { settings } from "./settings";
 import { shell } from "./shell";
 import { theme } from "./theme";
 import { window } from "./window";
+import { wander } from "./wander";
 
 export const router = {
   albums,
@@ -20,4 +21,5 @@ export const router = {
   shell,
   photos,
   cull,
+  wander,
 };

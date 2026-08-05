@@ -18,6 +18,7 @@ import { Route as CullRouteImport } from './routes/cull'
 import { Route as AlbumsRouteImport } from './routes/albums'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsWatermarkRouteImport } from './routes/settings.watermark'
+import { Route as SettingsWanderRouteImport } from './routes/settings.wander'
 import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSequencesRouteImport } from './routes/settings.sequences'
@@ -73,6 +74,11 @@ const IndexRoute = IndexRouteImport.update({
 const SettingsWatermarkRoute = SettingsWatermarkRouteImport.update({
   id: '/watermark',
   path: '/watermark',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsWanderRoute = SettingsWanderRouteImport.update({
+  id: '/wander',
+  path: '/wander',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsUpdateRoute = SettingsUpdateRouteImport.update({
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
+  '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRoutesByTo {
@@ -173,6 +180,7 @@ export interface FileRoutesByTo {
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
+  '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRoutesById {
@@ -196,6 +204,7 @@ export interface FileRoutesById {
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
+  '/settings/wander': typeof SettingsWanderRoute
   '/settings/watermark': typeof SettingsWatermarkRoute
 }
 export interface FileRouteTypes {
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
+    | '/settings/wander'
     | '/settings/watermark'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
+    | '/settings/wander'
     | '/settings/watermark'
   id:
     | '__root__'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
+    | '/settings/wander'
     | '/settings/watermark'
   fileRoutesById: FileRoutesById
 }
@@ -341,6 +353,13 @@ declare module '@tanstack/react-router' {
       path: '/watermark'
       fullPath: '/settings/watermark'
       preLoaderRoute: typeof SettingsWatermarkRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/wander': {
+      id: '/settings/wander'
+      path: '/wander'
+      fullPath: '/settings/wander'
+      preLoaderRoute: typeof SettingsWanderRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/update': {
@@ -465,6 +484,7 @@ interface SettingsRouteChildren {
   SettingsSequencesRoute: typeof SettingsSequencesRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
   SettingsUpdateRoute: typeof SettingsUpdateRoute
+  SettingsWanderRoute: typeof SettingsWanderRoute
   SettingsWatermarkRoute: typeof SettingsWatermarkRoute
 }
 
@@ -476,6 +496,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsSequencesRoute: SettingsSequencesRoute,
   SettingsStorageRoute: SettingsStorageRoute,
   SettingsUpdateRoute: SettingsUpdateRoute,
+  SettingsWanderRoute: SettingsWanderRoute,
   SettingsWatermarkRoute: SettingsWatermarkRoute,
 }
 

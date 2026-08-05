@@ -30,6 +30,7 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { wanderActions } from "@/actions/wander";
 import {
   LightboxInfoPanel,
   type LightboxInfoPhoto,
@@ -161,6 +162,18 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setLoaded(false);
     setImageError(false);
   }, [photo?.id, previewPlayback]);
+
+  useEffect(() => {
+    if (!(open && photo)) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      wanderActions.recordExposure({ photoId: photo.id, source: "lightbox" }).catch(
+        () => undefined
+      );
+    }, 2000);
+    return () => window.clearTimeout(timeout);
+  }, [open, photo]);
 
   const resetView = useCallback(() => {
     wheelZoomRef.current = 1;

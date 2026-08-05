@@ -16,6 +16,9 @@ interface Window {
     httpPort: number;
     /** E2E 测试模式，用于跳过引导流程等 */
     isE2E: boolean;
+    getWanderLifecycleState: () =>
+      | import("@/constants").WanderLifecycleState
+      | null;
     startDrag: (filePath: string) => void;
     copyImageToClipboard: (filePath: string) => Promise<boolean>;
     restartApp: () => void;
