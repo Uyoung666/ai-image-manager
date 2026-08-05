@@ -651,6 +651,32 @@ async function ensureModelAvailable(): Promise<void> {
   log.warn("AI models not found in any dev path");
 }
 
+// ── UI zoom scale ────────────────────────────────────────────────────
+// Persisted via the app_settings table (key "ui.zoomScale"), applied on
+// every window load so the preference survives restarts. Defaults to 1
+// (follow system DPI); the settings → appearance page offers 80%–130%.
+function applyUiZoomScale() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  try {
+    const db = getDatabase();
+    const row = db
+      .select({ value: appSettings.value })
+      .from(appSettings)
+      .where(eq(appSettings.key, "ui.zoomScale"))
+      .get();
+    const parsed = Number.parseFloat(row?.value ?? "");
+    const scale = Number.isFinite(parsed)
+      ? Math.min(2, Math.max(0.5, parsed))
+      : 1;
+    mainWindow.webContents.setZoomFactor(scale);
+  } catch {
+    // DB not ready yet — leave the default zoom; the settings page will
+    // apply the stored value the next time it changes.
+  }
+}
+
 // ── Create main window ───────────────────────────────────────────────
 function createWindow(httpPort: number) {
   const basePath = getBasePath();
@@ -760,6 +786,7 @@ function createWindow(httpPort: number) {
   });
   mainWindow.webContents.on("did-finish-load", () => {
     lifecycleBridge.publish("initial");
+    applyUiZoomScale();
   });
 
   ipcContext.setMainWindow(mainWindow);

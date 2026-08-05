@@ -584,6 +584,9 @@ i18n.use(initReactI18next).init({
         sequencePHashDistanceHint:
           "控制相邻照片需要多相似才会归为同一序列。数值越小，要求画面越相似。",
         settingsTheme: "主题",
+        settingsUiScale: "界面缩放",
+        settingsUiScaleHint:
+          "整体缩放应用界面；Windows 显示缩放设置较大时可调小以增大可用空间",
         settingsLanguage: "语言",
         openAtLogin: "开机自启",
         openAtLoginHint: "软件启动时自动运行",
@@ -2355,6 +2358,9 @@ i18n.use(initReactI18next).init({
         sequencePHashDistanceHint:
           "Controls how similar adjacent photos must look. Lower values require more similar frames.",
         settingsTheme: "Theme",
+        settingsUiScale: "UI scale",
+        settingsUiScaleHint:
+          "Scale the whole app interface. Lower it when Windows display scaling is set high to reclaim screen space.",
         settingsLanguage: "Language",
         openAtLogin: "Launch at startup",
         openAtLoginHint: "Automatically start the app when you sign in",

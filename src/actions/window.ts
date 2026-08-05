@@ -12,3 +12,6 @@ export async function closeWindow() {
 export async function getIsMaximized() {
   return await ipc.client.window.isWindowMaximized();
 }
+export async function setZoomFactor(scale: number) {
+  await ipc.client.window.setZoomFactor({ scale });
+}

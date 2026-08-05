@@ -1,4 +1,5 @@
 import { os } from "@orpc/server";
+import { z } from "zod";
 import { ipcContext } from "../context";
 
 export const minimizeWindow = os
@@ -35,4 +36,16 @@ export const isWindowMaximized = os
     const { window } = context;
 
     return window.isMaximized();
+  });
+
+export const setZoomFactor = os
+  .use(ipcContext.mainWindowContext)
+  .input(z.object({ scale: z.number() }))
+  .handler(({ context, input }) => {
+    const { window } = context;
+
+    // Clamp to a sane range — the settings UI offers 80%–130%, but guard
+    // against out-of-bounds IPC callers.
+    const scale = Math.min(2, Math.max(0.5, input.scale));
+    window.webContents.setZoomFactor(scale);
   });

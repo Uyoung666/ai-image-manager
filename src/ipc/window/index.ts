@@ -3,6 +3,7 @@ import {
   isWindowMaximized,
   maximizeWindow,
   minimizeWindow,
+  setZoomFactor,
 } from "./handlers";
 
 export const window = {
@@ -10,4 +11,5 @@ export const window = {
   maximizeWindow,
   closeWindow,
   isWindowMaximized,
+  setZoomFactor,
 };
