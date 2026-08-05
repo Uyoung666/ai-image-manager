@@ -16,6 +16,11 @@ import {
   selectRelevantSemanticResults,
 } from "./scoring";
 import {
+  getActiveSearchSensitivity,
+  getSensitivityMultiplier,
+  type SearchSensitivity,
+} from "./search-sensitivity";
+import {
   getSemanticQueryPlan,
   prepareSemanticQueryPlan,
   SEMANTIC_QUERY_PLAN_VERSION,
@@ -428,7 +433,8 @@ interface MultiPromptSearchResult {
 async function multiPromptSearch(
   plan: SemanticQueryPlan,
   limit: number,
-  timings: SearchTimings = { embedMs: 0, vectorMs: 0 }
+  timings: SearchTimings = { embedMs: 0, vectorMs: 0 },
+  sensitivity: SearchSensitivity = "standard"
 ): Promise<MultiPromptSearchResult> {
   if (!(embeddingModel && photoTable) || plan.prompts.length === 0) {
     return {
@@ -464,8 +470,12 @@ async function multiPromptSearch(
     0,
     plan.prompts.findIndex((prompt) => prompt.role === "primary")
   );
-  const candidateMinimum =
-    model.scoring.semanticSearch?.candidateMinimumSimilarity ?? 0.02;
+  // 灵敏度同时缩放 ANN 候选预过滤阈值——否则 relaxed 档在召回层就丢掉弱匹配。
+  const s = getSensitivityMultiplier(sensitivity);
+  const candidateMinimum = Math.max(
+    0.005,
+    (model.scoring.semanticSearch?.candidateMinimumSimilarity ?? 0.02) * s
+  );
   const candidateMaxDistance = 1 - candidateMinimum;
   let candidateDepth = Math.min(rowCount, Math.max(200, limit));
 
@@ -510,6 +520,7 @@ async function multiPromptSearch(
           ({ similarity }) => similarity
         ),
         promptGroupCount,
+        sensitivity: s,
       }
     );
     const exhausted = candidateDepth >= rowCount;
@@ -670,11 +681,13 @@ export async function searchByTextWithPlan(
     };
   }
 
+  const sensitivity = getActiveSearchSensitivity();
   const cacheKey = JSON.stringify({
     limit,
     model: getActiveEmbeddingModel().kind,
     policy: getSemanticPolicyVersion(),
     query: query.trim(),
+    sensitivity,
     strategy: "hybrid-zh-v2",
     translation: getTranslationModelVersion(),
     version: SEMANTIC_QUERY_PLAN_VERSION,
@@ -698,7 +711,7 @@ export async function searchByTextWithPlan(
     return cached;
   }
 
-  const searchPromise = performTextSearch(query, limit, cacheKey);
+  const searchPromise = performTextSearch(query, limit, cacheKey, sensitivity);
   pendingTextSearches.set(cacheKey, searchPromise);
   try {
     return await searchPromise;
@@ -712,7 +725,8 @@ export async function searchByTextWithPlan(
 async function performTextSearch(
   query: string,
   limit: number,
-  cacheKey: string
+  cacheKey: string,
+  sensitivity: SearchSensitivity
 ): Promise<SemanticTextSearchResult> {
   const totalStartedAt = Date.now();
   const timings: SearchTimings = { embedMs: 0, vectorMs: 0 };
@@ -776,7 +790,8 @@ async function performTextSearch(
     plan,
     getActiveEmbeddingModel().kind,
     limit,
-    getTranslationModelVersion()
+    getTranslationModelVersion(),
+    sensitivity
   );
   const planCached = getCachedSearch(effectiveCacheKey);
   if (planCached) {
@@ -785,7 +800,7 @@ async function performTextSearch(
   }
   const semanticSearch =
     plan.prompts.length > 0
-      ? await multiPromptSearch(plan, limit, timings)
+      ? await multiPromptSearch(plan, limit, timings, sensitivity)
       : {
           candidateDepth: 0,
           consensusCutoff: 0,

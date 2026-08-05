@@ -165,6 +165,16 @@ describe("SemanticQueryPlan", () => {
     ).not.toBe(semanticQueryPlanCacheKey(negative, "siglip", 50, "opus-v1"));
   });
 
+  it("缓存键包含灵敏度预设", async () => {
+    const plan = await prepareSemanticQueryPlan("snow mountain");
+
+    expect(
+      semanticQueryPlanCacheKey(plan, "siglip", 50, "opus-v1", "standard")
+    ).not.toBe(
+      semanticQueryPlanCacheKey(plan, "siglip", 50, "opus-v1", "relaxed")
+    );
+  });
+
   it("环境变量可回退到纯词典策略且绝不回退中文 embedding", async () => {
     process.env.AI_ZH_QUERY_STRATEGY = "dictionary";
     const plan = await prepareSemanticQueryPlan("可爱猫咪");

@@ -112,6 +112,8 @@ interface PhotoGridProps {
   routeKey: string;
   searchQuery?: string;
   selectedIds: Set<number>;
+  /** 本次语义搜索最佳匹配的原始余弦相似度，透传给 PhotoCard 归一化角标 */
+  semanticTopSimilarity?: number;
   /** 序列数量徽标；传给工具栏"序列"切换按钮。默认不显示。 */
   sequenceCount?: number;
   sequenceMode?: "photos" | "sequences";
@@ -660,6 +662,7 @@ export const PhotoGrid = memo(
     gridRef,
     routeKey,
     searchQuery,
+    semanticTopSimilarity,
     sort = "date",
     sortOrder = "desc",
     emptyState,
@@ -1109,6 +1112,7 @@ export const PhotoGrid = memo(
             onToggleFavorite={onToggleFavorite}
             path={photo.path}
             searchQuery={searchQuery}
+            semanticTopSimilarity={semanticTopSimilarity}
             thumbnailPath={photo.thumbnailPath}
             thumbnailSmallPath={photo.thumbnailSmallPath}
             width={photo.width}

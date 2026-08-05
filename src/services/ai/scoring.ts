@@ -328,6 +328,8 @@ export interface SemanticRelevanceOptions {
   intent?: SemanticQueryIntent;
   primaryScores?: number[];
   promptGroupCount?: number;
+  /** 灵敏度阈值乘数（relaxed<1 / standard=1 / precise>1），作用在最终 cutoffs 上 */
+  sensitivity?: number;
 }
 
 export function calculateScoreGapCutoff(
@@ -358,15 +360,16 @@ function selectLegacySemanticResults(
   policy: NonNullable<EmbeddingModelConfig["scoring"]["semanticSearch"]>,
   promptGroupCount: number,
   limit: number,
-  candidateTails: SemanticRelevanceOptions["candidateTails"]
+  options: SemanticRelevanceOptions
 ): SemanticRelevanceSelection {
+  const s = options.sensitivity ?? 1;
   const topSimilarity = Math.max(...results.map((result) => result.similarity));
   const strongCutoff = Math.max(
-    policy.absoluteMinimumSimilarity,
-    topSimilarity * policy.relativeToTopRatio
+    policy.absoluteMinimumSimilarity * s,
+    topSimilarity * policy.relativeToTopRatio * s
   );
   const consensusCutoff = Math.max(
-    policy.candidateMinimumSimilarity,
+    policy.candidateMinimumSimilarity * s,
     strongCutoff * policy.consensusThresholdRatio
   );
   const relevant = results.filter(
@@ -376,7 +379,7 @@ function selectLegacySemanticResults(
         result.supportingGroups.length >= 2 &&
         result.similarity >= consensusCutoff)
   );
-  const tails = candidateTails ?? [];
+  const tails = options.candidateTails ?? [];
   const strongTail = tails.some(({ similarity }) => similarity >= strongCutoff);
   const consensusTailGroups = new Set(
     tails
@@ -458,6 +461,7 @@ function selectV2SemanticResults(
 ): SemanticRelevanceSelection {
   const intent = options.intent ?? "unknown";
   const cutoffPolicy = INTENT_CUTOFF_POLICIES[intent];
+  const s = options.sensitivity ?? 1;
   const primaryScores = options.primaryScores?.length
     ? options.primaryScores
     : results.map((result) => result.primarySimilarity);
@@ -466,24 +470,28 @@ function selectV2SemanticResults(
     intent === "object" || intent === "unknown"
       ? calculateScoreGapCutoff(options.primaryScores ?? [])
       : null;
-  const relativeCutoff = topSimilarity * cutoffPolicy.ratio;
+  const relativeCutoff = topSimilarity * cutoffPolicy.ratio * s;
   const strongCutoff = Math.max(
-    cutoffPolicy.base,
+    cutoffPolicy.base * s,
     relativeCutoff,
     gapCutoff ?? 0
   );
   const supportsRelaxation =
     cutoffPolicy.supportFloor !== undefined &&
     cutoffPolicy.supportRatio !== undefined;
+  const supportFloorScaled =
+    cutoffPolicy.supportFloor === undefined
+      ? strongCutoff
+      : cutoffPolicy.supportFloor * s;
   const consensusCutoff = supportsRelaxation
     ? Math.max(
-        cutoffPolicy.supportFloor ?? strongCutoff,
+        supportFloorScaled,
         strongCutoff * (cutoffPolicy.supportRatio ?? 1)
       )
     : strongCutoff;
   const supportCutoff =
     intent === "object" || intent === "unknown"
-      ? Math.max(0.045, strongCutoff * 0.85)
+      ? Math.max(0.045 * s, strongCutoff * 0.85)
       : consensusCutoff;
   const relevant = results.filter(
     (result) =>
@@ -565,7 +573,7 @@ export function selectRelevantSemanticResults(
       policy,
       promptGroupCount,
       limit,
-      options.candidateTails
+      options
     );
   }
   return selectV2SemanticResults(results, policy, limit, options);

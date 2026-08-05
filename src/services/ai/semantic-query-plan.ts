@@ -441,7 +441,8 @@ export function semanticQueryPlanCacheKey(
   plan: SemanticQueryPlan,
   modelKind: string,
   limit: number,
-  translationModelVersion: string
+  translationModelVersion: string,
+  sensitivity = "standard"
 ): string {
   return JSON.stringify({
     limit,
@@ -450,6 +451,7 @@ export function semanticQueryPlanCacheKey(
     normalizedQuery: plan.normalizedQuery,
     prompts: plan.prompts,
     policy: getSemanticPolicyVersion(),
+    sensitivity,
     strategy: "hybrid-zh-v2",
     translationModelVersion,
     translationMode: plan.translationMode,

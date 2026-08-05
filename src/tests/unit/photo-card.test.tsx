@@ -169,4 +169,53 @@ describe("PhotoCard", () => {
     );
     expect(screen.getByText("AI 标签")).toBeInTheDocument();
   });
+
+  it("labels semantic results with a percentage normalized to the top match", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{ kind: "semantic", score: 0.73 }}
+        semanticTopSimilarity={0.8}
+      />
+    );
+    expect(screen.getByText("语义匹配 91%")).toBeInTheDocument();
+  });
+
+  it("falls back to the plain semantic label when top similarity is absent", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{ kind: "semantic", score: 0.73 }}
+        semanticTopSimilarity={0}
+      />
+    );
+    expect(screen.getByText("语义匹配")).toBeInTheDocument();
+  });
+
+  it("labels hybrid semantic results with a normalized percentage when a score is present", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{
+          kind: "hybrid",
+          evidence: ["semantic", "tag"],
+          tagNames: ["海边"],
+          score: 0.6,
+        }}
+        semanticTopSimilarity={0.8}
+      />
+    );
+    expect(screen.getByText("语义匹配 75%")).toBeInTheDocument();
+  });
+
+  it("keeps the plain hybrid label when a hybrid result has no semantic score", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        match={{ kind: "hybrid", evidence: ["tag"], tagNames: ["海边"] }}
+        semanticTopSimilarity={0.8}
+      />
+    );
+    expect(screen.getByText("标签命中")).toBeInTheDocument();
+  });
 });

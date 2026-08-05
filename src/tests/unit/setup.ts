@@ -53,6 +53,7 @@ vi.mock("react-i18next", () => ({
         searchModeImage: "以图搜图",
         searchMatchColor: "色彩接近度 {{value}}%",
         searchMatchSemantic: "语义匹配",
+        searchMatchSemanticPercent: "语义匹配 {{value}}%",
         searchMatchHybrid: "语义 + 标签",
         searchMatchAutoTag: "AI 标签",
         searchMatchSimilarity: "相似度 {{value}}%",

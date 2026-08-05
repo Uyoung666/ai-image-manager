@@ -1278,6 +1278,12 @@ export const searchCompound = os
         return { results: [], query: q, total: 0, semantic };
       }
 
+      // hybrid 的 similarity 在 rerank 里取自语义分（含 semantic 证据时），
+      // 带上它让前端能把「语义 + 标签」也归一化为匹配百分比。
+      const hybridSemanticScore = (
+        evidence: readonly string[],
+        similarity: number
+      ) => (evidence.includes("semantic") ? { score: similarity } : {});
       const toSearchMatch = (result: (typeof rerankedList)[number]) => {
         if ("hybridEvidence" in result) {
           const hybridResult = result as GatedHybridResult;
@@ -1295,6 +1301,10 @@ export const searchCompound = os
             kind: "hybrid" as const,
             evidence: hybridResult.hybridEvidence,
             tagNames: hybridResult.tagNames,
+            ...hybridSemanticScore(
+              hybridResult.hybridEvidence,
+              result.similarity
+            ),
           };
         }
         return result._source === "ai" || result._source === "autoTag"

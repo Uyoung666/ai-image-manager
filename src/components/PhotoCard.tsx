@@ -61,6 +61,8 @@ interface PhotoCardProps {
   renderImage?: boolean;
   searchQuery?: string;
   selectionInset?: boolean;
+  /** 本次语义搜索最佳匹配的原始余弦相似度，用于把 score 归一化为相对百分比（最佳=100%） */
+  semanticTopSimilarity?: number;
   thumbnailPath: string | null;
   thumbnailSmallPath?: string | null;
   width: number;
@@ -208,6 +210,7 @@ export const PhotoCard = memo(function PhotoCard({
   searchQuery,
   selectionInset = false,
   match,
+  semanticTopSimilarity,
   renderImage = true,
   onClick,
   onDoubleClick,
@@ -257,23 +260,39 @@ export const PhotoCard = memo(function PhotoCard({
     if (!match) {
       return null;
     }
+    // 相对本次搜索最佳匹配归一化（最佳=100%），避免 SigLIP 原始余弦
+    // 绝对分数偏低带来的"才 40% 匹配？"误解。无有效 topSimilarity 时回退 null。
+    const semanticPercentOf = (score: number): string | null => {
+      if (
+        semanticTopSimilarity &&
+        semanticTopSimilarity > 0 &&
+        score <= semanticTopSimilarity
+      ) {
+        return t("searchMatchSemanticPercent", {
+          value: Math.max(1, Math.round((score / semanticTopSimilarity) * 100)),
+        });
+      }
+      return null;
+    };
     if (match.kind === "color") {
       return t("searchMatchColor", { value: Math.round(match.score * 100) });
     }
     if (match.kind === "semantic") {
-      return t("searchMatchSemantic");
+      return semanticPercentOf(match.score) ?? t("searchMatchSemantic");
     }
     if (match.kind === "hybrid") {
-      if (
-        match.evidence.includes("semantic") &&
-        match.evidence.includes("tag")
-      ) {
-        return t("searchMatchHybrid");
+      // 只要带语义证据就优先显示匹配百分比；回退时保留「语义 + 标签」等文案。
+      if (match.evidence.includes("semantic")) {
+        const percent =
+          match.score === undefined ? null : semanticPercentOf(match.score);
+        if (percent) {
+          return percent;
+        }
+        return match.evidence.includes("tag")
+          ? t("searchMatchHybrid")
+          : t("searchMatchSemantic");
       }
-      if (match.evidence.includes("tag")) {
-        return t("searchMatchExactTag");
-      }
-      return t("searchMatchSemantic");
+      return t("searchMatchExactTag");
     }
     if (match.kind === "tagFilter") {
       return match.origin === "auto"
@@ -292,7 +311,7 @@ export const PhotoCard = memo(function PhotoCard({
       return t("searchMatchExactTag");
     }
     return t("searchMatchExactFilename");
-  }, [match, t]);
+  }, [match, semanticTopSimilarity, t]);
 
   // ── 事件处理 ──────────────────────────────────────────────────────
   const starRef = useRef<HTMLButtonElement>(null);

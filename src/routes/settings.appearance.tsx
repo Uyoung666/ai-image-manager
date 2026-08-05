@@ -47,6 +47,45 @@ function UiScaleControl({
   );
 }
 
+const SENSITIVITY_OPTIONS: { labelKey: string; value: string }[] = [
+  { value: "relaxed", labelKey: "searchSensitivityRelaxed" },
+  { value: "standard", labelKey: "searchSensitivityStandard" },
+  { value: "precise", labelKey: "searchSensitivityPrecise" },
+];
+
+function SensitivityControl({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (preset: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center rounded-[8px] bg-muted p-1">
+      {SENSITIVITY_OPTIONS.map((option) => {
+        const active = value === option.value;
+        return (
+          <button
+            aria-pressed={active}
+            className={cn(
+              "min-w-[52px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
+              active
+                ? "bg-card font-semibold text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+                : "text-muted-foreground hover:bg-card/50"
+            )}
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            type="button"
+          >
+            {t(option.labelKey)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
@@ -60,6 +99,7 @@ function AppearanceSettingsPage() {
     }
   });
   const [uiScale, setUiScale] = useState(1);
+  const [searchSensitivity, setSearchSensitivity] = useState("standard");
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef);
 
@@ -87,6 +127,15 @@ function AppearanceSettingsPage() {
         }
       })
       .catch(() => undefined);
+    ipc.client.settings
+      .getAppSetting({ key: "search.sensitivity" })
+      .then((result) => {
+        const raw = (result as { value?: string | null }).value;
+        if (raw === "relaxed" || raw === "standard" || raw === "precise") {
+          setSearchSensitivity(raw);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   function onUiScaleChange(scale: number) {
@@ -95,6 +144,13 @@ function AppearanceSettingsPage() {
     ipc.client.settings
       .setAppSetting({ key: "ui.zoomScale", value: String(scale) })
       .catch(() => setUiScale(uiScale));
+  }
+
+  function onSensitivityChange(preset: string) {
+    setSearchSensitivity(preset);
+    ipc.client.settings
+      .setAppSetting({ key: "search.sensitivity", value: preset })
+      .catch(() => setSearchSensitivity(searchSensitivity));
   }
 
   let themeDescription = t("themeSystem");
@@ -122,6 +178,16 @@ function AppearanceSettingsPage() {
             }
             description={t("settingsUiScaleHint")}
             title={t("settingsUiScale")}
+          />
+          <SettingRow
+            action={
+              <SensitivityControl
+                onChange={onSensitivityChange}
+                value={searchSensitivity}
+              />
+            }
+            description={t("searchSensitivityHint")}
+            title={t("settingsSearchSensitivity")}
           />
           <SettingRow action={<LangToggle />} title={t("settingsLanguage")} />
           <SettingRow

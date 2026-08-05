@@ -587,6 +587,12 @@ i18n.use(initReactI18next).init({
         settingsUiScale: "界面缩放",
         settingsUiScaleHint:
           "整体缩放应用界面；Windows 显示缩放设置较大时可调小以增大可用空间",
+        settingsSearchSensitivity: "匹配灵敏度",
+        searchSensitivityHint:
+          "控制语义搜索的匹配严格程度：宽松返回更多结果，精确只保留高匹配",
+        searchSensitivityRelaxed: "宽松",
+        searchSensitivityStandard: "标准",
+        searchSensitivityPrecise: "精确",
         settingsLanguage: "语言",
         openAtLogin: "开机自启",
         openAtLoginHint: "软件启动时自动运行",
@@ -1253,6 +1259,7 @@ i18n.use(initReactI18next).init({
         confidence: "置信度: {{value}}%",
         searchMatchColor: "色彩接近度 {{value}}%",
         searchMatchSemantic: "语义匹配",
+        searchMatchSemanticPercent: "语义匹配 {{value}}%",
         searchMatchHybrid: "语义 + 标签",
         searchMatchAutoTag: "AI 标签",
         searchCursorExpired:
@@ -2361,6 +2368,12 @@ i18n.use(initReactI18next).init({
         settingsUiScale: "UI scale",
         settingsUiScaleHint:
           "Scale the whole app interface. Lower it when Windows display scaling is set high to reclaim screen space.",
+        settingsSearchSensitivity: "Match sensitivity",
+        searchSensitivityHint:
+          "Controls how strictly semantic search matches: Relaxed returns more results, Precise keeps only high matches.",
+        searchSensitivityRelaxed: "Relaxed",
+        searchSensitivityStandard: "Standard",
+        searchSensitivityPrecise: "Precise",
         settingsLanguage: "Language",
         openAtLogin: "Launch at startup",
         openAtLoginHint: "Automatically start the app when you sign in",
@@ -3061,6 +3074,7 @@ i18n.use(initReactI18next).init({
         confidence: "Confidence: {{value}}%",
         searchMatchColor: "Color closeness {{value}}%",
         searchMatchSemantic: "Semantic match",
+        searchMatchSemanticPercent: "Semantic match {{value}}%",
         searchMatchHybrid: "Semantic + tag",
         searchMatchAutoTag: "AI tag",
         searchCursorExpired:

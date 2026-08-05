@@ -5,6 +5,8 @@ export type SearchMatch =
       kind: "hybrid";
       evidence: ("semantic" | "tag")[];
       tagNames: string[];
+      /** 语义证据存在时的余弦相似度（用于归一化角标百分比） */
+      score?: number;
     }
   | { kind: "tagFilter"; origin: "manual" | "auto" }
   | { kind: "image"; score: number }

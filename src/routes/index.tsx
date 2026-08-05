@@ -2585,6 +2585,7 @@ function HomePage() {
                   restoreGateReady={restoreGateReady}
                   routeKey={routeKey}
                   searchQuery={searchQuery}
+                  semanticTopSimilarity={searchSemantic?.topSimilarity}
                   selectedIds={selectedIds}
                   sequenceMode={displayedSequenceMode}
                   sequences={sequences}
