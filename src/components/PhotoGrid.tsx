@@ -118,6 +118,7 @@ interface PhotoGridProps {
   sequenceCount?: number;
   sequenceMode?: "photos" | "sequences";
   sequences?: PhotoSequence[];
+  showGroupHeaders?: boolean;
   showToolbar?: boolean;
   sort?: SortField;
   sortOrder?: SortOrder;
@@ -700,6 +701,7 @@ export const PhotoGrid = memo(
     sequences = [],
     sequenceCount,
     sequenceMode = "photos",
+    showGroupHeaders = true,
     onOpenSequence,
     onOpenSequenceDetails,
     onNameFace,
@@ -1459,6 +1461,7 @@ export const PhotoGrid = memo(
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
+            showGroupHeaders={showGroupHeaders}
             topInset={gridTopInset}
           />
         </div>
@@ -1566,6 +1569,9 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.showToolbar !== nextProps.showToolbar) {
+      return false;
+    }
+    if (prevProps.showGroupHeaders !== nextProps.showGroupHeaders) {
       return false;
     }
     if (prevProps.onScrollTopChange !== nextProps.onScrollTopChange) {

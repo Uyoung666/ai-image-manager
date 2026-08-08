@@ -50,6 +50,7 @@ interface MasonryLayoutCache {
   itemCount: number;
   layoutKey: string;
   positions: MasonryItem[];
+  showGroupHeaders: boolean;
   visibilityIndex: number[];
 }
 
@@ -112,6 +113,7 @@ function computeLayout(
   gap: number,
   groupHeaders: GroupHeaderInput[] | undefined,
   startIndex: number,
+  showGroupHeaders: boolean,
   initialColumnHeights?: number[],
   existingHeaders?: HeaderPosition[],
   existingVisibilityIndex?: number[]
@@ -137,7 +139,9 @@ function computeLayout(
     if (headerLabel !== undefined) {
       const maxHeight = Math.max(...columnHeights);
       headerPositions.push({ label: headerLabel, top: maxHeight });
-      const newBase = maxHeight + headerHeight + gap;
+      const newBase = showGroupHeaders
+        ? maxHeight + headerHeight + gap
+        : maxHeight;
       columnHeights.fill(newBase);
     }
 
@@ -198,6 +202,7 @@ function createCache(
   layoutKey: string,
   colWidth: number,
   columnCount: number,
+  showGroupHeaders: boolean,
   result: {
     positions: MasonryItem[];
     columnHeights: number[];
@@ -215,6 +220,7 @@ function createCache(
     itemCount: items.length,
     layoutKey,
     positions: result.positions,
+    showGroupHeaders,
     visibilityIndex: result.visibilityIndex,
   };
 }
@@ -225,7 +231,8 @@ export function useMasonryLayout(
   columnCount: number,
   gap: number,
   groupHeaders?: GroupHeaderInput[],
-  layoutKey = "default"
+  layoutKey = "default",
+  showGroupHeaders = true
 ): MasonryLayout {
   const previousRef = useRef<MasonryLayoutCache | null>(null);
 
@@ -249,6 +256,7 @@ export function useMasonryLayout(
       layoutKey === previous.layoutKey &&
       previous.columnCount === columnCount &&
       Math.abs(previous.colWidth - colWidth) < 0.5 &&
+      previous.showGroupHeaders === showGroupHeaders &&
       items.length > previous.itemCount &&
       hasMatchingLayoutPrefix(previous.inputSnapshot, items) &&
       hasMatchingHeaderPrefix(
@@ -270,6 +278,7 @@ export function useMasonryLayout(
         gap,
         appendedHeaders,
         previous.itemCount,
+        showGroupHeaders,
         previous.columnHeights,
         previous.headerPositions,
         previous.visibilityIndex
@@ -284,6 +293,7 @@ export function useMasonryLayout(
         layoutKey,
         colWidth,
         columnCount,
+        showGroupHeaders,
         result
       );
       const layout = {
@@ -302,7 +312,8 @@ export function useMasonryLayout(
       columnCount,
       gap,
       groupHeaders,
-      0
+      0,
+      showGroupHeaders
     );
     previousRef.current = createCache(
       items,
@@ -310,6 +321,7 @@ export function useMasonryLayout(
       layoutKey,
       colWidth,
       columnCount,
+      showGroupHeaders,
       result
     );
     const layout = {
@@ -320,5 +332,13 @@ export function useMasonryLayout(
     };
     recordGalleryPerf("masonryLayoutMs", performance.now() - start);
     return layout;
-  }, [items, containerWidth, columnCount, gap, groupHeaders, layoutKey]);
+  }, [
+    items,
+    containerWidth,
+    columnCount,
+    gap,
+    groupHeaders,
+    layoutKey,
+    showGroupHeaders,
+  ]);
 }

@@ -96,6 +96,7 @@ interface MasonryGridProps {
   scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
   selectionActive?: boolean;
+  showGroupHeaders?: boolean;
   topInset?: number;
 }
 
@@ -119,6 +120,7 @@ export const MasonryGrid = memo(
       scrollToId,
       className,
       selectionActive = false,
+      showGroupHeaders = true,
       routeKey,
       restoreGateReady = true,
       isPlaceholderData = false,
@@ -154,7 +156,8 @@ export const MasonryGrid = memo(
         columnCount,
         gap,
         groupHeaders,
-        routeKey
+        routeKey,
+        showGroupHeaders
       );
 
     const idToIndexMap = useMemo(
@@ -574,28 +577,29 @@ export const MasonryGrid = memo(
                 width: "100%",
               }}
             >
-              {visibleHeaders.map((h) => (
-                <div
-                  className="flex cursor-pointer items-end px-1 pb-1 font-medium text-[12px] text-muted-foreground"
-                  key={h.label}
-                  onClick={() => {
-                    scrollRef.current?.scrollTo({
-                      top: Math.max(0, h.top - 16),
-                      behavior: isReducedMotionEnabled() ? "auto" : "smooth",
-                    });
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  style={{
-                    position: "absolute",
-                    top: h.top,
-                    left: 0,
-                    width: "100%",
-                    height: HEADER_HEIGHT,
-                  }}
-                >
-                  {h.label}
-                </div>
-              ))}
+              {showGroupHeaders &&
+                visibleHeaders.map((h) => (
+                  <div
+                    className="flex cursor-pointer items-end px-1 pb-1 font-medium text-[12px] text-muted-foreground"
+                    key={h.label}
+                    onClick={() => {
+                      scrollRef.current?.scrollTo({
+                        top: Math.max(0, h.top - 16),
+                        behavior: isReducedMotionEnabled() ? "auto" : "smooth",
+                      });
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: "absolute",
+                      top: h.top,
+                      left: 0,
+                      width: "100%",
+                      height: HEADER_HEIGHT,
+                    }}
+                  >
+                    {h.label}
+                  </div>
+                ))}
               {visibleItems.map(({ index, style }) => (
                 <div key={items[index].id} style={style}>
                   {renderItem(items[index], index, style, {
@@ -648,8 +652,11 @@ export const MasonryGrid = memo(
           selectionActive={selectionActive}
           show={showScrollTop}
         />
-        {isScrolling && currentTimeLabel && headerPositions.length > 1 && (
-          <div className="glass-surface pointer-events-none absolute top-10 right-4 z-40 rounded-[6px] px-3 py-1.5 font-medium text-[12px] text-foreground shadow-lg ring-1 ring-border">
+        {isScrolling && currentTimeLabel && headerPositions.length > 0 && (
+          <div
+            className="glass-surface pointer-events-none absolute right-4 z-20 rounded-[6px] px-3 py-1.5 font-medium text-[12px] text-foreground shadow-lg ring-1 ring-border"
+            style={{ top: topInset + 8 }}
+          >
             {currentTimeLabel}
           </div>
         )}
@@ -671,6 +678,7 @@ export const MasonryGrid = memo(
     prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
     prevProps.onRestoreSettled === nextProps.onRestoreSettled &&
     prevProps.topInset === nextProps.topInset &&
+    prevProps.showGroupHeaders === nextProps.showGroupHeaders &&
     prevProps.routeKey === nextProps.routeKey &&
     prevProps.restoreGateReady === nextProps.restoreGateReady
 );

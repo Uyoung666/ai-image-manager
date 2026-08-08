@@ -1076,6 +1076,7 @@ function PersonDetailPage() {
             sequenceCount={sequenceView.sequences.length}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
+            showGroupHeaders={false}
             sort={sortField}
             sortOrder={sortOrder}
           />

@@ -10,12 +10,13 @@ interface HookProps {
   headers?: GroupHeaderInput[];
   items: MasonryLayoutInput[];
   layoutKey: string;
+  showGroupHeaders?: boolean;
 }
 
 function renderLayout(initialProps: HookProps) {
   return renderHook(
-    ({ headers, items, layoutKey }: HookProps) =>
-      useMasonryLayout(items, 208, 2, 8, headers, layoutKey),
+    ({ headers, items, layoutKey, showGroupHeaders }: HookProps) =>
+      useMasonryLayout(items, 208, 2, 8, headers, layoutKey, showGroupHeaders),
     { initialProps }
   );
 }
@@ -122,5 +123,46 @@ describe("useMasonryLayout cache safety", () => {
     expect(result.current.positions[2].top).toBe(196);
     expect(result.current.positions).toHaveLength(3);
     expect(result.current.visibilityIndex).toHaveLength(3);
+  });
+
+  it("keeps compact group boundaries while retaining date marker positions", () => {
+    const { result } = renderLayout({
+      headers: [
+        { beforeIndex: 0, label: "January" },
+        { beforeIndex: 2, label: "February" },
+      ],
+      items: [...baseItems, { height: 100, id: 3, width: 100 }],
+      layoutKey: "compact",
+      showGroupHeaders: false,
+    });
+
+    expect(result.current.headerPositions).toEqual([
+      { label: "January", top: 0 },
+      { label: "February", top: 108 },
+    ]);
+    expect(result.current.positions[0].top).toBe(0);
+    expect(result.current.positions[2].top).toBe(108);
+  });
+
+  it("recomputes appended positions when group header spacing mode changes", () => {
+    const { result, rerender } = renderLayout({
+      headers: [{ beforeIndex: 0, label: "January" }],
+      items: baseItems,
+      layoutKey: "compact-toggle",
+      showGroupHeaders: true,
+    });
+
+    rerender({
+      headers: [
+        { beforeIndex: 0, label: "January" },
+        { beforeIndex: 2, label: "February" },
+      ],
+      items: [...baseItems, { height: 100, id: 3, width: 100 }],
+      layoutKey: "compact-toggle",
+      showGroupHeaders: false,
+    });
+
+    expect(result.current.positions[0].top).toBe(0);
+    expect(result.current.positions[2].top).toBe(108);
   });
 });

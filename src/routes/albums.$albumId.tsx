@@ -892,6 +892,7 @@ function AlbumDetailPage() {
             selectedIds={selectedIds}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
+            showGroupHeaders={false}
             sort={sortField}
             sortOrder={sortOrder}
           />
