@@ -1,6 +1,5 @@
 // biome-ignore-all lint/style/useFilenamingConvention: React component files use the repository's PascalCase convention.
 import {
-  ChevronDown,
   Layers,
   Play,
   Timer,
@@ -17,13 +16,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { photoSequenceActions } from "@/actions/photo-sequences";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import { loadPhotoDetailPanelWidth } from "@/components/PhotoDetailPanel";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -397,76 +392,48 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
               <p className="text-muted-foreground text-sm">
                 {t("sequenceSetRepresentative")}
               </p>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button className="w-full justify-between" variant="outline">
-                    <span className="truncate">
-                      {t("sequenceFrameWithName", {
-                        frame:
-                          sequence.members.findIndex(
-                            (photo) => photo.id === representative?.id
-                          ) + 1,
-                        name: representative?.filename,
-                      })}
-                    </span>
-                    <ChevronDown />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  className="max-h-64 w-[var(--radix-popover-trigger-width)] overflow-y-auto p-1"
-                >
-                  {sequence.members.map((photo, index) => (
-                    <Button
-                      className="w-full justify-start"
-                      key={photo.id}
-                      onClick={() => onSetRepresentative(sequence.id, photo.id)}
-                      variant={
-                        photo.id === representative?.id ? "secondary" : "ghost"
-                      }
-                    >
-                      {t("sequenceFrameWithName", {
-                        frame: index + 1,
-                        name: photo.filename,
-                      })}
-                    </Button>
-                  ))}
-                </PopoverContent>
-              </Popover>
+              <FilterDropdown
+                ariaLabel={t("sequenceSetRepresentative")}
+                className="w-full min-w-0 truncate"
+                onChange={(value) => {
+                  const photo = sequence.members.find(
+                    (member) => String(member.id) === value
+                  );
+                  if (photo) {
+                    onSetRepresentative(sequence.id, photo.id);
+                  }
+                }}
+                options={sequence.members.map((photo, index) => ({
+                  label: t("sequenceFrameWithName", {
+                    frame: index + 1,
+                    name: photo.filename,
+                  }),
+                  value: String(photo.id),
+                }))}
+                placeholder={t("sequenceSetRepresentative")}
+                value={String(representative?.id ?? "")}
+              />
             </div>
           )}
           {onSplit && sequence.members.length >= 4 && (
             <div className="flex gap-2">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    className="min-w-0 flex-1 justify-between"
-                    variant="outline"
-                  >
-                    <span>
-                      {t("sequenceSplitFrom", { frame: validSplitPosition })}
-                    </span>
-                    <ChevronDown />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  className="max-h-64 w-[var(--radix-popover-trigger-width)] overflow-y-auto p-1"
-                >
-                  {sequence.members.slice(1, -1).map((photo, index) => (
-                    <Button
-                      className="w-full justify-start"
-                      key={photo.id}
-                      onClick={() => setSplitPosition(index + 2)}
-                      variant={
-                        validSplitPosition === index + 2 ? "secondary" : "ghost"
-                      }
-                    >
-                      {t("sequenceSplitFrom", { frame: index + 2 })}
-                    </Button>
-                  ))}
-                </PopoverContent>
-              </Popover>
+              <div className="min-w-0 flex-1">
+                <FilterDropdown
+                  ariaLabel={t("sequenceSplitFrom", {
+                    frame: validSplitPosition,
+                  })}
+                  className="w-full"
+                  onChange={(value) => setSplitPosition(Number(value))}
+                  options={sequence.members.slice(1, -1).map((_, index) => ({
+                    label: t("sequenceSplitFrom", { frame: index + 2 }),
+                    value: String(index + 2),
+                  }))}
+                  placeholder={t("sequenceSplitFrom", {
+                    frame: validSplitPosition,
+                  })}
+                  value={String(validSplitPosition)}
+                />
+              </div>
               <Button
                 onClick={() => onSplit(sequence.id, validSplitPosition)}
                 variant="outline"

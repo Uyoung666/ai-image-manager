@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
@@ -55,5 +55,27 @@ describe("SequenceDetailPanel", () => {
     );
 
     expect(screen.getByLabelText("正在加载推荐代表帧")).toBeInTheDocument();
+  });
+
+  it("maps the representative-frame dropdown back to the photo id", () => {
+    const onSetRepresentative = vi.fn();
+    render(
+      <SequenceDetailPanel
+        onClose={vi.fn()}
+        onOpenPhoto={vi.fn()}
+        onPlay={vi.fn()}
+        onSetRepresentative={onSetRepresentative}
+        sequence={sequence}
+        width={360}
+      />
+    );
+
+    const dropdown = screen.getByRole("combobox");
+    fireEvent.click(dropdown);
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    fireEvent.click(options[1]);
+
+    expect(onSetRepresentative).toHaveBeenCalledWith(10, 2);
   });
 });

@@ -176,6 +176,7 @@ function WatermarkSettingsPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-end">
           <Switch
+            ariaLabel={t("watermarkSettings")}
             checked={wm.enabled}
             onCheckedChange={(checked) =>
               setWm((prev) => ({ ...prev, enabled: checked }))

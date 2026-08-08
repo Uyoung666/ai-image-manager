@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import {
   Dialog,
   DialogContent,
@@ -206,14 +207,17 @@ export function CloudConfigPanel() {
 
           <div className="space-y-2.5">
             <div className="flex gap-2 max-sm:flex-col">
-              <select
-                className="h-8 shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none focus:border-primary"
-                onChange={(e) => setProvider(e.target.value as "webdav" | "s3")}
+              <FilterDropdown
+                ariaLabel={t("cloudConfigTitle")}
+                className="shrink-0"
+                onChange={(value) => setProvider(value as "webdav" | "s3")}
+                options={[
+                  { label: "WebDAV", value: "webdav" },
+                  { label: "Amazon S3", value: "s3" },
+                ]}
+                placeholder={t("cloudConfigTitle")}
                 value={provider}
-              >
-                <option value="webdav">WebDAV</option>
-                <option value="s3">Amazon S3</option>
-              </select>
+              />
               <input
                 className="h-8 min-w-0 flex-1 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setName(e.target.value)}

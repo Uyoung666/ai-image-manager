@@ -1,15 +1,25 @@
 import * as React from "react";
 
-interface SwitchProps {
+export interface SwitchProps {
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
 }
 
-export function Switch({ checked, onCheckedChange, disabled = false }: SwitchProps) {
+export function Switch({
+  ariaLabel,
+  ariaLabelledBy,
+  checked,
+  onCheckedChange,
+  disabled = false,
+}: SwitchProps) {
   return (
     <label className="custom-switch">
       <input
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onCheckedChange(e.target.checked)}

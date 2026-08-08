@@ -318,6 +318,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           <SettingRow
             action={
               <Switch
+                ariaLabel={t("settingsAutoUpdate")}
                 checked={autoUpdate}
                 onCheckedChange={(checked) => {
                   const previous = autoUpdate;
@@ -337,6 +338,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           <SettingRow
             action={
               <Switch
+                ariaLabel={t("settingsUpdateReminder")}
                 checked={updateReminder}
                 onCheckedChange={(checked) => {
                   const previous = updateReminder;

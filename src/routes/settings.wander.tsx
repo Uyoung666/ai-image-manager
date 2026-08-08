@@ -17,10 +17,6 @@ const CONTENT_MODES: WanderContentMode[] = [
   "theme",
   "rediscovery",
 ];
-// Match the EXIF filter inputs (SearchBar's filterInputClass) so the dropdown
-// popup and closed control look identical to the EXIF filters.
-const dropdownClassName =
-  "h-8 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none focus:border-primary/40";
 
 function WanderSettingsPage() {
   const { t } = useTranslation();
@@ -63,6 +59,7 @@ function WanderSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("wander.enabled")}
               checked={preferences.enabled}
               onCheckedChange={(checked) =>
                 updatePreference("enabled", checked).catch(() => undefined)
@@ -75,8 +72,7 @@ function WanderSettingsPage() {
         <SettingRow
           action={
             <FilterDropdown
-              aria-label={t("wander.idleMinutes")}
-              className={dropdownClassName}
+              ariaLabel={t("wander.idleMinutes")}
               onChange={(value) =>
                 updatePreference(
                   "idleMinutes",
@@ -97,8 +93,7 @@ function WanderSettingsPage() {
         <SettingRow
           action={
             <FilterDropdown
-              aria-label={t("wander.intervalSeconds")}
-              className={dropdownClassName}
+              ariaLabel={t("wander.intervalSeconds")}
               onChange={(value) =>
                 updatePreference(
                   "intervalSeconds",
@@ -131,6 +126,7 @@ function WanderSettingsPage() {
           <SettingRow
             action={
               <Switch
+                ariaLabel={t(`wander.mode.${mode}`)}
                 checked={preferences.modes.includes(mode)}
                 disabled={
                   preferences.modes.length === 1 &&

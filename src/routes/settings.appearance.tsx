@@ -207,6 +207,7 @@ function AppearanceSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("settingsReduceMotion")}
               checked={reduceMotion}
               onCheckedChange={onReduceMotionChange}
             />

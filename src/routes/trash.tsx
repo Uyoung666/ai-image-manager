@@ -1179,8 +1179,8 @@ function TrashPage() {
                 )}
               </label>
               <FilterDropdown
-                aria-label={t("sortBy")}
-                className="h-8 rounded-[6px] border border-border bg-background px-2 text-[12px]"
+                ariaLabel={t("sortBy")}
+                className="min-w-[132px]"
                 onChange={(value) =>
                   setSort(value as "deletedAt" | "name" | "size")
                 }

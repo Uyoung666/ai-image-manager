@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Eye, EyeOff, UserMinus } from "lucide-react";
+import { ArrowLeft, UserMinus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ import { RouteError } from "@/components/RouteError";
 import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
+import { Switch } from "@/components/ui/switch";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import {
   shouldShowSequenceEmptyState,
@@ -974,19 +975,18 @@ function PersonDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            aria-pressed={showFaceBoxes}
-            className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-foreground transition-colors hover:bg-foreground/5"
-            onClick={() => handleFaceBoxVisibilityChange(!showFaceBoxes)}
-            type="button"
-          >
-            {showFaceBoxes ? (
-              <Eye className="h-3.5 w-3.5" />
-            ) : (
-              <EyeOff className="h-3.5 w-3.5" />
-            )}
-            {showFaceBoxes ? t("faceBoxesHide") : t("faceBoxesShow")}
-          </button>
+          <div className="flex items-center gap-1.5 text-[12px] text-foreground">
+            <Switch
+              ariaLabel={
+                showFaceBoxes ? t("faceBoxesHide") : t("faceBoxesShow")
+              }
+              checked={showFaceBoxes}
+              onCheckedChange={handleFaceBoxVisibilityChange}
+            />
+            <span>
+              {showFaceBoxes ? t("faceBoxesHide") : t("faceBoxesShow")}
+            </span>
+          </div>
           {selectedIds.size > 0 && (
             <button
               className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"

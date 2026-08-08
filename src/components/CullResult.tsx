@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { ExportDialog } from "@/components/ExportDialog";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import {
   Dialog,
@@ -866,34 +867,35 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           })}
         </span>
         <span className="ml-auto flex items-center gap-2">
-          <select
-            aria-label={t("cullFilterStatus")}
-            className="rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-[10px] text-foreground"
-            onChange={(event) => {
-              setStatusFilter(event.target.value as typeof statusFilter);
+          <FilterDropdown
+            ariaLabel={t("cullFilterStatus")}
+            onChange={(value) => {
+              setStatusFilter(value as typeof statusFilter);
               setSelected(new Set());
             }}
+            options={[
+              { label: t("cullFilterAll"), value: "all" },
+              { label: t("cullKeep"), value: "kept" },
+              { label: t("cullBatchPending"), value: "pending" },
+              { label: t("cullReject"), value: "rejected" },
+            ]}
+            placeholder={t("cullFilterStatus")}
             value={statusFilter}
-          >
-            <option value="all">{t("cullFilterAll")}</option>
-            <option value="kept">{t("cullKeep")}</option>
-            <option value="pending">{t("cullBatchPending")}</option>
-            <option value="rejected">{t("cullReject")}</option>
-          </select>
-          <select
-            aria-label={t("cullResultSort")}
-            className="rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-[10px] text-foreground"
-            onChange={(event) =>
-              setResultSort(event.target.value as typeof resultSort)
-            }
+          />
+          <FilterDropdown
+            ariaLabel={t("cullResultSort")}
+            onChange={(value) => setResultSort(value as typeof resultSort)}
+            options={[
+              {
+                label: t(isDuel ? "cullSortByRating" : "cullSortDefault"),
+                value: "default",
+              },
+              { label: t("cullSortDateAsc"), value: "dateAsc" },
+              { label: t("cullSortDateDesc"), value: "dateDesc" },
+            ]}
+            placeholder={t("cullResultSort")}
             value={resultSort}
-          >
-            <option value="default">
-              {t(isDuel ? "cullSortByRating" : "cullSortDefault")}
-            </option>
-            <option value="dateAsc">{t("cullSortDateAsc")}</option>
-            <option value="dateDesc">{t("cullSortDateDesc")}</option>
-          </select>
+          />
           <button
             aria-pressed={favoriteOnly}
             className={`rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${

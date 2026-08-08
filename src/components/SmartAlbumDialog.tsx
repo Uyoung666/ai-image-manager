@@ -2,6 +2,7 @@ import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import {
   Dialog,
   DialogContent,
@@ -541,88 +542,95 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                 className="flex items-center gap-1.5 rounded-[6px] border border-border bg-card p-2"
                 key={idx}
               >
-                <select
-                  className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                  onChange={(e) =>
-                    updateRule(idx, { type: e.target.value as RuleType })
+                <FilterDropdown
+                  ariaLabel={t("smartAlbumRulesLabel")}
+                  onChange={(value) =>
+                    updateRule(idx, { type: value as RuleType })
                   }
+                  options={Object.entries(RULE_LABELS).map(
+                    ([value, label]) => ({
+                      label: t(label),
+                      value,
+                    })
+                  )}
+                  placeholder={t("smartAlbumRulesLabel")}
                   value={rule.type}
-                >
-                  {Object.entries(RULE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {t(v)}
-                    </option>
-                  ))}
-                </select>
+                />
 
                 {rule.type === "dateRange" && (
-                  <select
-                    className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) =>
+                  <FilterDropdown
+                    ariaLabel={t("smartRuleDateTaken")}
+                    onChange={(value) =>
                       updateRule(idx, {
-                        datePreset: e.target.value as DatePreset,
+                        datePreset: value as DatePreset,
                         value: "",
                       })
                     }
+                    options={DATE_PRESETS.map((value) => ({
+                      label: t(value),
+                      value,
+                    }))}
+                    placeholder={t("smartRuleDateTaken")}
                     value={rule.datePreset || "smartPresetLastYearToday"}
-                  >
-                    {DATE_PRESETS.map((p) => (
-                      <option key={p} value={p}>
-                        {t(p)}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 )}
                 {(rule.type === "cameraModel" || rule.type === "lensModel") && (
-                  <select
-                    className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) =>
+                  <FilterDropdown
+                    ariaLabel={t(RULE_LABELS[rule.type])}
+                    onChange={(value) =>
                       updateRule(idx, {
-                        stringOp: e.target.value as StringOp,
+                        stringOp: value as StringOp,
                       })
                     }
+                    options={[
+                      {
+                        label: t("operatorContains"),
+                        value: "operatorContains",
+                      },
+                      { label: t("operatorEquals"), value: "operatorEquals" },
+                    ]}
+                    placeholder={t(RULE_LABELS[rule.type])}
                     value={rule.stringOp || "operatorContains"}
-                  >
-                    <option value="operatorContains">
-                      {t("operatorContains")}
-                    </option>
-                    <option value="operatorEquals">
-                      {t("operatorEquals")}
-                    </option>
-                  </select>
+                  />
                 )}
                 {(rule.type === "focalLength" ||
                   rule.type === "aperture" ||
                   rule.type === "iso") && (
-                  <select
-                    className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) =>
+                  <FilterDropdown
+                    ariaLabel={t(RULE_LABELS[rule.type])}
+                    onChange={(value) =>
                       updateRule(idx, {
-                        numberOp: e.target.value as NumberOp,
+                        numberOp: value as NumberOp,
                       })
                     }
+                    options={[
+                      { label: t("operatorGte"), value: "operatorGte" },
+                      { label: t("operatorLte"), value: "operatorLte" },
+                      { label: t("operatorRange"), value: "operatorRange" },
+                    ]}
+                    placeholder={t(RULE_LABELS[rule.type])}
                     value={rule.numberOp || "operatorGte"}
-                  >
-                    <option value="operatorGte">{t("operatorGte")}</option>
-                    <option value="operatorLte">{t("operatorLte")}</option>
-                    <option value="operatorRange">{t("operatorRange")}</option>
-                  </select>
+                  />
                 )}
                 {rule.type === "tags" && (
-                  <select
-                    className="h-7 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) =>
-                      updateRule(idx, { tagsOp: e.target.value as TagsOp })
+                  <FilterDropdown
+                    ariaLabel={t("smartRuleTags")}
+                    onChange={(value) =>
+                      updateRule(idx, { tagsOp: value as TagsOp })
                     }
+                    options={[
+                      {
+                        label: t("operatorContainsAny"),
+                        value: "operatorContainsAny",
+                      },
+                      {
+                        label: t("operatorContainsAll"),
+                        value: "operatorContainsAll",
+                      },
+                    ]}
+                    placeholder={t("smartRuleTags")}
                     value={rule.tagsOp || "operatorContainsAny"}
-                  >
-                    <option value="operatorContainsAny">
-                      {t("operatorContainsAny")}
-                    </option>
-                    <option value="operatorContainsAll">
-                      {t("operatorContainsAll")}
-                    </option>
-                  </select>
+                  />
                 )}
 
                 {rule.type === "dateRange" &&
@@ -650,18 +658,20 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     />
                   </div>
                 ) : rule.type === "fileFormat" ? (
-                  <select
-                    className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none"
-                    onChange={(e) => updateRule(idx, { value: e.target.value })}
+                  <FilterDropdown
+                    ariaLabel={t("smartRuleFileFormat")}
+                    className="flex-1"
+                    onChange={(value) => updateRule(idx, { value })}
+                    options={[
+                      { label: t("chooseFormat"), value: "" },
+                      ...FORMATS.map((value) => ({
+                        label: value.toUpperCase(),
+                        value,
+                      })),
+                    ]}
+                    placeholder={t("chooseFormat")}
                     value={rule.value}
-                  >
-                    <option value="">{t("chooseFormat")}</option>
-                    {FORMATS.map((f) => (
-                      <option key={f} value={f}>
-                        {f.toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 ) : rule.type === "tags" ? (
                   <TagSelector
                     existingTags={existingTags}

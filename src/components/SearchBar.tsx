@@ -774,6 +774,7 @@ export const SearchBar = memo(
 
       const filterInputClass =
         "h-8 w-full rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40";
+      const filterDropdownClass = "w-full placeholder:text-muted-foreground/70";
       const selectedTags = useMemo(() => {
         if (!activeTagIds?.length) {
           return [];
@@ -1245,8 +1246,9 @@ export const SearchBar = memo(
                       {t("dateMonthLabel")}
                     </label>
                     <FilterDropdown
+                      ariaLabel={t("dateMonthLabel")}
                       className={cn(
-                        filterInputClass,
+                        filterDropdownClass,
                         drillOriginFilters.has("dateMonth") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
@@ -1282,8 +1284,9 @@ export const SearchBar = memo(
                       {t("dateHourLabel")}
                     </label>
                     <FilterDropdown
+                      ariaLabel={t("dateHourLabel")}
                       className={cn(
-                        filterInputClass,
+                        filterDropdownClass,
                         drillOriginFilters.has("dateHour") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
@@ -1322,8 +1325,9 @@ export const SearchBar = memo(
                       {t("cameraModelLabel")}
                     </label>
                     <FilterDropdown
+                      ariaLabel={t("cameraModelLabel")}
                       className={cn(
-                        filterInputClass,
+                        filterDropdownClass,
                         drillOriginFilters.has("cameraModel") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
@@ -1355,8 +1359,9 @@ export const SearchBar = memo(
                       {t("lensModelLabel")}
                     </label>
                     <FilterDropdown
+                      ariaLabel={t("lensModelLabel")}
                       className={cn(
-                        filterInputClass,
+                        filterDropdownClass,
                         drillOriginFilters.has("lensModel") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
@@ -1388,8 +1393,9 @@ export const SearchBar = memo(
                       {t("creatorLabel")}
                     </label>
                     <FilterDropdown
+                      ariaLabel={t("creatorLabel")}
                       className={cn(
-                        filterInputClass,
+                        filterDropdownClass,
                         drillOriginFilters.has("creator") &&
                           "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
                       )}
@@ -1423,7 +1429,7 @@ export const SearchBar = memo(
                     <div className="space-y-1">
                       <FilterDropdown
                         ariaLabel={t("advancedExifFilterField")}
-                        className={filterInputClass}
+                        className={filterDropdownClass}
                         id="search-advanced-exif-field"
                         onChange={(value) =>
                           updateFilter(
@@ -1446,7 +1452,7 @@ export const SearchBar = memo(
                       />
                       <FilterDropdown
                         ariaLabel={t("advancedExifFilterValue")}
-                        className={filterInputClass}
+                        className={filterDropdownClass}
                         disabled={!filters.advancedField}
                         editable
                         onChange={(value) =>

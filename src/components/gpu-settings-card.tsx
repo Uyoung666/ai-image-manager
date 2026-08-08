@@ -298,6 +298,7 @@ export function GpuSettingsCard({
             )}
           </div>
           <Switch
+            ariaLabel={t("gpuEnableAcceleration")}
             checked={enabled}
             disabled={detectPhase === "checking"}
             onCheckedChange={handleEnabledChange}

@@ -54,6 +54,7 @@ describe("settings.wander", () => {
     vi.clearAllMocks();
     wanderState.active = false;
     wanderState.loading = false;
+    wanderState.updatePreference.mockResolvedValue(undefined);
     wanderState.preferences = {
       ...DEFAULT_WANDER_SETTINGS,
       enabled: true,
@@ -82,5 +83,24 @@ describe("settings.wander", () => {
     fireEvent.click(screen.getByRole("button", { name: "wander.startNow" }));
 
     expect(wanderState.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("converts dropdown values back to numeric wander preferences", () => {
+    renderPage();
+
+    const dropdowns = screen.getAllByRole("combobox");
+    fireEvent.click(dropdowns[0]);
+    fireEvent.click(screen.getAllByRole("option")[1]);
+    fireEvent.click(dropdowns[1]);
+    fireEvent.click(screen.getAllByRole("option")[1]);
+
+    expect(wanderState.updatePreference).toHaveBeenCalledWith(
+      "idleMinutes",
+      15
+    );
+    expect(wanderState.updatePreference).toHaveBeenCalledWith(
+      "intervalSeconds",
+      5
+    );
   });
 });

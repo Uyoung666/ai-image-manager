@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import { SettingRow } from "@/components/settings/setting-row";
 import {
   SettingsPageShell,
@@ -128,20 +129,19 @@ function BehaviorSettingsPage() {
       <SettingsSection>
         <SettingRow
           action={
-            <select
-              aria-label={t("settingsCloseBehavior")}
-              className="h-8 min-w-[160px] rounded-[6px] border border-input bg-card px-2 text-[12px] text-foreground outline-none focus:border-primary"
-              onChange={(event) =>
-                onCloseBehaviorChange(event.target.value as CloseBehavior)
+            <FilterDropdown
+              ariaLabel={t("settingsCloseBehavior")}
+              className="min-w-[160px]"
+              onChange={(value) =>
+                onCloseBehaviorChange(value as CloseBehavior)
               }
+              options={CLOSE_BEHAVIOR_OPTIONS.map((value) => ({
+                label: t(CLOSE_BEHAVIOR_LABEL_KEYS[value]),
+                value,
+              }))}
+              placeholder={t("settingsCloseBehavior")}
               value={closeBehavior}
-            >
-              {CLOSE_BEHAVIOR_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {t(CLOSE_BEHAVIOR_LABEL_KEYS[value])}
-                </option>
-              ))}
-            </select>
+            />
           }
           description={t("settingsCloseBehaviorHint")}
           title={t("settingsCloseBehavior")}
@@ -149,6 +149,7 @@ function BehaviorSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("settingsRememberWindowBounds")}
               checked={rememberBounds}
               onCheckedChange={onRememberBoundsChange}
             />
@@ -159,6 +160,7 @@ function BehaviorSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("openAtLogin")}
               checked={openAtLogin}
               onCheckedChange={onOpenAtLoginChange}
             />
@@ -169,6 +171,7 @@ function BehaviorSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("sidebarDefaultCollapsed")}
               checked={sidebarCollapsed}
               onCheckedChange={onSidebarCollapsedChange}
             />
@@ -179,6 +182,7 @@ function BehaviorSettingsPage() {
         <SettingRow
           action={
             <Switch
+              ariaLabel={t("cullSyncFavorites")}
               checked={syncCullFavorites}
               onCheckedChange={onSyncCullFavoritesChange}
             />
