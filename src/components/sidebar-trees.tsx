@@ -493,6 +493,7 @@ export function FolderTree({
       aria-label={label}
       className="resource-tree-scroll min-h-0 flex-1 overflow-y-auto"
       data-bottom-fade={hasMoreBelow}
+      data-resource-tree-scroll="true"
       data-virtualized={shouldVirtualize}
       onScroll={updateBottomFade}
       ref={scrollRef}

@@ -717,6 +717,8 @@ export const PhotoGrid = memo(
     const [containerWidth, setContainerWidth] = useState(0);
     const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const toolbarRef = useRef<HTMLDivElement>(null);
+    const [toolbarHeight, setToolbarHeight] = useState(0);
     const observerRef = useRef<ResizeObserver | null>(null);
     const targetColWidthRef = useRef(targetColWidth);
     targetColWidthRef.current = targetColWidth;
@@ -871,6 +873,26 @@ export const PhotoGrid = memo(
       containerWidth,
       selectedIds,
     ]);
+    useEffect(() => {
+      if (!showToolbar) {
+        setToolbarHeight(0);
+        return;
+      }
+      const element = toolbarRef.current;
+      if (!element) {
+        return;
+      }
+      const updateHeight = () => setToolbarHeight(element.offsetHeight);
+      updateHeight();
+      if (typeof ResizeObserver === "undefined") {
+        return;
+      }
+      const observer = new ResizeObserver(updateHeight);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }, [displayPhotos.length, loading, showToolbar]);
+
+    const gridTopInset = Math.max(topInset, showToolbar ? toolbarHeight : 0);
     const keyboardPhotos = useMemo(
       () =>
         displayPhotos.flatMap((photo) =>
@@ -1358,6 +1380,7 @@ export const PhotoGrid = memo(
               isToolbarScrolled ? "is-scrolled" : ""
             }`}
             onClick={(event) => event.stopPropagation()}
+            ref={toolbarRef}
           >
             <span className="truncate text-[12px] text-muted-foreground">
               {t("photosCount", {
@@ -1415,7 +1438,7 @@ export const PhotoGrid = memo(
           }}
         >
           <MasonryGrid
-            className={`scrollbar-thin px-2 ${showToolbar ? "pt-12" : topInset > 0 ? "" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
+            className={`scrollbar-thin px-2 ${gridTopInset > 0 ? "" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
             columnCount={columnCount}
             containerWidth={containerWidth - 16}
             gap={GAP}
@@ -1436,7 +1459,7 @@ export const PhotoGrid = memo(
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
             selectionActive={selectedIds.size > 0}
-            topInset={topInset}
+            topInset={gridTopInset}
           />
         </div>
 

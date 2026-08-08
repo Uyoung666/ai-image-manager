@@ -1681,6 +1681,7 @@ export function Sidebar({
                             aria-label={t("sidebarTags")}
                             className="resource-tree-scroll flex-1 overflow-y-auto"
                             data-bottom-fade={tagTreeHasMoreBelow}
+                            data-resource-tree-scroll="true"
                             onFocus={(e) => {
                               const container = e.currentTarget;
                               const currentFocus = document.activeElement;

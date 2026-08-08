@@ -117,6 +117,10 @@ describe("folder tree helpers", () => {
     renderFolderTree(folders);
 
     expect(screen.getByRole("tree")).toHaveAttribute(
+      "data-resource-tree-scroll",
+      "true"
+    );
+    expect(screen.getByRole("tree")).toHaveAttribute(
       "data-virtualized",
       "true"
     );

@@ -517,6 +517,46 @@
   padding-bottom: 20px;
 }
 
+.resource-tree-scroll[data-resource-tree-scroll="true"] {
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+}
+
+.resource-tree-scroll[data-resource-tree-scroll="true"]::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.resource-tree-scroll[data-resource-tree-scroll="true"]:hover {
+  scrollbar-color: color-mix(in srgb, var(--primary) 35%, transparent)
+    transparent;
+}
+
+.resource-tree-scroll[data-resource-tree-scroll="true"]:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.resource-tree-scroll[data-resource-tree-scroll="true"]:hover::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+@media (forced-colors: active) {
+  .resource-tree-scroll[data-resource-tree-scroll="true"] {
+    scrollbar-color: transparent transparent;
+  }
+
+  .resource-tree-scroll[data-resource-tree-scroll="true"]::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .resource-tree-scroll[data-resource-tree-scroll="true"]:hover {
+    scrollbar-color: auto;
+  }
+
+  .resource-tree-scroll[data-resource-tree-scroll="true"]:hover::-webkit-scrollbar-thumb {
+    background: ButtonText;
+  }
+}
+
 .resource-tree-scroll[data-bottom-fade="true"] {
   -webkit-mask-image: linear-gradient(
     to bottom,
