@@ -3,6 +3,7 @@ import { getDatabase } from "@/db";
 import { photoTags, tags } from "@/db/schema";
 import { cosineSimilarity } from "./constants";
 import { getActiveEmbeddingModel } from "./model-config";
+import { getActiveEmbeddingFingerprint } from "./model-fingerprint";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import { getTagEmbeddingCacheKey, selectTagScores } from "./scoring";
 import { embedImageInWorker } from "./search";
@@ -413,6 +414,7 @@ const TAG_EMBEDDING_BATCH_SIZE = 16;
 
 // In-memory LRU cache for recently queried image vectors
 const imageVecCache = new Map<number, number[]>();
+let imageVecCacheFingerprint: string | null = null;
 const IMAGE_VEC_CACHE_MAX = 100;
 
 function getTagPrompt(tag: CandidateTag): string {
@@ -426,7 +428,10 @@ export function _ensureTagEmbeddingsForTest(): Promise<void> {
     return Promise.resolve();
   }
   const model = getActiveEmbeddingModel();
-  const cacheKey = getTagEmbeddingCacheKey(model.kind, TAG_PROMPT_VERSION);
+  const cacheKey = getTagEmbeddingCacheKey(
+    getActiveEmbeddingFingerprint(),
+    TAG_PROMPT_VERSION
+  );
   if (cachedTagEmbeddings && cachedTagEmbeddingKey === cacheKey) {
     return Promise.resolve();
   }
@@ -521,6 +526,12 @@ export async function suggestTags(
   if (!embeddingModel) {
     console.warn("[AI] suggestTags: AI not initialized");
     return [];
+  }
+
+  const embeddingFingerprint = getActiveEmbeddingFingerprint();
+  if (imageVecCacheFingerprint !== embeddingFingerprint) {
+    imageVecCache.clear();
+    imageVecCacheFingerprint = embeddingFingerprint;
   }
 
   let localModelPath = _localModelPath;

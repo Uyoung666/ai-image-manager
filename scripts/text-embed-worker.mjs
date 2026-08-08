@@ -1,99 +1,143 @@
 /**
- * Persistent text embedding worker.
+ * Configurable text embedding worker.
  *
- * Keeps tokenizer/model loading and ONNX inference outside Electron's main
- * process so a first-run SigLIP warmup cannot block renderer IPC.
+ * The first adapter uses transformers-js. The protocol carries an engine field
+ * so an ONNX Runtime text implementation can be added later without changing
+ * the client contract.
  */
 
-const MODEL_CONFIGS = {
-  siglip: {
-    displayName: "SigLIP Base Patch16-224",
-    modelId: "Xenova/siglip-base-patch16-224",
-    outputName: "pooler_output",
-    vectorDimensions: 768,
-  },
-};
-
-let activeModel = MODEL_CONFIGS.siglip;
+let activeAdapter = null;
 let textModel = null;
 let tokenizer = null;
+const PATH_SPLIT_RE = /[\\/]/u;
+const QUANTIZED_ONNX_RE = /_quantized\.onnx$/iu;
+const ONNX_RE = /\.onnx$/iu;
+
+function validateAdapter(adapter) {
+  if (!adapter || adapter.protocolVersion !== 1) {
+    throw new Error("Unsupported or missing text worker adapter protocol");
+  }
+  const text = adapter.text;
+  if (
+    typeof adapter.adapterId !== "string" ||
+    typeof adapter.fingerprint !== "string" ||
+    typeof adapter.modelRoot !== "string" ||
+    typeof adapter.modelId !== "string" ||
+    !text ||
+    typeof text.modelRelativePath !== "string" ||
+    !Number.isInteger(text.dimensions) ||
+    text.dimensions <= 0 ||
+    typeof text.outputName !== "string" ||
+    !Number.isInteger(text.maxLength) ||
+    text.maxLength <= 0 ||
+    text.padding !== "max_length" ||
+    adapter.normalization !== "l2"
+  ) {
+    throw new Error("Invalid text worker adapter configuration");
+  }
+  if (text.engine !== "transformers-js") {
+    throw new Error(`Text engine is not enabled in phase 1: ${text.engine}`);
+  }
+  return adapter;
+}
 
 function disposeOutput(output) {
   for (const value of Object.values(output ?? {})) {
-    if (value && typeof value.dispose === "function") {
-      value.dispose();
-    }
+    value?.dispose?.();
   }
 }
 
 async function initialize(message) {
-  activeModel = MODEL_CONFIGS.siglip;
-
-  const { AutoTokenizer, SiglipTextModel, env } = await import(
+  activeAdapter = validateAdapter(message.adapter);
+  const { AutoModel, AutoTokenizer, env } = await import(
     "@xenova/transformers"
   );
-
-  env.localModelPath = message.modelPath;
+  env.localModelPath = activeAdapter.modelRoot;
   env.allowLocalModels = true;
   env.allowRemoteModels = false;
   env.useFS = true;
   env.useFSCache = true;
 
-  tokenizer = await AutoTokenizer.from_pretrained(activeModel.modelId);
-  textModel = await SiglipTextModel.from_pretrained(activeModel.modelId, {
+  tokenizer = await AutoTokenizer.from_pretrained(activeAdapter.modelId);
+  textModel = await AutoModel.from_pretrained(activeAdapter.modelId, {
+    model_file_name: activeAdapter.text.modelRelativePath
+      .split(PATH_SPLIT_RE)
+      .at(-1)
+      .replace(QUANTIZED_ONNX_RE, "")
+      .replace(ONNX_RE, ""),
     quantized: true,
   });
+  process.send?.({
+    type: "ready",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
+  });
+}
 
-  process.send?.({ type: "ready" });
+function normalizeVector(vector) {
+  if (
+    vector.length !== activeAdapter.text.dimensions ||
+    vector.some((value) => !Number.isFinite(value))
+  ) {
+    throw new Error(
+      `Invalid text vector: expected ${activeAdapter.text.dimensions} finite values`
+    );
+  }
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  const normalized = vector.map((value) => value / (norm || 1));
+  if (normalized.some((value) => !Number.isFinite(value))) {
+    throw new Error("Text vector normalization produced non-finite values");
+  }
+  return normalized;
 }
 
 async function embed(message) {
-  if (!(tokenizer && textModel)) {
+  if (!(tokenizer && textModel && activeAdapter)) {
     throw new Error("Text embedding model is not initialized");
   }
-
   const texts = Array.isArray(message.texts) ? message.texts : [];
   if (texts.length === 0) {
     process.send?.({
       type: "result",
       requestId: message.requestId,
+      adapterId: activeAdapter.adapterId,
+      fingerprint: activeAdapter.fingerprint,
       vectors: [],
     });
     return;
   }
 
   const inputs = await tokenizer(texts, {
-    padding: "max_length",
+    padding: activeAdapter.text.padding,
     truncation: true,
+    max_length: activeAdapter.text.maxLength,
   });
   const output = await textModel(inputs);
   try {
-    const embeddings = output[activeModel.outputName];
+    const embeddings = output[activeAdapter.text.outputName];
     if (!embeddings) {
-      throw new Error(
-        `${activeModel.displayName} output "${activeModel.outputName}" missing`
-      );
+      throw new Error(`Output "${activeAdapter.text.outputName}" missing`);
     }
-
     const data = Array.from(embeddings.data);
     const vectorSize = data.length / texts.length;
     if (
       !Number.isInteger(vectorSize) ||
-      vectorSize !== activeModel.vectorDimensions
+      vectorSize !== activeAdapter.text.dimensions
     ) {
       throw new Error(
-        `${activeModel.displayName} vector size mismatch: expected=${activeModel.vectorDimensions} actual=${vectorSize}`
+        `Text vector size mismatch: expected=${activeAdapter.text.dimensions} actual=${vectorSize}`
       );
     }
-
-    const vectors = texts.map((_, index) => {
-      const vector = data.slice(index * vectorSize, (index + 1) * vectorSize);
-      const norm = Math.sqrt(
-        vector.reduce((sum, value) => sum + value * value, 0)
-      );
-      return vector.map((value) => value / (norm || 1));
+    const vectors = texts.map((_, index) =>
+      normalizeVector(data.slice(index * vectorSize, (index + 1) * vectorSize))
+    );
+    process.send?.({
+      type: "result",
+      requestId: message.requestId,
+      adapterId: activeAdapter.adapterId,
+      fingerprint: activeAdapter.fingerprint,
+      vectors,
     });
-    process.send?.({ type: "result", requestId: message.requestId, vectors });
   } finally {
     disposeOutput(output);
   }
@@ -116,6 +160,8 @@ async function handleMessage(message) {
     process.send?.({
       type: message?.type === "init" ? "init-error" : "error",
       requestId: message?.requestId,
+      adapterId: activeAdapter?.adapterId,
+      fingerprint: activeAdapter?.fingerprint,
       error: error instanceof Error ? error.message : String(error),
     });
   }

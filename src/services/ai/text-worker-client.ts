@@ -3,10 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { WORKER_TIMEOUT } from "./constants";
-import {
-  type EmbeddingModelKind,
-  getActiveEmbeddingModel,
-} from "./model-config";
+import type { SerializedWorkerAdapter } from "./model-adapter";
+import { getActiveEmbeddingWorkerAdapter } from "./model-config";
 
 interface PendingRequest {
   reject: (error: Error) => void;
@@ -15,7 +13,9 @@ interface PendingRequest {
 }
 
 interface WorkerMessage {
+  adapterId?: string;
   error?: string;
+  fingerprint?: string;
   requestId?: number;
   type: "ready" | "init-error" | "result" | "error";
   vectors?: number[][];
@@ -24,6 +24,7 @@ interface WorkerMessage {
 let worker: ChildProcess | null = null;
 let workerKey: string | null = null;
 let workerReady = false;
+let activeWorkerAdapter: SerializedWorkerAdapter | null = null;
 let initializationPromise: Promise<void> | null = null;
 let nextRequestId = 1;
 const pendingRequests = new Map<number, PendingRequest>();
@@ -65,7 +66,7 @@ function rejectPendingRequests(error: Error): void {
 }
 
 function validateVectors(vectors: unknown, expectedCount: number): number[][] {
-  const dimensions = getActiveEmbeddingModel().vectorDimensions;
+  const dimensions = activeWorkerAdapter?.text.dimensions ?? 768;
   if (
     !Array.isArray(vectors) ||
     vectors.length !== expectedCount ||
@@ -98,15 +99,29 @@ function handleRequestMessage(message: WorkerMessage): void {
       new Error(message.error ?? "Text embedding worker request failed")
     );
   } else if (message.type === "result") {
+    if (
+      activeWorkerAdapter &&
+      message.adapterId !== undefined &&
+      (message.adapterId !== activeWorkerAdapter.adapterId ||
+        message.fingerprint !== activeWorkerAdapter.fingerprint)
+    ) {
+      pending.reject(new Error("Stale text embedding worker result discarded"));
+      return;
+    }
     pending.resolve(message.vectors ?? []);
   }
 }
 
 export function initTextWorker(
   modelPath: string,
-  modelKind: EmbeddingModelKind = getActiveEmbeddingModel().kind
+  _modelKind = "siglip"
 ): Promise<void> {
-  const key = JSON.stringify({ modelKind, modelPath });
+  const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
+  const key = JSON.stringify({
+    adapterId: adapter.adapterId,
+    fingerprint: adapter.fingerprint,
+    modelRoot: adapter.modelRoot,
+  });
   if (worker?.connected && workerReady && workerKey === key) {
     return Promise.resolve();
   }
@@ -119,6 +134,7 @@ export function initTextWorker(
 
   workerKey = key;
   workerReady = false;
+  activeWorkerAdapter = adapter;
   const child = fork(findTextWorkerScript(), [], {
     stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
@@ -175,11 +191,12 @@ export function initTextWorker(
         worker = null;
         workerKey = null;
         workerReady = false;
+        activeWorkerAdapter = null;
         initializationPromise = null;
       }
     });
 
-    child.send({ type: "init", modelKind, modelPath });
+    child.send({ type: "init", adapter });
   }).finally(() => {
     initializationPromise = null;
   });
@@ -223,6 +240,7 @@ export function shutdownTextWorker(): void {
   worker = null;
   workerKey = null;
   workerReady = false;
+  activeWorkerAdapter = null;
   initializationPromise = null;
   rejectPendingRequests(new Error("Text embedding worker shut down"));
   if (!child) {

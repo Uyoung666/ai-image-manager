@@ -1,16 +1,9 @@
 /**
- * Persistent SigLIP image embedding worker.
+ * Configurable image embedding worker.
  *
- * Runs as a child process via fork(). Loads the SigLIP vision ONNX model once
- * via onnxruntime-node (native, supports DirectML), then processes batches
- * as they arrive — no model reload per batch.
- *
- * IPC protocol:
- *   Parent → { type: "init",   modelPath, useGPU }
- *   Worker → { type: "ready" }
- *   Parent → { type: "embed",  photos: [{ id, path }, ...] }
- *   Worker → { type: "result", results: [{ id, vector?, error? }] }
- *   Parent → { type: "shutdown" } — worker exits.
+ * The parent sends a complete serialized adapter. This worker intentionally
+ * has no model-specific dimensions, paths, output names, or preprocessing
+ * constants of its own.
  */
 
 import { createRequire } from "node:module";
@@ -19,7 +12,6 @@ import sharp from "sharp";
 import { extractRawPreview } from "./raw-preview.mjs";
 
 const require = createRequire(import.meta.url);
-
 const sharpThreads = Math.max(
   1,
   Number.parseInt(process.env.AI_EMBED_SHARP_THREADS || "1", 10) || 1
@@ -48,39 +40,65 @@ function isRawFile(filePath) {
   return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-const MODEL_CONFIGS = {
-  siglip: {
-    directory: "siglip-base-patch16-224",
-    displayName: "SigLIP Base Patch16-224",
-    imageMean: [0.5, 0.5, 0.5],
-    imageOutputName: "pooler_output",
-    imageSize: 224,
-    imageStd: [0.5, 0.5, 0.5],
-    resizeFit: "fill",
-  },
-};
-let activeModel = MODEL_CONFIGS.siglip;
+function validateAdapter(adapter) {
+  if (!adapter || adapter.protocolVersion !== 1) {
+    throw new Error("Unsupported or missing worker adapter protocol");
+  }
+  if (
+    typeof adapter.adapterId !== "string" ||
+    typeof adapter.fingerprint !== "string" ||
+    typeof adapter.modelRoot !== "string" ||
+    !adapter.image ||
+    adapter.normalization !== "l2"
+  ) {
+    throw new Error("Invalid serialized worker adapter");
+  }
+  const image = adapter.image;
+  if (
+    typeof image.modelRelativePath !== "string" ||
+    typeof image.inputName !== "string" ||
+    typeof image.outputName !== "string" ||
+    !Number.isInteger(image.dimensions) ||
+    image.dimensions <= 0 ||
+    !Number.isInteger(image.imageSize) ||
+    image.imageSize <= 0 ||
+    !["fill", "contain", "cover"].includes(image.resizeFit) ||
+    !Array.isArray(image.mean) ||
+    !Array.isArray(image.std) ||
+    image.mean.length !== 3 ||
+    image.std.length !== 3 ||
+    image.mean.some((value) => !Number.isFinite(value)) ||
+    image.std.some((value) => !Number.isFinite(value) || value === 0)
+  ) {
+    throw new Error("Invalid image worker adapter configuration");
+  }
+  return adapter;
+}
 
-// --- Abort flag for mid-batch cancellation ---
+function resolveRelativeModelPath(root, relativePath) {
+  const rootPath = path.resolve(root);
+  const resolved = path.resolve(rootPath, relativePath);
+  if (resolved !== rootPath && !resolved.startsWith(`${rootPath}${path.sep}`)) {
+    throw new Error("Worker model path escapes model root");
+  }
+  return resolved;
+}
+
+let activeAdapter = null;
+let ortSession = null;
+let _ort = null;
 let aborted = false;
 
-// --- Module-level model cache ---
-let ortSession = null;
-// onnxruntime-node lazy-loaded singleton
-let _ort = null;
 function loadOrt() {
   if (_ort) {
     return _ort;
   }
-  // Use the module-level `require` (line 24) — it already resolves from
-  // the script's location and is more reliable than creating a new one.
   try {
     _ort = require("onnxruntime-node");
-  } catch (err0) {
-    // Fallback: resolve from project root (packaged builds may differ)
+  } catch (error) {
     console.error(
       "[Worker] Primary onnxruntime-node load failed:",
-      err0.message
+      error.message
     );
     const projectRoot = path.resolve(import.meta.dirname, "..");
     _ort = require(path.join(projectRoot, "node_modules", "onnxruntime-node"));
@@ -88,15 +106,12 @@ function loadOrt() {
   return _ort;
 }
 
-/**
- * Preprocess image: sharp decode + resize + normalize → Float32Array(NCHW).
- */
-async function preprocessSigLIP(filePath) {
-  const imageSize = activeModel.imageSize;
+async function preprocessImage(filePath) {
+  const image = activeAdapter.image;
   const { data, info } = await sharp(filePath, { failOn: "none" })
     .rotate()
-    .resize(imageSize, imageSize, {
-      fit: activeModel.resizeFit,
+    .resize(image.imageSize, image.imageSize, {
+      fit: image.resizeFit,
       position: "center",
     })
     .removeAlpha()
@@ -104,69 +119,57 @@ async function preprocessSigLIP(filePath) {
     .toBuffer({ resolveWithObject: true });
 
   const { width, height, channels } = info;
-  if (width !== imageSize || height !== imageSize) {
-    throw new Error(`sharp resize mismatch: ${width}x${height}`);
+  if (width !== image.imageSize || height !== image.imageSize || channels < 3) {
+    throw new Error(`Image resize mismatch: ${width}x${height}x${channels}`);
   }
 
   const rgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-  const pixelsPerChannel = imageSize * imageSize;
+  const pixelsPerChannel = image.imageSize * image.imageSize;
   const floatData = new Float32Array(3 * pixelsPerChannel);
-
-  for (let y = 0; y < imageSize; y++) {
-    for (let x = 0; x < imageSize; x++) {
-      const srcIdx = (y * imageSize + x) * channels;
-      for (let c = 0; c < 3; c++) {
-        const pixel = rgb[srcIdx + c] / 255.0;
-        const normalized =
-          (pixel - activeModel.imageMean[c]) / activeModel.imageStd[c];
-        floatData[c * pixelsPerChannel + y * imageSize + x] = normalized;
+  for (let y = 0; y < image.imageSize; y++) {
+    for (let x = 0; x < image.imageSize; x++) {
+      const sourceIndex = (y * image.imageSize + x) * channels;
+      for (let channel = 0; channel < 3; channel++) {
+        const pixel = rgb[sourceIndex + channel] / 255;
+        floatData[channel * pixelsPerChannel + y * image.imageSize + x] =
+          (pixel - image.mean[channel]) / image.std[channel];
       }
     }
   }
   return floatData;
 }
 
-// --- Init handler: load SigLIP vision ONNX model directly ---
-async function handleInit(msg) {
-  const { modelPath } = msg;
-  activeModel = MODEL_CONFIGS.siglip;
+async function handleInit(message) {
+  activeAdapter = validateAdapter(message.adapter);
+  const execution = message.execution ?? {
+    provider: "cpu",
+    intraOpNumThreads: 1,
+  };
   const intraOpNumThreads = Math.max(
     1,
-    Number.parseInt(
-      String(msg.intraOpNumThreads || process.env.AI_EMBED_THREADS || "1"),
-      10
-    ) || 1
+    Number.parseInt(String(execution.intraOpNumThreads || "1"), 10) || 1
   );
-  const onnxPath = path.join(
-    modelPath,
-    "Xenova",
-    activeModel.directory,
-    "onnx",
-    "vision_model_quantized.onnx"
-  );
-  console.error(
-    `[Worker] Loading ${activeModel.displayName} vision ONNX: ${onnxPath}`
+  const onnxPath = resolveRelativeModelPath(
+    activeAdapter.modelRoot,
+    activeAdapter.image.modelRelativePath
   );
 
-  // Phase 1: load onnxruntime binding (~10%)
   process.send?.({
     type: "init-progress",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
     percent: 5,
     stage: "loading-runtime",
   });
   const { InferenceSession } = loadOrt();
-
-  // NOTE: DML crashes on ViT-B/32 (0xFFFF0003) in both onnxruntime 1.26.0
-  // and 1.27.0-dev. Keep CPU-only until upstream fixes DML shader compilation
-  // for Transformer models (LayerNorm/Gelu/MultiHeadAttention ops).
-  const executionProviders = ["cpu"];
-  console.error(
-    `[Worker] Creating session with: [cpu], intraOpNumThreads=${intraOpNumThreads}, sharpThreads=${sharpThreads}`
-  );
-
-  // Phase 2: creating ONNX session — the heavy part (~20% → ~95%)
+  // SigLIP v1 remains CPU-only. DirectML is protocol-compatible for future
+  // adapters, while the active adapter/pool deliberately requests CPU.
+  const executionProviders =
+    execution.provider === "directml" ? ["directml", "cpu"] : ["cpu"];
   process.send?.({
     type: "init-progress",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
     percent: 20,
     stage: "creating-session",
   });
@@ -179,37 +182,49 @@ async function handleInit(msg) {
     interOpNumThreads: 1,
     intraOpNumThreads,
   });
-  console.error(
-    `[Worker] ${activeModel.displayName} loaded, ready for batches`
-  );
-
-  process.send?.({ type: "init-progress", percent: 100, stage: "ready" });
-  process.send?.({ type: "ready" });
+  process.send?.({
+    type: "init-progress",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
+    percent: 100,
+    stage: "ready",
+  });
+  process.send?.({
+    type: "ready",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
+  });
 }
 
-function getImageEmbedding(output) {
-  const imageEmbedding = output[activeModel.imageOutputName];
-  if (!imageEmbedding) {
+function normalizeVector(rawVector) {
+  if (
+    !Array.isArray(rawVector) ||
+    rawVector.length !== activeAdapter.image.dimensions ||
+    rawVector.some((value) => !Number.isFinite(value))
+  ) {
     throw new Error(
-      `${activeModel.displayName} output "${activeModel.imageOutputName}" missing`
+      `Invalid image vector: expected ${activeAdapter.image.dimensions} finite values`
     );
   }
-  return imageEmbedding;
+  const norm = Math.sqrt(
+    rawVector.reduce((sum, value) => sum + value * value, 0)
+  );
+  const vector = rawVector.map((value) => value / (norm || 1));
+  if (vector.some((value) => !Number.isFinite(value))) {
+    throw new Error("Image vector normalization produced non-finite values");
+  }
+  return vector;
 }
 
-// --- Embed handler: process a batch ---
-async function handleEmbed(msg) {
-  const { photos, modelPath } = msg;
-
-  // Auto-init if model not loaded yet
-  if (!ortSession && modelPath) {
-    await handleInit({ modelPath, modelKind: msg.modelKind });
-  }
-  if (!ortSession) {
+async function handleEmbed(message) {
+  const photos = Array.isArray(message.photos) ? message.photos : [];
+  if (!(ortSession && activeAdapter)) {
     process.send?.({
       type: "result",
-      results: (photos || []).map((p) => ({
-        id: p.id,
+      adapterId: activeAdapter?.adapterId,
+      fingerprint: activeAdapter?.fingerprint,
+      results: photos.map((photo) => ({
+        id: photo.id,
         error: "Model not initialized",
       })),
     });
@@ -217,95 +232,76 @@ async function handleEmbed(msg) {
   }
 
   const ort = loadOrt();
-  const batchStartMs = Date.now();
   const results = [];
-
-  for (let i = 0; i < photos.length; i++) {
-    // Check for abort signal before processing each photo
+  for (const photo of photos) {
     if (aborted) {
-      console.error(`[Worker] Aborted at photo ${i}/${photos.length}`);
       break;
     }
-    const photo = photos[i];
     try {
-      // Resolve input: for RAW files, extract embedded JPEG preview
       let imageInput = photo.path;
       if (isRawFile(photo.path)) {
-        const preview = extractRawPreview(photo.path);
-        if (preview) {
-          imageInput = preview;
-        }
+        imageInput = extractRawPreview(photo.path) || photo.path;
       }
-
-      // Preprocess + run ONNX inference directly (no transformers overhead)
-      const floatData = await preprocessSigLIP(imageInput);
+      const floatData = await preprocessImage(imageInput);
+      const image = activeAdapter.image;
       const pixelValues = new ort.Tensor("float32", floatData, [
         1,
         3,
-        activeModel.imageSize,
-        activeModel.imageSize,
+        image.imageSize,
+        image.imageSize,
       ]);
-      const output = await ortSession.run({ pixel_values: pixelValues });
-
-      const imageEmbeds = getImageEmbedding(output);
-      const vec = Array.from(imageEmbeds.data);
-      const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
-      const vector = vec.map((v) => v / (norm || 1));
-
-      // Free tensors
-      for (const v of Object.values(output)) {
-        if (v && typeof v === "object" && typeof v.dispose === "function") {
-          v.dispose();
-        }
+      const output = await ortSession.run({ [image.inputName]: pixelValues });
+      const embedding = output[image.outputName];
+      if (!embedding) {
+        throw new Error(`Output "${image.outputName}" missing`);
       }
-
+      const vector = normalizeVector(Array.from(embedding.data));
+      for (const value of Object.values(output)) {
+        value?.dispose?.();
+      }
       results.push({ id: photo.id, vector });
-      console.error(
-        `[Worker] ${i + 1}/${photos.length} OK: ${path.basename(photo.path)}`
-      );
-    } catch (err) {
-      console.error(
-        `[Worker] ${i + 1}/${photos.length} FAIL: ${photo.path} — ${err.message}`
-      );
-      results.push({ id: photo.id, error: err.message });
+    } catch (error) {
+      results.push({
+        id: photo.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  const batchMs = Date.now() - batchStartMs;
-  console.error(
-    `[Worker] Batch done: ${results.length} photos in ${batchMs}ms (${Math.round(batchMs / results.length)}ms/photo)`
-  );
-
-  process.send?.({ type: "result", results });
+  process.send?.({
+    type: "result",
+    adapterId: activeAdapter.adapterId,
+    fingerprint: activeAdapter.fingerprint,
+    results,
+  });
 }
 
-// --- Message loop ---
-process.on("message", async (msg) => {
+process.on("message", async (message) => {
   try {
-    if (msg.type === "init") {
-      await handleInit(msg);
-    } else if (msg.type === "embed") {
-      aborted = false; // Reset abort flag for new batch
-      await handleEmbed(msg);
-    } else if (msg.type === "abort") {
+    if (message?.type === "init") {
+      await handleInit(message);
+    } else if (message?.type === "embed") {
+      aborted = false;
+      await handleEmbed(message);
+    } else if (message?.type === "abort") {
       aborted = true;
-      console.error("[Worker] Abort signal received");
-    } else if (msg.type === "shutdown") {
-      console.error("[Worker] Shutting down");
+    } else if (message?.type === "shutdown") {
       process.exit(0);
     }
-  } catch (err) {
-    console.error(`[Worker] Fatal error handling "${msg.type}":`, err.message);
-    if (msg.type === "embed") {
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    if (message?.type === "embed") {
       process.send?.({
         type: "result",
-        results: (msg.photos || []).map((p) => ({
-          id: p.id,
-          error: err.message,
+        adapterId: activeAdapter?.adapterId,
+        fingerprint: activeAdapter?.fingerprint,
+        results: (message.photos || []).map((photo) => ({
+          id: photo.id,
+          error: messageText,
         })),
       });
-    } else if (msg.type === "init") {
-      process.send?.({ type: "init-error", error: err.message });
+    } else if (message?.type === "init") {
+      process.send?.({ type: "init-error", error: messageText });
     }
   }
 });

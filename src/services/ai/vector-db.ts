@@ -13,18 +13,35 @@ import { getDatabase } from "@/db";
 import { appSettings, photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
-import { getActiveEmbeddingModel } from "./model-config";
+import { getActiveEmbeddingAdapter } from "./model-adapter";
 import {
+  getActiveEmbeddingModel,
+  getActiveEmbeddingRuntimeInfo,
+} from "./model-config";
+import {
+  getModelFingerprint,
+  getVectorFingerprintPath,
+  readStoredVectorFingerprint,
+  type VectorCompatibility,
+  verifyAdapterArtifacts,
+  writeStoredVectorFingerprint,
+} from "./model-fingerprint";
+import {
+  _localModelPath,
+  colorTable,
+  getActiveEmbeddingRuntime,
   isVectorDBReady,
   photoTable,
-  colorTable,
+  setActiveEmbeddingRuntime,
+  setColorTable,
   setIsVectorDBReady,
   setPhotoTable,
-  setColorTable,
+  setVectorCompatibility,
   setVectordb,
   setWasAutoRepaired,
   vectordb,
 } from "./state";
+import { getActiveThresholdProfile } from "./threshold-profile";
 import { planVectorReconciliation } from "./vector-reconciliation";
 
 // ── 向量数据库定期维护 ──────────────────────────────────────────────
@@ -87,6 +104,96 @@ function clearVectorMaintenance(): void {
 
 let vectorDbInitPromise: Promise<void> | null = null;
 
+function modelRootCandidates(): string[] {
+  const candidates = [
+    path.join(getDataPath(), "models"),
+    path.join(process.cwd(), "models"),
+    _localModelPath,
+  ];
+  return [
+    ...new Set(
+      candidates.filter((candidate): candidate is string => !!candidate)
+    ),
+  ];
+}
+
+async function canAdoptLegacyVectorStore(): Promise<boolean> {
+  const adapter = getActiveEmbeddingAdapter();
+  for (const modelRoot of modelRootCandidates()) {
+    if (await verifyAdapterArtifacts(modelRoot, adapter.artifacts)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function inspectVectorCompatibility(
+  dataPath: string,
+  dimensions: number,
+  rowCount: number
+): Promise<{ status: VectorCompatibility; adoptLegacy: boolean }> {
+  const adapter = getActiveEmbeddingAdapter();
+  const fingerprint = getModelFingerprint(adapter);
+  const markerPath = getVectorFingerprintPath(dataPath);
+  const stored = readStoredVectorFingerprint(dataPath);
+
+  if (stored) {
+    if (stored.dimensions !== dimensions) {
+      return { status: "dimension-mismatch", adoptLegacy: false };
+    }
+    if (stored.adapterId !== adapter.id || stored.fingerprint !== fingerprint) {
+      return { status: "fingerprint-mismatch", adoptLegacy: false };
+    }
+    return { status: "matching", adoptLegacy: false };
+  }
+
+  if (fs.existsSync(markerPath)) {
+    return { status: "invalid-fingerprint", adoptLegacy: false };
+  }
+  if (rowCount === 0) {
+    return { status: "empty", adoptLegacy: false };
+  }
+  if (
+    adapter.legacyKind === "siglip" &&
+    dimensions === adapter.embeddingSpace.dimensions &&
+    (await canAdoptLegacyVectorStore())
+  ) {
+    return { status: "legacy-compatible", adoptLegacy: true };
+  }
+  return { status: "missing-fingerprint", adoptLegacy: false };
+}
+
+function initializeEmbeddingRuntime(): void {
+  if (getActiveEmbeddingRuntime()) {
+    return;
+  }
+  const info = getActiveEmbeddingRuntimeInfo();
+  const profile = getActiveThresholdProfile();
+  setActiveEmbeddingRuntime({
+    ...info,
+    vectorCompatibility: "empty",
+    thresholdProfileId: profile.profileId,
+    calibrationStatus: profile.calibrationStatus,
+  });
+}
+
+export async function persistActiveVectorFingerprint(
+  source: "fresh-build" | "legacy-adoption" = "fresh-build"
+): Promise<void> {
+  const adapter = getActiveEmbeddingAdapter();
+  await writeStoredVectorFingerprint(getDataPath(), {
+    schemaVersion: 1,
+    fingerprint: getModelFingerprint(adapter),
+    adapterId: adapter.id,
+    dimensions: adapter.embeddingSpace.dimensions,
+    createdAt: new Date().toISOString(),
+    source,
+  });
+  setVectorCompatibility(
+    source === "legacy-adoption" ? "legacy-compatible" : "matching"
+  );
+}
+
 export function initVectorDB(): Promise<void> {
   if (isVectorDBReady && vectordb && photoTable) {
     return Promise.resolve();
@@ -101,7 +208,9 @@ export function initVectorDB(): Promise<void> {
   return vectorDbInitPromise;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Vector DB startup keeps compatibility checks, corruption recovery, and table setup in one flow.
 async function initializeVectorDB(): Promise<void> {
+  initializeEmbeddingRuntime();
   // 清理上次重建残留的 .bak 目录
   await cleanupStaleBackups();
 
@@ -142,6 +251,23 @@ async function initializeVectorDB(): Promise<void> {
     if (table) {
       setPhotoTable(table);
 
+      const existingRowCount = await table.countRows();
+      const compatibility = await inspectVectorCompatibility(
+        getDataPath(),
+        vectorDimensions,
+        existingRowCount
+      );
+      setVectorCompatibility(compatibility.status);
+      if (
+        existingRowCount > 0 &&
+        compatibility.status !== "matching" &&
+        compatibility.status !== "legacy-compatible"
+      ) {
+        throw new Error(
+          `Vector store is incompatible with active embedding model (${compatibility.status}); rebuild required`
+        );
+      }
+
       // Model changes also change the vector schema and require re-indexing.
       const schema = await table.schema();
       const vectorField = schema.fields.find((f: any) => f.name === "vector");
@@ -161,6 +287,10 @@ async function initializeVectorDB(): Promise<void> {
         const validation = await validateVectorDB();
 
         if (validation.healthy) {
+          if (compatibility.adoptLegacy) {
+            await persistActiveVectorFingerprint("legacy-adoption");
+            console.log("[AI] Adopted legacy SigLIP v1 vector fingerprint");
+          }
           // Data is intact. If the marker is missing, it was a clean dev
           // restart or similar — just write it now and continue.
           if (!isIndexCleanShutdown()) {
@@ -248,6 +378,7 @@ async function initializeVectorDB(): Promise<void> {
 
   const newTable = await db.createEmptyTable("photo_embeddings", schema);
   setPhotoTable(newTable);
+  setVectorCompatibility("empty");
   console.log(
     `[AI] Created photo_embeddings table (FixedSizeList<Float32>[${vectorDimensions}], ${model.displayName})`
   );
@@ -929,7 +1060,7 @@ export async function backfillColorVectors(): Promise<{
         await upsertColorVectors(entries);
         backfilled += entries.length;
       } catch (err: any) {
-        console.error(`[AI] Color backfill batch failed:`, err?.message);
+        console.error("[AI] Color backfill batch failed:", err?.message);
       }
     }
 

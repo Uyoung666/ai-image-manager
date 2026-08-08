@@ -8,8 +8,8 @@ import { photos } from "@/db/schema";
 import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
+import { getActiveEmbeddingWorkerAdapter } from "./model-config";
 import { ensureLocalModel } from "./model-loader";
-import { getActiveEmbeddingModel } from "./model-config";
 import type { EmbedProgress, EmbedProgressCallback } from "./state";
 import {
   _localModelPath,
@@ -22,10 +22,10 @@ import {
   drainPendingAutoTagPhotoIds,
   finishEmbeddingRun,
   getAiControlState,
-  getWrittenPhotoIdsForRun,
   getWrittenPhotoIds,
-  isEmbedding,
+  getWrittenPhotoIdsForRun,
   isCurrentEmbeddingRun,
+  isEmbedding,
   isRunWritable,
   photoTable,
   poolCancelled,
@@ -45,6 +45,7 @@ import {
   deletePhotoVectors,
   ensureVectorIndex,
   initVectorDB,
+  persistActiveVectorFingerprint,
 } from "./vector-db";
 
 function appendAiWorkerLog(message: string): void {
@@ -138,6 +139,7 @@ function runEmbedBatch(
   modelPath: string
 ): Promise<EmbedResult[]> {
   return new Promise((resolve, reject) => {
+    const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
     const workerScript = findWorkerScript();
 
     appendAiWorkerLog(
@@ -195,6 +197,10 @@ function runEmbedBatch(
         }
         return;
       }
+      if (msg.type === "ready") {
+        child.send({ type: "embed", photos: batchPhotos });
+        return;
+      }
       if (msg.type === "init-error" && !resolved) {
         appendAiWorkerLog(
           `[Batch Worker] init-error ${msg.error || "Worker init failed"}`
@@ -205,6 +211,15 @@ function runEmbedBatch(
         return;
       }
       if (msg.type === "result" && !resolved) {
+        if (
+          msg.adapterId !== adapter.adapterId ||
+          msg.fingerprint !== adapter.fingerprint
+        ) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(new Error("Stale image embedding worker result discarded"));
+          return;
+        }
         appendAiWorkerLog(
           `[Batch Worker] result ok=${(msg.results as EmbedResult[]).filter((r) => r.vector && r.vector.length > 0).length} errors=${(
             msg.results as EmbedResult[]
@@ -241,10 +256,9 @@ function runEmbedBatch(
     });
 
     child.send({
-      type: "embed",
-      modelKind: getActiveEmbeddingModel().kind,
-      modelPath,
-      photos: batchPhotos,
+      type: "init",
+      adapter,
+      execution: { provider: "cpu", intraOpNumThreads: 1 },
     });
   });
 }
@@ -1014,8 +1028,12 @@ export async function embedAllPhotos(
       }
     }
 
-    if (processed > 0 && photoTable) {
+    // Publish the model identity only after every photo in this indexing run
+    // has been persisted. A partial, cancelled, or failed build must not make
+    // a mixed vector table look complete.
+    if (processed > 0 && processed === total && photoTable) {
       await ensureVectorIndex(true);
+      await persistActiveVectorFingerprint("fresh-build");
     }
 
     if (tagError) {

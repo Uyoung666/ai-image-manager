@@ -5,8 +5,10 @@ import { app } from "electron";
 import { WORKER_TIMEOUT } from "./constants";
 import {
   getActiveEmbeddingModel,
+  getActiveEmbeddingWorkerAdapter,
   getSemanticPolicyVersion,
 } from "./model-config";
+import { getActiveEmbeddingFingerprint } from "./model-fingerprint";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import {
   applyNegativeSemanticPenalty,
@@ -22,6 +24,7 @@ import {
 } from "./search-sensitivity";
 import {
   getSemanticQueryPlan,
+  getSemanticQueryPlanFingerprint,
   prepareSemanticQueryPlan,
   SEMANTIC_QUERY_PLAN_VERSION,
   type SemanticQueryPlan,
@@ -33,6 +36,10 @@ import {
   photoTable,
   setLocalModelPath,
 } from "./state";
+import {
+  getActiveThresholdProfile,
+  getThresholdProfileIdentity,
+} from "./threshold-profile";
 import {
   getTranslationModelVersion,
   warmupTranslationWorker,
@@ -76,6 +83,7 @@ export function embedImageInWorker(
   modelPath: string
 ): Promise<number[]> {
   return new Promise((resolve, reject) => {
+    const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
     const workerScript = findWorkerScript();
     const child = fork(workerScript, [], {
       stdio: ["ignore", "inherit", "pipe", "ipc"],
@@ -101,14 +109,20 @@ export function embedImageInWorker(
       if (msg.type === "ready") {
         child.send({
           type: "embed",
-          modelKind: getActiveEmbeddingModel().kind,
-          modelPath,
           photos: [{ id: 1, path: imagePath }],
         });
       } else if (msg.type === "result" && !resolved) {
         resolved = true;
         clearTimeout(timeout);
         child.kill();
+        if (
+          msg.adapterId !== undefined &&
+          (msg.adapterId !== adapter.adapterId ||
+            msg.fingerprint !== adapter.fingerprint)
+        ) {
+          reject(new Error("Stale image embedding worker result discarded"));
+          return;
+        }
         const result = msg.results?.[0];
         if (result?.vector && result.vector.length > 0) {
           resolve(result.vector);
@@ -144,8 +158,8 @@ export function embedImageInWorker(
 
     child.send({
       type: "init",
-      modelKind: getActiveEmbeddingModel().kind,
-      modelPath,
+      adapter,
+      execution: { provider: "cpu", intraOpNumThreads: 1 },
     });
   });
 }
@@ -319,28 +333,36 @@ const MAX_EMBEDDING_CACHE = 100;
 let embeddingCacheModel: typeof embeddingModel = null;
 
 function getCachedEmbedding(text: string): number[] | null {
-  const entry = textEmbeddingCache.get(text);
+  const key = JSON.stringify({
+    embeddingFingerprint: getActiveEmbeddingFingerprint(),
+    text,
+  });
+  const entry = textEmbeddingCache.get(key);
   if (!entry) {
     return null;
   }
   if (Date.now() - entry.timestamp > EMBEDDING_CACHE_TTL) {
-    textEmbeddingCache.delete(text);
+    textEmbeddingCache.delete(key);
     return null;
   }
-  textEmbeddingCache.delete(text);
-  textEmbeddingCache.set(text, entry);
+  textEmbeddingCache.delete(key);
+  textEmbeddingCache.set(key, entry);
   return entry.vector;
 }
 
 function setCachedEmbedding(text: string, vector: number[]): void {
+  const key = JSON.stringify({
+    embeddingFingerprint: getActiveEmbeddingFingerprint(),
+    text,
+  });
   if (textEmbeddingCache.size >= MAX_EMBEDDING_CACHE) {
     const lru = textEmbeddingCache.keys().next().value;
     if (lru !== undefined) {
       textEmbeddingCache.delete(lru);
     }
   }
-  textEmbeddingCache.delete(text);
-  textEmbeddingCache.set(text, { timestamp: Date.now(), vector });
+  textEmbeddingCache.delete(key);
+  textEmbeddingCache.set(key, { timestamp: Date.now(), vector });
 }
 
 async function embedSearchTexts(
@@ -367,7 +389,7 @@ async function embedSearchTexts(
     const startedAt = Date.now();
     const missingTexts = missing.map(({ text }) => text);
     const batchKey = JSON.stringify({
-      model: getActiveEmbeddingModel().kind,
+      embeddingFingerprint: getActiveEmbeddingFingerprint(),
       texts: missingTexts,
     });
     let generationTask = pendingEmbeddingBatches.get(batchKey);
@@ -472,10 +494,14 @@ async function multiPromptSearch(
   );
   // 灵敏度同时缩放 ANN 候选预过滤阈值——否则 relaxed 档在召回层就丢掉弱匹配。
   const s = getSensitivityMultiplier(sensitivity);
-  const candidateMinimum = Math.max(
-    0.005,
-    (model.scoring.semanticSearch?.candidateMinimumSimilarity ?? 0.02) * s
-  );
+  const thresholdProfile = getActiveThresholdProfile();
+  const candidateMinimum =
+    thresholdProfile.calibrationStatus === "uncalibrated"
+      ? -1
+      : Math.max(
+          0.005,
+          thresholdProfile.semanticSearch.candidateMinimumSimilarity * s
+        );
   const candidateMaxDistance = 1 - candidateMinimum;
   let candidateDepth = Math.min(rowCount, Math.max(200, limit));
 
@@ -683,9 +709,13 @@ export async function searchByTextWithPlan(
 
   const sensitivity = getActiveSearchSensitivity();
   const cacheKey = JSON.stringify({
+    embeddingFingerprint: getActiveEmbeddingFingerprint(),
     limit,
-    model: getActiveEmbeddingModel().kind,
+    queryPlanFingerprint: getSemanticQueryPlanFingerprint(
+      getTranslationModelVersion()
+    ),
     policy: getSemanticPolicyVersion(),
+    thresholdProfile: getThresholdProfileIdentity(),
     query: query.trim(),
     sensitivity,
     strategy: "hybrid-zh-v2",
@@ -788,7 +818,7 @@ async function performTextSearch(
   const parseMs = Date.now() - parseStartedAt;
   const effectiveCacheKey = semanticQueryPlanCacheKey(
     plan,
-    getActiveEmbeddingModel().kind,
+    getActiveEmbeddingFingerprint(),
     limit,
     getTranslationModelVersion(),
     sensitivity

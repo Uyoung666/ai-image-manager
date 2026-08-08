@@ -1,6 +1,21 @@
 // Shared mutable state across AI sub-modules.
 // Centralised here so that split modules can read/write the same singletons.
 
+import type { VectorCompatibility } from "./model-fingerprint";
+import type { CalibrationStatus } from "./threshold-profile";
+
+export interface ActiveEmbeddingRuntime {
+  adapterId: string;
+  calibrationStatus: CalibrationStatus;
+  dimensions: number;
+  displayName: string;
+  fingerprint: string;
+  modelId: string;
+  revision: string;
+  thresholdProfileId: string;
+  vectorCompatibility: VectorCompatibility;
+}
+
 export interface EmbedProgress {
   currentFile: string;
   downloadPercent?: number;
@@ -65,6 +80,7 @@ export let currentProgress: EmbedProgress = {
   currentFile: "",
 };
 export let _localModelPath: string | null = null;
+let activeEmbeddingRuntime: ActiveEmbeddingRuntime | null = null;
 
 export function setVectordb(v: any): void {
   vectordb = v;
@@ -237,4 +253,25 @@ export function setCurrentProgress(p: EmbedProgress): void {
 }
 export function setLocalModelPath(p: string | null): void {
   _localModelPath = p;
+}
+
+export function setActiveEmbeddingRuntime(
+  runtime: ActiveEmbeddingRuntime
+): void {
+  activeEmbeddingRuntime = runtime;
+}
+
+export function getActiveEmbeddingRuntime(): ActiveEmbeddingRuntime | null {
+  return activeEmbeddingRuntime;
+}
+
+export function setVectorCompatibility(
+  compatibility: VectorCompatibility
+): void {
+  if (activeEmbeddingRuntime) {
+    activeEmbeddingRuntime = {
+      ...activeEmbeddingRuntime,
+      vectorCompatibility: compatibility,
+    };
+  }
 }

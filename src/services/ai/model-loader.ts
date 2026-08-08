@@ -6,6 +6,7 @@ import { getDataPath } from "@/utils/data-path";
 import { isSafePath } from "@/utils/path-security";
 import {
   getActiveEmbeddingModel,
+  getActiveEmbeddingRuntimeInfo,
   getEmbeddingModelFile,
   getTranslationModelFile,
 } from "./model-config";
@@ -16,9 +17,11 @@ import {
   aiControlState,
   currentProgress,
   embeddingModel,
+  getActiveEmbeddingRuntime,
   isEmbedding,
   isModelLoaded,
   isPaused,
+  setActiveEmbeddingRuntime,
   setAiControlState,
   setCurrentProgress,
   setEmbeddingModel,
@@ -29,6 +32,7 @@ import {
   setPoolCancelled,
 } from "./state";
 import { embedTextsInWorker, initTextWorker } from "./text-worker-client";
+import { getActiveThresholdProfile } from "./threshold-profile";
 
 async function copyDir(src: string, dest: string): Promise<void> {
   // 验证源路径和目标路径的安全性
@@ -231,6 +235,18 @@ async function initializeModel(): Promise<void> {
   }
 
   const model = getActiveEmbeddingModel();
+  const runtimeInfo = getActiveEmbeddingRuntimeInfo();
+  const thresholdProfile = getActiveThresholdProfile();
+  const existingRuntime = getActiveEmbeddingRuntime();
+  setActiveEmbeddingRuntime({
+    ...runtimeInfo,
+    vectorCompatibility:
+      existingRuntime?.fingerprint === runtimeInfo.fingerprint
+        ? existingRuntime.vectorCompatibility
+        : "empty",
+    thresholdProfileId: thresholdProfile.profileId,
+    calibrationStatus: thresholdProfile.calibrationStatus,
+  });
   await initTextWorker(localModelPath, model.kind);
 
   const embedTexts = (texts: string[]): Promise<number[][]> =>

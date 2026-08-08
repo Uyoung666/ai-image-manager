@@ -3,10 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
-import {
-  type EmbeddingModelKind,
-  getActiveEmbeddingModel,
-} from "@/services/ai/model-config";
+import type { SerializedWorkerAdapter } from "@/services/ai/model-adapter";
+import { getActiveEmbeddingWorkerAdapter } from "@/services/ai/model-config";
 
 interface EmbedResult {
   error?: string;
@@ -52,8 +50,9 @@ const RESPAWN_DELAY_MS = 1000;
 let slots: WorkerSlot[] = [];
 let requestQueue: QueuedRequest[] = [];
 let modelPath: string | null = null;
-let poolModelKind: EmbeddingModelKind = getActiveEmbeddingModel().kind;
+let workerAdapter: SerializedWorkerAdapter | null = null;
 let poolUseGPU = false;
+let poolExecutionProvider: "cpu" | "directml" = "cpu";
 let initialized = false;
 let poolSize = 0;
 let poolBatchSize = DEFAULT_BATCH_SIZE;
@@ -198,9 +197,12 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
     }
   });
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: worker IPC handler keeps progress, lifecycle, and stale-result validation together.
   child.on("message", (msg: unknown) => {
     const message = msg as {
       error?: string;
+      adapterId?: string;
+      fingerprint?: string;
       percent?: number;
       results?: EmbedResult[];
       type?: string;
@@ -236,11 +238,20 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
     }
     if (message.type === "result" && slot.status === "busy") {
       const resolve = slot.pendingResolve;
+      const reject = slot.pendingReject;
       slot.pendingResolve = null;
       slot.pendingReject = null;
       slot.status = "idle";
       slot.consecutiveFailures = 0;
-      resolve?.(message.results ?? []);
+      if (
+        workerAdapter &&
+        (message.adapterId !== workerAdapter.adapterId ||
+          message.fingerprint !== workerAdapter.fingerprint)
+      ) {
+        reject?.(new Error("Stale embedding worker result discarded"));
+      } else {
+        resolve?.(message.results ?? []);
+      }
       drainQueue();
     }
   });
@@ -299,7 +310,11 @@ function handleWorkerDeath(slot: WorkerSlot): void {
     return;
   }
 
-  if (slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES && modelPath) {
+  if (
+    slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES &&
+    modelPath &&
+    workerAdapter
+  ) {
     const generation = slot.generation;
     setTimeout(() => {
       if (
@@ -318,10 +333,11 @@ function handleWorkerDeath(slot: WorkerSlot): void {
       slots[slot.index] = newSlot;
       newSlot.process.send({
         type: "init",
-        modelPath,
-        modelKind: poolModelKind,
-        useGPU: poolUseGPU,
-        intraOpNumThreads: poolIntraOpNumThreads,
+        adapter: workerAdapter,
+        execution: {
+          provider: poolExecutionProvider,
+          intraOpNumThreads: poolIntraOpNumThreads,
+        },
       });
     }, RESPAWN_DELAY_MS);
   } else if (slot.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -373,8 +389,6 @@ function dispatchToSlot(
 
   slot.process.send({
     type: "embed",
-    modelKind: poolModelKind,
-    modelPath,
     photos,
   });
 }
@@ -386,8 +400,11 @@ async function startWorkerPool(
 ): Promise<void> {
   const generation = ++poolGeneration;
   modelPath = mp;
-  poolModelKind = getActiveEmbeddingModel().kind;
+  workerAdapter = getActiveEmbeddingWorkerAdapter(mp);
   poolUseGPU = useGPU;
+  // Current SigLIP v1 vision execution remains CPU-only. The provider is an
+  // adapter concern so a future adapter can opt into DirectML safely.
+  poolExecutionProvider = "cpu";
   slots = [];
   requestQueue = [];
   workerInitProgress.clear();
@@ -434,10 +451,11 @@ async function startWorkerPool(
   for (const slot of slots) {
     slot.process.send({
       type: "init",
-      modelPath,
-      modelKind: poolModelKind,
-      useGPU: poolUseGPU,
-      intraOpNumThreads: poolIntraOpNumThreads,
+      adapter: workerAdapter,
+      execution: {
+        provider: poolExecutionProvider,
+        intraOpNumThreads: poolIntraOpNumThreads,
+      },
     });
   }
 
@@ -470,8 +488,13 @@ async function startWorkerPool(
 
 /** Start the persistent worker pool exactly once for a given configuration. */
 export function initWorkerPool(mp: string, useGPU = false): Promise<void> {
-  const modelKind = getActiveEmbeddingModel().kind;
-  const key = JSON.stringify({ modelKind, mp, useGPU });
+  const adapter = getActiveEmbeddingWorkerAdapter(mp);
+  const key = JSON.stringify({
+    adapterId: adapter.adapterId,
+    fingerprint: adapter.fingerprint,
+    modelRoot: adapter.modelRoot,
+    executionProvider: "cpu",
+  });
 
   if (
     initialized &&

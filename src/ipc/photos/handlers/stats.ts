@@ -22,7 +22,7 @@ import {
   photoSequenceMembers,
   photos,
 } from "@/db/schema";
-import { getActiveEmbeddingModel } from "@/services/ai/model-config";
+import { getDuplicateThreshold } from "@/services/ai/threshold-profile";
 import { getPhotoVectors } from "@/services/ai-embedder";
 import { BKTree } from "@/services/bk-tree";
 import {
@@ -1324,8 +1324,7 @@ export const findDuplicates = os
     }
 
     const confirmedPairs: CandidatePair[] = [];
-    const duplicateConfirmationSimilarity =
-      getActiveEmbeddingModel().scoring.duplicateConfirmationSimilarity;
+    const duplicateConfirmationSimilarity = getDuplicateThreshold();
 
     for (const c of candidates) {
       if (c.matchType === "exact") {

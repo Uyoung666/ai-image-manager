@@ -5,10 +5,12 @@ import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import { type AiCoverageState, deriveAiCoverageState } from "./coverage";
+import type { VectorCompatibility } from "./model-fingerprint";
 import { loadModel } from "./model-loader";
 import {
   currentProgress,
   embeddingModel,
+  getActiveEmbeddingRuntime,
   isEmbedding,
   isModelLoaded,
   photoTable,
@@ -23,17 +25,24 @@ import {
 import { initVectorDB } from "./vector-db";
 
 export interface AiHealthStatus {
+  embeddingAdapterId?: string;
+  embeddingFingerprint?: string;
   lancedb: "ok" | "error";
   lancedbDetail: string;
   overall: "healthy" | "degraded" | "unhealthy";
   textModel: "ok" | "not_loaded" | "error";
+  thresholdCalibrationStatus?: string;
+  thresholdProfileId?: string;
   translationState: TranslationState;
+  vectorCompatibility?: VectorCompatibility;
   vectorIndex: "ok" | "missing" | "error";
   vectorTable: "ok" | "missing" | "error";
   vectorTableRows: number;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: health probing keeps database, model, and readiness checks together.
 export async function checkAiHealth(): Promise<AiHealthStatus> {
+  const runtime = getActiveEmbeddingRuntime();
   const status: AiHealthStatus = {
     lancedb: "error",
     lancedbDetail: "",
@@ -44,6 +53,13 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     translationState: getTranslationState(),
     overall: "unhealthy",
   };
+  if (runtime) {
+    status.embeddingAdapterId = runtime.adapterId;
+    status.embeddingFingerprint = runtime.fingerprint;
+    status.vectorCompatibility = runtime.vectorCompatibility;
+    status.thresholdProfileId = runtime.thresholdProfileId;
+    status.thresholdCalibrationStatus = runtime.calibrationStatus;
+  }
 
   try {
     if (!vectordb) {
@@ -122,7 +138,11 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     status.vectorTableRows > 1 &&
     (status.vectorIndex === "ok" ||
       status.vectorTableRows < MIN_VECTORS_FOR_INDEX) &&
-    status.textModel === "ok"
+    status.textModel === "ok" &&
+    (!status.vectorCompatibility ||
+      status.vectorCompatibility === "matching" ||
+      status.vectorCompatibility === "legacy-compatible" ||
+      status.vectorCompatibility === "empty")
   ) {
     status.overall = "healthy";
   } else if (

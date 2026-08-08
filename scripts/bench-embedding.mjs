@@ -14,6 +14,36 @@ const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const workerScript = path.join(repoRoot, "scripts", "embed-worker.mjs");
 const modelPath = path.join(repoRoot, "models");
+const adapter = {
+  protocolVersion: 1,
+  adapterId: "siglip-v1-base-patch16-224",
+  fingerprint:
+    "ed62a65ceff237b5aa9f1267ccd058710f76be5781b3c739ccfa15bf764f6297",
+  modelRoot: modelPath,
+  modelId: "Xenova/siglip-base-patch16-224",
+  image: {
+    modelRelativePath:
+      "Xenova/siglip-base-patch16-224/onnx/vision_model_quantized.onnx",
+    inputName: "pixel_values",
+    outputName: "pooler_output",
+    dimensions: 768,
+    imageSize: 224,
+    resizeFit: "fill",
+    mean: [0.5, 0.5, 0.5],
+    std: [0.5, 0.5, 0.5],
+  },
+  text: {
+    engine: "transformers-js",
+    modelRelativePath:
+      "Xenova/siglip-base-patch16-224/onnx/text_model_quantized.onnx",
+    tokenizerRelativePath: "Xenova/siglip-base-patch16-224/tokenizer.json",
+    outputName: "pooler_output",
+    dimensions: 768,
+    maxLength: 64,
+    padding: "max_length",
+  },
+  normalization: "l2",
+};
 const defaultInput = "D:\\8806\\ai-image-manager测试用例";
 const inputPath = path.resolve(process.argv[2] || defaultInput);
 const count = Math.max(1, Number.parseInt(process.argv[3] || "12", 10) || 12);
@@ -67,7 +97,7 @@ function runWorker(photos, intraOpNumThreads) {
       if (msg.type === "ready") {
         initMs = performance.now() - initStartedAt;
         embedStartedAt = performance.now();
-        child.send({ type: "embed", modelPath, modelKind: "siglip", photos });
+        child.send({ type: "embed", photos });
         return;
       }
       if (msg.type === "init-error") {
@@ -109,10 +139,8 @@ function runWorker(photos, intraOpNumThreads) {
 
     child.send({
       type: "init",
-      modelKind: "siglip",
-      modelPath,
-      intraOpNumThreads,
-      useGPU: false,
+      adapter,
+      execution: { provider: "cpu", intraOpNumThreads },
     });
   });
 }

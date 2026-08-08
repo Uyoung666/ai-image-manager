@@ -3,14 +3,29 @@ import {
   getActiveEmbeddingModel,
   getSemanticPolicyVersion,
 } from "./model-config";
+import { sha256Canonical } from "./model-fingerprint";
 import {
   generateSearchPrompts,
   getQueryCoverage,
   parseChineseQuery,
 } from "./query-parser";
+import { getThresholdProfileIdentity } from "./threshold-profile";
 import { translateChineseToEnglish } from "./translation-worker-client";
 
 export const SEMANTIC_QUERY_PLAN_VERSION = 4;
+
+export function getSemanticQueryPlanFingerprint(
+  translationModelVersion = "unknown"
+): string {
+  return sha256Canonical({
+    schemaVersion: 1,
+    translationModelVersion,
+    promptTemplateVersion: SEMANTIC_QUERY_PLAN_VERSION,
+    chineseStrategy:
+      process.env.AI_ZH_QUERY_STRATEGY?.trim().toLowerCase() || "hybrid-zh-v2",
+    semanticPolicyVersion: getSemanticPolicyVersion(),
+  });
+}
 
 const CJK_RE = /[一-鿿]/;
 const LATIN_RE = /[A-Za-z]/;
@@ -445,16 +460,20 @@ export function semanticQueryPlanCacheKey(
   sensitivity = "standard"
 ): string {
   return JSON.stringify({
+    embeddingFingerprint: modelKind,
     limit,
-    modelKind,
     negativePrompts: plan.negativePrompts,
     normalizedQuery: plan.normalizedQuery,
     prompts: plan.prompts,
     policy: getSemanticPolicyVersion(),
+    queryPlanFingerprint: getSemanticQueryPlanFingerprint(
+      translationModelVersion
+    ),
     sensitivity,
     strategy: "hybrid-zh-v2",
     translationModelVersion,
     translationMode: plan.translationMode,
+    thresholdProfile: getThresholdProfileIdentity(),
     version: plan.version,
   });
 }

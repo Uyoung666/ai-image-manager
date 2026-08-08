@@ -1,12 +1,15 @@
 import {
   type EmbeddingModelConfig,
-  type EmbeddingModelKind,
   getSemanticPolicyVersion,
 } from "./model-config";
 import type {
   SemanticEvidenceGroup,
   SemanticQueryIntent,
 } from "./semantic-query-plan";
+import {
+  getActiveThresholdProfile,
+  type ThresholdProfile,
+} from "./threshold-profile";
 
 export interface TagScore<TCategory extends string = string> {
   category: TCategory;
@@ -39,10 +42,13 @@ function median(values: number[]): number {
 function selectSiglipTags<TCategory extends string>(
   scores: TagScore<TCategory>[],
   maxTags: number,
-  model: EmbeddingModelConfig
+  _model: EmbeddingModelConfig
 ): SelectedTag<TCategory>[] {
-  const policy = model.scoring.tag;
-  if (!(policy && scores.length > 0)) {
+  const policy = getActiveThresholdProfile().tag;
+  if (
+    getActiveThresholdProfile().calibrationStatus === "uncalibrated" ||
+    !(policy && scores.length > 0)
+  ) {
     return [];
   }
 
@@ -108,10 +114,10 @@ export function isValidEmbeddingVector(
 }
 
 export function getTagEmbeddingCacheKey(
-  modelKind: EmbeddingModelKind,
+  embeddingFingerprint: string,
   promptVersion: number
 ): string {
-  return `${modelKind}:tags-v${promptVersion}`;
+  return `${embeddingFingerprint}:tags-v${promptVersion}`;
 }
 
 export function filterCosineSearchResults(
@@ -357,7 +363,7 @@ export function calculateScoreGapCutoff(
 
 function selectLegacySemanticResults(
   results: FusedRankedSearchResult[],
-  policy: NonNullable<EmbeddingModelConfig["scoring"]["semanticSearch"]>,
+  policy: ThresholdProfile["semanticSearch"],
   promptGroupCount: number,
   limit: number,
   options: SemanticRelevanceOptions
@@ -455,7 +461,7 @@ function hasIndependentSupport(result: FusedRankedSearchResult): boolean {
 
 function selectV2SemanticResults(
   results: FusedRankedSearchResult[],
-  policy: NonNullable<EmbeddingModelConfig["scoring"]["semanticSearch"]>,
+  policy: ThresholdProfile["semanticSearch"],
   limit: number,
   options: SemanticRelevanceOptions
 ): SemanticRelevanceSelection {
@@ -541,13 +547,13 @@ function selectV2SemanticResults(
 
 export function selectRelevantSemanticResults(
   results: FusedRankedSearchResult[],
-  model: EmbeddingModelConfig,
+  _model: EmbeddingModelConfig,
   promptGroupCount: number,
   limit: number,
   options: SemanticRelevanceOptions = {}
 ): SemanticRelevanceSelection {
-  const policy = model.scoring.semanticSearch;
-  if (!(policy && results.length > 0)) {
+  const policy = getActiveThresholdProfile().semanticSearch;
+  if (results.length === 0) {
     return {
       acceptedCount: results.length,
       candidateMinimum: Number.NEGATIVE_INFINITY,
@@ -564,6 +570,26 @@ export function selectRelevantSemanticResults(
       strongCutoff: Number.NEGATIVE_INFINITY,
       supportedAccepted: 0,
       topSimilarity: results[0]?.similarity ?? 0,
+    };
+  }
+
+  if (getActiveThresholdProfile().calibrationStatus === "uncalibrated") {
+    return {
+      acceptedCount: results.length,
+      candidateMinimum: Number.NEGATIVE_INFINITY,
+      canContinue: false,
+      consensusCutoff: Number.NEGATIVE_INFINITY,
+      cutoffReason: "uncalibrated",
+      finalCutoff: Number.NEGATIVE_INFINITY,
+      hasMoreCandidates: false,
+      rejectedWeak: 0,
+      results: results.slice(0, limit),
+      supportCandidates: results.slice(0, limit),
+      supportCutoff: Number.NEGATIVE_INFINITY,
+      strongAccepted: 0,
+      strongCutoff: Number.NEGATIVE_INFINITY,
+      supportedAccepted: 0,
+      topSimilarity: Math.max(...results.map((result) => result.similarity)),
     };
   }
 
