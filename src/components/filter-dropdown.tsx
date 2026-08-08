@@ -1,8 +1,16 @@
-import { ChevronDown } from "lucide-react";
-import { type KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "@/utils/tailwind";
 
 export interface FilterDropdownOption {
+  color?: string;
   label: string;
   value: string;
 }
@@ -19,6 +27,8 @@ export function FilterDropdown({
   onChange,
   options,
   placeholder,
+  showOptionColors = false,
+  showSelectedCheck = false,
   value,
 }: {
   ariaLabel?: string;
@@ -29,12 +39,18 @@ export function FilterDropdown({
   onChange: (value: string) => void;
   options: FilterDropdownOption[];
   placeholder: string;
+  showOptionColors?: boolean;
+  showSelectedCheck?: boolean;
   value: string;
 }) {
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const pointerDownStateRef = useRef<{
+    wasFocused: boolean;
+    wasOpen: boolean;
+  } | null>(null);
   const visibleOptions = useMemo(() => {
     if (!(editable && value.trim())) {
       return options;
@@ -47,6 +63,7 @@ export function FilterDropdown({
   const displayValue = editable
     ? value
     : (options.find((option) => option.value === value)?.label ?? "");
+  const selectedOption = options.find((option) => option.value === value);
   const selectedIndex = visibleOptions.findIndex(
     (option) => option.value === value
   );
@@ -149,6 +166,13 @@ export function FilterDropdown({
 
   return (
     <div className="relative">
+      {showOptionColors && selectedOption?.color && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full"
+          style={{ backgroundColor: selectedOption.color }}
+        />
+      )}
       <input
         aria-activedescendant={
           open && activeIndex >= 0
@@ -164,6 +188,7 @@ export function FilterDropdown({
         className={cn(
           FILTER_DROPDOWN_CLASS_NAME,
           className,
+          showOptionColors && selectedOption?.color && "pl-7",
           !editable && "cursor-pointer pr-7",
           disabled && "cursor-not-allowed opacity-50"
         )}
@@ -176,9 +201,34 @@ export function FilterDropdown({
           }
           setOpen(true);
         }}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          const pointerDownState = pointerDownStateRef.current;
+          pointerDownStateRef.current = null;
+
+          // A real click focuses the input before firing click. In that case
+          // focus already opened a closed dropdown, so the first click should
+          // remain open; subsequent clicks toggle it normally.
+          if (
+            pointerDownState &&
+            !pointerDownState.wasOpen &&
+            !pointerDownState.wasFocused
+          ) {
+            return;
+          }
+
+          setOpen((previous) => !previous);
+        }}
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
+        onMouseDown={(event) => {
+          if (event.button !== 0) {
+            return;
+          }
+          pointerDownStateRef.current = {
+            wasFocused: document.activeElement === event.currentTarget,
+            wasOpen: open,
+          };
+        }}
         placeholder={placeholder}
         readOnly={!editable}
         role="combobox"
@@ -200,7 +250,7 @@ export function FilterDropdown({
             <button
               aria-selected={option.value === value}
               className={cn(
-                "flex w-full items-center truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5",
+                "flex w-full items-center justify-between truncate px-2.5 py-1.5 text-left text-[12px] text-foreground hover:bg-foreground/5",
                 option.value === value && "bg-foreground/5",
                 index === activeIndex && "bg-foreground/10"
               )}
@@ -214,7 +264,22 @@ export function FilterDropdown({
               role="option"
               type="button"
             >
-              {option.label}
+              <span className="flex min-w-0 items-center gap-2 truncate">
+                {showOptionColors && option.color && (
+                  <span
+                    aria-hidden="true"
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: option.color }}
+                  />
+                )}
+                <span className="truncate">{option.label}</span>
+              </span>
+              {showSelectedCheck && option.value === value && (
+                <Check
+                  aria-hidden="true"
+                  className="ml-2 h-3.5 w-3.5 shrink-0 text-foreground"
+                />
+              )}
             </button>
           ))}
         </div>

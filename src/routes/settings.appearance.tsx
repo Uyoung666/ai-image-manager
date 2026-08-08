@@ -1,8 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  applyAccentColor,
+  cacheAccentColor,
+  getAccentColorPreference,
+  getCurrentAccentTheme,
+  readCachedAccentColor,
+  setAccentColorPreference,
+} from "@/actions/accent-color";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { setZoomFactor } from "@/actions/window";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import LangToggle from "@/components/lang-toggle";
 import { SettingRow } from "@/components/settings/setting-row";
 import {
@@ -18,6 +27,12 @@ import {
 } from "@/components/ui/tooltip";
 import { useUiPreferences } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
+import {
+  type AccentColor,
+  type AccentTheme,
+  getAccentColorOptions,
+  parseAccentColor,
+} from "@/types/accent-color";
 import { cn } from "@/utils/tailwind";
 
 const UI_SCALE_OPTIONS = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
@@ -122,15 +137,53 @@ function SensitivityControl({
   );
 }
 
+function AccentColorControl({
+  onChange,
+  theme,
+  value,
+}: {
+  onChange: (value: AccentColor) => void;
+  theme: AccentTheme;
+  value: AccentColor;
+}) {
+  const { t } = useTranslation();
+  return (
+    <FilterDropdown
+      ariaLabel={t("settingsAccentColor")}
+      className="w-[132px]"
+      onChange={(nextValue) => onChange(nextValue as AccentColor)}
+      options={getAccentColorOptions(theme).map((option) => ({
+        color: option.color,
+        label: t(option.labelKey),
+        value: option.value,
+      }))}
+      placeholder={t("settingsAccentColor")}
+      showOptionColors
+      showSelectedCheck
+      value={value}
+    />
+  );
+}
+
 function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const { reduceMotion, setReduceMotion } = useUiPreferences();
+  const [accentColor, setAccentColor] = useState<AccentColor>(
+    readCachedAccentColor
+  );
+  const [accentTheme, setAccentTheme] = useState<AccentTheme>(
+    getCurrentAccentTheme
+  );
   const [uiScale, setUiScale] = useState(1);
   const [searchSensitivity, setSearchSensitivity] = useState("standard");
 
   useEffect(() => {
     getCurrentTheme().then(setThemeMode);
+    setAccentTheme(getCurrentAccentTheme());
+    getAccentColorPreference()
+      .then(setAccentColor)
+      .catch(() => undefined);
 
     ipc.client.settings
       .getAppSetting({ key: "ui.zoomScale" })
@@ -166,6 +219,31 @@ function AppearanceSettingsPage() {
       .catch(() => setUiScale(previous));
   }
 
+  function onAccentColorChange(nextColor: AccentColor) {
+    const previous = accentColor;
+    setAccentColor(nextColor);
+    applyAccentColor(nextColor);
+    cacheAccentColor(nextColor);
+    setAccentColorPreference(nextColor).catch(() => {
+      setAccentColor(previous);
+      applyAccentColor(previous);
+      cacheAccentColor(previous);
+    });
+  }
+
+  function onThemeChange(nextTheme: ThemeMode) {
+    setThemeMode(nextTheme);
+    const nextAccentTheme = getCurrentAccentTheme();
+    setAccentTheme(nextAccentTheme);
+    const nextAccentColor = parseAccentColor(accentColor, nextAccentTheme);
+    if (nextAccentColor !== accentColor) {
+      setAccentColor(nextAccentColor);
+      applyAccentColor(nextAccentColor);
+      cacheAccentColor(nextAccentColor);
+      setAccentColorPreference(nextAccentColor).catch(() => undefined);
+    }
+  }
+
   function onSensitivityChange(preset: string) {
     const previous = searchSensitivity;
     setSearchSensitivity(preset);
@@ -192,7 +270,18 @@ function AppearanceSettingsPage() {
     >
       <SettingsSection>
         <SettingRow
-          action={<ToggleTheme onChange={setThemeMode} />}
+          action={
+            <AccentColorControl
+              onChange={onAccentColorChange}
+              theme={accentTheme}
+              value={accentColor}
+            />
+          }
+          description={t("settingsAccentColorHint")}
+          title={t("settingsAccentColor")}
+        />
+        <SettingRow
+          action={<ToggleTheme onChange={onThemeChange} />}
           description={themeDescription}
           title={t("settingsTheme")}
         />

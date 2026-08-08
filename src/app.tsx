@@ -3,6 +3,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
+import {
+  applyAccentColor,
+  cacheAccentColor,
+  setAccentColorPreference,
+} from "./actions/accent-color";
 import { updateAppLanguage } from "./actions/language";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
 import { installDownloadedUpdate } from "./actions/update";
@@ -25,7 +30,14 @@ export default function App() {
   useEffect(() => {
     ipc.client.settings
       .getAppPreferences({})
-      .then((preferences) => setUpdateReminder(preferences.updateReminder))
+      .then((preferences) => {
+        const accentColor = applyAccentColor(preferences.accentColor);
+        cacheAccentColor(accentColor);
+        if (accentColor !== preferences.accentColor) {
+          setAccentColorPreference(accentColor).catch(() => undefined);
+        }
+        setUpdateReminder(preferences.updateReminder);
+      })
       .catch(() => undefined);
     function handleReminder(event: Event) {
       setUpdateReminder((event as CustomEvent<boolean>).detail === true);

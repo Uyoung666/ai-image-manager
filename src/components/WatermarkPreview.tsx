@@ -12,6 +12,17 @@ import { useTranslation } from "react-i18next";
 let cachedSampleImg: HTMLImageElement | null = null;
 let cachedSampleImgPath = "";
 
+function colorWithAlpha(color: string, alpha: number) {
+  const hex = color.startsWith("#") ? color.slice(1) : color;
+  if (hex.length !== 6) {
+    return color;
+  }
+  const channels = [0, 2, 4].map((offset) =>
+    Number.parseInt(hex.slice(offset, offset + 2), 16)
+  );
+  return `rgba(${channels.join(",")},${alpha})`;
+}
+
 export type WmAnchor =
   | "topLeft"
   | "topCenter"
@@ -226,6 +237,9 @@ export function WatermarkPreview({
     if (!ctx) {
       return;
     }
+    const primaryColor =
+      getComputedStyle(canvas).getPropertyValue("--primary").trim() ||
+      "#3a83f7";
 
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
@@ -346,7 +360,7 @@ export function WatermarkPreview({
 
     // Reference lines while dragging
     if (dragging) {
-      ctx.strokeStyle = "rgba(94,106,210,0.3)";
+      ctx.strokeStyle = colorWithAlpha(primaryColor, 0.3);
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -365,7 +379,7 @@ export function WatermarkPreview({
       ctx.drawImage(activeWmImg, wmX, wmY, wmW, wmH);
       ctx.globalAlpha = 1;
       if (dragging) {
-        ctx.strokeStyle = "rgba(94,106,210,0.8)";
+        ctx.strokeStyle = colorWithAlpha(primaryColor, 0.8);
         ctx.lineWidth = 1.5;
         ctx.strokeRect(wmX, wmY, wmW, wmH);
       }
@@ -381,7 +395,7 @@ export function WatermarkPreview({
 
       ctx.globalAlpha = dragging ? 0.6 : 0.12;
       ctx.strokeStyle = dragging
-        ? "rgba(94,106,210,0.8)"
+        ? colorWithAlpha(primaryColor, 0.8)
         : "rgba(255,255,255,0.3)";
       ctx.lineWidth = 1;
       ctx.strokeRect(wmX, wmY, wmW, wmH);
@@ -389,7 +403,7 @@ export function WatermarkPreview({
 
     // Draw anchor point dot
     ctx.globalAlpha = 1;
-    ctx.fillStyle = "rgba(94,106,210,0.6)";
+    ctx.fillStyle = colorWithAlpha(primaryColor, 0.6);
     ctx.beginPath();
     ctx.arc(ax, ay, 3, 0, Math.PI * 2);
     ctx.fill();

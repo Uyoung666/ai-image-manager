@@ -16,9 +16,32 @@
             : "light";
         }
         document.documentElement.classList.add(theme);
+        const accentColors = [
+          "blue",
+          "green",
+          "yellow",
+          "pink",
+          "orange",
+          "purple",
+        ];
+        const themeAccentColor = document.documentElement.classList.contains(
+          "light"
+        )
+          ? "black"
+          : "default";
+        accentColors.push(themeAccentColor);
+        const storedAccentColor = localStorage.getItem("ui.accentColor");
+        const accentColor = accentColors.includes(storedAccentColor || "")
+          ? storedAccentColor
+          : "blue";
+        document.documentElement.dataset.accentColor = accentColor;
+        if (storedAccentColor !== accentColor) {
+          localStorage.setItem("ui.accentColor", accentColor);
+        }
         document.documentElement.dataset.reducedMotion =
           localStorage.getItem("ui.reduceMotion") === "true" ? "true" : "false";
       } catch {
+        document.documentElement.dataset.accentColor = "blue";
         document.documentElement.dataset.reducedMotion = "false";
         // localStorage 不可用时静默忽略
       }

@@ -1208,7 +1208,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("dateFrom") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("dateFrom", e.target.value);
@@ -1226,7 +1226,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("dateTo") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("dateTo", e.target.value);
@@ -1255,7 +1255,7 @@ export const SearchBar = memo(
                       className={cn(
                         filterDropdownClass,
                         drillOriginFilters.has("dateMonth") &&
-                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          "border-primary bg-primary/10 dark:bg-primary/20"
                       )}
                       id="search-date-month"
                       onChange={(value) => {
@@ -1293,7 +1293,7 @@ export const SearchBar = memo(
                       className={cn(
                         filterDropdownClass,
                         drillOriginFilters.has("dateHour") &&
-                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          "border-primary bg-primary/10 dark:bg-primary/20"
                       )}
                       id="search-date-hour"
                       onChange={(value) => {
@@ -1334,7 +1334,7 @@ export const SearchBar = memo(
                       className={cn(
                         filterDropdownClass,
                         drillOriginFilters.has("cameraModel") &&
-                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          "border-primary bg-primary/10 dark:bg-primary/20"
                       )}
                       editable
                       id="search-camera-model"
@@ -1368,7 +1368,7 @@ export const SearchBar = memo(
                       className={cn(
                         filterDropdownClass,
                         drillOriginFilters.has("lensModel") &&
-                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          "border-primary bg-primary/10 dark:bg-primary/20"
                       )}
                       editable
                       id="search-lens-model"
@@ -1402,7 +1402,7 @@ export const SearchBar = memo(
                       className={cn(
                         filterDropdownClass,
                         drillOriginFilters.has("creator") &&
-                          "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          "border-primary bg-primary/10 dark:bg-primary/20"
                       )}
                       editable
                       id="search-creator"
@@ -1483,7 +1483,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("isoMin") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("isoMin", e.target.value);
@@ -1501,7 +1501,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("isoMax") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("isoMax", e.target.value);
@@ -1542,7 +1542,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("apertureMin") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         min="0.7"
                         onChange={(e) => {
@@ -1564,7 +1564,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("apertureMax") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         min="0.7"
                         onChange={(e) => {
@@ -1609,7 +1609,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("focalMin") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("focalMin", e.target.value);
@@ -1629,7 +1629,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("focalMax") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("focalMax", e.target.value);
@@ -1672,7 +1672,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("shutterMin") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("shutterMin", e.target.value);
@@ -1690,7 +1690,7 @@ export const SearchBar = memo(
                         className={cn(
                           filterInputClass,
                           drillOriginFilters.has("shutterMax") &&
-                            "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            "border-primary bg-primary/10 dark:bg-primary/20"
                         )}
                         onChange={(e) => {
                           updateFilter("shutterMax", e.target.value);

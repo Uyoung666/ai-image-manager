@@ -599,6 +599,16 @@ i18n.use(initReactI18next).init({
         sequencePHashDistanceHint:
           "控制相邻照片需要多相似才会归为同一序列。数值越小，要求画面越相似。",
         settingsTheme: "主题",
+        settingsAccentColor: "强调色",
+        settingsAccentColorHint: "调整选中态、按钮和界面交互反馈的颜色",
+        accentColorDefault: "默认",
+        accentColorBlue: "蓝色",
+        accentColorGreen: "绿色",
+        accentColorYellow: "黄色",
+        accentColorPink: "粉色",
+        accentColorOrange: "橙色",
+        accentColorPurple: "紫色",
+        accentColorBlack: "黑色",
         settingsUiScale: "界面缩放",
         settingsUiScaleHint:
           "整体缩放应用界面；Windows 显示缩放设置较大时可调小以增大可用空间",
@@ -2479,6 +2489,17 @@ i18n.use(initReactI18next).init({
         sequencePHashDistanceHint:
           "Controls how similar adjacent photos must look. Lower values require more similar frames.",
         settingsTheme: "Theme",
+        settingsAccentColor: "Accent color",
+        settingsAccentColorHint:
+          "Adjust the color used for selections, buttons, and interaction feedback",
+        accentColorDefault: "Default",
+        accentColorBlue: "Blue",
+        accentColorGreen: "Green",
+        accentColorYellow: "Yellow",
+        accentColorPink: "Pink",
+        accentColorOrange: "Orange",
+        accentColorPurple: "Purple",
+        accentColorBlack: "Black",
         settingsUiScale: "UI scale",
         settingsUiScaleHint:
           "Scale the whole app interface. Lower it when Windows display scaling is set high to reclaim screen space.",

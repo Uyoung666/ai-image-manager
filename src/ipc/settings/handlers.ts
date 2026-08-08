@@ -10,6 +10,7 @@ import {
   getSetting,
   setSetting,
 } from "@/services/settings-manager";
+import { parseAccentColor } from "@/types/accent-color";
 import {
   APP_PREFERENCE_DEFAULTS,
   APP_PREFERENCE_KEYS,
@@ -90,6 +91,7 @@ export const getAllAppSettings = os
 
 export const getAppPreferences = os.handler(
   (): AppPreferences => ({
+    accentColor: parseAccentColor(getSetting(APP_PREFERENCE_KEYS.accentColor)),
     closeBehavior: parseCloseBehavior(
       getSetting(APP_PREFERENCE_KEYS.closeBehavior)
     ),
@@ -116,6 +118,7 @@ export const setAppPreference = os
   .input(
     z.object({
       key: z.enum([
+        APP_PREFERENCE_KEYS.accentColor,
         APP_PREFERENCE_KEYS.closeBehavior,
         APP_PREFERENCE_KEYS.reduceMotion,
         APP_PREFERENCE_KEYS.rememberBounds,
@@ -126,7 +129,9 @@ export const setAppPreference = os
     })
   )
   .handler(async ({ input }) => {
-    if (input.key === APP_PREFERENCE_KEYS.closeBehavior) {
+    if (input.key === APP_PREFERENCE_KEYS.accentColor) {
+      setSetting(input.key, parseAccentColor(input.value));
+    } else if (input.key === APP_PREFERENCE_KEYS.closeBehavior) {
       setSetting(input.key, parseCloseBehavior(input.value));
     } else if (input.key === APP_PREFERENCE_KEYS.reduceMotion) {
       setSetting(

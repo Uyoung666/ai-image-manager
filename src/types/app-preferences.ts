@@ -1,6 +1,13 @@
+import {
+  ACCENT_COLOR_KEY,
+  type AccentColor,
+  DEFAULT_ACCENT_COLOR,
+} from "@/types/accent-color";
+
 export type CloseBehavior = "tray" | "quit" | "ask";
 
 export interface AppPreferences {
+  accentColor: AccentColor;
   closeBehavior: CloseBehavior;
   reduceMotion: boolean;
   rememberBounds: boolean;
@@ -9,6 +16,7 @@ export interface AppPreferences {
 }
 
 export const APP_PREFERENCE_DEFAULTS: AppPreferences = {
+  accentColor: DEFAULT_ACCENT_COLOR,
   closeBehavior: "tray",
   reduceMotion: false,
   rememberBounds: false,
@@ -17,6 +25,7 @@ export const APP_PREFERENCE_DEFAULTS: AppPreferences = {
 };
 
 export const APP_PREFERENCE_KEYS = {
+  accentColor: ACCENT_COLOR_KEY,
   closeBehavior: "window.closeBehavior",
   reduceMotion: "ui.reduceMotion",
   rememberBounds: "window.rememberBounds",

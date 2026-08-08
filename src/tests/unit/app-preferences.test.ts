@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { parseAccentColor } from "@/types/accent-color";
 import {
   APP_PREFERENCE_DEFAULTS,
+  APP_PREFERENCE_KEYS,
   parseBooleanPreference,
   parseCloseBehavior,
 } from "@/types/app-preferences";
@@ -8,6 +10,7 @@ import {
 describe("app preference defaults and validation", () => {
   it("keeps the product defaults stable", () => {
     expect(APP_PREFERENCE_DEFAULTS).toEqual({
+      accentColor: "blue",
       closeBehavior: "tray",
       reduceMotion: false,
       rememberBounds: false,
@@ -22,6 +25,8 @@ describe("app preference defaults and validation", () => {
     expect(parseCloseBehavior("tray")).toBe("tray");
     expect(parseCloseBehavior("quit")).toBe("quit");
     expect(parseCloseBehavior("ask")).toBe("ask");
+    expect(parseAccentColor("pink")).toBe("pink");
+    expect(APP_PREFERENCE_KEYS.accentColor).toBe("ui.accentColor");
   });
 
   it("falls back when persisted values are invalid", () => {
@@ -29,5 +34,7 @@ describe("app preference defaults and validation", () => {
     expect(parseBooleanPreference("no", false)).toBe(false);
     expect(parseCloseBehavior("minimize")).toBe("tray");
     expect(parseCloseBehavior(null)).toBe("tray");
+    expect(parseAccentColor("indigo")).toBe("blue");
+    expect(parseAccentColor(null)).toBe("blue");
   });
 });

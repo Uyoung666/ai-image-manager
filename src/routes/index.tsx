@@ -2602,15 +2602,15 @@ function HomePage() {
             )}
           {/* Drill-down banner */}
           {showDrillBanner && (
-            <div className="flex items-center justify-between border-blue-200 border-b bg-blue-50 px-4 py-2 dark:border-blue-800 dark:bg-blue-900/20">
+            <div className="flex items-center justify-between border-primary/20 border-b bg-primary/10 px-4 py-2 dark:border-primary/40 dark:bg-primary/20">
               <div className="flex items-center gap-2">
-                <span className="text-blue-900 text-sm dark:text-blue-100">
+                <span className="text-primary text-sm">
                   {t("drillDownActiveHint")}
                 </span>
               </div>
               <div className="flex gap-2">
                 <button
-                  className="rounded-[4px] px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-800"
+                  className="rounded-[4px] px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
                   onClick={() => {
                     filter.setSearchDraftFilters({});
                     filter.clearSearch();
@@ -2629,7 +2629,7 @@ function HomePage() {
                         ? "backToPlacesAndColors"
                         : "backToDashboard"
                     )}
-                    className="rounded-[4px] border border-blue-300 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-800"
+                    className="rounded-[4px] border border-primary/40 px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
                     onClick={() =>
                       navigate({
                         to: "/dashboard",

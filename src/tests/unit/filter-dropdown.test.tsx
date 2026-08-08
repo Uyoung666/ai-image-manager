@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -56,6 +57,29 @@ describe("FilterDropdown", () => {
     expect(input).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("closes when the already-open input is clicked again", async () => {
+    const user = userEvent.setup();
+    renderDropdown();
+    const input = screen.getByRole("combobox");
+
+    await user.click(input);
+    expect(input).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(input);
+    expect(input).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens on focus and still closes with Escape", () => {
+    renderDropdown();
+    const input = screen.getByRole("combobox");
+
+    fireEvent.focus(input);
+    expect(input).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("supports keyboard navigation, Home/End, Enter and Escape", () => {
     const onChange = vi.fn();
     renderDropdown({ onChange });
@@ -101,5 +125,32 @@ describe("FilterDropdown", () => {
     expect(
       screen.queryByRole("option", { name: "First option" })
     ).not.toBeInTheDocument();
+  });
+
+  it("renders optional color swatches and a selected check", () => {
+    renderDropdown({
+      options: [
+        { color: "#B4B4B4", label: "Default", value: "default" },
+        { color: "#F077AF", label: "Pink", value: "pink" },
+      ],
+      showOptionColors: true,
+      showSelectedCheck: true,
+      value: "pink",
+    });
+
+    fireEvent.click(screen.getByRole("combobox"));
+
+    expect(screen.getByRole("option", { name: "Pink" })).toHaveTextContent(
+      "Pink"
+    );
+    expect(screen.getByRole("option", { name: "Pink" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(
+      screen
+        .getByRole("option", { name: "Pink" })
+        .querySelector('[aria-hidden="true"]')
+    ).toBeInTheDocument();
   });
 });
