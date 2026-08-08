@@ -11,9 +11,17 @@ const { updateFolderAppearanceMock, useAiStatusMock } = vi.hoisted(() => ({
 vi.mock("@/ipc/manager", () => ({
   ipc: {
     client: {
+      app: {
+        getUpdateStatus: vi.fn().mockResolvedValue({ phase: "idle" }),
+      },
       photos: {
         getTags: vi.fn(() => new Promise(() => undefined)),
         updateFolderAppearance: updateFolderAppearanceMock,
+      },
+      settings: {
+        getAppPreferences: vi.fn().mockResolvedValue({
+          updateReminder: false,
+        }),
       },
     },
   },

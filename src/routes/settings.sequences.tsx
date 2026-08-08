@@ -2,6 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingRow } from "@/components/settings/setting-row";
+import {
+  SettingsPageShell,
+  SettingsSection,
+} from "@/components/settings/settings-page-shell";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -190,96 +194,90 @@ function SequenceSettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
-      <section className="mx-auto w-full max-w-[820px] space-y-3">
-        <div>
-          <h2 className="font-semibold text-[14px] text-foreground">
-            {t("settingsSequenceDetection")}
-          </h2>
-          <p className="mt-1 text-muted-foreground text-sm">
-            {t("settingsSequenceDetectionHint")}
-          </p>
-        </div>
-        <div className="rounded-[8px] border border-border bg-secondary p-4">
-          <SettingRow
-            action={
-              <SequencePresetToggle
-                onChange={(preset) =>
-                  save(
-                    preset === "custom"
-                      ? {
-                          ...settings,
-                          ...customValuesRef.current,
-                          preset,
-                        }
-                      : { preset, ...presets[preset] }
-                  )
-                }
-                value={settings.preset}
-              />
-            }
-            description={t("sequencePresetHint")}
-            title={t("sequencePreset")}
-          />
-          <SettingRow
-            action={
-              <input
-                className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
-                min={3}
-                onChange={(event) =>
-                  saveCustom({
-                    ...getCustomValues(settings),
-                    timelapseMinFrames: Number(event.target.value) || 6,
-                  })
-                }
-                type="number"
-                value={settings.timelapseMinFrames}
-              />
-            }
-            description={t("sequenceTimelapseMinFramesHint")}
-            title={t("sequenceTimelapseMinFrames")}
-          />
-          <SettingRow
-            action={
-              <input
-                className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
-                max={50}
-                min={1}
-                onChange={(event) =>
-                  saveCustom({
-                    ...getCustomValues(settings),
-                    rhythmTolerance: Number(event.target.value) / 100 || 0.15,
-                  })
-                }
-                type="number"
-                value={Math.round(settings.rhythmTolerance * 100)}
-              />
-            }
-            description={t("sequenceRhythmToleranceHint")}
-            title={t("sequenceRhythmTolerance")}
-          />
-          <SettingRow
-            action={
-              <input
-                className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
-                max={64}
-                min={1}
-                onChange={(event) =>
-                  saveCustom({
-                    ...getCustomValues(settings),
-                    timelapsePHashDistance: Number(event.target.value) || 16,
-                  })
-                }
-                type="number"
-                value={settings.timelapsePHashDistance}
-              />
-            }
-            description={t("sequencePHashDistanceHint")}
-            title={t("sequencePHashDistance")}
-          />
-        </div>
-      </section>
-    </div>
+    <SettingsPageShell
+      description={t("settingsSequenceDetectionHint")}
+      scrollRef={scrollRef}
+      title={t("settingsSequenceDetection")}
+    >
+      <SettingsSection>
+        <SettingRow
+          action={
+            <SequencePresetToggle
+              onChange={(preset) =>
+                save(
+                  preset === "custom"
+                    ? {
+                        ...settings,
+                        ...customValuesRef.current,
+                        preset,
+                      }
+                    : { preset, ...presets[preset] }
+                )
+              }
+              value={settings.preset}
+            />
+          }
+          description={t("sequencePresetHint")}
+          title={t("sequencePreset")}
+        />
+        <SettingRow
+          action={
+            <input
+              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              min={3}
+              onChange={(event) =>
+                saveCustom({
+                  ...getCustomValues(settings),
+                  timelapseMinFrames: Number(event.target.value) || 6,
+                })
+              }
+              type="number"
+              value={settings.timelapseMinFrames}
+            />
+          }
+          description={t("sequenceTimelapseMinFramesHint")}
+          title={t("sequenceTimelapseMinFrames")}
+        />
+        <SettingRow
+          action={
+            <input
+              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              max={50}
+              min={1}
+              onChange={(event) =>
+                saveCustom({
+                  ...getCustomValues(settings),
+                  rhythmTolerance: Number(event.target.value) / 100 || 0.15,
+                })
+              }
+              type="number"
+              value={Math.round(settings.rhythmTolerance * 100)}
+            />
+          }
+          description={t("sequenceRhythmToleranceHint")}
+          title={t("sequenceRhythmTolerance")}
+        />
+        <SettingRow
+          action={
+            <input
+              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              max={64}
+              min={1}
+              onChange={(event) =>
+                saveCustom({
+                  ...getCustomValues(settings),
+                  timelapsePHashDistance: Number(event.target.value) || 16,
+                })
+              }
+              type="number"
+              value={settings.timelapsePHashDistance}
+            />
+          }
+          description={t("sequencePHashDistanceHint")}
+          title={t("sequencePHashDistance")}
+        />
+      </SettingsSection>
+    </SettingsPageShell>
   );
 }
 

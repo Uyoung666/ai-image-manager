@@ -46,6 +46,7 @@ function LoadingSpinner({
     <div
       aria-label={label}
       data-slot="loading-spinner"
+      data-reduced-motion-keep="spinner"
       role="status"
       className={cn(loadingSpinnerVariants({ variant, size }), className)}
       {...props}

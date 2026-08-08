@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { Switch } from "@/components/ui/switch";
 import {
   WatermarkPreview,
@@ -167,12 +168,13 @@ function WatermarkSettingsPage() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
-      <section className="mx-auto w-full max-w-[1040px] space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-[14px] text-foreground">
-            {t("watermarkSettings")}
-          </h2>
+    <SettingsPageShell
+      maxWidth="wide"
+      scrollRef={scrollRef}
+      title={t("watermarkSettings")}
+    >
+      <section className="space-y-3">
+        <div className="flex items-center justify-end">
           <Switch
             checked={wm.enabled}
             onCheckedChange={(checked) =>
@@ -380,7 +382,7 @@ function WatermarkSettingsPage() {
           </fieldset>
         </div>
       </section>
-    </div>
+    </SettingsPageShell>
   );
 }
 

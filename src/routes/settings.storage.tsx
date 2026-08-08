@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DataDirSection } from "@/components/settings/DataDirSection";
 import { SettingRow } from "@/components/settings/setting-row";
+import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -184,11 +185,8 @@ function StorageSettingsPage() {
   }, [queryClient, t]);
 
   return (
-    <div
-      className="h-full space-y-6 overflow-y-auto p-4 sm:p-6"
-      ref={scrollRef}
-    >
-      <section className="mx-auto w-full max-w-[820px] space-y-3">
+    <SettingsPageShell scrollRef={scrollRef} title={t("settingsStorage")}>
+      <section className="space-y-3">
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("settingsIndexing")}
         </h2>
@@ -412,7 +410,7 @@ function StorageSettingsPage() {
       </section>
 
       <DataDirSection />
-    </div>
+    </SettingsPageShell>
   );
 }
 

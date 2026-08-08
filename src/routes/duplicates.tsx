@@ -11,11 +11,19 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import type {
   DuplicateGroup,
@@ -226,6 +234,7 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
 
 export function DuplicatesPage() {
   const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -448,7 +457,7 @@ export function DuplicatesPage() {
           ) : (
             <div />
           )}
-          <div className="flex items-center justify-self-end gap-2">
+          <div className="flex items-center gap-2 justify-self-end">
             <button
               className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
               disabled={rescan.isPending}
@@ -476,119 +485,119 @@ export function DuplicatesPage() {
       <div className="relative flex min-h-0 flex-1">
         <nav
           className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between gap-4 overflow-x-auto border-b px-6 py-1.5 ${
-          isToolbarScrolled ? "is-scrolled" : ""
-        }`}
+            isToolbarScrolled ? "is-scrolled" : ""
+          }`}
           ref={toolbarRef}
         >
-        <div className="inline-flex shrink-0 rounded-[8px] border border-border bg-secondary p-1">
-          {filters.map(([key, label, count]) => (
-            <button
-              aria-pressed={filter === key}
-              className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
-                filter === key
-                  ? "bg-card font-medium text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              key={key}
-              onClick={() => setFilter(key)}
-              type="button"
-            >
-              {label}
-              <span className="ml-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            </button>
-          ))}
-        </div>
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-success" />
-          {t("duplicateSafetyHint")}
-        </span>
+          <div className="inline-flex shrink-0 rounded-[8px] border border-border bg-secondary p-1">
+            {filters.map(([key, label, count]) => (
+              <button
+                aria-pressed={filter === key}
+                className={`rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+                  filter === key
+                    ? "bg-card font-medium text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                key={key}
+                onClick={() => setFilter(key)}
+                type="button"
+              >
+                {label}
+                <span className="ml-1.5 text-[10px] text-muted-foreground">
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-success" />
+            {t("duplicateSafetyHint")}
+          </span>
         </nav>
 
         <main
-        className="flex-1 overflow-y-auto p-6"
-        onScroll={(event) => {
-          const isScrolled = event.currentTarget.scrollTop > 4;
-          setIsToolbarScrolled(isScrolled);
-          setShowBackToTop(isScrolled);
-        }}
-        ref={parentRef}
-        style={{ paddingTop: toolbarHeight }}
-      >
-        {isLoading ? (
-          <div className="space-y-4">
-            {[0, 1, 2].map((item) => (
-              <div
-                className="h-72 animate-pulse rounded-[10px] bg-muted"
-                key={item}
-              />
-            ))}
-          </div>
-        ) : null}
-        {!isLoading && filteredGroups.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-center">
-            <div>
-              <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
-              <p className="mt-3 font-medium text-[16px]">
-                {t(
-                  filter === "dismissed"
-                    ? "duplicateNoIgnored"
-                    : "noDuplicatesTitle"
-                )}
-              </p>
-              <p className="mt-2 text-[13px] text-muted-foreground">
-                {t("noDuplicatesDescription")}
-              </p>
-            </div>
-          </div>
-        ) : null}
-        {!isLoading && filteredGroups.length > 0 ? (
-          <div
-            className="relative w-full"
-            style={{ height: `${virtualizer.getTotalSize()}px` }}
-          >
-            {virtualizer.getVirtualItems().map((item) => {
-              const group = filteredGroups[item.index];
-              return (
+          className="flex-1 overflow-y-auto p-6"
+          onScroll={(event) => {
+            const isScrolled = event.currentTarget.scrollTop > 4;
+            setIsToolbarScrolled(isScrolled);
+            setShowBackToTop(isScrolled);
+          }}
+          ref={parentRef}
+          style={{ paddingTop: toolbarHeight }}
+        >
+          {isLoading ? (
+            <div className="space-y-4">
+              {[0, 1, 2].map((item) => (
                 <div
-                  className="absolute top-0 left-0 w-full pb-4"
-                  data-index={item.index}
-                  key={item.key}
-                  ref={virtualizer.measureElement}
-                  style={{ transform: `translateY(${item.start}px)` }}
-                >
-                  <DuplicateGroupCard
-                    enabled={enabledGroups.has(group.groupKey)}
-                    group={group}
-                    keeperId={
-                      keeperByGroup[group.groupKey] ?? group.recommendedKeepId
-                    }
-                    onDismiss={() => dismiss.mutate(group)}
-                    onKeeperChange={(photoId) =>
-                      setKeeperByGroup((previous) => ({
-                        ...previous,
-                        [group.groupKey]: photoId,
-                      }))
-                    }
-                    onToggleEnabled={() =>
-                      setEnabledGroups((previous) => {
-                        const next = new Set(previous);
-                        if (next.has(group.groupKey)) {
-                          next.delete(group.groupKey);
-                        } else {
-                          next.add(group.groupKey);
-                        }
-                        return next;
-                      })
-                    }
-                    t={t}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+                  className="h-72 animate-pulse rounded-[10px] bg-muted"
+                  key={item}
+                />
+              ))}
+            </div>
+          ) : null}
+          {!isLoading && filteredGroups.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-center">
+              <div>
+                <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
+                <p className="mt-3 font-medium text-[16px]">
+                  {t(
+                    filter === "dismissed"
+                      ? "duplicateNoIgnored"
+                      : "noDuplicatesTitle"
+                  )}
+                </p>
+                <p className="mt-2 text-[13px] text-muted-foreground">
+                  {t("noDuplicatesDescription")}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          {!isLoading && filteredGroups.length > 0 ? (
+            <div
+              className="relative w-full"
+              style={{ height: `${virtualizer.getTotalSize()}px` }}
+            >
+              {virtualizer.getVirtualItems().map((item) => {
+                const group = filteredGroups[item.index];
+                return (
+                  <div
+                    className="absolute top-0 left-0 w-full pb-4"
+                    data-index={item.index}
+                    key={item.key}
+                    ref={virtualizer.measureElement}
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    <DuplicateGroupCard
+                      enabled={enabledGroups.has(group.groupKey)}
+                      group={group}
+                      keeperId={
+                        keeperByGroup[group.groupKey] ?? group.recommendedKeepId
+                      }
+                      onDismiss={() => dismiss.mutate(group)}
+                      onKeeperChange={(photoId) =>
+                        setKeeperByGroup((previous) => ({
+                          ...previous,
+                          [group.groupKey]: photoId,
+                        }))
+                      }
+                      onToggleEnabled={() =>
+                        setEnabledGroups((previous) => {
+                          const next = new Set(previous);
+                          if (next.has(group.groupKey)) {
+                            next.delete(group.groupKey);
+                          } else {
+                            next.add(group.groupKey);
+                          }
+                          return next;
+                        })
+                      }
+                      t={t}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </main>
         <MasonryBackToTop
           label={t("backToTop")}
@@ -601,7 +610,7 @@ export function DuplicatesPage() {
             element.scrollTo({
               top: 0,
               behavior:
-                element.scrollTop > element.clientHeight * 4
+                reduceMotion || element.scrollTop > element.clientHeight * 4
                   ? "auto"
                   : "smooth",
             });

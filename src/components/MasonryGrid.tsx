@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import {
   type MasonryGridHandle,
@@ -90,8 +91,8 @@ interface MasonryGridProps {
     style: React.CSSProperties,
     options: { renderImage: boolean }
   ) => ReactNode;
-  routeKey: string;
   restoreGateReady?: boolean;
+  routeKey: string;
   scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
   selectionActive?: boolean;
@@ -495,7 +496,10 @@ export const MasonryGrid = memo(
       const distance = el.scrollTop;
       el.scrollTo({
         top: 0,
-        behavior: distance > el.clientHeight * 4 ? "auto" : "smooth",
+        behavior:
+          isReducedMotionEnabled() || distance > el.clientHeight * 4
+            ? "auto"
+            : "smooth",
       });
     }, []);
 
@@ -577,7 +581,7 @@ export const MasonryGrid = memo(
                   onClick={() => {
                     scrollRef.current?.scrollTo({
                       top: Math.max(0, h.top - 16),
-                      behavior: "smooth",
+                      behavior: isReducedMotionEnabled() ? "auto" : "smooth",
                     });
                   }}
                   onMouseDown={(e) => e.stopPropagation()}

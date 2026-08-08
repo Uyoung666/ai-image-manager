@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import { SettingRow } from "@/components/settings/setting-row";
+import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { Switch } from "@/components/ui/switch";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { useWander } from "@/providers/WanderProvider";
@@ -43,114 +44,107 @@ function WanderSettingsPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
-      <section className="mx-auto w-full max-w-[820px] space-y-3">
-        <div>
-          <h2 className="font-semibold text-[14px] text-foreground">
-            {t("settingsWander")}
-          </h2>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            {t("wander.startHint")}
-          </p>
+    <SettingsPageShell
+      description={t("wander.startHint")}
+      scrollRef={scrollRef}
+      title={t("settingsWander")}
+    >
+      <button
+        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        disabled={wanderActive || wanderLoading}
+        onClick={() => startWander()}
+        type="button"
+      >
+        <Compass className="h-4 w-4" />
+        {t("wander.startNow")}
+      </button>
+
+      <div className="rounded-[8px] border border-border bg-secondary p-4">
+        <SettingRow
+          action={
+            <Switch
+              checked={preferences.enabled}
+              onCheckedChange={(checked) =>
+                updatePreference("enabled", checked).catch(() => undefined)
+              }
+            />
+          }
+          description={t("wander.enabledHint")}
+          title={t("wander.enabled")}
+        />
+        <SettingRow
+          action={
+            <FilterDropdown
+              aria-label={t("wander.idleMinutes")}
+              className={dropdownClassName}
+              onChange={(value) =>
+                updatePreference(
+                  "idleMinutes",
+                  Number(value) as WanderSettings["idleMinutes"]
+                ).catch(() => undefined)
+              }
+              options={IDLE_OPTIONS.map((value) => ({
+                label: t("wander.minutes", { count: value }),
+                value: String(value),
+              }))}
+              placeholder={t("wander.idleMinutes")}
+              value={String(preferences.idleMinutes)}
+            />
+          }
+          description={t("wander.idleMinutesHint")}
+          title={t("wander.idleMinutes")}
+        />
+        <SettingRow
+          action={
+            <FilterDropdown
+              aria-label={t("wander.intervalSeconds")}
+              className={dropdownClassName}
+              onChange={(value) =>
+                updatePreference(
+                  "intervalSeconds",
+                  Number(value) as WanderSettings["intervalSeconds"]
+                ).catch(() => undefined)
+              }
+              options={INTERVAL_OPTIONS.map((value) => ({
+                label: t("wander.seconds", { count: value }),
+                value: String(value),
+              }))}
+              placeholder={t("wander.intervalSeconds")}
+              value={String(preferences.intervalSeconds)}
+            />
+          }
+          description={t("wander.intervalSecondsHint")}
+          title={t("wander.intervalSeconds")}
+        />
+      </div>
+
+      <div className="rounded-[8px] border border-border bg-secondary p-4">
+        <div className="pb-2">
+          <div className="font-medium text-[13px] text-foreground">
+            {t("wander.contentMode")}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">
+            {t("wander.contentModeHint")}
+          </div>
         </div>
-
-        <button
-          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          disabled={wanderActive || wanderLoading}
-          onClick={() => startWander()}
-          type="button"
-        >
-          <Compass className="h-4 w-4" />
-          {t("wander.startNow")}
-        </button>
-
-        <div className="rounded-[8px] border border-border bg-secondary p-4">
+        {CONTENT_MODES.map((mode) => (
           <SettingRow
             action={
               <Switch
-                checked={preferences.enabled}
-                onCheckedChange={(checked) =>
-                  updatePreference("enabled", checked).catch(() => undefined)
+                checked={preferences.modes.includes(mode)}
+                disabled={
+                  preferences.modes.length === 1 &&
+                  preferences.modes.includes(mode)
                 }
+                onCheckedChange={(checked) => toggleMode(mode, checked)}
               />
             }
-            description={t("wander.enabledHint")}
-            title={t("wander.enabled")}
+            key={mode}
+            title={t(`wander.mode.${mode}`)}
           />
-          <SettingRow
-            action={
-              <FilterDropdown
-                aria-label={t("wander.idleMinutes")}
-                className={dropdownClassName}
-                onChange={(value) =>
-                  updatePreference(
-                    "idleMinutes",
-                    Number(value) as WanderSettings["idleMinutes"]
-                  ).catch(() => undefined)
-                }
-                options={IDLE_OPTIONS.map((value) => ({
-                  label: t("wander.minutes", { count: value }),
-                  value: String(value),
-                }))}
-                placeholder={t("wander.idleMinutes")}
-                value={String(preferences.idleMinutes)}
-              />
-            }
-            description={t("wander.idleMinutesHint")}
-            title={t("wander.idleMinutes")}
-          />
-          <SettingRow
-            action={
-              <FilterDropdown
-                aria-label={t("wander.intervalSeconds")}
-                className={dropdownClassName}
-                onChange={(value) =>
-                  updatePreference(
-                    "intervalSeconds",
-                    Number(value) as WanderSettings["intervalSeconds"]
-                  ).catch(() => undefined)
-                }
-                options={INTERVAL_OPTIONS.map((value) => ({
-                  label: t("wander.seconds", { count: value }),
-                  value: String(value),
-                }))}
-                placeholder={t("wander.intervalSeconds")}
-                value={String(preferences.intervalSeconds)}
-              />
-            }
-            description={t("wander.intervalSecondsHint")}
-            title={t("wander.intervalSeconds")}
-          />
-        </div>
-
-        <div className="rounded-[8px] border border-border bg-secondary p-4">
-          <div className="pb-2">
-            <div className="font-medium text-[13px] text-foreground">
-              {t("wander.contentMode")}
-            </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              {t("wander.contentModeHint")}
-            </div>
-          </div>
-          {CONTENT_MODES.map((mode) => (
-            <SettingRow
-              action={
-                <Switch
-                  checked={preferences.modes.includes(mode)}
-                  disabled={
-                    preferences.modes.length === 1 &&
-                    preferences.modes.includes(mode)
-                  }
-                  onCheckedChange={(checked) => toggleMode(mode, checked)}
-                />
-              }
-              key={mode}
-              title={t(`wander.mode.${mode}`)}
-            />
-          ))}
-        </div>
-      </section>
-    </div>
+        ))}
+      </div>
+    </SettingsPageShell>
   );
 }
 

@@ -3,7 +3,6 @@ import path from "node:path";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   app,
-  autoUpdater,
   BrowserWindow,
   clipboard,
   dialog,
@@ -23,7 +22,6 @@ import { ipcMain } from "electron/main";
 import started from "electron-squirrel-startup";
 import Store from "electron-store";
 import sharp from "sharp";
-import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import { getDatabase } from "@/db";
 import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
 import { ipcContext } from "@/ipc/context";
@@ -59,6 +57,18 @@ import {
 } from "@/services/wander-lifecycle";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
+import { getSetting } from "@/services/settings-manager";
+import {
+  APP_PREFERENCE_DEFAULTS,
+  APP_PREFERENCE_KEYS,
+  parseBooleanPreference,
+  parseCloseBehavior,
+} from "@/types/app-preferences";
+import {
+  installUpdate,
+  startUpdateManager,
+  stopAutomaticChecks,
+} from "@/services/update-manager";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
@@ -289,22 +299,86 @@ function getWindowStore() {
   return windowStore;
 }
 
+function getWindowPreferences() {
+  try {
+    return {
+      closeBehavior: parseCloseBehavior(
+        getSetting(APP_PREFERENCE_KEYS.closeBehavior)
+      ),
+      rememberBounds: parseBooleanPreference(
+        getSetting(APP_PREFERENCE_KEYS.rememberBounds),
+        APP_PREFERENCE_DEFAULTS.rememberBounds
+      ),
+    };
+  } catch {
+    return {
+      closeBehavior: APP_PREFERENCE_DEFAULTS.closeBehavior,
+      rememberBounds: APP_PREFERENCE_DEFAULTS.rememberBounds,
+    };
+  }
+}
+
+function isBoundsVisible(bounds: {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}): boolean {
+  try {
+    return screen.getAllDisplays().some((display) => {
+      const right = Math.min(bounds.x + bounds.width, display.workArea.x + display.workArea.width);
+      const bottom = Math.min(bounds.y + bounds.height, display.workArea.y + display.workArea.height);
+      const left = Math.max(bounds.x, display.workArea.x);
+      const top = Math.max(bounds.y, display.workArea.y);
+      return right - left >= 32 && bottom - top >= 32;
+    });
+  } catch {
+    return false;
+  }
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = null;
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 // ── Tray language store ────────────────────────────────────────────
 type TrayLang = "zh" | "en";
 
 const trayLabels: Record<
   TrayLang,
-  { showWindow: string; launchAtStartup: string; quit: string; tooltip: string }
+  {
+    closeWindowQuestion: string;
+    closeWindowTitle: string;
+    launchAtStartup: string;
+    minimizeToTray: string;
+    quit: string;
+    showWindow: string;
+    tooltip: string;
+  }
 > = {
   zh: {
+    closeWindowQuestion: "关闭窗口时要如何处理？",
+    closeWindowTitle: "关闭窗口",
     showWindow: "显示窗口",
     launchAtStartup: "开机自启",
+    minimizeToTray: "最小化到托盘",
     quit: "退出",
     tooltip: "AI 图片管理器",
   },
   en: {
+    closeWindowQuestion: "What should happen when the window is closed?",
+    closeWindowTitle: "Close window",
     showWindow: "Show Window",
     launchAtStartup: "Launch at Startup",
+    minimizeToTray: "Minimize to tray",
     quit: "Quit",
     tooltip: "AI Image Manager",
   },
@@ -341,10 +415,7 @@ function buildTrayMenu(): Electron.Menu {
     {
       label: tTray("showWindow"),
       click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
+        showMainWindow();
       },
     },
     { type: "separator" },
@@ -386,10 +457,7 @@ function createTray() {
   tray.setContextMenu(buildTrayMenu());
 
   tray.on("double-click", () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
 }
 
@@ -397,11 +465,7 @@ function createTray() {
 function registerGlobalShortcuts() {
   const searchRegistered = globalShortcut.register("Ctrl+Shift+F", () => {
     if (mainWindow) {
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore();
-      }
-      mainWindow.show();
-      mainWindow.focus();
+      showMainWindow();
       mainWindow.webContents.send("global-shortcut:search");
     }
   });
@@ -683,10 +747,19 @@ function createWindow(httpPort: number) {
   const preload = path.join(basePath, "preload.js");
 
   const store = getWindowStore();
-  const savedWidth = store.get("width", 1280);
-  const savedHeight = store.get("height", 800);
-  const savedX = store.get("x");
-  const savedY = store.get("y");
+  const windowPreferences = getWindowPreferences();
+  const savedWidth = windowPreferences.rememberBounds
+    ? store.get("width", 1280)
+    : 1280;
+  const savedHeight = windowPreferences.rememberBounds
+    ? store.get("height", 800)
+    : 800;
+  const savedX = windowPreferences.rememberBounds ? store.get("x") : undefined;
+  const savedY = windowPreferences.rememberBounds ? store.get("y") : undefined;
+  const savedBounds =
+    savedX !== undefined && savedY !== undefined
+      ? { height: savedHeight, width: savedWidth, x: savedX, y: savedY }
+      : null;
 
   mainWindow = new BrowserWindow({
     width: savedWidth,
@@ -694,7 +767,7 @@ function createWindow(httpPort: number) {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    ...(savedX !== undefined && savedY !== undefined
+    ...(savedBounds && isBoundsVisible(savedBounds)
       ? { x: savedX, y: savedY }
       : {}),
     title: "AI Image Manager",
@@ -729,32 +802,77 @@ function createWindow(httpPort: number) {
   });
   wanderLifecycleBridge = lifecycleBridge;
 
-  if (store.get("isMaximized", false)) {
+  if (windowPreferences.rememberBounds && store.get("isMaximized", false)) {
     mainWindow.maximize();
   }
 
+  let closePromptOpen = false;
   mainWindow.on("close", (event) => {
-    // Hide to tray on user close, but allow real quits (relaunch, tray Exit,
-    // OS shutdown) to proceed. Without the isQuitting guard, every close is
-    // swallowed and app.quit()/app.relaunch() become no-ops.
-    if (!isQuitting && tray && process.platform === "win32") {
-      event.preventDefault();
-      const store = getWindowStore();
-      if (!store.get("trayMinimizeHinted", false)) {
-        store.set("trayMinimizeHinted", true);
-        if (Notification.isSupported()) {
-          new Notification({
-            title: "AI Image Manager",
-            body: "应用已最小化至系统托盘，双击托盘图标可重新打开",
-            silent: false,
-          }).show();
-        }
-      }
-      mainWindow?.hide();
+    if (isQuitting) {
+      return;
     }
+
+    const { closeBehavior } = getWindowPreferences();
+    if (closeBehavior === "quit" || !tray) {
+      event.preventDefault();
+      isQuitting = true;
+      app.quit();
+      return;
+    }
+
+    event.preventDefault();
+    if (closeBehavior === "tray") {
+      hideMainWindowToTray();
+      return;
+    }
+
+    if (closePromptOpen) {
+      return;
+    }
+    closePromptOpen = true;
+    dialog
+      .showMessageBox(mainWindow!, {
+        buttons: [tTray("minimizeToTray"), tTray("quit")],
+        cancelId: 0,
+        defaultId: 0,
+        message: tTray("closeWindowQuestion"),
+        title: tTray("closeWindowTitle"),
+        type: "question",
+      })
+      .then(({ response }) => {
+        if (response === 1) {
+          isQuitting = true;
+          app.quit();
+        } else {
+          hideMainWindowToTray();
+        }
+      })
+      .finally(() => {
+        closePromptOpen = false;
+      });
   });
 
+  function hideMainWindowToTray() {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    if (!store.get("trayMinimizeHinted", false)) {
+      store.set("trayMinimizeHinted", true);
+      if (Notification.isSupported()) {
+        new Notification({
+          title: "AI Image Manager",
+          body: "应用已最小化至系统托盘，双击托盘图标可重新打开",
+          silent: false,
+        }).show();
+      }
+    }
+    mainWindow.hide();
+  }
+
   const saveBounds = () => {
+    if (!getWindowPreferences().rememberBounds) {
+      return;
+    }
     if (mainWindow?.isMaximized()) {
       store.set("isMaximized", true);
     } else {
@@ -774,11 +892,15 @@ function createWindow(httpPort: number) {
   mainWindow.on("resize", saveBounds);
   mainWindow.on("move", saveBounds);
   mainWindow.on("maximize", () => {
-    store.set("isMaximized", true);
+    if (getWindowPreferences().rememberBounds) {
+      store.set("isMaximized", true);
+    }
     mainWindow?.webContents.send("window:maximize-change", true);
   });
   mainWindow.on("unmaximize", () => {
-    store.set("isMaximized", false);
+    if (getWindowPreferences().rememberBounds) {
+      store.set("isMaximized", false);
+    }
     mainWindow?.webContents.send("window:maximize-change", false);
   });
   mainWindow.once("ready-to-show", () => {
@@ -815,29 +937,6 @@ function createWindow(httpPort: number) {
 }
 
 // ── Auto-update state (persisted in main process so settings page can query on mount) ─
-import { setUpdateState } from "@/services/update-state";
-
-const NETWORK_ERROR_RE =
-  /ENOTFOUND|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|net::ERR/i;
-const HTTP_ERROR_RE = /403|404/i;
-
-function broadcastUpdateStatus(payload: Record<string, unknown>) {
-  setUpdateState({
-    phase: payload.phase as string,
-    version: payload.version as string | undefined,
-    message: payload.message as string | undefined,
-    percent: payload.percent as number | undefined,
-    bytesPerSecond: payload.bytesPerSecond as number | undefined,
-    transferred: payload.transferred as number | undefined,
-    total: payload.total as number | undefined,
-    releaseNotes: payload.releaseNotes as string | undefined,
-    releaseDate: payload.releaseDate as string | undefined,
-    updateURL: payload.updateURL as string | undefined,
-  });
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("update:status", payload);
-  }
-}
 
 // ── Update proxy config ──────────────────────────────────────────────
 function getUpdateConfigStore() {
@@ -863,6 +962,8 @@ async function applyProxyConfig() {
 
 // ── Auto-update check ────────────────────────────────────────────────
 function checkForUpdates() {
+  startUpdateManager();
+  /*
   updateElectronApp({
     updateSource: {
       type: UpdateSourceType.ElectronPublicUpdateService,
@@ -943,10 +1044,11 @@ function checkForUpdates() {
       });
     });
   } catch {
-    /* download-progress not available */
+    // download-progress not available
   }
 
   log.info("Update checker started");
+  */
 }
 
 ipcMain.on("app:restart", () => {
@@ -963,7 +1065,7 @@ ipcMain.on("app:install-update", () => {
     `${new Date().toISOString()} install-update: quitAndInstall\n`,
     { flag: "a" }
   );
-  autoUpdater.quitAndInstall();
+  installUpdate();
 });
 
 // Sync language from renderer to main process (updates tray menu labels)
@@ -1305,7 +1407,7 @@ app.whenReady().then(async () => {
     createWindow(httpPort);
     createTray();
     registerGlobalShortcuts();
-    applyProxyConfig(); // fire-and-forget, applies before first auto-update check
+    await applyProxyConfig();
     checkForUpdates();
     setupSendToShortcut();
 
@@ -1383,13 +1485,7 @@ app.whenReady().then(async () => {
 
 // ── Second instance: focus existing window ───────────────────────────
 app.on("second-instance", (_event, _commandLine, _workingDirectory) => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  showMainWindow();
 });
 
 // ── Window lifecycle ─────────────────────────────────────────────────
@@ -1400,10 +1496,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow();
   } else {
+    mainWindow = null;
     createWindow(getHttpServerPort() ?? 0);
   }
 });
@@ -1416,6 +1512,7 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", async () => {
+  stopAutomaticChecks();
   try {
     fs.writeFileSync(
       path.join(logDir, "migrate.log"),

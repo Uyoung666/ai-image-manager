@@ -1,22 +1,39 @@
 import { RouterProvider } from "@tanstack/react-router";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useTranslation } from "react-i18next";
 import { Toaster, toast } from "sonner";
 import { updateAppLanguage } from "./actions/language";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
+import { installDownloadedUpdate } from "./actions/update";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { UiPreferencesProvider } from "./contexts/ui-preferences-context";
+import { ipc } from "./ipc/manager";
 import { QueryProvider } from "./providers/QueryProvider";
 import { router } from "./utils/routes";
 import "./localization/i18n";
 
 export default function App() {
   const { t, i18n } = useTranslation();
+  const [updateReminder, setUpdateReminder] = useState(true);
 
   useEffect(() => {
     syncWithLocalTheme();
     updateAppLanguage(i18n);
   }, [i18n]);
+
+  useEffect(() => {
+    ipc.client.settings
+      .getAppPreferences({})
+      .then((preferences) => setUpdateReminder(preferences.updateReminder))
+      .catch(() => undefined);
+    function handleReminder(event: Event) {
+      setUpdateReminder((event as CustomEvent<boolean>).detail === true);
+    }
+    window.addEventListener("update-reminder-changed", handleReminder);
+    return () =>
+      window.removeEventListener("update-reminder-changed", handleReminder);
+  }, []);
 
   // Listen for OS-level theme changes when using "system" mode
   useEffect(() => {
@@ -26,19 +43,19 @@ export default function App() {
   // Listen for update availability
   const handleUpdate = useCallback(
     (event: MessageEvent) => {
-      if (event.data?.channel === "update:available") {
+      if (updateReminder && event.data?.channel === "update:available") {
         toast(t("updateDownloaded", { version: event.data.version }), {
           duration: 30_000,
           action: {
             label: t("updateRestart"),
-            onClick: () => {
-              window.electronAPI?.installUpdate?.();
+            onClick: async () => {
+              await installDownloadedUpdate();
             },
           },
         });
       }
     },
-    [t]
+    [t, updateReminder]
   );
 
   useEffect(() => {
@@ -48,19 +65,21 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <QueryProvider>
-        <RouterProvider router={router} />
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              background: "var(--popover)",
-              color: "var(--foreground)",
-              border: "1px solid var(--border)",
-            },
-          }}
-        />
-      </QueryProvider>
+      <UiPreferencesProvider>
+        <QueryProvider>
+          <RouterProvider router={router} />
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: "var(--popover)",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+              },
+            }}
+          />
+        </QueryProvider>
+      </UiPreferencesProvider>
     </ErrorBoundary>
   );
 }

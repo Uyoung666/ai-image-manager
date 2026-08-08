@@ -1,5 +1,6 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { flushSync } from "react-dom";
+import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { routeTree } from "@/routeTree.gen";
 
 declare module "@tanstack/react-router" {
@@ -22,7 +23,11 @@ export const router = createRouter({
 const _orig = router.navigate;
 // biome-ignore lint/suspicious/noExplicitAny: router.navigate has a complex generic signature; the opaque cast is intentional
 router.navigate = ((opts: any) => {
-  if (typeof document !== "undefined" && document.startViewTransition) {
+  if (
+    typeof document !== "undefined" &&
+    document.startViewTransition &&
+    !isReducedMotionEnabled()
+  ) {
     const currentPath = router.state.location.pathname;
     const targetPath =
       typeof opts === "string" ? opts : (opts?.to ?? currentPath);

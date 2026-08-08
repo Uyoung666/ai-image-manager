@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatedGitHubButton } from "@/components/animated-github-button";
 import { AnimatedNameLoader } from "@/components/animated-name-loader";
+import { ConfettiOverlay } from "@/components/ConfettiOverlay";
+import { SignatureOverlay } from "@/components/SignatureOverlay";
+import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ConfettiOverlay } from "@/components/ConfettiOverlay";
-import { SignatureOverlay } from "@/components/SignatureOverlay";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -83,7 +84,7 @@ function AboutSettingsPage() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+    <SettingsPageShell scrollRef={scrollRef} title={t("settingsAbout")}>
       <ConfettiOverlay
         active={confettiActive}
         onDone={handleConfettiDone}
@@ -94,9 +95,6 @@ function AboutSettingsPage() {
       <div className="mx-auto w-full max-w-[820px] space-y-6">
         {/* App info */}
         <section className="space-y-3">
-          <h2 className="font-semibold text-[14px] text-foreground">
-            {t("settingsAbout")}
-          </h2>
           <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-muted-foreground">
@@ -182,7 +180,7 @@ function AboutSettingsPage() {
           )}
         </section>
       </div>
-    </div>
+    </SettingsPageShell>
   );
 }
 

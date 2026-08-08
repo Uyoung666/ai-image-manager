@@ -15,6 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 export interface DashboardPoint {
   count: number;
@@ -65,10 +66,7 @@ export function DashboardBarChart({
   onPointClick?: (point: DashboardPoint) => void;
   sampleTotal: number;
 }) {
-  const noMotion =
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      : false;
+  const noMotion = useReducedMotion();
   const animationKey = data
     .map((point) => `${point.name}:${point.count}`)
     .join("|");
@@ -204,7 +202,7 @@ export function ChartSection({
   sampleTotal?: number;
   title: string;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   return (
     <section
       aria-label={title}
@@ -302,13 +300,13 @@ function ChartDataTable({
                       })
                     : point.name}
                 </button>
+              ) : point.isGap ? (
+                t("dashboardNoDataYears", {
+                  from: point.gapStart,
+                  to: point.gapEnd,
+                })
               ) : (
-                point.isGap
-                  ? t("dashboardNoDataYears", {
-                      from: point.gapStart,
-                      to: point.gapEnd,
-                    })
-                  : point.name
+                point.name
               )}
             </td>
             <td className="px-3 py-2 text-right tabular-nums">
@@ -336,6 +334,7 @@ export function CoverageCard({
   percentage: number;
 }) {
   const { t } = useTranslation();
+  const noMotion = useReducedMotion();
   let statusKey = "dashboardCoverageLow";
   let barColor = "var(--warning)";
   if (percentage >= 80) {
@@ -355,10 +354,12 @@ export function CoverageCard({
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full transition-[width] ease-out"
+          className={`h-full rounded-full ${
+            noMotion ? "" : "transition-[width] ease-out"
+          }`}
           style={{
             backgroundColor: barColor,
-            transitionDuration: "400ms",
+            transitionDuration: noMotion ? undefined : "400ms",
             width: `${Math.min(100, percentage)}%`,
           }}
         />

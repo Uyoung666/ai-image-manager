@@ -1,19 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentTheme, type ThemeMode } from "@/actions/theme";
 import { setZoomFactor } from "@/actions/window";
 import LangToggle from "@/components/lang-toggle";
 import { SettingRow } from "@/components/settings/setting-row";
+import {
+  SettingsPageShell,
+  SettingsSection,
+} from "@/components/settings/settings-page-shell";
 import ToggleTheme from "@/components/toggle-theme";
 import { Switch } from "@/components/ui/switch";
-import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import { useUiPreferences } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { cn } from "@/utils/tailwind";
 
-const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
-
 const UI_SCALE_OPTIONS = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
+
+function getSettingValue(result: unknown): string | undefined {
+  if (!result || typeof result !== "object") {
+    return undefined;
+  }
+  const value = (result as { value?: unknown }).value;
+  return typeof value === "string" ? value : undefined;
+}
 
 function UiScaleControl({
   value,
@@ -107,68 +117,57 @@ function SensitivityControl({
 function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
-  const [openAtLogin, setOpenAtLogin] = useState(false);
-  const [syncCullFavorites, setSyncCullFavorites] = useState(true);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
+  const { reduceMotion, setReduceMotion } = useUiPreferences();
   const [uiScale, setUiScale] = useState(1);
   const [searchSensitivity, setSearchSensitivity] = useState("standard");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useRouteScrollRestoration(scrollRef);
 
   useEffect(() => {
     getCurrentTheme().then(setThemeMode);
-    ipc.client.settings.getOpenAtLogin({}).then((result) => {
-      setOpenAtLogin(
-        (result as { openAtLogin?: boolean }).openAtLogin ?? false
-      );
-    });
-    ipc.client.settings
-      .getAppSetting({ key: "cull.syncKeptWithFavorites" })
-      .then((result) => {
-        setSyncCullFavorites(
-          (result as { value?: string | null }).value !== "false"
-        );
-      });
+
     ipc.client.settings
       .getAppSetting({ key: "ui.zoomScale" })
       .then((result) => {
-        const raw = (result as { value?: string | null }).value;
-        const parsed = Number.parseFloat(raw ?? "");
+        const parsed = Number.parseFloat(getSettingValue(result) ?? "");
         if (Number.isFinite(parsed)) {
           setUiScale(parsed);
         }
       })
       .catch(() => undefined);
+
     ipc.client.settings
       .getAppSetting({ key: "search.sensitivity" })
       .then((result) => {
-        const raw = (result as { value?: string | null }).value;
-        if (raw === "relaxed" || raw === "standard" || raw === "precise") {
-          setSearchSensitivity(raw);
+        const value = getSettingValue(result);
+        if (
+          value === "relaxed" ||
+          value === "standard" ||
+          value === "precise"
+        ) {
+          setSearchSensitivity(value);
         }
       })
       .catch(() => undefined);
   }, []);
 
   function onUiScaleChange(scale: number) {
+    const previous = uiScale;
     setUiScale(scale);
     setZoomFactor(scale);
     ipc.client.settings
       .setAppSetting({ key: "ui.zoomScale", value: String(scale) })
-      .catch(() => setUiScale(uiScale));
+      .catch(() => setUiScale(previous));
   }
 
   function onSensitivityChange(preset: string) {
+    const previous = searchSensitivity;
     setSearchSensitivity(preset);
     ipc.client.settings
       .setAppSetting({ key: "search.sensitivity", value: preset })
-      .catch(() => setSearchSensitivity(searchSensitivity));
+      .catch(() => setSearchSensitivity(previous));
+  }
+
+  function onReduceMotionChange(checked: boolean) {
+    setReduceMotion(checked).catch(() => undefined);
   }
 
   let themeDescription = t("themeSystem");
@@ -179,91 +178,44 @@ function AppearanceSettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
-      <section className="mx-auto w-full max-w-[820px] space-y-3">
-        <h2 className="font-semibold text-[14px] text-foreground">
-          {t("settingsAppearance")}
-        </h2>
-        <div className="rounded-[8px] border border-border bg-secondary p-4">
-          <SettingRow
-            action={<ToggleTheme onChange={setThemeMode} />}
-            description={themeDescription}
-            title={t("settingsTheme")}
-          />
-          <SettingRow
-            action={
-              <UiScaleControl onChange={onUiScaleChange} value={uiScale} />
-            }
-            description={t("settingsUiScaleHint")}
-            title={t("settingsUiScale")}
-          />
-          <SettingRow
-            action={
-              <SensitivityControl
-                onChange={onSensitivityChange}
-                value={searchSensitivity}
-              />
-            }
-            description={t("searchSensitivityHint")}
-            title={t("settingsSearchSensitivity")}
-          />
-          <SettingRow action={<LangToggle />} title={t("settingsLanguage")} />
-          <SettingRow
-            action={
-              <Switch
-                checked={openAtLogin}
-                onCheckedChange={() => {
-                  const next = !openAtLogin;
-                  setOpenAtLogin(next);
-                  ipc.client.settings
-                    .setOpenAtLogin({ openAtLogin: next })
-                    .catch(() => setOpenAtLogin(!next));
-                }}
-              />
-            }
-            description={t("openAtLoginHint")}
-            title={t("openAtLogin")}
-          />
-          <SettingRow
-            action={
-              <Switch
-                checked={sidebarCollapsed}
-                onCheckedChange={() => {
-                  const next = !sidebarCollapsed;
-                  setSidebarCollapsed(next);
-                  try {
-                    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
-                  } catch {
-                    // Keep the in-memory preference when storage is unavailable.
-                  }
-                }}
-              />
-            }
-            description={t("sidebarDefaultCollapsedHint")}
-            title={t("sidebarDefaultCollapsed")}
-          />
-          <SettingRow
-            action={
-              <Switch
-                checked={syncCullFavorites}
-                onCheckedChange={() => {
-                  const next = !syncCullFavorites;
-                  setSyncCullFavorites(next);
-                  ipc.client.settings
-                    .setAppSetting({
-                      key: "cull.syncKeptWithFavorites",
-                      value: String(next),
-                    })
-                    .catch(() => setSyncCullFavorites(!next));
-                }}
-              />
-            }
-            description={t("cullSyncFavoritesHint")}
-            title={t("cullSyncFavorites")}
-          />
-        </div>
-      </section>
-    </div>
+    <SettingsPageShell
+      description={t("settingsAppearanceDescription")}
+      title={t("settingsAppearance")}
+    >
+      <SettingsSection>
+        <SettingRow
+          action={<ToggleTheme onChange={setThemeMode} />}
+          description={themeDescription}
+          title={t("settingsTheme")}
+        />
+        <SettingRow
+          action={<UiScaleControl onChange={onUiScaleChange} value={uiScale} />}
+          description={t("settingsUiScaleHint")}
+          title={t("settingsUiScale")}
+        />
+        <SettingRow action={<LangToggle />} title={t("settingsLanguage")} />
+        <SettingRow
+          action={
+            <SensitivityControl
+              onChange={onSensitivityChange}
+              value={searchSensitivity}
+            />
+          }
+          description={t("searchSensitivityHint")}
+          title={t("settingsSearchSensitivity")}
+        />
+        <SettingRow
+          action={
+            <Switch
+              checked={reduceMotion}
+              onCheckedChange={onReduceMotionChange}
+            />
+          }
+          description={t("settingsReduceMotionHint")}
+          title={t("settingsReduceMotion")}
+        />
+      </SettingsSection>
+    </SettingsPageShell>
   );
 }
 

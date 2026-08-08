@@ -1,14 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { os } from "@orpc/server";
-import { app, autoUpdater, net, session, shell } from "electron";
+import { app, net, session, shell } from "electron";
 import Store from "electron-store";
 import { z } from "zod";
 import { getHttpServerPort } from "@/services/http-server";
-import { getUpdateState } from "@/services/update-state";
 import {
-  consumeUpdateWelcome as consumeUpdateWelcomeState,
-} from "@/services/update-welcome-state";
+  checkForUpdatesManually,
+  installUpdate,
+} from "@/services/update-manager";
+import { getUpdateState } from "@/services/update-state";
+import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/update-welcome-state";
 
 export const currentPlatform = os.handler(() => {
   return process.platform;
@@ -38,19 +40,16 @@ export const restartApp = os.handler(() => {
 });
 
 export const checkForUpdates = os.handler(() => {
-  if (!app.isPackaged) {
-    return { ok: false, error: "DEV_MODE" };
-  }
-  try {
-    autoUpdater.checkForUpdates();
-    return { ok: true };
-  } catch (err: unknown) {
-    return { ok: false, error: (err as Error)?.message || String(err) };
-  }
+  return checkForUpdatesManually();
 });
 
 export const getUpdateStatus = os.handler(() => {
-  return getUpdateState();
+  return getUpdateState(app.getVersion());
+});
+
+export const installDownloadedUpdate = os.handler(() => {
+  installUpdate();
+  return { ok: true };
 });
 
 export const consumeUpdateWelcome = os.handler(() => {

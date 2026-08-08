@@ -8,12 +8,24 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 describe("SettingsSidebar", () => {
-  it("keeps navigation without a dedicated settings search input", () => {
+  it("renders the six settings categories and their navigation", () => {
     render(<SettingsSidebar />);
 
+    for (const group of [
+      "settingsGroupAppearance",
+      "settingsGroupBehavior",
+      "settingsGroupPhotos",
+      "settingsGroupData",
+      "settingsGroupOutput",
+      "settingsGroupUpdates",
+    ]) {
+      expect(screen.getByText(group)).toBeInTheDocument();
+    }
+
+    expect(screen.getByText("settingsAppearance")).toBeInTheDocument();
+    expect(screen.getByText("settingsBehavior")).toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText("settingsSearchPlaceholder")
     ).not.toBeInTheDocument();
-    expect(screen.getByText("settingsAppearance")).toBeInTheDocument();
   });
 });

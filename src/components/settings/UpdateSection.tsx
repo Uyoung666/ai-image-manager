@@ -2,7 +2,18 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  checkForUpdates,
+  getUpdateProxy,
+  getUpdateStatus,
+  installDownloadedUpdate,
+  openReleasePage,
+  setUpdateProxy,
+  testUpdateProxy,
+} from "@/actions/update";
+import { SettingRow } from "@/components/settings/setting-row";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
 
 type UpdatePhase =
@@ -13,6 +24,42 @@ type UpdatePhase =
   | "downloaded"
   | "error";
 
+interface UpdateStatusPayload {
+  bytesPerSecond?: number;
+  message?: string;
+  percent?: number;
+  phase: UpdatePhase;
+  releaseDate?: string;
+  releaseNotes?: string;
+  total?: number;
+  transferred?: number;
+  updateURL?: string;
+  version?: string;
+}
+
+interface UpdateProxyPayload {
+  proxy?: string;
+}
+
+function mapUpdateErrorMessage(
+  message: string | undefined,
+  translate: (key: string) => string
+): string {
+  if (!message) {
+    return translate("updateError");
+  }
+  if (message === "DEV_MODE") {
+    return translate("updateDevMode");
+  }
+  if (message === "NETWORK_ERROR") {
+    return translate("updateErrorNetwork");
+  }
+  if (message === "UPDATE_NOT_FOUND") {
+    return translate("updateErrorNotFound");
+  }
+  return message;
+}
+
 export function UpdateSection({ appVersion }: { appVersion: string }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<UpdatePhase>("idle");
@@ -22,7 +69,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   const [percent, setPercent] = useState<number | undefined>();
   const [bytesPerSecond, setBytesPerSecond] = useState<number | undefined>();
   const [releaseNotes, setReleaseNotes] = useState("");
-  const [manualUrl, setManualUrl] = useState("");
+  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [updateReminder, setUpdateReminder] = useState(true);
   const [proxy, setProxy] = useState("");
   const [proxySaved, setProxySaved] = useState(false);
   const [proxyTesting, setProxyTesting] = useState(false);
@@ -42,7 +90,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
-    ipc.client.app.getUpdateStatus({}).then((status: any) => {
+    getUpdateStatus().then((rawStatus) => {
+      const status = rawStatus as UpdateStatusPayload | null;
       if (!status || status.phase === "idle") {
         return;
       }
@@ -53,9 +102,6 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
       if (status.releaseNotes) {
         setReleaseNotes(status.releaseNotes);
       }
-      if (status.updateURL) {
-        setManualUrl(status.updateURL);
-      }
       if (status.percent != null) {
         setPercent(status.percent);
       }
@@ -63,16 +109,24 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         setBytesPerSecond(status.bytesPerSecond);
       }
       if (status.message && status.message !== "DEV_MODE") {
-        setErrorMsg(mapErrorMessage(status.message));
+        setErrorMsg(mapUpdateErrorMessage(status.message, t));
       }
     });
     // Restore saved proxy
-    ipc.client.app.getUpdateProxy({}).then((r: any) => {
-      if (r?.proxy) {
-        setProxy(r.proxy);
+    getUpdateProxy().then((r) => {
+      const proxyResult = r as UpdateProxyPayload;
+      if (proxyResult.proxy) {
+        setProxy(proxyResult.proxy);
       }
     });
-  }, []);
+    ipc.client.settings
+      .getAppPreferences({})
+      .then((preferences) => {
+        setAutoUpdate(preferences.updateAutoUpdate);
+        setUpdateReminder(preferences.updateReminder);
+      })
+      .catch(() => undefined);
+  }, [t]);
 
   // Listen for update status events from main process
   useEffect(() => {
@@ -112,13 +166,10 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           if (data.releaseNotes) {
             setReleaseNotes(data.releaseNotes);
           }
-          if (data.updateURL) {
-            setManualUrl(data.updateURL);
-          }
           break;
         case "error":
           setPhase("error");
-          setErrorMsg(mapErrorMessage(data.message));
+          setErrorMsg(mapUpdateErrorMessage(data.message, t));
           break;
       }
     }
@@ -162,22 +213,6 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     };
   }, [phase]);
 
-  function mapErrorMessage(msg: string | undefined): string {
-    if (!msg) {
-      return t("updateError");
-    }
-    if (msg === "DEV_MODE") {
-      return t("updateDevMode");
-    }
-    if (msg === "NETWORK_ERROR") {
-      return t("updateErrorNetwork");
-    }
-    if (msg === "UPDATE_NOT_FOUND") {
-      return t("updateErrorNotFound");
-    }
-    return msg;
-  }
-
   function formatSpeed(bps: number | undefined): string {
     if (bps == null || bps <= 0) {
       return "";
@@ -195,25 +230,29 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     setPhase("checking");
     setErrorMsg("");
     try {
-      const result = await ipc.client.app.checkForUpdates({});
+      const result = await checkForUpdates();
       const data = result as { ok?: boolean; error?: string } | undefined;
       if (!data?.ok) {
         setPhase("error");
-        setErrorMsg(mapErrorMessage(data?.error));
+        setErrorMsg(mapUpdateErrorMessage(data?.error, t));
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPhase("error");
-      setErrorMsg(err?.message || t("updateError"));
+      setErrorMsg(
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message)
+          : t("updateError")
+      );
     }
   }
 
-  function handleRestart() {
-    window.electronAPI?.installUpdate?.();
+  async function handleRestart() {
+    await installDownloadedUpdate();
   }
 
   async function handleSaveProxy() {
     try {
-      await ipc.client.app.setUpdateProxy({ proxy });
+      await setUpdateProxy(proxy);
       setProxySaved(true);
       setProxyResult(undefined);
       toast.success(t("updateSaved"));
@@ -227,7 +266,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     setProxyTesting(true);
     setProxyResult(undefined);
     try {
-      const r = (await ipc.client.app.testProxy({})) as {
+      const r = (await testUpdateProxy()) as {
         ok: boolean;
         status?: number;
         latency?: number;
@@ -256,7 +295,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   async function handleOpenManual() {
-    await ipc.client.app.openReleasePage({});
+    await openReleasePage();
   }
 
   return (
@@ -273,6 +312,52 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           <span className="text-[13px] text-foreground">
             {appVersion || "..."}
           </span>
+        </div>
+
+        <div className="border-border border-t pt-3">
+          <SettingRow
+            action={
+              <Switch
+                checked={autoUpdate}
+                onCheckedChange={(checked) => {
+                  const previous = autoUpdate;
+                  setAutoUpdate(checked);
+                  ipc.client.settings
+                    .setAppPreference({
+                      key: "update.autoUpdate",
+                      value: String(checked),
+                    })
+                    .catch(() => setAutoUpdate(previous));
+                }}
+              />
+            }
+            description={t("settingsAutoUpdateHint")}
+            title={t("settingsAutoUpdate")}
+          />
+          <SettingRow
+            action={
+              <Switch
+                checked={updateReminder}
+                onCheckedChange={(checked) => {
+                  const previous = updateReminder;
+                  setUpdateReminder(checked);
+                  window.dispatchEvent(
+                    new CustomEvent("update-reminder-changed", {
+                      detail: checked,
+                    })
+                  );
+                  ipc.client.settings
+                    .setAppPreference({
+                      key: "update.reminder",
+                      value: String(checked),
+                    })
+                    .catch(() => setUpdateReminder(previous));
+                }}
+              />
+            }
+            description={t("settingsUpdateReminderHint")}
+            title={t("settingsUpdateReminder")}
+          />
         </div>
 
         {/* Status area */}
@@ -312,12 +397,19 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                   ? t("updateFound", { version: updateVersion })
                   : t("updateDownloading")}
               </p>
-              <div className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="absolute inset-y-0 w-2/5 animate-indeterminate-bar rounded-full bg-gradient-to-r from-transparent via-primary to-transparent" />
+              <div
+                className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                data-reduced-motion-keep="progress-bar"
+              >
+                <div
+                  className={`absolute inset-y-0 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent ${percent == null ? "w-2/5 animate-indeterminate-bar" : ""}`}
+                  data-reduced-motion-keep="progress-bar"
+                  style={percent == null ? undefined : { width: `${percent}%` }}
+                />
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/60">
                 {elapsedSeconds > 0
-                  ? t("updateElapsed", { seconds: elapsedSeconds })
+                  ? `${t("updateElapsed", { seconds: elapsedSeconds })}${bytesPerSecond ? ` · ${formatSpeed(bytesPerSecond)}` : ""}`
                   : t("updateDownloading")}
               </p>
             </div>
@@ -342,6 +434,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
               <button
                 className="mt-2 w-full rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
                 onClick={handleRestart}
+                type="button"
               >
                 {t("updateRestartNow")}
               </button>
@@ -374,6 +467,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
             <button
               className="mt-2 w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
               onClick={handleOpenManual}
+              type="button"
             >
               {t("updateDownloadManually")}
             </button>
@@ -387,6 +481,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
               className="w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={phase === "checking" || phase === "downloading"}
               onClick={handleCheck}
+              type="button"
             >
               {phase === "checking" || phase === "downloading" ? (
                 <span className="flex items-center justify-center gap-1.5">
@@ -404,12 +499,16 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
 
         {/* Proxy setting */}
         <div className="border-border border-t pt-3">
-          <label className="text-[11px] text-muted-foreground">
+          <label
+            className="text-[11px] text-muted-foreground"
+            htmlFor="update-proxy"
+          >
             {t("updateProxyLabel")}
           </label>
           <div className="mt-1 flex flex-wrap gap-2">
             <input
               className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40"
+              id="update-proxy"
               onChange={(e) => setProxy(e.target.value)}
               placeholder="127.0.0.1:7890"
               value={proxy}
@@ -417,6 +516,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
             <button
               className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
               onClick={handleSaveProxy}
+              type="button"
             >
               {proxySaved ? t("updateSaved") : t("updateSave")}
             </button>
@@ -424,6 +524,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
               className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={proxyTesting}
               onClick={handleTestProxy}
+              type="button"
             >
               {proxyTesting ? t("updateProxyTesting") : t("updateProxyTest")}
             </button>

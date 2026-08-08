@@ -5,6 +5,7 @@ import {
   CoverageCard,
   DashboardBarChart,
 } from "@/components/dashboard/dashboard-charts";
+import { UiPreferencesContext } from "@/contexts/ui-preferences-context";
 
 describe("dashboard chart accessibility", () => {
   it("exposes chart values through a keyboard-operable data table", () => {
@@ -69,26 +70,21 @@ describe("dashboard chart accessibility", () => {
   });
 
   it("disables horizontal bar motion when reduced motion is requested", () => {
-    const originalMatchMedia = window.matchMedia;
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: vi.fn(() => ({ matches: true }) as MediaQueryList),
-    });
     const { container } = render(
-      <DashboardBarChart
-        data={[{ count: 5, name: "Manual" }]}
-        horizontal
-        sampleTotal={5}
-      />
+      <UiPreferencesContext.Provider
+        value={{ reduceMotion: true, setReduceMotion: vi.fn() }}
+      >
+        <DashboardBarChart
+          data={[{ count: 5, name: "Manual" }]}
+          horizontal
+          sampleTotal={5}
+        />
+      </UiPreferencesContext.Provider>
     );
 
     expect(
       container.querySelector('[style*="width 400ms ease-out"]')
     ).toBeNull();
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: originalMatchMedia,
-    });
   });
 
   it("keeps zero-count data points non-interactive", () => {

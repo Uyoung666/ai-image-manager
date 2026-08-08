@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { SettingsPageShell } from "@/components/settings/settings-page-shell";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 import { UpdateChangelogHistory } from "@/components/settings/update-changelog-history";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
 function UpdateSettingsPage() {
+  const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef);
@@ -15,12 +18,12 @@ function UpdateSettingsPage() {
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
-      <div className="mx-auto w-full max-w-[820px]">
+    <SettingsPageShell scrollRef={scrollRef} title={t("settingsGroupUpdates")}>
+      <div className="space-y-6">
         <UpdateSection appVersion={appVersion} />
         <UpdateChangelogHistory />
       </div>
-    </div>
+    </SettingsPageShell>
   );
 }
 

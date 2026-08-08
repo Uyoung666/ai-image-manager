@@ -11,6 +11,13 @@ import {
   setSetting,
 } from "@/services/settings-manager";
 import {
+  APP_PREFERENCE_DEFAULTS,
+  APP_PREFERENCE_KEYS,
+  type AppPreferences,
+  parseBooleanPreference,
+  parseCloseBehavior,
+} from "@/types/app-preferences";
+import {
   getDataPath,
   isDefaultDataPath,
   setCustomDataPath,
@@ -79,6 +86,109 @@ export const getAllAppSettings = os
   .handler(async ({ input }) => {
     const settings = getAllSettings(input.prefix);
     return { settings };
+  });
+
+export const getAppPreferences = os.handler(
+  (): AppPreferences => ({
+    closeBehavior: parseCloseBehavior(
+      getSetting(APP_PREFERENCE_KEYS.closeBehavior)
+    ),
+    reduceMotion: parseBooleanPreference(
+      getSetting(APP_PREFERENCE_KEYS.reduceMotion),
+      APP_PREFERENCE_DEFAULTS.reduceMotion
+    ),
+    rememberBounds: parseBooleanPreference(
+      getSetting(APP_PREFERENCE_KEYS.rememberBounds),
+      APP_PREFERENCE_DEFAULTS.rememberBounds
+    ),
+    updateAutoUpdate: parseBooleanPreference(
+      getSetting(APP_PREFERENCE_KEYS.updateAutoUpdate),
+      APP_PREFERENCE_DEFAULTS.updateAutoUpdate
+    ),
+    updateReminder: parseBooleanPreference(
+      getSetting(APP_PREFERENCE_KEYS.updateReminder),
+      APP_PREFERENCE_DEFAULTS.updateReminder
+    ),
+  })
+);
+
+export const setAppPreference = os
+  .input(
+    z.object({
+      key: z.enum([
+        APP_PREFERENCE_KEYS.closeBehavior,
+        APP_PREFERENCE_KEYS.reduceMotion,
+        APP_PREFERENCE_KEYS.rememberBounds,
+        APP_PREFERENCE_KEYS.updateAutoUpdate,
+        APP_PREFERENCE_KEYS.updateReminder,
+      ]),
+      value: z.string(),
+    })
+  )
+  .handler(async ({ input }) => {
+    if (input.key === APP_PREFERENCE_KEYS.closeBehavior) {
+      setSetting(input.key, parseCloseBehavior(input.value));
+    } else if (input.key === APP_PREFERENCE_KEYS.reduceMotion) {
+      setSetting(
+        input.key,
+        String(
+          parseBooleanPreference(
+            input.value,
+            APP_PREFERENCE_DEFAULTS.reduceMotion
+          )
+        )
+      );
+    } else if (input.key === APP_PREFERENCE_KEYS.rememberBounds) {
+      setSetting(
+        input.key,
+        String(
+          parseBooleanPreference(
+            input.value,
+            APP_PREFERENCE_DEFAULTS.rememberBounds
+          )
+        )
+      );
+    } else if (input.key === APP_PREFERENCE_KEYS.updateAutoUpdate) {
+      setSetting(
+        input.key,
+        String(
+          parseBooleanPreference(
+            input.value,
+            APP_PREFERENCE_DEFAULTS.updateAutoUpdate
+          )
+        )
+      );
+    } else {
+      setSetting(
+        input.key,
+        String(
+          parseBooleanPreference(
+            input.value,
+            APP_PREFERENCE_DEFAULTS.updateReminder
+          )
+        )
+      );
+    }
+    if (input.key === APP_PREFERENCE_KEYS.updateAutoUpdate) {
+      const { setAutoUpdateEnabled } = await import(
+        "@/services/update-manager"
+      );
+      setAutoUpdateEnabled(
+        parseBooleanPreference(
+          input.value,
+          APP_PREFERENCE_DEFAULTS.updateAutoUpdate
+        )
+      );
+    } else if (input.key === APP_PREFERENCE_KEYS.updateReminder) {
+      const { setReminderEnabled } = await import("@/services/update-manager");
+      setReminderEnabled(
+        parseBooleanPreference(
+          input.value,
+          APP_PREFERENCE_DEFAULTS.updateReminder
+        )
+      );
+    }
+    return { ok: true };
   });
 
 export const getDataPathInfo = os.handler(() => {

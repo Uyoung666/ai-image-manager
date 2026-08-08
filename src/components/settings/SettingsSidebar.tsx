@@ -8,6 +8,7 @@ import {
   Layers,
   Paintbrush,
   RefreshCw,
+  Settings,
   Zap,
 } from "lucide-react";
 import { Fragment } from "react";
@@ -28,80 +29,94 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
-    groupKey: "settingsGroupGeneral",
+    groupKey: "settingsGroupAppearance",
     icon: Paintbrush,
     keywords:
-      "主题 深色 浅色 暗色 语言 中文 英文 开机自启 启动 侧边栏 折叠 theme dark light language startup sidebar collapse",
+      "\u5916\u89c2 \u4ea4\u4e92 \u4e3b\u9898 \u6df1\u8272 \u6d45\u8272 \u7cfb\u7edf \u8bed\u8a00 \u4e2d\u6587 \u82f1\u6587 \u7f29\u653e \u754c\u9762\u7f29\u653e \u641c\u7d22 \u5339\u914d \u7075\u654f\u5ea6 \u5bbd\u677e \u6807\u51c6 \u4e25\u683c \u52a8\u753b \u51cf\u5c11\u52a8\u753b appearance interaction theme dark light language chinese english scale zoom search sensitivity relaxed standard strict motion animation",
     labelKey: "settingsAppearance",
     to: "/settings/appearance",
   },
   {
-    groupKey: "settingsGroupGeneral",
+    groupKey: "settingsGroupBehavior",
+    icon: Settings,
+    keywords:
+      "\u5e94\u7528\u884c\u4e3a \u5173\u95ed \u5173\u95ed\u884c\u4e3a \u9000\u51fa \u6258\u76d8 \u6700\u5c0f\u5316 \u8bb0\u4f4f\u7a97\u53e3 \u4f4d\u7f6e \u5927\u5c0f \u5f00\u673a\u81ea\u542f \u542f\u52a8 \u4fa7\u8fb9\u680f \u6298\u53e0 \u9009\u7247 \u4fdd\u7559 \u6536\u85cf app behavior close quit tray minimize window bounds startup login sidebar collapse cull keep favorites",
+    labelKey: "settingsBehavior",
+    to: "/settings/behavior",
+  },
+  {
+    groupKey: "settingsGroupPhotos",
     icon: Compass,
-    keywords: "漫游 闲置 放映 回忆 主题 wander idle slideshow memories theme",
+    keywords:
+      "\u7167\u7247\u4f53\u9a8c \u6f2b\u6e38 \u95f2\u7f6e \u653e\u6620 \u56de\u5fc6 \u4e3b\u9898 wander idle slideshow memories theme",
     labelKey: "settingsWander",
     to: "/settings/wander",
   },
   {
-    groupKey: "settingsGroupSystem",
+    groupKey: "settingsGroupPhotos",
     icon: Layers,
     keywords:
-      "序列 识别 连拍 延时摄影 burst timelapse sequence detection recognition",
+      "\u7167\u7247\u4f53\u9a8c \u5e8f\u5217\u8bc6\u522b \u8fde\u62cd \u5ef6\u65f6\u6444\u5f71 \u8bc6\u522b burst timelapse sequence detection recognition",
     labelKey: "settingsSequenceDetection",
     to: "/settings/sequences",
   },
   {
-    groupKey: "settingsGroupSystem",
+    groupKey: "settingsGroupData",
     icon: HardDrive,
     keywords:
-      "缓存 缩略图 清理 孤立 索引 无效 数据库 数据目录 迁移 cache thumbnail orphan index database directory clean storage",
+      "\u6570\u636e \u6027\u80fd \u7f13\u5b58 \u7f29\u7565\u56fe \u6e05\u7406 \u5b64\u7acb \u7d22\u5f15 \u65e0\u6548 \u6570\u636e\u5e93 \u6570\u636e\u76ee\u5f55 \u8fc1\u79fb cache thumbnail orphan index database directory clean storage",
     labelKey: "settingsStorage",
     to: "/settings/storage",
   },
   {
-    groupKey: "settingsGroupSystem",
+    groupKey: "settingsGroupData",
     icon: Zap,
-    keywords: "gpu 显卡 加速 directml 人脸 检测 face detection acceleration",
+    keywords:
+      "\u6570\u636e \u6027\u80fd GPU \u663e\u5361 \u52a0\u901f \u4eba\u8138\u68c0\u6d4b directml face detection acceleration",
     labelKey: "gpuAcceleration",
     to: "/settings/acceleration",
   },
   {
-    groupKey: "settingsGroupExport",
+    groupKey: "settingsGroupOutput",
     icon: Cloud,
-    keywords: "云同步 webdav s3 上传 存储桶 cloud sync upload bucket",
+    keywords:
+      "\u8f93\u51fa \u540c\u6b65 \u4e91\u540c\u6b65 webdav s3 \u4e0a\u4f20 \u5b58\u50a8\u6876 cloud sync upload bucket",
     labelKey: "cloudSync",
     to: "/settings/cloud-sync",
   },
   {
-    groupKey: "settingsGroupExport",
+    groupKey: "settingsGroupOutput",
     icon: Image,
     keywords:
-      "水印 文字 图片 透明度 大小 位置 字体 watermark text image opacity font position",
+      "\u8f93\u51fa \u540c\u6b65 \u6c34\u5370 \u6587\u5b57 \u56fe\u7247 \u900f\u660e\u5ea6 \u5927\u5c0f \u4f4d\u7f6e \u5b57\u4f53 watermark text image opacity font position",
     labelKey: "watermarkSettings",
     to: "/settings/watermark",
   },
   {
-    groupKey: "settingsGroupSystem",
+    groupKey: "settingsGroupUpdates",
     icon: RefreshCw,
     keywords:
-      "更新 版本 升级 下载 代理 重启 update version upgrade download proxy restart",
+      "\u66f4\u65b0 \u7248\u672c \u5347\u7ea7 \u4e0b\u8f7d \u4ee3\u7406 \u91cd\u542f \u81ea\u52a8\u66f4\u65b0 \u63d0\u9192 update version upgrade download proxy restart automatic reminder",
     labelKey: "settingsUpdate",
     to: "/settings/update",
   },
   {
-    groupKey: "settingsGroupGeneral",
+    groupKey: "settingsGroupUpdates",
     icon: Info,
     keywords:
-      "关于 版本 许可 作者 github 依赖 about version license author dependencies",
+      "\u66f4\u65b0 \u5173\u4e8e \u7248\u672c \u8bb8\u53ef\u8bc1 \u4f5c\u8005 github \u4f9d\u8d56 about version license author dependencies",
     labelKey: "settingsAbout",
     to: "/settings/about",
   },
 ];
 
 const GROUP_ORDER = [
-  "settingsGroupGeneral",
-  "settingsGroupExport",
-  "settingsGroupSystem",
+  "settingsGroupAppearance",
+  "settingsGroupBehavior",
+  "settingsGroupPhotos",
+  "settingsGroupData",
+  "settingsGroupOutput",
+  "settingsGroupUpdates",
 ];
 
 export { GROUP_ORDER as SETTINGS_GROUP_ORDER, NAV_ITEMS as SETTINGS_NAV_ITEMS };

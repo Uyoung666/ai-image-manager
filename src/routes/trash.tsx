@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
@@ -70,6 +71,7 @@ const TRASH_EXPIRY_FORMATTER = new Intl.DateTimeFormat(undefined, {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates coupled desktop selection and batch-operation state
 function TrashPage() {
   const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const routeKey = "trash";
   const [photos, setPhotos] = useState<DeletedPhoto[]>([]);
@@ -1029,9 +1031,7 @@ function TrashPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div
-        className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4"
-      >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
           <button
             aria-label={t("backToHome")}
@@ -1110,189 +1110,191 @@ function TrashPage() {
       </div>
 
       <div className="relative flex min-h-0 flex-1">
-      {/* Selection bar */}
-      {!loading && (trashTotalCount > 0 || query) && (
+        {/* Selection bar */}
+        {!loading && (trashTotalCount > 0 || query) && (
           <div
             className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b px-6 py-2 ${
               isToolbarScrolled ? "is-scrolled" : ""
             }`}
             ref={toolbarRef}
           >
-          <div className="flex items-center gap-3">
-            {photos.length > 0 && (
-              <button
-                className="text-[12px] text-muted-foreground hover:text-foreground"
-                disabled={operationRunning}
-                onClick={selectAll}
-                type="button"
-              >
-                {selectedIds.size === photos.length
-                  ? t("deselectAll")
-                  : t("selectLoaded")}
-              </button>
-            )}
-            {selectedIds.size > 0 && (
-              <span className="text-[12px] text-muted-foreground">
-                {t("selectedCount", { count: selectedIds.size })}
-              </span>
-            )}
-            <span className="text-[12px] text-muted-foreground/70">
-              {query
-                ? t("trashSearchResults", {
-                    bytes: formatBytes(totalBytes),
-                    count: totalCount,
-                  })
-                : t("trashRetentionHint")}
-            </span>
-          </div>
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <label className="relative min-w-36 flex-1 sm:flex-none">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                aria-keyshortcuts="Control+F Meta+F Escape"
-                aria-label={t("trashSearchPlaceholder")}
-                className="h-8 w-full rounded-[6px] border border-border bg-background pr-8 pl-8 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 sm:w-48"
-                onChange={(event) => setSearchInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape" && searchInput) {
-                    event.preventDefault();
-                    setSearchInput("");
-                  }
-                }}
-                placeholder={t("trashSearchPlaceholder")}
-                ref={searchInputRef}
-                type="search"
-                value={searchInput}
-              />
-              {searchInput && (
+            <div className="flex items-center gap-3">
+              {photos.length > 0 && (
                 <button
-                  aria-label={t("clearSearch")}
-                  className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                  onClick={() => {
-                    setSearchInput("");
-                    searchInputRef.current?.focus();
-                  }}
+                  className="text-[12px] text-muted-foreground hover:text-foreground"
+                  disabled={operationRunning}
+                  onClick={selectAll}
                   type="button"
                 >
-                  <X className="h-3 w-3" />
+                  {selectedIds.size === photos.length
+                    ? t("deselectAll")
+                    : t("selectLoaded")}
                 </button>
               )}
-            </label>
-            <FilterDropdown
-              aria-label={t("sortBy")}
-              className="h-8 rounded-[6px] border border-border bg-background px-2 text-[12px]"
-              onChange={(value) =>
-                setSort(value as "deletedAt" | "name" | "size")
-              }
-              options={[
-                { label: t("trashSortDeletedAt"), value: "deletedAt" },
-                { label: t("trashSortName"), value: "name" },
-                { label: t("trashSortSize"), value: "size" },
-              ]}
-              placeholder={t("sortBy")}
-              value={sort}
-            />
+              {selectedIds.size > 0 && (
+                <span className="text-[12px] text-muted-foreground">
+                  {t("selectedCount", { count: selectedIds.size })}
+                </span>
+              )}
+              <span className="text-[12px] text-muted-foreground/70">
+                {query
+                  ? t("trashSearchResults", {
+                      bytes: formatBytes(totalBytes),
+                      count: totalCount,
+                    })
+                  : t("trashRetentionHint")}
+              </span>
+            </div>
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <label className="relative min-w-36 flex-1 sm:flex-none">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  aria-keyshortcuts="Control+F Meta+F Escape"
+                  aria-label={t("trashSearchPlaceholder")}
+                  className="h-8 w-full rounded-[6px] border border-border bg-background pr-8 pl-8 text-[12px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 sm:w-48"
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && searchInput) {
+                      event.preventDefault();
+                      setSearchInput("");
+                    }
+                  }}
+                  placeholder={t("trashSearchPlaceholder")}
+                  ref={searchInputRef}
+                  type="search"
+                  value={searchInput}
+                />
+                {searchInput && (
+                  <button
+                    aria-label={t("clearSearch")}
+                    className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                    onClick={() => {
+                      setSearchInput("");
+                      searchInputRef.current?.focus();
+                    }}
+                    type="button"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </label>
+              <FilterDropdown
+                aria-label={t("sortBy")}
+                className="h-8 rounded-[6px] border border-border bg-background px-2 text-[12px]"
+                onChange={(value) =>
+                  setSort(value as "deletedAt" | "name" | "size")
+                }
+                options={[
+                  { label: t("trashSortDeletedAt"), value: "deletedAt" },
+                  { label: t("trashSortName"), value: "name" },
+                  { label: t("trashSortSize"), value: "size" },
+                ]}
+                placeholder={t("sortBy")}
+                value={sort}
+              />
+              <button
+                aria-label={
+                  order === "desc" ? t("sortDescending") : t("sortAscending")
+                }
+                className="h-8 rounded-[6px] border border-border px-2 text-[12px] text-muted-foreground hover:text-foreground"
+                onClick={() =>
+                  setOrder((value) => (value === "desc" ? "asc" : "desc"))
+                }
+                title={
+                  order === "desc" ? t("sortDescending") : t("sortAscending")
+                }
+                type="button"
+              >
+                {order === "desc" ? "↓" : "↑"}
+              </button>
+              {refreshing && (
+                <span
+                  aria-label={t("trashSearching")}
+                  aria-live="polite"
+                  className="flex items-center"
+                  role="status"
+                >
+                  <LoadingSpinner size="sm" />
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {refreshError && (
+          <div
+            aria-live="polite"
+            className="flex items-center justify-center gap-2 border-border border-b bg-destructive/5 px-6 py-1.5 text-[12px] text-destructive"
+          >
+            <span>{t("trashRefreshFailed")}</span>
             <button
-              aria-label={
-                order === "desc" ? t("sortDescending") : t("sortAscending")
-              }
-              className="h-8 rounded-[6px] border border-border px-2 text-[12px] text-muted-foreground hover:text-foreground"
-              onClick={() =>
-                setOrder((value) => (value === "desc" ? "asc" : "desc"))
-              }
-              title={
-                order === "desc" ? t("sortDescending") : t("sortAscending")
-              }
+              className="rounded-[6px] border border-border px-2 py-0.5 text-foreground hover:bg-foreground/5"
+              onClick={() => loadPhotos(null, false)}
               type="button"
             >
-              {order === "desc" ? "↓" : "↑"}
+              {t("retry")}
             </button>
-            {refreshing && (
-              <span
-                aria-label={t("trashSearching")}
-                aria-live="polite"
-                className="flex items-center"
-                role="status"
-              >
-                <LoadingSpinner size="sm" />
-              </span>
-            )}
           </div>
-        </div>
-      )}
-
-      {refreshError && (
-        <div
-          aria-live="polite"
-          className="flex items-center justify-center gap-2 border-border border-b bg-destructive/5 px-6 py-1.5 text-[12px] text-destructive"
-        >
-          <span>{t("trashRefreshFailed")}</span>
-          <button
-            className="rounded-[6px] border border-border px-2 py-0.5 text-foreground hover:bg-foreground/5"
-            onClick={() => loadPhotos(null, false)}
-            type="button"
-          >
-            {t("retry")}
-          </button>
-        </div>
-      )}
-      {/* Photo grid */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users select individual semantic card buttons */}
-      {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
-      <div
-        aria-busy={loading || refreshing}
-        className="relative flex-1 overflow-y-auto p-6"
-        onClick={(e) => {
-          if (marqueeJustCompleted.current) {
-            marqueeJustCompleted.current = false;
-            return;
-          }
-          const target = e.target as HTMLElement;
-          if (!target.closest("[data-photo-id]")) {
-            clearSelection();
-          }
-        }}
-        onMouseDown={handleMarqueeStart}
-        onScroll={(event) => {
-          const isScrolled = event.currentTarget.scrollTop > 4;
-          setIsToolbarScrolled(isScrolled);
-          setShowBackToTop(isScrolled);
-        }}
-        ref={scrollRef}
-        style={{ paddingTop: toolbarHeight, userSelect: "none" }}
-      >
-        {/* Marquee selection overlay */}
-        {marquee && (
-          <div
-            className="pointer-events-none absolute z-10 rounded-[4px] bg-primary/20 ring-1 ring-primary/40"
-            style={{
-              left: Math.min(marquee.startX, marquee.x),
-              top: Math.min(marquee.startY, marquee.y),
-              width: Math.abs(marquee.x - marquee.startX),
-              height: Math.abs(marquee.y - marquee.startY),
-            }}
-          />
         )}
-        {renderTrashContent()}
-      </div>
-      <MasonryBackToTop
-        label={t("backToTop")}
-        onClick={(event) => {
-          event.stopPropagation();
-          const element = scrollRef.current;
-          if (!element) {
-            return;
-          }
-          element.scrollTo({
-            top: 0,
-            behavior:
-              element.scrollTop > element.clientHeight * 4 ? "auto" : "smooth",
-          });
-        }}
-        selectionActive={selectedIds.size > 0}
-        show={showBackToTop}
-      />
+        {/* Photo grid */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users select individual semantic card buttons */}
+        {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
+        <div
+          aria-busy={loading || refreshing}
+          className="relative flex-1 overflow-y-auto p-6"
+          onClick={(e) => {
+            if (marqueeJustCompleted.current) {
+              marqueeJustCompleted.current = false;
+              return;
+            }
+            const target = e.target as HTMLElement;
+            if (!target.closest("[data-photo-id]")) {
+              clearSelection();
+            }
+          }}
+          onMouseDown={handleMarqueeStart}
+          onScroll={(event) => {
+            const isScrolled = event.currentTarget.scrollTop > 4;
+            setIsToolbarScrolled(isScrolled);
+            setShowBackToTop(isScrolled);
+          }}
+          ref={scrollRef}
+          style={{ paddingTop: toolbarHeight, userSelect: "none" }}
+        >
+          {/* Marquee selection overlay */}
+          {marquee && (
+            <div
+              className="pointer-events-none absolute z-10 rounded-[4px] bg-primary/20 ring-1 ring-primary/40"
+              style={{
+                left: Math.min(marquee.startX, marquee.x),
+                top: Math.min(marquee.startY, marquee.y),
+                width: Math.abs(marquee.x - marquee.startX),
+                height: Math.abs(marquee.y - marquee.startY),
+              }}
+            />
+          )}
+          {renderTrashContent()}
+        </div>
+        <MasonryBackToTop
+          label={t("backToTop")}
+          onClick={(event) => {
+            event.stopPropagation();
+            const element = scrollRef.current;
+            if (!element) {
+              return;
+            }
+            element.scrollTo({
+              top: 0,
+              behavior:
+                reduceMotion || element.scrollTop > element.clientHeight * 4
+                  ? "auto"
+                  : "smooth",
+            });
+          }}
+          selectionActive={selectedIds.size > 0}
+          show={showBackToTop}
+        />
       </div>
 
       {/* Context menu */}

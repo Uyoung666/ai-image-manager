@@ -732,6 +732,45 @@ html.transitioning [data-theme-sensitive] {
   border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
 }
 
+/* User-controlled reduced motion. The inline bootstrap in index.html sets the
+   attribute before React paints, so this also covers the first screen. */
+html[data-reduced-motion="true"],
+html[data-reduced-motion="true"] body,
+html[data-reduced-motion="true"] * {
+  scroll-behavior: auto !important;
+}
+
+/* Keep status feedback, skeletons, progress indicators, and startup waiting
+   alive; they communicate work that is still in progress. */
+html[data-reduced-motion="true"] :where(
+  *:not([role="status"]):not([role="status"] *):not([data-slot="skeleton"]):not(
+      [data-slot="skeleton"] *
+    ):not([data-reduced-motion-keep]):not([data-reduced-motion-keep] *):not(
+      .wheel-and-hamster
+    ):not(.wheel-and-hamster *)
+) {
+  transition: none !important;
+  animation: none !important;
+}
+
+html[data-reduced-motion="true"] :where(*:not(:focus-visible)) {
+  box-shadow: none !important;
+}
+
+html[data-reduced-motion="true"] [class*="backdrop-blur"],
+html[data-reduced-motion="true"] .glass-surface,
+html[data-reduced-motion="true"] .glass-surface-heavy,
+html[data-reduced-motion="true"] .page-toolbar.is-scrolled,
+html[data-reduced-motion="true"] .home-gallery-toolbar-layer.is-scrolled {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-reduced-motion="true"]::view-transition-old(root),
+html[data-reduced-motion="true"]::view-transition-new(root) {
+  animation: none !important;
+}
+
 /* Renderer startup surface */
 .startup-splash {
   position: fixed;

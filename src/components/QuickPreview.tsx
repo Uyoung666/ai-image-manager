@@ -5,6 +5,7 @@ import {
   type PreviewMenuState,
 } from "@/components/PreviewContextMenu";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -32,6 +33,7 @@ export function QuickPreview({
   onOpenLightbox,
 }: QuickPreviewProps) {
   const { t, i18n } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const [loaded, setLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [srcKey, setSrcKey] = useState(0);
@@ -53,12 +55,16 @@ export function QuickPreview({
 
   // ── 入场动画 ──────────────────────────────────────────────────
   useEffect(() => {
+    if (reduceMotion) {
+      setAnimState("visible");
+      return;
+    }
     setAnimState("entering");
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => setAnimState("visible"));
     });
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [reduceMotion]);
 
   useEffect(() => {
     setLoaded(false);
@@ -67,6 +73,10 @@ export function QuickPreview({
 
   function handleClose() {
     if (animState === "exiting") {
+      return;
+    }
+    if (reduceMotion) {
+      onCloseRef.current();
       return;
     }
     setAnimState("exiting");
@@ -111,9 +121,11 @@ export function QuickPreview({
 
   return (
     <div
-      className={`fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm transition-all duration-200 ease-out ${
-        animState === "visible" ? "opacity-100" : "opacity-0"
-      }`}
+      className={`fixed inset-0 z-[200] flex items-center justify-center bg-black/80 ${
+        reduceMotion
+          ? ""
+          : "backdrop-blur-sm transition-all duration-200 ease-out"
+      } ${animState === "visible" ? "opacity-100" : "opacity-0"}`}
       data-wander-blocking="true"
       onClick={handleClose}
       onTransitionEnd={() => {
@@ -123,7 +135,9 @@ export function QuickPreview({
       }}
     >
       <div
-        className={`relative flex max-h-[90vh] max-w-[90vw] flex-col items-center transition-all duration-200 ease-out ${
+        className={`relative flex max-h-[90vh] max-w-[90vw] flex-col items-center ${
+          reduceMotion ? "" : "transition-all duration-200 ease-out"
+        } ${
           animState === "visible"
             ? "translate-y-0 scale-100 opacity-100"
             : "translate-y-2 scale-95 opacity-0"
@@ -149,7 +163,9 @@ export function QuickPreview({
         ) : (
           <img
             alt={photo.filename}
-            className={`max-h-[80vh] max-w-[90vw] rounded-[8px] object-contain transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
+            className={`max-h-[80vh] max-w-[90vw] rounded-[8px] object-contain ${
+              reduceMotion ? "" : "transition-opacity duration-200"
+            } ${loaded ? "opacity-100" : "opacity-0"}`}
             draggable
             key={srcKey}
             onContextMenu={(e) => {

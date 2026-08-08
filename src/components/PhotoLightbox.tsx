@@ -39,6 +39,8 @@ import {
   PreviewContextMenu,
   type PreviewMenuState,
 } from "@/components/PreviewContextMenu";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -48,6 +50,7 @@ export interface LightboxPhoto extends LightboxInfoPhoto {
 }
 
 interface PhotoLightboxProps {
+  autoPlay?: boolean;
   initialIndex: number;
   modalOpen?: boolean;
   onAddToAlbum?: (photoId: number) => void;
@@ -55,7 +58,6 @@ interface PhotoLightboxProps {
   onToggleFavorite?: (photoId: number, nextFavorite: boolean) => Promise<void>;
   open: boolean;
   photos: LightboxPhoto[];
-  autoPlay?: boolean;
   sequencePlayback?: boolean;
   showThumbnailsInitially?: boolean;
 }
@@ -91,6 +93,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   autoPlay = false,
 }: PhotoLightboxProps) {
   const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -168,9 +171,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       return;
     }
     const timeout = window.setTimeout(() => {
-      wanderActions.recordExposure({ photoId: photo.id, source: "lightbox" }).catch(
-        () => undefined
-      );
+      wanderActions
+        .recordExposure({ photoId: photo.id, source: "lightbox" })
+        .catch(() => undefined);
     }, 2000);
     return () => window.clearTimeout(timeout);
   }, [open, photo]);
@@ -201,7 +204,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           (direction === 1 && previous === photos.length - 1) ||
           (direction === -1 && previous === 0)
         ) {
-          setWrapPulse(true);
+          if (!reduceMotion) {
+            setWrapPulse(true);
+          }
           window.setTimeout(() => setWrapPulse(false), 450);
         }
         return next;
@@ -214,7 +219,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         setPlaying(false);
       }
     },
-    [photos.length, resetView]
+    [photos.length, reduceMotion, resetView]
   );
 
   const updateZoom = useCallback((next: number, manual = true) => {
@@ -420,11 +425,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       return;
     }
     thumbnailRefs.current.get(photo.id)?.scrollIntoView?.({
-      behavior: "smooth",
+      behavior: reduceMotion ? "auto" : "smooth",
       block: "nearest",
       inline: "center",
     });
-  }, [open, photo, thumbnailsVisible]);
+  }, [open, photo, reduceMotion, thumbnailsVisible]);
 
   useEffect(() => {
     if (!open) {
@@ -807,106 +812,110 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 </button>
               </div>
             </div>
+          ) : // biome-ignore lint/style/noNestedTernary: the mutually exclusive error, playback, and original-image surfaces keep only one frame mounted.
+          previewPlayback && previewUrl ? (
+            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the playback image retains error handling for unavailable thumbnails.
+            <img
+              alt={photo.filename}
+              className="max-h-full max-w-full select-none object-contain"
+              data-lightbox-image
+              data-lightbox-playback-frame
+              draggable={false}
+              height={photo.height || undefined}
+              onError={() => {
+                setImageError(true);
+                setLoaded(false);
+              }}
+              src={previewUrl}
+              width={photo.width || undefined}
+            />
           ) : (
-            // biome-ignore lint/style/noNestedTernary: the mutually exclusive error, playback, and original-image surfaces keep only one frame mounted.
-            previewPlayback && previewUrl ? (
-              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the playback image retains error handling for unavailable thumbnails.
-              <img
-                alt={photo.filename}
-                className="max-h-full max-w-full select-none object-contain"
-                data-lightbox-image
-                data-lightbox-playback-frame
-                draggable={false}
-                height={photo.height || undefined}
-                onError={() => {
-                  setImageError(true);
-                  setLoaded(false);
-                }}
-                src={previewUrl}
-                width={photo.width || undefined}
-              />
-            ) : (
-              // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
-              <img
-                alt={photo.filename}
-                className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
-                data-lightbox-image
-                draggable={zoom <= 1}
-                height={photo.height || undefined}
-                key={`${photo.id}-${sourceKey}`}
-                onDoubleClick={() => {
-                  if (zoom > 1.05) {
-                    updateZoom(1);
-                  } else {
-                    showActualPixels();
-                  }
-                }}
-                onDragStart={(event) => {
-                  event.preventDefault();
-                  if (zoom > 1) {
-                    return;
-                  }
-                  window.electronAPI?.startDrag?.(photo.path);
-                }}
-                onError={() => {
-                  setImageError(true);
-                  setLoaded(false);
-                }}
-                onLoad={() => setLoaded(true)}
-                onPointerDown={(event) => {
-                  if (zoom <= 1) {
-                    return;
-                  }
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  dragRef.current = {
-                    pointerId: event.pointerId,
-                    startX: event.clientX,
-                    startY: event.clientY,
-                    translateX: translate.x,
-                    translateY: translate.y,
-                  };
-                }}
-                onPointerMove={(event) => {
-                  const drag = dragRef.current;
-                  if (!drag || drag.pointerId !== event.pointerId) {
-                    return;
-                  }
-                  setTranslate({
-                    x: drag.translateX + event.clientX - drag.startX,
-                    y: drag.translateY + event.clientY - drag.startY,
-                  });
-                }}
-                onPointerUp={(event) => {
-                  if (dragRef.current?.pointerId === event.pointerId) {
-                    dragRef.current = null;
-                  }
-                }}
-                onWheel={handleWheelZoom}
-                ref={imageRef}
-                src={toLocalMediaUrl(photo.path)}
-                style={{
-                  maxHeight:
-                    isQuarterTurn && canvasSize.width
-                      ? `${Math.max(1, canvasSize.width - 128)}px`
-                      : undefined,
-                  maxWidth:
-                    isQuarterTurn && canvasSize.height
-                      ? `${Math.max(1, canvasSize.height - 112)}px`
-                      : undefined,
-                  transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
-                  backfaceVisibility: "hidden",
-                  transition: dragRef.current || wheelActive
+            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the reviewed image is directly pannable, zoomable, draggable, and context-menu enabled.
+            <img
+              alt={photo.filename}
+              className={`max-h-full max-w-full select-none object-contain transition-opacity duration-150 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"} ${zoom > 1 ? "cursor-grab active:cursor-grabbing" : ""}`}
+              data-lightbox-image
+              draggable={zoom <= 1}
+              height={photo.height || undefined}
+              key={`${photo.id}-${sourceKey}`}
+              onDoubleClick={() => {
+                if (zoom > 1.05) {
+                  updateZoom(1);
+                } else {
+                  showActualPixels();
+                }
+              }}
+              onDragStart={(event) => {
+                event.preventDefault();
+                if (zoom > 1) {
+                  return;
+                }
+                window.electronAPI?.startDrag?.(photo.path);
+              }}
+              onError={() => {
+                setImageError(true);
+                setLoaded(false);
+              }}
+              onLoad={() => setLoaded(true)}
+              onPointerDown={(event) => {
+                if (zoom <= 1) {
+                  return;
+                }
+                event.currentTarget.setPointerCapture(event.pointerId);
+                dragRef.current = {
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  translateX: translate.x,
+                  translateY: translate.y,
+                };
+              }}
+              onPointerMove={(event) => {
+                const drag = dragRef.current;
+                if (!drag || drag.pointerId !== event.pointerId) {
+                  return;
+                }
+                setTranslate({
+                  x: drag.translateX + event.clientX - drag.startX,
+                  y: drag.translateY + event.clientY - drag.startY,
+                });
+              }}
+              onPointerUp={(event) => {
+                if (dragRef.current?.pointerId === event.pointerId) {
+                  dragRef.current = null;
+                }
+              }}
+              onWheel={handleWheelZoom}
+              ref={imageRef}
+              src={toLocalMediaUrl(photo.path)}
+              style={{
+                maxHeight:
+                  isQuarterTurn && canvasSize.width
+                    ? `${Math.max(1, canvasSize.width - 128)}px`
+                    : undefined,
+                maxWidth:
+                  isQuarterTurn && canvasSize.height
+                    ? `${Math.max(1, canvasSize.height - 112)}px`
+                    : undefined,
+                transform: `translate3d(${translate.x}px, ${translate.y}px, 0) scale(${zoom}) rotate(${rotation}deg)`,
+                backfaceVisibility: "hidden",
+                transition:
+                  reduceMotion || dragRef.current || wheelActive
                     ? "none"
                     : "transform 150ms cubic-bezier(0.16, 1, 0.3, 1)",
-                  willChange: "transform",
-                }}
-                width={photo.width || undefined}
-              />
-            )
+                willChange: "transform",
+              }}
+              width={photo.width || undefined}
+            />
           )}
-          {(!previewPlayback || !previewUrl) && !(loaded || imageError) && (
+          {!(previewPlayback && previewUrl) && !(loaded || imageError) && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/20 border-t-white/75" />
+              <LoadingSpinner
+                aria-label={t("loading")}
+                data-reduced-motion-keep="spinner"
+                size="lg"
+                variant="overlay"
+              />
             </div>
           )}
         </div>
@@ -944,6 +953,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             <div className="relative flex items-center gap-1 overflow-hidden rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
               <div
                 className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-100"
+                data-reduced-motion-keep="progress-bar"
                 style={{ width: `${progress * 100}%` }}
               />
               <ControlButton
@@ -966,7 +976,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   }}
                   type="button"
                 >
-                  {sequencePlayback ? `${Math.round(1000 / value)} fps` : `${value / 1000}s`}
+                  {sequencePlayback
+                    ? `${Math.round(1000 / value)} fps`
+                    : `${value / 1000}s`}
                 </button>
               ))}
               <div className="mx-1 h-5 border-white/10 border-l" />

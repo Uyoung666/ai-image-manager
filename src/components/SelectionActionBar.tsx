@@ -21,6 +21,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 type ActionHandler = () => void | Promise<void>;
 
@@ -60,6 +61,7 @@ export function SelectionActionBar({
   onStartCull,
 }: SelectionActionBarProps) {
   const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const [animating, setAnimating] = useState(false);
   const [visible, setVisible] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
@@ -71,14 +73,18 @@ export function SelectionActionBar({
     if (selectedCount > 0) {
       mountedRef.current = true;
       setAnimating(true);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setVisible(true));
-      });
+      if (reduceMotion) {
+        setVisible(true);
+      } else {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => setVisible(true));
+        });
+      }
     } else {
       setMoreOpen(false);
       setVisible(false);
     }
-  }, [selectedCount]);
+  }, [reduceMotion, selectedCount]);
 
   function wrapAction(
     key: string,

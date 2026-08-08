@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 interface Particle {
   color: string;
@@ -40,6 +41,7 @@ export function ConfettiOverlay({
   onDone,
   onMidpoint,
 }: ConfettiOverlayProps) {
+  const reduceMotion = useReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const rafRef = useRef<number>(0);
@@ -70,6 +72,12 @@ export function ConfettiOverlay({
 
   useEffect(() => {
     if (!active) {
+      return;
+    }
+
+    if (reduceMotion) {
+      onMidpoint?.();
+      onDone?.();
       return;
     }
 
@@ -199,9 +207,9 @@ export function ConfettiOverlay({
         canvas.style.opacity = "1";
       }
     };
-  }, [active, spawnParticles, onDone, onMidpoint]);
+  }, [active, reduceMotion, spawnParticles, onDone, onMidpoint]);
 
-  if (!active) {
+  if (!active || reduceMotion) {
     return null;
   }
 

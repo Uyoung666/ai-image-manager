@@ -16,7 +16,10 @@
             : "light";
         }
         document.documentElement.classList.add(theme);
+        document.documentElement.dataset.reducedMotion =
+          localStorage.getItem("ui.reduceMotion") === "true" ? "true" : "false";
       } catch {
+        document.documentElement.dataset.reducedMotion = "false";
         // localStorage 不可用时静默忽略
       }
     })();

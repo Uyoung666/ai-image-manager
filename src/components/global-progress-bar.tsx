@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { getRandomPhrase } from "@/utils/progress-phrases";
 
@@ -9,6 +10,7 @@ import { getRandomPhrase } from "@/utils/progress-phrases";
 export function GlobalProgressBar() {
   const { t } = useTranslation();
   const status = useGlobalAiStatus();
+  const reduceMotion = useReducedMotion();
 
   // ── Fun phrase rotation ─────────────────────────────────────
   const [phrase, setPhrase] = useState(() => getRandomPhrase(status.phase));
@@ -40,6 +42,12 @@ export function GlobalProgressBar() {
   const prevRunningRef = useRef(false);
 
   useEffect(() => {
+    if (reduceMotion) {
+      setRender(status.isRunning);
+      setVisible(status.isRunning);
+      prevRunningRef.current = status.isRunning;
+      return;
+    }
     if (status.isRunning && !render) {
       // Enter: render immediately, then animate in
       setRender(true);
@@ -55,7 +63,7 @@ export function GlobalProgressBar() {
       return () => clearTimeout(timer);
     }
     prevRunningRef.current = status.isRunning;
-  }, [status.isRunning, render]);
+  }, [reduceMotion, status.isRunning, render]);
 
   // ── Percent smoothing ───────────────────────────────────────
   // Smooth the raw percentage so rapid updates don't cause jitter.
@@ -63,8 +71,8 @@ export function GlobalProgressBar() {
   const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!status.isRunning) {
-      setSmoothPct(0);
+    if (!status.isRunning || reduceMotion) {
+      setSmoothPct(reduceMotion ? status.percent : 0);
       return;
     }
     // Animate toward target over ~120ms using rAF
@@ -90,7 +98,7 @@ export function GlobalProgressBar() {
     }
     rafRef.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [status.percent, status.isRunning]);
+  }, [reduceMotion, status.percent, status.isRunning]);
 
   // Immediately snap on phase changes so the bar doesn't lag behind
   // a completely different task.
@@ -115,6 +123,7 @@ export function GlobalProgressBar() {
     <div
       className={`overflow-hidden transition-all duration-300 ease-out ${visible ? "max-h-12 opacity-100" : "max-h-0 opacity-0"}
       `}
+      data-reduced-motion-keep="progress-bar"
     >
       <div className="flex items-center gap-2 px-4 py-1.5">
         {showSpinner && <LoadingSpinner size="xs" />}
@@ -158,6 +167,7 @@ export function GlobalProgressBar() {
         <div
           className={`h-full bg-primary transition-[width] duration-300 ease-out ${isIndeterminate ? "animate-indeterminate-bar" : ""}
           `}
+          data-reduced-motion-keep="progress-bar"
           style={{
             width: isIndeterminate ? "30%" : `${Math.max(1, smoothPct)}%`,
           }}

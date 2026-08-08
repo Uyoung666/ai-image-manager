@@ -11,6 +11,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  RefreshCw,
   ScanSearch,
   Search,
   Settings,
@@ -23,6 +24,7 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getUpdateStatus } from "@/actions/update";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
@@ -280,6 +282,58 @@ export function Sidebar({
   const [tagSearch, setTagSearch] = useState("");
   const [debouncedTagSearch, setDebouncedTagSearch] = useState("");
   const [trashCount, setTrashCount] = useState(0);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      ipc.client.settings.getAppPreferences({}),
+      getUpdateStatus(),
+    ])
+      .then(([preferences, status]) => {
+        if (active) {
+          setUpdateAvailable(
+            preferences.updateReminder && status.phase === "downloaded"
+          );
+        }
+      })
+      .catch(() => undefined);
+
+    function handleUpdate(event: MessageEvent) {
+      if (event.data?.channel === "update:available") {
+        setUpdateAvailable(true);
+        return;
+      }
+      if (
+        event.data?.channel === "update:status" &&
+        event.data.phase === "downloaded"
+      ) {
+        ipc.client.settings
+          .getAppPreferences({})
+          .then((preferences) =>
+            setUpdateAvailable(preferences.updateReminder)
+          )
+          .catch(() => undefined);
+      }
+    }
+    function handleReminder(event: Event) {
+      const enabled = (event as CustomEvent<boolean>).detail === true;
+      if (!enabled) {
+        setUpdateAvailable(false);
+        return;
+      }
+      getUpdateStatus()
+        .then((status) => setUpdateAvailable(status.phase === "downloaded"))
+        .catch(() => undefined);
+    }
+    window.addEventListener("message", handleUpdate);
+    window.addEventListener("update-reminder-changed", handleReminder);
+    return () => {
+      active = false;
+      window.removeEventListener("message", handleUpdate);
+      window.removeEventListener("update-reminder-changed", handleReminder);
+    };
+  }, []);
 
   useEffect(() => {
     const listDeletedPhotos = ipc.client.photos.listDeletedPhotos;
@@ -1323,6 +1377,15 @@ export function Sidebar({
           </div>
 
           <div className="flex flex-col items-center gap-1 px-1.5">
+            {updateAvailable && (
+              <RailButton
+                active={location.pathname === "/settings/update"}
+                badge
+                icon={<RefreshCw className="h-4 w-4" />}
+                label={t("settingsUpdate")}
+                onClick={() => navigate({ to: "/settings/update" })}
+              />
+            )}
             <RailButton
               active={location.pathname.startsWith("/settings")}
               icon={<Settings className="h-4 w-4" />}

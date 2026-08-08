@@ -21,9 +21,7 @@ import {
   YAxis,
 } from "recharts";
 import { advancedExifActions } from "@/actions/advanced-exif";
-import {
-  CalendarHeatmap,
-} from "@/components/dashboard/calendar-heatmap";
+import { CalendarHeatmap } from "@/components/dashboard/calendar-heatmap";
 import {
   ChartSection,
   DashboardBarChart,
@@ -44,6 +42,7 @@ import {
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import type { AdvancedExifProgress } from "@/types/photo-metadata";
@@ -233,8 +232,7 @@ function DashboardPage() {
     useState<DashboardDisplayMode>("trend");
   const [timeDisplayMode, setTimeDisplayMode] =
     useState<DashboardDisplayMode>("trend");
-  const [isCustomRangeDialogOpen, setIsCustomRangeDialogOpen] =
-    useState(false);
+  const [isCustomRangeDialogOpen, setIsCustomRangeDialogOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(search.from ?? "");
   const [customTo, setCustomTo] = useState(search.to ?? "");
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
@@ -556,9 +554,7 @@ function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <header
-        className="border-border border-b px-4 py-3 sm:px-6"
-      >
+      <header className="border-border border-b px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
@@ -646,443 +642,494 @@ function DashboardPage() {
       </Dialog>
 
       <div className="relative flex min-h-0 flex-1">
-      <nav
-        aria-label={t("dashboardSections")}
-        className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex gap-1 overflow-x-auto border-b px-4 py-2 sm:px-6 ${
-          isToolbarScrolled ? "is-scrolled" : ""
-        }`}
-        ref={toolbarRef}
-      >
-        {TABS.map((item) => (
-          <button
-            aria-current={tab === item ? "page" : undefined}
-            className={`shrink-0 rounded-[6px] px-3 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-ring ${tab === item ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-            key={item}
-            onClick={() => setSearch({ tab: item })}
-            type="button"
-          >
-            {t(`dashboardTab_${item}`)}
-          </button>
-        ))}
-      </nav>
+        <nav
+          aria-label={t("dashboardSections")}
+          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex gap-1 overflow-x-auto border-b px-4 py-2 sm:px-6 ${
+            isToolbarScrolled ? "is-scrolled" : ""
+          }`}
+          ref={toolbarRef}
+        >
+          {TABS.map((item) => (
+            <button
+              aria-current={tab === item ? "page" : undefined}
+              className={`shrink-0 rounded-[6px] px-3 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-ring ${tab === item ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              key={item}
+              onClick={() => setSearch({ tab: item })}
+              type="button"
+            >
+              {t(`dashboardTab_${item}`)}
+            </button>
+          ))}
+        </nav>
 
-      <main
-        className="flex-1 overflow-y-auto p-4 sm:p-6"
-        onScroll={(event) => setIsToolbarScrolled(event.currentTarget.scrollTop > 4)}
-        ref={scrollRef}
-        style={{ paddingTop: toolbarHeight }}
-      >
-        {range.from !== undefined && data.scope.excludedUndated > 0 && (
-          <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-            <span>
-              {t("dashboardUndatedExcluded", {
-                count: data.scope.excludedUndated.toLocaleString(i18n.language),
-              })}
-            </span>
-          </div>
-        )}
+        <main
+          className="flex-1 overflow-y-auto p-4 sm:p-6"
+          onScroll={(event) =>
+            setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
+          }
+          ref={scrollRef}
+          style={{ paddingTop: toolbarHeight }}
+        >
+          {range.from !== undefined && data.scope.excludedUndated > 0 && (
+            <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <span>
+                {t("dashboardUndatedExcluded", {
+                  count: data.scope.excludedUndated.toLocaleString(
+                    i18n.language
+                  ),
+                })}
+              </span>
+            </div>
+          )}
 
-        {tab === "overview" && (
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-            <section className="relative order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
-              <div className="absolute top-5 right-5 sm:top-6 sm:right-6">
-                <ChartDisplayModeToggle
-                  onChange={changeOverviewDisplayMode}
-                  value={overviewDisplayMode}
-                />
-              </div>
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
-                    {t("dashboardOverviewEyebrow")}
-                  </p>
-                  <p className="mt-3 text-[11px] text-muted-foreground">
-                    {t("dashboardScopedPhotos")}
-                  </p>
-                  <h2 className="mt-1 font-semibold text-[40px] text-foreground tabular-nums leading-none tracking-tight">
-                    {sampleTotal.toLocaleString(i18n.language)}
-                  </h2>
-                  <p className="mt-3 max-w-xl text-[11px] text-muted-foreground">
-                    {t("dashboardOverviewSubtitle")}
-                  </p>
+          {tab === "overview" && (
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+              <section className="relative order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
+                <div className="absolute top-5 right-5 sm:top-6 sm:right-6">
+                  <ChartDisplayModeToggle
+                    onChange={changeOverviewDisplayMode}
+                    value={overviewDisplayMode}
+                  />
                 </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2 border-primary/15 border-t pt-3 text-[11px] sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
-                  {sampleTotal !== data.scope.libraryTotal && (
-                    <div>
-                      <p className="text-muted-foreground">
-                        {t("dashboardLibraryTotal")}
-                      </p>
-                      <p className="mt-0.5 font-medium text-foreground tabular-nums">
-                        {data.scope.libraryTotal.toLocaleString(i18n.language)}
-                      </p>
-                    </div>
-                  )}
+                <div className="flex flex-wrap items-end justify-between gap-4">
                   <div>
-                    <p className="text-muted-foreground">{t("dateRange")}</p>
-                    <p className="mt-0.5 font-medium text-foreground tabular-nums">
-                      {data.dateRange
-                        ? `${new Date(data.dateRange.earliest).getFullYear()}–${new Date(data.dateRange.latest).getFullYear()}`
-                        : "—"}
+                    <p className="font-medium text-[11px] text-primary uppercase tracking-[0.14em]">
+                      {t("dashboardOverviewEyebrow")}
+                    </p>
+                    <p className="mt-3 text-[11px] text-muted-foreground">
+                      {t("dashboardScopedPhotos")}
+                    </p>
+                    <h2 className="mt-1 font-semibold text-[40px] text-foreground tabular-nums leading-none tracking-tight">
+                      {sampleTotal.toLocaleString(i18n.language)}
+                    </h2>
+                    <p className="mt-3 max-w-xl text-[11px] text-muted-foreground">
+                      {t("dashboardOverviewSubtitle")}
                     </p>
                   </div>
+                  <div className="flex flex-wrap gap-x-6 gap-y-2 border-primary/15 border-t pt-3 text-[11px] sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
+                    {sampleTotal !== data.scope.libraryTotal && (
+                      <div>
+                        <p className="text-muted-foreground">
+                          {t("dashboardLibraryTotal")}
+                        </p>
+                        <p className="mt-0.5 font-medium text-foreground tabular-nums">
+                          {data.scope.libraryTotal.toLocaleString(
+                            i18n.language
+                          )}
+                        </p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-muted-foreground">{t("dateRange")}</p>
+                      <p className="mt-0.5 font-medium text-foreground tabular-nums">
+                        {data.dateRange
+                          ? `${new Date(data.dateRange.earliest).getFullYear()}–${new Date(data.dateRange.latest).getFullYear()}`
+                          : "—"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="mt-6 border-primary/10 border-t pt-3">
-                <OverviewTrend
-                  calendarData={data.dailyStats}
-                  color="var(--primary)"
-                  data={yearlyData}
-                  displayMode={overviewDisplayMode}
-                  onDateClick={(date) => drill(buildDateDrillParams(date))}
-                  title={t("yearlyDistribution")}
-                />
-              </div>
-            </section>
-            <section className="order-3 rounded-[10px] border border-border bg-secondary p-5 xl:col-span-3">
-              <h2 className="font-semibold text-[15px] text-foreground">
-                {t("dashboardLibraryHealth")}
-              </h2>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {t("dashboardCoverageDescription")}
-              </p>
-              <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border sm:grid-cols-3 xl:grid-cols-6">
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "ai"}
-                  label={t("dashboardAiCoverage")}
-                  percentage={overviewCoverage.ai}
-                />
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "exif"}
-                  label={t("dashboardExifCoverage")}
-                  percentage={overviewCoverage.exif}
-                />
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "advancedExif"}
-                  label={t("dashboardAdvancedExifCoverage")}
-                  percentage={overviewCoverage.advancedExif}
-                />
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "date"}
-                  label={t("dashboardDateCoverage")}
-                  percentage={overviewCoverage.date}
-                />
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "gps"}
-                  label={t("dashboardGpsCoverage")}
-                  percentage={overviewCoverage.gps}
-                />
-                <HealthMetric
-                  emphasized={weakestCoverageKey === "color"}
-                  label={t("dashboardColorCoverage")}
-                  percentage={overviewCoverage.color}
-                />
-              </div>
-            </section>
-            <div className="contents">
-              <section
-                className={`order-4 rounded-[10px] border border-border bg-secondary p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
-              >
+                <div className="mt-6 border-primary/10 border-t pt-3">
+                  <OverviewTrend
+                    calendarData={data.dailyStats}
+                    color="var(--primary)"
+                    data={yearlyData}
+                    displayMode={overviewDisplayMode}
+                    onDateClick={(date) => drill(buildDateDrillParams(date))}
+                    title={t("yearlyDistribution")}
+                  />
+                </div>
+              </section>
+              <section className="order-3 rounded-[10px] border border-border bg-secondary p-5 xl:col-span-3">
                 <h2 className="font-semibold text-[15px] text-foreground">
-                  {t("dashboardPhotographyProfile")}
+                  {t("dashboardLibraryHealth")}
                 </h2>
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t("dashboardPhotographyProfileSubtitle")}
+                  {t("dashboardCoverageDescription")}
                 </p>
-                <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border lg:grid-cols-3">
-                  <Insight
-                    detail={
-                      topCamera
-                        ? t("dashboardPhotoCount", { count: topCamera.count })
-                        : undefined
-                    }
-                    label={t("cameraUsage")}
-                    value={topCamera?.name ?? t("dashboardNoInsight")}
+                <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border sm:grid-cols-3 xl:grid-cols-6">
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "ai"}
+                    label={t("dashboardAiCoverage")}
+                    percentage={overviewCoverage.ai}
                   />
-                  <Insight
-                    detail={
-                      advancedChart("captureMode")[0]?.count
-                        ? t("dashboardPhotoCount", {
-                            count: advancedChart("captureMode")[0].count,
-                          })
-                        : undefined
-                    }
-                    label={t("metadataCaptureMode")}
-                    value={
-                      advancedChart("captureMode")[0]?.name ??
-                      t("dashboardNoInsight")
-                    }
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "exif"}
+                    label={t("dashboardExifCoverage")}
+                    percentage={overviewCoverage.exif}
                   />
-                  <Insight
-                    detail={
-                      advancedChart("inCameraLook")[0]?.count
-                        ? t("dashboardPhotoCount", {
-                            count: advancedChart("inCameraLook")[0].count,
-                          })
-                        : undefined
-                    }
-                    label={t("metadataInCameraLook")}
-                    value={
-                      advancedChart("inCameraLook")[0]?.name ??
-                      t("dashboardNoInsight")
-                    }
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "advancedExif"}
+                    label={t("dashboardAdvancedExifCoverage")}
+                    percentage={overviewCoverage.advancedExif}
                   />
-                  <Insight
-                    detail={
-                      topLens
-                        ? t("dashboardPhotoCount", { count: topLens.count })
-                        : undefined
-                    }
-                    label={t("lensUsage")}
-                    value={topLens?.name ?? t("dashboardNoInsight")}
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "date"}
+                    label={t("dashboardDateCoverage")}
+                    percentage={overviewCoverage.date}
                   />
-                  <Insight
-                    detail={
-                      peakHour?.count
-                        ? t("dashboardPhotoCount", { count: peakHour.count })
-                        : undefined
-                    }
-                    label={t("dashboardPeakHour")}
-                    value={
-                      peakHour?.count ? peakHour.name : t("dashboardNoInsight")
-                    }
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "gps"}
+                    label={t("dashboardGpsCoverage")}
+                    percentage={overviewCoverage.gps}
                   />
-                  <Insight
-                    detail={
-                      peakMonth?.count
-                        ? t("dashboardPhotoCount", { count: peakMonth.count })
-                        : undefined
-                    }
-                    label={t("dashboardPeakMonth")}
-                    value={
-                      peakMonth?.count
-                        ? peakMonth.name
-                        : t("dashboardNoInsight")
-                    }
+                  <HealthMetric
+                    emphasized={weakestCoverageKey === "color"}
+                    label={t("dashboardColorCoverage")}
+                    percentage={overviewCoverage.color}
                   />
                 </div>
               </section>
-              <section className="order-2 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-5 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
+              <div className="contents">
+                <section
+                  className={`order-4 rounded-[10px] border border-border bg-secondary p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
+                >
                   <h2 className="font-semibold text-[15px] text-foreground">
-                    {t("dashboardNextActions")}
+                    {t("dashboardPhotographyProfile")}
                   </h2>
-                </div>
-                {data.coverage.ai < sampleTotal ? (
-                  <div className="mt-4">
-                    <p className="text-[12px] text-foreground">
-                      {t("dashboardContinueAi", {
-                        count: sampleTotal - data.coverage.ai,
-                      })}
-                    </p>
-                    <Button
-                      className="mt-3 h-8 text-[11px]"
-                      disabled={startingAi}
-                      onClick={startAi}
-                    >
-                      {startingAi
-                        ? t("dashboardStartingAi")
-                        : t("dashboardStartAi")}
-                    </Button>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {t("dashboardPhotographyProfileSubtitle")}
+                  </p>
+                  <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border lg:grid-cols-3">
+                    <Insight
+                      detail={
+                        topCamera
+                          ? t("dashboardPhotoCount", { count: topCamera.count })
+                          : undefined
+                      }
+                      label={t("cameraUsage")}
+                      value={topCamera?.name ?? t("dashboardNoInsight")}
+                    />
+                    <Insight
+                      detail={
+                        advancedChart("captureMode")[0]?.count
+                          ? t("dashboardPhotoCount", {
+                              count: advancedChart("captureMode")[0].count,
+                            })
+                          : undefined
+                      }
+                      label={t("metadataCaptureMode")}
+                      value={
+                        advancedChart("captureMode")[0]?.name ??
+                        t("dashboardNoInsight")
+                      }
+                    />
+                    <Insight
+                      detail={
+                        advancedChart("inCameraLook")[0]?.count
+                          ? t("dashboardPhotoCount", {
+                              count: advancedChart("inCameraLook")[0].count,
+                            })
+                          : undefined
+                      }
+                      label={t("metadataInCameraLook")}
+                      value={
+                        advancedChart("inCameraLook")[0]?.name ??
+                        t("dashboardNoInsight")
+                      }
+                    />
+                    <Insight
+                      detail={
+                        topLens
+                          ? t("dashboardPhotoCount", { count: topLens.count })
+                          : undefined
+                      }
+                      label={t("lensUsage")}
+                      value={topLens?.name ?? t("dashboardNoInsight")}
+                    />
+                    <Insight
+                      detail={
+                        peakHour?.count
+                          ? t("dashboardPhotoCount", { count: peakHour.count })
+                          : undefined
+                      }
+                      label={t("dashboardPeakHour")}
+                      value={
+                        peakHour?.count
+                          ? peakHour.name
+                          : t("dashboardNoInsight")
+                      }
+                    />
+                    <Insight
+                      detail={
+                        peakMonth?.count
+                          ? t("dashboardPhotoCount", { count: peakMonth.count })
+                          : undefined
+                      }
+                      label={t("dashboardPeakMonth")}
+                      value={
+                        peakMonth?.count
+                          ? peakMonth.name
+                          : t("dashboardNoInsight")
+                      }
+                    />
                   </div>
-                ) : (data.exifCompleteness?.withoutExif ?? 0) > 0 ? (
-                  <p className="mt-4 text-[12px] text-foreground">
-                    {t("dashboardMissingExifAction", {
-                      count: data.exifCompleteness?.withoutExif,
-                    })}
-                  </p>
-                ) : (
-                  <p className="mt-4 text-[12px] text-muted-foreground">
-                    {t("dashboardHealthGood")}
-                  </p>
-                )}
-                {advancedExifQuery.data && (
-                  <div className="mt-4 border-border border-t pt-3">
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("advancedExifProgress", {
-                        processed: advancedExifQuery.data.processed,
-                        total: advancedExifQuery.data.total,
+                </section>
+                <section className="order-2 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-5 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <h2 className="font-semibold text-[15px] text-foreground">
+                      {t("dashboardNextActions")}
+                    </h2>
+                  </div>
+                  {data.coverage.ai < sampleTotal ? (
+                    <div className="mt-4">
+                      <p className="text-[12px] text-foreground">
+                        {t("dashboardContinueAi", {
+                          count: sampleTotal - data.coverage.ai,
+                        })}
+                      </p>
+                      <Button
+                        className="mt-3 h-8 text-[11px]"
+                        disabled={startingAi}
+                        onClick={startAi}
+                      >
+                        {startingAi
+                          ? t("dashboardStartingAi")
+                          : t("dashboardStartAi")}
+                      </Button>
+                    </div>
+                  ) : (data.exifCompleteness?.withoutExif ?? 0) > 0 ? (
+                    <p className="mt-4 text-[12px] text-foreground">
+                      {t("dashboardMissingExifAction", {
+                        count: data.exifCompleteness?.withoutExif,
                       })}
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {advancedExifQuery.data.running &&
-                      !advancedExifQuery.data.paused ? (
-                        <Button
-                          className="h-7 text-[10px]"
-                          onClick={() => advancedExifActions.pause()}
-                          variant="outline"
-                        >
-                          {t("pause")}
-                        </Button>
-                      ) : (
-                        <Button
-                          className="h-7 text-[10px]"
-                          onClick={() => advancedExifActions.resume()}
-                          variant="outline"
-                        >
-                          {t("advancedExifResume")}
-                        </Button>
-                      )}
-                      {advancedExifQuery.data.failed > 0 && (
-                        <Button
-                          className="h-7 text-[10px]"
-                          onClick={() => advancedExifActions.retry()}
-                          variant="outline"
-                        >
-                          {t("advancedExifRetry", {
-                            count: advancedExifQuery.data.failed,
-                          })}
-                        </Button>
-                      )}
+                  ) : (
+                    <p className="mt-4 text-[12px] text-muted-foreground">
+                      {t("dashboardHealthGood")}
+                    </p>
+                  )}
+                  {advancedExifQuery.data && (
+                    <div className="mt-4 border-border border-t pt-3">
+                      <p className="text-[11px] text-muted-foreground">
+                        {t("advancedExifProgress", {
+                          processed: advancedExifQuery.data.processed,
+                          total: advancedExifQuery.data.total,
+                        })}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {advancedExifQuery.data.running &&
+                        !advancedExifQuery.data.paused ? (
+                          <Button
+                            className="h-7 text-[10px]"
+                            onClick={() => advancedExifActions.pause()}
+                            variant="outline"
+                          >
+                            {t("pause")}
+                          </Button>
+                        ) : (
+                          <Button
+                            className="h-7 text-[10px]"
+                            onClick={() => advancedExifActions.resume()}
+                            variant="outline"
+                          >
+                            {t("advancedExifResume")}
+                          </Button>
+                        )}
+                        {advancedExifQuery.data.failed > 0 && (
+                          <Button
+                            className="h-7 text-[10px]"
+                            onClick={() => advancedExifActions.retry()}
+                            variant="outline"
+                          >
+                            {t("advancedExifRetry", {
+                              count: advancedExifQuery.data.failed,
+                            })}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
+              {shootingGuidance.length > 0 && (
+                <section className="order-5 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-primary/10 p-2 text-primary">
+                      <Lightbulb className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h2 className="font-semibold text-[15px] text-foreground">
+                        {t("dashboardGuidanceTitle")}
+                      </h2>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {t("dashboardGuidanceSubtitle")}
+                      </p>
                     </div>
                   </div>
-                )}
-              </section>
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                    {shootingGuidance.slice(0, 3).map((item) => (
+                      <GuidanceCard
+                        key={item.kind}
+                        kind={item.kind}
+                        value={item.value}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
-            {shootingGuidance.length > 0 && (
-              <section className="order-5 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-full bg-primary/10 p-2 text-primary">
-                    <Lightbulb className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-[15px] text-foreground">
-                      {t("dashboardGuidanceTitle")}
-                    </h2>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {t("dashboardGuidanceSubtitle")}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                  {shootingGuidance.slice(0, 3).map((item) => (
-                    <GuidanceCard
-                      key={item.kind}
-                      kind={item.kind}
-                      value={item.value}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
+          )}
 
-        {tab === "gear" && (
-          <div className="space-y-4">
-            <ChartBlock
-              color={DASHBOARD_COLORS.gear}
-              data={advancedChart("vendor")}
-              hint={t("dashboardHint_vendor")}
-              horizontal
-              meta={data.distributionMetadata.advancedVendor}
-              onClick={(point) =>
-                drill({
-                  advancedField: String(point.advancedField),
-                  advancedValue: String(point.advancedValue),
-                })
-              }
-              title={t("dashboardCameraBrand")}
-            />
-            <ChartWithExpand
-              color={DASHBOARD_COLORS.gear}
-              data={cameraData}
-              expanded={expandedCharts.has("camera")}
-              hasMore={cameraAll.length > 8}
-              hint={t("dashboardHint_camera")}
-              meta={data.distributionMetadata.camera}
-              onExpand={() => toggleExpanded("camera")}
-              onPointClick={(point) =>
-                drill({ cameraModel: String(point.cameraModel) })
-              }
-              title={t("cameraUsage")}
-            />
-            <ChartWithExpand
-              color={DASHBOARD_COLORS.gear}
-              data={lensData}
-              expanded={expandedCharts.has("lens")}
-              hasMore={lensAll.length > 8}
-              hint={t("dashboardHint_lens")}
-              meta={data.distributionMetadata.lens}
-              onExpand={() => toggleExpanded("lens")}
-              onPointClick={(point) =>
-                drill({ lensModel: String(point.lensModel) })
-              }
-              title={t("lensUsage")}
-            />
-          </div>
-        )}
-
-        {tab === "exposure" && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {tab === "gear" && (
+            <div className="space-y-4">
               <ChartBlock
-                color={DASHBOARD_COLORS.exposure}
-                data={focalData}
-                hint={t("dashboardHint_focal")}
-                meta={data.distributionMetadata.focal}
+                color={DASHBOARD_COLORS.gear}
+                data={advancedChart("vendor")}
+                hint={t("dashboardHint_vendor")}
+                horizontal
+                meta={data.distributionMetadata.advancedVendor}
                 onClick={(point) =>
                   drill({
-                    focalMin: String(point.focalMin),
-                    focalMax: String(point.focalMax),
+                    advancedField: String(point.advancedField),
+                    advancedValue: String(point.advancedValue),
                   })
                 }
-                title={t("focalDistribution")}
+                title={t("dashboardCameraBrand")}
               />
-              <ChartBlock
-                color={DASHBOARD_COLORS.exposure}
-                data={apertureData}
-                hint={t("dashboardHint_aperture")}
-                meta={data.distributionMetadata.aperture}
-                onClick={(point) =>
-                  drill({
-                    apertureMin: String(point.apertureMin),
-                    apertureMax: String(point.apertureMax),
-                  })
+              <ChartWithExpand
+                color={DASHBOARD_COLORS.gear}
+                data={cameraData}
+                expanded={expandedCharts.has("camera")}
+                hasMore={cameraAll.length > 8}
+                hint={t("dashboardHint_camera")}
+                meta={data.distributionMetadata.camera}
+                onExpand={() => toggleExpanded("camera")}
+                onPointClick={(point) =>
+                  drill({ cameraModel: String(point.cameraModel) })
                 }
-                title={t("aperturePreference")}
+                title={t("cameraUsage")}
               />
-              <ChartBlock
-                color={DASHBOARD_COLORS.exposure}
-                data={isoData}
-                hint={t("dashboardHint_iso")}
-                meta={data.distributionMetadata.iso}
-                onClick={(point) =>
-                  drill(
-                    buildRangeSearchParams(
-                      "iso",
-                      point.isoMin as number | undefined,
-                      point.isoMax as number | undefined
-                    )
-                  )
+              <ChartWithExpand
+                color={DASHBOARD_COLORS.gear}
+                data={lensData}
+                expanded={expandedCharts.has("lens")}
+                hasMore={lensAll.length > 8}
+                hint={t("dashboardHint_lens")}
+                meta={data.distributionMetadata.lens}
+                onExpand={() => toggleExpanded("lens")}
+                onPointClick={(point) =>
+                  drill({ lensModel: String(point.lensModel) })
                 }
-                title={t("isoDistributionTitle")}
+                title={t("lensUsage")}
               />
-              <ChartBlock
-                color={DASHBOARD_COLORS.exposure}
-                data={shutterData}
-                hint={t("dashboardHint_shutter")}
-                meta={data.distributionMetadata.shutter}
-                onClick={(point) =>
-                  drill(
-                    buildRangeSearchParams(
-                      "shutter",
-                      point.shutterMin as number | undefined,
-                      point.shutterMax as number | undefined
-                    )
-                  )
-                }
-                title={t("shutterDistribution")}
-              />
-              {[
-                ["exposureProgram", "metadataExposureProgram"],
-                ["meteringMode", "metadataMeteringMode"],
-                ["whiteBalance", "metadataWhiteBalance"],
-                ["stabilizationMode", "metadataStabilization"],
-              ].map(([key, label]) => (
+            </div>
+          )}
+
+          {tab === "exposure" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 <ChartBlock
                   color={DASHBOARD_COLORS.exposure}
+                  data={focalData}
+                  hint={t("dashboardHint_focal")}
+                  meta={data.distributionMetadata.focal}
+                  onClick={(point) =>
+                    drill({
+                      focalMin: String(point.focalMin),
+                      focalMax: String(point.focalMax),
+                    })
+                  }
+                  title={t("focalDistribution")}
+                />
+                <ChartBlock
+                  color={DASHBOARD_COLORS.exposure}
+                  data={apertureData}
+                  hint={t("dashboardHint_aperture")}
+                  meta={data.distributionMetadata.aperture}
+                  onClick={(point) =>
+                    drill({
+                      apertureMin: String(point.apertureMin),
+                      apertureMax: String(point.apertureMax),
+                    })
+                  }
+                  title={t("aperturePreference")}
+                />
+                <ChartBlock
+                  color={DASHBOARD_COLORS.exposure}
+                  data={isoData}
+                  hint={t("dashboardHint_iso")}
+                  meta={data.distributionMetadata.iso}
+                  onClick={(point) =>
+                    drill(
+                      buildRangeSearchParams(
+                        "iso",
+                        point.isoMin as number | undefined,
+                        point.isoMax as number | undefined
+                      )
+                    )
+                  }
+                  title={t("isoDistributionTitle")}
+                />
+                <ChartBlock
+                  color={DASHBOARD_COLORS.exposure}
+                  data={shutterData}
+                  hint={t("dashboardHint_shutter")}
+                  meta={data.distributionMetadata.shutter}
+                  onClick={(point) =>
+                    drill(
+                      buildRangeSearchParams(
+                        "shutter",
+                        point.shutterMin as number | undefined,
+                        point.shutterMax as number | undefined
+                      )
+                    )
+                  }
+                  title={t("shutterDistribution")}
+                />
+                {[
+                  ["exposureProgram", "metadataExposureProgram"],
+                  ["meteringMode", "metadataMeteringMode"],
+                  ["whiteBalance", "metadataWhiteBalance"],
+                  ["stabilizationMode", "metadataStabilization"],
+                ].map(([key, label]) => (
+                  <ChartBlock
+                    color={DASHBOARD_COLORS.exposure}
+                    data={advancedChart(key)}
+                    hint={t(`dashboardHint_${key}`)}
+                    horizontal
+                    key={key}
+                    meta={data.distributionMetadata[key]}
+                    onClick={(point) =>
+                      drill({
+                        advancedField: String(point.advancedField),
+                        advancedValue: String(point.advancedValue),
+                      })
+                    }
+                    title={t(label)}
+                  />
+                ))}
+              </div>
+              <div className="rounded-[8px] border border-border bg-secondary px-4 py-3 text-[12px] text-muted-foreground">
+                {t("dashboardAverageIso")}:{" "}
+                <strong className="text-foreground">
+                  {data.avgIso
+                    ? Math.round(data.avgIso).toLocaleString(i18n.language)
+                    : "—"}
+                </strong>{" "}
+                · {t("dashboardAverageIsoHint")}
+              </div>
+            </div>
+          )}
+
+          {tab === "technique" && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {[
+                ["focusMode", "metadataFocusMode"],
+                ["subjectTarget", "metadataSubjectTarget"],
+                ["driveMode", "metadataDriveMode"],
+                ["computationalMode", "metadataComputationalMode"],
+                ["inCameraLook", "metadataInCameraLook"],
+                ["provenanceStatus", "metadataCredentialStatus"],
+              ].map(([key, label]) => (
+                <ChartBlock
+                  color={
+                    key === "provenanceStatus"
+                      ? DASHBOARD_COLORS.provenance
+                      : DASHBOARD_COLORS.technique
+                  }
                   data={advancedChart(key)}
                   hint={t(`dashboardHint_${key}`)}
                   horizontal
@@ -1098,120 +1145,75 @@ function DashboardPage() {
                 />
               ))}
             </div>
-            <div className="rounded-[8px] border border-border bg-secondary px-4 py-3 text-[12px] text-muted-foreground">
-              {t("dashboardAverageIso")}:{" "}
-              <strong className="text-foreground">
-                {data.avgIso
-                  ? Math.round(data.avgIso).toLocaleString(i18n.language)
-                  : "—"}
-              </strong>{" "}
-              · {t("dashboardAverageIsoHint")}
-            </div>
-          </div>
-        )}
+          )}
 
-        {tab === "technique" && (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {[
-              ["focusMode", "metadataFocusMode"],
-              ["subjectTarget", "metadataSubjectTarget"],
-              ["driveMode", "metadataDriveMode"],
-              ["computationalMode", "metadataComputationalMode"],
-              ["inCameraLook", "metadataInCameraLook"],
-              ["provenanceStatus", "metadataCredentialStatus"],
-            ].map(([key, label]) => (
-              <ChartBlock
-                color={
-                  key === "provenanceStatus"
-                    ? DASHBOARD_COLORS.provenance
-                    : DASHBOARD_COLORS.technique
-                }
-                data={advancedChart(key)}
-                hint={t(`dashboardHint_${key}`)}
-                horizontal
-                key={key}
-                meta={data.distributionMetadata[key]}
-                onClick={(point) =>
-                  drill({
-                    advancedField: String(point.advancedField),
-                    advancedValue: String(point.advancedValue),
-                  })
-                }
-                title={t(label)}
-              />
-            ))}
-          </div>
-        )}
-
-        {tab === "time" && (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]">
-            <TrendChart
-              calendarData={data.dailyStats}
-              color={DASHBOARD_COLORS.time}
-              data={yearlyData}
-              displayMode={timeDisplayMode}
-              hint={t("dashboardHint_yearly")}
-              onDateClick={(date) => drill(buildDateDrillParams(date))}
-              onDisplayModeChange={changeTimeDisplayMode}
-              onPointClick={(point) => {
-                const params = buildYearDrillParams(
-                  Number(point.year),
-                  range
-                );
-                if (Object.keys(params).length > 0) {
-                  drill(params);
-                }
-              }}
-              sampleTotal={sampleTotal}
-              title={t("yearlyDistribution")}
-            />
-            <ChartBlock
-              color={DASHBOARD_COLORS.time}
-              data={monthlyData}
-              hint={t("dashboardHint_monthly")}
-              meta={{
-                valid: data.coverage.date,
-                missing: data.exifCompleteness?.missingDate ?? 0,
-                totalCategories: 12,
-                truncated: false,
-              }}
-              onClick={(point) =>
-                drill({ dateMonth: String(point.month) })
-              }
-              title={t("dashboardMonthlyPreference")}
-            />
-            <div className="xl:col-span-2">
+          {tab === "time" && (
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]">
               <TrendChart
+                calendarData={data.dailyStats}
                 color={DASHBOARD_COLORS.time}
-                data={timeData}
-                hint={t("dashboardHint_time")}
-                onPointClick={(point) =>
-                  drill({ dateHour: String(point.hour) })
-                }
-                sampleTotal={data.coverage.date}
-                title={t("timeDistribution24h")}
+                data={yearlyData}
+                displayMode={timeDisplayMode}
+                hint={t("dashboardHint_yearly")}
+                onDateClick={(date) => drill(buildDateDrillParams(date))}
+                onDisplayModeChange={changeTimeDisplayMode}
+                onPointClick={(point) => {
+                  const params = buildYearDrillParams(
+                    Number(point.year),
+                    range
+                  );
+                  if (Object.keys(params).length > 0) {
+                    drill(params);
+                  }
+                }}
+                sampleTotal={sampleTotal}
+                title={t("yearlyDistribution")}
               />
+              <ChartBlock
+                color={DASHBOARD_COLORS.time}
+                data={monthlyData}
+                hint={t("dashboardHint_monthly")}
+                meta={{
+                  valid: data.coverage.date,
+                  missing: data.exifCompleteness?.missingDate ?? 0,
+                  totalCategories: 12,
+                  truncated: false,
+                }}
+                onClick={(point) => drill({ dateMonth: String(point.month) })}
+                title={t("dashboardMonthlyPreference")}
+              />
+              <div className="xl:col-span-2">
+                <TrendChart
+                  color={DASHBOARD_COLORS.time}
+                  data={timeData}
+                  hint={t("dashboardHint_time")}
+                  onPointClick={(point) =>
+                    drill({ dateHour: String(point.hour) })
+                  }
+                  sampleTotal={data.coverage.date}
+                  title={t("timeDistribution24h")}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {tab === "places" && (
-          <PlacesAndColors
-            colorData={colorQuery.data ?? null}
-            colorLoading={colorQuery.isLoading}
-            drill={drill}
-            geoData={geoQuery.data ?? null}
-            geoLoading={geoQuery.isLoading}
-            mapSource={mapSource}
-            onMapSourceChange={(source) => {
-              setMapSource(source);
-              ipc.client.settings
-                .setAppSetting({ key: "mapSource", value: source })
-                .catch(() => undefined);
-            }}
-          />
-        )}
-      </main>
+          {tab === "places" && (
+            <PlacesAndColors
+              colorData={colorQuery.data ?? null}
+              colorLoading={colorQuery.isLoading}
+              drill={drill}
+              geoData={geoQuery.data ?? null}
+              geoLoading={geoQuery.isLoading}
+              mapSource={mapSource}
+              onMapSourceChange={(source) => {
+                setMapSource(source);
+                ipc.client.settings
+                  .setAppSetting({ key: "mapSource", value: source })
+                  .catch(() => undefined);
+              }}
+            />
+          )}
+        </main>
       </div>
     </div>
   );
@@ -1432,9 +1434,7 @@ function TrendChart({
   title: string;
 }) {
   const { t } = useTranslation();
-  const noMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)"
-  ).matches;
+  const noMotion = useReducedMotion();
   const hasCalendarData = calendarData && calendarData.length > 0;
   return (
     <ChartSection
@@ -1736,9 +1736,7 @@ function OverviewTrend({
   onDateClick: (date: string) => void;
   title: string;
 }) {
-  const noMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)"
-  ).matches;
+  const noMotion = useReducedMotion();
   if (!(data.some((point) => point.count > 0) || calendarData.length > 0)) {
     return null;
   }
@@ -1753,39 +1751,39 @@ function OverviewTrend({
       ) : (
         <div className="h-40" role="img">
           <ResponsiveContainer height="100%" width="100%">
-        <AreaChart
-          data={data}
-          margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
-        >
-          <defs>
-            <linearGradient id="overview-trend" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.38} />
-              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid
-            stroke="var(--border)"
-            strokeDasharray="3 3"
-            vertical={false}
-          />
-          <XAxis
-            axisLine={false}
-            dataKey="name"
-            interval="preserveStartEnd"
-            tick={axisTick}
-            tickLine={false}
-          />
-          <Tooltip {...chartTooltipStyle} />
-          <Area
-            animationDuration={400}
-            dataKey="count"
-            fill="url(#overview-trend)"
-            isAnimationActive={!noMotion}
-            stroke={color}
-            strokeWidth={2}
-            type="linear"
-          />
-        </AreaChart>
+            <AreaChart
+              data={data}
+              margin={{ bottom: 4, left: 0, right: 8, top: 8 }}
+            >
+              <defs>
+                <linearGradient id="overview-trend" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity={0.38} />
+                  <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                stroke="var(--border)"
+                strokeDasharray="3 3"
+                vertical={false}
+              />
+              <XAxis
+                axisLine={false}
+                dataKey="name"
+                interval="preserveStartEnd"
+                tick={axisTick}
+                tickLine={false}
+              />
+              <Tooltip {...chartTooltipStyle} />
+              <Area
+                animationDuration={400}
+                dataKey="count"
+                fill="url(#overview-trend)"
+                isAnimationActive={!noMotion}
+                stroke={color}
+                strokeWidth={2}
+                type="linear"
+              />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
