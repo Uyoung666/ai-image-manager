@@ -368,15 +368,50 @@
 
   [data-masonry-scroll] {
     scrollbar-gutter: stable;
-    scrollbar-color: color-mix(in srgb, var(--primary) 35%, transparent)
-      transparent;
-    scrollbar-width: auto;
+    scrollbar-width: none;
     transform: translateZ(0);
     will-change: scroll-position;
   }
 
-  [data-masonry-scroll]::-webkit-scrollbar-track {
-    margin-block-start: var(--masonry-scrollbar-top-inset, 0);
+  [data-masonry-scroll]::-webkit-scrollbar {
+    display: none;
+    height: 0;
+    width: 0;
+  }
+
+  .masonry-scrollbar {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: 10px;
+    pointer-events: none;
+  }
+
+  .masonry-scrollbar-track {
+    position: absolute;
+    inset: 0;
+  }
+
+  .masonry-scrollbar-thumb {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    width: 6px;
+    min-height: 24px;
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: 9999px;
+    pointer-events: auto;
+    cursor: grab;
+  }
+
+  .masonry-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--primary) 55%, transparent);
+  }
+
+  .masonry-scrollbar-thumb:active {
+    background: color-mix(in srgb, var(--primary) 75%, transparent);
+    cursor: grabbing;
   }
 
   /* ── 选中文本颜色 ──────────────────── */
@@ -583,7 +618,7 @@
   right: 0;
   left: 0;
   z-index: 40;
-  background: var(--gallery-canvas);
+  background: transparent;
   transition:
     background-color 160ms ease,
     box-shadow 160ms ease,

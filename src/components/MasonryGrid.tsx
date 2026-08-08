@@ -36,6 +36,7 @@ const SCROLL_TOP_EPSILON = 0.5;
 const SCROLL_RENDER_STEP_PX = 96;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_BEFORE = 1;
 const IMAGE_RENDER_OVERSCAN_VIEWPORTS_AFTER = 2;
+const MIN_SCROLLBAR_THUMB_HEIGHT = 24;
 
 export function shouldRenderItemImage(
   style: React.CSSProperties,
@@ -133,12 +134,14 @@ export const MasonryGrid = memo(
     const sentinelRef = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
+    const [scrollHeight, setScrollHeight] = useState(0);
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrolling, setIsScrolling] = useState(false);
     const [currentTimeLabel, setCurrentTimeLabel] = useState("");
     const [scrollVelocity, setScrollVelocity] = useState(0);
     const scrollTopStateRef = useRef(0);
     const viewportHeightStateRef = useRef(0);
+    const scrollHeightStateRef = useRef(0);
     const showScrollTopStateRef = useRef(false);
     const isScrollingStateRef = useRef(false);
     const currentTimeLabelRef = useRef("");
@@ -148,6 +151,13 @@ export const MasonryGrid = memo(
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
+    const scrollbarThumbRef = useRef<HTMLDivElement>(null);
+    const scrollbarDragRef = useRef<{
+      pointerId: number;
+      startY: number;
+      startScrollTop: number;
+      travel: number;
+    } | null>(null);
 
     const { positions, totalHeight, headerPositions, visibilityIndex } =
       useMasonryLayout(
@@ -228,6 +238,46 @@ export const MasonryGrid = memo(
     const headerPositionsRef = useRef(headerPositions);
     headerPositionsRef.current = headerPositions;
 
+    const syncScrollMetrics = useCallback((el: HTMLDivElement) => {
+      if (el.clientHeight !== viewportHeightStateRef.current) {
+        viewportHeightStateRef.current = el.clientHeight;
+        setViewportHeight(el.clientHeight);
+      }
+      if (el.scrollHeight !== scrollHeightStateRef.current) {
+        scrollHeightStateRef.current = el.scrollHeight;
+        setScrollHeight(el.scrollHeight);
+      }
+    }, []);
+
+    const updateScrollbarThumbPosition = useCallback(
+      (el: HTMLDivElement) => {
+        const thumb = scrollbarThumbRef.current;
+        if (!thumb) {
+          return;
+        }
+        const trackHeight = Math.max(0, el.clientHeight - topInset);
+        const scrollRange = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (trackHeight <= 0 || scrollRange <= 0) {
+          thumb.style.display = "none";
+          return;
+        }
+        const thumbHeight = Math.min(
+          trackHeight,
+          Math.max(
+            MIN_SCROLLBAR_THUMB_HEIGHT,
+            (trackHeight * el.clientHeight) / el.scrollHeight
+          )
+        );
+        const travel = Math.max(0, trackHeight - thumbHeight);
+        const offset =
+          travel > 0 ? (el.scrollTop / scrollRange) * travel : 0;
+        thumb.style.display = "block";
+        thumb.style.height = `${thumbHeight}px`;
+        thumb.style.transform = `translateY(${offset}px)`;
+      },
+      [topInset]
+    );
+
     const handleScroll = useCallback(() => {
       if (rafRef.current) {
         return;
@@ -257,10 +307,8 @@ export const MasonryGrid = memo(
           setScrollTop(el.scrollTop);
           recordGalleryPerf("masonryScrollRenderTopUpdates", 1);
         }
-        if (el.clientHeight !== viewportHeightStateRef.current) {
-          viewportHeightStateRef.current = el.clientHeight;
-          setViewportHeight(el.clientHeight);
-        }
+        syncScrollMetrics(el);
+        updateScrollbarThumbPosition(el);
 
         const nextShowScrollTop = el.scrollTop > el.clientHeight * 2;
         if (nextShowScrollTop !== showScrollTopStateRef.current) {
@@ -317,15 +365,19 @@ export const MasonryGrid = memo(
           performance.now() - frameStart
         );
       });
-    }, [checkNearBottom, onScrollTopChange]);
+    }, [
+      checkNearBottom,
+      onScrollTopChange,
+      syncScrollMetrics,
+      updateScrollbarThumbPosition,
+    ]);
 
     useLayoutEffect(() => {
       const el = scrollRef.current;
       if (el && el.clientHeight > 0) {
-        viewportHeightStateRef.current = el.clientHeight;
-        setViewportHeight(el.clientHeight);
+        syncScrollMetrics(el);
       }
-    }, []);
+    }, [syncScrollMetrics]);
 
     useEffect(() => {
       const el = scrollRef.current;
@@ -355,14 +407,11 @@ export const MasonryGrid = memo(
         return;
       }
       const observer = new ResizeObserver(() => {
-        if (el.clientHeight !== viewportHeightStateRef.current) {
-          viewportHeightStateRef.current = el.clientHeight;
-          setViewportHeight(el.clientHeight);
-        }
+        syncScrollMetrics(el);
       });
       observer.observe(el);
       return () => observer.disconnect();
-    }, []);
+    }, [syncScrollMetrics]);
 
     const prevPositionsRef = useRef(positions);
     const prevScrollToAlignmentRef = useRef(scrollToAlignment);
@@ -507,6 +556,28 @@ export const MasonryGrid = memo(
     }, []);
 
     const layoutReady = containerWidth > 0 && columnCount > 0;
+    useLayoutEffect(() => {
+      const el = scrollRef.current;
+      if (!el) {
+        return;
+      }
+      syncScrollMetrics(el);
+      updateScrollbarThumbPosition(el);
+    }, [
+      layoutReady,
+      syncScrollMetrics,
+      totalHeight,
+      topInset,
+      updateScrollbarThumbPosition,
+    ]);
+
+    useLayoutEffect(() => {
+      const el = scrollRef.current;
+      if (el) {
+        updateScrollbarThumbPosition(el);
+      }
+    }, [scrollHeight, scrollTop, updateScrollbarThumbPosition, viewportHeight]);
+
     const bottomSkeletons = useMemo(() => {
       const skeletonAspects = [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3];
       if (!(isLoadingMore && layoutReady) || positions.length === 0) {
@@ -552,6 +623,77 @@ export const MasonryGrid = memo(
       gap,
     ]);
 
+    const scrollbarTrackHeight = Math.max(0, viewportHeight - topInset);
+    const scrollbarThumbHeight =
+      scrollHeight > viewportHeight && scrollbarTrackHeight > 0
+        ? Math.min(
+            scrollbarTrackHeight,
+            Math.max(
+              MIN_SCROLLBAR_THUMB_HEIGHT,
+              (scrollbarTrackHeight * viewportHeight) / scrollHeight
+            )
+          )
+        : 0;
+    const scrollbarTravel = Math.max(
+      0,
+      scrollbarTrackHeight - scrollbarThumbHeight
+    );
+    const showCustomScrollbar =
+      scrollbarThumbHeight > 0 && scrollHeight > viewportHeight;
+
+    const handleScrollbarThumbPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        const el = scrollRef.current;
+        if (!el || scrollbarTravel <= 0) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        scrollbarDragRef.current = {
+          pointerId: event.pointerId,
+          startScrollTop: el.scrollTop,
+          startY: event.clientY,
+          travel: scrollbarTravel,
+        };
+      },
+      [scrollbarTravel]
+    );
+
+    const handleScrollbarThumbPointerMove = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        const drag = scrollbarDragRef.current;
+        const el = scrollRef.current;
+        if (!drag || drag.pointerId !== event.pointerId || !el) {
+          return;
+        }
+        event.preventDefault();
+        const scrollRange = Math.max(0, el.scrollHeight - el.clientHeight);
+        const nextScrollTop = Math.max(
+          0,
+          Math.min(
+            scrollRange,
+            drag.startScrollTop +
+              ((event.clientY - drag.startY) / drag.travel) * scrollRange
+          )
+        );
+        el.scrollTop = nextScrollTop;
+      },
+      []
+    );
+
+    const finishScrollbarDrag = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        if (scrollbarDragRef.current?.pointerId === event.pointerId) {
+          scrollbarDragRef.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }
+      },
+      []
+    );
+
     return (
       <div className="relative" style={{ height: "100%", overflow: "hidden" }}>
         <div
@@ -561,7 +703,6 @@ export const MasonryGrid = memo(
           ref={scrollRef}
           style={
             {
-              "--masonry-scrollbar-top-inset": `${topInset}px`,
               height: "100%",
               overflowX: "hidden",
               overflowY: "auto",
@@ -646,6 +787,23 @@ export const MasonryGrid = memo(
             </div>
           )}
         </div>
+        {showCustomScrollbar && (
+          <div
+            aria-hidden="true"
+            className="masonry-scrollbar"
+            style={{ top: topInset }}
+          >
+            <div className="masonry-scrollbar-track" />
+            <div
+              className="masonry-scrollbar-thumb"
+              onPointerCancel={finishScrollbarDrag}
+              onPointerDown={handleScrollbarThumbPointerDown}
+              onPointerMove={handleScrollbarThumbPointerMove}
+              onPointerUp={finishScrollbarDrag}
+              ref={scrollbarThumbRef}
+            />
+          </div>
+        )}
         <MasonryBackToTop
           label={t("backToTop")}
           onClick={scrollToTop}
