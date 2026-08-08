@@ -1,6 +1,7 @@
 import {
   appVersion,
   checkForUpdates,
+  consumeUpdateWelcome,
   currentPlatform,
   getHttpPort,
   getUpdateProxy,
@@ -16,6 +17,7 @@ export const app = {
   appVersion,
   restartApp,
   checkForUpdates,
+  consumeUpdateWelcome,
   getUpdateStatus,
   getHttpPort,
   getUpdateProxy,

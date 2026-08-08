@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WhatsNewRouteImport } from './routes/whats-new'
 import { Route as TrashRouteImport } from './routes/trash'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PeopleRouteImport } from './routes/people'
@@ -31,6 +32,11 @@ import { Route as PeopleIdentityIdRouteImport } from './routes/people.$identityI
 import { Route as CullSessionIdRouteImport } from './routes/cull.$sessionId'
 import { Route as AlbumsAlbumIdRouteImport } from './routes/albums.$albumId'
 
+const WhatsNewRoute = WhatsNewRouteImport.update({
+  id: '/whats-new',
+  path: '/whats-new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TrashRoute = TrashRouteImport.update({
   id: '/trash',
   path: '/trash',
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
+  '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByTo {
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
+  '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/people': typeof PeopleRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/trash': typeof TrashRoute
+  '/whats-new': typeof WhatsNewRoute
   '/albums/$albumId': typeof AlbumsAlbumIdRoute
   '/cull/$sessionId': typeof CullSessionIdRoute
   '/people/$identityId': typeof PeopleIdentityIdRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/people'
     | '/settings'
     | '/trash'
+    | '/whats-new'
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
@@ -241,6 +251,7 @@ export interface FileRouteTypes {
     | '/people'
     | '/settings'
     | '/trash'
+    | '/whats-new'
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '/people'
     | '/settings'
     | '/trash'
+    | '/whats-new'
     | '/albums/$albumId'
     | '/cull/$sessionId'
     | '/people/$identityId'
@@ -288,10 +300,18 @@ export interface RootRouteChildren {
   PeopleRoute: typeof PeopleRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
   TrashRoute: typeof TrashRoute
+  WhatsNewRoute: typeof WhatsNewRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/whats-new': {
+      id: '/whats-new'
+      path: '/whats-new'
+      fullPath: '/whats-new'
+      preLoaderRoute: typeof WhatsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/trash': {
       id: '/trash'
       path: '/trash'
@@ -513,6 +533,7 @@ const rootRouteChildren: RootRouteChildren = {
   PeopleRoute: PeopleRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,
   TrashRoute: TrashRoute,
+  WhatsNewRoute: WhatsNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

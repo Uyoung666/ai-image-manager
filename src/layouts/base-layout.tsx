@@ -18,14 +18,13 @@ import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
 import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
-import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
-import { WanderProvider } from "@/providers/WanderProvider";
 import {
   SidebarFilterProvider,
   useSidebarFilter,
 } from "@/contexts/SidebarFilterContext";
-import { useFolders } from "@/hooks/useFolders";
 import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
+import { useFolders } from "@/hooks/useFolders";
+import { WanderProvider } from "@/providers/WanderProvider";
 
 function isPerfMonitorEnabled() {
   try {
@@ -103,51 +102,47 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
   }, [handleKeyDown]);
 
   return (
-    <ScrollPositionProvider>
-      <OnboardingProvider>
-        <GlobalAiStatusProvider>
-          <WanderProvider>
-            <OnboardingOverlay />
-            <AppContentGate>
-              <BrowseSessionProvider>
-                <SidebarFilterProvider>
+    <OnboardingProvider>
+      <GlobalAiStatusProvider>
+        <WanderProvider>
+          <OnboardingOverlay />
+          <AppContentGate>
+            <BrowseSessionProvider>
+              <SidebarFilterProvider>
+                <div
+                  className={`flex h-screen flex-col overflow-hidden ${
+                    isHomePage ? "home-workspace" : ""
+                  }`}
+                >
+                  <DragWindowRegion title="AI Image Manager" />
+                  <GlobalProgressBar />
                   <div
-                    className={`flex h-screen flex-col overflow-hidden ${
-                      isHomePage ? "home-workspace" : ""
+                    className={`flex min-h-0 flex-1 overflow-hidden ${
+                      isHomePage ? "home-workspace-content" : ""
                     }`}
                   >
-                    <DragWindowRegion title="AI Image Manager" />
-                    <GlobalProgressBar />
-                    <div
-                      className={`flex min-h-0 flex-1 overflow-hidden ${
-                        isHomePage ? "home-workspace-content" : ""
+                    <SidebarSlot />
+                    <main
+                      className={`min-w-0 flex-1 overflow-hidden ${
+                        isHomePage ? "home-gallery-canvas" : ""
                       }`}
                     >
-                      <SidebarSlot />
-                      <main
-                        className={`min-w-0 flex-1 overflow-hidden ${
-                          isHomePage ? "home-gallery-canvas" : ""
-                        }`}
-                      >
-                        {children}
-                      </main>
-                    </div>
-                    <SpotlightSearch />
-                    <KeyboardShortcuts
-                      onClose={() => setShortcutsOpen(false)}
-                      open={shortcutsOpen}
-                    />
-                    {perfOn && (
-                      <PerfOverlay memory={memory} metrics={metrics} />
-                    )}
+                      {children}
+                    </main>
                   </div>
-                </SidebarFilterProvider>
-              </BrowseSessionProvider>
-            </AppContentGate>
-          </WanderProvider>
-        </GlobalAiStatusProvider>
-      </OnboardingProvider>
-    </ScrollPositionProvider>
+                  <SpotlightSearch />
+                  <KeyboardShortcuts
+                    onClose={() => setShortcutsOpen(false)}
+                    open={shortcutsOpen}
+                  />
+                  {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
+                </div>
+              </SidebarFilterProvider>
+            </BrowseSessionProvider>
+          </AppContentGate>
+        </WanderProvider>
+      </GlobalAiStatusProvider>
+    </OnboardingProvider>
   );
 }
 

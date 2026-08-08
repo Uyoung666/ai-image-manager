@@ -1,9 +1,17 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { Suspense } from "react";
+import {
+  createRootRoute,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
+import { Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { consumeUpdateWelcome } from "@/actions/update-changelog";
+import DragWindowRegion from "@/components/drag-window-region";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
 import BaseLayout from "@/layouts/base-layout";
 
 function RouteSuspense() {
@@ -15,16 +23,92 @@ function RouteSuspense() {
 }
 
 function Root() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [startupReady, setStartupReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    if (window.electronAPI?.isE2E || !window.electronAPI?.preloadReady) {
+      setStartupReady(true);
+      return () => {
+        active = false;
+      };
+    }
+
+    consumeUpdateWelcome()
+      .then(({ version }) => {
+        if (!active) {
+          return;
+        }
+
+        if (!version) {
+          setStartupReady(true);
+          return;
+        }
+
+        return navigate({
+          to: "/whats-new",
+          search: { version },
+          replace: true,
+        }).finally(() => {
+          if (active) {
+            setStartupReady(true);
+          }
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to check update welcome state", error);
+        if (active) {
+          setStartupReady(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
+
+  if (!startupReady) {
+    return <StartupSplash />;
+  }
+
+  const content = (
+    <ErrorBoundary>
+      <Suspense fallback={<RouteSuspense />}>
+        <Outlet />
+      </Suspense>
+    </ErrorBoundary>
+  );
+
   return (
     <TooltipProvider>
-      <BaseLayout>
-        <ErrorBoundary>
-          <Suspense fallback={<RouteSuspense />}>
-            <Outlet />
-          </Suspense>
-        </ErrorBoundary>
-      </BaseLayout>
+      <ScrollPositionProvider>
+        {location.pathname === "/whats-new" ? (
+          <StandaloneLayout>{content}</StandaloneLayout>
+        ) : (
+          <BaseLayout>{content}</BaseLayout>
+        )}
+      </ScrollPositionProvider>
     </TooltipProvider>
+  );
+}
+
+function StandaloneLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
+      <DragWindowRegion title="AI Image Manager" />
+      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+    </div>
+  );
+}
+
+function StartupSplash() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div aria-hidden="true" className="whats-new-startup-mark" />
+    </div>
   );
 }
 

@@ -6,6 +6,9 @@ import Store from "electron-store";
 import { z } from "zod";
 import { getHttpServerPort } from "@/services/http-server";
 import { getUpdateState } from "@/services/update-state";
+import {
+  consumeUpdateWelcome as consumeUpdateWelcomeState,
+} from "@/services/update-welcome-state";
 
 export const currentPlatform = os.handler(() => {
   return process.platform;
@@ -48,6 +51,10 @@ export const checkForUpdates = os.handler(() => {
 
 export const getUpdateStatus = os.handler(() => {
   return getUpdateState();
+});
+
+export const consumeUpdateWelcome = os.handler(() => {
+  return consumeUpdateWelcomeState();
 });
 
 /**
