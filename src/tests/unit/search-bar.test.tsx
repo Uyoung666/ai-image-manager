@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -274,6 +274,41 @@ describe("SearchBar", () => {
 
     expect(inputClick).toHaveBeenCalledOnce();
     inputClick.mockRestore();
+  });
+
+  it("shows the shared tooltip for the image search action", async () => {
+    const user = userEvent.setup();
+    render(<ControlledSearchBar {...baseProps} onImageSearch={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "以图搜图" });
+    await user.hover(button);
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent(
+      "以图搜图 — 选择参考图片寻找相似照片"
+    );
+    const tooltipContent = tooltip.closest('[data-slot="tooltip-content"]');
+    expect(tooltipContent).not.toBeNull();
+    expect(tooltipContent).toHaveAttribute("data-slot", "tooltip-content");
+    expect(tooltipContent).toHaveClass(
+      "rounded-[6px]",
+      "border-border",
+      "bg-popover",
+      "px-2.5",
+      "py-1.5",
+      "text-[12px]",
+      "shadow-md",
+      "ring-1",
+      "surface-elevated"
+    );
+
+    await user.unhover(button);
+    fireEvent.pointerLeave(button);
+    fireEvent.blur(button);
+    fireEvent.pointerMove(document, { clientX: 1000, clientY: 1000 });
+    await waitFor(() => {
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    });
   });
 
   it("calls onSearch when the form is submitted", async () => {

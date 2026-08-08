@@ -10,6 +10,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 export interface FaceReassignIdentity {
@@ -90,8 +95,13 @@ export function FaceReassignDialog({
       <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{t("faceReassignTitle")}</DialogTitle>
-          <DialogDescription className="truncate" title={photoName}>
-            {photoName}
+          <DialogDescription className="truncate">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block truncate">{photoName}</span>
+              </TooltipTrigger>
+              <TooltipContent>{photoName}</TooltipContent>
+            </Tooltip>
           </DialogDescription>
         </DialogHeader>
 
@@ -115,7 +125,9 @@ export function FaceReassignDialog({
                     className="h-8 w-8 rounded-[6px] object-cover"
                     height={32}
                     src={toLocalMediaUrl(
-                      identity.coverThumbnailPath || identity.coverPhotoPath || ""
+                      identity.coverThumbnailPath ||
+                        identity.coverPhotoPath ||
+                        ""
                     )}
                     width={32}
                   />

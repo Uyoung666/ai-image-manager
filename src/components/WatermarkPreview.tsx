@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Module-level cache — survives page navigation so preview shows photo on first frame
 let cachedSampleImg: HTMLImageElement | null = null;
@@ -488,20 +493,26 @@ export function WatermarkPreview({
         </span>
         <div className="grid grid-cols-3 gap-0.5">
           {ANCHORS.map((a) => (
-            <button
-              className={`flex h-6 w-6 items-center justify-center rounded-[4px] text-[12px] transition-all ${
-                wm.anchor === a.anchor
-                  ? "scale-105 bg-primary/20 text-primary ring-1 ring-primary/30"
-                  : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-              } disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}
-              disabled={!wm.enabled}
-              key={a.anchor}
-              onClick={() => onSettingsChange({ anchor: a.anchor })}
-              title={t(`anchor_${a.anchor}`)}
-              type="button"
-            >
-              <AnchorGlyph active={wm.anchor === a.anchor} anchor={a.anchor} />
-            </button>
+            <Tooltip key={a.anchor}>
+              <TooltipTrigger asChild>
+                <button
+                  className={`flex h-6 w-6 items-center justify-center rounded-[4px] text-[12px] transition-all ${
+                    wm.anchor === a.anchor
+                      ? "scale-105 bg-primary/20 text-primary ring-1 ring-primary/30"
+                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                  } disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}
+                  disabled={!wm.enabled}
+                  onClick={() => onSettingsChange({ anchor: a.anchor })}
+                  type="button"
+                >
+                  <AnchorGlyph
+                    active={wm.anchor === a.anchor}
+                    anchor={a.anchor}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t(`anchor_${a.anchor}`)}</TooltipContent>
+            </Tooltip>
           ))}
         </div>
         <span className="text-[10px] text-muted-foreground/50">

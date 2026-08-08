@@ -2,6 +2,11 @@ import { ChevronDown, Copy, FolderOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
 import { getDateLocale } from "@/utils/date-locale";
@@ -235,14 +240,19 @@ export function LightboxInfoPanel({
           <h2 className="font-semibold text-[14px]">{t("photoDetail")}</h2>
           <p className="truncate text-[11px] text-white/45">{photo.filename}</p>
         </div>
-        <button
-          aria-label={t("close")}
-          className="lightbox-control-button"
-          onClick={onClose}
-          type="button"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("close")}
+              className="lightbox-control-button"
+              onClick={onClose}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("close")}</TooltipContent>
+        </Tooltip>
       </header>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">

@@ -1366,20 +1366,22 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 /* Country label tooltip (offline map) */
 .country-label-tooltip {
-  padding: 2px 8px !important;
+  max-width: 260px !important;
+  padding: 6px 10px !important;
   font-family: "Inter Variable", system-ui, sans-serif !important;
-  font-size: 11px !important;
-  font-weight: 510 !important;
-  color: hsl(220 10% 70%) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.375 !important;
+  color: var(--popover-foreground) !important;
   pointer-events: none !important;
-  background: rgba(18, 20, 24, 0.85) !important;
-  border: 1px solid hsl(240 4% 22%) !important;
-  border-radius: 4px !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
+  background: var(--popover) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-md-val) !important;
 }
 
 .country-label-tooltip::before {
-  border-top-color: hsl(240 4% 22%) !important;
+  border-top-color: var(--border) !important;
 }
 
 /* Custom dot marker */
@@ -1584,32 +1586,13 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 }
 
 .scroll-to-top-btn:hover {
-  width: 110px;
   background-color: var(--primary);
-  border-radius: 50px;
   box-shadow: 0px 0px 0px 3px
     color-mix(in srgb, var(--primary) 40%, transparent);
 }
 
-.scroll-to-top-btn:hover .scroll-to-top-icon {
-  transform: translateY(-200%);
-}
-
 .scroll-to-top-btn:hover .scroll-to-top-icon path {
   fill: var(--primary-foreground);
-}
-
-.scroll-to-top-btn::before {
-  position: absolute;
-  font-size: 0px;
-  color: var(--primary-foreground);
-  white-space: nowrap;
-  content: attr(data-text);
-}
-
-.scroll-to-top-btn:hover::before {
-  font-size: 11px;
-  opacity: 1;
 }
 
 /* ── 主题切换开关 (太阳/月亮动画) ──────────────── */

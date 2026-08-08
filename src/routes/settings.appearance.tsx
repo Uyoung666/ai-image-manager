@@ -11,6 +11,11 @@ import {
 } from "@/components/settings/settings-page-shell";
 import ToggleTheme from "@/components/toggle-theme";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useUiPreferences } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { cn } from "@/utils/tailwind";
@@ -92,22 +97,25 @@ function SensitivityControl({
       {SENSITIVITY_OPTIONS.map((option) => {
         const active = value === option.value;
         return (
-          <button
-            aria-label={`${t(option.labelKey)}: ${t(option.descriptionKey)}`}
-            aria-pressed={active}
-            className={cn(
-              "min-w-[52px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
-              active
-                ? "bg-card font-semibold text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
-                : "text-muted-foreground hover:bg-card/50"
-            )}
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            title={t(option.descriptionKey)}
-            type="button"
-          >
-            {t(option.labelKey)}
-          </button>
+          <Tooltip key={option.value}>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={`${t(option.labelKey)}: ${t(option.descriptionKey)}`}
+                aria-pressed={active}
+                className={cn(
+                  "min-w-[52px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
+                  active
+                    ? "bg-card font-semibold text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+                    : "text-muted-foreground hover:bg-card/50"
+                )}
+                onClick={() => onChange(option.value)}
+                type="button"
+              >
+                {t(option.labelKey)}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t(option.descriptionKey)}</TooltipContent>
+          </Tooltip>
         );
       })}
     </div>

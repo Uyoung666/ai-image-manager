@@ -23,6 +23,11 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
+import {
+  Tooltip as AppTooltip,
+  TooltipContent as AppTooltipContent,
+  TooltipTrigger as AppTooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import type {
@@ -114,12 +119,14 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
         </span>
       </div>
       <div className="border-border border-t p-2.5">
-        <p
-          className="truncate text-[11px] text-foreground"
-          title={photo.filename}
-        >
-          {photo.filename}
-        </p>
+        <AppTooltip>
+          <AppTooltipTrigger asChild>
+            <p className="truncate text-[11px] text-foreground">
+              {photo.filename}
+            </p>
+          </AppTooltipTrigger>
+          <AppTooltipContent>{photo.filename}</AppTooltipContent>
+        </AppTooltip>
         <p className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
           <span>{formatFileSize(photo.fileSize ?? 0)}</span>
           <span>{formatResolution(photo)}</span>
@@ -175,13 +182,17 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
             {t("duplicatePhotoCount", { count: group.photos.length })}
           </span>
           {group.matchType === "similar" && !dismissed ? (
-            <span
-              className="flex items-center gap-1 rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] text-warning"
-              title={t("duplicateSimilarManualHint")}
-            >
-              <Eye className="h-3 w-3" />
-              {t("duplicateManualReview")}
-            </span>
+            <AppTooltip>
+              <AppTooltipTrigger asChild>
+                <span className="flex items-center gap-1 rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] text-warning">
+                  <Eye className="h-3 w-3" />
+                  {t("duplicateManualReview")}
+                </span>
+              </AppTooltipTrigger>
+              <AppTooltipContent>
+                {t("duplicateSimilarManualHint")}
+              </AppTooltipContent>
+            </AppTooltip>
           ) : null}
           {!dismissed && enabled ? (
             <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive">

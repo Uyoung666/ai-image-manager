@@ -451,30 +451,38 @@ export function SequenceFocusTray({
           <Unlink className="mr-1 inline size-3.5" />
           移出
         </button>
-        <button
-          aria-label="在序列中前移"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
-          disabled={isMutating || selectedFullIndex <= 0}
-          onClick={() => handleMove(-1)}
-          title="前移"
-          type="button"
-        >
-          <ArrowLeft className="size-3.5" />
-        </button>
-        <button
-          aria-label="在序列中后移"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
-          disabled={
-            isMutating ||
-            selectedFullIndex < 0 ||
-            selectedFullIndex >= fullMembers.length - 1
-          }
-          onClick={() => handleMove(1)}
-          title="后移"
-          type="button"
-        >
-          <ArrowRight className="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("sequenceMoveUp")}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
+              disabled={isMutating || selectedFullIndex <= 0}
+              onClick={() => handleMove(-1)}
+              type="button"
+            >
+              <ArrowLeft className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("sequenceMoveUp")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("sequenceMoveDown")}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
+              disabled={
+                isMutating ||
+                selectedFullIndex < 0 ||
+                selectedFullIndex >= fullMembers.length - 1
+              }
+              onClick={() => handleMove(1)}
+              type="button"
+            >
+              <ArrowRight className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("sequenceMoveDown")}</TooltipContent>
+        </Tooltip>
         <button
           className="h-7 shrink-0 rounded-md border border-border bg-background/80 px-2 text-[11px] disabled:opacity-40"
           disabled={

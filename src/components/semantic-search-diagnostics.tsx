@@ -1,5 +1,10 @@
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type SearchSensitivity = "relaxed" | "standard" | "precise";
 type SearchIntent = "object" | "scene" | "composed" | "unknown";
@@ -66,13 +71,17 @@ export function SemanticSearchDiagnostics({
 
   return (
     <details className="group relative flex h-7 w-5 flex-shrink-0 items-center justify-center text-muted-foreground/45">
-      <summary
-        aria-label={t("semanticSearchDiagnosticsTitle")}
-        className="flex h-6 w-5 cursor-pointer list-none items-center justify-center rounded text-muted-foreground/45 outline-none transition-colors hover:bg-foreground/5 hover:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-        title={t("semanticSearchDiagnosticsTitle")}
-      >
-        <Info className="h-3.5 w-3.5" />
-      </summary>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <summary
+            aria-label={t("semanticSearchDiagnosticsTitle")}
+            className="flex h-6 w-5 cursor-pointer list-none items-center justify-center rounded text-muted-foreground/45 outline-none transition-colors hover:bg-foreground/5 hover:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+          >
+            <Info className="h-3.5 w-3.5" />
+          </summary>
+        </TooltipTrigger>
+        <TooltipContent>{t("semanticSearchDiagnosticsTitle")}</TooltipContent>
+      </Tooltip>
       <div className="absolute top-full right-0 z-50 mt-1 w-[min(360px,calc(100vw-2rem))] rounded-md border border-border bg-popover p-3 text-[11px] text-muted-foreground shadow-lg">
         <div className="mb-2 font-medium text-foreground">
           {t("semanticSearchDiagnosticsTitle")}

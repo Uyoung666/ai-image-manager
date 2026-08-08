@@ -1,5 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { SearchMatch } from "@/types/photo";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -536,41 +541,48 @@ export const PhotoCard = memo(function PhotoCard({
 
       {/* Favorite star */}
       {onToggleFavorite && (
-        <button
-          aria-label={isFavorite ? t("unfavorite") : t("favorite")}
-          aria-pressed={isFavorite}
-          className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full transition-opacity ${
-            isFavorite
-              ? "opacity-100"
-              : "hover:!opacity-100 opacity-0 group-hover:opacity-70"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (starRef.current) {
-              starRef.current.classList.remove("animate-star-bounce");
-              void starRef.current.offsetWidth;
-              starRef.current.classList.add("animate-star-bounce");
-            }
-            onToggleFavorite(id);
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-          ref={starRef}
-          type="button"
-        >
-          <svg
-            className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
-            fill="currentFill"
-            stroke="currentColor"
-            strokeWidth="2"
-            viewBox="0 0 24 24"
-          >
-            <path
-              d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={isFavorite ? t("unfavorite") : t("favorite")}
+              aria-pressed={isFavorite}
+              className={`absolute top-2 left-2 flex h-5 w-5 items-center justify-center rounded-full transition-opacity ${
+                isFavorite
+                  ? "opacity-100"
+                  : "hover:!opacity-100 opacity-0 group-hover:opacity-70"
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (starRef.current) {
+                  starRef.current.classList.remove("animate-star-bounce");
+                  void starRef.current.offsetWidth;
+                  starRef.current.classList.add("animate-star-bounce");
+                }
+                onToggleFavorite(id);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              ref={starRef}
+              type="button"
+            >
+              <svg
+                className={`h-4 w-4 drop-shadow-sm ${isFavorite ? "fill-yellow-400 text-yellow-400" : "fill-transparent text-white"}`}
+                fill="currentFill"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {isFavorite ? t("unfavorite") : t("favorite")}
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {searchMatchLabel && (

@@ -10,6 +10,11 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { recordWanderExposure } from "@/actions/wander";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { WanderSession } from "@/types/wander";
 import { preloadImageAsync, toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -542,16 +547,21 @@ export function WanderOverlay({
             <p className="mt-1 text-white/65 text-xs">{themeSubtitle}</p>
           )}
         </div>
-        <button
-          aria-label={t("close")}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
-          onBlur={handleControlsLeave}
-          onClick={onClose}
-          onFocus={handleControlsEnter}
-          type="button"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("close")}
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
+              onBlur={handleControlsLeave}
+              onClick={onClose}
+              onFocus={handleControlsEnter}
+              type="button"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t("close")}</TooltipContent>
+        </Tooltip>
       </header>
 
       {view === "playing" && (

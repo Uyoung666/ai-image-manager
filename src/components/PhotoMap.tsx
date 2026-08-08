@@ -4,6 +4,12 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { Globe, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import {
+  TOOLTIP_CONTENT_CLASS_NAME,
+  Tooltip as AppTooltip,
+  TooltipContent as AppTooltipContent,
+  TooltipTrigger as AppTooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 export interface GeoLocation {
@@ -75,7 +81,7 @@ function GeoJsonLayer({ data }: { data: GeoJSON.GeoJSON | null }) {
           l.bindTooltip(name, {
             permanent: false,
             direction: "center",
-            className: "country-label-tooltip",
+            className: `country-label-tooltip ${TOOLTIP_CONTENT_CLASS_NAME}`,
             opacity: 0.85,
           });
         }
@@ -196,29 +202,39 @@ export function PhotoMap({
         ))}
       </MapContainer>
 
-      <button
-        className="absolute top-2 right-2 z-[1000] flex items-center gap-1.5 rounded-[6px] border border-border bg-secondary/90 px-2.5 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:bg-secondary hover:text-foreground"
-        onClick={() =>
-          onMapSourceChange(mapSource === "offline" ? "online" : "offline")
-        }
-        title={
-          mapSource === "offline"
+      <AppTooltip>
+        <AppTooltipTrigger asChild>
+          <button
+            aria-label={
+              mapSource === "offline"
+                ? t("mapSwitchToOnline")
+                : t("mapSwitchToOffline")
+            }
+            className="absolute top-2 right-2 z-[1000] flex items-center gap-1.5 rounded-[6px] border border-border bg-secondary/90 px-2.5 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:bg-secondary hover:text-foreground"
+            onClick={() =>
+              onMapSourceChange(mapSource === "offline" ? "online" : "offline")
+            }
+            type="button"
+          >
+            {mapSource === "offline" ? (
+              <>
+                <Globe className="h-3.5 w-3.5" />
+                <span>{t("mapModeOnline")}</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="h-3.5 w-3.5" />
+                <span>{t("mapModeOffline")}</span>
+              </>
+            )}
+          </button>
+        </AppTooltipTrigger>
+        <AppTooltipContent>
+          {mapSource === "offline"
             ? t("mapSwitchToOnline")
-            : t("mapSwitchToOffline")
-        }
-      >
-        {mapSource === "offline" ? (
-          <>
-            <Globe className="h-3.5 w-3.5" />
-            <span>{t("mapModeOnline")}</span>
-          </>
-        ) : (
-          <>
-            <WifiOff className="h-3.5 w-3.5" />
-            <span>{t("mapModeOffline")}</span>
-          </>
-        )}
-      </button>
+            : t("mapSwitchToOffline")}
+        </AppTooltipContent>
+      </AppTooltip>
     </div>
   );
 }

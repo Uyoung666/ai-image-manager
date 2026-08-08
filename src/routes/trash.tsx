@@ -24,6 +24,11 @@ import {
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -861,16 +866,21 @@ function TrashPage() {
             />
           )}
           {remaining <= 3 && (
-            <span
-              className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm"
-              title={t("trashExpiresAt", {
-                date: expiryDate(photo.deletedAt),
-              })}
-            >
-              {remaining === 0
-                ? t("trashMoveToday")
-                : t("trashMoveAfterDays", { count: remaining })}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm"
+                  tabIndex={0}
+                >
+                  {remaining === 0
+                    ? t("trashMoveToday")
+                    : t("trashMoveAfterDays", { count: remaining })}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {t("trashExpiresAt", { date: expiryDate(photo.deletedAt) })}
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
         <div className="min-h-[54px] px-2.5 py-2">
@@ -878,12 +888,16 @@ function TrashPage() {
             {photo.filename}
           </p>
           <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/75 leading-4">
-            <span
-              className="min-w-0 truncate"
-              title={photo.folderName ?? t("originalFolderRemoved")}
-            >
-              {photo.folderName ?? t("originalFolderRemoved")}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="min-w-0 truncate" tabIndex={0}>
+                  {photo.folderName ?? t("originalFolderRemoved")}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {photo.folderName ?? t("originalFolderRemoved")}
+              </TooltipContent>
+            </Tooltip>
             <span className="shrink-0">{secondaryMeta}</span>
           </div>
         </div>
@@ -1033,15 +1047,19 @@ function TrashPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">
-          <button
-            aria-label={t("backToHome")}
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            onClick={() => navigate({ to: "/" })}
-            title={t("backToHome")}
-            type="button"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={t("backToHome")}
+                className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                onClick={() => navigate({ to: "/" })}
+                type="button"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t("backToHome")}</TooltipContent>
+          </Tooltip>
           <div>
             <h1 className="font-semibold text-[16px] text-foreground">
               {t("recentlyDeletedTitle")}
@@ -1165,17 +1183,22 @@ function TrashPage() {
                   value={searchInput}
                 />
                 {searchInput && (
-                  <button
-                    aria-label={t("clearSearch")}
-                    className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                    onClick={() => {
-                      setSearchInput("");
-                      searchInputRef.current?.focus();
-                    }}
-                    type="button"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("clearSearch")}
+                        className="absolute top-1/2 right-1.5 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                        onClick={() => {
+                          setSearchInput("");
+                          searchInputRef.current?.focus();
+                        }}
+                        type="button"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("clearSearch")}</TooltipContent>
+                  </Tooltip>
                 )}
               </label>
               <FilterDropdown
@@ -1192,21 +1215,27 @@ function TrashPage() {
                 placeholder={t("sortBy")}
                 value={sort}
               />
-              <button
-                aria-label={
-                  order === "desc" ? t("sortDescending") : t("sortAscending")
-                }
-                className="h-8 rounded-[6px] border border-border px-2 text-[12px] text-muted-foreground hover:text-foreground"
-                onClick={() =>
-                  setOrder((value) => (value === "desc" ? "asc" : "desc"))
-                }
-                title={
-                  order === "desc" ? t("sortDescending") : t("sortAscending")
-                }
-                type="button"
-              >
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={
+                      order === "desc"
+                        ? t("sortDescending")
+                        : t("sortAscending")
+                    }
+                    className="h-8 rounded-[6px] border border-border px-2 text-[12px] text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      setOrder((value) => (value === "desc" ? "asc" : "desc"))
+                    }
+                    type="button"
+                  >
                 {order === "desc" ? "↓" : "↑"}
-              </button>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {order === "desc" ? t("sortDescending") : t("sortAscending")}
+                </TooltipContent>
+              </Tooltip>
               {refreshing && (
                 <span
                   aria-label={t("trashSearching")}

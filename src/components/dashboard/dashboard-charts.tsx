@@ -15,6 +15,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip as AppTooltip,
+  TooltipContent as AppTooltipContent,
+  TooltipTrigger as AppTooltipTrigger,
+  TOOLTIP_CONTENT_CLASS_NAME,
+} from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 export interface DashboardPoint {
@@ -41,7 +47,7 @@ function CountTooltip({
   }
   const percentage = sampleTotal > 0 ? (point.count / sampleTotal) * 100 : 0;
   return (
-    <div className="rounded-[6px] border border-border bg-popover px-3 py-2 text-popover-foreground shadow-lg">
+    <div className={TOOLTIP_CONTENT_CLASS_NAME}>
       <p className="max-w-64 font-medium text-[12px]">{point.name}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         {t("dashboardTooltipCount", {
@@ -89,10 +95,7 @@ export function DashboardBarChart({
             sampleTotal > 0 ? (point.count / sampleTotal) * 100 : 0;
           const content = (
             <>
-              <span
-                className="truncate text-left text-[11px] text-muted-foreground"
-                title={point.name}
-              >
+              <span className="truncate text-left text-[11px] text-muted-foreground">
                 {point.name}
               </span>
               <span className="h-5 overflow-hidden rounded-[4px] bg-muted">
@@ -119,23 +122,26 @@ export function DashboardBarChart({
           );
           return (
             <li key={point.name}>
-              {onPointClick && point.count > 0 ? (
-                <button
-                  className="grid w-full grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 rounded-[5px] py-1 focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={() => onPointClick(point)}
-                  title={`${point.name}: ${point.count}`}
-                  type="button"
-                >
-                  {content}
-                </button>
-              ) : (
-                <div
-                  className="grid grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 py-1"
-                  title={`${point.name}: ${point.count}`}
-                >
-                  {content}
-                </div>
-              )}
+              <AppTooltip>
+                <AppTooltipTrigger asChild>
+                  {onPointClick && point.count > 0 ? (
+                    <button
+                      className="grid w-full grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 rounded-[5px] py-1 focus-visible:outline-2 focus-visible:outline-ring"
+                      onClick={() => onPointClick(point)}
+                      type="button"
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <div className="grid grid-cols-[minmax(110px,180px)_1fr_62px] items-center gap-3 py-1">
+                      {content}
+                    </div>
+                  )}
+                </AppTooltipTrigger>
+                <AppTooltipContent>
+                  {point.name}: {point.count.toLocaleString()}
+                </AppTooltipContent>
+              </AppTooltip>
             </li>
           );
         })}

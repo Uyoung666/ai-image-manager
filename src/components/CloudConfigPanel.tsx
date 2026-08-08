@@ -12,6 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 
 interface CloudConfig {
@@ -333,16 +338,23 @@ export function CloudConfigPanel() {
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {testStates[cfg.id] && (
-                  <span
-                    className={`max-w-[180px] truncate text-[10px] ${
-                      testStates[cfg.id].success
-                        ? "text-[#46a758]"
-                        : "text-[#e5484d]"
-                    }`}
-                    title={testStates[cfg.id].result}
-                  >
-                    {testStates[cfg.id].result}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`max-w-[180px] truncate text-[10px] ${
+                          testStates[cfg.id].success
+                            ? "text-[#46a758]"
+                            : "text-[#e5484d]"
+                        }`}
+                        tabIndex={0}
+                      >
+                        {testStates[cfg.id].result}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {testStates[cfg.id].result}
+                    </TooltipContent>
+                  </Tooltip>
                 )}
                 <button
                   className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
@@ -352,14 +364,19 @@ export function CloudConfigPanel() {
                 >
                   {testingId === cfg.id ? t("cloudTesting") : t("test")}
                 </button>
-                <button
-                  className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-[#e5484d]"
-                  onClick={() => setDeleteConfirmId(cfg.id)}
-                  title={t("delete")}
-                  type="button"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("delete")}
+                      className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-[#e5484d]"
+                      onClick={() => setDeleteConfirmId(cfg.id)}
+                      type="button"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("delete")}</TooltipContent>
+                </Tooltip>
               </div>
             </div>
           ))}

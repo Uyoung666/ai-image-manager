@@ -847,14 +847,19 @@ export const SearchBar = memo(
                   value={query}
                 />
                 {(query || imageSearchActive) && (
-                  <button
-                    aria-label={t("clearSearch")}
-                    className="absolute top-1/2 right-1 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[5px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-                    onClick={handleClear}
-                    type="button"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("clearSearch")}
+                        className="absolute top-1/2 right-1 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[5px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                        onClick={handleClear}
+                        type="button"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("clearSearch")}</TooltipContent>
+                  </Tooltip>
                 )}
               </form>
 

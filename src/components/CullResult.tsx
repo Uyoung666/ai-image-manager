@@ -27,6 +27,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -91,6 +96,7 @@ const CullResultCard = memo(
     onPreview: (index: number) => void;
     updating: Set<number>;
   }) {
+    const { t } = useTranslation();
     const isUpdating = updating.has(item.id);
     const isKept = item.status === "kept";
     const isRejected = item.status === "rejected";
@@ -184,41 +190,59 @@ const CullResultCard = memo(
           <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             {item.status === "pending" ? (
               <>
-                <button
-                  className="rounded-[4px] bg-success/10 p-1 text-[10px] text-success hover:bg-success/20"
-                  disabled={isUpdating}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStatusChange(item.id, "kept");
-                  }}
-                  type="button"
-                >
-                  <Heart className="h-3 w-3" />
-                </button>
-                <button
-                  className="rounded-[4px] bg-destructive/10 p-1 text-[10px] text-destructive hover:bg-destructive/20"
-                  disabled={isUpdating}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStatusChange(item.id, "rejected");
-                  }}
-                  type="button"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("cullKeep")}
+                      className="rounded-[4px] bg-success/10 p-1 text-[10px] text-success hover:bg-success/20"
+                      disabled={isUpdating}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStatusChange(item.id, "kept");
+                      }}
+                      type="button"
+                    >
+                      <Heart className="h-3 w-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("cullKeep")}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t("cullReject")}
+                      className="rounded-[4px] bg-destructive/10 p-1 text-[10px] text-destructive hover:bg-destructive/20"
+                      disabled={isUpdating}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStatusChange(item.id, "rejected");
+                      }}
+                      type="button"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("cullReject")}</TooltipContent>
+                </Tooltip>
               </>
             ) : (
-              <button
-                className="rounded-[4px] bg-muted p-1 text-[10px] text-muted-foreground hover:text-foreground"
-                disabled={isUpdating}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStatusChange(item.id, "pending");
-                }}
-                type="button"
-              >
-                ↺
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("cullUndo")}
+                    className="rounded-[4px] bg-muted p-1 text-[10px] text-muted-foreground hover:text-foreground"
+                    disabled={isUpdating}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStatusChange(item.id, "pending");
+                    }}
+                    type="button"
+                  >
+                    ↺
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("cullUndo")}</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>

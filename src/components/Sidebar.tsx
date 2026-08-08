@@ -185,36 +185,44 @@ function FolderShortcutRow({
 }) {
   return (
     <div className="group flex min-w-0 items-center rounded-[6px] hover:bg-foreground/5">
-      <button
-        aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
-        onClick={onSelect}
-        title={folder.path}
-        type="button"
-      >
-        <FolderBadge className="h-6 w-6" folder={folder} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium text-[12px] text-foreground">
-            {folder.displayName}
-          </span>
-          <span className="block truncate text-[10px] text-muted-foreground/65">
-            {folder.path}
-          </span>
-        </span>
-        <span className="flex-shrink-0 text-[10px] text-muted-foreground/60">
-          {(folder.totalPhotoCount ?? folder.photoCount).toLocaleString()}
-        </span>
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            aria-label={`${folder.displayName} (${folder.totalPhotoCount ?? folder.photoCount})`}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+            onClick={onSelect}
+            type="button"
+          >
+            <FolderBadge className="h-6 w-6" folder={folder} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-[12px] text-foreground">
+                {folder.displayName}
+              </span>
+              <span className="block truncate text-[10px] text-muted-foreground/65">
+                {folder.path}
+              </span>
+            </span>
+            <span className="flex-shrink-0 text-[10px] text-muted-foreground/60">
+              {(folder.totalPhotoCount ?? folder.photoCount).toLocaleString()}
+            </span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{folder.path}</TooltipContent>
+      </Tooltip>
       {onUnpin && (
-        <button
-          aria-label={`${unpinLabel}: ${folder.displayName}`}
-          className="mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[5px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-foreground/8 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
-          onClick={onUnpin}
-          title={unpinLabel}
-          type="button"
-        >
-          <PinOff className="h-3.5 w-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={`${unpinLabel}: ${folder.displayName}`}
+              className="mr-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[5px] text-muted-foreground/60 opacity-0 transition-opacity hover:bg-foreground/8 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+              onClick={onUnpin}
+              type="button"
+            >
+              <PinOff className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{unpinLabel}</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );
@@ -286,10 +294,7 @@ export function Sidebar({
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      ipc.client.settings.getAppPreferences({}),
-      getUpdateStatus(),
-    ])
+    Promise.all([ipc.client.settings.getAppPreferences({}), getUpdateStatus()])
       .then(([preferences, status]) => {
         if (active) {
           setUpdateAvailable(
@@ -310,9 +315,7 @@ export function Sidebar({
       ) {
         ipc.client.settings
           .getAppPreferences({})
-          .then((preferences) =>
-            setUpdateAvailable(preferences.updateReminder)
-          )
+          .then((preferences) => setUpdateAvailable(preferences.updateReminder))
           .catch(() => undefined);
       }
     }
@@ -1496,14 +1499,19 @@ export function Sidebar({
                       value={folderSearch}
                     />
                     {folderSearch && (
-                      <button
-                        aria-label={t("clearSearch")}
-                        className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
-                        onClick={() => setFolderSearch("")}
-                        type="button"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            aria-label={t("clearSearch")}
+                            className="absolute top-1/2 right-1.5 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-[3px] text-muted-foreground/70 hover:text-foreground"
+                            onClick={() => setFolderSearch("")}
+                            type="button"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("clearSearch")}</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                   <Tooltip>

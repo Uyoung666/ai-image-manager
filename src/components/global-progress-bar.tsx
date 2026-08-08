@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
@@ -118,6 +123,9 @@ export function GlobalProgressBar() {
     (status.phase === "loading-model" && smoothPct < 1) ||
     (status.phase === "import-queue" && smoothPct < 1);
   const showSpinner = status.phase === "loading-model" || isIndeterminate;
+  const progressLabel = status.statusText
+    ? `${phrase} · ${status.statusText}`
+    : phrase;
 
   return (
     <div
@@ -128,19 +136,19 @@ export function GlobalProgressBar() {
       <div className="flex items-center gap-2 px-4 py-1.5">
         {showSpinner && <LoadingSpinner size="xs" />}
 
-        <span
-          className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
-          title={
-            status.statusText ? `${phrase} · ${status.statusText}` : phrase
-          }
-        >
-          {phrase}
-          {status.statusText && (
-            <span className="text-muted-foreground/70">
-              {` · ${status.statusText}`}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+              {phrase}
+              {status.statusText && (
+                <span className="text-muted-foreground/70">
+                  {` · ${status.statusText}`}
+                </span>
+              )}
             </span>
-          )}
-        </span>
+          </TooltipTrigger>
+          <TooltipContent>{progressLabel}</TooltipContent>
+        </Tooltip>
 
         {status.canCancel && (
           <button

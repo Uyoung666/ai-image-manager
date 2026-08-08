@@ -7,6 +7,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 
 interface RenameResult {
@@ -271,15 +276,21 @@ export function BatchRenameDialog({
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {TOKENS.map((token) => (
-                  <button
-                    className="rounded-md border border-border bg-secondary px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                    key={token.token}
-                    onClick={() => insertToken(token.token)}
-                    title={`${t(token.descriptionKey)} — ${t("examplePrefix")}: ${token.example}`}
-                    type="button"
-                  >
-                    {token.token}
-                  </button>
+                  <Tooltip key={token.token}>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="rounded-md border border-border bg-secondary px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                        onClick={() => insertToken(token.token)}
+                        type="button"
+                      >
+                        {token.token}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t(token.descriptionKey)} — {t("examplePrefix")}:{" "}
+                      {token.example}
+                    </TooltipContent>
+                  </Tooltip>
                 ))}
               </div>
             </div>

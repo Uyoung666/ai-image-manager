@@ -17,6 +17,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
+  type TooltipProps,
   XAxis,
   YAxis,
 } from "recharts";
@@ -41,6 +42,7 @@ import {
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
+  TOOLTIP_CONTENT_CLASS_NAME,
 } from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -157,16 +159,25 @@ const TABS: DashboardTab[] = [
   "places",
 ];
 const PRESETS: DashboardRangePreset[] = ["all", "year", "last12", "custom"];
-const chartTooltipStyle = {
-  contentStyle: {
-    background: "var(--popover)",
-    border: "1px solid var(--border)",
-    borderRadius: 6,
-    color: "var(--popover-foreground)",
-    fontSize: 12,
-  },
-  cursor: { fill: "var(--muted)" },
-};
+
+function DashboardChartTooltip({
+  active,
+  label,
+  payload,
+}: TooltipProps<number, string>) {
+  if (!(active && payload?.length)) {
+    return null;
+  }
+  const value = payload[0]?.value;
+  return (
+    <div className={TOOLTIP_CONTENT_CLASS_NAME}>
+      <p className="max-w-64 font-medium text-[12px]">{String(label ?? "")}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {String(value ?? "")}
+      </p>
+    </div>
+  );
+}
 
 const DASHBOARD_COLORS = {
   exposure: "var(--dashboard-exposure)",
@@ -1502,7 +1513,10 @@ function TrendChart({
               tickLine={false}
               width={42}
             />
-            <Tooltip {...chartTooltipStyle} />
+            <Tooltip
+              content={<DashboardChartTooltip />}
+              cursor={{ fill: "var(--muted)" }}
+            />
             <Area
               animationDuration={400}
               animationEasing="ease-out"
@@ -1701,9 +1715,14 @@ function HealthMetric({
         {emphasized && (
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
         )}
-        <p className="truncate text-[10px] text-muted-foreground" title={label}>
-          {label}
-        </p>
+        <AppTooltip>
+          <AppTooltipTrigger asChild>
+            <p className="truncate text-[10px] text-muted-foreground">
+              {label}
+            </p>
+          </AppTooltipTrigger>
+          <AppTooltipContent>{label}</AppTooltipContent>
+        </AppTooltip>
       </div>
       <p className="mt-1 font-semibold text-[18px] text-foreground tabular-nums">
         {percentage}%
@@ -1773,7 +1792,10 @@ function OverviewTrend({
                 tick={axisTick}
                 tickLine={false}
               />
-              <Tooltip {...chartTooltipStyle} />
+              <Tooltip
+                content={<DashboardChartTooltip />}
+                cursor={{ fill: "var(--muted)" }}
+              />
               <Area
                 animationDuration={400}
                 dataKey="count"
@@ -1802,12 +1824,14 @@ function Insight({
   return (
     <div className="min-w-0 border-border/70 border-r border-b bg-background/20 p-4">
       <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
-      <p
-        className="mt-1 truncate font-medium text-[13px] text-foreground"
-        title={value}
-      >
-        {value}
-      </p>
+      <AppTooltip>
+        <AppTooltipTrigger asChild>
+          <p className="mt-1 truncate font-medium text-[13px] text-foreground">
+            {value}
+          </p>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{value}</AppTooltipContent>
+      </AppTooltip>
       {detail && (
         <p className="mt-1 text-[10px] text-muted-foreground">{detail}</p>
       )}

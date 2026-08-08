@@ -40,6 +40,11 @@ import {
   type PreviewMenuState,
 } from "@/components/PreviewContextMenu";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ipc } from "@/ipc/manager";
 import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
@@ -669,12 +674,14 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             >
               {safeIndex + 1} / {photos.length}
             </span>
-            <span
-              className="truncate font-medium text-[13px] text-white/85"
-              title={photo.filename}
-            >
-              {photo.filename}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="truncate font-medium text-[13px] text-white/85">
+                  {photo.filename}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{photo.filename}</TooltipContent>
+            </Tooltip>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {onToggleFavorite && (
@@ -922,26 +929,36 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
         {photos.length > 1 && (
           <>
-            <button
-              aria-label={t("previousPhoto")}
-              className={`group absolute top-14 bottom-16 left-0 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
-              onClick={() => navigate(-1)}
-              type="button"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/60 opacity-40 transition-all group-hover:bg-black/70 group-hover:text-white group-hover:opacity-100">
-                <ChevronLeft className="h-6 w-6" />
-              </span>
-            </button>
-            <button
-              aria-label={t("nextPhoto")}
-              className={`group absolute top-14 right-0 bottom-16 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
-              onClick={() => navigate(1)}
-              type="button"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/60 opacity-40 transition-all group-hover:bg-black/70 group-hover:text-white group-hover:opacity-100">
-                <ChevronRight className="h-6 w-6" />
-              </span>
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={t("previousPhoto")}
+                  className={`group absolute top-14 bottom-16 left-0 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
+                  onClick={() => navigate(-1)}
+                  type="button"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/60 opacity-40 transition-all group-hover:bg-black/70 group-hover:text-white group-hover:opacity-100">
+                    <ChevronLeft className="h-6 w-6" />
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("previousPhoto")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={t("nextPhoto")}
+                  className={`group absolute top-14 right-0 bottom-16 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
+                  onClick={() => navigate(1)}
+                  type="button"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white/60 opacity-40 transition-all group-hover:bg-black/70 group-hover:text-white group-hover:opacity-100">
+                    <ChevronRight className="h-6 w-6" />
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t("nextPhoto")}</TooltipContent>
+            </Tooltip>
           </>
         )}
 
@@ -999,28 +1016,38 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               >
                 <Minus className="h-4 w-4" />
               </ControlButton>
-              <button
-                className="min-w-14 rounded-md px-2 py-2 text-[11px] text-white/70 tabular-nums hover:bg-white/10 hover:text-white"
-                onClick={() => updateZoom(1)}
-                title={t("fitToScreen")}
-                type="button"
-              >
-                {zoomLabel}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("fitToScreen")}
+                    className="min-w-14 rounded-md px-2 py-2 text-[11px] text-white/70 tabular-nums hover:bg-white/10 hover:text-white"
+                    onClick={() => updateZoom(1)}
+                    type="button"
+                  >
+                    {zoomLabel}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("fitToScreen")}</TooltipContent>
+              </Tooltip>
               <ControlButton
                 label={t("zoomIn")}
                 onClick={() => updateZoom(zoom * ZOOM_STEP)}
               >
                 <Plus className="h-4 w-4" />
               </ControlButton>
-              <button
-                className="lightbox-control-button px-2 font-semibold text-[10px]"
-                onClick={showActualPixels}
-                title={t("actualSize")}
-                type="button"
-              >
-                1:1
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={t("actualSize")}
+                    className="lightbox-control-button px-2 font-semibold text-[10px]"
+                    onClick={showActualPixels}
+                    type="button"
+                  >
+                    1:1
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("actualSize")}</TooltipContent>
+              </Tooltip>
               <div className="mx-1 h-5 border-white/10 border-l" />
               <ControlButton
                 label={t("rotateLeft")}
@@ -1143,17 +1170,21 @@ function ControlButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      aria-label={label}
-      aria-pressed={active || undefined}
-      className={`lightbox-control-button ${active ? "bg-white/15 text-white" : ""}`}
-      disabled={disabled}
-      onClick={onClick}
-      title={label}
-      type="button"
-    >
-      {children}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          aria-label={label}
+          aria-pressed={active || undefined}
+          className={`lightbox-control-button ${active ? "bg-white/15 text-white" : ""}`}
+          disabled={disabled}
+          onClick={onClick}
+          type="button"
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

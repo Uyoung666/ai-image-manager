@@ -21,6 +21,11 @@ import {
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip as AppTooltip,
+  TooltipContent as AppTooltipContent,
+  TooltipTrigger as AppTooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 type ReviewTab =
@@ -428,14 +433,19 @@ function FaceReviewPage() {
     <div className="flex h-full flex-col bg-background">
       <header className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          <Button
-            aria-label={t("back")}
-            onClick={() => navigate({ to: "/people" })}
-            size="icon-lg"
-            variant="ghost"
-          >
-            <ArrowLeft />
-          </Button>
+          <AppTooltip>
+            <AppTooltipTrigger asChild>
+              <Button
+                aria-label={t("back")}
+                onClick={() => navigate({ to: "/people" })}
+                size="icon-lg"
+                variant="ghost"
+              >
+                <ArrowLeft />
+              </Button>
+            </AppTooltipTrigger>
+            <AppTooltipContent>{t("back")}</AppTooltipContent>
+          </AppTooltip>
           <div className="min-w-0">
             <h1 className="font-semibold text-[22px] text-foreground tracking-tight">
               {t("faceReviewTitle")}
@@ -603,12 +613,16 @@ function FaceReviewPage() {
             </div>
             <div className="flex items-center justify-between gap-3 px-1">
               <div className="min-w-0">
-                <p
-                  className="truncate text-[12px] text-foreground"
-                  title={candidateFilename(activeCandidate)}
-                >
-                  {candidateFilename(activeCandidate)}
-                </p>
+                <AppTooltip>
+                  <AppTooltipTrigger asChild>
+                    <p className="truncate text-[12px] text-foreground">
+                      {candidateFilename(activeCandidate)}
+                    </p>
+                  </AppTooltipTrigger>
+                  <AppTooltipContent>
+                    {candidateFilename(activeCandidate)}
+                  </AppTooltipContent>
+                </AppTooltip>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
                   {candidateReason(activeCandidate, t)}
                 </p>
@@ -617,28 +631,42 @@ function FaceReviewPage() {
                 <span className="text-[11px] text-muted-foreground tabular-nums">
                   {activeIndex + 1} / {visibleCandidates.length}
                 </span>
-                <Button
-                  aria-label={t("previous")}
-                  disabled={activeIndex === 0}
-                  onClick={() =>
-                    setActiveId(visibleCandidates[activeIndex - 1]?.id ?? null)
-                  }
-                  size="icon"
-                  variant="outline"
-                >
-                  <ChevronLeft />
-                </Button>
-                <Button
-                  aria-label={t("next")}
-                  disabled={activeIndex >= visibleCandidates.length - 1}
-                  onClick={() =>
-                    setActiveId(visibleCandidates[activeIndex + 1]?.id ?? null)
-                  }
-                  size="icon"
-                  variant="outline"
-                >
-                  <ChevronRight />
-                </Button>
+                <AppTooltip>
+                  <AppTooltipTrigger asChild>
+                    <Button
+                      aria-label={t("previous")}
+                      disabled={activeIndex === 0}
+                      onClick={() =>
+                        setActiveId(
+                          visibleCandidates[activeIndex - 1]?.id ?? null
+                        )
+                      }
+                      size="icon"
+                      variant="outline"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                  </AppTooltipTrigger>
+                  <AppTooltipContent>{t("previous")}</AppTooltipContent>
+                </AppTooltip>
+                <AppTooltip>
+                  <AppTooltipTrigger asChild>
+                    <Button
+                      aria-label={t("next")}
+                      disabled={activeIndex >= visibleCandidates.length - 1}
+                      onClick={() =>
+                        setActiveId(
+                          visibleCandidates[activeIndex + 1]?.id ?? null
+                        )
+                      }
+                      size="icon"
+                      variant="outline"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </AppTooltipTrigger>
+                  <AppTooltipContent>{t("next")}</AppTooltipContent>
+                </AppTooltip>
               </div>
             </div>
           </section>

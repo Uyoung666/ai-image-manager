@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DuplicatesPage } from "@/routes/duplicates";
 import type { DuplicateGroup } from "@/services/duplicate-groups";
@@ -125,8 +126,9 @@ describe("DuplicatesPage", () => {
     );
 
     await screen.findByText("1.jpg");
-    expect(screen.getByText("duplicateManualReview")).toHaveAttribute(
-      "title",
+    const user = userEvent.setup();
+    await user.hover(screen.getByText("duplicateManualReview"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "duplicateSimilarManualHint"
     );
 

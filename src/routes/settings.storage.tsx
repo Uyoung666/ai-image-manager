@@ -18,6 +18,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
@@ -197,15 +202,21 @@ function StorageSettingsPage() {
                 onOpenChange={setClearDialogOpen}
                 open={clearDialogOpen}
               >
-                <AlertDialogTrigger asChild>
-                  <button
-                    className="max-w-[160px] shrink-0 truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
-                    title={clearCacheStatus || t("settingsClear")}
-                    type="button"
-                  >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        className="max-w-[160px] shrink-0 truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                        type="button"
+                      >
+                        {clearCacheStatus || t("settingsClear")}
+                      </button>
+                    </AlertDialogTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>
                     {clearCacheStatus || t("settingsClear")}
-                  </button>
-                </AlertDialogTrigger>
+                  </TooltipContent>
+                </Tooltip>
                 <AlertDialogContent size="sm">
                   <AlertDialogHeader>
                     <AlertDialogTitle>
@@ -233,24 +244,36 @@ function StorageSettingsPage() {
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsThumbnailCacheLocation")}
                   </span>
-                  <span
-                    className="truncate font-mono text-[11px] text-muted-foreground/80"
-                    title={indexStats.thumbnailCacheDir || ""}
-                  >
-                    {indexStats.thumbnailCacheDir || "-"}
-                  </span>
-                  <button
-                    className="shrink-0 rounded-[4px] p-0.5 text-muted-foreground/50 hover:bg-foreground/5 hover:text-foreground"
-                    onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
-                    title={t("copyPath")}
-                    type="button"
-                  >
-                    {copiedPath === indexStats.thumbnailCacheDir ? (
-                      <Check className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="truncate font-mono text-[11px] text-muted-foreground/80"
+                        tabIndex={0}
+                      >
+                        {indexStats.thumbnailCacheDir || "-"}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {indexStats.thumbnailCacheDir || "-"}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("copyPath")}
+                        className="shrink-0 rounded-[4px] p-0.5 text-muted-foreground/50 hover:bg-foreground/5 hover:text-foreground"
+                        onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
+                        type="button"
+                      >
+                        {copiedPath === indexStats.thumbnailCacheDir ? (
+                          <Check className="h-3 w-3 text-green-600" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("copyPath")}</TooltipContent>
+                  </Tooltip>
                 </div>
                 <div className="flex items-baseline gap-2">
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
@@ -328,17 +351,23 @@ function StorageSettingsPage() {
 
           <SettingRow
             action={
-              <button
-                className="flex max-w-[160px] shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
-                onClick={handleCleanupOrphans}
-                title={cleanupStatus || t("cleanupInvalidRecords")}
-                type="button"
-              >
-                <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex max-w-[160px] shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                    onClick={handleCleanupOrphans}
+                    type="button"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      {cleanupStatus || t("cleanupInvalidRecords")}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
                   {cleanupStatus || t("cleanupInvalidRecords")}
-                </span>
-              </button>
+                </TooltipContent>
+              </Tooltip>
             }
             className="mt-3"
             description={
@@ -382,24 +411,36 @@ function StorageSettingsPage() {
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsIndexDbLocation")}
                   </span>
-                  <span
-                    className="truncate font-mono text-[11px] text-muted-foreground/80"
-                    title={indexStats.databasePath || ""}
-                  >
-                    {indexStats.databasePath || "-"}
-                  </span>
-                  <button
-                    className="shrink-0 rounded-[4px] p-0.5 text-muted-foreground/50 hover:bg-foreground/5 hover:text-foreground"
-                    onClick={() => handleCopyPath(indexStats.databasePath)}
-                    title={t("copyPath")}
-                    type="button"
-                  >
-                    {copiedPath === indexStats.databasePath ? (
-                      <Check className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="truncate font-mono text-[11px] text-muted-foreground/80"
+                        tabIndex={0}
+                      >
+                        {indexStats.databasePath || "-"}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {indexStats.databasePath || "-"}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("copyPath")}
+                        className="shrink-0 rounded-[4px] p-0.5 text-muted-foreground/50 hover:bg-foreground/5 hover:text-foreground"
+                        onClick={() => handleCopyPath(indexStats.databasePath)}
+                        type="button"
+                      >
+                        {copiedPath === indexStats.databasePath ? (
+                          <Check className="h-3 w-3 text-green-600" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("copyPath")}</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             ) : (

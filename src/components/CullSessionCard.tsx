@@ -1,6 +1,11 @@
 import { Copy, Pencil, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface CullSessionCardProps {
   getModeIcon: (mode: string) => ReactNode;
@@ -86,18 +91,22 @@ export function CullSessionCard({
           { action: onDuplicate, icon: Copy, label: t("duplicate") },
           { action: onDelete, icon: Trash2, label: t("delete") },
         ].map(({ action, icon: Icon, label }) => (
-          <button
-            aria-label={label}
-            className="rounded-[6px] p-2 text-muted-foreground hover:bg-muted hover:text-foreground last:hover:text-destructive"
-            key={label}
-            onClick={(event) => {
-              event.stopPropagation();
-              action();
-            }}
-            type="button"
-          >
-            <Icon className="h-4 w-4" />
-          </button>
+          <Tooltip key={label}>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={label}
+                className="rounded-[6px] p-2 text-muted-foreground hover:bg-muted hover:text-foreground last:hover:text-destructive"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  action();
+                }}
+                type="button"
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{label}</TooltipContent>
+          </Tooltip>
         ))}
       </div>
 
@@ -134,15 +143,21 @@ export function CullSessionCard({
 
       {/* Progress bar */}
       {session.status === "active" && (
-        <div className="group/progress relative mt-3 h-1 w-full overflow-visible rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-300"
-            style={{ width: `${displayProgress}%` }}
-          />
-          <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-[4px] bg-foreground px-2 py-0.5 text-[11px] text-background opacity-0 transition-opacity group-hover/progress:opacity-100">
-            {progressTooltip}
-          </div>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              aria-label={progressTooltip}
+              className="relative mt-3 h-1 w-full overflow-visible rounded-full bg-muted"
+              role="img"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${displayProgress}%` }}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>{progressTooltip}</TooltipContent>
+        </Tooltip>
       )}
     </button>
   );
