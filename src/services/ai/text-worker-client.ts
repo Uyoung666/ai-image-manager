@@ -28,6 +28,7 @@ let activeWorkerAdapter: SerializedWorkerAdapter | null = null;
 let initializationPromise: Promise<void> | null = null;
 let nextRequestId = 1;
 const pendingRequests = new Map<number, PendingRequest>();
+const L2_NORM_TOLERANCE = 1e-3;
 
 function findTextWorkerScript(): string {
   const candidates = [
@@ -81,6 +82,16 @@ function validateVectors(vectors: unknown, expectedCount: number): number[][] {
       `Invalid text embedding result: expected ${expectedCount}x${dimensions}`
     );
   }
+  for (const vector of vectors as number[][]) {
+    const norm = Math.sqrt(
+      vector.reduce((sum, value) => sum + value * value, 0)
+    );
+    if (!Number.isFinite(norm) || Math.abs(norm - 1) > L2_NORM_TOLERANCE) {
+      throw new Error(
+        "Invalid text embedding result: expected L2-normalized vectors"
+      );
+    }
+  }
   return vectors as number[][];
 }
 
@@ -100,10 +111,9 @@ function handleRequestMessage(message: WorkerMessage): void {
     );
   } else if (message.type === "result") {
     if (
-      activeWorkerAdapter &&
-      message.adapterId !== undefined &&
-      (message.adapterId !== activeWorkerAdapter.adapterId ||
-        message.fingerprint !== activeWorkerAdapter.fingerprint)
+      !activeWorkerAdapter ||
+      message.adapterId !== activeWorkerAdapter.adapterId ||
+      message.fingerprint !== activeWorkerAdapter.fingerprint
     ) {
       pending.reject(new Error("Stale text embedding worker result discarded"));
       return;
@@ -140,7 +150,7 @@ export function initTextWorker(
   });
   worker = child;
 
-  initializationPromise = new Promise<void>((resolve, reject) => {
+  const pendingInitialization = new Promise<void>((resolve, reject) => {
     let settled = false;
     const timeout = setTimeout(() => {
       if (settled) {
@@ -166,6 +176,16 @@ export function initTextWorker(
 
     child.on("message", (message: WorkerMessage) => {
       if (message.type === "ready") {
+        if (
+          worker !== child ||
+          !activeWorkerAdapter ||
+          message.adapterId !== activeWorkerAdapter.adapterId ||
+          message.fingerprint !== activeWorkerAdapter.fingerprint
+        ) {
+          finish(new Error("Stale text embedding worker ready discarded"));
+          child.kill();
+          return;
+        }
         workerReady = true;
         finish();
         return;
@@ -197,11 +217,16 @@ export function initTextWorker(
     });
 
     child.send({ type: "init", adapter });
-  }).finally(() => {
-    initializationPromise = null;
   });
+  initializationPromise = pendingInitialization;
+  const clearInitialization = () => {
+    if (initializationPromise === pendingInitialization) {
+      initializationPromise = null;
+    }
+  };
+  pendingInitialization.then(clearInitialization, clearInitialization);
 
-  return initializationPromise;
+  return pendingInitialization;
 }
 
 export async function embedTextsInWorker(

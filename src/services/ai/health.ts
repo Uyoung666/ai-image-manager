@@ -5,7 +5,12 @@ import { photos } from "@/db/schema";
 import { getDataPath } from "@/utils/data-path";
 import { MIN_VECTORS_FOR_INDEX } from "./constants";
 import { type AiCoverageState, deriveAiCoverageState } from "./coverage";
-import type { VectorCompatibility } from "./model-fingerprint";
+import { getActiveEmbeddingRuntimeInfo } from "./model-config";
+import {
+  isVectorCompatibilitySearchable,
+  resolveRuntimeVectorCompatibility,
+  type VectorCompatibility,
+} from "./model-fingerprint";
 import { loadModel } from "./model-loader";
 import {
   currentProgress,
@@ -54,9 +59,14 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
     overall: "unhealthy",
   };
   if (runtime) {
-    status.embeddingAdapterId = runtime.adapterId;
-    status.embeddingFingerprint = runtime.fingerprint;
-    status.vectorCompatibility = runtime.vectorCompatibility;
+    const active = getActiveEmbeddingRuntimeInfo();
+    status.embeddingAdapterId = active.adapterId;
+    status.embeddingFingerprint = active.fingerprint;
+    status.vectorCompatibility = resolveRuntimeVectorCompatibility(
+      active,
+      runtime,
+      runtime.vectorCompatibility
+    );
     status.thresholdProfileId = runtime.thresholdProfileId;
     status.thresholdCalibrationStatus = runtime.calibrationStatus;
   }
@@ -140,9 +150,7 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
       status.vectorTableRows < MIN_VECTORS_FOR_INDEX) &&
     status.textModel === "ok" &&
     (!status.vectorCompatibility ||
-      status.vectorCompatibility === "matching" ||
-      status.vectorCompatibility === "legacy-compatible" ||
-      status.vectorCompatibility === "empty")
+      isVectorCompatibilitySearchable(status.vectorCompatibility))
   ) {
     status.overall = "healthy";
   } else if (

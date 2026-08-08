@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-image-manager.local/schemas/siglip-v1-run-index-v2.json",
+  "title": "SigLIP v1 baseline run index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "createdAt",
+    "adapter",
+    "definitions",
+    "environment",
+    "trialPlan",
+    "rawTrials",
+    "reports",
+    "generatedArtifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "runId": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "adapter": { "type": "object" },
+    "definitions": { "type": "object" },
+    "environment": { "type": "object" },
+    "trialPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trialsPerProfile", "scheduling", "executionOrder"],
+      "properties": {
+        "trialsPerProfile": { "type": "integer", "minimum": 3, "maximum": 5 },
+        "scheduling": { "const": "deterministic-rotating-round-robin" },
+        "executionOrder": { "type": "array", "minItems": 3 }
+      }
+    },
+    "rawTrials": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fileName",
+          "reportType",
+          "profileId",
+          "trialNumber",
+          "executionOrder"
+        ],
+        "properties": {
+          "fileName": { "type": "string", "minLength": 1 },
+          "reportType": { "enum": ["performance-trial", "quality-trial"] },
+          "profileId": { "enum": ["low", "standard", "high"] },
+          "trialNumber": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "executionOrder": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "reports": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "generatedArtifacts": {
+      "type": "object",
+      "required": ["summaryJson", "summaryMarkdown", "generatedAt"]
+    }
+  }
+}

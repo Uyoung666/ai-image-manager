@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-image-manager.local/schemas/siglip-v1-summary-v2.json",
+  "title": "Generated SigLIP v1 baseline summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sourceOfTruth",
+    "generatedAt",
+    "runId",
+    "adapter",
+    "definitions",
+    "environment",
+    "trialPlan",
+    "profiles",
+    "operatingGuidance",
+    "quality",
+    "comparisons",
+    "limitations",
+    "warnings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "sourceOfTruth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "rawTrials", "policy"],
+      "properties": {
+        "index": { "const": "run-index.json" },
+        "rawTrials": { "type": "array", "minItems": 3 },
+        "policy": {
+          "const": "All aggregate and Markdown values are generated from raw JSON"
+        }
+      }
+    },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "runId": { "type": "string", "minLength": 1 },
+    "adapter": { "type": "object" },
+    "definitions": { "type": "object" },
+    "environment": { "type": "object" },
+    "trialPlan": { "type": "object" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "actualConfiguration",
+          "requestedConfiguration",
+          "comparisonClassification",
+          "trials",
+          "phases",
+          "memory",
+          "temperature",
+          "errorsTotal"
+        ]
+      }
+    },
+    "operatingGuidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "standardModel",
+        "standardDeviceBaseline",
+        "productRuntimePolicy",
+        "lowEndFallback"
+      ],
+      "properties": {
+        "standardModel": { "const": "SigLIP v1" },
+        "standardDeviceBaseline": {
+          "type": ["object", "null"]
+        },
+        "productRuntimePolicy": { "type": "string", "minLength": 1 },
+        "lowEndFallback": { "type": "string", "minLength": 1 }
+      }
+    },
+    "quality": { "type": ["object", "null"] },
+    "comparisons": {
+      "type": "object",
+      "required": ["standardVsHigh"]
+    },
+    "limitations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hardwareCoverage",
+        "qualityScope",
+        "memoryStress",
+        "historicalLatencyComparison"
+      ],
+      "properties": {
+        "hardwareCoverage": { "$ref": "#/$defs/limitation" },
+        "qualityScope": { "$ref": "#/$defs/limitation" },
+        "memoryStress": { "$ref": "#/$defs/limitation" },
+        "historicalLatencyComparison": { "$ref": "#/$defs/limitation" }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "meaning"],
+      "properties": {
+        "status": { "type": "string", "minLength": 1 },
+        "meaning": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

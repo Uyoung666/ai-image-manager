@@ -46,6 +46,7 @@ const DEFAULT_BATCH_SIZE = 20;
 const WORKER_TIMEOUT = 300_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 const RESPAWN_DELAY_MS = 1000;
+const L2_NORM_TOLERANCE = 1e-3;
 
 let slots: WorkerSlot[] = [];
 let requestQueue: QueuedRequest[] = [];
@@ -75,6 +76,45 @@ function parsePositiveInt(value: string | undefined): number | null {
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function validateEmbedResults(results: unknown): EmbedResult[] {
+  if (!Array.isArray(results)) {
+    throw new Error("Invalid image embedding result: expected an array");
+  }
+  const dimensions = workerAdapter?.image.dimensions ?? 768;
+  for (const entry of results) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("Invalid image embedding result entry");
+    }
+    const result = entry as EmbedResult;
+    if (result.vector === undefined) {
+      if (typeof result.error !== "string" || result.error.length === 0) {
+        throw new Error(
+          `Invalid image embedding result for id ${String(result.id)}: missing vector or error`
+        );
+      }
+      continue;
+    }
+    if (
+      !Array.isArray(result.vector) ||
+      result.vector.length !== dimensions ||
+      result.vector.some((value) => !Number.isFinite(value))
+    ) {
+      throw new Error(
+        `Invalid image embedding result for id ${String(result.id)}: expected ${dimensions} finite values`
+      );
+    }
+    const norm = Math.sqrt(
+      result.vector.reduce((sum, value) => sum + value * value, 0)
+    );
+    if (!Number.isFinite(norm) || Math.abs(norm - 1) > L2_NORM_TOLERANCE) {
+      throw new Error(
+        `Invalid image embedding result for id ${String(result.id)}: expected an L2-normalized vector`
+      );
+    }
+  }
+  return results as EmbedResult[];
 }
 
 export function resolveEmbedPoolConfig(
@@ -231,6 +271,18 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       if (!isCurrentSlot(slot)) {
         return;
       }
+      if (
+        !workerAdapter ||
+        message.adapterId !== workerAdapter.adapterId ||
+        message.fingerprint !== workerAdapter.fingerprint
+      ) {
+        console.error(
+          `[Pool] Worker ${index} reported stale identity on ready`
+        );
+        slot.process.kill();
+        handleWorkerDeath(slot);
+        return;
+      }
       workerInitProgress.set(index, 100);
       slot.status = "idle";
       drainQueue();
@@ -244,13 +296,17 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       slot.status = "idle";
       slot.consecutiveFailures = 0;
       if (
-        workerAdapter &&
-        (message.adapterId !== workerAdapter.adapterId ||
-          message.fingerprint !== workerAdapter.fingerprint)
+        !workerAdapter ||
+        message.adapterId !== workerAdapter.adapterId ||
+        message.fingerprint !== workerAdapter.fingerprint
       ) {
         reject?.(new Error("Stale embedding worker result discarded"));
       } else {
-        resolve?.(message.results ?? []);
+        try {
+          resolve?.(validateEmbedResults(message.results));
+        } catch (error) {
+          reject?.(error instanceof Error ? error : new Error(String(error)));
+        }
       }
       drainQueue();
     }

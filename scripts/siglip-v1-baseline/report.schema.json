@@ -1,0 +1,516 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-image-manager.local/schemas/siglip-v1-baseline-report-v2.json",
+  "title": "SigLIP v1 raw trial or aggregate report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportType",
+    "adapter",
+    "benchmark",
+    "environment",
+    "performanceProfile",
+    "run",
+    "resourceObservations",
+    "metrics"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "reportType": {
+      "enum": ["performance-trial", "performance", "quality-trial", "quality"]
+    },
+    "adapter": { "$ref": "#/$defs/adapter" },
+    "benchmark": { "$ref": "#/$defs/benchmark" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "performanceProfile": { "$ref": "#/$defs/performanceProfile" },
+    "trial": { "$ref": "#/$defs/trial" },
+    "trialAggregation": { "$ref": "#/$defs/trialAggregation" },
+    "run": { "$ref": "#/$defs/run" },
+    "resourceObservations": { "$ref": "#/$defs/resourceObservations" },
+    "metrics": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "reportType": { "const": "performance-trial" } },
+        "required": ["reportType"]
+      },
+      "then": {
+        "required": ["trial"],
+        "properties": {
+          "metrics": { "$ref": "#/$defs/performanceTrialMetrics" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "reportType": { "const": "performance" } },
+        "required": ["reportType"]
+      },
+      "then": {
+        "required": ["trialAggregation"],
+        "properties": {
+          "metrics": { "$ref": "#/$defs/performanceAggregateMetrics" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "reportType": { "const": "quality-trial" } },
+        "required": ["reportType"]
+      },
+      "then": {
+        "required": ["trial"],
+        "properties": {
+          "metrics": { "$ref": "#/$defs/qualityTrialMetrics" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "reportType": { "const": "quality" } },
+        "required": ["reportType"]
+      },
+      "then": {
+        "required": ["trialAggregation"],
+        "properties": {
+          "metrics": { "$ref": "#/$defs/qualityAggregateMetrics" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nonNegativeNumber": { "type": "number", "minimum": 0 },
+    "numberSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "min",
+        "p5",
+        "p50",
+        "median",
+        "p95",
+        "max",
+        "range",
+        "method"
+      ],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "min": { "type": "number" },
+        "p5": { "type": "number" },
+        "p50": { "type": "number" },
+        "median": { "type": "number" },
+        "p95": { "type": "number" },
+        "max": { "type": "number" },
+        "range": { "type": "number", "minimum": 0 },
+        "method": { "const": "linear-interpolation-r7" },
+        "histogram": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapterId",
+        "modelId",
+        "revision",
+        "embeddingFingerprint",
+        "embeddingDimensions",
+        "thresholdProfileId"
+      ],
+      "properties": {
+        "adapterId": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "revision": { "type": "string", "minLength": 1 },
+        "embeddingFingerprint": { "$ref": "#/$defs/sha256" },
+        "embeddingDimensions": { "type": "integer", "minimum": 1 },
+        "thresholdProfileId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasetVersion",
+        "datasetManifestFingerprint",
+        "queryDefinitionVersion",
+        "queryDefinitionFingerprint",
+        "queryPlanFingerprint",
+        "sampleCount",
+        "queryCount"
+      ],
+      "properties": {
+        "datasetVersion": { "type": "string", "minLength": 1 },
+        "datasetManifestFingerprint": { "$ref": "#/$defs/sha256" },
+        "queryDefinitionVersion": { "type": "string", "minLength": 1 },
+        "queryDefinitionFingerprint": { "$ref": "#/$defs/sha256" },
+        "queryPlanFingerprint": { "$ref": "#/$defs/sha256" },
+        "sampleCount": { "type": "integer", "minimum": 1 },
+        "queryCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeVersion",
+        "nodeMajor",
+        "nodeBaselineStatus",
+        "platform",
+        "arch",
+        "cpu",
+        "memory"
+      ],
+      "properties": {
+        "nodeVersion": { "type": "string", "minLength": 1 },
+        "nodeMajor": { "type": "integer", "minimum": 1 },
+        "nodeBaselineStatus": { "enum": ["supported", "unsupported"] },
+        "platform": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "cpu": {
+          "type": "object",
+          "required": ["model", "logicalCores"],
+          "properties": {
+            "model": { "type": "string", "minLength": 1 },
+            "logicalCores": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "memory": {
+          "type": "object",
+          "required": ["totalBytes", "freeBytesAtStart"],
+          "properties": {
+            "totalBytes": { "type": "integer", "minimum": 1 },
+            "freeBytesAtStart": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "workerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workers", "threadsPerWorker"],
+      "properties": {
+        "workers": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "threadsPerWorker": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "performanceProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "requested",
+        "actual",
+        "degraded",
+        "configurationSource",
+        "comparisonClassification"
+      ],
+      "properties": {
+        "profileId": { "enum": ["low", "standard", "high"] },
+        "requested": { "$ref": "#/$defs/workerConfig" },
+        "actual": { "$ref": "#/$defs/workerConfig" },
+        "degraded": { "type": "boolean" },
+        "configurationSource": {
+          "enum": ["fixed-low", "production-auto", "bounded-high"]
+        },
+        "comparisonClassification": {
+          "enum": ["distinct-configuration", "same-configuration-repeat"]
+        }
+      }
+    },
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileId",
+        "trialNumber",
+        "trialsPerProfile",
+        "round",
+        "executionOrder",
+        "profileOrder",
+        "freshWorkerProcesses"
+      ],
+      "properties": {
+        "profileId": { "enum": ["low", "standard", "high"] },
+        "trialNumber": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "trialsPerProfile": { "type": "integer", "minimum": 3, "maximum": 5 },
+        "round": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "executionOrder": { "type": "integer", "minimum": 1 },
+        "profileOrder": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["low", "standard", "high"] }
+        },
+        "freshWorkerProcesses": { "const": true }
+      }
+    },
+    "trialAggregation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trialCount",
+        "rawTrialFiles",
+        "statistic",
+        "distributionFields"
+      ],
+      "properties": {
+        "trialCount": { "type": "integer", "minimum": 3, "maximum": 5 },
+        "rawTrialFiles": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "statistic": { "const": "median" },
+        "distributionFields": {
+          "const": ["p5", "median", "p95", "max", "range"]
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "finishedAt", "durationMs", "errors"],
+      "properties": {
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "durationMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "resourceObservations": {
+      "type": "object",
+      "required": ["memory", "temperature", "workerProcesses"],
+      "properties": {
+        "memory": { "type": "object" },
+        "temperature": { "type": "object" },
+        "workerProcesses": { "type": ["object", "array"] }
+      }
+    },
+    "vectorValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedDimensions",
+        "observedDimensions",
+        "minimumL2Norm",
+        "maximumL2Norm",
+        "meanL2Norm",
+        "fingerprintCorrect",
+        "adapterIdCorrect",
+        "allVectorsValid"
+      ],
+      "properties": {
+        "expectedDimensions": { "type": "integer", "minimum": 1 },
+        "observedDimensions": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "minimumL2Norm": { "$ref": "#/$defs/nonNegativeNumber" },
+        "maximumL2Norm": { "$ref": "#/$defs/nonNegativeNumber" },
+        "meanL2Norm": { "$ref": "#/$defs/nonNegativeNumber" },
+        "fingerprintCorrect": { "type": "boolean" },
+        "adapterIdCorrect": { "type": "boolean" },
+        "allVectorsValid": { "type": "boolean" }
+      }
+    },
+    "legacyImageMetrics": {
+      "type": "object",
+      "required": [
+        "coldStartModelLoadMs",
+        "perWorkerLoadMs",
+        "firstImageInferenceMs",
+        "hotSingleAverageMs",
+        "batchWallMs",
+        "batchThroughputPerSecond",
+        "latencyP50Ms",
+        "latencyP95Ms",
+        "workerCount",
+        "threadsPerWorker",
+        "errors",
+        "vectorValidation"
+      ],
+      "properties": {
+        "coldStartModelLoadMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "perWorkerLoadMs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeNumber" }
+        },
+        "firstImageInferenceMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "hotSingleAverageMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "batchWallMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "batchThroughputPerSecond": { "$ref": "#/$defs/nonNegativeNumber" },
+        "latencyP50Ms": { "$ref": "#/$defs/nonNegativeNumber" },
+        "latencyP95Ms": { "$ref": "#/$defs/nonNegativeNumber" },
+        "workerCount": { "type": "integer", "minimum": 1 },
+        "threadsPerWorker": { "type": "integer", "minimum": 1 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "vectorValidation": { "$ref": "#/$defs/vectorValidation" }
+      }
+    },
+    "legacyTextMetrics": {
+      "type": "object",
+      "required": [
+        "coldStartModelLoadMs",
+        "firstEmbeddingMs",
+        "averageEmbeddingMs",
+        "latencyP50Ms",
+        "latencyP95Ms",
+        "errors",
+        "vectorValidation"
+      ],
+      "properties": {
+        "coldStartModelLoadMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "firstEmbeddingMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "averageEmbeddingMs": { "$ref": "#/$defs/nonNegativeNumber" },
+        "latencyP50Ms": { "$ref": "#/$defs/nonNegativeNumber" },
+        "latencyP95Ms": { "$ref": "#/$defs/nonNegativeNumber" },
+        "errors": { "type": "integer", "minimum": 0 },
+        "vectorValidation": { "$ref": "#/$defs/vectorValidation" }
+      }
+    },
+    "performanceTrialMetrics": {
+      "type": "object",
+      "required": [
+        "metricSemantics",
+        "phases",
+        "image",
+        "text",
+        "errorsTotal",
+        "observedPeakProcessMemoryBytes"
+      ],
+      "properties": {
+        "metricSemantics": { "type": "object" },
+        "phases": {
+          "type": "object",
+          "required": [
+            "imageModelLoad",
+            "firstImageInference",
+            "hotSingleImageInference",
+            "batchImageEmbedding",
+            "textModelLoad",
+            "textEncoding"
+          ]
+        },
+        "image": { "$ref": "#/$defs/legacyImageMetrics" },
+        "text": { "$ref": "#/$defs/legacyTextMetrics" },
+        "errorsTotal": { "type": "integer", "minimum": 0 },
+        "observedPeakProcessMemoryBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "performanceAggregateMetrics": {
+      "type": "object",
+      "required": [
+        "trialCount",
+        "rawTrialFiles",
+        "phaseAggregates",
+        "metricSemantics",
+        "image",
+        "text",
+        "errorsTotal",
+        "observedPeakProcessMemoryBytes"
+      ],
+      "properties": {
+        "trialCount": { "type": "integer", "minimum": 3, "maximum": 5 },
+        "rawTrialFiles": { "type": "array", "minItems": 3, "maxItems": 5 },
+        "phaseAggregates": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/numberSummary" }
+        },
+        "metricSemantics": { "type": "object" },
+        "image": { "$ref": "#/$defs/legacyImageMetrics" },
+        "text": { "$ref": "#/$defs/legacyTextMetrics" },
+        "errorsTotal": { "type": "integer", "minimum": 0 },
+        "observedPeakProcessMemoryBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "qualityCommon": {
+      "type": "object",
+      "required": [
+        "queryCount",
+        "candidateMinimumSimilarity",
+        "searchLatencyScope",
+        "canonical",
+        "macro",
+        "metricSemantics",
+        "errorCategories",
+        "perQuery"
+      ],
+      "properties": {
+        "queryCount": { "type": "integer", "minimum": 1 },
+        "candidateMinimumSimilarity": { "type": "number" },
+        "searchLatencyScope": {
+          "type": "object",
+          "required": ["scope", "excludes"]
+        },
+        "canonical": {
+          "type": "object",
+          "required": [
+            "hitAt1",
+            "hitAt3",
+            "hitAt5",
+            "hitAt10",
+            "meanReciprocalRank",
+            "recallAt5",
+            "recallAt10",
+            "fixedCutoffPrecisionAt5",
+            "fixedCutoffPrecisionAt10",
+            "fixedCutoffPrecisionAt20",
+            "fixedCutoffPrecisionAt50",
+            "hardNegativeFalsePositiveRateAt1",
+            "hardNegativeFalsePositiveRateAt3",
+            "hardNegativeFalsePositiveRateAt5",
+            "hardNegativeFalsePositiveRateAt10",
+            "hardNegativeQueryCount",
+            "returnedCountDistribution",
+            "latencyPhases"
+          ]
+        },
+        "macro": {
+          "type": "object",
+          "required": [
+            "precisionAt20",
+            "precisionAt50",
+            "recallAt50",
+            "recallAt200",
+            "ndcgAt50",
+            "p95LatencyMs",
+            "emptyResultRate"
+          ]
+        },
+        "metricSemantics": { "type": "object" },
+        "errorCategories": { "type": "object" },
+        "perQuery": { "type": "array", "minItems": 1 }
+      }
+    },
+    "qualityTrialMetrics": { "$ref": "#/$defs/qualityCommon" },
+    "qualityAggregateMetrics": {
+      "allOf": [
+        { "$ref": "#/$defs/qualityCommon" },
+        {
+          "type": "object",
+          "required": [
+            "trialCount",
+            "rawTrialFiles",
+            "canonicalMetricAggregates",
+            "latencyPhaseAggregates",
+            "legacyMetricAggregates"
+          ],
+          "properties": {
+            "trialCount": { "type": "integer", "minimum": 3, "maximum": 5 },
+            "rawTrialFiles": { "type": "array", "minItems": 3, "maxItems": 5 },
+            "canonicalMetricAggregates": { "type": "object" },
+            "latencyPhaseAggregates": { "type": "object" },
+            "legacyMetricAggregates": { "type": "object" }
+          }
+        }
+      ]
+    }
+  }
+}

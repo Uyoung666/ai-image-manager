@@ -19,9 +19,10 @@ import {
   getActiveEmbeddingRuntimeInfo,
 } from "./model-config";
 import {
+  decideVectorCompatibility,
   getModelFingerprint,
-  getVectorFingerprintPath,
-  readStoredVectorFingerprint,
+  inspectStoredVectorFingerprint,
+  isVectorCompatibilitySearchable,
   type VectorCompatibility,
   verifyAdapterArtifacts,
   writeStoredVectorFingerprint,
@@ -134,44 +135,40 @@ async function inspectVectorCompatibility(
 ): Promise<{ status: VectorCompatibility; adoptLegacy: boolean }> {
   const adapter = getActiveEmbeddingAdapter();
   const fingerprint = getModelFingerprint(adapter);
-  const markerPath = getVectorFingerprintPath(dataPath);
-  const stored = readStoredVectorFingerprint(dataPath);
-
-  if (stored) {
-    if (stored.dimensions !== dimensions) {
-      return { status: "dimension-mismatch", adoptLegacy: false };
-    }
-    if (stored.adapterId !== adapter.id || stored.fingerprint !== fingerprint) {
-      return { status: "fingerprint-mismatch", adoptLegacy: false };
-    }
-    return { status: "matching", adoptLegacy: false };
-  }
-
-  if (fs.existsSync(markerPath)) {
-    return { status: "invalid-fingerprint", adoptLegacy: false };
-  }
-  if (rowCount === 0) {
-    return { status: "empty", adoptLegacy: false };
-  }
-  if (
+  const marker = inspectStoredVectorFingerprint(dataPath);
+  const shouldVerifyLegacyArtifacts =
+    marker.state === "missing" &&
+    rowCount > 0 &&
     adapter.legacyKind === "siglip" &&
-    dimensions === adapter.embeddingSpace.dimensions &&
-    (await canAdoptLegacyVectorStore())
-  ) {
-    return { status: "legacy-compatible", adoptLegacy: true };
-  }
-  return { status: "missing-fingerprint", adoptLegacy: false };
+    dimensions === adapter.embeddingSpace.dimensions;
+
+  return decideVectorCompatibility({
+    active: {
+      adapterId: adapter.id,
+      dimensions: adapter.embeddingSpace.dimensions,
+      fingerprint,
+      legacyKind: adapter.legacyKind,
+    },
+    marker,
+    rowCount,
+    vectorDimensions: dimensions,
+    legacyArtifactsVerified:
+      shouldVerifyLegacyArtifacts && (await canAdoptLegacyVectorStore()),
+  });
 }
 
 function initializeEmbeddingRuntime(): void {
-  if (getActiveEmbeddingRuntime()) {
-    return;
-  }
   const info = getActiveEmbeddingRuntimeInfo();
   const profile = getActiveThresholdProfile();
+  const current = getActiveEmbeddingRuntime();
   setActiveEmbeddingRuntime({
     ...info,
-    vectorCompatibility: "empty",
+    vectorCompatibility:
+      current?.adapterId === info.adapterId &&
+      current.fingerprint === info.fingerprint &&
+      current.dimensions === info.dimensions
+        ? current.vectorCompatibility
+        : "empty",
     thresholdProfileId: profile.profileId,
     calibrationStatus: profile.calibrationStatus,
   });
@@ -260,8 +257,7 @@ async function initializeVectorDB(): Promise<void> {
       setVectorCompatibility(compatibility.status);
       if (
         existingRowCount > 0 &&
-        compatibility.status !== "matching" &&
-        compatibility.status !== "legacy-compatible"
+        !isVectorCompatibilitySearchable(compatibility.status)
       ) {
         throw new Error(
           `Vector store is incompatible with active embedding model (${compatibility.status}); rebuild required`
@@ -563,7 +559,7 @@ export async function ensureVectorIndex(force = false): Promise<boolean> {
       console.log(
         `[AI] Index not needed: ${rowCount} < ${MIN_VECTORS_FOR_INDEX} threshold`
       );
-      return false;
+      return true;
     }
 
     const { Index: LIdx } = await import("@lancedb/lancedb");

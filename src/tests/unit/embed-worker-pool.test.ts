@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const childProcessMock = vi.hoisted(() => {
   type Listener = (...args: any[]) => void;
@@ -29,7 +29,7 @@ const childProcessMock = vi.hoisted(() => {
   }
 
   const children: FakeChildProcess[] = [];
-  const fork = vi.fn(() => {
+  const fork = vi.fn((..._args: unknown[]) => {
     const child = new FakeChildProcess();
     children.push(child);
     return child;
@@ -37,6 +37,27 @@ const childProcessMock = vi.hoisted(() => {
 
   return { children, fork };
 });
+
+function getWorkerIdentity(child: (typeof childProcessMock.children)[number]): {
+  adapterId: string;
+  fingerprint: string;
+} {
+  const initMessage = child.send.mock.calls.find(
+    ([message]) => message.type === "init"
+  )?.[0];
+  return {
+    adapterId: initMessage.adapter.adapterId,
+    fingerprint: initMessage.adapter.fingerprint,
+  };
+}
+
+function emitReady(child: (typeof childProcessMock.children)[number]): void {
+  child.emit("message", { type: "ready", ...getWorkerIdentity(child) });
+}
+
+function normalizedVector(): number[] {
+  return [1, ...Array.from({ length: 767 }, () => 0)];
+}
 
 vi.mock("node:child_process", () => ({
   default: {
@@ -117,7 +138,7 @@ describe("embed worker pool lifecycle", () => {
     expect(childProcessMock.fork).toHaveBeenCalledTimes(2);
 
     for (const child of childProcessMock.children) {
-      child.emit("message", { type: "ready" });
+      emitReady(child);
     }
     await vi.advanceTimersByTimeAsync(50);
     await Promise.all([first, second]);
@@ -137,7 +158,7 @@ describe("embed worker pool lifecycle", () => {
     const firstInit = initWorkerPool("model-path");
     const oldChildren = [...childProcessMock.children];
     for (const child of oldChildren) {
-      child.emit("message", { type: "ready" });
+      emitReady(child);
     }
     await vi.advanceTimersByTimeAsync(50);
     await firstInit;
@@ -146,7 +167,7 @@ describe("embed worker pool lifecycle", () => {
     const secondInit = initWorkerPool("model-path");
     const newChildren = childProcessMock.children.slice(2);
     for (const child of newChildren) {
-      child.emit("message", { type: "ready" });
+      emitReady(child);
     }
     await vi.advanceTimersByTimeAsync(50);
     await secondInit;
@@ -155,6 +176,128 @@ describe("embed worker pool lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1500);
 
     expect(childProcessMock.fork).toHaveBeenCalledTimes(4);
+    shutdownPool();
+  });
+
+  it("respawns a crashed worker with the same adapter identity", async () => {
+    const { getPoolHealth, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const initialization = initWorkerPool("model-path");
+    for (const child of childProcessMock.children) {
+      emitReady(child);
+    }
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+
+    const crashed = childProcessMock.children[0];
+    const expectedIdentity = getWorkerIdentity(crashed);
+    crashed.emit("exit", 1, null);
+    expect(getPoolHealth()).toMatchObject({ alive: 1, dead: 1 });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(childProcessMock.fork).toHaveBeenCalledTimes(3);
+    const replacement = childProcessMock.children[2];
+    expect(getWorkerIdentity(replacement)).toEqual(expectedIdentity);
+    expect(replacement.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        execution: expect.objectContaining({ provider: "cpu" }),
+        type: "init",
+      })
+    );
+    emitReady(replacement);
+    expect(getPoolHealth()).toMatchObject({ alive: 2, dead: 0, idle: 2 });
+    shutdownPool();
+  });
+
+  it("rejects a worker whose ready identity does not match", async () => {
+    vi.stubEnv("AI_EMBED_WORKERS", "1");
+    const { initWorkerPool } = await import("@/services/embed-worker-pool");
+
+    const initialization = initWorkerPool("model-path");
+    const rejection =
+      expect(initialization).rejects.toThrow("died during init");
+    const child = childProcessMock.children[0];
+    child.emit("message", {
+      type: "ready",
+      adapterId: "old-adapter",
+      fingerprint: "0".repeat(64),
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await rejection;
+    expect(child.kill).toHaveBeenCalled();
+  });
+
+  it("accepts a finite 768-dimensional L2 image vector", async () => {
+    vi.stubEnv("AI_EMBED_WORKERS", "1");
+    const { embedSingleImage, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const initialization = initWorkerPool("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+
+    const result = embedSingleImage("sample.png", "model-path");
+    child.emit("message", {
+      type: "result",
+      ...getWorkerIdentity(child),
+      results: [{ id: 0, vector: normalizedVector() }],
+    });
+
+    await expect(result).resolves.toHaveLength(768);
+    shutdownPool();
+  });
+
+  it.each([
+    ["empty", []],
+    ["wrong-dimensional", [1]],
+    ["non-finite", [Number.NaN, ...Array.from({ length: 767 }, () => 0)]],
+    ["non-L2", Array.from({ length: 768 }, () => 0)],
+  ])("rejects a %s image vector", async (_label, vector) => {
+    vi.stubEnv("AI_EMBED_WORKERS", "1");
+    const { embedSingleImage, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const initialization = initWorkerPool("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+
+    const result = embedSingleImage("sample.png", "model-path");
+    child.emit("message", {
+      type: "result",
+      ...getWorkerIdentity(child),
+      results: [{ id: 0, vector }],
+    });
+
+    await expect(result).rejects.toThrow("Invalid image embedding result");
+    shutdownPool();
+  });
+
+  it("discards an image result from an old adapter run", async () => {
+    vi.stubEnv("AI_EMBED_WORKERS", "1");
+    const { embedSingleImage, initWorkerPool, shutdownPool } = await import(
+      "@/services/embed-worker-pool"
+    );
+    const initialization = initWorkerPool("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await vi.advanceTimersByTimeAsync(50);
+    await initialization;
+
+    const result = embedSingleImage("sample.png", "model-path");
+    child.emit("message", {
+      type: "result",
+      adapterId: "old-adapter",
+      fingerprint: "0".repeat(64),
+      results: [{ id: 0, vector: normalizedVector() }],
+    });
+
+    await expect(result).rejects.toThrow("Stale embedding worker result");
     shutdownPool();
   });
 });

@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "siglip-v1-semantic-21-v1",
+  "description": "Stable definitions for the repository's existing 21-image SigLIP v1 quality set. Image assets remain local and are never committed.",
+  "assetPolicy": "local-only",
+  "sampleCount": 21,
+  "samples": [
+    {
+      "id": "ocean-pier-sunset",
+      "fileName": "050510.jpg",
+      "errorCategory": "coastal-scene"
+    },
+    {
+      "id": "dark-mountain-valley",
+      "fileName": "20260510_test-image-0474.jpg",
+      "errorCategory": "mountain-scene"
+    },
+    {
+      "id": "mountain-valley-lake",
+      "fileName": "test-image-0011.jpg",
+      "errorCategory": "mountain-scene"
+    },
+    {
+      "id": "coffee-mug-table",
+      "fileName": "test-image-0030.jpg",
+      "errorCategory": "tabletop-object"
+    },
+    {
+      "id": "white-coastal-village",
+      "fileName": "test-image-0049.jpg",
+      "errorCategory": "architecture"
+    },
+    {
+      "id": "highway-cars",
+      "fileName": "test-image-0088.jpg",
+      "errorCategory": "transport"
+    },
+    {
+      "id": "meadow-sunset",
+      "fileName": "test-image-0110.jpg",
+      "errorCategory": "sunset-scene"
+    },
+    {
+      "id": "piano-keys",
+      "fileName": "test-image-0153.jpg",
+      "errorCategory": "musical-instrument"
+    },
+    {
+      "id": "foggy-wooden-pier",
+      "fileName": "test-image-0172.jpg",
+      "errorCategory": "coastal-scene"
+    },
+    {
+      "id": "sandy-beach",
+      "fileName": "test-image-0215.jpg",
+      "errorCategory": "coastal-scene"
+    },
+    {
+      "id": "church-rocky-cliff",
+      "fileName": "test-image-0236.jpg",
+      "errorCategory": "architecture"
+    },
+    {
+      "id": "flying-birds",
+      "fileName": "test-image-0258.jpg",
+      "errorCategory": "wildlife"
+    },
+    {
+      "id": "autumn-leaves-path",
+      "fileName": "test-image-0301.jpg",
+      "errorCategory": "forest-scene"
+    },
+    {
+      "id": "cobblestone-street",
+      "fileName": "test-image-0322.jpg",
+      "errorCategory": "urban-scene"
+    },
+    {
+      "id": "subway-train",
+      "fileName": "test-image-0345.jpg",
+      "errorCategory": "transport"
+    },
+    {
+      "id": "keyboard-mug",
+      "fileName": "test-image-0366.jpg",
+      "errorCategory": "tabletop-object"
+    },
+    {
+      "id": "calm-ocean-horizon",
+      "fileName": "test-image-0385.jpg",
+      "errorCategory": "coastal-scene"
+    },
+    {
+      "id": "cloud-covered-mountain",
+      "fileName": "test-image-0406.jpg",
+      "errorCategory": "mountain-scene"
+    },
+    {
+      "id": "palm-trees-sunset",
+      "fileName": "test-image-0427.jpg",
+      "errorCategory": "sunset-scene"
+    },
+    {
+      "id": "green-pine-forest",
+      "fileName": "test-image-0471.jpg",
+      "errorCategory": "forest-scene"
+    },
+    {
+      "id": "bamboo-canopy",
+      "fileName": "Unknown10.jpg",
+      "errorCategory": "forest-scene"
+    }
+  ]
+}

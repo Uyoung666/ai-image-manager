@@ -1,0 +1,245 @@
+{
+  "schemaVersion": 1,
+  "queryDefinitionVersion": "siglip-v1-semantic-queries-v3",
+  "queryPlan": {
+    "language": "en",
+    "promptTemplateVersion": "explicit-siglip-photo-prompt-v1",
+    "translationModelVersion": "not-used"
+  },
+  "evaluationProtocol": {
+    "version": "siglip-quality-protocol-v3",
+    "hitCutoffs": [1, 3, 5, 10],
+    "recallCutoffs": [5, 10, 50, 200],
+    "fixedPrecisionCutoffs": [5, 10, 20, 50],
+    "ndcgCutoffs": [50],
+    "rankingPolicy": "production-candidate-threshold-then-score-descending"
+  },
+  "metrics": [
+    "precisionAt20",
+    "precisionAt50",
+    "recallAt50",
+    "recallAt200",
+    "ndcgAt50",
+    "p95LatencyMs",
+    "errorCategories",
+    "emptyResultRate",
+    "hitAt1",
+    "hitAt3",
+    "hitAt5",
+    "hitAt10",
+    "meanReciprocalRank",
+    "recallAt5",
+    "recallAt10",
+    "fixedCutoffPrecisionAt5",
+    "fixedCutoffPrecisionAt10",
+    "fixedCutoffPrecisionAt20",
+    "fixedCutoffPrecisionAt50",
+    "returnedCountDistribution",
+    "latencyPhases",
+    "hardNegativeFalsePositiveRates"
+  ],
+  "queries": [
+    {
+      "id": "ocean-pier-sunset",
+      "text": "a sunset over the ocean with a pier",
+      "prompt": "This is a photo of a sunset over the ocean with a pier.",
+      "intent": "composed",
+      "category": "coastal-scene",
+      "relevantSampleIds": ["ocean-pier-sunset"],
+      "hardNegativeSampleIds": [
+        "foggy-wooden-pier",
+        "palm-trees-sunset",
+        "calm-ocean-horizon"
+      ]
+    },
+    {
+      "id": "dark-mountain-valley",
+      "text": "a barren dark mountain valley",
+      "prompt": "This is a photo of a barren dark mountain valley.",
+      "intent": "composed",
+      "category": "mountain-scene",
+      "relevantSampleIds": ["dark-mountain-valley"],
+      "hardNegativeSampleIds": [
+        "mountain-valley-lake",
+        "cloud-covered-mountain"
+      ]
+    },
+    {
+      "id": "mountain-valley-lake",
+      "text": "a lake in a mountain valley",
+      "prompt": "This is a photo of a lake in a mountain valley.",
+      "intent": "composed",
+      "category": "mountain-scene",
+      "relevantSampleIds": ["mountain-valley-lake"],
+      "hardNegativeSampleIds": [
+        "dark-mountain-valley",
+        "cloud-covered-mountain"
+      ]
+    },
+    {
+      "id": "coffee-mug-table",
+      "text": "a coffee mug on a wooden table",
+      "prompt": "This is a photo of a coffee mug on a wooden table.",
+      "intent": "composed",
+      "category": "tabletop-object",
+      "relevantSampleIds": ["coffee-mug-table"],
+      "hardNegativeSampleIds": ["keyboard-mug"]
+    },
+    {
+      "id": "white-coastal-village",
+      "text": "a white coastal village",
+      "prompt": "This is a photo of a white coastal village.",
+      "intent": "composed",
+      "category": "architecture",
+      "relevantSampleIds": ["white-coastal-village"],
+      "hardNegativeSampleIds": ["church-rocky-cliff", "cobblestone-street"]
+    },
+    {
+      "id": "highway-cars",
+      "text": "cars driving on a highway",
+      "prompt": "This is a photo of cars driving on a highway.",
+      "intent": "composed",
+      "category": "transport",
+      "relevantSampleIds": ["highway-cars"],
+      "hardNegativeSampleIds": ["subway-train"]
+    },
+    {
+      "id": "meadow-sunset",
+      "text": "a sunset over a green meadow",
+      "prompt": "This is a photo of a sunset over a green meadow.",
+      "intent": "composed",
+      "category": "sunset-scene",
+      "relevantSampleIds": ["meadow-sunset"],
+      "hardNegativeSampleIds": ["palm-trees-sunset", "ocean-pier-sunset"]
+    },
+    {
+      "id": "piano-keys",
+      "text": "close-up of piano keys",
+      "prompt": "This is a photo of a close-up of piano keys.",
+      "intent": "object",
+      "category": "musical-instrument",
+      "relevantSampleIds": ["piano-keys"],
+      "hardNegativeSampleIds": ["keyboard-mug"]
+    },
+    {
+      "id": "foggy-wooden-pier",
+      "text": "a wooden pier in fog",
+      "prompt": "This is a photo of a wooden pier in fog.",
+      "intent": "composed",
+      "category": "coastal-scene",
+      "relevantSampleIds": ["foggy-wooden-pier"],
+      "hardNegativeSampleIds": ["ocean-pier-sunset", "calm-ocean-horizon"]
+    },
+    {
+      "id": "sandy-beach",
+      "text": "a wide sandy beach",
+      "prompt": "This is a photo of a wide sandy beach.",
+      "intent": "scene",
+      "category": "coastal-scene",
+      "relevantSampleIds": ["sandy-beach"],
+      "hardNegativeSampleIds": ["calm-ocean-horizon", "white-coastal-village"]
+    },
+    {
+      "id": "church-rocky-cliff",
+      "text": "a small church below a rocky cliff",
+      "prompt": "This is a photo of a small church below a rocky cliff.",
+      "intent": "composed",
+      "category": "architecture",
+      "relevantSampleIds": ["church-rocky-cliff"],
+      "hardNegativeSampleIds": [
+        "white-coastal-village",
+        "cloud-covered-mountain"
+      ]
+    },
+    {
+      "id": "flying-birds",
+      "text": "a flock of birds flying in the sky",
+      "prompt": "This is a photo of a flock of birds flying in the sky.",
+      "intent": "composed",
+      "category": "wildlife",
+      "relevantSampleIds": ["flying-birds"],
+      "hardNegativeSampleIds": ["cloud-covered-mountain"]
+    },
+    {
+      "id": "autumn-leaves-path",
+      "text": "fallen autumn leaves on a path",
+      "prompt": "This is a photo of fallen autumn leaves on a path.",
+      "intent": "composed",
+      "category": "forest-scene",
+      "relevantSampleIds": ["autumn-leaves-path"],
+      "hardNegativeSampleIds": ["green-pine-forest", "bamboo-canopy"]
+    },
+    {
+      "id": "cobblestone-street",
+      "text": "a narrow cobblestone street",
+      "prompt": "This is a photo of a narrow cobblestone street.",
+      "intent": "scene",
+      "category": "urban-scene",
+      "relevantSampleIds": ["cobblestone-street"],
+      "hardNegativeSampleIds": ["white-coastal-village"]
+    },
+    {
+      "id": "subway-train",
+      "text": "a moving subway train",
+      "prompt": "This is a photo of a moving subway train.",
+      "intent": "object",
+      "category": "transport",
+      "relevantSampleIds": ["subway-train"],
+      "hardNegativeSampleIds": ["highway-cars"]
+    },
+    {
+      "id": "keyboard-mug",
+      "text": "a computer keyboard beside a mug",
+      "prompt": "This is a photo of a computer keyboard beside a mug.",
+      "intent": "composed",
+      "category": "tabletop-object",
+      "relevantSampleIds": ["keyboard-mug"],
+      "hardNegativeSampleIds": ["coffee-mug-table", "piano-keys"]
+    },
+    {
+      "id": "calm-ocean-horizon",
+      "text": "a calm ocean horizon",
+      "prompt": "This is a photo of a calm ocean horizon.",
+      "intent": "scene",
+      "category": "coastal-scene",
+      "relevantSampleIds": ["calm-ocean-horizon"],
+      "hardNegativeSampleIds": ["sandy-beach", "ocean-pier-sunset"]
+    },
+    {
+      "id": "cloud-covered-mountain",
+      "text": "a mountain covered in clouds",
+      "prompt": "This is a photo of a mountain covered in clouds.",
+      "intent": "composed",
+      "category": "mountain-scene",
+      "relevantSampleIds": ["cloud-covered-mountain"],
+      "hardNegativeSampleIds": ["dark-mountain-valley", "mountain-valley-lake"]
+    },
+    {
+      "id": "palm-trees-sunset",
+      "text": "palm trees at sunset",
+      "prompt": "This is a photo of palm trees at sunset.",
+      "intent": "composed",
+      "category": "sunset-scene",
+      "relevantSampleIds": ["palm-trees-sunset"],
+      "hardNegativeSampleIds": ["meadow-sunset", "ocean-pier-sunset"]
+    },
+    {
+      "id": "green-pine-forest",
+      "text": "a green pine forest",
+      "prompt": "This is a photo of a green pine forest.",
+      "intent": "scene",
+      "category": "forest-scene",
+      "relevantSampleIds": ["green-pine-forest"],
+      "hardNegativeSampleIds": ["bamboo-canopy", "autumn-leaves-path"]
+    },
+    {
+      "id": "bamboo-canopy",
+      "text": "looking up through a bamboo forest",
+      "prompt": "This is a photo of looking up through a bamboo forest.",
+      "intent": "composed",
+      "category": "forest-scene",
+      "relevantSampleIds": ["bamboo-canopy"],
+      "hardNegativeSampleIds": ["green-pine-forest", "autumn-leaves-path"]
+    }
+  ]
+}

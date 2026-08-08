@@ -8,7 +8,12 @@ import {
   getActiveEmbeddingWorkerAdapter,
   getSemanticPolicyVersion,
 } from "./model-config";
-import { getActiveEmbeddingFingerprint } from "./model-fingerprint";
+import {
+  getActiveEmbeddingFingerprint,
+  isVectorCompatibilitySearchable,
+  resolveRuntimeVectorCompatibility,
+  type VectorCompatibility,
+} from "./model-fingerprint";
 import { ensureLocalModel, loadModel } from "./model-loader";
 import {
   applyNegativeSemanticPenalty,
@@ -33,6 +38,7 @@ import {
 import {
   _localModelPath,
   embeddingModel,
+  getActiveEmbeddingRuntime,
   photoTable,
   setLocalModelPath,
 } from "./state";
@@ -622,6 +628,23 @@ let warmedTable: typeof photoTable = null;
 let searchCacheModel: typeof embeddingModel = null;
 let searchCacheTable: typeof photoTable = null;
 
+function getEffectiveVectorCompatibility(): VectorCompatibility | null {
+  const runtime = getActiveEmbeddingRuntime();
+  if (!runtime) {
+    return null;
+  }
+  const model = getActiveEmbeddingModel();
+  return resolveRuntimeVectorCompatibility(
+    {
+      adapterId: model.adapterId,
+      dimensions: model.vectorDimensions,
+      fingerprint: getActiveEmbeddingFingerprint(),
+    },
+    runtime,
+    runtime.vectorCompatibility
+  );
+}
+
 export function isAiSearchReady(): boolean {
   return (
     embeddingModel !== null &&
@@ -797,6 +820,35 @@ async function performTextSearch(
   await initVectorDB();
   const initMs = Date.now() - initStartedAt;
 
+  const vectorCompatibility = getEffectiveVectorCompatibility();
+  if (
+    vectorCompatibility &&
+    !isVectorCompatibilitySearchable(vectorCompatibility)
+  ) {
+    console.error(
+      `[AI] searchByText blocked by vector compatibility: ${vectorCompatibility}`
+    );
+    return {
+      candidateDepth: 0,
+      consensusCutoff: 0,
+      cutoffReason: `vector-${vectorCompatibility}`,
+      finalCutoff: 0,
+      hasMore: false,
+      plan: await prepareSemanticQueryPlan(query, {
+        translate: async () => "",
+      }),
+      promptGroupCount: 0,
+      rejectedWeak: 0,
+      results: [],
+      supportCandidates: [],
+      supportCutoff: 0,
+      strongAccepted: 0,
+      strongCutoff: 0,
+      supportedAccepted: 0,
+      topSimilarity: 0,
+    };
+  }
+
   if (!(embeddingModel && photoTable)) {
     console.warn("[AI] searchByText: AI not initialized");
     return {
@@ -884,6 +936,15 @@ export function warmupAiSearch(): Promise<void> {
       const startedAt = Date.now();
       await loadModel();
       await initVectorDB();
+      const vectorCompatibility = getEffectiveVectorCompatibility();
+      if (
+        vectorCompatibility &&
+        !isVectorCompatibilitySearchable(vectorCompatibility)
+      ) {
+        throw new Error(
+          `Vector store is incompatible with active embedding model (${vectorCompatibility})`
+        );
+      }
       if (!(embeddingModel && photoTable)) {
         return;
       }
@@ -924,6 +985,17 @@ export async function searchByImage(
   }
 
   await initVectorDB();
+
+  const vectorCompatibility = getEffectiveVectorCompatibility();
+  if (
+    vectorCompatibility &&
+    !isVectorCompatibilitySearchable(vectorCompatibility)
+  ) {
+    console.error(
+      `[AI] searchByImage blocked by vector compatibility: ${vectorCompatibility}`
+    );
+    return [];
+  }
 
   if (!photoTable) {
     console.warn("[AI] searchByImage: AI not initialized");

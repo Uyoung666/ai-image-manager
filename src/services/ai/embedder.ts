@@ -9,6 +9,7 @@ import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
+import { shouldPublishVectorFingerprint } from "./model-fingerprint";
 import { ensureLocalModel } from "./model-loader";
 import type { EmbedProgress, EmbedProgressCallback } from "./state";
 import {
@@ -1032,8 +1033,18 @@ export async function embedAllPhotos(
     // has been persisted. A partial, cancelled, or failed build must not make
     // a mixed vector table look complete.
     if (processed > 0 && processed === total && photoTable) {
-      await ensureVectorIndex(true);
-      await persistActiveVectorFingerprint("fresh-build");
+      const indexReady = await ensureVectorIndex(true);
+      if (
+        shouldPublishVectorFingerprint({
+          hasVectorTable: Boolean(photoTable),
+          indexReady,
+          processed,
+          runWritable: isRunWritable(runId),
+          total,
+        })
+      ) {
+        await persistActiveVectorFingerprint("fresh-build");
+      }
     }
 
     if (tagError) {

@@ -54,6 +54,39 @@ export type VectorCompatibility =
   | "invalid-fingerprint"
   | "dimension-mismatch";
 
+export type VectorFingerprintMarker =
+  | { state: "missing" }
+  | { state: "invalid" }
+  | { state: "valid"; value: StoredVectorFingerprint };
+
+export interface VectorCompatibilityIdentity {
+  adapterId: string;
+  dimensions: number;
+  fingerprint: string;
+  legacyKind?: "siglip";
+}
+
+export interface VectorCompatibilityDecision {
+  adoptLegacy: boolean;
+  status: VectorCompatibility;
+}
+
+export interface VectorCompatibilityDecisionInput {
+  active: VectorCompatibilityIdentity;
+  legacyArtifactsVerified: boolean;
+  marker: VectorFingerprintMarker;
+  rowCount: number;
+  vectorDimensions: number;
+}
+
+export interface VectorFingerprintPublicationInput {
+  hasVectorTable: boolean;
+  indexReady: boolean;
+  processed: number;
+  runWritable: boolean;
+  total: number;
+}
+
 const EMBEDDING_ALGORITHM_VERSION = "siglip-adapter-v1";
 const SHA256_RE = /^[a-f0-9]{64}$/u;
 const PATH_SPLIT_RE = /[\\/]/u;
@@ -158,26 +191,113 @@ export function isValidStoredVectorFingerprint(
   );
 }
 
+export function decideVectorCompatibility({
+  active,
+  legacyArtifactsVerified,
+  marker,
+  rowCount,
+  vectorDimensions,
+}: VectorCompatibilityDecisionInput): VectorCompatibilityDecision {
+  if (marker.state === "valid") {
+    if (
+      marker.value.dimensions !== active.dimensions ||
+      vectorDimensions !== active.dimensions
+    ) {
+      return { status: "dimension-mismatch", adoptLegacy: false };
+    }
+    if (
+      marker.value.adapterId !== active.adapterId ||
+      marker.value.fingerprint !== active.fingerprint
+    ) {
+      return { status: "fingerprint-mismatch", adoptLegacy: false };
+    }
+    return { status: "matching", adoptLegacy: false };
+  }
+
+  if (marker.state === "invalid") {
+    return { status: "invalid-fingerprint", adoptLegacy: false };
+  }
+  if (rowCount === 0) {
+    return { status: "empty", adoptLegacy: false };
+  }
+  if (vectorDimensions !== active.dimensions) {
+    return { status: "dimension-mismatch", adoptLegacy: false };
+  }
+  if (active.legacyKind === "siglip" && legacyArtifactsVerified) {
+    return { status: "legacy-compatible", adoptLegacy: true };
+  }
+  return { status: "missing-fingerprint", adoptLegacy: false };
+}
+
+export function resolveRuntimeVectorCompatibility(
+  active: VectorCompatibilityIdentity,
+  runtime: VectorCompatibilityIdentity,
+  storedCompatibility: VectorCompatibility
+): VectorCompatibility {
+  if (runtime.dimensions !== active.dimensions) {
+    return "dimension-mismatch";
+  }
+  if (
+    runtime.adapterId !== active.adapterId ||
+    runtime.fingerprint !== active.fingerprint
+  ) {
+    return "fingerprint-mismatch";
+  }
+  return storedCompatibility;
+}
+
+export function isVectorCompatibilitySearchable(
+  compatibility: VectorCompatibility
+): boolean {
+  return (
+    compatibility === "empty" ||
+    compatibility === "matching" ||
+    compatibility === "legacy-compatible"
+  );
+}
+
+export function shouldPublishVectorFingerprint({
+  hasVectorTable,
+  indexReady,
+  processed,
+  runWritable,
+  total,
+}: VectorFingerprintPublicationInput): boolean {
+  return (
+    hasVectorTable &&
+    indexReady &&
+    runWritable &&
+    total > 0 &&
+    processed === total
+  );
+}
+
 export function getVectorFingerprintPath(dataPath: string): string {
   return path.join(dataPath, "vectors", ".model_fingerprint.json");
+}
+
+export function inspectStoredVectorFingerprint(
+  dataPath: string
+): VectorFingerprintMarker {
+  const markerPath = getVectorFingerprintPath(dataPath);
+  if (!fs.existsSync(markerPath)) {
+    return { state: "missing" };
+  }
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(markerPath, "utf-8"));
+    return isValidStoredVectorFingerprint(parsed)
+      ? { state: "valid", value: parsed }
+      : { state: "invalid" };
+  } catch {
+    return { state: "invalid" };
+  }
 }
 
 export function readStoredVectorFingerprint(
   dataPath: string
 ): StoredVectorFingerprint | null {
-  const markerPath = getVectorFingerprintPath(dataPath);
-  if (!fs.existsSync(markerPath)) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(markerPath, "utf-8"));
-    if (!isValidStoredVectorFingerprint(parsed)) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
+  const marker = inspectStoredVectorFingerprint(dataPath);
+  return marker.state === "valid" ? marker.value : null;
 }
 
 export async function writeStoredVectorFingerprint(

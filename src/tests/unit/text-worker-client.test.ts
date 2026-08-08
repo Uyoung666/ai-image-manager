@@ -39,6 +39,23 @@ const childProcessMock = vi.hoisted(() => {
   return { children, fork };
 });
 
+function getWorkerIdentity(child: (typeof childProcessMock.children)[number]): {
+  adapterId: string;
+  fingerprint: string;
+} {
+  const initMessage = child.send.mock.calls.find(
+    ([message]) => message.type === "init"
+  )?.[0];
+  return {
+    adapterId: initMessage.adapter.adapterId,
+    fingerprint: initMessage.adapter.fingerprint,
+  };
+}
+
+function emitReady(child: (typeof childProcessMock.children)[number]): void {
+  child.emit("message", { type: "ready", ...getWorkerIdentity(child) });
+}
+
 vi.mock("node:child_process", () => ({
   default: {
     fork: childProcessMock.fork,
@@ -54,7 +71,7 @@ vi.mock("electron", () => ({
 
 function vectors(count: number): number[][] {
   return Array.from({ length: count }, () =>
-    Array.from({ length: 768 }, () => 0.5)
+    Array.from({ length: 768 }, (_, index) => (index === 0 ? 1 : 0))
   );
 }
 
@@ -82,7 +99,7 @@ describe("text embedding worker client", () => {
     expect(childProcessMock.fork).toHaveBeenCalledOnce();
 
     const child = childProcessMock.children[0];
-    child.emit("message", { type: "ready" });
+    emitReady(child);
     await Promise.all([first, second]);
 
     const resultPromise = embedTextsInWorker(["one", "two"], "model-path");
@@ -97,6 +114,7 @@ describe("text embedding worker client", () => {
     child.emit("message", {
       type: "result",
       requestId: request.requestId,
+      ...getWorkerIdentity(child),
       vectors: vectors(2),
     });
 
@@ -109,7 +127,7 @@ describe("text embedding worker client", () => {
       await import("@/services/ai/text-worker-client");
     const init = initTextWorker("model-path");
     const firstChild = childProcessMock.children[0];
-    firstChild.emit("message", { type: "ready" });
+    emitReady(firstChild);
     await init;
 
     const pending = embedTextsInWorker(["one"], "model-path");
@@ -119,7 +137,7 @@ describe("text embedding worker client", () => {
 
     const replacement = initTextWorker("model-path");
     expect(childProcessMock.fork).toHaveBeenCalledTimes(2);
-    childProcessMock.children[1].emit("message", { type: "ready" });
+    emitReady(childProcessMock.children[1]);
     await replacement;
     shutdownTextWorker();
   });
@@ -129,7 +147,7 @@ describe("text embedding worker client", () => {
       await import("@/services/ai/text-worker-client");
     const init = initTextWorker("model-path");
     const child = childProcessMock.children[0];
-    child.emit("message", { type: "ready" });
+    emitReady(child);
     await init;
 
     const invalid = embedTextsInWorker(["one"], "model-path");
@@ -140,6 +158,7 @@ describe("text embedding worker client", () => {
     child.emit("message", {
       type: "result",
       requestId: request.requestId,
+      ...getWorkerIdentity(child),
       vectors: [[1]],
     });
     await expect(invalid).rejects.toThrow("Invalid text embedding result");
@@ -161,5 +180,100 @@ describe("text embedding worker client", () => {
 
     await rejection;
     expect(childProcessMock.children[0].kill).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a ready message with missing model identity", async () => {
+    const { initTextWorker } = await import("@/services/ai/text-worker-client");
+    const initialization = initTextWorker("model-path");
+    const child = childProcessMock.children[0];
+
+    child.emit("message", { type: "ready" });
+
+    await expect(initialization).rejects.toThrow(
+      "Stale text embedding worker ready"
+    );
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("does not let an old ready message supersede a replacement", async () => {
+    const { initTextWorker, shutdownTextWorker } = await import(
+      "@/services/ai/text-worker-client"
+    );
+    const first = initTextWorker("model-a");
+    const firstRejection = expect(first).rejects.toThrow(
+      "Stale text embedding worker ready"
+    );
+    const firstChild = childProcessMock.children[0];
+
+    const replacement = initTextWorker("model-b");
+    const replacementChild = childProcessMock.children[1];
+    firstChild.emit("message", {
+      type: "ready",
+      ...getWorkerIdentity(firstChild),
+    });
+    emitReady(replacementChild);
+
+    await firstRejection;
+    await replacement;
+    await initTextWorker("model-b");
+    expect(childProcessMock.fork).toHaveBeenCalledTimes(2);
+    shutdownTextWorker();
+  });
+
+  it.each([
+    ["empty", [[]]],
+    ["wrong-dimensional", [[1]]],
+    [
+      "non-finite",
+      [[Number.POSITIVE_INFINITY, ...Array.from({ length: 767 }, () => 0)]],
+    ],
+    ["non-L2", [Array.from({ length: 768 }, () => 0)]],
+  ])("rejects a %s text vector", async (_label, invalidVectors) => {
+    const { embedTextsInWorker, initTextWorker, shutdownTextWorker } =
+      await import("@/services/ai/text-worker-client");
+    const initialization = initTextWorker("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await initialization;
+
+    const result = embedTextsInWorker(["one"], "model-path");
+    await Promise.resolve();
+    const request = child.send.mock.calls.find(
+      ([message]) => message.type === "embed"
+    )?.[0];
+    child.emit("message", {
+      type: "result",
+      requestId: request.requestId,
+      ...getWorkerIdentity(child),
+      vectors: invalidVectors,
+    });
+
+    await expect(result).rejects.toThrow("Invalid text embedding result");
+    shutdownTextWorker();
+  });
+
+  it("discards a text result from an old adapter run", async () => {
+    const { embedTextsInWorker, initTextWorker, shutdownTextWorker } =
+      await import("@/services/ai/text-worker-client");
+    const initialization = initTextWorker("model-path");
+    const child = childProcessMock.children[0];
+    emitReady(child);
+    await initialization;
+
+    const result = embedTextsInWorker(["one"], "model-path");
+    await Promise.resolve();
+    const request = child.send.mock.calls.find(
+      ([message]) => message.type === "embed"
+    )?.[0];
+    child.emit("message", {
+      type: "result",
+      requestId: request.requestId,
+      adapterId: "old-adapter",
+      fingerprint: "0".repeat(64),
+      vectors: vectors(1),
+    });
+
+    await expect(result).rejects.toThrow("Stale text embedding worker result");
+    shutdownTextWorker();
   });
 });
