@@ -25,6 +25,8 @@
     "test:worker-smoke": "node scripts/run-worker-smoke.mjs",
     "test:worker-smoke:packaged": "node scripts/run-worker-smoke.mjs --packaged",
     "validate:phase2:isolated": "node scripts/run-phase2-isolated-validation.mjs",
+    "diagnostics:ai": "node scripts/run-ai-device-diagnostics.mjs",
+    "diagnostics:ai:memory-summary": "node scripts/summarize-ai-memory-localization.mjs",
     "test:e2e": "playwright test",
     "test:all": "node scripts/run-vitest.mjs run && playwright test",
     "db:generate": "drizzle-kit generate",

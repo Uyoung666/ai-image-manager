@@ -3,6 +3,7 @@ import {
   buildSyntheticWorkload,
   parseStressArguments,
   resolveStressExitCode,
+  summarizeMemoryEpochs,
   summarizeMemoryTrend,
   summarizeMemoryTrends,
 } from "../../../scripts/run-ai-index-stress.mjs";
@@ -27,14 +28,30 @@ describe("AI index synthetic stress plan", () => {
     ]);
   });
 
-  it("only accepts the designed 500-1000 item stress range", () => {
+  it("only accepts the designed 500-5000 item stress range", () => {
     expect(() => parseStressArguments(["--count", "499"])).toThrow(
-      "between 500 and 1000"
+      "between 500 and 5000"
     );
-    expect(() => parseStressArguments(["--count", "1001"])).toThrow(
-      "between 500 and 1000"
+    expect(() => parseStressArguments(["--count", "5001"])).toThrow(
+      "between 500 and 5000"
     );
-    expect(parseStressArguments(["--count", "1000"]).count).toBe(1000);
+    expect(parseStressArguments(["--count", "5000"]).count).toBe(5000);
+    expect(
+      parseStressArguments([
+        "--count",
+        "3000",
+        "--restart-worker-after",
+        "1500",
+      ]).restartWorkerAfter
+    ).toBe(1500);
+    expect(() =>
+      parseStressArguments([
+        "--count",
+        "3000",
+        "--restart-worker-after",
+        "3000",
+      ])
+    ).toThrow("less than --count");
   });
 
   it("only allows item errors when explicitly requested", () => {
@@ -144,5 +161,49 @@ describe("AI index synthetic stress plan", () => {
       rssSlopeBytesPer100Items: 20,
       sampleCount: 3,
     });
+  });
+
+  it("separates memory trends across worker restart generations", () => {
+    const epochs = summarizeMemoryEpochs([
+      {
+        completed: 0,
+        phase: "workers-ready",
+        totalRssBytes: 100,
+        workerGeneration: 1,
+      },
+      {
+        completed: 100,
+        phase: "segment",
+        totalRssBytes: 120,
+        workerGeneration: 1,
+      },
+      {
+        completed: 200,
+        phase: "segment",
+        totalRssBytes: 140,
+        workerGeneration: 1,
+      },
+      {
+        completed: 200,
+        phase: "workers-restarted",
+        totalRssBytes: 105,
+        workerGeneration: 2,
+      },
+      {
+        completed: 300,
+        phase: "segment",
+        totalRssBytes: 110,
+        workerGeneration: 2,
+      },
+      {
+        completed: 400,
+        phase: "segment",
+        totalRssBytes: 115,
+        workerGeneration: 2,
+      },
+    ]);
+
+    expect(epochs["1"].fullRun.rssDeltaBytes).toBe(40);
+    expect(epochs["2"].fullRun.rssDeltaBytes).toBe(10);
   });
 });

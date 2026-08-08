@@ -3,7 +3,7 @@
  *
  * This runner deliberately creates a synthetic logical workload by cycling a
  * stable, sorted list of local source images. Reports must not be interpreted
- * as quality coverage for 500-1000 distinct real photos.
+ * as quality coverage for 500-5000 distinct real photos.
  */
 import { execFile, fork } from "node:child_process";
 import fs from "node:fs";
@@ -34,6 +34,7 @@ const sourceWorkerRoot = path.join(repoRoot, "scripts");
 const imageExtensions = new Set([".avif", ".jpeg", ".jpg", ".png", ".webp"]);
 const workerTimeoutMs = 300_000;
 const l2Tolerance = 0.001;
+const lineBreakRegex = /\r?\n/u;
 const steadyStateWarmupSegmentCount = 2;
 const whitespaceRegex = /\s+/u;
 
@@ -79,6 +80,7 @@ export function parseStressArguments(argv) {
     packagedResources: null,
     pauseAfter: null,
     pauseMs: 1000,
+    restartWorkerAfter: null,
     segmentSize: null,
     validateOnly: false,
   };
@@ -127,6 +129,12 @@ export function parseStressArguments(argv) {
         0
       );
       index += 1;
+    } else if (argument === "--restart-worker-after") {
+      options.restartWorkerAfter = parseInteger(
+        takeOption(argv, index, "--restart-worker-after"),
+        "--restart-worker-after"
+      );
+      index += 1;
     } else if (argument === "--cancel-after") {
       options.cancelAfter = parseInteger(
         takeOption(argv, index, "--cancel-after"),
@@ -150,17 +158,24 @@ export function parseStressArguments(argv) {
     }
   }
 
-  if (options.count < 500 || options.count > 1000) {
-    throw new Error("--count must be between 500 and 1000");
+  if (options.count < 500 || options.count > 5000) {
+    throw new Error("--count must be between 500 and 5000");
   }
   for (const [label, value] of [
     ["--pause-after", options.pauseAfter],
+    ["--restart-worker-after", options.restartWorkerAfter],
     ["--cancel-after", options.cancelAfter],
     ["--inject-failure-at", options.injectFailureAt],
   ]) {
     if (value !== null && value > options.count) {
       throw new Error(`${label} must not exceed --count`);
     }
+  }
+  if (
+    options.restartWorkerAfter !== null &&
+    options.restartWorkerAfter >= options.count
+  ) {
+    throw new Error("--restart-worker-after must be less than --count");
   }
   return options;
 }
@@ -171,18 +186,19 @@ function printHelp() {
 
 Options:
   --allow-errors              Exit zero when the report contains expected item errors
-  --count <500-1000>          Synthetic logical image count (default: 500)
+  --count <500-5000>          Synthetic logical image count (default: 500)
   --input <file-or-dir>       Stable local source image(s) (default: images/demo.png)
   --model-root <dir>          Current model asset root (default: ./models)
   --segment-size <count>      Logical items per measured segment
   --pause-after <count>       Pause once after this many logical items, then resume
   --pause-ms <ms>             Pause duration (default: 1000)
+  --restart-worker-after <n>  Restart image worker(s) at a batch boundary
   --cancel-after <count>      Stop at a batch boundary and verify no fingerprint publish
   --inject-failure-at <id>    Replace one logical path with a missing path
   --packaged-resources <dir>  Compare source and packaged image/text worker behavior
   --output-dir <reports/...>  Report directory (must remain below ./reports)
   --keep-workdir              Preserve temporary userData/vector files below the report
-  --validate-only             Validate the 500-1000 synthetic workload plan only`);
+  --validate-only             Validate the 500-5000 synthetic workload plan only`);
 }
 
 async function collectImageFiles(inputPath) {
@@ -303,18 +319,47 @@ export function summarizeMemoryTrend(samples, scope = "fullRun") {
 }
 
 export function summarizeMemoryTrends(samples) {
-  const steadyStateSamples = samples.slice(steadyStateWarmupSegmentCount);
+  const processingSamples = samples.filter(
+    (sample) =>
+      sample.phase === undefined ||
+      sample.phase === "workers-ready" ||
+      sample.phase === "workers-restarted" ||
+      sample.phase === "segment"
+  );
+  const steadyStateSamples = processingSamples.slice(
+    steadyStateWarmupSegmentCount
+  );
   return {
-    fullRun: summarizeMemoryTrend(samples, "fullRun"),
+    fullRun: summarizeMemoryTrend(processingSamples, "fullRun"),
     steadyState: summarizeMemoryTrend(steadyStateSamples, "steadyState"),
     warmupCutoff: {
       completedLogicalItems:
-        samples[steadyStateWarmupSegmentCount]?.completed ?? null,
+        processingSamples[steadyStateWarmupSegmentCount]?.completed ?? null,
       sampleIndex: steadyStateWarmupSegmentCount,
       skippedSegmentCount: steadyStateWarmupSegmentCount,
       strategy: "skip-first-segments-use-cutoff-sample-as-steady-baseline",
     },
   };
+}
+
+export function summarizeMemoryEpochs(samples) {
+  const generations = [
+    ...new Set(
+      samples.map((sample) => sample.workerGeneration).filter(Number.isInteger)
+    ),
+  ];
+  return Object.fromEntries(
+    generations.map((generation) => {
+      const epochSamples = samples.filter(
+        (sample) =>
+          sample.workerGeneration === generation &&
+          ["workers-ready", "workers-restarted", "segment"].includes(
+            sample.phase
+          )
+      );
+      return [String(generation), summarizeMemoryTrends(epochSamples)];
+    })
+  );
 }
 
 export function resolveStressExitCode(report) {
@@ -563,53 +608,98 @@ async function shutdownWorker(handle) {
   });
 }
 
-async function readWorkerRssBytes(processIds) {
+async function readWorkerMemory(processIds) {
   const ids = processIds.filter((id) => Number.isInteger(id) && id > 0);
   if (ids.length === 0) {
-    return 0;
+    return [];
   }
   try {
     if (process.platform === "win32") {
       const idList = ids.join(",");
-      const command = `$items = Get-Process -Id ${idList} -ErrorAction SilentlyContinue; ($items | Measure-Object -Property WorkingSet64 -Sum).Sum`;
+      const command = `$items = Get-Process -Id ${idList} -ErrorAction SilentlyContinue; $items | ForEach-Object { "$($_.Id),$($_.WorkingSet64)" }`;
       const { stdout } = await execFileAsync(
         "powershell.exe",
         ["-NoProfile", "-NonInteractive", "-Command", command],
         { timeout: 10_000 }
       );
-      const value = Number.parseInt(stdout.trim(), 10);
-      return Number.isFinite(value) ? value : null;
+      return stdout
+        .split(lineBreakRegex)
+        .filter(Boolean)
+        .map((line) => {
+          const [pid, rssBytes] = line.trim().split(",").map(Number);
+          return { pid, rssBytes };
+        })
+        .filter(
+          (entry) =>
+            Number.isInteger(entry.pid) && Number.isFinite(entry.rssBytes)
+        );
     }
     const { stdout } = await execFileAsync(
       "ps",
-      ["-o", "rss=", "-p", ids.join(",")],
+      ["-o", "pid=,rss=", "-p", ids.join(",")],
       { timeout: 10_000 }
     );
-    const kilobytes = stdout
-      .split(whitespaceRegex)
-      .filter(Boolean)
-      .map(Number)
-      .filter(Number.isFinite)
-      .reduce((sum, value) => sum + value, 0);
-    return kilobytes * 1024;
+    const values = stdout.split(whitespaceRegex).filter(Boolean).map(Number);
+    const workers = [];
+    for (let index = 0; index < values.length; index += 2) {
+      const pid = values[index];
+      const rssKilobytes = values[index + 1];
+      if (Number.isInteger(pid) && Number.isFinite(rssKilobytes)) {
+        workers.push({ pid, rssBytes: rssKilobytes * 1024 });
+      }
+    }
+    return workers;
   } catch {
     return null;
   }
 }
 
-async function sampleMemory(completed, handles) {
-  const parentRssBytes = process.memoryUsage().rss;
-  const workerRssBytes = await readWorkerRssBytes(
+async function sampleMemory(
+  completed,
+  handles,
+  phase = "segment",
+  workerGeneration = 1
+) {
+  const parentUsage = process.memoryUsage();
+  const workerProcesses = await readWorkerMemory(
     handles.map((handle) => handle.child.pid)
   );
+  const workerRssBytes =
+    workerProcesses === null
+      ? null
+      : workerProcesses.reduce((sum, worker) => sum + worker.rssBytes, 0);
   return {
     completed,
-    parentRssBytes,
+    parentMemory: {
+      arrayBuffersBytes: parentUsage.arrayBuffers,
+      externalBytes: parentUsage.external,
+      heapTotalBytes: parentUsage.heapTotal,
+      heapUsedBytes: parentUsage.heapUsed,
+      rssBytes: parentUsage.rss,
+    },
+    parentRssBytes: parentUsage.rss,
+    phase,
     sampledAt: new Date().toISOString(),
     totalRssBytes:
-      workerRssBytes === null ? null : parentRssBytes + workerRssBytes,
+      workerRssBytes === null ? null : parentUsage.rss + workerRssBytes,
+    workerGeneration,
+    workerProcesses,
     workerRssBytes,
   };
+}
+
+async function launchImageWorkerSet({
+  adapter,
+  count,
+  env,
+  scriptPath,
+  threads,
+}) {
+  const handles = [];
+  for (let index = 0; index < count; index += 1) {
+    handles.push(await launchImageWorker(scriptPath, adapter, threads, env));
+  }
+  return handles;
 }
 
 function splitAcrossWorkers(items, workerCount) {
@@ -768,7 +858,7 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
     synthetic: true,
     reuseStrategy: "stable-sorted-cyclic-path-reuse",
     warning:
-      "Synthetic workload: repeated logical items do not represent 500-1000 distinct real photos or quality coverage.",
+      "Synthetic workload: repeated logical items do not represent 500-5000 distinct real photos or quality coverage.",
   };
   if (options.validateOnly) {
     console.log(JSON.stringify(planningSummary, null, 2));
@@ -810,6 +900,8 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
   let successfulVectors = 0;
   let paused = false;
   let cancelled = false;
+  let workerGeneration = 1;
+  let workerRestart = null;
   let packagedParity = null;
   let fingerprintPublished = false;
   let report;
@@ -834,17 +926,18 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
     table = await vectorDb.createEmptyTable("photo_embeddings", schema);
 
     const imageWorkerPath = path.join(sourceWorkerRoot, "embed-worker.mjs");
-    for (let index = 0; index < workerConfig.workers; index += 1) {
-      workerHandles.push(
-        await launchImageWorker(
-          imageWorkerPath,
-          workerAdapter,
-          workerConfig.intraOpNumThreads,
-          temporaryEnv
-        )
-      );
-    }
-    memorySamples.push(await sampleMemory(0, workerHandles));
+    workerHandles.push(
+      ...(await launchImageWorkerSet({
+        adapter: workerAdapter,
+        count: workerConfig.workers,
+        env: temporaryEnv,
+        scriptPath: imageWorkerPath,
+        threads: workerConfig.intraOpNumThreads,
+      }))
+    );
+    memorySamples.push(
+      await sampleMemory(0, workerHandles, "workers-ready", workerGeneration)
+    );
 
     while (completedLogicalItems < workload.length) {
       if (
@@ -861,6 +954,59 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
       ) {
         paused = true;
         await new Promise((resolve) => setTimeout(resolve, options.pauseMs));
+      }
+      if (
+        options.restartWorkerAfter !== null &&
+        workerRestart === null &&
+        completedLogicalItems >= options.restartWorkerAfter
+      ) {
+        const beforeShutdown = await sampleMemory(
+          completedLogicalItems,
+          workerHandles,
+          "before-worker-restart",
+          workerGeneration
+        );
+        const previousProcessIds = workerHandles.map(
+          (handle) => handle.child.pid
+        );
+        await Promise.all(workerHandles.splice(0).map(shutdownWorker));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const afterShutdown = await sampleMemory(
+          completedLogicalItems,
+          workerHandles,
+          "workers-stopped-for-restart",
+          workerGeneration
+        );
+        workerGeneration += 1;
+        workerHandles.push(
+          ...(await launchImageWorkerSet({
+            adapter: workerAdapter,
+            count: workerConfig.workers,
+            env: temporaryEnv,
+            scriptPath: imageWorkerPath,
+            threads: workerConfig.intraOpNumThreads,
+          }))
+        );
+        const afterRestart = await sampleMemory(
+          completedLogicalItems,
+          workerHandles,
+          "workers-restarted",
+          workerGeneration
+        );
+        memorySamples.push(beforeShutdown, afterShutdown, afterRestart);
+        workerRestart = {
+          afterRestart,
+          afterShutdown,
+          beforeShutdown,
+          completedLogicalItems,
+          newProcessIds: workerHandles.map((handle) => handle.child.pid),
+          previousProcessIds,
+          workerRssReleasedBytes:
+            beforeShutdown.workerRssBytes === null ||
+            afterShutdown.workerRssBytes === null
+              ? null
+              : beforeShutdown.workerRssBytes - afterShutdown.workerRssBytes,
+        };
       }
       const maximumEnd = Math.min(
         workload.length,
@@ -912,7 +1058,12 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
       completedLogicalItems += segmentItems.length;
       successfulVectors += records.length;
       const elapsedMs = performance.now() - segmentStartedAt;
-      const memory = await sampleMemory(completedLogicalItems, workerHandles);
+      const memory = await sampleMemory(
+        completedLogicalItems,
+        workerHandles,
+        "segment",
+        workerGeneration
+      );
       memorySamples.push(memory);
       segments.push({
         completed: completedLogicalItems,
@@ -969,7 +1120,38 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
       );
     }
 
+    memorySamples.push(
+      await sampleMemory(
+        completedLogicalItems,
+        workerHandles,
+        "before-final-worker-shutdown",
+        workerGeneration
+      )
+    );
     await Promise.all(workerHandles.splice(0).map(shutdownWorker));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    memorySamples.push(
+      await sampleMemory(
+        completedLogicalItems,
+        workerHandles,
+        "workers-stopped-final",
+        workerGeneration
+      )
+    );
+    if (vectorDb) {
+      await vectorDb.close();
+      vectorDb = null;
+      table = null;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      memorySamples.push(
+        await sampleMemory(
+          completedLogicalItems,
+          workerHandles,
+          "vector-db-closed",
+          workerGeneration
+        )
+      );
+    }
     if (options.packagedResources) {
       packagedParity = await runPackagedParityProbe(
         productionContext,
@@ -1031,6 +1213,8 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
         pauseAfter: options.pauseAfter,
         pauseDurationMs: paused ? options.pauseMs : 0,
         pausedAndResumed: paused,
+        restartWorkerAfter: options.restartWorkerAfter,
+        workerRestart,
       },
       results: {
         completedLogicalItems,
@@ -1056,6 +1240,7 @@ export async function runAiIndexStress(argv = process.argv.slice(2)) {
         ),
       },
       memory: {
+        epochTrends: summarizeMemoryEpochs(memorySamples),
         samples: memorySamples,
         trend: summarizeMemoryTrends(memorySamples),
         warning:
