@@ -224,12 +224,43 @@ describe("embedding prompts and ranked fusion", () => {
 
     expect(selection.strongCutoff).toBeGreaterThanOrEqual(0.055);
     expect(selection.results.map((result) => result.photoId)).toEqual([1]);
-    expect(selection.supportCandidates.map((result) => result.photoId)).toEqual([
-      1, 2, 3,
-    ]);
+    expect(selection.supportCandidates.map((result) => result.photoId)).toEqual(
+      [1, 2, 3]
+    );
     expect(selection.supportCutoff).toBeGreaterThan(0.045);
     expect(selection.rejectedWeak).toBe(3);
     expect(selection.hasMoreCandidates).toBe(false);
+  });
+
+  it("keeps object results nested from relaxed to standard to precise", () => {
+    const results = [0.1, 0.08, 0.07, 0.065, 0.06, 0.05, 0.04].map(
+      (similarity, index) => ({
+        photoId: index + 1,
+        primarySimilarity: similarity,
+        rankScore: 0.01,
+        similarity,
+        supportingGroups: ["whole-query" as const],
+      })
+    );
+
+    const select = (sensitivity: number) =>
+      selectRelevantSemanticResults(
+        results,
+        getActiveEmbeddingModel(),
+        1,
+        100,
+        { intent: "object", sensitivity }
+      );
+
+    const relaxed = select(0.6).results.map(({ photoId }) => photoId);
+    const standard = select(1).results.map(({ photoId }) => photoId);
+    const precise = select(1.4).results.map(({ photoId }) => photoId);
+
+    expect(relaxed).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(standard).toEqual([1, 2, 3, 4, 5]);
+    expect(precise).toEqual([1]);
+    expect(new Set(relaxed)).toEqual(new Set([...standard, 6, 7]));
+    expect(new Set(standard)).toEqual(new Set([...precise, 2, 3, 4, 5]));
   });
 
   it("continues broad scene retrieval while the primary tail remains eligible", () => {

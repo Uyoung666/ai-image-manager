@@ -35,6 +35,10 @@ import {
   searchByTextWithPlan as aiSearchByTextWithPlan,
   isAiSearchReady,
 } from "@/services/ai-embedder";
+import {
+  getActiveSearchSensitivity,
+  getSensitivityMultiplier,
+} from "@/services/ai/search-sensitivity";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import {
@@ -378,7 +382,11 @@ export const searchCompound = os
       limit,
       offset,
     } = input;
-    const fingerprint = createSearchFingerprint(input);
+    const activeSensitivity = getActiveSearchSensitivity();
+    const fingerprint = createSearchFingerprint({
+      ...input,
+      sensitivity: activeSensitivity,
+    });
     const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
     if (
       cursor &&
@@ -894,6 +902,7 @@ export const searchCompound = os
       const q = searchText.trim();
       const aiReadiness = await getAiReadiness({ loadModel: false });
       let semantic = {
+        candidateMinimum: 0,
         candidateDepth: 0,
         consensusCutoff: 0,
         cutoffReason: "not-run",
@@ -907,6 +916,8 @@ export const searchCompound = os
         state: aiReadiness.coverageState,
         strongAccepted: 0,
         strongCutoff: 0,
+        sensitivity: activeSensitivity,
+        sensitivityMultiplier: getSensitivityMultiplier(activeSensitivity),
         supportedAccepted: 0,
         supportCutoff: 0,
         manualExactAccepted: 0,
@@ -1104,6 +1115,7 @@ export const searchCompound = os
       }
       semantic = {
         ...semantic,
+        candidateMinimum: aiSearch?.candidateMinimum ?? 0,
         candidateDepth: aiSearch?.candidateDepth ?? 0,
         consensusCutoff: aiSearch?.consensusCutoff ?? 0,
         cutoffReason: aiSearch?.cutoffReason ?? "not-run",
@@ -1115,6 +1127,10 @@ export const searchCompound = os
         rejectedWeak: aiSearch?.rejectedWeak ?? 0,
         strongAccepted: aiSearch?.strongAccepted ?? 0,
         strongCutoff: aiSearch?.strongCutoff ?? 0,
+        sensitivity: aiSearch?.sensitivity ?? activeSensitivity,
+        sensitivityMultiplier:
+          aiSearch?.sensitivityMultiplier ??
+          getSensitivityMultiplier(activeSensitivity),
         supportedAccepted: aiSearch?.supportedAccepted ?? 0,
         supportCutoff: aiSearch?.supportCutoff ?? 0,
         topSimilarity: aiSearch?.topSimilarity ?? 0,

@@ -83,6 +83,7 @@ import {
 } from "./home-sort-storage";
 
 interface SemanticSearchMeta {
+  candidateMinimum?: number;
   candidateDepth?: number;
   consensusCutoff?: number;
   cutoffReason?: string;
@@ -93,6 +94,8 @@ interface SemanticSearchMeta {
   promptGroupCount?: number;
   reason?: string;
   rejectedWeak?: number;
+  sensitivity?: "relaxed" | "standard" | "precise";
+  sensitivityMultiplier?: number;
   state: "ready" | "partial" | "unavailable" | "error";
   strongAccepted?: number;
   strongCutoff?: number;
@@ -2377,6 +2380,9 @@ function HomePage() {
             resultCount={searchQuery ? photos.length : undefined}
             searchMode={searchMode}
             searchTime={searchTime}
+            semanticDiagnostics={
+              searchMode === "text" ? (searchSemantic ?? undefined) : undefined
+            }
             trailingContent={
               <>
                 <div className="flex rounded-md border border-border p-0.5 text-[11px]">

@@ -25,6 +25,19 @@ describe("search session pagination", () => {
     expect(next).toBe(first);
   });
 
+  it("separates frozen search sessions when sensitivity changes", () => {
+    const standard = createSearchFingerprint({
+      query: "猫咪",
+      sensitivity: "standard",
+    });
+    const precise = createSearchFingerprint({
+      query: "猫咪",
+      sensitivity: "precise",
+    });
+
+    expect(precise).not.toBe(standard);
+  });
+
   it("expires idle sessions and evicts the least recently used session", () => {
     let now = 0;
     let sequence = 0;

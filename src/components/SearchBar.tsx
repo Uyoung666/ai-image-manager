@@ -34,6 +34,10 @@ import { FilterBreadcrumb } from "./FilterBreadcrumb";
 import { FilterDropdown } from "./filter-dropdown";
 import { FilterPresets } from "./FilterPresets";
 import {
+  SemanticSearchDiagnostics,
+  type SemanticSearchDiagnosticsProps,
+} from "./semantic-search-diagnostics";
+import {
   clearSavedHistory,
   getFilterLabel,
   getTimePresets,
@@ -97,6 +101,7 @@ interface SearchBarProps {
   resultCount?: number;
   searchMode?: SearchMode | null;
   searchTime?: number;
+  semanticDiagnostics?: SemanticSearchDiagnosticsProps;
   trailingContent?: ReactNode;
 }
 
@@ -122,6 +127,7 @@ export const SearchBar = memo(
       resultCount,
       searchMode,
       searchTime,
+      semanticDiagnostics,
       trailingContent,
     }: SearchBarProps, _ref) => {
       const { t } = useTranslation();
@@ -880,6 +886,10 @@ export const SearchBar = memo(
                       : t("searchSuggestions")}
                   </TooltipContent>
                 </Tooltip>
+              )}
+
+              {searchMode === "text" && semanticDiagnostics?.used && (
+                <SemanticSearchDiagnostics {...semanticDiagnostics} />
               )}
 
               {onImageSearch && (

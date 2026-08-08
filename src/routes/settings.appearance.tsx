@@ -47,10 +47,26 @@ function UiScaleControl({
   );
 }
 
-const SENSITIVITY_OPTIONS: { labelKey: string; value: string }[] = [
-  { value: "relaxed", labelKey: "searchSensitivityRelaxed" },
-  { value: "standard", labelKey: "searchSensitivityStandard" },
-  { value: "precise", labelKey: "searchSensitivityPrecise" },
+const SENSITIVITY_OPTIONS: {
+  descriptionKey: string;
+  labelKey: string;
+  value: string;
+}[] = [
+  {
+    descriptionKey: "searchSensitivityRelaxedHint",
+    labelKey: "searchSensitivityRelaxed",
+    value: "relaxed",
+  },
+  {
+    descriptionKey: "searchSensitivityStandardHint",
+    labelKey: "searchSensitivityStandard",
+    value: "standard",
+  },
+  {
+    descriptionKey: "searchSensitivityStrictHint",
+    labelKey: "searchSensitivityPrecise",
+    value: "precise",
+  },
 ];
 
 function SensitivityControl({
@@ -67,6 +83,7 @@ function SensitivityControl({
         const active = value === option.value;
         return (
           <button
+            aria-label={`${t(option.labelKey)}: ${t(option.descriptionKey)}`}
             aria-pressed={active}
             className={cn(
               "min-w-[52px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
@@ -76,6 +93,7 @@ function SensitivityControl({
             )}
             key={option.value}
             onClick={() => onChange(option.value)}
+            title={t(option.descriptionKey)}
             type="button"
           >
             {t(option.labelKey)}

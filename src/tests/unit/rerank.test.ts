@@ -182,6 +182,55 @@ describe("semantic reranking", () => {
     expect(result.results.some(({ photoId }) => photoId === 4)).toBe(false);
   });
 
+  it("does not let strict-mode auto-tag rescue bypass the stricter support floor", () => {
+    const result = fuseGatedHybridSearchEvidence(
+      [
+        {
+          photoId: 1,
+          primarySimilarity: 0.065,
+          rankScore: 0.02,
+          similarity: 0.065,
+          supportingGroups: ["whole-query"],
+        },
+        {
+          photoId: 2,
+          primarySimilarity: 0.06,
+          rankScore: 0.019,
+          similarity: 0.06,
+          supportingGroups: ["whole-query"],
+        },
+      ],
+      [],
+      [
+        {
+          confidence: 0.8,
+          id: 1,
+          name: "猫咪",
+          origin: "auto",
+          userConfirmed: false,
+        },
+        {
+          confidence: 0.8,
+          id: 2,
+          name: "猫咪",
+          origin: "auto",
+          userConfirmed: false,
+        },
+      ],
+      {
+        acceptedSemanticPhotoIds: new Set(),
+        intent: "object",
+        promptGroupCount: 1,
+        strongCutoff: 0.084,
+        supportCutoff: 0.063,
+        topSimilarity: 0.09,
+      }
+    );
+
+    expect(result.results.map(({ photoId }) => photoId)).toEqual([1]);
+    expect(result.diagnostics.autoTagRescued).toBe(1);
+  });
+
   it("normalizes usable auto-tag confidence into the configured half-to-one range", () => {
     expect(normalizeAutoTagStrength(0.55)).toBe(0.5);
     expect(normalizeAutoTagStrength(0.75)).toBe(0.75);

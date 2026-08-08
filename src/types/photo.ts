@@ -60,6 +60,7 @@ export interface SearchResponse {
   query?: string;
   results: Photo[];
   semantic?: {
+    candidateMinimum?: number;
     candidateDepth?: number;
     autoTagRescued?: number;
     consensusCutoff?: number;
@@ -74,6 +75,8 @@ export interface SearchResponse {
     manualExactAccepted?: number;
     reason?: string;
     rejectedWeak?: number;
+    sensitivity?: "relaxed" | "standard" | "precise";
+    sensitivityMultiplier?: number;
     state: "ready" | "partial" | "unavailable" | "error";
     strongAccepted?: number;
     strongCutoff?: number;

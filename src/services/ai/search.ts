@@ -437,6 +437,7 @@ async function embedSearchTexts(
 
 interface MultiPromptSearchResult {
   candidateDepth: number;
+  candidateMinimum: number;
   consensusCutoff: number;
   cutoffReason: string;
   finalCutoff: number;
@@ -460,6 +461,7 @@ async function multiPromptSearch(
 ): Promise<MultiPromptSearchResult> {
   if (!(embeddingModel && photoTable) || plan.prompts.length === 0) {
     return {
+      candidateMinimum: 0,
       candidateDepth: 0,
       consensusCutoff: 0,
       cutoffReason: "no-prompts",
@@ -559,6 +561,7 @@ async function multiPromptSearch(
         `[AI] Semantic relevance: policy=${getSemanticPolicyVersion()} model=${model.kind} intent=${plan.intent} primary="${plan.prompts[primaryPromptIndex]?.text ?? ""}" prompts=${plan.rawPromptCount}->${plan.prompts.length} groups=${promptGroupCount} depth=${candidateDepth}/${rowCount} top=${selection.topSimilarity.toFixed(4)} cutoff=${selection.finalCutoff.toFixed(4)} reason=${selection.cutoffReason} strong=${selection.strongAccepted} supported=${selection.supportedAccepted} rejectedWeak=${selection.rejectedWeak} accepted=${selection.results.length} hasMore=${hasMore}`
       );
       return {
+        candidateMinimum,
         candidateDepth,
         consensusCutoff: selection.consensusCutoff,
         cutoffReason: selection.cutoffReason,
@@ -583,6 +586,7 @@ async function multiPromptSearch(
   }
 
   return {
+    candidateMinimum: 0,
     candidateDepth: 0,
     consensusCutoff: 0,
     cutoffReason: "no-candidates",
@@ -667,6 +671,7 @@ export async function searchByText(
 
 export interface SemanticTextSearchResult {
   candidateDepth: number;
+  candidateMinimum?: number;
   consensusCutoff: number;
   cutoffReason: string;
   finalCutoff: number;
@@ -675,6 +680,8 @@ export interface SemanticTextSearchResult {
   promptGroupCount: number;
   rejectedWeak: number;
   results: RankedSemanticSearchResult[];
+  sensitivity?: SearchSensitivity;
+  sensitivityMultiplier?: number;
   strongAccepted: number;
   strongCutoff: number;
   supportCandidates: RankedSemanticSearchResult[];
@@ -832,6 +839,7 @@ async function performTextSearch(
     plan.prompts.length > 0
       ? await multiPromptSearch(plan, limit, timings, sensitivity)
       : {
+          candidateMinimum: 0,
           candidateDepth: 0,
           consensusCutoff: 0,
           cutoffReason: "no-prompts",
@@ -847,7 +855,12 @@ async function performTextSearch(
           supportedAccepted: 0,
           topSimilarity: 0,
         };
-  const searchResult = { plan, ...semanticSearch };
+  const searchResult = {
+    plan,
+    ...semanticSearch,
+    sensitivity,
+    sensitivityMultiplier: getSensitivityMultiplier(sensitivity),
+  };
 
   setCachedSearch(cacheKey, searchResult);
   if (effectiveCacheKey !== cacheKey) {
