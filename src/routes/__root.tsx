@@ -4,15 +4,24 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { consumeUpdateWelcome } from "@/actions/update-changelog";
 import DragWindowRegion from "@/components/drag-window-region";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { StartupSplash } from "@/components/startup-splash";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
 import BaseLayout from "@/layouts/base-layout";
+import {
+  STARTUP_HOME_READY_EVENT,
+  STARTUP_ONBOARDING_STATE_EVENT,
+  type StartupOnboardingStateDetail,
+} from "@/utils/startup-readiness";
+
+const STARTUP_READY_TIMEOUT_MS = 15_000;
+const STARTUP_SPLASH_FADE_MS = 180;
 
 function RouteSuspense() {
   return (
@@ -25,13 +34,51 @@ function RouteSuspense() {
 function Root() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [startupReady, setStartupReady] = useState(false);
+  const isTestEnvironment = Boolean(
+    window.electronAPI?.isE2E || !window.electronAPI?.preloadReady
+  );
+  const [startupReady, setStartupReady] = useState(isTestEnvironment);
+  const [onboardingStateKnown, setOnboardingStateKnown] =
+    useState(isTestEnvironment);
+  const [needsOnboarding, setNeedsOnboarding] = useState(isTestEnvironment);
+  const [homeReady, setHomeReady] = useState(isTestEnvironment);
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
+  const [renderSplash, setRenderSplash] = useState(!isTestEnvironment);
+  const [splashExiting, setSplashExiting] = useState(false);
+
+  useLayoutEffect(() => {
+    const handleHomeReady = () => {
+      setHomeReady(true);
+    };
+    const handleOnboardingState = (event: Event) => {
+      const detail = (event as CustomEvent<StartupOnboardingStateDetail>)
+        .detail;
+      if (!detail) {
+        return;
+      }
+      setNeedsOnboarding(detail.needsOnboarding);
+      setOnboardingStateKnown(true);
+    };
+
+    window.addEventListener(STARTUP_HOME_READY_EVENT, handleHomeReady);
+    window.addEventListener(
+      STARTUP_ONBOARDING_STATE_EVENT,
+      handleOnboardingState
+    );
+
+    return () => {
+      window.removeEventListener(STARTUP_HOME_READY_EVENT, handleHomeReady);
+      window.removeEventListener(
+        STARTUP_ONBOARDING_STATE_EVENT,
+        handleOnboardingState
+      );
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
 
-    if (window.electronAPI?.isE2E || !window.electronAPI?.preloadReady) {
-      setStartupReady(true);
+    if (isTestEnvironment) {
       return () => {
         active = false;
       };
@@ -68,11 +115,47 @@ function Root() {
     return () => {
       active = false;
     };
-  }, [navigate]);
+  }, [isTestEnvironment, navigate]);
 
-  if (!startupReady) {
-    return <StartupSplash />;
-  }
+  const isHomeRoute = location.pathname === "/";
+  const surfaceReady = onboardingStateKnown && (needsOnboarding || homeReady);
+  const startupWaiting = !startupReady || (isHomeRoute && !surfaceReady);
+  const shouldShowSplash = !startupTimedOut && startupWaiting;
+
+  useEffect(() => {
+    if (isTestEnvironment || startupTimedOut || !startupWaiting) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      console.warn(
+        "[startup] Initial surface readiness timed out; revealing fallback UI"
+      );
+      setStartupTimedOut(true);
+    }, STARTUP_READY_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [isTestEnvironment, startupTimedOut, startupWaiting]);
+
+  useEffect(() => {
+    if (shouldShowSplash) {
+      setRenderSplash(true);
+      setSplashExiting(false);
+      return;
+    }
+
+    if (!renderSplash) {
+      return;
+    }
+
+    setSplashExiting(true);
+    const timeout = window.setTimeout(() => {
+      setRenderSplash(false);
+      setSplashExiting(false);
+    }, STARTUP_SPLASH_FADE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [renderSplash, shouldShowSplash]);
 
   const content = (
     <ErrorBoundary>
@@ -83,15 +166,18 @@ function Root() {
   );
 
   return (
-    <TooltipProvider>
-      <ScrollPositionProvider>
-        {location.pathname === "/whats-new" ? (
-          <StandaloneLayout>{content}</StandaloneLayout>
-        ) : (
-          <BaseLayout>{content}</BaseLayout>
-        )}
-      </ScrollPositionProvider>
-    </TooltipProvider>
+    <>
+      <TooltipProvider>
+        <ScrollPositionProvider>
+          {location.pathname === "/whats-new" ? (
+            <StandaloneLayout>{content}</StandaloneLayout>
+          ) : (
+            <BaseLayout>{content}</BaseLayout>
+          )}
+        </ScrollPositionProvider>
+      </TooltipProvider>
+      {renderSplash && <StartupSplash exiting={splashExiting} />}
+    </>
   );
 }
 
@@ -100,14 +186,6 @@ function StandaloneLayout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       <DragWindowRegion title="AI Image Manager" />
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
-    </div>
-  );
-}
-
-function StartupSplash() {
-  return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div aria-hidden="true" className="whats-new-startup-mark" />
     </div>
   );
 }

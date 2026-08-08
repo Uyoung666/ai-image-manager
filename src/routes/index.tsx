@@ -70,6 +70,7 @@ import {
   parseDashboardReturnTarget,
 } from "@/utils/dashboard-data";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
+import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import {
   canPaginateGalleryPhotos,
   getDisplayedSequenceMode,
@@ -551,7 +552,7 @@ function HomePage() {
     order: sortOrder,
     enabled: !isSearching,
   });
-  const { data: folders = [] } = useFolders();
+  const { data: folders = [], isLoading: foldersLoading } = useFolders();
   const globalAiStatus = useGlobalAiStatus();
 
   const { data: aiStatus } = useAiStatus();
@@ -1301,6 +1302,34 @@ function HomePage() {
   );
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
   const loading = isSearching ? searchLoading : photosLoading;
+  const startupHomeReadyRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      startupHomeReadyRef.current ||
+      loading ||
+      foldersLoading ||
+      (isSearching && searchResults === null)
+    ) {
+      return;
+    }
+
+    let firstFrame = 0;
+    let secondFrame = 0;
+
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        startupHomeReadyRef.current = true;
+        notifyStartupHomeReady();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [foldersLoading, isSearching, loading, searchResults]);
+
   const showAiTaskStatus = Boolean(
     aiStatus?.isEmbedding || aiStatus?.lastError
   );

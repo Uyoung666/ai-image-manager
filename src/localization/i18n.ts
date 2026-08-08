@@ -144,6 +144,7 @@ i18n.use(initReactI18next).init({
         photosSelected: " · {{count}} 张已选",
         noPhotos: "还没有照片，请先添加文件夹",
         loadingPhotos: "正在加载照片…",
+        startupLoading: "正在准备首屏…",
 
         // Gallery empty states
         emptyWelcomeTitle: "添加照片文件夹开始整理",
@@ -1944,6 +1945,7 @@ i18n.use(initReactI18next).init({
         photosSelected: " · {{count}} selected",
         noPhotos: "No photos yet. Add a folder to get started.",
         loadingPhotos: "Loading photos...",
+        startupLoading: "Preparing your workspace…",
 
         emptyWelcomeTitle: "Add a photo folder to get started",
         emptyWelcomeDescription:

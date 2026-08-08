@@ -13,6 +13,7 @@ import LangToggle from "@/components/lang-toggle";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
+import { notifyStartupOnboardingState } from "@/utils/startup-readiness";
 import appIcon from "../../../assets/icon.png";
 import { useOnboarding } from "./OnboardingProvider";
 import { StepIndicator } from "./StepIndicator";
@@ -143,6 +144,7 @@ export function OnboardingOverlay() {
         return;
       }
       setNeedsOnboarding(true);
+      notifyStartupOnboardingState(true);
       try {
         const pathInfo = await ipc.client.settings.getDataPathInfo({});
         if (!cancelled && pathInfo?.path) {
@@ -156,6 +158,7 @@ export function OnboardingOverlay() {
     async function initNormal() {
       if (window.electronAPI?.isE2E) {
         setNeedsOnboarding(false);
+        notifyStartupOnboardingState(false);
         clearPersistedStep();
         return;
       }
@@ -178,11 +181,13 @@ export function OnboardingOverlay() {
 
       if (onboardingCompleted) {
         setNeedsOnboarding(false);
+        notifyStartupOnboardingState(false);
         clearPersistedStep();
         return;
       }
 
       setNeedsOnboarding(true);
+      notifyStartupOnboardingState(true);
 
       try {
         const pathInfo = await ipc.client.settings.getDataPathInfo({});

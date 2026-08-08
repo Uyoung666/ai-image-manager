@@ -693,6 +693,7 @@ function createWindow(httpPort: number) {
     height: savedHeight,
     minWidth: 720,
     minHeight: 480,
+    show: false,
     ...(savedX !== undefined && savedY !== undefined
       ? { x: savedX, y: savedY }
       : {}),
