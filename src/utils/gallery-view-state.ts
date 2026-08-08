@@ -1,5 +1,12 @@
 export type GallerySequenceMode = "photos" | "sequences";
 
+export function createSearchResultSourceKey(
+  generation: number,
+  photoIds: number[]
+): string {
+  return `${generation}:${photoIds.join(",")}`;
+}
+
 export function getDisplayedSequenceMode(
   mode: GallerySequenceMode,
   sequenceViewReady: boolean
@@ -37,6 +44,48 @@ export function getStableSearchAppendIds({
     currentIds.length >= previousIds.length &&
     previousIds.every((id, index) => currentIds[index] === id);
   return prefixIsStable ? currentIds.slice(previousIds.length) : null;
+}
+
+export function isSequenceSourceReady({
+  currentGeneration,
+  currentIds,
+  currentSourceKey,
+  isSearching,
+  previousGeneration,
+  previousIds,
+  previousSourceKey,
+  refreshUnchanged,
+}: {
+  currentGeneration: number | null;
+  currentIds: number[];
+  currentSourceKey: string;
+  isSearching: boolean;
+  previousGeneration: number | null;
+  previousIds: number[];
+  previousSourceKey: string;
+  refreshUnchanged: boolean;
+}): boolean {
+  if (currentSourceKey === previousSourceKey) {
+    return true;
+  }
+  if (
+    !isSearching ||
+    currentGeneration === null ||
+    previousGeneration === null ||
+    currentGeneration !== previousGeneration
+  ) {
+    return false;
+  }
+  return (
+    getStableSearchAppendIds({
+      currentIds,
+      currentSearchKey: String(currentGeneration),
+      isSearching: true,
+      previousIds,
+      previousSearchKey: String(previousGeneration),
+      refreshUnchanged,
+    }) !== null
+  );
 }
 
 export function isGalleryRevealPending({

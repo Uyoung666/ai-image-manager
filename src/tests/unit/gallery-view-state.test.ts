@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   canPaginateGalleryPhotos,
+  createSearchResultSourceKey,
   getDisplayedSequenceMode,
   getStableSearchAppendIds,
   isGalleryRevealPending,
+  isSequenceSourceReady,
 } from "@/utils/gallery-view-state";
 
 describe("gallery view state", () => {
@@ -70,5 +72,56 @@ describe("gallery view state", () => {
         refreshUnchanged: true,
       })
     ).toBeNull();
+  });
+
+  it("changes the committed search source only when generation or result ids change", () => {
+    expect(createSearchResultSourceKey(4, [11, 12])).toBe("4:11,12");
+    expect(createSearchResultSourceKey(4, [11, 12])).toBe(
+      createSearchResultSourceKey(4, [11, 12])
+    );
+    expect(createSearchResultSourceKey(5, [11, 12])).not.toBe("4:11,12");
+    expect(createSearchResultSourceKey(4, [11, 13])).not.toBe("4:11,12");
+  });
+
+  it("keeps the old sequence layout while a new search result is pending", () => {
+    expect(
+      isSequenceSourceReady({
+        currentGeneration: 4,
+        currentIds: [11, 12],
+        currentSourceKey: "search:4:11,12:sequence:0:11,12",
+        isSearching: true,
+        previousGeneration: 4,
+        previousIds: [11, 12],
+        previousSourceKey: "search:4:11,12:sequence:0:11,12",
+        refreshUnchanged: true,
+      })
+    ).toBe(true);
+    expect(
+      isSequenceSourceReady({
+        currentGeneration: 5,
+        currentIds: [21, 22],
+        currentSourceKey: "search:5:21,22:sequence:0:21,22",
+        isSearching: true,
+        previousGeneration: 4,
+        previousIds: [11, 12],
+        previousSourceKey: "search:4:11,12:sequence:0:11,12",
+        refreshUnchanged: true,
+      })
+    ).toBe(false);
+  });
+
+  it("keeps a stable sequence prefix ready during search pagination", () => {
+    expect(
+      isSequenceSourceReady({
+        currentGeneration: 4,
+        currentIds: [11, 12, 13],
+        currentSourceKey: "search:4:11,12:sequence:0:11,12,13",
+        isSearching: true,
+        previousGeneration: 4,
+        previousIds: [11, 12],
+        previousSourceKey: "search:4:11,12:sequence:0:11,12",
+        refreshUnchanged: true,
+      })
+    ).toBe(true);
   });
 });

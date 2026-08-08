@@ -87,8 +87,10 @@ export function usePhotoDetailPanel(
       }
     } else if (selectedIds.size === 0) {
       // 规则 4：无选中 → 关闭
-      setDetailPhoto(null);
-      detailPhotoIdRef.current = null;
+      if (detailPhotoIdRef.current !== null) {
+        setDetailPhoto(null);
+        detailPhotoIdRef.current = null;
+      }
       prevSelectedIdRef.current = null;
       userDismissedRef.current = false;
     }

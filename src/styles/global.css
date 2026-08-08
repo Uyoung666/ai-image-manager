@@ -1363,22 +1363,6 @@ html.transitioning [data-theme-sensitive] {
   transform: scale(1.35);
 }
 
-/* ── 搜索结果淡入 ──────────────────────────────────── */
-@keyframes search-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.search-results-enter {
-  animation: search-fade-in 200ms ease-out both;
-}
-
 /* ── 右键菜单弹出动画（弹簧曲线）──────────── */
 @keyframes context-menu-enter {
   from {
