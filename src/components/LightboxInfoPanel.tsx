@@ -299,7 +299,7 @@ export function LightboxInfoPanel({
                 <div className="flex flex-wrap gap-1.5">
                   {tags.map((tag) => (
                     <span
-                      className={`rounded px-2 py-0.5 text-[11px] ${tag.isConfirmed === false ? "border border-white/20 border-dashed text-white/65" : "text-white"}`}
+                      className={`rounded px-2 py-0.5 text-[11px] ${tag.isConfirmed === false ? "border border-foreground/20 border-dashed bg-foreground/5 text-foreground/65" : "text-white"}`}
                       key={tag.id}
                       style={
                         tag.isConfirmed === false

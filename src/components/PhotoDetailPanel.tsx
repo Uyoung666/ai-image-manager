@@ -717,10 +717,10 @@ export function PhotoDetailPanel({
                                 })
                               : t("clickToRemove")
                           }
-                          className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] text-white/90 ${
+                          className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[11px] ${
                             unconfirmed
-                              ? "border border-white/30 border-dashed bg-white/5"
-                              : "hover:opacity-80"
+                              ? "border border-foreground/30 border-dashed bg-foreground/5 text-foreground"
+                              : "text-white/90 hover:opacity-80"
                           }`}
                           onClick={() =>
                             unconfirmed

@@ -2,9 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 
-const { getPhotoTagAnalysisStatusMock } = vi.hoisted(() => ({
-  getPhotoTagAnalysisStatusMock: vi.fn(),
-}));
+const { getPhotoTagAnalysisStatusMock, getPhotoTagsMock, getTagsMock } =
+  vi.hoisted(() => ({
+    getPhotoTagAnalysisStatusMock: vi.fn(),
+    getPhotoTagsMock: vi.fn(() => new Promise(() => undefined)),
+    getTagsMock: vi.fn(() => new Promise(() => undefined)),
+  }));
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
@@ -12,8 +15,8 @@ vi.mock("@/ipc/manager", () => ({
       photos: {
         getPhotoExif: vi.fn(() => new Promise(() => undefined)),
         getPhotoTagAnalysisStatus: getPhotoTagAnalysisStatusMock,
-        getPhotoTags: vi.fn(() => new Promise(() => undefined)),
-        getTags: vi.fn(() => new Promise(() => undefined)),
+        getPhotoTags: getPhotoTagsMock,
+        getTags: getTagsMock,
       },
     },
   },
@@ -98,6 +101,35 @@ describe("PhotoDetailPanel preview", () => {
     expect(container.querySelector("img[alt='first.jpg']")).toBeNull();
     expect(image?.getAttribute("src")).toContain("second.webp");
     expect(image).toHaveClass("opacity-0");
+  });
+
+  it("keeps unconfirmed tags readable in the light theme", async () => {
+    getPhotoTagsMock.mockResolvedValue([
+      {
+        color: null,
+        confidence: 0.8,
+        id: 1,
+        isConfirmed: false,
+        name: "人物",
+      },
+    ]);
+    getTagsMock.mockResolvedValue([]);
+
+    render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("人物")).toHaveClass(
+        "border-foreground/30",
+        "bg-foreground/5",
+        "text-foreground"
+      );
+    });
   });
 
   it("hides manual analysis while the photo is being auto-tagged", async () => {
