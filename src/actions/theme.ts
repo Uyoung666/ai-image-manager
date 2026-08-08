@@ -4,6 +4,14 @@ import type { ThemeMode } from "@/types/theme-mode";
 
 export type { ThemeMode };
 
+interface TemporaryThemeOverride {
+  mode: "dark";
+  token: symbol;
+}
+
+let temporaryThemeOverride: TemporaryThemeOverride | null = null;
+let latestSystemResolvedTheme: "dark" | "light" | null = null;
+
 export async function getCurrentTheme(): Promise<ThemeMode> {
   const local = localStorage.getItem(
     LOCAL_STORAGE_KEYS.THEME
@@ -14,8 +22,7 @@ export async function getCurrentTheme(): Promise<ThemeMode> {
 export async function getResolvedTheme(): Promise<"dark" | "light"> {
   const mode = await getCurrentTheme();
   if (mode === "system") {
-    const sys = await ipc.client.theme.getCurrentThemeMode();
-    return sys === "dark" ? "dark" : "light";
+    return getSystemResolvedTheme();
   }
   return mode;
 }
@@ -23,7 +30,39 @@ export async function getResolvedTheme(): Promise<"dark" | "light"> {
 export async function setTheme(newTheme: ThemeMode) {
   await ipc.client.theme.setThemeMode(newTheme);
   localStorage.setItem(LOCAL_STORAGE_KEYS.THEME, newTheme);
+  if (newTheme === "system") {
+    latestSystemResolvedTheme = null;
+  }
   applyResolvedTheme();
+}
+
+/**
+ * Temporarily force the document into dark mode without changing the user's
+ * persisted theme preference or Electron's native theme source.
+ *
+ * The returned cleanup function restores the current persisted theme. A
+ * token prevents an older cleanup from clearing a newer override.
+ */
+export function enterTemporaryDarkTheme(): () => void {
+  const token = Symbol("temporary-dark-theme");
+  latestSystemResolvedTheme = null;
+  temporaryThemeOverride = { mode: "dark", token };
+  updateDocumentTheme(true);
+
+  let active = true;
+  return () => {
+    if (!active) {
+      return;
+    }
+    active = false;
+
+    if (temporaryThemeOverride?.token !== token) {
+      return;
+    }
+
+    temporaryThemeOverride = null;
+    applyResolvedTheme();
+  };
 }
 
 export async function toggleTheme() {
@@ -43,11 +82,20 @@ export async function syncWithLocalTheme() {
 }
 
 async function applyResolvedTheme() {
+  if (temporaryThemeOverride?.mode === "dark") {
+    updateDocumentTheme(true);
+    return;
+  }
+
   const mode = await getCurrentTheme();
+  if (temporaryThemeOverride?.mode === "dark") {
+    updateDocumentTheme(true);
+    return;
+  }
+
   let isDark: boolean;
   if (mode === "system") {
-    const sys = await ipc.client.theme.getCurrentThemeMode();
-    isDark = sys === "dark";
+    isDark = getSystemResolvedTheme() === "dark";
   } else {
     isDark = mode === "dark";
   }
@@ -57,15 +105,31 @@ async function applyResolvedTheme() {
 export function listenSystemThemeChanges() {
   function handler(event: MessageEvent) {
     if (event.data?.channel === "theme:system-changed") {
+      latestSystemResolvedTheme =
+        event.data.resolved === "dark" ? "dark" : "light";
       getCurrentTheme().then((mode) => {
-        if (mode === "system") {
-          updateDocumentTheme(event.data.resolved === "dark");
+        if (mode === "system" && !temporaryThemeOverride) {
+          updateDocumentTheme(latestSystemResolvedTheme === "dark");
         }
       });
     }
   }
   window.addEventListener("message", handler);
   return () => window.removeEventListener("message", handler);
+}
+
+function getSystemResolvedTheme(): "dark" | "light" {
+  if (latestSystemResolvedTheme) {
+    return latestSystemResolvedTheme;
+  }
+
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  }
+
+  return "light";
 }
 
 function updateDocumentTheme(isDark: boolean) {

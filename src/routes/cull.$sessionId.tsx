@@ -4,12 +4,13 @@ import { ArrowLeft, BarChart3, Eye, RotateCcw, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { enterTemporaryDarkTheme } from "@/actions/theme";
 import { CullCurate } from "@/components/CullCurate";
 import { CullDuel } from "@/components/CullDuel";
 import { CullResult } from "@/components/CullResult";
-import { ipc } from "@/ipc/manager";
 import { RouteError } from "@/components/RouteError";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { ipc } from "@/ipc/manager";
 
 // ── Shared types ──
 
@@ -94,6 +95,13 @@ function CullSessionPage() {
 
   const session = sessionQuery.data ?? null;
   const isLoading = sessionQuery.isLoading && !sessionQuery.data;
+
+  useEffect(() => {
+    if (session?.mode !== "duel") {
+      return;
+    }
+    return enterTemporaryDarkTheme();
+  }, [session?.mode]);
 
   useEffect(() => {
     if (session?.status === "completed") {
