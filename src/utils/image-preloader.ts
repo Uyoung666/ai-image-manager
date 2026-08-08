@@ -18,7 +18,8 @@ interface PreloadTask {
   url: string;
 }
 
-const queuedOrLoading = new Set<string>();
+const loadedUrls = new Set<string>();
+const inFlightLoads = new Map<string, Promise<"loaded" | "failed">>();
 const pendingQueue: PreloadTask[] = [];
 let activeLoads = 0;
 let globalConcurrency = DEFAULT_CONCURRENCY;
@@ -47,7 +48,16 @@ function loadOne(url: string, timeoutMs: number): Promise<"loaded" | "failed"> {
 
     const timer = setTimeout(() => done("failed"), timeoutMs);
 
-    img.onload = () => done("loaded");
+    img.onload = () => {
+      if (typeof img.decode !== "function") {
+        done("loaded");
+        return;
+      }
+      img
+        .decode()
+        .catch(() => undefined)
+        .then(() => done("loaded"));
+    };
     img.onerror = () => done("failed");
     img.src = url;
   });
@@ -55,17 +65,42 @@ function loadOne(url: string, timeoutMs: number): Promise<"loaded" | "failed"> {
 
 function pumpQueue() {
   while (activeLoads < globalConcurrency && pendingQueue.length > 0) {
-    const task = pendingQueue.shift()!;
+    const task = pendingQueue.shift();
+    if (!task) {
+      break;
+    }
     activeLoads++;
     loadOne(task.url, SINGLE_TIMEOUT_MS)
-      .then(task.resolve)
+      .then((result) => {
+        if (result === "loaded") {
+          loadedUrls.add(task.url);
+        }
+        task.resolve(result);
+      })
       .catch(() => task.resolve("failed"))
       .finally(() => {
         activeLoads--;
-        queuedOrLoading.delete(task.url);
+        inFlightLoads.delete(task.url);
         pumpQueue();
       });
   }
+}
+
+function enqueueLoad(url: string): Promise<"loaded" | "failed"> {
+  if (loadedUrls.has(url)) {
+    return Promise.resolve("loaded");
+  }
+
+  const inFlight = inFlightLoads.get(url);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const taskPromise = new Promise<"loaded" | "failed">((resolve) => {
+    pendingQueue.push({ resolve, url });
+  });
+  inFlightLoads.set(url, taskPromise);
+  return taskPromise;
 }
 
 /**
@@ -79,28 +114,13 @@ export async function preloadImagesWithConcurrency(
   urls: string[],
   concurrency = DEFAULT_CONCURRENCY
 ): Promise<{ loaded: number; failed: number }> {
-  if (urls.length === 0) {
+  const uniqueUrls = [...new Set(urls.filter(Boolean))];
+  if (uniqueUrls.length === 0) {
     return { loaded: 0, failed: 0 };
   }
 
-  globalConcurrency = Math.max(1, Math.min(globalConcurrency, concurrency));
-  const tasks: Array<Promise<"loaded" | "failed">> = [];
-
-  for (const url of urls) {
-    if (queuedOrLoading.has(url)) {
-      continue;
-    }
-    queuedOrLoading.add(url);
-    tasks.push(
-      new Promise<"loaded" | "failed">((resolve) => {
-        pendingQueue.push({ resolve, url });
-      })
-    );
-  }
-
-  if (tasks.length === 0) {
-    return { loaded: 0, failed: 0 };
-  }
+  globalConcurrency = Math.max(1, Math.floor(concurrency));
+  const tasks = uniqueUrls.map(enqueueLoad);
 
   pumpQueue();
   const results = await Promise.all(tasks);

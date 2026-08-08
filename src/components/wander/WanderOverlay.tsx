@@ -1,15 +1,23 @@
 /** biome-ignore-all lint/style/useFilenamingConvention: component names follow the repository's existing React convention. */
 import { Save, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { recordWanderExposure } from "@/actions/wander";
 import type { WanderSession } from "@/types/wander";
-import { preloadImage, toLocalMediaUrl } from "@/utils/local-media-url";
+import { preloadImageAsync, toLocalMediaUrl } from "@/utils/local-media-url";
 
 const INTRO_MS = 1200;
 const EXPOSURE_MS = 2000;
-const CONTROLS_HIDE_MS = 2500;
+const CONTROLS_HIDE_MS = 3500;
+const HINT_HIDE_MS = 3500;
+const WANDER_PRELOAD_CONCURRENCY = 4;
 
 interface WanderOverlayProps {
   intervalMs: number;
@@ -22,6 +30,115 @@ interface WanderOverlayProps {
   session: WanderSession;
 }
 
+type WanderView = "intro" | "playing";
+
+function useWanderHint(view: WanderView, initiallyVisible: boolean) {
+  const [hintVisible, setHintVisible] = useState(initiallyVisible);
+
+  useEffect(() => {
+    if (view !== "playing" || !hintVisible) {
+      return;
+    }
+    const timeout = window.setTimeout(
+      () => setHintVisible(false),
+      HINT_HIDE_MS
+    );
+    return () => window.clearTimeout(timeout);
+  }, [hintVisible, view]);
+
+  return hintVisible;
+}
+
+function useWanderKeyboard({
+  onClose,
+  onTogglePause,
+  view,
+}: {
+  onClose: () => void;
+  onTogglePause: () => void;
+  view: WanderView;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.code === "Space" && view === "playing") {
+        onTogglePause();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onClose, onTogglePause, view]);
+}
+
+interface WanderImageStackProps {
+  className?: string;
+  layer: "current" | "pending";
+  onPreviewError?: () => void;
+  onPreviewReady?: () => void;
+  photo: WanderSession["photos"][number];
+}
+
+function WanderImageStack({
+  className,
+  layer,
+  onPreviewError,
+  onPreviewReady,
+  photo,
+}: WanderImageStackProps) {
+  const [fullReady, setFullReady] = useState(false);
+  const [fullError, setFullError] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [previewReady, setPreviewReady] = useState(false);
+
+  const previewSrc = toLocalMediaUrl(photo.thumbnailPath ?? photo.path);
+  const fullSrc = toLocalMediaUrl(photo.path);
+
+  return (
+    <div
+      className={`absolute inset-0 ${className ?? ""}`}
+      data-wander-layer={layer}
+      data-wander-photo-id={photo.id}
+    >
+      <img
+        alt=""
+        aria-hidden="true"
+        className={`absolute inset-0 h-full w-full object-contain ${previewError ? "opacity-0" : "opacity-100"}`}
+        data-wander-preview
+        data-wander-preview-ready={previewReady}
+        height={photo.height || 1}
+        onError={() => {
+          setPreviewError(true);
+          onPreviewError?.();
+        }}
+        onLoad={() => {
+          setPreviewReady(true);
+          onPreviewReady?.();
+        }}
+        src={previewSrc}
+        width={photo.width || 1}
+      />
+      {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: the image load event updates the display layer. */}
+      <img
+        alt={photo.filename}
+        className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-[500ms] motion-reduce:transition-none ${fullReady && !fullError ? "opacity-100" : "opacity-0"}`}
+        data-wander-full
+        data-wander-full-ready={fullReady}
+        height={photo.height || 1}
+        onError={() => setFullError(true)}
+        onLoad={() => setFullReady(true)}
+        src={fullSrc}
+        width={photo.width || 1}
+      />
+    </div>
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the full-screen overlay coordinates playback, controls, and accessibility state in one modal.
 export function WanderOverlay({
   intervalMs,
   onClose,
@@ -33,14 +150,158 @@ export function WanderOverlay({
   session,
 }: WanderOverlayProps) {
   const { t } = useTranslation();
-  const [view, setView] = useState<"intro" | "playing">("intro");
+  const [view, setView] = useState<WanderView>("intro");
   const [index, setIndex] = useState(0);
-  const [loaded, setLoaded] = useState(false);
+  const [pendingIndex, setPendingIndex] = useState<number | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const controlsHoveredRef = useRef(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const previewPreloadsRef = useRef(new Map<number, Promise<boolean>>());
+  const fullPreloadsRef = useRef(new Map<number, Promise<boolean>>());
+  const advanceInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pendingPreviewReadyRef = useRef<number | null>(null);
+  const playbackStateRef = useRef({ index, paused, pendingIndex, view });
   const photo = session.photos[index];
+  const pendingPhoto =
+    pendingIndex === null ? undefined : session.photos[pendingIndex];
+  const hintVisible = useWanderHint(view, roundNumber === 1);
+  playbackStateRef.current = { index, paused, pendingIndex, view };
 
-  // Show the round's theme card briefly before playback begins.
+  const preloadWanderAsset = useCallback(
+    (
+      item: WanderSession["photos"][number],
+      kind: "preview" | "full"
+    ): Promise<boolean> => {
+      const filePath =
+        kind === "preview" ? (item.thumbnailPath ?? item.path) : item.path;
+      const cache =
+        kind === "preview"
+          ? previewPreloadsRef.current
+          : fullPreloadsRef.current;
+      const existing = cache.get(item.id);
+      if (existing) {
+        return existing;
+      }
+
+      const request = preloadImageAsync(
+        filePath,
+        WANDER_PRELOAD_CONCURRENCY
+      ).catch(() => false);
+      cache.set(item.id, request);
+      return request;
+    },
+    []
+  );
+
+  const findNextReadyPhoto = useCallback(
+    async (fromIndex: number): Promise<number | null> => {
+      for (
+        let nextIndex = fromIndex + 1;
+        nextIndex < session.photos.length;
+        nextIndex++
+      ) {
+        const previewLoaded = await preloadWanderAsset(
+          session.photos[nextIndex],
+          "preview"
+        );
+        if (previewLoaded) {
+          return nextIndex;
+        }
+      }
+      return null;
+    },
+    [preloadWanderAsset, session.photos]
+  );
+
+  const requestNextTransition = useCallback(
+    async (fromIndex: number, replacePending = false) => {
+      if (
+        advanceInFlightRef.current ||
+        (!replacePending && playbackStateRef.current.pendingIndex !== null)
+      ) {
+        return;
+      }
+      advanceInFlightRef.current = true;
+      try {
+        const nextIndex = await findNextReadyPhoto(fromIndex);
+        if (!mountedRef.current) {
+          return;
+        }
+        const currentState = playbackStateRef.current;
+        if (
+          currentState.index !== fromIndex ||
+          currentState.view !== "playing" ||
+          currentState.paused
+        ) {
+          return;
+        }
+        if (nextIndex === null) {
+          onRoundComplete();
+          return;
+        }
+        setPendingIndex(nextIndex);
+      } finally {
+        advanceInFlightRef.current = false;
+      }
+    },
+    [findNextReadyPhoto, onRoundComplete]
+  );
+
+  const startTransition = useCallback(
+    (fromIndex: number, nextIndex: number) => {
+      const currentState = playbackStateRef.current;
+      if (
+        !mountedRef.current ||
+        currentState.index !== fromIndex ||
+        currentState.pendingIndex !== nextIndex ||
+        currentState.view !== "playing" ||
+        currentState.paused
+      ) {
+        return;
+      }
+
+      setIndex(nextIndex);
+      setPendingIndex(null);
+      pendingPreviewReadyRef.current = null;
+    },
+    []
+  );
+
+  const handlePendingPreviewReady = useCallback(() => {
+    const currentState = playbackStateRef.current;
+    if (currentState.pendingIndex !== null) {
+      pendingPreviewReadyRef.current = currentState.pendingIndex;
+      startTransition(currentState.index, currentState.pendingIndex);
+    }
+  }, [startTransition]);
+
+  const handlePreviewError = useCallback(
+    (photoIndex: number) => {
+      const currentState = playbackStateRef.current;
+      if (photoIndex === currentState.pendingIndex) {
+        pendingPreviewReadyRef.current = null;
+      }
+      if (
+        photoIndex === currentState.index ||
+        photoIndex === currentState.pendingIndex
+      ) {
+        requestNextTransition(currentState.index, true);
+      }
+    },
+    [requestNextTransition]
+  );
+
+  // Keep asynchronous playback callbacks from updating an unmounted overlay.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (view !== "intro") {
       return;
@@ -49,31 +310,100 @@ export function WanderOverlay({
     return () => window.clearTimeout(timeout);
   }, [view]);
 
-  // Advance playback; the final frame signals the parent to start the next round.
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+    }
+    hideTimerRef.current = setTimeout(() => {
+      if (!controlsHoveredRef.current) {
+        setControlsVisible(false);
+      }
+    }, CONTROLS_HIDE_MS);
+  }, []);
+
+  const handleControlsEnter = () => {
+    controlsHoveredRef.current = true;
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+    }
+    setControlsVisible(true);
+  };
+
+  const handleControlsLeave = () => {
+    controlsHoveredRef.current = false;
+    revealControls();
+  };
+
+  const handleMouseMove = (event: MouseEvent<HTMLDivElement>) => {
+    controlsHoveredRef.current = Boolean(
+      (event.target as HTMLElement).closest("[data-wander-control]")
+    );
+    revealControls();
+  };
+
+  // Focus the modal root so keyboard shortcuts work immediately after opening.
   useEffect(() => {
-    if (!(view === "playing" && photo)) {
+    overlayRef.current?.focus();
+  }, []);
+
+  // Advance only after the next preview is ready, so a slow original cannot create a blank frame.
+  useEffect(() => {
+    if (!(view === "playing" && photo) || paused) {
       return;
     }
     const timeout = window.setTimeout(
       () => {
         if (index >= session.photos.length - 1) {
-          onRoundComplete();
+          if (
+            mountedRef.current &&
+            playbackStateRef.current.index === index &&
+            playbackStateRef.current.view === "playing" &&
+            !playbackStateRef.current.paused
+          ) {
+            onRoundComplete();
+          }
           return;
         }
-        setLoaded(false);
-        setIndex((value) => value + 1);
+        requestNextTransition(index);
       },
       Math.max(1, intervalMs)
     );
-    return () => window.clearTimeout(timeout);
-  }, [index, intervalMs, onRoundComplete, photo, session.photos.length, view]);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [
+    index,
+    intervalMs,
+    onRoundComplete,
+    paused,
+    photo,
+    requestNextTransition,
+    session.photos.length,
+    view,
+  ]);
 
-  // Preload the next two frames' thumbnails while the current one is visible.
   useEffect(() => {
-    for (const item of session.photos.slice(index + 1, index + 3)) {
-      preloadImage(item.thumbnailPath ?? item.path);
+    if (
+      view === "playing" &&
+      !paused &&
+      pendingIndex !== null &&
+      pendingPreviewReadyRef.current === pendingIndex
+    ) {
+      startTransition(index, pendingIndex);
     }
-  }, [index, session.photos]);
+  }, [index, paused, pendingIndex, startTransition, view]);
+
+  // Preload the current frame and the next two frames with the exact URLs used by the two image layers.
+  useEffect(() => {
+    const nextPhotos = session.photos.slice(index, index + 3);
+    for (const item of nextPhotos) {
+      preloadWanderAsset(item, "preview");
+    }
+    for (const item of nextPhotos) {
+      preloadWanderAsset(item, "full");
+    }
+  }, [index, preloadWanderAsset, session.photos]);
 
   // Record a valid exposure once a photo has stayed on screen for two seconds.
   useEffect(() => {
@@ -88,48 +418,20 @@ export function WanderOverlay({
     return () => window.clearTimeout(timeout);
   }, [photo]);
 
-  // Any keyboard input closes the overlay and must not reach the page beneath.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose]);
+  const togglePaused = useCallback(() => {
+    setPaused((value) => !value);
+    revealControls();
+  }, [revealControls]);
+  useWanderKeyboard({ onClose, onTogglePause: togglePaused, view });
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    revealControls();
+    return () => {
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
       }
-    },
-    []
-  );
-
-  const revealControls = () => {
-    setControlsVisible(true);
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-    }
-    hideTimerRef.current = setTimeout(
-      () => setControlsVisible(false),
-      CONTROLS_HIDE_MS
-    );
-  };
-
-  const handleImageError = () => {
-    if (!photo || view !== "playing") {
-      return;
-    }
-    if (index >= session.photos.length - 1) {
-      onRoundComplete();
-      return;
-    }
-    setLoaded(false);
-    setIndex((value) => value + 1);
-  };
+    };
+  }, [revealControls]);
 
   if (!photo) {
     return null;
@@ -144,17 +446,15 @@ export function WanderOverlay({
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the full-screen dialog owns dismissal gestures across its backdrop.
     <div
       aria-label={t("wander.experience")}
+      aria-modal="true"
       className={`fixed inset-0 z-[10000] overflow-hidden bg-[#070709] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
-      onMouseMove={revealControls}
-      onPointerDown={(event) => {
-        if (!(event.target as HTMLElement).closest("[data-wander-control]")) {
-          onClose();
-        }
-      }}
+      onMouseMove={handleMouseMove}
+      onPointerDown={revealControls}
       onWheel={(event) => {
         event.preventDefault();
-        onClose();
+        revealControls();
       }}
+      ref={overlayRef}
       role="dialog"
       tabIndex={-1}
     >
@@ -172,27 +472,60 @@ export function WanderOverlay({
 
       {view === "intro" ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
-          <div className="text-[11px] text-white/45 uppercase tracking-[0.28em]">
+          <div className="text-[11px] text-white/45 uppercase tracking-[0.12em]">
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
           <h2 className="font-medium text-3xl">{themeTitle}</h2>
           {themeSubtitle && (
-            <p className="text-sm text-white/55">{themeSubtitle}</p>
+            <p className="text-sm text-white/65">{themeSubtitle}</p>
           )}
         </div>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center px-10 pt-24 pb-20">
-          {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: load state drives the image crossfade. */}
-          <img
-            alt={photo.filename}
-            className={`max-h-full max-w-full object-contain transition-opacity duration-[600ms] motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"}`}
-            height={photo.height || 1}
-            key={photo.id}
-            onError={handleImageError}
-            onLoad={() => setLoaded(true)}
-            src={toLocalMediaUrl(photo.path)}
-            width={photo.width || 1}
-          />
+          <div className="relative h-full w-full">
+            <WanderImageStack
+              className="opacity-100"
+              key={photo.id}
+              layer="current"
+              onPreviewError={() => handlePreviewError(index)}
+              photo={photo}
+            />
+            {pendingPhoto && (
+              <WanderImageStack
+                className="opacity-0"
+                key={pendingPhoto.id}
+                layer="pending"
+                onPreviewError={() => {
+                  if (pendingIndex !== null) {
+                    handlePreviewError(pendingIndex);
+                  }
+                }}
+                onPreviewReady={handlePendingPreviewReady}
+                photo={pendingPhoto}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {view === "playing" && hintVisible && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-16 z-10 text-center text-[11px] text-white/50 transition-opacity duration-500"
+        >
+          {t("wander.controlsHint")}
+        </div>
+      )}
+
+      {view === "playing" && paused && (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+          role="status"
+        >
+          <span className="rounded-full bg-black/45 px-4 py-2 text-sm text-white/80 backdrop-blur-sm">
+            {t("wander.paused")}
+          </span>
         </div>
       )}
 
@@ -201,18 +534,20 @@ export function WanderOverlay({
         data-wander-control
       >
         <div>
-          <div className="text-[10px] text-white/45 uppercase tracking-[0.24em]">
+          <div className="text-[10px] text-white/50 uppercase tracking-[0.12em]">
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
           <h1 className="mt-1 font-medium text-lg">{themeTitle}</h1>
           {themeSubtitle && (
-            <p className="mt-1 text-white/45 text-xs">{themeSubtitle}</p>
+            <p className="mt-1 text-white/65 text-xs">{themeSubtitle}</p>
           )}
         </div>
         <button
           aria-label={t("close")}
           className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
+          onBlur={handleControlsLeave}
           onClick={onClose}
+          onFocus={handleControlsEnter}
           type="button"
         >
           <X className="h-5 w-5" />
@@ -235,15 +570,34 @@ export function WanderOverlay({
           )}
           <button
             aria-label={t("wander.saveRound")}
-            className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-4 text-white/75 text-xs hover:bg-white/15 hover:text-white disabled:opacity-50"
+            className="flex h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/15 px-4 text-white/90 text-xs hover:bg-white/20 hover:text-white disabled:opacity-50"
             disabled={saving}
+            onBlur={handleControlsLeave}
             onClick={onSave}
+            onFocus={handleControlsEnter}
             type="button"
           >
             <Save className="h-3.5 w-3.5" />
             {saving ? t("wander.saving") : t("wander.saveRound")}
           </button>
         </footer>
+      )}
+
+      {view === "playing" && (
+        <div
+          aria-label={t("wander.progress")}
+          aria-valuemax={session.photos.length}
+          aria-valuemin={1}
+          aria-valuenow={index + 1}
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-white/10"
+          data-wander-progress
+          role="progressbar"
+        >
+          <div
+            className="h-full bg-white/45 transition-[width] duration-500"
+            style={{ width: `${((index + 1) / session.photos.length) * 100}%` }}
+          />
+        </div>
       )}
     </div>,
     document.body

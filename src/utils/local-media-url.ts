@@ -1,6 +1,8 @@
 import { getHttpPortSync } from "./http-port";
+import { preloadImagesWithConcurrency } from "./image-preloader";
 
 const DISPLAY_PIPELINE_VERSION = 2;
+const MEDIA_PRELOAD_CONCURRENCY = 4;
 
 /**
  * 将本地文件路径转换为可访问的媒体 URL。
@@ -88,10 +90,30 @@ export function toDuelPreviewUrl(filePath: string | null | undefined): string {
 /**
  * 预加载图片到浏览器缓存。
  */
-export function preloadImage(filePath: string | null | undefined): void {
+export async function preloadImageAsync(
+  filePath: string | null | undefined,
+  concurrency = MEDIA_PRELOAD_CONCURRENCY
+): Promise<boolean> {
   if (!filePath) {
-    return;
+    return false;
   }
-  const img = new Image();
-  img.src = toLocalMediaUrl(filePath);
+
+  const url = toLocalMediaUrl(filePath);
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const result = await preloadImagesWithConcurrency([url], concurrency);
+    return result.loaded > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 兼容旧调用方的 fire-and-forget 入口；实际加载由并发队列负责。
+ */
+export function preloadImage(filePath: string | null | undefined): void {
+  preloadImageAsync(filePath);
 }
