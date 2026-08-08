@@ -6,8 +6,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import DragWindowRegion from "@/components/drag-window-region";
 import { GlobalProgressBar } from "@/components/global-progress-bar";
+import { ImportDropLayer } from "@/components/import-drop-layer";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { OnboardingOverlay } from "@/components/onboarding/OnboardingOverlay";
 import {
@@ -18,6 +20,10 @@ import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
 import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
+import {
+  ImportDropProvider,
+  useImportDropContext,
+} from "@/contexts/import-drop-context";
 import {
   SidebarFilterProvider,
   useSidebarFilter,
@@ -42,9 +48,12 @@ function SidebarSlot() {
   const isHomePage = location.pathname === "/";
   const filter = useSidebarFilter();
   const { data: folders = [] } = useFolders();
+  const { zones } = useImportDropContext();
 
   return (
-    <div className={isHomePage ? "" : "hidden"}>
+    <div
+      className={isHomePage ? "relative h-full shrink-0" : "hidden"}
+    >
       <Sidebar
         activeFolderId={filter.activeFolderId}
         activeTagIds={filter.activeTagIds}
@@ -62,13 +71,32 @@ function SidebarSlot() {
         tagMode={filter.tagMode}
         totalPhotos={filter.totalPhotos}
       />
+      {isHomePage && (
+        <ImportDropLayer
+          className={`sidebar-import-drop-layer ${filter.collapsed ? "is-collapsed" : ""}`}
+          kind={zones.dragKind}
+          onDragOver={zones.handleZoneDragOver}
+          onDrop={zones.handleZoneDrop}
+          zone="folders"
+        />
+      )}
     </div>
   );
 }
 
 export default function BaseLayout({ children }: { children: ReactNode }) {
+  return (
+    <ImportDropProvider>
+      <BaseLayoutContent>{children}</BaseLayoutContent>
+    </ImportDropProvider>
+  );
+}
+
+function BaseLayoutContent({ children }: { children: ReactNode }) {
   const location = useLocation();
   const isHomePage = location.pathname === "/";
+  const { zones } = useImportDropContext();
+  const { t } = useTranslation();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [perfOn] = useState(isPerfMonitorEnabled);
   const { metrics, memory } = usePerfMonitor(perfOn);
@@ -109,10 +137,19 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
           <AppContentGate>
             <BrowseSessionProvider>
               <SidebarFilterProvider>
+                {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: the application shell owns the native external drag lifecycle */}
                 <div
-                  className={`flex h-screen flex-col overflow-hidden ${
-                    isHomePage ? "home-workspace" : ""
+                  aria-label={t("appName")}
+                  className={`relative flex h-screen flex-col overflow-hidden ${
+                    isHomePage
+                      ? `home-workspace ${zones.dragKind ? "home-import-dragging" : ""}`
+                      : ""
                   }`}
+                  onDragEnter={isHomePage ? zones.handleRootDragEnter : undefined}
+                  onDragLeave={isHomePage ? zones.handleRootDragLeave : undefined}
+                  onDragOver={isHomePage ? zones.handleRootDragOver : undefined}
+                  onDrop={isHomePage ? zones.handleRootDrop : undefined}
+                  role="application"
                 >
                   <DragWindowRegion title="AI Image Manager" />
                   <GlobalProgressBar />
@@ -124,10 +161,19 @@ export default function BaseLayout({ children }: { children: ReactNode }) {
                     <SidebarSlot />
                     <main
                       className={`min-w-0 flex-1 overflow-hidden ${
-                        isHomePage ? "home-gallery-canvas" : ""
+                        isHomePage ? "home-gallery-canvas relative" : ""
                       }`}
                     >
                       {children}
+                      {isHomePage && (
+                        <ImportDropLayer
+                          className="home-import-drop-layer"
+                          kind={zones.dragKind}
+                          onDragOver={zones.handleZoneDragOver}
+                          onDrop={zones.handleZoneDrop}
+                          zone="image"
+                        />
+                      )}
                     </main>
                   </div>
                   <SpotlightSearch />

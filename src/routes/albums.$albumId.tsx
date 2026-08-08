@@ -24,7 +24,6 @@ import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useCollectionSequences } from "@/hooks/useCollectionSequences";
-import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
@@ -86,7 +85,6 @@ function AlbumDetailPage() {
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const { markRouteDirty } = useScrollPosition();
-  const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
   const routeKey = `album-${albumId}`;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
@@ -739,8 +737,6 @@ function AlbumDetailPage() {
   return (
     <div
       className="flex h-full flex-col bg-background"
-      onDragOver={handleGlobalDragOver}
-      onDrop={handleGlobalDrop}
     >
       <div className="flex items-center justify-between border-border border-b px-6 py-4">
         <div className="flex items-center gap-3">

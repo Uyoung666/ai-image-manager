@@ -560,48 +560,11 @@ export function Sidebar({
     }
   }, [debouncedTagSearch, tags]);
 
-  // Drag-and-drop: album/tag/folder drop targets + external folder import
+  // Drag-and-drop: keep application photo organization targets local to the sidebar
   function handleSidebarDragOver(e: React.DragEvent) {
     if (e.dataTransfer.types.includes("application/x-photo-ids")) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
-    } else if (e.dataTransfer.types.includes("Files")) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "copy";
-    }
-  }
-
-  async function handleSidebarDrop(e: React.DragEvent) {
-    // External folder drop → import
-    if (e.dataTransfer.types.includes("Files")) {
-      e.preventDefault();
-      const items = Array.from(e.dataTransfer.items);
-      const folders: string[] = [];
-      for (const item of items) {
-        if (item.kind !== "file") {
-          continue;
-        }
-        const entry = item.webkitGetAsEntry?.();
-        const file = item.getAsFile();
-        if (!file) {
-          continue;
-        }
-        const filePath = (window as any).electronAPI?.getFilePath?.(file);
-        if (!filePath) {
-          continue;
-        }
-        if (entry?.isDirectory) {
-          folders.push(filePath);
-        } else {
-          const parent = filePath.replace(/[\\/][^\\/]+$/, "");
-          if (parent && !folders.includes(parent)) {
-            folders.push(parent);
-          }
-        }
-      }
-      for (const folder of folders) {
-        onAddFolder(folder);
-      }
     }
   }
 
@@ -1189,7 +1152,6 @@ export function Sidebar({
       <div
         className="sidebar-bg relative flex h-full flex-row overflow-hidden"
         onDragOver={handleSidebarDragOver}
-        onDrop={handleSidebarDrop}
         style={{ width: collapsed ? 48 : 48 + resourcePanelWidth }}
       >
         <nav

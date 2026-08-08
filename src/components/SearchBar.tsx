@@ -315,7 +315,6 @@ export const SearchBar = memo(
           setShowSuggestions(false);
         }
       }, [imageSearchActive, setQuery, t]);
-      const [dragOver, setDragOver] = useState(false);
       const inputRef = useRef<HTMLInputElement>(null);
       const fileInputRef = useRef<HTMLInputElement>(null);
       const dropdownRef = useRef<HTMLDivElement>(null);
@@ -587,78 +586,6 @@ export const SearchBar = memo(
         setShowSuggestions(false);
       }
 
-      // Electron 拖拽时 MIME type 为空，改用扩展名判断
-      const IMAGE_EXTENSIONS = new Set([
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".webp",
-        ".bmp",
-        ".avif",
-        ".heic",
-        ".heif",
-        ".tiff",
-        ".tif",
-        ".svg",
-        ".ico",
-        ".raw",
-        ".cr2",
-        ".cr3",
-        ".nef",
-        ".arw",
-        ".orf",
-        ".rw2",
-        ".dng",
-        ".pef",
-        ".raf",
-        ".sr2",
-      ]);
-
-      function handleDragOver(e: React.DragEvent) {
-        if (!onImageSearch) {
-          return;
-        }
-        // 接受单个文件拖放
-        if (
-          e.dataTransfer.types.includes("Files") &&
-          e.dataTransfer.items.length === 1 &&
-          e.dataTransfer.items[0].kind === "file"
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          e.dataTransfer.dropEffect = "copy";
-          setDragOver(true);
-        }
-      }
-
-      function handleDragLeave(e: React.DragEvent) {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragOver(false);
-      }
-
-      function handleDrop(e: React.DragEvent) {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragOver(false);
-        if (!onImageSearch) {
-          return;
-        }
-        const file = e.dataTransfer.files[0];
-        if (!file) {
-          return;
-        }
-        const filePath = (window as any).electronAPI?.getFilePath?.(file);
-        if (!filePath) {
-          return;
-        }
-        const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
-        if (IMAGE_EXTENSIONS.has(ext)) {
-          onImageSearch(filePath);
-        }
-      }
-
       function updateFilter(
         key: keyof ExifFilters,
         value: string,
@@ -786,21 +713,10 @@ export const SearchBar = memo(
       return (
         <div
           aria-label={t("searchPlaceholder")}
-          className={`home-unified-toolbar relative border-border border-b transition-colors ${dragOver ? "bg-primary/5" : ""}`}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
+          className="home-unified-toolbar relative border-border border-b transition-colors"
           ref={toolbarRef}
           role="search"
         >
-          {dragOver && (
-            <div className="pointer-events-none absolute inset-0 z-10 m-2 flex items-center justify-center rounded-[6px] border-2 border-primary border-dashed bg-primary/10">
-              <span className="font-medium text-[13px] text-primary">
-                {t("dropImageToSearch")}
-              </span>
-            </div>
-          )}
-
           <div className="px-3 py-2">
             {/* Search input row */}
             <div className="flex min-h-9 items-center gap-2">

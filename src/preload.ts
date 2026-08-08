@@ -27,6 +27,15 @@ const isE2E = process.argv.includes("--e2e");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   getFilePath: (file: File): string => webUtils.getPathForFile(file),
+  isDirectoryPath: (filePath: string): boolean => {
+    try {
+      return (
+        ipcRenderer.sendSync(IPC_CHANNELS.IS_DIRECTORY_PATH, filePath) === true
+      );
+    } catch {
+      return false;
+    }
+  },
   preloadReady: true,
   // HTTP 服务器端口（由主进程在 createWindow 时通过 additionalArguments 注入）
   httpPort,

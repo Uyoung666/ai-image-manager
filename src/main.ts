@@ -1084,6 +1084,18 @@ ipcMain.on("shell:open-external", (_event, url: string) => {
   }
 });
 
+ipcMain.on(IPC_CHANNELS.IS_DIRECTORY_PATH, (event, filePath: unknown) => {
+  if (typeof filePath !== "string" || !filePath) {
+    event.returnValue = false;
+    return;
+  }
+  try {
+    event.returnValue = fs.statSync(filePath).isDirectory();
+  } catch {
+    event.returnValue = false;
+  }
+});
+
 ipcMain.handle("app:get-http-port", () => {
   return getHttpServerPort();
 });

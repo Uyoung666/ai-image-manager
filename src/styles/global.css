@@ -640,6 +640,88 @@
   background: color-mix(in srgb, var(--gallery-canvas) 86%, transparent);
 }
 
+.home-import-dragging .home-gallery-toolbar-layer,
+.home-import-dragging .home-gallery-body,
+.home-import-dragging .home-gallery-status-bar,
+.home-import-dragging .sidebar-bg {
+  opacity: 0.76;
+  transition: opacity 140ms ease;
+}
+
+.import-drop-layer {
+  --import-drop-accent: var(--primary);
+
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  padding: 8px;
+  pointer-events: none;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.import-drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  pointer-events: auto;
+  cursor: copy;
+  background: none;
+  border: 2px dashed
+    color-mix(in srgb, var(--muted-foreground) 32%, transparent);
+  border-radius: 12px;
+  box-shadow: none;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.import-drop-zone.is-allowed {
+  color: var(--import-drop-accent);
+  background: none;
+  border-color: var(--import-drop-accent);
+  box-shadow: none;
+}
+
+.import-drop-zone.is-forbidden {
+  color: color-mix(in srgb, var(--muted-foreground) 80%, transparent);
+  cursor: not-allowed;
+  background: none;
+  border-color: color-mix(in srgb, var(--muted-foreground) 32%, transparent);
+  box-shadow: none;
+}
+
+.import-drop-zone-content {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.sidebar-import-drop-layer {
+  right: 0;
+  left: 48px;
+}
+
+.sidebar-import-drop-layer.is-collapsed {
+  left: 0;
+}
+
 .home-gallery-restore-content {
   opacity: 1;
   transition: opacity 180ms ease-out;

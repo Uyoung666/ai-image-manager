@@ -47,12 +47,12 @@ import { SortDropdown } from "@/components/SortDropdown";
 import { StatusBar } from "@/components/StatusBar";
 import { Welcome } from "@/components/Welcome";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
+import { useImportDropContext } from "@/contexts/import-drop-context";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
-import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { usePhotos } from "@/hooks/usePhotos";
@@ -210,7 +210,13 @@ function HomePage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const filter = useSidebarFilter();
-  const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
+  const { registerImageSearch } = useImportDropContext();
+  const imageSearchRef = useRef(handleImageSearch);
+  imageSearchRef.current = handleImageSearch;
+  useEffect(
+    () => registerImageSearch((imagePath) => imageSearchRef.current(imagePath)),
+    [registerImageSearch]
+  );
   // 搜索状态：从 BrowseSessionContext 恢复，导航回来时保留搜索上下文
   const { getSession: getBrowseSession, saveSession: saveBrowseSession } =
     useBrowseSession();
@@ -2451,8 +2457,6 @@ function HomePage() {
     <>
       <div
         className="relative flex h-full min-w-0 flex-col"
-        onDragOver={handleGlobalDragOver}
-        onDrop={handleGlobalDrop}
       >
         <div
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
@@ -2925,7 +2929,7 @@ function HomePage() {
           </div>
         ) : (
           <div
-            className="flex min-h-0 flex-1"
+            className="home-gallery-body flex min-h-0 flex-1"
             style={{ paddingTop: galleryToolbarHeight }}
           >
             <Welcome
@@ -2937,7 +2941,7 @@ function HomePage() {
         {showAiTaskStatus && (
           <StatusBar
             aiStatus={aiStatus ?? null}
-            className="absolute right-0 bottom-0 left-0 z-50"
+            className="home-gallery-status-bar absolute right-0 bottom-0 left-0 z-50"
             selectedCount={selectedIds.size}
             totalPhotos={totalPhotos}
           />

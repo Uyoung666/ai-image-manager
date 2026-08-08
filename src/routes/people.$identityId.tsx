@@ -35,7 +35,6 @@ import {
   shouldShowSequenceEmptyState,
   useCollectionSequences,
 } from "@/hooks/useCollectionSequences";
-import { useGlobalDropZone } from "@/hooks/useGlobalDropZone";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
@@ -106,7 +105,6 @@ function PersonDetailPage() {
   const [identity, setIdentity] = useState<IdentityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const { markRouteDirty } = useScrollPosition();
-  const { handleGlobalDragOver, handleGlobalDrop } = useGlobalDropZone();
   const routeKey = `person-${identityId}`;
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -908,8 +906,6 @@ function PersonDetailPage() {
   return (
     <div
       className="flex h-full flex-col bg-background"
-      onDragOver={handleGlobalDragOver}
-      onDrop={handleGlobalDrop}
     >
       {/* Header */}
       <div className="flex items-center justify-between border-border border-b px-6 py-4">

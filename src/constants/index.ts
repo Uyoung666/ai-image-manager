@@ -6,6 +6,7 @@ export const LOCAL_STORAGE_KEYS = {
 export const IPC_CHANNELS = {
   START_ORPC_SERVER: "start-orpc-server",
   FILE_CHANGE: "file-change",
+  IS_DIRECTORY_PATH: "path:is-directory",
   NATIVE_FILE_DRAG: "native-file-drag",
   WANDER_LIFECYCLE: "wander:lifecycle",
 };

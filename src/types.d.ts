@@ -11,6 +11,7 @@ declare module "*.png";
 interface Window {
   electronAPI: {
     getFilePath: (file: File) => string;
+    isDirectoryPath?: (filePath: string) => boolean;
     preloadReady: boolean;
     /** HTTP 服务器端口（由主进程在 createWindow 时通过 --http-port 参数同步注入） */
     httpPort: number;

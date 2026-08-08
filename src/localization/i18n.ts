@@ -1133,7 +1133,15 @@ i18n.use(initReactI18next).init({
         semanticSearchUnavailable:
           "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。",
         semanticSearchUnavailableTitle: "AI 语义搜索暂不可用",
-        dropImageToSearch: "拖放图片以搜索相似照片",
+        dropImageToSearch: "拖入单张图片进行以图搜图",
+        dropFoldersToImport: "拖入一个或多个文件夹导入照片",
+        dropImageToSearchOnly: "仅支持单张图片，请拖到主页瀑布流进行以图搜图",
+        dropFoldersToImportOnly: "仅支持文件夹，请拖到侧边文件树导入",
+        dropUnsupportedItems:
+          "不支持此内容：瀑布流仅收单张图片，文件树仅收文件夹",
+        toastImageDropFailed: "图片拖入失败",
+        toastFolderDropFailed: "未读取到可导入的文件夹",
+        toastImportAlreadyQueued: "{{count}} 个文件夹已在导入队列中",
         imageSearchTitle: "以图搜图 — 选择参考图片寻找相似照片",
         exifFilterTitle: "EXIF 筛选",
         searchModeSemantic: "语义搜索",
@@ -3057,7 +3065,17 @@ i18n.use(initReactI18next).init({
         semanticSearchUnavailable:
           "AI semantic search is unavailable. Showing filename, tag, and person matches only.",
         semanticSearchUnavailableTitle: "AI semantic search unavailable",
-        dropImageToSearch: "Drop an image to search for similar photos",
+        dropImageToSearch: "Drop one image to search by image",
+        dropFoldersToImport: "Drop one or more folders to import photos",
+        dropImageToSearchOnly:
+          "Only one image is accepted here; drop it in the home gallery for image search",
+        dropFoldersToImportOnly:
+          "Only folders are accepted here; drop them in the sidebar file tree",
+        dropUnsupportedItems:
+          "Unsupported: the gallery accepts one image; the file tree accepts folders only",
+        toastImageDropFailed: "Failed to read the dropped image",
+        toastFolderDropFailed: "No importable folder was found",
+        toastImportAlreadyQueued: "{{count}} folders are already in the import queue",
         imageSearchTitle:
           "Image search — choose a reference image to find similar photos",
         exifFilterTitle: "EXIF Filters",

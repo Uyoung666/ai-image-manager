@@ -139,6 +139,7 @@ vi.mock("react-i18next", () => ({
           "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
         toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
         toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
+        toastImportAlreadyQueued: "{{count}} 个文件夹已在导入队列中",
         semanticSearchPartial:
           "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
         semanticSearchUnavailable:
