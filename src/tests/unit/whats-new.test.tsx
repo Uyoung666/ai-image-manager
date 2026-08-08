@@ -46,7 +46,7 @@ describe("WhatsNewPage", () => {
 
   it("renders localized highlights and continues to the gallery", () => {
     const entry = getEntry();
-    render(<WhatsNewPage />);
+    const { container } = render(<WhatsNewPage />);
 
     expect(
       screen.getByText(getLocalizedText(entry.title, "zh"))
@@ -55,6 +55,14 @@ describe("WhatsNewPage", () => {
       screen.getByText(getLocalizedText(entry.highlights[0].title, "zh"))
     ).toBeInTheDocument();
     expect(screen.getAllByRole("article")).toHaveLength(3);
+    expect(
+      container.querySelectorAll(
+        ".whats-new-brand-icon, .whats-new-release-visual-image"
+      )
+    ).toHaveLength(2);
+    expect(
+      container.querySelectorAll(".whats-new-highlight-arrow")
+    ).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "whatsNewContinue" }));
     expect(mocks.navigate).toHaveBeenCalledWith({ to: "/", replace: true });

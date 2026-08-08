@@ -8,11 +8,13 @@ import { type CSSProperties, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { openExternalLink } from "@/actions/shell";
+import { Button } from "@/components/ui/button";
 import {
   getChangelog,
   getLatestChangelog,
   getLocalizedText,
 } from "@/content/changelogs";
+import appIcon from "../../assets/icon.png";
 
 const GITHUB_RELEASE_URL = "https://github.com/Uyoung666/ai-image-manager";
 
@@ -41,12 +43,14 @@ function ReleaseVisual({ version }: { version: string }) {
       <div className="whats-new-release-visual-glow whats-new-release-visual-glow-one" />
       <div className="whats-new-release-visual-glow whats-new-release-visual-glow-two" />
       <div className="whats-new-release-visual-halo" />
-      <div className="whats-new-release-visual-core">
-        <span />
-        <span />
-        <span />
-        <span />
-      </div>
+      <img
+        alt=""
+        className="whats-new-release-visual-image"
+        draggable={false}
+        height={78}
+        src={appIcon}
+        width={78}
+      />
       <span className="whats-new-release-visual-version">v{version}</span>
     </div>
   );
@@ -76,13 +80,13 @@ export function WhatsNewPage() {
   if (!entry) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center">
-        <button
+        <Button
           className="rounded-full bg-primary px-5 py-2.5 font-medium text-primary-foreground text-sm transition-transform hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={handleContinue}
           type="button"
         >
           {t("whatsNewContinue")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -100,22 +104,26 @@ export function WhatsNewPage() {
           className="whats-new-topbar"
         >
           <div className="whats-new-brand">
-            <span aria-hidden="true" className="whats-new-brand-mark">
-              <span />
-              <span />
-              <span />
-              <span />
-            </span>
+            <img
+              alt=""
+              className="whats-new-brand-icon"
+              draggable={false}
+              height={22}
+              src={appIcon}
+              width={22}
+            />
             <span>AI Image Manager</span>
           </div>
-          <button
+          <Button
             aria-label={t("whatsNewClose")}
             className="whats-new-close"
             onClick={handleContinue}
+            size="icon"
             type="button"
+            variant="outline"
           >
             <X className="h-[17px] w-[17px]" strokeWidth={1.8} />
-          </button>
+          </Button>
         </nav>
 
         <main className="whats-new-main">
@@ -143,7 +151,10 @@ export function WhatsNewPage() {
                 {highlightCount}
               </span>
             </div>
-            <div className="whats-new-highlight-list">
+            <section
+              aria-labelledby="whats-new-highlights"
+              className="whats-new-highlight-list"
+            >
               {entry.highlights.map((highlight, index) => (
                 <article
                   className="whats-new-highlight"
@@ -157,18 +168,15 @@ export function WhatsNewPage() {
                     <h3>{getLocalizedText(highlight.title, language)}</h3>
                     <p>{getLocalizedText(highlight.description, language)}</p>
                   </div>
-                  <ArrowUpRight
-                    aria-hidden="true"
-                    className="whats-new-highlight-arrow"
-                    strokeWidth={1.6}
-                  />
                 </article>
               ))}
-            </div>
-            <button
+            </section>
+            <Button
               className="whats-new-github-link"
               onClick={() => openExternalLink(GITHUB_RELEASE_URL)}
+              size="sm"
               type="button"
+              variant="link"
             >
               {t("whatsNewGithub")}
               <ArrowUpRight
@@ -176,16 +184,18 @@ export function WhatsNewPage() {
                 className="h-3.5 w-3.5"
                 strokeWidth={1.7}
               />
-            </button>
+            </Button>
           </section>
         </main>
 
         <footer className="whats-new-actions">
-          <button
+          <Button
             autoFocus
             className="whats-new-continue"
             onClick={handleContinue}
+            size="lg"
             type="button"
+            variant="default"
           >
             {t("whatsNewContinue")}
             <ArrowRight
@@ -193,7 +203,7 @@ export function WhatsNewPage() {
               className="h-4 w-4"
               strokeWidth={1.8}
             />
-          </button>
+          </Button>
           <p className="whats-new-escape-hint">{t("whatsNewEscapeHint")}</p>
         </footer>
       </div>
