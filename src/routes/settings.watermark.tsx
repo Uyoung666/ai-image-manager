@@ -1,9 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Check, CircleAlert, LoaderCircle, ShieldCheck } from "lucide-react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsPageShell } from "@/components/settings/settings-page-shell";
+import {
+  WatermarkControls,
+  type WatermarkSaveState,
+} from "@/components/settings/WatermarkControls";
 import { Switch } from "@/components/ui/switch";
 import {
+  type WatermarkImageStatus,
   WatermarkPreview,
   type WatermarkPreviewSettings,
 } from "@/components/WatermarkPreview";
@@ -11,12 +23,13 @@ import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 
 interface WatermarkSettings extends WatermarkPreviewSettings {
-  position?: string; // legacy, auto-migrated
-  wmX?: number; // legacy
-  wmY?: number; // legacy
+  position?: string;
+  wmX?: number;
+  wmY?: number;
 }
 
 interface PhotoListItem {
+  filename?: string;
   height?: number;
   path?: string;
   width?: number;
@@ -27,360 +40,360 @@ interface PhotoListResult {
   pages?: Array<{ items?: PhotoListItem[] }>;
 }
 
+interface SamplePhoto extends PhotoListItem {
+  path: string;
+}
+
 const DEFAULT_WM: WatermarkSettings = {
-  enabled: false,
-  text: "",
-  imagePath: "",
   anchor: "bottomRight",
-  margin: 5,
-  opacity: 50,
+  enabled: false,
   fontSize: 24,
+  imagePath: "",
   imageScale: 15,
+  margin: 5,
+  mode: "text",
+  opacity: 50,
+  text: "",
 };
 
-// Module-level cache — survives page navigation so re-entry shows preview immediately
 const PATH_SEPARATOR_RE = /[\\/]/;
 
-let cachedSamplePhoto = "";
+let cachedSamplePhoto: SamplePhoto | null = null;
+
+function normalizeWatermarkSettings(result: unknown): WatermarkSettings {
+  const raw = (
+    result && typeof result === "object" ? result : {}
+  ) as Partial<WatermarkSettings>;
+  let mode: WatermarkSettings["mode"] = "text";
+  if (raw.mode === "image" || raw.mode === "text") {
+    mode = raw.mode;
+  } else if (raw.imagePath) {
+    mode = "image";
+  }
+  const next: WatermarkSettings = {
+    ...DEFAULT_WM,
+    ...raw,
+    mode,
+  };
+
+  if (!raw.anchor) {
+    if (
+      raw.position === "topLeft" ||
+      raw.position === "topRight" ||
+      raw.position === "bottomLeft" ||
+      raw.position === "bottomRight" ||
+      raw.position === "center" ||
+      raw.position === "topCenter" ||
+      raw.position === "centerLeft" ||
+      raw.position === "centerRight" ||
+      raw.position === "bottomCenter"
+    ) {
+      next.anchor = raw.position;
+    }
+    next.margin = 5;
+  }
+
+  return next;
+}
+
+function getSamplePhoto(items: PhotoListItem[]): SamplePhoto | null {
+  const horizontal = items.find(
+    (item) =>
+      item.path && item.width && item.height && item.width >= item.height
+  );
+  const fallback = items.find((item) => item.path);
+  const item = horizontal ?? fallback;
+  return item?.path ? { ...item, path: item.path } : null;
+}
+
+function SaveState({ state }: { state: WatermarkSaveState }) {
+  const { t } = useTranslation();
+  if (state === "saving") {
+    return (
+      <span
+        aria-live="polite"
+        className="flex items-center gap-1 text-[10px] text-muted-foreground"
+      >
+        <LoaderCircle aria-hidden="true" className="h-3 w-3 animate-spin" />
+        {t("watermarkSaving")}
+      </span>
+    );
+  }
+  if (state === "saved") {
+    return (
+      <span
+        aria-live="polite"
+        className="flex items-center gap-1 text-[10px] text-success"
+      >
+        <Check aria-hidden="true" className="h-3 w-3" />
+        {t("watermarkSaved")}
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <span
+        aria-live="polite"
+        className="flex items-center gap-1 text-[10px] text-destructive"
+      >
+        <CircleAlert aria-hidden="true" className="h-3 w-3" />
+        {t("watermarkSaveError")}
+      </span>
+    );
+  }
+  return null;
+}
 
 function WatermarkSettingsPage() {
   const { t } = useTranslation();
   const [wm, setWm] = useState<WatermarkSettings>(DEFAULT_WM);
   const [wmLoaded, setWmLoaded] = useState(false);
-  const [samplePhoto, setSamplePhoto] = useState(cachedSamplePhoto);
+  const [samplePhoto, setSamplePhoto] = useState<SamplePhoto | null>(
+    cachedSamplePhoto
+  );
+  const [imageStatus, setImageStatus] = useState<WatermarkImageStatus>("empty");
+  const [saveState, setSaveState] = useState<WatermarkSaveState>("idle");
+  const [settingsLoadError, setSettingsLoadError] = useState(false);
+  const [focusTextSignal, setFocusTextSignal] = useState(0);
+  const [previewHeight, setPreviewHeight] = useState<number | null>(null);
   const wmOriginalRef = useRef<WatermarkSettings | null>(null);
   const wmSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wmLatestRef = useRef<WatermarkSettings>(DEFAULT_WM);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const previewPaneRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef);
 
-  // Load watermark settings + preload sample photo
   useEffect(() => {
-    ipc.client.photos
-      .getWatermarkSettings({})
-      .then((result) => {
-        if (result) {
-          const w = {
-            ...DEFAULT_WM,
-            ...(result as Partial<WatermarkSettings>),
-          };
-          // Migrate old wmX/wmY → anchor
-          if (!w.anchor && typeof w.wmX === "number") {
-            w.anchor = "bottomRight";
-            w.margin = 5;
-          }
-          if (!w.anchor && w.position) {
-            w.anchor =
-              w.position === "topLeft" ||
-              w.position === "topRight" ||
-              w.position === "bottomLeft" ||
-              w.position === "bottomRight" ||
-              w.position === "center" ||
-              w.position === "topCenter" ||
-              w.position === "centerLeft" ||
-              w.position === "centerRight" ||
-              w.position === "bottomCenter"
-                ? (w.position as WatermarkSettings["anchor"])
-                : "bottomRight";
-            w.margin = 5;
-          }
-          setWm(w);
-          wmLatestRef.current = w;
-          // Snapshot original values so we can skip the initial no-op save
-          wmOriginalRef.current = { ...w };
-        } else {
-          // No saved settings yet — snapshot defaults to skip initial save
-          wmOriginalRef.current = { ...DEFAULT_WM };
-        }
-        setWmLoaded(true);
-      })
-      .catch(() => {
-        if (!wmOriginalRef.current) {
-          wmOriginalRef.current = { ...DEFAULT_WM };
-        }
-        setWmLoaded(true);
-      });
+    const previewPane = previewPaneRef.current;
+    if (!previewPane) {
+      return;
+    }
 
-    // Preload sample photo (cached at module level, fetched once per session)
-    if (cachedSamplePhoto) {
-      setSamplePhoto(cachedSamplePhoto);
-    } else {
-      ipc.client.photos
-        .listPhotos({ sort: "date", order: "desc", limit: 30 })
-        .then((r) => {
-          const result = r as PhotoListResult;
-          const photos = result.pages?.[0]?.items || result.items || [];
-          const horizontal = photos.find(
-            (p) => p.width && p.height && p.width >= p.height
-          );
-          if (horizontal?.path) {
-            cachedSamplePhoto = horizontal.path;
-            setSamplePhoto(horizontal.path);
-          }
-        })
-        .catch(() => {
-          /* ignore sample preview load failures */
-        });
+    const updatePreviewHeight = () => {
+      setPreviewHeight(previewPane.getBoundingClientRect().height);
+    };
+    updatePreviewHeight();
+
+    const resizeObserver = new ResizeObserver(updatePreviewHeight);
+    resizeObserver.observe(previewPane);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  const loadWatermarkSettings = useCallback(async () => {
+    setWmLoaded(false);
+    try {
+      const result = await ipc.client.photos.getWatermarkSettings({});
+      const next = normalizeWatermarkSettings(result);
+      setWm(next);
+      wmLatestRef.current = next;
+      wmOriginalRef.current = { ...next };
+      setSettingsLoadError(false);
+    } catch {
+      wmOriginalRef.current = { ...DEFAULT_WM };
+      setSettingsLoadError(true);
+    } finally {
+      setWmLoaded(true);
     }
   }, []);
 
-  // Keep ref in sync for the unmount flush
+  useEffect(() => {
+    loadWatermarkSettings().catch(() => undefined);
+
+    if (cachedSamplePhoto) {
+      setSamplePhoto(cachedSamplePhoto);
+      return;
+    }
+
+    ipc.client.photos
+      .listPhotos({ sort: "date", order: "desc", limit: 30 })
+      .then((result) => {
+        const response = result as PhotoListResult;
+        const items = response.pages?.[0]?.items || response.items || [];
+        const next = getSamplePhoto(items);
+        if (next) {
+          cachedSamplePhoto = next;
+          setSamplePhoto(next);
+        }
+      })
+      .catch(() => undefined);
+  }, [loadWatermarkSettings]);
+
   wmLatestRef.current = wm;
 
-  // Persist watermark settings (debounced 300ms, skips unchanged values)
-  useEffect(() => {
-    if (!wmLoaded) {
-      return;
+  const saveWatermark = useCallback(async () => {
+    setSaveState("saving");
+    try {
+      await ipc.client.photos.setWatermarkSettings(wmLatestRef.current);
+      wmOriginalRef.current = { ...wmLatestRef.current };
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
     }
-    // Skip if unchanged from originally loaded values
-    const original = wmOriginalRef.current;
-    if (original && JSON.stringify(wm) === JSON.stringify(original)) {
-      return;
-    }
-    // Debounce slider drags into a single write
-    if (wmSaveTimerRef.current) {
-      clearTimeout(wmSaveTimerRef.current);
-    }
-    wmSaveTimerRef.current = setTimeout(() => {
-      ipc.client.photos.setWatermarkSettings(wmLatestRef.current).catch(() => {
-        /* ignore */
-      });
-    }, 300);
-    return () => {
-      if (wmSaveTimerRef.current) {
-        clearTimeout(wmSaveTimerRef.current);
-      }
-    };
-  }, [wm, wmLoaded]);
+  }, []);
 
-  // Flush pending debounced save on unmount so quick navigation doesn't lose changes
   useEffect(() => {
     return () => {
       if (wmSaveTimerRef.current) {
         clearTimeout(wmSaveTimerRef.current);
         ipc.client.photos
           .setWatermarkSettings(wmLatestRef.current)
-          .catch(() => {
-            /* ignore pending save failures during navigation */
-          });
+          .catch(() => undefined);
       }
     };
   }, []);
 
+  useEffect(() => {
+    if (!wmLoaded) {
+      return;
+    }
+    const original = wmOriginalRef.current;
+    if (original && JSON.stringify(wm) === JSON.stringify(original)) {
+      return;
+    }
+
+    if (wmSaveTimerRef.current) {
+      clearTimeout(wmSaveTimerRef.current);
+    }
+    setSaveState("saving");
+    wmSaveTimerRef.current = setTimeout(() => {
+      wmSaveTimerRef.current = null;
+      saveWatermark().catch(() => undefined);
+    }, 300);
+
+    return () => {
+      if (wmSaveTimerRef.current) {
+        clearTimeout(wmSaveTimerRef.current);
+      }
+    };
+  }, [saveWatermark, wm, wmLoaded]);
+
+  const handleSettingsChange = useCallback(
+    (patch: Partial<WatermarkPreviewSettings>) => {
+      setWm((previous) => ({ ...previous, ...patch }));
+    },
+    []
+  );
+
+  const handleEnableChange = (enabled: boolean) => {
+    setWm((previous) => ({ ...previous, enabled }));
+    if (enabled && wm.mode === "text" && !wm.text.trim()) {
+      setFocusTextSignal((value) => value + 1);
+    }
+  };
+
+  const handleChooseImage = async () => {
+    try {
+      const result = (await ipc.client.shell.openFileDialog({
+        filters: [
+          {
+            name: "Images",
+            extensions: ["png", "jpg", "jpeg", "webp", "svg"],
+          },
+        ],
+      })) as { path?: string };
+      if (result?.path) {
+        setWm((previous) => ({
+          ...previous,
+          imagePath: result.path,
+          mode: "image",
+        }));
+      }
+    } catch {
+      setImageStatus("error");
+    }
+  };
+
   return (
     <SettingsPageShell
+      description={t("watermarkSettingsDescription")}
       maxWidth="wide"
       scrollRef={scrollRef}
       title={t("watermarkSettings")}
     >
-      <section className="space-y-3">
-        <div className="flex items-center justify-end">
-          <Switch
-            ariaLabel={t("watermarkSettings")}
-            checked={wm.enabled}
-            onCheckedChange={(checked) =>
-              setWm((prev) => ({ ...prev, enabled: checked }))
-            }
-          />
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-4 rounded-[8px] border border-border bg-secondary p-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-primary/10 text-primary">
+              <ShieldCheck aria-hidden="true" className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-medium text-[13px] text-foreground">
+                {t("enableWatermark")}
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground/70">
+                {t("watermarkEnableHint")}
+              </div>
+              <div
+                className={`mt-1 text-[11px] ${
+                  wm.enabled ? "text-success" : "text-muted-foreground"
+                }`}
+              >
+                {wm.enabled ? t("watermarkEnabled") : t("watermarkDisabled")}
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            <SaveState state={saveState} />
+            <Switch
+              ariaLabel={t("enableWatermark")}
+              checked={wm.enabled}
+              onCheckedChange={handleEnableChange}
+            />
+          </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_360px] lg:items-start">
-          <div className="relative lg:sticky lg:top-6">
+        {settingsLoadError && (
+          <div className="flex items-center justify-between gap-3 rounded-[6px] border border-destructive/25 bg-destructive/8 px-3 py-2 text-[11px] text-destructive">
+            <span>{t("watermarkLoadError")}</span>
+            <button
+              className="font-medium underline"
+              onClick={() => loadWatermarkSettings().catch(() => undefined)}
+              type="button"
+            >
+              {t("retry")}
+            </button>
+          </div>
+        )}
+
+        <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-stretch">
+          <div
+            className="min-w-0 lg:sticky lg:top-6 lg:self-start"
+            ref={previewPaneRef}
+          >
             <WatermarkPreview
-              onSettingsChange={(patch) =>
-                setWm((prev) => ({ ...prev, ...patch }))
+              onImageStatusChange={setImageStatus}
+              onSettingsChange={handleSettingsChange}
+              samplePhotoDimensions={samplePhoto ?? undefined}
+              samplePhotoName={
+                samplePhoto?.filename ||
+                samplePhoto?.path.split(PATH_SEPARATOR_RE).pop()
               }
-              samplePhotoPath={samplePhoto}
+              samplePhotoPath={samplePhoto?.path}
               wm={wm}
             />
-            {!wm.enabled && (
-              <div className="absolute inset-0 flex cursor-not-allowed items-center justify-center rounded-[8px] bg-background/45 backdrop-blur-[1px]">
-                <span className="rounded-[6px] bg-background/90 px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm">
-                  {t("watermarkDisabled")}
-                </span>
-              </div>
-            )}
           </div>
 
-          <fieldset
-            className={`space-y-3 rounded-[8px] border border-border bg-secondary p-4 transition-opacity disabled:cursor-not-allowed [&_button:disabled]:cursor-not-allowed [&_button:disabled]:opacity-50 [&_input:disabled]:cursor-not-allowed [&_input:disabled]:opacity-60 ${
-              wm.enabled ? "" : "opacity-60"
-            }`}
-            disabled={!wm.enabled}
+          <div
+            className="min-h-0 overflow-hidden lg:h-[var(--watermark-workspace-height)]"
+            style={
+              previewHeight === null
+                ? undefined
+                : ({
+                    "--watermark-workspace-height": `${previewHeight}px`,
+                  } as CSSProperties)
+            }
           >
-            {/* Margin slider */}
-            <div>
-              <label
-                className="mb-1 block text-[11px] text-muted-foreground/70"
-                htmlFor="watermark-margin"
-              >
-                {t("watermarkMargin", { value: wm.margin })}
-              </label>
-              <input
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                id="watermark-margin"
-                max={15}
-                min={2}
-                onChange={(e) =>
-                  setWm((prev) => ({
-                    ...prev,
-                    margin: Number(e.target.value),
-                  }))
-                }
-                step={1}
-                type="range"
-                value={wm.margin}
-              />
-            </div>
-
-            {/* Text watermark */}
-            <div className="border-border border-t pt-3">
-              <label
-                className="mb-1 block text-[11px] text-muted-foreground/70"
-                htmlFor="watermark-text"
-              >
-                {t("watermarkText")}
-              </label>
-              <input
-                className="h-8 w-full rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                id="watermark-text"
-                onChange={(e) =>
-                  setWm((prev) => ({ ...prev, text: e.target.value }))
-                }
-                placeholder={t("watermarkTextPlaceholder")}
-                value={wm.text}
-              />
-            </div>
-
-            {/* Image watermark */}
-            <div className="border-border border-t pt-3">
-              <div className="mb-1 block text-[11px] text-muted-foreground/70">
-                {t("watermarkImage")}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="rounded-[6px] border border-input px-3 py-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                  onClick={async () => {
-                    try {
-                      const result = (await ipc.client.shell.openFileDialog({
-                        filters: [
-                          {
-                            name: "Images",
-                            extensions: ["png", "jpg", "jpeg", "webp", "svg"],
-                          },
-                        ],
-                      })) as { path?: string };
-                      if (result?.path) {
-                        const imagePath = result.path;
-                        setWm((prev) => ({
-                          ...prev,
-                          imagePath,
-                        }));
-                      }
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                  type="button"
-                >
-                  {wm.imagePath ? t("changeFile") : t("chooseFile")}
-                </button>
-                {wm.imagePath && (
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
-                    {wm.imagePath.split(PATH_SEPARATOR_RE).pop()}
-                  </span>
-                )}
-                {wm.imagePath && (
-                  <button
-                    className="text-[10px] text-destructive hover:underline"
-                    onClick={() =>
-                      setWm((prev) => ({ ...prev, imagePath: "" }))
-                    }
-                    type="button"
-                  >
-                    {t("clear")}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Size slider */}
-            <div className="border-border border-t pt-3">
-              <label
-                className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground/70"
-                htmlFor={
-                  wm.imagePath ? "watermark-image-scale" : "watermark-font-size"
-                }
-              >
-                <span>
-                  {wm.imagePath
-                    ? t("watermarkImageScale", { value: wm.imageScale })
-                    : t("watermarkFontSize", { value: wm.fontSize })}
-                </span>
-                <span className="text-[10px] text-muted-foreground/50">
-                  {wm.imagePath ? "5% — 50%" : "12 — 72"}
-                </span>
-              </label>
-              {wm.imagePath ? (
-                <input
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                  id="watermark-image-scale"
-                  max={50}
-                  min={5}
-                  onChange={(e) =>
-                    setWm((prev) => ({
-                      ...prev,
-                      imageScale: Number(e.target.value),
-                    }))
-                  }
-                  step={1}
-                  type="range"
-                  value={wm.imageScale}
-                />
-              ) : (
-                <input
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                  id="watermark-font-size"
-                  max={72}
-                  min={12}
-                  onChange={(e) =>
-                    setWm((prev) => ({
-                      ...prev,
-                      fontSize: Number(e.target.value),
-                    }))
-                  }
-                  step={2}
-                  type="range"
-                  value={wm.fontSize}
-                />
-              )}
-            </div>
-
-            {/* Opacity */}
-            <div className="border-border border-t pt-3">
-              <label
-                className="mb-1 block text-[11px] text-muted-foreground/70"
-                htmlFor="watermark-opacity"
-              >
-                {t("watermarkOpacity", { value: wm.opacity })}
-              </label>
-              <input
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                id="watermark-opacity"
-                max={100}
-                min={10}
-                onChange={(e) =>
-                  setWm((prev) => ({
-                    ...prev,
-                    opacity: Number(e.target.value),
-                  }))
-                }
-                step={5}
-                type="range"
-                value={wm.opacity}
-              />
-            </div>
-          </fieldset>
+            <WatermarkControls
+              className="lg:h-full"
+              focusTextSignal={focusTextSignal}
+              imageStatus={imageStatus}
+              onChooseImage={handleChooseImage}
+              onRetrySave={() => saveWatermark().catch(() => undefined)}
+              onSettingsChange={handleSettingsChange}
+              saveState={saveState}
+              wm={wm}
+            />
+          </div>
         </div>
       </section>
     </SettingsPageShell>

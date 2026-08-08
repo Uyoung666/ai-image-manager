@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 
 // Module-level cache — survives page navigation so preview shows photo on first frame
 let cachedSampleImg: HTMLImageElement | null = null;
@@ -21,6 +23,10 @@ export type WmAnchor =
   | "bottomCenter"
   | "bottomRight";
 
+export type WatermarkMode = "text" | "image";
+
+export type WatermarkImageStatus = "empty" | "loading" | "ready" | "error";
+
 export interface WatermarkPreviewSettings {
   anchor: WmAnchor;
   enabled: boolean;
@@ -28,17 +34,21 @@ export interface WatermarkPreviewSettings {
   imagePath?: string;
   imageScale: number;
   margin: number;
+  mode: WatermarkMode;
   opacity: number;
   text: string;
 }
 
 interface Props {
+  onImageStatusChange?: (status: WatermarkImageStatus) => void;
   onSettingsChange: (patch: Partial<WatermarkPreviewSettings>) => void;
+  samplePhotoDimensions?: { height?: number; width?: number };
+  samplePhotoName?: string;
   samplePhotoPath?: string;
   wm: WatermarkPreviewSettings;
 }
 
-const ANCHORS: { label?: string; anchor: WmAnchor }[] = [
+export const WATERMARK_ANCHORS: { anchor: WmAnchor; label?: string }[] = [
   { label: "↖", anchor: "topLeft" },
   { label: "↑", anchor: "topCenter" },
   { label: "↗", anchor: "topRight" },
@@ -50,17 +60,17 @@ const ANCHORS: { label?: string; anchor: WmAnchor }[] = [
   { label: "↘", anchor: "bottomRight" },
 ];
 
-function AnchorGlyph({
+export function WatermarkAnchorGlyph({
   active,
   anchor,
 }: {
   active: boolean;
   anchor: WmAnchor;
 }) {
-  const index = ANCHORS.findIndex((item) => item.anchor === anchor);
+  const index = WATERMARK_ANCHORS.findIndex((item) => item.anchor === anchor);
   return (
     <span className="grid grid-cols-3 gap-[2px]">
-      {ANCHORS.map((item, itemIndex) => {
+      {WATERMARK_ANCHORS.map((item, itemIndex) => {
         let dotClass = "bg-muted-foreground/20";
         if (itemIndex === index) {
           dotClass = active ? "bg-primary" : "bg-muted-foreground";
@@ -144,11 +154,15 @@ export function calcWmPosition(
 export function WatermarkPreview({
   wm,
   samplePhotoPath,
+  samplePhotoName,
+  samplePhotoDimensions,
+  onImageStatusChange,
   onSettingsChange,
 }: Props) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pointerIdRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [sampleImg, setSampleImg] = useState<HTMLImageElement | null>(
     samplePhotoPath && samplePhotoPath === cachedSampleImgPath
@@ -161,8 +175,10 @@ export function WatermarkPreview({
   useEffect(() => {
     if (!samplePhotoPath) {
       setSampleImg(null);
+      setLoadError(false);
       return;
     }
+    setLoadError(false);
     const img = new Image();
     img.onload = () => {
       cachedSampleImg = img;
@@ -180,17 +196,25 @@ export function WatermarkPreview({
   useEffect(() => {
     if (!wm.imagePath) {
       setWmImg(null);
+      onImageStatusChange?.("empty");
       return;
     }
+    onImageStatusChange?.("loading");
     const img = new Image();
-    img.onload = () => setWmImg(img);
-    img.onerror = () => setWmImg(null);
+    img.onload = () => {
+      setWmImg(img);
+      onImageStatusChange?.("ready");
+    };
+    img.onerror = () => {
+      setWmImg(null);
+      onImageStatusChange?.("error");
+    };
     img.src = `local-media://${wm.imagePath.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/")}`;
     return () => {
       img.onload = null;
       img.onerror = null;
     };
-  }, [wm.imagePath]);
+  }, [onImageStatusChange, wm.imagePath]);
 
   // Draw preview
   const draw = useCallback(() => {
@@ -293,9 +317,11 @@ export function WatermarkPreview({
       wmX = 0,
       wmY = 0;
 
-    if (wmImg) {
+    const activeWmImg = wm.mode === "image" ? wmImg : null;
+
+    if (activeWmImg) {
       const maxDim = Math.round(Math.min(cw, ch) * (wm.imageScale / 100));
-      const ratio = wmImg.width / wmImg.height;
+      const ratio = activeWmImg.width / activeWmImg.height;
       if (ratio > 1) {
         wmW = maxDim;
         wmH = maxDim / ratio;
@@ -306,7 +332,7 @@ export function WatermarkPreview({
       // Position bounding box relative to anchor point
       wmX = h === "left" ? ax : h === "right" ? ax - wmW : ax - wmW / 2;
       wmY = v === "top" ? ay : v === "bottom" ? ay - wmH : ay - wmH / 2;
-    } else if (wm.text.trim()) {
+    } else if (wm.mode === "text" && wm.text.trim()) {
       const fontSize = Math.max(10, Math.round((wm.fontSize / 72) * (cw / 4)));
       ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
       const metrics = ctx.measureText(wm.text);
@@ -334,9 +360,9 @@ export function WatermarkPreview({
       ctx.setLineDash([]);
     }
 
-    if (wmImg) {
+    if (activeWmImg) {
       ctx.globalAlpha = wm.opacity / 100;
-      ctx.drawImage(wmImg, wmX, wmY, wmW, wmH);
+      ctx.drawImage(activeWmImg, wmX, wmY, wmW, wmH);
       ctx.globalAlpha = 1;
       if (dragging) {
         ctx.strokeStyle = "rgba(94,106,210,0.8)";
@@ -377,7 +403,7 @@ export function WatermarkPreview({
     ctx.fillStyle = "rgba(255,255,255,0.25)";
     ctx.fillText(
       t("watermarkReadout", {
-        anchor: wm.anchor,
+        anchor: t(`anchor_${wm.anchor}`),
         marginPx: mp,
         marginPct: wm.margin,
       }),
@@ -409,12 +435,13 @@ export function WatermarkPreview({
     const cw = rect.width;
     const ch = rect.height;
 
-    const approxW = wmImg
-      ? Math.round(Math.min(cw, ch) * (wm.imageScale / 100))
-      : cw * 0.12;
+    const approxW =
+      wm.mode === "image" && wmImg
+        ? Math.round(Math.min(cw, ch) * (wm.imageScale / 100))
+        : cw * 0.12;
     const approxH = approxW;
 
-    const candidates = ANCHORS.map((a) => {
+    const candidates = WATERMARK_ANCHORS.map((a) => {
       const pos = calcWmPosition(a.anchor, 5, cw, ch, approxW, approxH);
       const cx = pos.x + approxW / 2,
         cy = pos.y + approxH / 2;
@@ -434,44 +461,109 @@ export function WatermarkPreview({
     onSettingsChange({ anchor: nearestAnchor, margin: marginPct });
   }
 
-  function handleMouseDown(e: React.MouseEvent) {
-    if (!wm.enabled) {
-      return;
-    }
+  function handlePointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    pointerIdRef.current = e.pointerId;
+    e.currentTarget.setPointerCapture(e.pointerId);
     setDragging(true);
     dragToAnchor(e.clientX, e.clientY);
   }
-  function handleMouseMove(e: React.MouseEvent) {
-    if (!(wm.enabled && dragging)) {
+  function handlePointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if (pointerIdRef.current !== e.pointerId || !dragging) {
       return;
     }
     dragToAnchor(e.clientX, e.clientY);
   }
-  function handleMouseUp() {
+  function handlePointerUp(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if (pointerIdRef.current === e.pointerId) {
+      pointerIdRef.current = null;
+    }
     setDragging(false);
   }
 
-  let canvasCursorClass = "cursor-not-allowed";
-  if (wm.enabled) {
-    canvasCursorClass = dragging ? "cursor-grabbing" : "cursor-grab";
+  function handleCanvasKeyDown(e: ReactKeyboardEvent<HTMLCanvasElement>) {
+    const currentIndex = WATERMARK_ANCHORS.findIndex(
+      (item) => item.anchor === wm.anchor
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+
+    const row = Math.floor(currentIndex / 3);
+    const column = currentIndex % 3;
+    let nextRow = row;
+    let nextColumn = column;
+
+    if (e.key === "ArrowUp") {
+      nextRow -= 1;
+    } else if (e.key === "ArrowDown") {
+      nextRow += 1;
+    } else if (e.key === "ArrowLeft") {
+      nextColumn -= 1;
+    } else if (e.key === "ArrowRight") {
+      nextColumn += 1;
+    } else {
+      return;
+    }
+
+    if (nextRow < 0 || nextRow > 2 || nextColumn < 0 || nextColumn > 2) {
+      return;
+    }
+
+    e.preventDefault();
+    onSettingsChange({
+      anchor: WATERMARK_ANCHORS[nextRow * 3 + nextColumn].anchor,
+    });
   }
+
+  const canvasCursorClass = dragging ? "cursor-grabbing" : "cursor-grab";
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3 rounded-t-[8px] border border-border border-b-0 bg-secondary px-3 py-2">
+        <span className="font-medium text-[12px] text-foreground">
+          {t("watermarkLivePreview")}
+        </span>
+        <span className="min-w-0 truncate text-[10px] text-muted-foreground/70">
+          {samplePhotoName || t("watermarkPreviewSample")}
+          {samplePhotoDimensions?.width && samplePhotoDimensions.height
+            ? ` · ${samplePhotoDimensions.width} × ${samplePhotoDimensions.height}`
+            : ""}
+        </span>
+      </div>
       <div
-        className="relative overflow-hidden rounded-[8px] border border-border bg-secondary"
+        className="relative overflow-hidden rounded-b-[8px] border border-border bg-secondary"
         ref={containerRef}
         style={{ aspectRatio: "16 / 10" }}
       >
         <canvas
-          className={`h-full w-full ${canvasCursorClass}`}
-          onMouseDown={handleMouseDown}
-          onMouseLeave={handleMouseUp}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
+          aria-label={t("watermarkPreviewCanvasLabel")}
+          className={`h-full w-full touch-none ${canvasCursorClass}`}
+          onKeyDown={handleCanvasKeyDown}
+          onPointerCancel={handlePointerUp}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
           ref={canvasRef}
           style={{ display: "block" }}
+          tabIndex={0}
         />
+        {!samplePhotoPath && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-[6px] bg-background/70 px-3 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm">
+              {t("watermarkNoPreviewPhoto")}
+            </span>
+          </div>
+        )}
+        {wm.mode === "image" && wm.imagePath && !wmImg && !dragging && (
+          <div className="pointer-events-none absolute bottom-3 left-3 rounded-[5px] bg-destructive/85 px-2 py-1 text-[10px] text-white shadow-sm">
+            {t("watermarkAssetError")}
+          </div>
+        )}
+        {!wm.enabled && (
+          <div className="pointer-events-none absolute top-2 left-2 rounded-[5px] bg-background/75 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur-sm">
+            {t("watermarkPreviewDisabled")}
+          </div>
+        )}
         {!dragging && (
           <div className="pointer-events-none absolute top-2 right-2 rounded-[4px] bg-background/70 px-2 py-0.5 text-[10px] text-foreground/70 backdrop-blur-sm">
             {t("orDragPreview")}
@@ -485,38 +577,17 @@ export function WatermarkPreview({
           </div>
         )}
       </div>
-
-      {/* Anchor grid + margin */}
-      <div className="flex items-center gap-3">
-        <span className="flex-shrink-0 text-[11px] text-muted-foreground/70">
-          {t("watermarkPosition")}
-        </span>
-        <div className="grid grid-cols-3 gap-0.5">
-          {ANCHORS.map((a) => (
-            <Tooltip key={a.anchor}>
-              <TooltipTrigger asChild>
-                <button
-                  className={`flex h-6 w-6 items-center justify-center rounded-[4px] text-[12px] transition-all ${
-                    wm.anchor === a.anchor
-                      ? "scale-105 bg-primary/20 text-primary ring-1 ring-primary/30"
-                      : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  } disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`}
-                  disabled={!wm.enabled}
-                  onClick={() => onSettingsChange({ anchor: a.anchor })}
-                  type="button"
-                >
-                  <AnchorGlyph
-                    active={wm.anchor === a.anchor}
-                    anchor={a.anchor}
-                  />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t(`anchor_${a.anchor}`)}</TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
-        <span className="text-[10px] text-muted-foreground/50">
-          {t("orDragPreview")}
+      <div
+        aria-live="polite"
+        className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground/60"
+      >
+        <span>{t("orDragPreview")}</span>
+        <span>
+          {t("watermarkReadout", {
+            anchor: t(`anchor_${wm.anchor}`),
+            marginPx: wm.margin,
+            marginPct: wm.margin,
+          })}
         </span>
       </div>
     </div>

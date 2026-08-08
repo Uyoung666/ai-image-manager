@@ -13,6 +13,7 @@ const WatermarkSchema = z.object({
   enabled: z.boolean(),
   text: z.string(),
   imagePath: z.string().optional(),
+  mode: z.enum(["text", "image"]).optional().default("text"),
   position: z.string().optional(), // legacy
   anchor: z.string().optional().default("bottomRight"),
   margin: z.number().min(2).max(15).optional().default(5),
@@ -43,6 +44,7 @@ export const getWatermarkSettings = os.handler(() => {
     enabled: false,
     text: "",
     imagePath: "",
+    mode: "text",
     anchor: "bottomRight",
     margin: 5,
     opacity: 50,
@@ -87,6 +89,7 @@ export const exportPhotos = os
       enabled: boolean;
       text: string;
       imagePath?: string;
+      mode: "text" | "image";
       anchor: string;
       margin: number;
       opacity: number;
@@ -96,6 +99,7 @@ export const exportPhotos = os
       enabled: false,
       text: "",
       imagePath: undefined,
+      mode: "text",
       anchor: "bottomRight",
       margin: 5,
       opacity: 50,
@@ -109,7 +113,18 @@ export const exportPhotos = os
         .where(eq(appSettings.key, "watermark_settings"))
         .get();
       if (wmRow) {
-        wm = JSON.parse(wmRow.value);
+        const parsed = JSON.parse(wmRow.value) as Partial<typeof wm>;
+        let mode: "image" | "text" = "text";
+        if (parsed.mode === "image" || parsed.mode === "text") {
+          mode = parsed.mode;
+        } else if (parsed.imagePath) {
+          mode = "image";
+        }
+        wm = {
+          ...wm,
+          ...parsed,
+          mode,
+        };
       }
     } catch {
       /* use defaults */
@@ -323,9 +338,10 @@ export const exportPhotos = os
               outHeight = Math.round(maxWidth * (imgHeight / imgWidth));
             }
 
-            // Apply image watermark (takes priority over text)
+            // Apply the selected image watermark mode
             if (
               wm.enabled &&
+              wm.mode === "image" &&
               wm.imagePath &&
               fs.existsSync(wm.imagePath) &&
               outWidth > 0 &&
@@ -352,6 +368,7 @@ export const exportPhotos = os
               pipeline = pipeline.composite([{ input: wmBuffer, top, left }]);
             } else if (
               wm.enabled &&
+              wm.mode === "text" &&
               wm.text.trim() &&
               outWidth > 0 &&
               outHeight > 0
