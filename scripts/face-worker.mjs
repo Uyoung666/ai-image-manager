@@ -18,14 +18,15 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import sharp from "sharp";
-import { extractRawPreview } from "./raw-preview.mjs";
 import {
+  ARCFACE_TARGET_POINTS,
   solveSimilarityTransform,
   warpSimilarity,
-  ARCFACE_TARGET_POINTS,
 } from "./face-alignment.mjs";
-import { postProcessYuNet } from "./face-yunet-postprocess.mjs";
+import { mapYuNetBoxToImage, normalizeImageInput } from "./face-image.mjs";
 import { rgbToNCHW } from "./face-preprocess.mjs";
+import { postProcessYuNet } from "./face-yunet-postprocess.mjs";
+import { extractRawPreview } from "./raw-preview.mjs";
 
 const RAW_EXTENSIONS = new Set([
   ".cr2",
@@ -204,18 +205,23 @@ async function initModels(modelsDir, useGPU = false) {
  * mapped back to the original image.
  * Returns array of { bbox, confidence, landmarks } (landmarks: 5x2, [右眼,左眼,鼻尖,右嘴角,左嘴角]).
  */
-async function detectFacesYunet(input) {
+async function detectFacesYunet(image) {
   const { Tensor } = await loadOrt();
 
-  const meta = await sharp(input, { failOn: "none" }).rotate().metadata();
-  const imgW = meta.width || 0;
-  const imgH = meta.height || 0;
+  const imgW = image.width;
+  const imgH = image.height;
   if (imgW < 32 || imgH < 32) {
     return [];
   }
 
-  const { data } = await sharp(input, { failOn: "none" })
-    .rotate()
+  const inputBuffer = Buffer.from(
+    image.data.buffer,
+    image.data.byteOffset,
+    image.data.byteLength
+  );
+  const { data } = await sharp(inputBuffer, {
+    raw: { channels: 3, height: imgH, width: imgW },
+  })
     .removeAlpha()
     .resize(YUNET_INPUT_SIZE, YUNET_INPUT_SIZE, { fit: "fill" })
     .raw()
@@ -245,18 +251,27 @@ async function detectFacesYunet(input) {
   const scaleY = imgH / YUNET_INPUT_SIZE;
 
   return faces
-    .map((f) => ({
-      bbox: {
-        x: Math.max(0, Math.round(f.x1 * scaleX)),
-        y: Math.max(0, Math.round(f.y1 * scaleY)),
-        width: Math.round(f.w * scaleX),
-        height: Math.round(f.h * scaleY),
-      },
-      confidence: f.score,
-      landmarks: f.landmarks.map(([lx, ly]) => [lx * scaleX, ly * scaleY]),
-    }))
+    .map((f) => {
+      const bbox = mapYuNetBoxToImage(
+        f,
+        imgW,
+        imgH,
+        YUNET_INPUT_SIZE
+      );
+      if (!bbox) {
+        return null;
+      }
+      return {
+        bbox,
+        confidence: f.score,
+        landmarks: f.landmarks.map(([lx, ly]) => [lx * scaleX, ly * scaleY]),
+      };
+    })
     .filter(
-      (f) => f.bbox.width >= MIN_FACE_SIZE && f.bbox.height >= MIN_FACE_SIZE
+      (f) =>
+        f !== null &&
+        f.bbox.width >= MIN_FACE_SIZE &&
+        f.bbox.height >= MIN_FACE_SIZE
     );
 }
 
@@ -361,28 +376,17 @@ async function processPhoto(photo) {
     }
   }
 
-  const faces = await detectFacesYunet(imageInput);
+  const normalizedImage = await normalizeImageInput(imageInput, photo.path);
+  const faces = await detectFacesYunet(normalizedImage);
   if (faces.length === 0) {
     return { id: photo.id, faces: [] };
   }
 
   // Decode the full image once so all faces can be alignment-warped
   // from shared raw pixels (avoids per-face re-decoding).
-  let rawRgb = null;
-  let imgW = 0;
-  let imgH = 0;
-  try {
-    const { data, info } = await sharp(imageInput, { failOn: "none" })
-      .rotate()
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    rawRgb = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    imgW = info.width;
-    imgH = info.height;
-  } catch (err) {
-    console.error(`[FaceWorker] Full-decode failed: ${err.message}`);
-  }
+  const rawRgb = normalizedImage.data;
+  const imgW = normalizedImage.width;
+  const imgH = normalizedImage.height;
 
   const results = [];
   for (let i = 0; i < faces.length; i++) {
