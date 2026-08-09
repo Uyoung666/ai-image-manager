@@ -45,7 +45,7 @@ import {
   type TrashOperationResult,
 } from "@/services/trash-operations";
 import { BatchPhotoIdsSchema, IdSchema, TrashListSchema } from "./shared";
-import { invalidateStatsCache } from "./stats";
+import { invalidateIndexStatsCache, invalidateStatsCache } from "./stats";
 
 /**
  * Unified hard-delete: removes photo DB records, updates folder photoCounts,
@@ -773,7 +773,9 @@ export const convertPhotos = os
   });
 
 export const clearThumbCache = os.handler(async () => {
-  return await clearThumbnailDiskCache();
+  const result = await clearThumbnailDiskCache();
+  invalidateIndexStatsCache();
+  return result;
 });
 
 export const scanOrphanThumbnails = os.handler(async () => {
@@ -781,7 +783,9 @@ export const scanOrphanThumbnails = os.handler(async () => {
 });
 
 export const cleanOrphanThumbnails = os.handler(async () => {
-  return await cleanOrphanThumbnailsService();
+  const result = await cleanOrphanThumbnailsService();
+  invalidateIndexStatsCache();
+  return result;
 });
 
 export const backfillMissingThumbnails = os

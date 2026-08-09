@@ -519,9 +519,11 @@ function FaceReviewPage() {
             <Check className="h-6 w-6 text-primary" />
           </span>
           <p className="font-medium text-[14px] text-foreground">
-            {t("faceReviewEmpty")}
+            {pending.length === 0 && ignored.length === 0
+              ? t("faceReviewNoPending")
+              : t("faceReviewEmpty")}
           </p>
-          <Button onClick={() => navigate({ to: "/people" })} variant="outline">
+          <Button onClick={() => navigate({ to: "/people" })}>
             {t("backToPeople")}
           </Button>
         </div>

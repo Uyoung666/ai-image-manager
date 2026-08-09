@@ -56,8 +56,6 @@ const DEFAULT_WM: WatermarkSettings = {
   text: "",
 };
 
-const PATH_SEPARATOR_RE = /[\\/]/;
-
 let cachedSamplePhoto: SamplePhoto | null = null;
 
 function normalizeWatermarkSettings(result: unknown): WatermarkSettings {
@@ -365,11 +363,6 @@ function WatermarkSettingsPage() {
             <WatermarkPreview
               onImageStatusChange={setImageStatus}
               onSettingsChange={handleSettingsChange}
-              samplePhotoDimensions={samplePhoto ?? undefined}
-              samplePhotoName={
-                samplePhoto?.filename ||
-                samplePhoto?.path.split(PATH_SEPARATOR_RE).pop()
-              }
               samplePhotoPath={samplePhoto?.path}
               wm={wm}
             />

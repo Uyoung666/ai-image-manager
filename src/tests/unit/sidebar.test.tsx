@@ -4,7 +4,18 @@ import { Sidebar } from "@/components/Sidebar";
 
 const PHOTOS_TITLE_PATTERN = /Photos/;
 const TRAVEL_TITLE_PATTERN = /Travel/;
-const { updateFolderAppearanceMock, useAiStatusMock } = vi.hoisted(() => ({
+const {
+  batchGenerateTagsMock,
+  toastErrorMock,
+  toastInfoMock,
+  toastSuccessMock,
+  updateFolderAppearanceMock,
+  useAiStatusMock,
+} = vi.hoisted(() => ({
+  batchGenerateTagsMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+  toastInfoMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
   updateFolderAppearanceMock: vi.fn(),
   useAiStatusMock: vi.fn(),
 }));
@@ -16,6 +27,7 @@ vi.mock("@/ipc/manager", () => ({
         getUpdateStatus: vi.fn().mockResolvedValue({ phase: "idle" }),
       },
       photos: {
+        batchGenerateTags: batchGenerateTagsMock,
         getTags: vi.fn(() => new Promise(() => undefined)),
         updateFolderAppearance: updateFolderAppearanceMock,
       },
@@ -34,6 +46,14 @@ vi.mock("@tanstack/react-router", () => ({
   useLocation: () => ({ pathname: "/" }),
 }));
 
+vi.mock("sonner", () => ({
+  toast: {
+    error: toastErrorMock,
+    info: toastInfoMock,
+    success: toastSuccessMock,
+  },
+}));
+
 // Mock AiProgressBar
 vi.mock("@/components/AiProgressBar", () => ({
   AiProgressBar: () => null,
@@ -47,6 +67,10 @@ describe("Sidebar", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    batchGenerateTagsMock.mockReset();
+    toastErrorMock.mockReset();
+    toastInfoMock.mockReset();
+    toastSuccessMock.mockReset();
     useAiStatusMock.mockReturnValue({
       data: {
         coverageState: "ready",
@@ -93,6 +117,14 @@ describe("Sidebar", () => {
     expect(
       screen.getByRole("button", { name: "添加文件夹" })
     ).toBeInTheDocument();
+  });
+
+  it("uses the default resource panel width when no width preference exists", () => {
+    render(<Sidebar {...baseProps} />);
+
+    expect(
+      screen.getByRole("separator", { name: "resizeSidebar" })
+    ).toHaveAttribute("aria-valuenow", "240");
   });
 
   it("shows all photos button", () => {
@@ -647,5 +679,21 @@ describe("Sidebar", () => {
     expect(
       screen.queryByRole("button", { name: "批量生成 AI 标签" })
     ).not.toBeInTheDocument();
+  });
+
+  it("shows an empty-state notice when there are no photos to tag", async () => {
+    batchGenerateTagsMock.mockResolvedValue({
+      skipped: 0,
+      tagged: 0,
+      total: 0,
+    });
+    render(<Sidebar {...baseProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "标签" }));
+    fireEvent.click(screen.getByRole("button", { name: "批量生成 AI 标签" }));
+
+    await waitFor(() => expect(batchGenerateTagsMock).toHaveBeenCalledWith({}));
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+    expect(toastInfoMock).toHaveBeenCalledWith("暂无可生成标签的照片");
   });
 });

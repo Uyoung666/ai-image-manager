@@ -87,10 +87,23 @@ export function CullSessionCard({
     : `${displayProgress}%`;
 
   return (
-    <button
+    // biome-ignore lint/a11y/useSemanticElements: the card contains nested action buttons
+    <div
       className="group relative flex min-w-0 cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
       onClick={onClick}
-      type="button"
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        if (event.key === "Enter") {
+          onClick();
+        } else if (event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      role="button"
+      tabIndex={0}
     >
       <div className="absolute top-1.5 right-1.5 z-10 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-[760px]:opacity-100">
         {[
@@ -166,6 +179,6 @@ export function CullSessionCard({
           <TooltipContent>{progressTooltip}</TooltipContent>
         </Tooltip>
       )}
-    </button>
+    </div>
   );
 }

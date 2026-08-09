@@ -70,7 +70,7 @@ import {
   type TagInfo,
 } from "./sidebar-trees";
 
-const RESOURCE_PANEL_DEFAULT_WIDTH = 232;
+const RESOURCE_PANEL_DEFAULT_WIDTH = 240;
 const RESOURCE_PANEL_MIN_WIDTH = 192;
 const RESOURCE_PANEL_MAX_WIDTH = 320;
 const RESOURCE_PANEL_WIDTH_KEY = "sidebar-resource-panel-width";
@@ -107,12 +107,15 @@ function saveFolderIds(key: string, ids: number[]) {
 
 function loadResourcePanelWidth() {
   try {
-    const stored = Number(localStorage.getItem(RESOURCE_PANEL_WIDTH_KEY));
-    if (Number.isFinite(stored)) {
-      return Math.min(
-        RESOURCE_PANEL_MAX_WIDTH,
-        Math.max(RESOURCE_PANEL_MIN_WIDTH, stored)
-      );
+    const storedValue = localStorage.getItem(RESOURCE_PANEL_WIDTH_KEY);
+    if (storedValue !== null) {
+      const stored = Number(storedValue);
+      if (Number.isFinite(stored)) {
+        return Math.min(
+          RESOURCE_PANEL_MAX_WIDTH,
+          Math.max(RESOURCE_PANEL_MIN_WIDTH, stored)
+        );
+      }
     }
   } catch {
     // Use the default width when storage is unavailable.
@@ -501,8 +504,13 @@ export function Sidebar({
     try {
       const result = (await ipc.client.photos.batchGenerateTags({})) as {
         busy?: boolean;
+        total?: number;
       };
       if (result.busy) {
+        return;
+      }
+      if (result.total === 0) {
+        toast.info(t("aiTagsNoPhotos"));
         return;
       }
       const updated = await ipc.client.photos.getTags({

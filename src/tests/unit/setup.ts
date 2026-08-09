@@ -138,6 +138,7 @@ vi.mock("react-i18next", () => ({
         tagAnalysisIndexing: "AI 索引中，完成后可分析",
         tagAnalysisRunning: "正在自动分析此照片",
         tagAnalysisBusy: "AI 标签任务正在运行，完成后可分析",
+        aiTagsNoPhotos: "暂无可生成标签的照片",
         tagDropHint: "松手添加",
         tagDeleteTitle: "删除标签",
         tagDeleteDescription: "确定要删除标签「{{name}}」吗？该操作不可撤销。",

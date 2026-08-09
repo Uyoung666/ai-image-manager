@@ -137,6 +137,7 @@ function StorageSettingsPage() {
         setClearCacheStatus(message);
         toast.success(message);
       }
+      queryClient.invalidateQueries({ queryKey: ["indexStats"] });
     } catch {
       setClearCacheStatus(t("clearCacheFailed"));
       toast.error(t("clearCacheFailed"));

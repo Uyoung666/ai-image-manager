@@ -54,8 +54,6 @@ export interface WatermarkPreviewSettings {
 interface Props {
   onImageStatusChange?: (status: WatermarkImageStatus) => void;
   onSettingsChange: (patch: Partial<WatermarkPreviewSettings>) => void;
-  samplePhotoDimensions?: { height?: number; width?: number };
-  samplePhotoName?: string;
   samplePhotoPath?: string;
   wm: WatermarkPreviewSettings;
 }
@@ -178,8 +176,6 @@ export function calcWmPosition(
 export function WatermarkPreview({
   wm,
   samplePhotoPath,
-  samplePhotoName,
-  samplePhotoDimensions,
   onImageStatusChange,
   onSettingsChange,
 }: Props) {
@@ -392,22 +388,7 @@ export function WatermarkPreview({
     ctx.fill();
 
     ctx.globalAlpha = 1;
-
-    // Readout: anchor name + margin in pixels
-    ctx.font = "10px Inter, system-ui, sans-serif";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "bottom";
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillText(
-      t("watermarkReadout", {
-        anchor: t(`anchor_${wm.anchor}`),
-        marginPx: mp,
-        marginPct: wm.margin,
-      }),
-      cw - 8,
-      ch - 8
-    );
-  }, [wm, sampleImg, wmImg, dragging, loadError, t]);
+  }, [wm, sampleImg, wmImg, dragging, loadError]);
 
   useEffect(() => {
     draw();
@@ -516,19 +497,8 @@ export function WatermarkPreview({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex min-w-0 flex-col items-start gap-1 rounded-t-[8px] border border-border border-b-0 bg-secondary px-3 py-2 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between min-[900px]:gap-3">
-        <span className="shrink-0 font-medium text-[12px] text-foreground">
-          {t("watermarkLivePreview")}
-        </span>
-        <span className="min-w-0 max-w-full break-all text-[10px] text-muted-foreground/70 min-[900px]:text-right">
-          {samplePhotoName || t("watermarkPreviewSample")}
-          {samplePhotoDimensions?.width && samplePhotoDimensions.height
-            ? ` · ${samplePhotoDimensions.width} × ${samplePhotoDimensions.height}`
-            : ""}
-        </span>
-      </div>
       <div
-        className="relative overflow-hidden rounded-b-[8px] border border-border bg-secondary"
+        className="relative overflow-hidden rounded-[8px] border border-border bg-secondary"
         ref={containerRef}
         style={{ aspectRatio: "16 / 10" }}
       >
@@ -559,11 +529,6 @@ export function WatermarkPreview({
         {!wm.enabled && (
           <div className="pointer-events-none absolute top-2 left-2 max-w-[calc(100%-1rem)] rounded-[5px] bg-background/75 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur-sm [overflow-wrap:anywhere]">
             {t("watermarkPreviewDisabled")}
-          </div>
-        )}
-        {!dragging && (
-          <div className="pointer-events-none absolute top-2 right-2 max-w-[calc(100%-1rem)] rounded-[4px] bg-background/70 px-2 py-0.5 text-right text-[10px] text-foreground/70 backdrop-blur-sm [overflow-wrap:anywhere]">
-            {t("orDragPreview")}
           </div>
         )}
         {dragging && (
