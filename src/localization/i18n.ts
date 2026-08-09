@@ -1,12 +1,13 @@
 ﻿import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import { LOCAL_STORAGE_KEYS } from "@/constants";
 
 // Detect system language early so the first render uses the correct locale.
 // If the user has previously chosen a language (stored in localStorage),
 // that takes precedence.
 function detectInitialLang(): string {
   try {
-    const saved = localStorage.getItem("ai-image-manager-language");
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE);
     if (saved === "zh" || saved === "en") {
       return saved;
     }
@@ -935,6 +936,7 @@ i18n.use(initReactI18next).init({
         toastSearchFailed: "搜索失败",
         searchPartialFailed: "部分搜索失败，结果可能不完整",
         toastDeletedCount: "已删除 {{count}} 张照片",
+        deletedPhotosCount: "已删除 {{count}} 张照片",
         toastDeleteFailed: "删除照片失败",
         photosMoved: "已移动 {{count}} 张照片",
         movePhotosFailed: "移动照片失败",
@@ -975,6 +977,7 @@ i18n.use(initReactI18next).init({
         emptyFilterAndQueryDesc:
           '关键字 "{{query}}" 在活跃的 EXIF 过滤条件下无匹配照片。',
         emptyClearAllFilters: "清除所有过滤条件",
+        clearFilters: "清除筛选条件",
         emptyKeepQueryOnly: "仅保留关键字搜索",
         emptyExifTooStrictTitle: "EXIF 过滤条件过于严格",
         emptyExifTooStrictDesc:
@@ -1084,6 +1087,7 @@ i18n.use(initReactI18next).init({
         aiIndexComplete: "AI 索引完成 ({{processed}}/{{total}})",
         aiIndexNewPhotos: "索引新照片",
         aiLoadingEmbedding: "加载 SigLIP 模型中... {{percent}}%",
+        aiLoadingEmbeddingIndeterminate: "加载 SigLIP 模型中...",
         aiPaused: "已暂停",
         aiComplete: "完成!",
         aiRepairingIndex: "正在重建索引...",
@@ -1678,6 +1682,7 @@ i18n.use(initReactI18next).init({
         faceDetectionFailed: "人脸检测失败",
         routeErrorTitle: "页面加载出错",
         routeErrorDescription: "请尝试刷新页面",
+        loadFailedRetry: "加载失败，请重试",
         refresh: "刷新",
         trashLoadFailed: "加载已删除照片失败",
         restoredPhotosCount: "已恢复 {{count}} 张照片",
@@ -1687,6 +1692,7 @@ i18n.use(initReactI18next).init({
         restoreFailed: "恢复失败",
         permanentlyDeletedCount: "已永久删除 {{count}} 张照片",
         deleteFailed: "删除失败",
+        deleting: "删除中...",
         trashEmptied: "回收站已清空",
         emptyTrashFailed: "清空失败",
         today: "今天",
@@ -2917,6 +2923,7 @@ i18n.use(initReactI18next).init({
         toastSearchFailed: "Search failed",
         searchPartialFailed: "Some search results may be incomplete",
         toastDeletedCount: "Deleted {{count}} photos",
+        deletedPhotosCount: "Deleted {{count}} photos",
         toastDeleteFailed: "Failed to delete photos",
         photosMoved: "Moved {{count}} photos",
         movePhotosFailed: "Failed to move photos",
@@ -2959,6 +2966,7 @@ i18n.use(initReactI18next).init({
         emptyFilterAndQueryDesc:
           'Keyword "{{query}}" has no matches under active EXIF filters.',
         emptyClearAllFilters: "Clear All Filters",
+        clearFilters: "Clear filters",
         emptyKeepQueryOnly: "Keep Keyword Only",
         emptyExifTooStrictTitle: "EXIF filters too strict",
         emptyExifTooStrictDesc:
@@ -3072,6 +3080,7 @@ i18n.use(initReactI18next).init({
         aiIndexComplete: "AI index complete ({{processed}}/{{total}})",
         aiIndexNewPhotos: "Index New Photos",
         aiLoadingEmbedding: "Loading SigLIP model... {{percent}}%",
+        aiLoadingEmbeddingIndeterminate: "Loading SigLIP model...",
         aiPaused: "Paused",
         aiComplete: "Complete!",
         aiRepairingIndex: "Rebuilding index...",
@@ -3697,6 +3706,7 @@ i18n.use(initReactI18next).init({
         faceDetectionFailed: "Face detection failed",
         routeErrorTitle: "Page failed to load",
         routeErrorDescription: "Try refreshing the page",
+        loadFailedRetry: "Load failed. Please try again.",
         refresh: "Refresh",
         trashLoadFailed: "Failed to load deleted photos",
         restoredPhotosCount: "Restored {{count}} photos",
@@ -3706,6 +3716,7 @@ i18n.use(initReactI18next).init({
         restoreFailed: "Restore failed",
         permanentlyDeletedCount: "Permanently deleted {{count}} photos",
         deleteFailed: "Delete failed",
+        deleting: "Deleting...",
         trashEmptied: "Trash emptied",
         emptyTrashFailed: "Failed to empty trash",
         today: "Today",

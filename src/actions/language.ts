@@ -15,17 +15,24 @@ function detectSystemLanguage(): string {
   return "en";
 }
 
+function isSupportedLanguage(value: string | null): value is "zh" | "en" {
+  return value === "zh" || value === "en";
+}
+
 export function setAppLanguage(lang: string, i18n: i18n) {
-  localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, lang);
-  i18n.changeLanguage(lang);
-  document.documentElement.lang = lang;
+  const nextLanguage = isSupportedLanguage(lang)
+    ? lang
+    : detectSystemLanguage();
+  localStorage.setItem(LOCAL_STORAGE_KEYS.LANGUAGE, nextLanguage);
+  i18n.changeLanguage(nextLanguage);
+  document.documentElement.lang = nextLanguage;
   // Sync language to main process so tray menu labels update
-  window.electronAPI?.setLanguage?.(lang);
+  window.electronAPI?.setLanguage?.(nextLanguage);
 }
 
 export function updateAppLanguage(i18n: i18n) {
   const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.LANGUAGE);
-  const lang = saved || detectSystemLanguage();
+  const lang = isSupportedLanguage(saved) ? saved : detectSystemLanguage();
   i18n.changeLanguage(lang);
   document.documentElement.lang = lang;
   // Sync initial language to main process on app startup

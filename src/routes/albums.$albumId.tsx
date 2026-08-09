@@ -1226,7 +1226,12 @@ function AlbumDetailPage() {
       <ConfirmDialog
         confirmText={t("delete")}
         description={t("confirmDeleteDescription", {
-          count: confirmDeleteIds.length,
+          target:
+            confirmDeleteIds.length > 1
+              ? t("confirmDeleteTargetPhotos", {
+                  count: confirmDeleteIds.length,
+                })
+              : t("confirmDeleteTargetPhoto"),
         })}
         destructive
         onCancel={() => setConfirmDeleteIds([])}
