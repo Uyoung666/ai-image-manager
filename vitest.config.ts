@@ -12,6 +12,8 @@ export default defineConfig({
   test: {
     include: ["src/tests/unit/**/*.{test,spec}.{ts,tsx,js,jsx,mjs}"],
     exclude: ["src/tests/e2e/**", "src/tests/integration/**"],
+    fileParallelism: !process.env.CI,
+    maxWorkers: process.env.CI ? 1 : undefined,
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/tests/unit/setup.ts",
