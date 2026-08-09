@@ -27,6 +27,16 @@ interface CullSessionCardProps {
   };
 }
 
+function getPkWorkConfig(pkMode?: string) {
+  if (pkMode === "quick") {
+    return { minComparisons: 5, recompareFactor: 0 };
+  }
+  if (pkMode === "fine") {
+    return { minComparisons: 12, recompareFactor: 0.3 };
+  }
+  return { minComparisons: 8, recompareFactor: 0.15 };
+}
+
 export function CullSessionCard({
   getModeIcon,
   getModeLabel,
@@ -39,19 +49,14 @@ export function CullSessionCard({
   const { t } = useTranslation();
   const isCurate = session.mode === "curate";
   const isCompleted = session.status === "completed";
-  const minC =
-    session.pkMode === "quick" ? 5 : session.pkMode === "fine" ? 12 : 8;
-  const recompareBudget =
-    session.pkMode === "quick"
-      ? 0
-      : session.pkMode === "fine"
-        ? Math.ceil(session.totalPhotos * 0.3)
-        : Math.ceil(session.totalPhotos * 0.15);
+  const { minComparisons, recompareFactor } = getPkWorkConfig(session.pkMode);
+  const recompareBudget = Math.ceil(session.totalPhotos * recompareFactor);
   const totalWork =
     session.totalPhotos > 0
       ? Math.max(
           1,
-          Math.ceil((session.totalPhotos * minC) / 2) + recompareBudget
+          Math.ceil((session.totalPhotos * minComparisons) / 2) +
+            recompareBudget
         )
       : 1;
   const duelProgress =
@@ -71,11 +76,12 @@ export function CullSessionCard({
   // ── 100% guard: when the session is completed, force the bar to
   //     full regardless of formula output.  Prevents the "stuck at
   //     97%" bug when cascade-deleted photos shrink the denominator.
-  const displayProgress = isCompleted
-    ? 100
-    : isCurate
-      ? curateProgress
-      : duelProgress;
+  let displayProgress = duelProgress;
+  if (isCompleted) {
+    displayProgress = 100;
+  } else if (isCurate) {
+    displayProgress = curateProgress;
+  }
   const progressTooltip = isCurate
     ? `${session.completedComparisons}/${session.totalPhotos}`
     : `${displayProgress}%`;
@@ -84,6 +90,7 @@ export function CullSessionCard({
     <button
       className="group relative flex min-w-0 cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
       onClick={onClick}
+      type="button"
     >
       <div className="absolute top-1.5 right-1.5 z-10 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-[760px]:opacity-100">
         {[

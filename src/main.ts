@@ -520,7 +520,7 @@ function getMimeType(ext: string): string {
 class IoSemaphore {
   private running = 0;
   private readonly pending: Array<() => void> = [];
-  private max: number;
+  private readonly max: number;
 
   constructor(max: number) {
     this.max = max;
@@ -552,10 +552,6 @@ const mediaSemaphore = new IoSemaphore(16);
 // HTTP 服务器的路径安全校验和索引模块共用。
 // 缓存 TTL 10 秒；索引变更（新建/删除文件夹）通过 invalidateFoldersCache() 主动失效。
 //
-// getFolderPaths / invalidateFoldersCache 从 @/utils/folder-paths 导入。
-// 此处保留 invalidateFoldersCache 的重导出以维持外部兼容。
-export { invalidateFoldersCache } from "@/utils/folder-paths";
-
 // ── AI model availability (copy from resources or dev paths) ─────────
 
 async function verifyCurrentFaceModels(modelsDir: string): Promise<{
@@ -572,8 +568,10 @@ async function verifyCurrentFaceModels(modelsDir: string): Promise<{
     );
     const filePath = path.join(modelsDir, "face", fileName);
     if (
-      !entry ||
-      !(await verifyModelFile(filePath, entry.sha256, entry.sizeBytes))
+      !(
+        entry &&
+        (await verifyModelFile(filePath, entry.sha256, entry.sizeBytes))
+      )
     ) {
       invalidFiles.push(fileName);
     }
@@ -582,138 +580,125 @@ async function verifyCurrentFaceModels(modelsDir: string): Promise<{
   return { invalidFiles, valid: invalidFiles.length === 0 };
 }
 
-async function ensureModelAvailable(): Promise<void> {
-  const dataPath = getDataPath();
-  const modelsDir = path.join(dataPath, "models");
-  const visionMarker = getEmbeddingModelFile(
-    modelsDir,
+async function hasCurrentModels(modelsDir: string): Promise<boolean> {
+  const markers = [
+    getEmbeddingModelFile(modelsDir, "vision_model_quantized.onnx"),
+    getTranslationModelFile(modelsDir, "encoder_model_quantized.onnx"),
+    getTranslationModelFile(modelsDir, "decoder_model_merged_quantized.onnx"),
+  ];
+  const faceValidation = await verifyCurrentFaceModels(modelsDir);
+  return (
+    markers.every((marker) => fs.existsSync(marker)) && faceValidation.valid
+  );
+}
+
+async function copyBundledModels(modelsDir: string): Promise<void> {
+  const bundledModels = path.join(process.resourcesPath, "models-release");
+  const bundledMarker = getEmbeddingModelFile(
+    bundledModels,
     "vision_model_quantized.onnx"
   );
-  const translationEncoder = getTranslationModelFile(
-    modelsDir,
-    "encoder_model_quantized.onnx"
-  );
-  const translationDecoder = getTranslationModelFile(
-    modelsDir,
-    "decoder_model_merged_quantized.onnx"
-  );
+  const bundledFaceValidation = await verifyCurrentFaceModels(bundledModels);
 
-  // Face models are copied together with the model directory, so include them
-  // in the cache check — otherwise an existing SigLIP cache would skip copying
-  // a newly added face model (e.g. YuNet/SFace upgrade).
-  const faceValidation = await verifyCurrentFaceModels(modelsDir);
-  if (
-    fs.existsSync(visionMarker) &&
-    fs.existsSync(translationEncoder) &&
-    fs.existsSync(translationDecoder) &&
-    faceValidation.valid
-  ) {
-    log.info(
-      "AI models already cached and face hashes verified at %s",
-      modelsDir
+  log.info(
+    "[ensureModelAvailable] bundledModels=%s exists=%s bundledMarker=%s exists=%s faceValid=%s",
+    bundledModels,
+    fs.existsSync(bundledModels),
+    bundledMarker,
+    fs.existsSync(bundledMarker),
+    bundledFaceValidation.valid
+  );
+  if (!(fs.existsSync(bundledMarker) && bundledFaceValidation.valid)) {
+    throw new Error(
+      `Bundled AI models are incomplete or failed hash verification; invalid face files: ${bundledFaceValidation.invalidFiles.join(", ") || "none"}`
     );
-    return;
   }
 
-  // ── Production: use shared single-flight copy (fixes Issue #25 race) ──
-  if (app.isPackaged) {
-    const bundledModels = path.join(process.resourcesPath, "models-release");
-    const bundledMarker = getEmbeddingModelFile(
-      bundledModels,
+  log.info("Copying AI models from bundled resources...");
+  try {
+    await copyModelsOnce();
+    await fs.promises.cp(
+      path.join(bundledModels, "face"),
+      path.join(modelsDir, "face"),
+      { recursive: true }
+    );
+    const copied = await hasCurrentModels(modelsDir);
+    const visionMarker = getEmbeddingModelFile(
+      modelsDir,
       "vision_model_quantized.onnx"
     );
-    const bundledFaceValidation = await verifyCurrentFaceModels(bundledModels);
-
+    const size = fs.existsSync(visionMarker)
+      ? fs.statSync(visionMarker).size
+      : 0;
     log.info(
-      "[ensureModelAvailable] bundledModels=%s exists=%s bundledMarker=%s exists=%s faceValid=%s",
-      bundledModels,
-      fs.existsSync(bundledModels),
-      bundledMarker,
-      fs.existsSync(bundledMarker),
-      bundledFaceValidation.valid
+      "[ensureModelAvailable] copy done — marker exists=%s size=%d",
+      copied,
+      size
     );
-
-    if (fs.existsSync(bundledMarker) && bundledFaceValidation.valid) {
-      log.info("Copying AI models from bundled resources...");
-      try {
-        await copyModelsOnce();
-        // copyModelsOnce intentionally short-circuits when the text-model
-        // cache is already present. Face models still need to be refreshed
-        // independently after a model upgrade.
-        await fs.promises.cp(
-          path.join(bundledModels, "face"),
-          path.join(modelsDir, "face"),
-          { recursive: true }
-        );
-        // Verify
-        const copied =
-          fs.existsSync(visionMarker) &&
-          fs.existsSync(translationEncoder) &&
-          fs.existsSync(translationDecoder) &&
-          (await verifyCurrentFaceModels(modelsDir)).valid;
-        const size = fs.existsSync(visionMarker)
-          ? fs.statSync(visionMarker).size
-          : 0;
-        log.info(
-          "[ensureModelAvailable] copy done — marker exists=%s size=%d",
-          copied,
-          size
-        );
-        if (copied && size > 0) {
-          log.info("AI models copied and current face model hashes verified");
-          return;
-        }
-        throw new Error(
-          "Copied AI models failed startup verification, including the active face model"
-        );
-      } catch (err) {
-        log.error({ err }, "Failed to copy AI models from resources");
-        throw err;
-      }
-    } else {
+    if (!copied || size <= 0) {
       throw new Error(
-        `Bundled AI models are incomplete or failed hash verification; invalid face files: ${bundledFaceValidation.invalidFiles.join(", ") || "none"}`
+        "Copied AI models failed startup verification, including the active face model"
       );
     }
+    log.info("AI models copied and current face model hashes verified");
+  } catch (err) {
+    log.error({ err }, "Failed to copy AI models from resources");
+    throw err;
   }
+}
 
-  // ── Dev mode: search/copy models from project directory ──────
+async function copyDevModels(modelsDir: string): Promise<void> {
   const devCandidates = [
     path.join(process.cwd(), "models"),
     path.join(app.getAppPath(), "models"),
     path.join(app.getAppPath(), "..", "models"),
     path.join(app.getAppPath(), "..", "..", "models"),
   ];
-
   for (const candidate of devCandidates) {
     const marker = getEmbeddingModelFile(
       candidate,
       "vision_model_quantized.onnx"
     );
     log.debug({ marker }, "Checking for AI model");
-    if (fs.existsSync(marker)) {
-      log.info({ source: candidate }, "Copying AI models from dev path");
-      try {
-        await fs.promises.cp(candidate, modelsDir, { recursive: true });
-        const copiedFaceValidation = await verifyCurrentFaceModels(modelsDir);
-        if (copiedFaceValidation.valid) {
-          log.info("AI models copied and current face model hashes verified");
-          return;
-        }
-        log.warn(
-          {
-            invalidFiles: copiedFaceValidation.invalidFiles,
-            source: candidate,
-          },
-          "Dev model copy rejected because the active face model failed hash verification"
-        );
-      } catch (err) {
-        log.warn({ err, source: candidate }, "Failed to copy from dev path");
+    if (!fs.existsSync(marker)) {
+      continue;
+    }
+    log.info({ source: candidate }, "Copying AI models from dev path");
+    try {
+      await fs.promises.cp(candidate, modelsDir, { recursive: true });
+      const copiedFaceValidation = await verifyCurrentFaceModels(modelsDir);
+      if (copiedFaceValidation.valid) {
+        log.info("AI models copied and current face model hashes verified");
+        return;
       }
+      log.warn(
+        {
+          invalidFiles: copiedFaceValidation.invalidFiles,
+          source: candidate,
+        },
+        "Dev model copy rejected because the active face model failed hash verification"
+      );
+    } catch (err) {
+      log.warn({ err, source: candidate }, "Failed to copy from dev path");
     }
   }
-
   log.warn("AI models not found in any dev path");
+}
+
+async function ensureModelAvailable(): Promise<void> {
+  const modelsDir = path.join(getDataPath(), "models");
+  if (await hasCurrentModels(modelsDir)) {
+    log.info(
+      "AI models already cached and face hashes verified at %s",
+      modelsDir
+    );
+    return;
+  }
+  if (app.isPackaged) {
+    await copyBundledModels(modelsDir);
+    return;
+  }
+  await copyDevModels(modelsDir);
 }
 
 // ── UI zoom scale ────────────────────────────────────────────────────
@@ -746,7 +731,9 @@ function applyUiZoomScale() {
 function createWindow(httpPort: number) {
   const modulePath = getBasePath();
   const basePath =
-    path.basename(modulePath) === "chunks" ? path.dirname(modulePath) : modulePath;
+    path.basename(modulePath) === "chunks"
+      ? path.dirname(modulePath)
+      : modulePath;
   const preload = path.join(basePath, "preload.js");
 
   const store = getWindowStore();
@@ -833,8 +820,13 @@ function createWindow(httpPort: number) {
       return;
     }
     closePromptOpen = true;
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) {
+      closePromptOpen = false;
+      return;
+    }
     dialog
-      .showMessageBox(mainWindow!, {
+      .showMessageBox(window, {
         buttons: [tTray("minimizeToTray"), tTray("quit")],
         cancelId: 0,
         defaultId: 0,
@@ -925,7 +917,7 @@ function createWindow(httpPort: number) {
       module: "renderer-console",
       process: "renderer",
       route: sanitizeRendererRoute(
-        mainWindow.webContents.getURL().split("#").at(-1) || "/"
+        mainWindow?.webContents.getURL().split("#").at(-1) || "/"
       ),
       source: `${details.sourceId}:${details.lineNumber}`,
     });
@@ -975,10 +967,7 @@ function createWindow(httpPort: number) {
   const windowLoad =
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
       ? mainWindow.loadFile(
-          path.join(
-            basePath,
-            `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`
-          )
+          path.join(basePath, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
         )
       : mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   windowLoad.catch((error) => {
@@ -1350,6 +1339,118 @@ if (process.platform === "win32") {
   app.setAppUserModelId("com.aiimagemanager.app");
 }
 
+const BROWSER_COMPATIBLE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".ico",
+  ".avif",
+  ".svg",
+]);
+
+function notFoundResponse(): Response {
+  return new Response(null, { status: 404 });
+}
+
+async function ensureLocalMediaFile(resolved: string): Promise<boolean> {
+  if (fs.existsSync(resolved)) {
+    return true;
+  }
+  const thumbDir = getThumbnailDir();
+  if (!(thumbDir && resolved.startsWith(thumbDir))) {
+    return false;
+  }
+  const photo = getDatabase()
+    .select({ path: photos.path })
+    .from(photos)
+    .where(eq(photos.thumbnailPath, resolved))
+    .get();
+  if (!photo) {
+    return false;
+  }
+  try {
+    await generateThumbnail(photo.path, "md");
+    return fs.existsSync(resolved);
+  } catch (err) {
+    log.warn(
+      { filePath: resolved, err },
+      "local-media: Thumbnail regeneration failed"
+    );
+    return false;
+  }
+}
+
+async function renderLocalMedia(resolved: string): Promise<Response> {
+  if (!(await ensureLocalMediaFile(resolved))) {
+    return notFoundResponse();
+  }
+  const ext = path.extname(resolved).toLowerCase();
+  const buffer = await fs.promises.readFile(resolved);
+  if (BROWSER_COMPATIBLE_EXTENSIONS.has(ext)) {
+    return new Response(buffer, {
+      headers: {
+        "content-type": getMimeType(ext),
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    });
+  }
+  if (isRawFile(resolved)) {
+    const preview = await extractRawPreview(resolved);
+    if (preview) {
+      return new Response(new Uint8Array(preview), {
+        headers: {
+          "content-type": "image/jpeg",
+          "cache-control": "public, max-age=31536000, immutable",
+        },
+      });
+    }
+  }
+  try {
+    const converted = await sharp(resolved).rotate().png().toBuffer();
+    return new Response(new Uint8Array(converted), {
+      headers: {
+        "content-type": "image/png",
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    });
+  } catch (err) {
+    log.warn({ filePath: resolved, err }, "local-media: Conversion failed");
+    return new Response(buffer, {
+      headers: {
+        "content-type": getMimeType(ext),
+        "cache-control": "public, max-age=31536000, immutable",
+      },
+    });
+  }
+}
+
+async function handleLocalMediaRequest(request: {
+  url: string;
+}): Promise<Response> {
+  try {
+    const encodedPath = request.url.slice("local-media://".length);
+    const filePath = decodeURIComponent(encodedPath);
+    const resolved = path.resolve(filePath);
+    const allowedPaths = [getDataPath(), ...getFolderPaths()];
+    if (!isSafePath(resolved, allowedPaths)) {
+      log.warn({ filePath }, "Security: local-media blocked");
+      return new Response(null, { status: 403 });
+    }
+    await mediaSemaphore.acquire();
+    try {
+      return await renderLocalMedia(resolved);
+    } finally {
+      mediaSemaphore.release();
+    }
+  } catch (err) {
+    log.debug({ err }, "local-media: Request failed");
+    return notFoundResponse();
+  }
+}
+
 app.whenReady().then(async () => {
   // Squirrel.Windows event (install/update/obsolete): quit immediately,
   // don't run expensive init like model copying — the process gets killed
@@ -1373,117 +1474,7 @@ app.whenReady().then(async () => {
     // Register custom protocol handler for local file access.
     // Must be set up before createWindow() since the window loads
     // local-media:// URLs immediately.
-    protocol.handle("local-media", async (request) => {
-      try {
-        // ── Phase 1: 路径解析 + 安全验证（纯 CPU，无需信号量）───
-        const encodedPath = request.url.slice("local-media://".length);
-        const filePath = decodeURIComponent(encodedPath);
-        const resolved = path.resolve(filePath);
-
-        const cachedPaths = getFolderPaths();
-        const allowedPaths = [getDataPath(), ...cachedPaths];
-
-        if (!isSafePath(resolved, allowedPaths)) {
-          log.warn({ filePath }, "Security: local-media blocked");
-          return new Response(null, { status: 403 });
-        }
-
-        // ── Phase 2: I/O 操作（信号量保护，并发上限 16）───────
-        await mediaSemaphore.acquire();
-        try {
-          if (!fs.existsSync(resolved)) {
-            const thumbDir = getThumbnailDir();
-            if (thumbDir && resolved.startsWith(thumbDir)) {
-              const db = getDatabase();
-              const photo = db
-                .select({ path: photos.path })
-                .from(photos)
-                .where(eq(photos.thumbnailPath, resolved))
-                .get();
-              if (photo) {
-                try {
-                  await generateThumbnail(photo.path, "md");
-                } catch (e) {
-                  log.warn(
-                    { filePath: resolved, err: e },
-                    "local-media: Thumbnail regeneration failed"
-                  );
-                  return new Response(null, { status: 404 });
-                }
-              } else {
-                return new Response(null, { status: 404 });
-              }
-            } else {
-              return new Response(null, { status: 404 });
-            }
-          }
-
-          const ext = path.extname(resolved).toLowerCase();
-          const buffer = await fs.promises.readFile(resolved);
-
-          // Chromium natively supports these image formats. For everything else
-          // (TIFF, HEIC, RAW camera formats), convert to PNG on-the-fly via sharp.
-          const browserCompatible = new Set([
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".webp",
-            ".bmp",
-            ".ico",
-            ".avif",
-            ".svg",
-          ]);
-
-          if (browserCompatible.has(ext)) {
-            return new Response(buffer, {
-              headers: {
-                "content-type": getMimeType(ext),
-                "cache-control": "public, max-age=31536000, immutable",
-              },
-            });
-          }
-
-          // RAW camera formats: extract embedded JPEG preview
-          if (isRawFile(resolved)) {
-            const preview = await extractRawPreview(resolved);
-            if (preview) {
-              return new Response(new Uint8Array(preview), {
-                headers: {
-                  "content-type": "image/jpeg",
-                  "cache-control": "public, max-age=31536000, immutable",
-                },
-              });
-            }
-          }
-
-          try {
-            const converted = await sharp(resolved).rotate().png().toBuffer();
-            return new Response(new Uint8Array(converted), {
-              headers: {
-                "content-type": "image/png",
-                "cache-control": "public, max-age=31536000, immutable",
-              },
-            });
-          } catch (e) {
-            log.warn(
-              { filePath: resolved, err: e },
-              "local-media: Conversion failed"
-            );
-            return new Response(buffer, {
-              headers: {
-                "content-type": getMimeType(ext),
-                "cache-control": "public, max-age=31536000, immutable",
-              },
-            });
-          }
-        } finally {
-          mediaSemaphore.release();
-        }
-      } catch {
-        return new Response(null, { status: 404 });
-      }
-    });
+    protocol.handle("local-media", handleLocalMediaRequest);
 
     // ── Step 2: Start HTTP server (must be ready before window loads) ──
     const httpPort = await startHttpServerEarly();

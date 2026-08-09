@@ -31,7 +31,7 @@ export function getAllSettings(
     return db
       .select()
       .from(appSettings)
-      .where(sql`${appSettings.key} LIKE ${prefix + "%"}`)
+      .where(sql`${appSettings.key} LIKE ${`${prefix}%`}`)
       .all()
       .map((r) => ({ key: r.key, value: r.value }));
   }

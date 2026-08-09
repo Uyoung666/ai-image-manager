@@ -224,6 +224,7 @@ const PersonCard = memo(function PersonCard({
   };
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: the card contains nested action buttons
     <div
       aria-label={`${identity.name || t("unnamedPerson")}，${t("photosCount", { count: identity.faceCount })}`}
       className={`group relative cursor-pointer overflow-hidden rounded-[8px] border bg-card transition-colors ${
@@ -362,6 +363,7 @@ function useSkeletonCount(): number {
 }
 
 // PeoplePage
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this page coordinates the existing people interactions
 function PeoplePage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -955,191 +957,195 @@ function PeoplePage() {
           ref={scrollRef}
           style={{ paddingTop: toolbarHeight }}
         >
-        {/* 加载骨架屏：填满视口的卡片矩阵 */}
-        {isLoading && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
-            {Array.from({ length: skeletonCount }).map((_, i) => (
-              <SkeletonCard key={`skel-${i}`} />
-            ))}
-          </div>
-        )}
-
-        {/* 错误状态 */}
-        {isError && (
-          <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
-            <User className="h-12 w-12 opacity-20" />
-            <p className="text-[13px]">{t("loadFailedRetry")}</p>
-            <button
-              className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
-              onClick={() =>
-                queryClient.invalidateQueries({
-                  queryKey: ["faces", "identities"],
-                })
-              }
-              type="button"
-            >
-              {t("retry")}
-            </button>
-          </div>
-        )}
-
-        {/* 空状态 */}
-        {showContent && personFilter === "hidden" && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
-            {isHiddenIdentitiesLoading &&
-              ["one", "two", "three", "four"].map((key) => (
-                <SkeletonCard key={`hidden-skeleton-${key}`} />
-              ))}
-            {isHiddenIdentitiesError && (
-              <div className="col-span-full flex flex-col items-center gap-3 py-12 text-center text-[13px] text-muted-foreground">
-                <span>{t("loadFailedRetry")}</span>
-                <button
-                  className="rounded-md border border-border px-3 py-1.5 hover:bg-muted"
-                  onClick={() =>
-                    queryClient.invalidateQueries({
-                      queryKey: ["faces", "hidden-identities"],
-                    })
-                  }
-                  type="button"
-                >
-                  {t("retry")}
-                </button>
-              </div>
-            )}
-            {filteredHiddenIdentities.map((hiddenIdentity) => (
-              <div
-                className="rounded-lg border border-border bg-card p-4"
-                key={hiddenIdentity.id}
-              >
-                <div className="mb-3 aspect-square overflow-hidden rounded-md bg-muted">
-                  {hiddenIdentity.coverThumbnailPath ||
-                  hiddenIdentity.coverPhotoPath ? (
-                    <img
-                      alt={hiddenIdentity.name || t("unnamedPerson")}
-                      className="h-full w-full object-cover"
-                      height={320}
-                      src={toLocalMediaUrl(
-                        hiddenIdentity.coverThumbnailPath ||
-                          hiddenIdentity.coverPhotoPath ||
-                          ""
-                      )}
-                      width={320}
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center">
-                      <User className="h-10 w-10 text-muted-foreground/30" />
-                    </div>
-                  )}
-                </div>
-                <button
-                  aria-label={t("hiddenViewPerson")}
-                  className="font-medium text-[14px] text-foreground hover:text-primary"
-                  onClick={() =>
-                    navigate({
-                      to: "/people/$identityId",
-                      params: { identityId: String(hiddenIdentity.id) },
-                    })
-                  }
-                  type="button"
-                >
-                  {hiddenIdentity.name || t("unnamedPerson")}
-                </button>
-                <p className="mt-1 text-[12px] text-muted-foreground">
-                  {t("photosCount", { count: hiddenIdentity.faceCount })}
-                </p>
-                <button
-                  className="mt-3 rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
-                  onClick={() => handleRestoreHidden(hiddenIdentity.id)}
-                  type="button"
-                >
-                  {t("restoreHiddenPerson")}
-                </button>
-              </div>
-            ))}
-            {!(isHiddenIdentitiesLoading || isHiddenIdentitiesError) &&
-              filteredHiddenIdentities.length === 0 && (
-                <p className="col-span-full py-12 text-center text-[13px] text-muted-foreground">
-                  {t("noHiddenPeople")}
-                </p>
+          {/* 加载骨架屏：填满视口的卡片矩阵 */}
+          {isLoading && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
+              {Array.from({ length: skeletonCount }, (_, index) => index).map(
+                (skeletonIndex) => (
+                  <SkeletonCard key={`skel-${skeletonIndex}`} />
+                )
               )}
-          </div>
-        )}
+            </div>
+          )}
 
-        {showContent &&
-          personFilter !== "hidden" &&
-          identities.length === 0 && (
+          {/* 错误状态 */}
+          {isError && (
             <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
               <User className="h-12 w-12 opacity-20" />
-              <div className="max-w-full rounded-lg border border-primary/20 bg-primary/[0.04] px-4 py-3 text-center sm:max-w-md">
-                <p className="font-medium text-[13px] text-foreground">
-                  {t("peopleEnableTitle")}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground leading-5">
-                  {t("peopleEnableDescription")}
-                </p>
-              </div>
-              <p className="text-[13px]">{t("noPeopleTitle")}</p>
-              <p className="text-[11px] text-muted-foreground/70/60">
-                {t("noPeopleDescription")}
-              </p>
+              <p className="text-[13px]">{t("loadFailedRetry")}</p>
               <button
                 className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
-                disabled={detecting || isScanScopeLoading}
-                onClick={() => requestDetection(false)}
+                onClick={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: ["faces", "identities"],
+                  })
+                }
                 type="button"
               >
-                {t("startFaceDetectionShort")}
+                {t("retry")}
               </button>
             </div>
           )}
 
-        {/* 人物卡片网格 */}
-        {showContent && personFilter !== "hidden" && identities.length > 0 && (
-          <>
-            {filteredIdentities.length === 0 && (
-              <div className="flex h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-                <Search className="h-8 w-8 opacity-30" />
-                <p className="text-[13px]">{t("peopleSearchEmpty")}</p>
+          {/* 空状态 */}
+          {showContent && personFilter === "hidden" && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
+              {isHiddenIdentitiesLoading &&
+                ["one", "two", "three", "four"].map((key) => (
+                  <SkeletonCard key={`hidden-skeleton-${key}`} />
+                ))}
+              {isHiddenIdentitiesError && (
+                <div className="col-span-full flex flex-col items-center gap-3 py-12 text-center text-[13px] text-muted-foreground">
+                  <span>{t("loadFailedRetry")}</span>
+                  <button
+                    className="rounded-md border border-border px-3 py-1.5 hover:bg-muted"
+                    onClick={() =>
+                      queryClient.invalidateQueries({
+                        queryKey: ["faces", "hidden-identities"],
+                      })
+                    }
+                    type="button"
+                  >
+                    {t("retry")}
+                  </button>
+                </div>
+              )}
+              {filteredHiddenIdentities.map((hiddenIdentity) => (
+                <div
+                  className="rounded-lg border border-border bg-card p-4"
+                  key={hiddenIdentity.id}
+                >
+                  <div className="mb-3 aspect-square overflow-hidden rounded-md bg-muted">
+                    {hiddenIdentity.coverThumbnailPath ||
+                    hiddenIdentity.coverPhotoPath ? (
+                      <img
+                        alt={hiddenIdentity.name || t("unnamedPerson")}
+                        className="h-full w-full object-cover"
+                        height={320}
+                        src={toLocalMediaUrl(
+                          hiddenIdentity.coverThumbnailPath ||
+                            hiddenIdentity.coverPhotoPath ||
+                            ""
+                        )}
+                        width={320}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <User className="h-10 w-10 text-muted-foreground/30" />
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    aria-label={t("hiddenViewPerson")}
+                    className="font-medium text-[14px] text-foreground hover:text-primary"
+                    onClick={() =>
+                      navigate({
+                        to: "/people/$identityId",
+                        params: { identityId: String(hiddenIdentity.id) },
+                      })
+                    }
+                    type="button"
+                  >
+                    {hiddenIdentity.name || t("unnamedPerson")}
+                  </button>
+                  <p className="mt-1 text-[12px] text-muted-foreground">
+                    {t("photosCount", { count: hiddenIdentity.faceCount })}
+                  </p>
+                  <button
+                    className="mt-3 rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+                    onClick={() => handleRestoreHidden(hiddenIdentity.id)}
+                    type="button"
+                  >
+                    {t("restoreHiddenPerson")}
+                  </button>
+                </div>
+              ))}
+              {!(isHiddenIdentitiesLoading || isHiddenIdentitiesError) &&
+                filteredHiddenIdentities.length === 0 && (
+                  <p className="col-span-full py-12 text-center text-[13px] text-muted-foreground">
+                    {t("noHiddenPeople")}
+                  </p>
+                )}
+            </div>
+          )}
+
+          {showContent &&
+            personFilter !== "hidden" &&
+            identities.length === 0 && (
+              <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
+                <User className="h-12 w-12 opacity-20" />
+                <div className="max-w-full rounded-lg border border-primary/20 bg-primary/[0.04] px-4 py-3 text-center sm:max-w-md">
+                  <p className="font-medium text-[13px] text-foreground">
+                    {t("peopleEnableTitle")}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground leading-5">
+                    {t("peopleEnableDescription")}
+                  </p>
+                </div>
+                <p className="text-[13px]">{t("noPeopleTitle")}</p>
+                <p className="text-[11px] text-muted-foreground/70/60">
+                  {t("noPeopleDescription")}
+                </p>
                 <button
-                  className="text-[12px] text-primary hover:underline"
-                  onClick={() => {
-                    setPersonFilter("all");
-                    setPersonQuery("");
-                  }}
+                  className="mt-2 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
+                  disabled={detecting || isScanScopeLoading}
+                  onClick={() => requestDetection(false)}
                   type="button"
                 >
-                  {t("clearFilters")}
+                  {t("startFaceDetectionShort")}
                 </button>
               </div>
             )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
-              {filteredIdentities.map((identity) => (
-                <PersonCard
-                  composingRef={composingRef}
-                  editingId={editingId}
-                  identity={identity}
-                  isSelected={selected.has(identity.id)}
-                  key={identity.id}
-                  nameInput={nameInput}
-                  onCancelEdit={cancelEditing}
-                  onHide={handleDeleteIdentity}
-                  onNameInputChange={setNameInput}
-                  onNameInputCompositionEnd={(e) => {
-                    composingRef.current = false;
-                    setNameInput((e.target as HTMLInputElement).value);
-                  }}
-                  onNameInputCompositionStart={() => {
-                    composingRef.current = true;
-                  }}
-                  onRename={handleRename}
-                  onStartEdit={startEditing}
-                  onToggleSelect={toggleSelect}
-                  selectMode={selectMode}
-                />
-              ))}
-            </div>
-          </>
-        )}
+
+          {/* 人物卡片网格 */}
+          {showContent &&
+            personFilter !== "hidden" &&
+            identities.length > 0 && (
+              <>
+                {filteredIdentities.length === 0 && (
+                  <div className="flex h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                    <Search className="h-8 w-8 opacity-30" />
+                    <p className="text-[13px]">{t("peopleSearchEmpty")}</p>
+                    <button
+                      className="text-[12px] text-primary hover:underline"
+                      onClick={() => {
+                        setPersonFilter("all");
+                        setPersonQuery("");
+                      }}
+                      type="button"
+                    >
+                      {t("clearFilters")}
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
+                  {filteredIdentities.map((identity) => (
+                    <PersonCard
+                      composingRef={composingRef}
+                      editingId={editingId}
+                      identity={identity}
+                      isSelected={selected.has(identity.id)}
+                      key={identity.id}
+                      nameInput={nameInput}
+                      onCancelEdit={cancelEditing}
+                      onHide={handleDeleteIdentity}
+                      onNameInputChange={setNameInput}
+                      onNameInputCompositionEnd={(e) => {
+                        composingRef.current = false;
+                        setNameInput((e.target as HTMLInputElement).value);
+                      }}
+                      onNameInputCompositionStart={() => {
+                        composingRef.current = true;
+                      }}
+                      onRename={handleRename}
+                      onStartEdit={startEditing}
+                      onToggleSelect={toggleSelect}
+                      selectMode={selectMode}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
         </div>
       </div>
 

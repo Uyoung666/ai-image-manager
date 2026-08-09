@@ -32,7 +32,7 @@ export function decodeYuNet(outputs, inputSize, scoreThreshold) {
     const obj = outputs[`obj_${stride}`]?.data;
     const bbox = outputs[`bbox_${stride}`]?.data;
     const kps = outputs[`kps_${stride}`]?.data;
-    if (!cls || !obj || !bbox || !kps) {
+    if (!(cls && obj && bbox && kps)) {
       continue;
     }
 
@@ -124,7 +124,11 @@ export function nmsBoxes(faces, nmsThreshold, topK = 5000) {
  * Full post-pipeline: decode -> NMS. Returns faces sorted by score desc.
  * @returns {Array<{x1,y1,w,h,score,landmarks}>}
  */
-export function postProcessYuNet(outputs, inputSize, { scoreThreshold, nmsThreshold, topK = 5000 }) {
+export function postProcessYuNet(
+  outputs,
+  inputSize,
+  { scoreThreshold, nmsThreshold, topK = 5000 }
+) {
   const candidates = decodeYuNet(outputs, inputSize, scoreThreshold);
   const keep = nmsBoxes(candidates, nmsThreshold, topK);
   return keep.map((i) => candidates[i]);

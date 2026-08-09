@@ -82,6 +82,41 @@ interface CachedSession {
   lastAccess: number;
 }
 
+interface BrowseSessionDebugWindow extends Window {
+  __inspectBrowseSessions?: () => Map<string, BrowseSessionData>;
+}
+
+function readStoredSession(routeKey: string): CachedSession | null {
+  try {
+    const stored = sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${routeKey}`);
+    if (!stored) {
+      return null;
+    }
+    const parsed = JSON.parse(stored) as BrowseSessionData;
+    if (
+      !Array.isArray(parsed.selectedIds) ||
+      typeof parsed.searchQuery !== "string"
+    ) {
+      return null;
+    }
+    return {
+      data: {
+        ...DEFAULT_SESSION,
+        ...parsed,
+        sequenceMode: normalizeSequenceMode(parsed.sequenceMode),
+      },
+      lastAccess: Date.now(),
+    };
+  } catch {
+    console.debug("[BrowseSessionContext] sessionStorage read failed");
+    return null;
+  }
+}
+
+function isSessionExpired(cached: CachedSession): boolean {
+  return Date.now() - cached.lastAccess > SESSION_EXPIRY_MS;
+}
+
 function normalizeSequenceMode(value: unknown): "photos" | "sequences" {
   return value === "sequences" ? "sequences" : "photos";
 }
@@ -157,56 +192,30 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
   );
 
   const getSession = useCallback((routeKey: string): BrowseSessionData => {
-    // 优先内存读取
     let cached = sessionsRef.current.get(routeKey);
-
-    // sessionStorage 回退（页面刷新场景）
     if (!cached) {
+      cached = readStoredSession(routeKey) ?? undefined;
+      if (cached) {
+        sessionsRef.current.set(routeKey, cached);
+      }
+    }
+
+    if (!cached) {
+      return { ...DEFAULT_SESSION };
+    }
+    if (isSessionExpired(cached)) {
+      sessionsRef.current.delete(routeKey);
       try {
-        const stored = sessionStorage.getItem(
-          `${STORAGE_KEY_PREFIX}${routeKey}`
-        );
-        if (stored) {
-          const parsed = JSON.parse(stored) as BrowseSessionData;
-          // 基本验证
-          if (
-            Array.isArray(parsed.selectedIds) &&
-            typeof parsed.searchQuery === "string"
-          ) {
-            cached = {
-              data: {
-                ...DEFAULT_SESSION,
-                ...parsed,
-                sequenceMode: normalizeSequenceMode(parsed.sequenceMode),
-              },
-              lastAccess: Date.now(),
-            };
-            sessionsRef.current.set(routeKey, cached);
-          }
-        }
+        sessionStorage.removeItem(`${STORAGE_KEY_PREFIX}${routeKey}`);
       } catch {
-        console.debug("[BrowseSessionContext] sessionStorage read failed");
+        /* ignore */
       }
+      return { ...DEFAULT_SESSION };
     }
 
-    if (cached) {
-      // 检查是否过期（30分钟无访问自动清理，与 ScrollPositionContext 一致）
-      if (Date.now() - cached.lastAccess > SESSION_EXPIRY_MS) {
-        sessionsRef.current.delete(routeKey);
-        try {
-          sessionStorage.removeItem(`${STORAGE_KEY_PREFIX}${routeKey}`);
-        } catch {
-          /* ignore */
-        }
-        return { ...DEFAULT_SESSION };
-      }
-      cached.lastAccess = Date.now();
-      return cached.data;
-    }
-
-    return { ...DEFAULT_SESSION };
+    cached.lastAccess = Date.now();
+    return cached.data;
   }, []);
-
   const clearSession = useCallback((routeKey: string) => {
     sessionsRef.current.delete(routeKey);
     try {
@@ -241,15 +250,19 @@ export function useBrowseSession(): BrowseSessionContextValue {
 
 // 开发环境调试工具
 if (import.meta.env.DEV) {
-  (window as any).__inspectBrowseSessions = () => {
+  const debugWindow = window as BrowseSessionDebugWindow;
+  debugWindow.__inspectBrowseSessions = () => {
     const sessions = new Map<string, BrowseSessionData>();
     try {
       for (let i = 0; i < sessionStorage.length; i++) {
         const key = sessionStorage.key(i);
         if (key?.startsWith(STORAGE_KEY_PREFIX)) {
           const routeKey = key.replace(STORAGE_KEY_PREFIX, "");
-          const data = JSON.parse(sessionStorage.getItem(key)!);
-          sessions.set(routeKey, data);
+          const stored = sessionStorage.getItem(key);
+          if (stored) {
+            const data = JSON.parse(stored) as BrowseSessionData;
+            sessions.set(routeKey, data);
+          }
         }
       }
     } catch {

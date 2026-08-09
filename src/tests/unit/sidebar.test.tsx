@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/Sidebar";
 
 const PHOTOS_TITLE_PATTERN = /Photos/;
+const TRAVEL_TITLE_PATTERN = /Travel/;
 const { updateFolderAppearanceMock, useAiStatusMock } = vi.hoisted(() => ({
   updateFolderAppearanceMock: vi.fn(),
   useAiStatusMock: vi.fn(),
@@ -394,14 +395,8 @@ describe("Sidebar", () => {
   });
 
   it("removes folder shortcut ids that no longer exist", async () => {
-    localStorage.setItem(
-      "sidebar-pinned-folder-ids",
-      JSON.stringify([1, 999])
-    );
-    localStorage.setItem(
-      "sidebar-recent-folder-ids",
-      JSON.stringify([999, 1])
-    );
+    localStorage.setItem("sidebar-pinned-folder-ids", JSON.stringify([1, 999]));
+    localStorage.setItem("sidebar-recent-folder-ids", JSON.stringify([999, 1]));
     render(
       <Sidebar
         {...baseProps}
@@ -568,7 +563,7 @@ describe("Sidebar", () => {
       screen.queryByRole("button", { name: PHOTOS_TITLE_PATTERN })
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Travel/ })
+      screen.queryByRole("button", { name: TRAVEL_TITLE_PATTERN })
     ).not.toBeInTheDocument();
   });
 

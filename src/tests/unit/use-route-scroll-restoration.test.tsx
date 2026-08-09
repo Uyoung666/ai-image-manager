@@ -63,7 +63,9 @@ describe("useRouteScrollRestoration", () => {
         return 1;
       }
     );
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {
+      /* Intentionally empty: requestAnimationFrame is simulated above. */
+    });
   });
 
   describe("save on scroll", () => {
@@ -72,7 +74,7 @@ describe("useRouteScrollRestoration", () => {
       const ref = createRef(el);
 
       // Capture scroll handler to verify it's registered
-      const addEventListenerCalls: Array<[string, EventListener]> = [];
+      const addEventListenerCalls: [string, EventListener][] = [];
       (el.addEventListener as ReturnType<typeof vi.fn>).mockImplementation(
         (event: string, handler: EventListener) => {
           addEventListenerCalls.push([event, handler]);
@@ -109,7 +111,10 @@ describe("useRouteScrollRestoration", () => {
         "scroll_position_test-direct-debounce"
       );
       expect(stored).not.toBeNull();
-      const parsed = JSON.parse(stored!);
+      if (stored === null) {
+        throw new Error("Expected scroll position to be stored");
+      }
+      const parsed = JSON.parse(stored);
       expect(parsed.scrollTop).toBe(600);
     });
   });
@@ -512,9 +517,13 @@ describe("useRouteScrollRestoration", () => {
       );
 
       // Session data preserved — no scroll save overwrote the original
-      const stored = JSON.parse(
-        sessionStorage.getItem("scroll_position_test-pending-locked")!
+      const storedValue = sessionStorage.getItem(
+        "scroll_position_test-pending-locked"
       );
+      if (storedValue === null) {
+        throw new Error("Expected pending scroll position to be stored");
+      }
+      const stored = JSON.parse(storedValue);
       expect(stored.scrollTop).toBe(5000);
       expect(stored.anchor.itemId).toBe(88_888);
     });

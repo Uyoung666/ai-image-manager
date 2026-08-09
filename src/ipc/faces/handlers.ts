@@ -400,7 +400,7 @@ export const listFaceIdentities = os.handler(() => {
     if (!uniquePhotoCountMap.has(m.identityId)) {
       uniquePhotoCountMap.set(m.identityId, new Set());
     }
-    uniquePhotoCountMap.get(m.identityId)!.add(m.photoId);
+    uniquePhotoCountMap.get(m.identityId)?.add(m.photoId);
   }
 
   // 4. Assemble results (pure in-memory)
@@ -551,7 +551,7 @@ export const createFaceIdentity = os
       faceVectorIds: z.array(z.number()).optional(),
     })
   )
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     let insertedId: number | undefined;
     db.transaction(() => {
@@ -975,10 +975,13 @@ function queryFaceReviewQueue(input: {
     .where(isNull(photos.deletedAt))
     .all();
 
-  const candidates = rows.flatMap((row) => {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Candidate construction keeps review filtering and ranking together.
+  function buildCandidate(row: (typeof rows)[number]) {
     const decision = decisionByKey.get(`${row.photoId}:${row.faceIndex}`);
     const isIgnored = row.isRejected || decision?.decision === "rejected";
-    if (input.status === "ignored" ? !isIgnored : isIgnored) {
+    const statusMatches =
+      input.status === "ignored" ? !isIgnored : Boolean(isIgnored);
+    if (!statusMatches) {
       return [];
     }
     if (input.status === "pending" && !row.embedding) {
@@ -996,13 +999,17 @@ function queryFaceReviewQueue(input: {
     ) {
       return [];
     }
-    const reason: ReviewCategory = isIgnored
-      ? "ignored"
-      : decision?.decision === "removed_from_identity"
-        ? "removed_from_identity"
-        : confidence !== null && confidence < model.clustering.confidenceFilter
-          ? "low_confidence"
-          : "unmatched";
+    let reason: ReviewCategory = "unmatched";
+    if (isIgnored) {
+      reason = "ignored";
+    } else if (decision?.decision === "removed_from_identity") {
+      reason = "removed_from_identity";
+    } else if (
+      confidence !== null &&
+      confidence < model.clustering.confidenceFilter
+    ) {
+      reason = "low_confidence";
+    }
     if (input.category !== "all" && input.category !== reason) {
       return [];
     }
@@ -1054,7 +1061,9 @@ function queryFaceReviewQueue(input: {
         thumbnailPath: row.thumbnailPath,
       },
     ];
-  });
+  }
+
+  const candidates = rows.flatMap(buildCandidate);
   candidates.sort(
     (a, b) =>
       (b.detectionConfidence ?? 0) - (a.detectionConfidence ?? 0) || b.id - a.id

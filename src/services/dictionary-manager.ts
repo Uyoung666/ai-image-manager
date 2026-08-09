@@ -32,8 +32,8 @@ export interface CustomDictionaryData {
  */
 export class DictionaryManager {
   private customDict: CustomDictionaryData | null = null;
-  private mergedCache: Map<string, DictEntry> = new Map();
-  private customDictPath: string;
+  private readonly mergedCache: Map<string, DictEntry> = new Map();
+  private readonly customDictPath: string;
 
   constructor() {
     this.customDictPath = path.join(
@@ -62,7 +62,7 @@ export class DictionaryManager {
           "Custom dictionary loaded"
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.error({ err }, "Failed to load custom dictionary");
     }
   }
@@ -244,7 +244,7 @@ export class DictionaryManager {
   /**
    * 保存自定义词典
    */
-  private async saveCustomDict(): Promise<void> {
+  private saveCustomDict(): void {
     const dir = path.dirname(this.customDictPath);
 
     if (!fs.existsSync(dir)) {
@@ -262,7 +262,7 @@ export class DictionaryManager {
   /**
    * 导出自定义词典
    */
-  async exportCustomDict(): Promise<string> {
+  exportCustomDict(): string {
     return JSON.stringify(this.customDict, null, 2);
   }
 
@@ -292,8 +292,10 @@ export class DictionaryManager {
           };
           result.added++;
         }
-      } catch (err: any) {
-        result.errors.push(`${zh}: ${err.message}`);
+      } catch (err: unknown) {
+        result.errors.push(
+          `${zh}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 

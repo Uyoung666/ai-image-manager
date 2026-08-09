@@ -21,6 +21,10 @@ import { extractRawPreview, isRawFile } from "./raw-preview";
 import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
 const log = createLogger("indexer");
+const FOCAL_RANGE_RE = /^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/;
+const FOCAL_SPLIT_RE = /\s*-\s*/;
+const SHUTTER_FRACTION_RE = /^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/;
+const WATCHER_IGNORED_PATTERNS = [/\.thumbnails/, /\.cache/];
 
 const SUPPORTED_EXTENSIONS = new Set([
   // Common image formats
@@ -204,7 +208,7 @@ async function computePHash(input: string | Buffer): Promise<string | null> {
     let hash = 0n;
     for (let i = 0; i < lowFreq.length; i++) {
       if (lowFreq[i] > median) {
-        hash |= 1n << BigInt(i);
+        hash += 2n ** BigInt(i);
       }
     }
 
@@ -288,8 +292,8 @@ async function readExif(
 }
 
 interface PhotoRecord {
-  colorSpace: string;
   colorBucket: number | null;
+  colorSpace: string;
   dominantColors: string | null;
   duelPreviewPath: string | null;
   fileDate: number;
@@ -313,7 +317,7 @@ function parseShutterSpeedToNum(value: string | undefined): number | null {
     return null;
   }
   // Fraction format: "1/1000", "1/60" etc.
-  const fracMatch = value.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+  const fracMatch = value.match(SHUTTER_FRACTION_RE);
   if (fracMatch) {
     const num = Number.parseFloat(fracMatch[1]);
     const den = Number.parseFloat(fracMatch[2]);
@@ -340,12 +344,14 @@ function parseFocalLengthToNum(value: string | undefined): number | null {
 // strings like "85.00000000001" which break GROUP BY and look ugly in charts.
 // Single-number → rounded to 0 decimals; zoom range "24-70" → kept as-is.
 function cleanFocalLengthText(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
+  if (!raw) {
+    return undefined;
+  }
   const trimmed = raw.trim();
   // Zoom range like "24-70" or "18-55"
-  if (/^\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?$/.test(trimmed)) {
+  if (FOCAL_RANGE_RE.test(trimmed)) {
     // Clean each part: "24.000001-70.00001" → "24-70"
-    const parts = trimmed.split(/\s*-\s*/);
+    const parts = trimmed.split(FOCAL_SPLIT_RE);
     const cleaned = parts.map((p) => {
       const n = Number.parseFloat(p);
       return Number.isFinite(n) ? Math.round(n).toString() : p;
@@ -441,6 +447,7 @@ function queuePrimaryColorVectorUpsert(
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Photo preparation combines metadata, thumbnail, RAW preview, EXIF, and color extraction for one indexed file.
 async function preparePhotoRecord(
   filePath: string,
   folderId: number | null
@@ -465,7 +472,7 @@ async function preparePhotoRecord(
   }
 
   // Generate thumbnail (md=320px for crisp display in grid)
-  let thumb;
+  let thumb: Awaited<ReturnType<typeof generateThumbnail>>;
   try {
     thumb = await generateThumbnail(filePath, "md", {
       input: meta.thumbnailInput,
@@ -473,7 +480,7 @@ async function preparePhotoRecord(
     });
   } catch {
     log.warn({ filePath }, "Thumbnail generation failed");
-    thumb = { thumbnailPath: null, width: 0, height: 0 };
+    thumb = { thumbnailPath: "", width: 0, height: 0 };
   }
 
   // Duel previews are generated lazily by cull.ensureDuelPreview.
@@ -536,6 +543,7 @@ async function preparePhotoRecord(
 
   if (exif && Object.keys(exif).length > 0) {
     const focalLengthStr = exif.FocalLength?.toString();
+    const focalLengthNum = parseFocalLengthToNum(focalLengthStr);
     const shutterSpeedStr = exif.ExposureTime?.toString();
 
     // Derive camera model with fallback: phone photos (iPhone/OPPO/etc.)
@@ -581,13 +589,12 @@ async function preparePhotoRecord(
       focalLength35mm: cleanFocalLengthText(
         exif.FocalLengthIn35mmFormat?.toString()
       ),
-      focalLengthNum: parseFocalLengthToNum(focalLengthStr)
-        ? Math.round(parseFocalLengthToNum(focalLengthStr)! * 10) / 10
-        : null,
+      focalLengthNum:
+        focalLengthNum === null ? null : Math.round(focalLengthNum * 10) / 10,
       aperture:
-        exif.FNumber != null
-          ? Math.round((exif.FNumber as number) * 10) / 10
-          : undefined,
+        exif.FNumber == null
+          ? undefined
+          : Math.round((exif.FNumber as number) * 10) / 10,
       shutterSpeed: shutterSpeedStr,
       shutterSpeedNum: parseShutterSpeedToNum(shutterSpeedStr),
       iso: exif.ISO as number,
@@ -691,7 +698,7 @@ async function indexSingleFile(
     try {
       exifRecord.photoId = photoId;
       db.insert(exifData).values(exifRecord).run();
-    } catch (err: any) {
+    } catch (err: unknown) {
       log.warn({ filePath, err }, "EXIF insert failed");
     }
   }
@@ -701,6 +708,7 @@ async function indexSingleFile(
   return photoId;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Folder scanning preserves cancellation, batching, duplicate handling, and progress lifecycle in one public operation.
 export async function scanFolder(
   folderPath: string,
   onProgress?: ProgressCallback
@@ -915,6 +923,7 @@ export async function scanFolder(
 
       const preparedRecords = await runWithConcurrency(
         batchFiles,
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Per-file indexing callback keeps all error and cancellation branches together for queue ordering.
         async (file) => {
           if (scanToken.cancelled) {
             return null;
@@ -1042,7 +1051,7 @@ export async function scanFolder(
                 try {
                   record.exifRecord.photoId = photoId;
                   db.insert(exifData).values(record.exifRecord).run();
-                } catch (err: any) {
+                } catch (err: unknown) {
                   log.warn(
                     { filePath: record.photoRecord.path, err },
                     "EXIF insert failed"
@@ -1064,7 +1073,7 @@ export async function scanFolder(
               record.photoRecord.dominantColors
             );
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           // Fallback to individual inserts if batch fails
           log.warn(
             { err },
@@ -1126,7 +1135,7 @@ export async function scanFolder(
 
     // Clean up photos whose files no longer exist on disk — check all folders
     const stalePhotoIds: number[] = [];
-    for (const [dirPath, fid] of dirToFolderId) {
+    for (const [_dirPath, fid] of dirToFolderId) {
       const dbPhotos = db
         .select({ id: photos.id, path: photos.path })
         .from(photos)
@@ -1265,7 +1274,7 @@ export function startWatching(
       continue;
     }
     const watcher = chokidar.watch(folder.path, {
-      ignored: [/\.thumbnails/, /\.cache/],
+      ignored: WATCHER_IGNORED_PATTERNS,
       ignorePermissionErrors: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
@@ -1315,7 +1324,7 @@ export function startWatching(
     watcher.on("unlink", (filePath) => {
       watcherStats.unlinkEvents++;
 
-      watcherQueue.add(async () => {
+      watcherQueue.add(() => {
         try {
           const photo = db
             .select({ id: photos.id, folderId: photos.folderId })
@@ -1386,7 +1395,7 @@ export function watchFolder(
   }
   const db = getDatabase();
   const watcher = chokidar.watch(folderPath, {
-    ignored: [/\.thumbnails/, /\.cache/],
+    ignored: WATCHER_IGNORED_PATTERNS,
     ignorePermissionErrors: true,
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
@@ -1436,7 +1445,7 @@ export function watchFolder(
   watcher.on("unlink", (filePath) => {
     watcherStats.unlinkEvents++;
 
-    watcherQueue.add(async () => {
+    watcherQueue.add(() => {
       try {
         const photo = db
           .select({ id: photos.id, folderId: photos.folderId })

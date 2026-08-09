@@ -141,14 +141,7 @@ export function useMasonryMarquee<T extends { id: number }>({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [
-    items,
-    marquee,
-    onMarqueeSelect,
-    positions,
-    scrollRef,
-    visibilityIndex,
-  ]);
+  }, [items, marquee, onMarqueeSelect, positions, scrollRef, visibilityIndex]);
 
   return { handleMarqueeStart, marquee };
 }

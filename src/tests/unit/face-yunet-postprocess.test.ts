@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   decodeYuNet,
   nmsBoxes,
@@ -22,7 +22,12 @@ function fakeOutputs(
     const rows = Math.round(inputSize / stride);
     const n = rows * cols;
     for (const prefix of ["cls", "obj", "bbox", "kps"]) {
-      const outLen = prefix === "bbox" ? n * 4 : prefix === "kps" ? n * 10 : n;
+      let outLen = n;
+      if (prefix === "bbox") {
+        outLen = n * 4;
+      } else if (prefix === "kps") {
+        outLen = n * 10;
+      }
       const data = new Float32Array(outLen);
       const name = `${prefix}_${stride}`;
       outputs[name] = { dims: [], data };
@@ -35,28 +40,31 @@ function fakeOutputs(
 describe("decodeYuNet", () => {
   it("decodes a single high-score face at stride 8", () => {
     const inputSize = 640;
-    const outputs = fakeOutputs(inputSize, (name, data, rows, cols, stride) => {
-      const c = 40; // grid col
-      const r = 30; // grid row
-      const idx = r * cols + c;
-      if (name === `cls_${stride}`) {
-        data[idx] = 0.81; // cls
+    const outputs = fakeOutputs(
+      inputSize,
+      (name, data, _rows, cols, stride) => {
+        const c = 40; // grid col
+        const r = 30; // grid row
+        const idx = r * cols + c;
+        if (name === `cls_${stride}`) {
+          data[idx] = 0.81; // cls
+        }
+        if (name === `obj_${stride}`) {
+          data[idx] = 1.0; // obj
+        }
+        if (name === `bbox_${stride}`) {
+          // offsets: cx=0, cy=0, w=1, h=1 -> center at (c*stride, r*stride), size stride
+          data[idx * 4 + 0] = 0;
+          data[idx * 4 + 1] = 0;
+          data[idx * 4 + 2] = 0; // exp(0)*stride = stride
+          data[idx * 4 + 3] = 0;
+        }
+        if (name === `kps_${stride}`) {
+          data[idx * 10 + 0] = 0; // landmark 0 x offset
+          data[idx * 10 + 1] = 0; // landmark 0 y offset
+        }
       }
-      if (name === `obj_${stride}`) {
-        data[idx] = 1.0; // obj
-      }
-      if (name === `bbox_${stride}`) {
-        // offsets: cx=0, cy=0, w=1, h=1 -> center at (c*stride, r*stride), size stride
-        data[idx * 4 + 0] = 0;
-        data[idx * 4 + 1] = 0;
-        data[idx * 4 + 2] = 0; // exp(0)*stride = stride
-        data[idx * 4 + 3] = 0;
-      }
-      if (name === `kps_${stride}`) {
-        data[idx * 10 + 0] = 0; // landmark 0 x offset
-        data[idx * 10 + 1] = 0; // landmark 0 y offset
-      }
-    });
+    );
 
     const faces = decodeYuNet(outputs, inputSize, 0.5);
     // score = sqrt(0.81 * 1.0) = 0.9 >= 0.5 -> kept, all 3 scales have it but only stride 8 populated
@@ -73,15 +81,18 @@ describe("decodeYuNet", () => {
 
   it("filters faces below the score threshold during decode", () => {
     const inputSize = 320;
-    const outputs = fakeOutputs(inputSize, (name, data, rows, cols, stride) => {
-      const idx = 0;
-      if (name === `cls_${stride}`) {
-        data[idx] = 0.1;
+    const outputs = fakeOutputs(
+      inputSize,
+      (name, data, _rows, _cols, stride) => {
+        const idx = 0;
+        if (name === `cls_${stride}`) {
+          data[idx] = 0.1;
+        }
+        if (name === `obj_${stride}`) {
+          data[idx] = 0.1; // score = 0.1
+        }
       }
-      if (name === `obj_${stride}`) {
-        data[idx] = 0.1; // score = 0.1
-      }
-    });
+    );
     const faces = decodeYuNet(outputs, inputSize, 0.5);
     expect(faces.length).toBe(0);
   });
@@ -107,7 +118,13 @@ describe("nmsBoxes", () => {
   });
 
   it("respects topK cap", () => {
-    const faces = [];
+    const faces: Array<{
+      x1: number;
+      y1: number;
+      w: number;
+      h: number;
+      score: number;
+    }> = [];
     for (let i = 0; i < 10; i++) {
       faces.push({ x1: i * 200, y1: 0, w: 50, h: 50, score: 1 - i * 0.05 });
     }
@@ -123,18 +140,27 @@ describe("nmsBoxes", () => {
 describe("postProcessYuNet", () => {
   it("runs decode + NMS end to end", () => {
     const inputSize = 640;
-    const outputs = fakeOutputs(inputSize, (name, data, rows, cols, stride) => {
-      if (stride !== 16) return;
-      const idx = 5 * cols + 5; // (r=5, c=5) — valid within 40x40 grid
-      if (name === "cls_16") data[idx] = 1;
-      if (name === "obj_16") data[idx] = 1;
-      if (name === "bbox_16") {
-        data[idx * 4 + 0] = 0;
-        data[idx * 4 + 1] = 0;
-        data[idx * 4 + 2] = 0;
-        data[idx * 4 + 3] = 0;
+    const outputs = fakeOutputs(
+      inputSize,
+      (name, data, _rows, cols, stride) => {
+        if (stride !== 16) {
+          return;
+        }
+        const idx = 5 * cols + 5; // (r=5, c=5) — valid within 40x40 grid
+        if (name === "cls_16") {
+          data[idx] = 1;
+        }
+        if (name === "obj_16") {
+          data[idx] = 1;
+        }
+        if (name === "bbox_16") {
+          data[idx * 4 + 0] = 0;
+          data[idx * 4 + 1] = 0;
+          data[idx * 4 + 2] = 0;
+          data[idx * 4 + 3] = 0;
+        }
       }
-    });
+    );
     const result = postProcessYuNet(outputs, inputSize, {
       scoreThreshold: 0.5,
       nmsThreshold: 0.3,

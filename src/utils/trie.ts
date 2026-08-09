@@ -9,16 +9,18 @@ class TrieNode {
 }
 
 export class Trie {
-  private root = new TrieNode();
+  private readonly root = new TrieNode();
 
   // 插入一个词条
   insert(word: string, category?: string, translation?: string): void {
     let node = this.root;
     for (const char of word) {
-      if (!node.children.has(char)) {
-        node.children.set(char, new TrieNode());
+      let child = node.children.get(char);
+      if (!child) {
+        child = new TrieNode();
+        node.children.set(char, child);
       }
-      node = node.children.get(char)!;
+      node = child;
     }
     node.isEnd = true;
     node.value = word;
@@ -39,10 +41,11 @@ export class Trie {
 
     // 找到前缀节点
     for (const char of prefix) {
-      if (!node.children.has(char)) {
+      const child = node.children.get(char);
+      if (!child) {
         return [];
       }
-      node = node.children.get(char)!;
+      node = child;
     }
 
     // 从前缀节点开始 DFS 收集所有词条
@@ -71,7 +74,10 @@ export class Trie {
         if (results.length >= limit) {
           break;
         }
-        dfs(current.children.get(key)!);
+        const child = current.children.get(key);
+        if (child) {
+          dfs(child);
+        }
       }
     };
 
@@ -83,10 +89,11 @@ export class Trie {
   has(word: string): boolean {
     let node = this.root;
     for (const char of word) {
-      if (!node.children.has(char)) {
+      const child = node.children.get(char);
+      if (!child) {
         return false;
       }
-      node = node.children.get(char)!;
+      node = child;
     }
     return node.isEnd;
   }

@@ -54,7 +54,7 @@ type AdvancedCategoryColumn =
 
 // Module-level cache for getStats (invalidate on photo/EXIF changes)
 interface StatsCacheEntry {
-  data: any;
+  data: unknown;
   includesColors: boolean;
   includesGeo: boolean;
   key?: string;
@@ -411,6 +411,7 @@ export const getStats = os
       toExclusive: z.number().finite().optional(),
     })
   )
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Dashboard stats combines the existing cached aggregate queries.
   .handler(({ input }) => {
     const cacheKey = JSON.stringify({
       from: input.from,
@@ -944,10 +945,12 @@ export const getStats = os
     // Optionally include color distribution in the same IPC call
     if (input.includeColors) {
       try {
-        (result as any).colorDistribution = computeDashboardColors(input);
+        Object.assign(result, {
+          colorDistribution: computeDashboardColors(input),
+        });
       } catch (err) {
         console.error("[getStats] colorDistribution failed:", err);
-        (result as any).colorDistribution = null;
+        Object.assign(result, { colorDistribution: null });
       }
     }
 
@@ -1112,6 +1115,7 @@ export const findDuplicates = os
       forceRescan: z.boolean().optional().default(false),
     })
   )
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate detection preserves its staged hash and vector pipeline.
   .handler(async ({ input }) => {
     const db = getDatabase();
     const sequenceByPhoto = getPhotoSequenceIds(db);
@@ -1267,16 +1271,19 @@ export const findDuplicates = os
     }
 
     // --- Phase 1: BK-Tree pHash near-neighbor search ---
-    const photosWithHash = allPhotos.filter((p) => p.phash);
+    const photosWithHash = allPhotos.filter(
+      (p): p is (typeof allPhotos)[number] & { phash: string } =>
+        p.phash != null
+    );
     const bkTree = new BKTree();
     for (const p of photosWithHash) {
-      bkTree.insert(p.id, p.phash!);
+      bkTree.insert(p.id, p.phash);
     }
 
     let phashProcessed = 0;
     for (const p of photosWithHash) {
       phashProcessed++;
-      const neighbors = bkTree.query(p.phash!, input.threshold);
+      const neighbors = bkTree.query(p.phash, input.threshold);
       for (const n of neighbors) {
         if (n.photoId === p.id) {
           continue;
@@ -1343,16 +1350,14 @@ export const findDuplicates = os
           c.matchType = "clip_confirmed";
           confirmedPairs.push(c);
         }
-      } else {
+      } else if (c.phashDistance <= 3) {
         // No vectors: use distance-based confidence
-        if (c.phashDistance <= 3) {
-          // High confidence without CLIP
-          confirmedPairs.push(c);
-        } else if (c.phashDistance <= input.threshold) {
-          // distance 4-8 without vectors: keep as pending for manual review
-          c.matchType = "phash";
-          confirmedPairs.push(c);
-        }
+        // High confidence without CLIP
+        confirmedPairs.push(c);
+      } else if (c.phashDistance <= input.threshold) {
+        // distance 4-8 without vectors: keep as pending for manual review
+        c.matchType = "phash";
+        confirmedPairs.push(c);
       }
     }
 
@@ -1542,7 +1547,10 @@ export async function runColorMigration(
 
   for (const photo of photoRows) {
     try {
-      const colors = await extractDominantColors(photo.thumbnailPath!);
+      if (!photo.thumbnailPath) {
+        continue;
+      }
+      const colors = await extractDominantColors(photo.thumbnailPath);
       if (colors) {
         // Compute hue bucket from the primary color for pre-filter optimization
         let bucketSql = sql`NULL`;

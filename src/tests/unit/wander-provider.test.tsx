@@ -20,7 +20,14 @@ const { mockPathname, aiStatus } = vi.hoisted(() => ({
   aiStatus: { isRunning: false },
 }));
 
-let overlayProps: Record<string, unknown> | null = null;
+interface TestOverlayProps {
+  onRoundComplete?: () => void;
+  onSave?: () => void;
+  roundNumber?: number;
+  session?: WanderSession;
+}
+
+let overlayProps: TestOverlayProps | null = null;
 
 vi.mock("@tanstack/react-router", () => ({
   useLocation: () => ({ pathname: mockPathname.value }),
@@ -42,7 +49,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/components/wander/WanderOverlay", () => ({
-  WanderOverlay: (props: Record<string, unknown>) => {
+  WanderOverlay: (props: TestOverlayProps) => {
     overlayProps = props;
     return <div data-testid="wander-overlay" />;
   },

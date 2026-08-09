@@ -17,6 +17,10 @@ import {
 } from "./state";
 import { getPhotoVectors, initVectorDB } from "./vector-db";
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export type TagCategory =
   | "scene"
   | "subject"
@@ -511,6 +515,7 @@ export function _resetTagEmbeddingCacheForTest(): void {
   tagEmbeddingPromiseKey = null;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Tag suggestion coordinates model loading, vector cache fallback, embedding, and persistence as one public operation.
 export async function suggestTags(
   imagePath: string,
   _threshold = 0.25,
@@ -518,8 +523,8 @@ export async function suggestTags(
 ): Promise<Array<{ tag: string; confidence: number }>> {
   try {
     await loadModel();
-  } catch (err: any) {
-    console.error("[AI] suggestTags: model load failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] suggestTags: model load failed:", getErrorMessage(err));
     return [];
   }
 
@@ -577,8 +582,11 @@ export async function suggestTags(
           `[AI] suggestTags: no vector in LanceDB for photo ${photoId}`
         );
       }
-    } catch (err: any) {
-      console.warn("[AI] suggestTags: LanceDB lookup failed:", err?.message);
+    } catch (err: unknown) {
+      console.warn(
+        "[AI] suggestTags: LanceDB lookup failed:",
+        getErrorMessage(err)
+      );
     }
   }
 
@@ -594,8 +602,11 @@ export async function suggestTags(
         }
         imageVecCache.set(photoId, imageVec);
       }
-    } catch (err: any) {
-      console.error("[AI] suggestTags: image embedding failed:", err?.message);
+    } catch (err: unknown) {
+      console.error(
+        "[AI] suggestTags: image embedding failed:",
+        getErrorMessage(err)
+      );
       return [];
     }
   }
@@ -659,6 +670,7 @@ export function batchSuggestTags(
   return activeBatchTaggingPromise;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Batch tagging preserves per-photo retry, transaction, progress, and cancellation behavior in one worker loop.
 async function runBatchSuggestTags(
   photoIds: number[],
   onProgress?: (processed: number, total: number, photoId: number) => void
@@ -667,8 +679,11 @@ async function runBatchSuggestTags(
 
   try {
     await loadModel();
-  } catch (err: any) {
-    console.error("[AI] batchSuggestTags: model load failed:", err?.message);
+  } catch (err: unknown) {
+    console.error(
+      "[AI] batchSuggestTags: model load failed:",
+      getErrorMessage(err)
+    );
     throw err;
   }
 
@@ -760,7 +775,10 @@ async function runBatchSuggestTags(
           try {
             let hash = 0;
             for (let i = 0; i < s.tag.length; i++) {
-              hash = s.tag.charCodeAt(i) + ((hash << 5) - hash);
+              hash = Math.imul(hash, 31) + s.tag.charCodeAt(i);
+              if (hash > 2_147_483_647) {
+                hash -= 4_294_967_296;
+              }
             }
             const tagColor = tagColors[Math.abs(hash) % tagColors.length];
 

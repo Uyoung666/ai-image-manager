@@ -1,8 +1,5 @@
 import { type CSSProperties, type RefObject, useMemo } from "react";
-import type {
-  HeaderPosition,
-  MasonryItem,
-} from "@/hooks/useMasonryLayout";
+import type { HeaderPosition, MasonryItem } from "@/hooks/useMasonryLayout";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 import {
   binarySearchVisibilityStart,
@@ -168,7 +165,9 @@ export function useMasonryVirtualWindow({
       ? (scrollRef.current?.scrollTop ?? scrollTop)
       : initialScrollTop;
     const effectiveHeight =
-      viewportHeight > 0 ? viewportHeight : (scrollRef.current?.clientHeight ?? 0);
+      viewportHeight > 0
+        ? viewportHeight
+        : (scrollRef.current?.clientHeight ?? 0);
     const result = getVisibleMasonryItems(
       positions,
       effectiveScrollTop,
@@ -183,7 +182,6 @@ export function useMasonryVirtualWindow({
     );
     return result;
   }, [
-    columnCount,
     hasInitialPositionedRef,
     initialScrollTop,
     positions,
@@ -197,7 +195,9 @@ export function useMasonryVirtualWindow({
 
   const visibleHeaders = useMemo(() => {
     const effectiveHeight =
-      viewportHeight > 0 ? viewportHeight : (scrollRef.current?.clientHeight ?? 0);
+      viewportHeight > 0
+        ? viewportHeight
+        : (scrollRef.current?.clientHeight ?? 0);
     return getVisibleMasonryHeaders(
       headerPositions,
       scrollTop,

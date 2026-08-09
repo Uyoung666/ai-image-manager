@@ -40,6 +40,9 @@ const CATEGORY_TO_SLOT: Record<DictCategory, keyof ParsedQuery> = {
   object: "subject",
 };
 
+const CJK_RE = /[一-鿿]/;
+const WHITESPACE_RE = /\s+/g;
+
 function getMergedDict() {
   try {
     return getDictionaryManager().getMergedDictionary();
@@ -80,14 +83,14 @@ export function parseChineseQuery(query: string): ParsedQuery {
   }
 
   // Character-level decomposition for remaining CJK characters
-  const remainingChars = remaining.replace(/\s+/g, "");
+  const remainingChars = remaining.replace(WHITESPACE_RE, "");
   if (remainingChars.length > 0) {
     for (const char of remainingChars) {
-      if (/[一-鿿]/.test(char) && CHAR_DECOMPOSE[char]) {
+      if (CJK_RE.test(char) && CHAR_DECOMPOSE[char]) {
         const entry = CHAR_DECOMPOSE[char];
         const slot = CATEGORY_TO_SLOT[entry.category as DictCategory];
         parsed[slot].push(char);
-      } else if (/[一-鿿]/.test(char)) {
+      } else if (CJK_RE.test(char)) {
         parsed.unknown.push(char);
       }
       // Non-CJK characters (English, numbers) are ignored here
@@ -116,7 +119,7 @@ function translateSlot(terms: string[]): string {
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const phrase of translated) {
-    for (const word of phrase.split(/\s+/)) {
+    for (const word of phrase.split(WHITESPACE_RE)) {
       const lower = word.toLowerCase();
       if (!seen.has(lower)) {
         seen.add(lower);
@@ -318,6 +321,8 @@ export function extractTemporalContext(
           factor: 1.3,
         };
       }
+      default:
+        break;
     }
   }
   return undefined;

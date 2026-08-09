@@ -24,7 +24,7 @@ export const createCloudConfig = os
       isDefault: z.boolean().optional(),
     })
   )
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const result = db
       .insert(cloudConfigs)
@@ -39,7 +39,7 @@ export const createCloudConfig = os
     return db
       .select()
       .from(cloudConfigs)
-      .where(eq(cloudConfigs.id, result!.insertedId))
+      .where(eq(cloudConfigs.id, result?.insertedId))
       .get();
   });
 
@@ -53,7 +53,7 @@ export const deleteCloudConfig = os
 
 export const testCloudConnection = os
   .input(z.object({ id: z.number() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     return testConnection(input.id);
   });
 
@@ -63,7 +63,10 @@ export const uploadPhotoToCloud = os
     try {
       const url = await uploadPhoto(input.photoId, input.cloudConfigId);
       return { success: true, remotePath: url };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   });

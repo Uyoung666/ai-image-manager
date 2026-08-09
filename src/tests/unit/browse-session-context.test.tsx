@@ -95,7 +95,10 @@ describe("BrowseSessionContext", () => {
 
       const stored = sessionStorage.getItem("browse_session_home");
       expect(stored).not.toBeNull();
-      const parsed = JSON.parse(stored!);
+      if (stored === null) {
+        throw new Error("Expected browse session to be stored");
+      }
+      const parsed = JSON.parse(stored);
       expect(parsed.selectedIds).toEqual([42]);
       expect(parsed.searchQuery).toBe("test");
     });
@@ -191,7 +194,9 @@ describe("BrowseSessionContext", () => {
 
   describe("useBrowseSession outside provider", () => {
     it("should throw when used outside provider", () => {
-      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {
+        /* Suppress the expected provider error during this test. */
+      });
 
       expect(() => {
         renderHook(() => useBrowseSession());

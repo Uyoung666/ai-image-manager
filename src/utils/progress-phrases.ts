@@ -5,14 +5,6 @@
 
 import i18n from "@/localization/i18n";
 
-type Phase =
-  | "scanning"
-  | "loading-model"
-  | "embedding"
-  | "tagging"
-  | "face-detection"
-  | "import-queue";
-
 /** 每次调用返回当前 phase 对应语言的一条随机短语。 */
 export function getRandomPhrase(phase: string): string {
   const key = `progressPhrases.${phase}`;

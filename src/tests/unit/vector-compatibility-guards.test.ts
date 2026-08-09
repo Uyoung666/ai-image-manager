@@ -1,3 +1,7 @@
+import type {
+  Connection as LanceConnection,
+  Table as LanceTable,
+} from "@lancedb/lancedb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeEach(() => {
@@ -39,8 +43,8 @@ describe("vector compatibility search guards", () => {
     state.setPhotoTable({
       countRows: vi.fn().mockResolvedValue(21),
       vectorSearch,
-    });
-    state.setVectordb({});
+    } as unknown as LanceTable);
+    state.setVectordb({} as unknown as LanceConnection);
 
     const { searchByTextWithPlan } = await import("@/services/ai/search");
     const result = await searchByTextWithPlan(
@@ -70,10 +74,10 @@ describe("AI health vector compatibility", () => {
       schema: vi.fn().mockResolvedValue({
         fields: [{ name: "vector", type: { listSize: active.dimensions } }],
       }),
-    });
+    } as unknown as LanceTable);
     state.setVectordb({
       tableNames: vi.fn().mockResolvedValue(["photo_embeddings"]),
-    });
+    } as unknown as LanceConnection);
 
     const { checkAiHealth } = await import("@/services/ai/health");
     const health = await checkAiHealth();

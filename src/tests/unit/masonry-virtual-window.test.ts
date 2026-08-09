@@ -127,9 +127,7 @@ describe("masonry virtual window helpers", () => {
       { label: "三月", top: 1000 },
     ];
     expect(
-      getVisibleMasonryHeaders(headers, 470, 100, 0).map(
-        (h) => h.label
-      )
+      getVisibleMasonryHeaders(headers, 470, 100, 0).map((h) => h.label)
     ).toEqual(["二月"]);
   });
 });

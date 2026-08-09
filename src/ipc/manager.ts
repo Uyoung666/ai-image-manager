@@ -44,7 +44,7 @@ export const ipc = new IPCManager();
 
 // Defer initialization: preload must register its message listener first.
 function tryInitialize(attempts = 0) {
-  if ((window as any).electronAPI?.preloadReady) {
+  if (window.electronAPI?.preloadReady) {
     console.log("[IPC] preloadReady detected, calling initialize");
     ipc.initialize();
   } else if (attempts < 100) {

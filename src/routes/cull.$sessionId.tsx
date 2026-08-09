@@ -17,7 +17,9 @@ import { ipc } from "@/ipc/manager";
 /** Lightweight delta sent by child components after mutation success.
  *  The parent invalidates its session query in response — no manual
  *  state patching needed because TanStack Query refetches atomically. */
-export type CullDelta = { type: "mutation" | "finish" };
+export interface CullDelta {
+  type: "mutation" | "finish";
+}
 
 interface SessionPhoto {
   comparisons: number;
@@ -61,6 +63,106 @@ export interface SessionSummary extends Omit<Session, "items"> {
   rejectedCount: number;
 }
 
+function SessionProgress({
+  isDuel,
+  keepCount,
+  pendingCount,
+  rejectCount,
+  session,
+}: {
+  isDuel: boolean;
+  keepCount: number;
+  pendingCount: number;
+  rejectCount: number;
+  session: SessionSummary;
+}) {
+  const { t } = useTranslation();
+
+  if (!isDuel) {
+    return t("cullReviewedProgress", {
+      done: keepCount + rejectCount,
+      total: session.totalPhotos,
+    });
+  }
+  if (session.status === "completed") {
+    return `${t("cullPkCount", { count: session.completedComparisons })} · ✓`;
+  }
+  if (pendingCount === 0) {
+    return t("cullPkCount", { count: session.completedComparisons });
+  }
+
+  let matchesPerPhoto = 8;
+  let retryFactor = 0.15;
+  if (session.pkMode === "quick") {
+    matchesPerPhoto = 5;
+    retryFactor = 0;
+  } else if (session.pkMode === "fine") {
+    matchesPerPhoto = 12;
+    retryFactor = 0.3;
+  }
+  const retryBonus = Math.ceil(pendingCount * retryFactor);
+  const total = Math.max(
+    1,
+    Math.ceil((pendingCount * matchesPerPhoto) / 2) + retryBonus
+  );
+  return t("cullPkProgress", {
+    done: session.completedComparisons,
+    total,
+  });
+}
+
+function CullSessionContent({
+  isDuel,
+  onMutationSuccess,
+  onRetry,
+  onUpdate,
+  resultData,
+  resultIsError,
+  session,
+  showResults,
+}: {
+  isDuel: boolean;
+  onMutationSuccess: () => void;
+  onRetry: () => void;
+  onUpdate: () => void;
+  resultData: Session | null;
+  resultIsError: boolean;
+  session: SessionSummary;
+  showResults: boolean;
+}) {
+  const { t } = useTranslation();
+
+  if (!showResults) {
+    return isDuel ? (
+      <CullDuel onMutationSuccess={onMutationSuccess} session={session} />
+    ) : (
+      <CullCurate onMutationSuccess={onMutationSuccess} session={session} />
+    );
+  }
+  if (resultData) {
+    return <CullResult onUpdate={onUpdate} session={resultData} />;
+  }
+  if (resultIsError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-[13px] text-destructive">{t("cullActionFailed")}</p>
+        <button
+          className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
+          onClick={onRetry}
+          type="button"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full items-center justify-center">
+      <LoadingSpinner size="xl" />
+    </div>
+  );
+}
+
 function CullSessionPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -90,7 +192,7 @@ function CullSessionPage() {
       return result as Session;
     },
     enabled: showResults,
-    staleTime: 5_000,
+    staleTime: 5000,
   });
 
   const session = sessionQuery.data ?? null;
@@ -200,6 +302,7 @@ function CullSessionPage() {
           <button
             className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => navigate({ to: "/cull" })}
+            type="button"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -208,37 +311,13 @@ function CullSessionPage() {
           </h1>
           {!showResults && (
             <span className="min-w-0 truncate text-[12px] text-muted-foreground/70">
-              {isDuel
-                ? session.status === "completed"
-                  ? `${t("cullPkCount", { count: session.completedComparisons })} · ✓`
-                  : pendingCount === 0
-                    ? t("cullPkCount", { count: session.completedComparisons })
-                    : t("cullPkProgress", {
-                        done: session.completedComparisons,
-                        total: (() => {
-                          const m =
-                            session.pkMode === "quick"
-                              ? 5
-                              : session.pkMode === "fine"
-                                ? 12
-                                : 8;
-                          const f =
-                            session.pkMode === "quick"
-                              ? 0
-                              : session.pkMode === "fine"
-                                ? 0.3
-                                : 0.15;
-                          const rb = Math.ceil(pendingCount * f);
-                          return Math.max(
-                            1,
-                            Math.ceil((pendingCount * m) / 2) + rb
-                          );
-                        })(),
-                      })
-                : t("cullReviewedProgress", {
-                    done: keepCount + rejectCount,
-                    total: session.totalPhotos,
-                  })}
+              <SessionProgress
+                isDuel={isDuel}
+                keepCount={keepCount}
+                pendingCount={pendingCount}
+                rejectCount={rejectCount}
+                session={session}
+              />
             </span>
           )}
           <span className="shrink-0 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
@@ -260,6 +339,7 @@ function CullSessionPage() {
                 : "bg-primary/10 font-medium text-primary"
             }`}
             onClick={() => setShowResults(false)}
+            type="button"
           >
             <Swords className="h-3.5 w-3.5" />
             {t("cullModeDuel")}
@@ -272,6 +352,7 @@ function CullSessionPage() {
                 : "bg-primary/10 font-medium text-primary"
             }`}
             onClick={() => setShowResults(false)}
+            type="button"
           >
             <Eye className="h-3.5 w-3.5" />
             {t("cullModeCurate")}
@@ -290,6 +371,7 @@ function CullSessionPage() {
               queryKey: ["cull", "session", sessionId],
             });
           }}
+          type="button"
         >
           <BarChart3 className="h-3.5 w-3.5" />
           {t("cullResult")}
@@ -320,42 +402,23 @@ function CullSessionPage() {
 
       {/* Content */}
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        {showResults ? (
-          resultQuery.data ? (
-            <CullResult
-              onUpdate={() => {
-                queryClient.invalidateQueries({
-                  queryKey: ["cull", "summary", sessionId],
-                });
-                queryClient.invalidateQueries({
-                  queryKey: ["cull", "session", sessionId],
-                });
-              }}
-              session={resultQuery.data}
-            />
-          ) : resultQuery.isError ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <p className="text-[13px] text-destructive">
-                {t("cullActionFailed")}
-              </p>
-              <button
-                className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
-                onClick={() => resultQuery.refetch()}
-                type="button"
-              >
-                {t("retry")}
-              </button>
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <LoadingSpinner size="xl" />
-            </div>
-          )
-        ) : isDuel ? (
-          <CullDuel onMutationSuccess={onMutationSuccess} session={session} />
-        ) : (
-          <CullCurate onMutationSuccess={onMutationSuccess} session={session} />
-        )}
+        <CullSessionContent
+          isDuel={isDuel}
+          onMutationSuccess={onMutationSuccess}
+          onRetry={() => resultQuery.refetch()}
+          onUpdate={() => {
+            queryClient.invalidateQueries({
+              queryKey: ["cull", "summary", sessionId],
+            });
+            queryClient.invalidateQueries({
+              queryKey: ["cull", "session", sessionId],
+            });
+          }}
+          resultData={resultQuery.data ?? null}
+          resultIsError={resultQuery.isError}
+          session={session}
+          showResults={showResults}
+        />
       </div>
     </div>
   );

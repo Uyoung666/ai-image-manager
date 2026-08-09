@@ -80,6 +80,7 @@ const ExportSchema = z.object({
 
 export const exportPhotos = os
   .input(ExportSchema)
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Export orchestration preserves the existing per-photo and cleanup flow.
   .handler(async ({ input }) => {
     const db = getDatabase();
     const { ids, format, maxWidth, quality, outputPath, locale } = input;
@@ -163,6 +164,7 @@ export const exportPhotos = os
 
     // Calculate watermark pixel position from anchor + margin.
     // Margin is % of short edge — consistent visual gap across aspect ratios.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Anchor mapping handles all supported watermark positions.
     function wmAnchorPos(
       anchor: string,
       margin: number,
@@ -226,6 +228,7 @@ export const exportPhotos = os
 
     // Build watermark SVG overlay once.
     // Positions text by anchor point + text-anchor alignment — no width estimation.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: SVG construction validates and escapes the persisted watermark settings.
     function buildWatermarkSvg(
       imgWidth: number,
       imgHeight: number
@@ -272,23 +275,41 @@ export const exportPhotos = os
         v = "bottom";
       }
 
-      const x =
-        h === "left"
-          ? mp
-          : h === "right"
-            ? imgWidth - mp
-            : Math.round(imgWidth / 2);
-      const y =
-        v === "top"
-          ? mp + fontSize
-          : v === "bottom"
-            ? imgHeight - mp
-            : Math.round(imgHeight / 2);
+      let x: number;
+      if (h === "left") {
+        x = mp;
+      } else if (h === "right") {
+        x = imgWidth - mp;
+      } else {
+        x = Math.round(imgWidth / 2);
+      }
 
-      const textAnchor =
-        h === "left" ? "start" : h === "right" ? "end" : "middle";
-      const baseline =
-        v === "top" ? "hanging" : v === "bottom" ? "baseline" : "middle";
+      let y: number;
+      if (v === "top") {
+        y = mp + fontSize;
+      } else if (v === "bottom") {
+        y = imgHeight - mp;
+      } else {
+        y = Math.round(imgHeight / 2);
+      }
+
+      let textAnchor: "start" | "end" | "middle";
+      if (h === "left") {
+        textAnchor = "start";
+      } else if (h === "right") {
+        textAnchor = "end";
+      } else {
+        textAnchor = "middle";
+      }
+
+      let baseline: "hanging" | "baseline" | "middle";
+      if (v === "top") {
+        baseline = "hanging";
+      } else if (v === "bottom") {
+        baseline = "baseline";
+      } else {
+        baseline = "middle";
+      }
 
       const escaped = wm.text
         .replace(/&/g, "&amp;")
@@ -384,29 +405,19 @@ export const exportPhotos = os
 
             if (format === "compressed") {
               const buffer = await pipeline.jpeg({ quality }).toBuffer();
-              destName =
-                path.basename(destName, path.extname(destName)) + ".jpg";
+              destName = `${path.basename(destName, path.extname(destName))}.jpg`;
               fs.writeFileSync(path.join(photosDir, destName), buffer);
-            } else {
+            } else if (wm.enabled) {
               // Watermark in original format: preserve source format
-              if (wm.enabled) {
-                const srcFormat = (meta.format || "").toLowerCase();
-                if (srcFormat === "jpeg" || srcFormat === "jpg") {
-                  const buffer = await pipeline
-                    .jpeg({ quality: 92 })
-                    .toBuffer();
-                  fs.writeFileSync(destPath, buffer);
-                } else if (srcFormat === "webp") {
-                  const buffer = await pipeline
-                    .webp({ quality: 92 })
-                    .toBuffer();
-                  fs.writeFileSync(destPath, buffer);
-                } else {
-                  const buffer = await pipeline.png().toBuffer();
-                  fs.writeFileSync(destPath, buffer);
-                }
+              const srcFormat = (meta.format || "").toLowerCase();
+              if (srcFormat === "jpeg" || srcFormat === "jpg") {
+                const buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
+                fs.writeFileSync(destPath, buffer);
+              } else if (srcFormat === "webp") {
+                const buffer = await pipeline.webp({ quality: 92 }).toBuffer();
+                fs.writeFileSync(destPath, buffer);
               } else {
-                const buffer = await pipeline.toBuffer();
+                const buffer = await pipeline.png().toBuffer();
                 fs.writeFileSync(destPath, buffer);
               }
             }
@@ -466,8 +477,8 @@ export const exportPhotos = os
           `gallery-${new Date().toISOString().slice(0, 10)}.zip`
         );
 
-      const { ZipArchive } = await import("archiver");
-      const archive = new ZipArchive({ zlib: { level: 9 } });
+      const { default: createArchive } = await import("archiver");
+      const archive = createArchive("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<void>((resolve, reject) => {
@@ -489,13 +500,16 @@ export const exportPhotos = os
         photoCount: photoList.length,
         sizeMB: Number.parseFloat(sizeMB),
       };
-    } catch (e: any) {
+    } catch (e) {
       // Cleanup on error
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       } catch {
         /* ignore */
       }
-      return { success: false, error: e.message };
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : String(e),
+      };
     }
   });

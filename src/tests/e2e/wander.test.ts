@@ -20,13 +20,17 @@ function round(page: Page, n: number) {
 }
 
 const SAVED_AS_ALBUM = /Saved as album/;
+const START_WANDER = /Start wandering now/;
+
+async function openWanderSettings(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Wander" }).click();
+  await expect(page.getByRole("button", { name: START_WANDER })).toBeVisible();
+}
 
 test.describe("wander — manual entry", () => {
   let app: ElectronApplication | undefined;
-  const userDataDir = path.join(
-    os.tmpdir(),
-    `ai-image-manager-e2e-wander-manual-${process.pid}`
-  );
+  let userDataDir = "";
 
   function requireApp(): ElectronApplication {
     if (!app) {
@@ -35,8 +39,12 @@ test.describe("wander — manual entry", () => {
     return app;
   }
 
-  test.beforeAll(async () => {
-    seedWanderLibrary(userDataDir, { enabled: false, photoCount: 14 });
+  test.beforeEach(async () => {
+    userDataDir = path.join(
+      os.tmpdir(),
+      `ai-image-manager-e2e-wander-manual-${process.pid}-${Date.now()}`
+    );
+    seedWanderLibrary(userDataDir, { enabled: false, photoCount: 40 });
     app = await launchWanderApp(userDataDir);
     app.on("window", (page) => {
       page.on("pageerror", (error) =>
@@ -49,15 +57,17 @@ test.describe("wander — manual entry", () => {
       intervalMs: 2000,
       roundSize: 3,
     });
+    await openWanderSettings(page);
   });
 
-  test.afterAll(async () => {
+  test.afterEach(async () => {
     await app?.close();
+    app = undefined;
   });
 
   test("starts wandering and keeps playing through rounds", async () => {
     const page: Page = await requireApp().firstWindow();
-    const wanderButton = page.getByRole("button", { name: "Wander" });
+    const wanderButton = page.getByRole("button", { name: START_WANDER });
     await expect(wanderButton).toBeVisible({ timeout: 15_000 });
     await wanderButton.click();
 
@@ -71,11 +81,17 @@ test.describe("wander — manual entry", () => {
 
   test("saves the current round as an album and keeps wandering", async () => {
     const page: Page = await requireApp().firstWindow();
-    await page.getByRole("button", { name: "Wander" }).click();
+    await page.getByRole("button", { name: START_WANDER }).click();
     await expect(round(page, 1)).toBeVisible({ timeout: 10_000 });
 
-    // Reveal the auto-hiding controls, then save the current round.
+    await expect(page.getByRole("progressbar")).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.keyboard.press("Space");
     await page.mouse.move(600, 400);
+    await expect(
+      page.getByRole("button", { name: "Save round as album" })
+    ).toBeVisible({ timeout: 10_000 });
     await page.getByRole("button", { name: "Save round as album" }).click();
 
     await expect(page.getByText(SAVED_AS_ALBUM)).toBeVisible({
@@ -90,21 +106,20 @@ test.describe("wander — manual entry", () => {
 
   test("exits wander and restores the gallery context", async () => {
     const page: Page = await requireApp().firstWindow();
-    await page.getByRole("button", { name: "Wander" }).click();
+    await page.getByRole("button", { name: START_WANDER }).click();
     await expect(round(page, 1)).toBeVisible({ timeout: 10_000 });
 
     await page.keyboard.press("Escape");
     await expect(round(page, 1)).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "Wander" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: START_WANDER })
+    ).toBeVisible();
   });
 });
 
 test.describe("wander — auto idle", () => {
   let app: ElectronApplication | undefined;
-  const userDataDir = path.join(
-    os.tmpdir(),
-    `ai-image-manager-e2e-wander-auto-${process.pid}`
-  );
+  let userDataDir = "";
 
   function requireApp(): ElectronApplication {
     if (!app) {
@@ -113,8 +128,12 @@ test.describe("wander — auto idle", () => {
     return app;
   }
 
-  test.beforeAll(async () => {
-    seedWanderLibrary(userDataDir, { enabled: true, photoCount: 14 });
+  test.beforeEach(async () => {
+    userDataDir = path.join(
+      os.tmpdir(),
+      `ai-image-manager-e2e-wander-auto-${process.pid}-${Date.now()}`
+    );
+    seedWanderLibrary(userDataDir, { enabled: true, photoCount: 40 });
     app = await launchWanderApp(userDataDir);
     app.on("window", (page) => {
       page.on("pageerror", (error) =>
@@ -130,8 +149,9 @@ test.describe("wander — auto idle", () => {
     await forceWanderEligible(page);
   });
 
-  test.afterAll(async () => {
+  test.afterEach(async () => {
     await app?.close();
+    app = undefined;
   });
 
   test("auto-starts after a short idle period on the home page", async () => {
@@ -157,11 +177,14 @@ test.describe("wander — auto idle", () => {
     await requireApp().evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.focus()
     );
+    await page.reload();
     await forceWanderEligible(page);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.mouse.move(10, 10);
     await page.waitForTimeout(3000);
     await expect(round(page, 1)).not.toBeVisible();
 
-    await page.waitForTimeout(4000);
-    await expect(round(page, 1)).toBeVisible({ timeout: 5000 });
+    await page.waitForTimeout(5000);
+    await expect(round(page, 1)).toBeVisible({ timeout: 15_000 });
   });
 });

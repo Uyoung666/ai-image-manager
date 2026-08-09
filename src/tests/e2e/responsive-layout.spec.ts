@@ -90,11 +90,11 @@ async function resizeWindow(width: number, height: number): Promise<void> {
 
 async function navigateTo(route: string): Promise<void> {
   const currentPage = requirePage();
-  await currentPage.evaluate((nextRoute) => {
-    window.history.pushState({}, "", nextRoute);
-    window.dispatchEvent(
-      new PopStateEvent("popstate", { state: window.history.state })
-    );
+  await currentPage.evaluate(async (nextRoute) => {
+    if (!window.__e2eNavigate) {
+      throw new Error("E2E router bridge is unavailable");
+    }
+    await window.__e2eNavigate(nextRoute);
   }, route);
 
   await currentPage.waitForFunction(
@@ -144,7 +144,7 @@ function measureHorizontalOverflow(): Promise<OverflowMeasurement[]> {
 async function expectShortcutDialogInsideViewport(): Promise<void> {
   const currentPage = requirePage();
   await navigateTo("/");
-  await currentPage.locator("body").press("Shift+/");
+  await currentPage.keyboard.press("?");
 
   const dialog = currentPage.locator('[data-slot="dialog-content"]').last();
   await expect(dialog).toBeVisible();
@@ -182,7 +182,9 @@ test.beforeAll(async () => {
   process.env.CI = "e2e";
   electronApp = await electron.launch({
     args: [
+      "--no-sandbox",
       "--disable-gpu-sandbox",
+      "--no-sandbox",
       "--enable-unsafe-swiftshader",
       "--use-angle=swiftshader",
       `--user-data-dir=${userDataDir}`,

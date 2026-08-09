@@ -29,7 +29,9 @@ describe("useMasonryAnchor", () => {
       setTimeout(() => cb(performance.now()), 0);
       return 1;
     });
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {
+      /* Intentionally empty: requestAnimationFrame is simulated above. */
+    });
   });
 
   it("captures the current visible anchor from positions", () => {

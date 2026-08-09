@@ -16,6 +16,13 @@ export const router = createRouter({
   }),
 });
 
+if (typeof window !== "undefined") {
+  window.__e2eNavigate = async (to: string) => {
+    await router.navigate({ to: to as never });
+    window.history.replaceState({}, "", to);
+  };
+}
+
 // View Transition API — native Chromium crossfade between all route changes.
 // flushSync commits React synchronously so startViewTransition can capture
 // the correct before/after screenshots within its callback.

@@ -6,23 +6,15 @@ import {
 
 describe("masonry image gating", () => {
   it("renders images near the viewport", () => {
-    expect(
-      shouldRenderItemImage(
-        { top: 1200, height: 200 },
-        1000,
-        600
-      )
-    ).toBe(true);
+    expect(shouldRenderItemImage({ top: 1200, height: 200 }, 1000, 600)).toBe(
+      true
+    );
   });
 
   it("skips image nodes for far overscan items", () => {
-    expect(
-      shouldRenderItemImage(
-        { top: 2600, height: 200 },
-        1000,
-        600
-      )
-    ).toBe(false);
+    expect(shouldRenderItemImage({ top: 2600, height: 200 }, 1000, 600)).toBe(
+      false
+    );
   });
 
   it("only updates render scrollTop after crossing the render step", () => {

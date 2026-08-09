@@ -53,6 +53,23 @@ import {
 } from "./translation-worker-client";
 import { initVectorDB } from "./vector-db";
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+interface ArrayLikeVector {
+  toArray: () => ArrayLike<number>;
+}
+
+function isArrayLikeVector(value: unknown): value is ArrayLikeVector {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "toArray" in value &&
+    typeof value.toArray === "function"
+  );
+}
+
 function findWorkerScript(): string {
   if (app.isPackaged) {
     const unpacked = path.join(
@@ -113,7 +130,17 @@ export function embedImageInWorker(
       stderr += data.toString();
     });
 
-    child.on("message", (msg: any) => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Worker result handling synchronizes protocol validation, timeout settlement, and vector resolution.
+    child.on("message", (rawMessage: unknown) => {
+      if (typeof rawMessage !== "object" || rawMessage === null) {
+        return;
+      }
+      const msg = rawMessage as {
+        adapterId?: string;
+        fingerprint?: string;
+        results?: Array<{ error?: string; vector?: number[] }>;
+        type?: string;
+      };
       if (msg.type === "ready") {
         child.send({
           type: "embed",
@@ -172,6 +199,7 @@ export function embedImageInWorker(
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Brute-force fallback keeps pagination, vector normalization, scoring, and safety limits in one path.
 async function fallbackSearch(
   queryVector: number[],
   limit: number,
@@ -220,13 +248,14 @@ async function fallbackSearch(
         vec = rawVec;
       } else if (Array.isArray(rawVec)) {
         vec = new Float32Array(rawVec as number[]);
-      } else if (typeof (rawVec as any).toArray === "function") {
-        vec = new Float32Array((rawVec as any).toArray());
+      } else if (isArrayLikeVector(rawVec)) {
+        vec = new Float32Array(rawVec.toArray());
       } else if (ArrayBuffer.isView(rawVec)) {
+        const view = rawVec as ArrayBufferView & { length?: number };
         vec = new Float32Array(
-          (rawVec as any).buffer,
-          (rawVec as any).byteOffset,
-          (rawVec as any).length
+          view.buffer,
+          view.byteOffset,
+          view.length ?? view.byteLength
         );
       }
       const vectorDimensions = getActiveEmbeddingModel().vectorDimensions;
@@ -301,8 +330,8 @@ async function searchVector(
       .refineFactor(adaptiveRefine)
       .limit(queryLimit);
     rawResults = (await vq.toArray()) as Record<string, unknown>[];
-  } catch (err: any) {
-    console.error("[AI] vectorSearch failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] vectorSearch failed:", getErrorMessage(err));
   }
 
   if (rawResults.length === 0) {
@@ -796,8 +825,11 @@ async function performTextSearch(
 
   try {
     await loadModel();
-  } catch (err: any) {
-    console.error("[AI] searchByText: model load failed:", err?.message);
+  } catch (err: unknown) {
+    console.error(
+      "[AI] searchByText: model load failed:",
+      getErrorMessage(err)
+    );
     return {
       candidateDepth: 0,
       consensusCutoff: 0,
@@ -1023,10 +1055,10 @@ export async function searchByImage(
   } catch {
     try {
       queryVector = await embedImageInWorker(imagePath, localModelPath);
-    } catch (fallbackErr: any) {
+    } catch (fallbackErr: unknown) {
       console.error(
         "[AI] searchByImage: image embedding failed:",
-        fallbackErr?.message
+        getErrorMessage(fallbackErr)
       );
       return [];
     }
@@ -1054,8 +1086,11 @@ export async function searchByImage(
       .refineFactor(adaptiveRefine)
       .limit(limit);
     rawResults = (await vq.toArray()) as Record<string, unknown>[];
-  } catch (err: any) {
-    console.error("[AI] searchByImage vectorSearch failed:", err?.message);
+  } catch (err: unknown) {
+    console.error(
+      "[AI] searchByImage vectorSearch failed:",
+      getErrorMessage(err)
+    );
   }
 
   if (rawResults.length === 0) {

@@ -80,7 +80,7 @@ export function getPinyinMap(): Map<string, string[]> {
       if (!map.has(pinyin)) {
         map.set(pinyin, []);
       }
-      map.get(pinyin)!.push(word);
+      map.get(pinyin)?.push(word);
     }
   }
 

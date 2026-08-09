@@ -810,6 +810,7 @@ export async function detectFaces(
   return totalFaces;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Face clustering keeps identity assignment and centroid updates consistent within one pass.
 function clusterUnassignedFaces(): void {
   const db = getDatabase();
 

@@ -68,16 +68,24 @@ const photos = [
 
 describe("PhotoLightbox", () => {
   it("keeps secondary review surfaces collapsed by default", () => {
-    render(<PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />);
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
+    );
 
-    expect(screen.getByRole("dialog", { name: "lightboxReview" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "lightboxReview" })
+    ).toBeInTheDocument();
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "2: second.jpg" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "2: second.jpg" })
+    ).not.toBeInTheDocument();
   });
 
   it("renders the reviewed image without a drop shadow", () => {
-    render(<PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />);
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
+    );
 
     expect(screen.getByRole("img", { name: "first.jpg" })).not.toHaveClass(
       "shadow-2xl"
@@ -86,21 +94,24 @@ describe("PhotoLightbox", () => {
 
   it("makes the information panel and thumbnail strip mutually exclusive", async () => {
     render(
-      <PhotoLightbox
-        initialIndex={0}
-        onClose={vi.fn()}
-        open
-        photos={photos}
-      />
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
     );
 
     fireEvent.keyDown(window, { key: "t" });
-    expect(screen.getByRole("button", { name: "2: second.jpg" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "2: second.jpg" })
+    ).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "i" });
-    expect(screen.queryByRole("button", { name: "2: second.jpg" })).not.toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "照片详情" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Sony A7")).toBeInTheDocument());
+    expect(
+      screen.queryByRole("button", { name: "2: second.jpg" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "照片详情" })
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("Sony A7")).toBeInTheDocument()
+    );
     expect(screen.getAllByRole("img", { name: "first.jpg" })).toHaveLength(1);
   });
 
@@ -148,12 +159,7 @@ describe("PhotoLightbox", () => {
 
   it("coalesces wheel input into smooth proportional zoom updates", async () => {
     render(
-      <PhotoLightbox
-        initialIndex={0}
-        onClose={vi.fn()}
-        open
-        photos={photos}
-      />
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
     );
 
     const image = screen.getByRole("img", { name: "first.jpg" });
@@ -165,18 +171,17 @@ describe("PhotoLightbox", () => {
 
   it("enters slideshow mode and pauses when the user navigates", () => {
     render(
-      <PhotoLightbox
-        initialIndex={0}
-        onClose={vi.fn()}
-        open
-        photos={photos}
-      />
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
     );
 
     fireEvent.keyDown(window, { key: " " });
-    expect(screen.getByRole("button", { name: "pauseSlideshow" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "pauseSlideshow" })
+    ).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(screen.getByRole("button", { name: "playSlideshow" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "playSlideshow" })
+    ).toBeInTheDocument();
   });
 
   it("renders a single thumbnail frame while playing a sequence", async () => {

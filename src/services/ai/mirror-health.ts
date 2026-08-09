@@ -13,7 +13,7 @@ export interface MirrorHealth {
  * 检查单个镜像源的健康状态
  * 通过 HEAD 请求已知模型文件来测试连通性和速度
  */
-async function checkSingleMirror(
+function checkSingleMirror(
   name: string,
   baseUrl: string,
   timeout = 8000

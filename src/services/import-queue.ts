@@ -4,8 +4,8 @@ import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { invalidateIndexStatsCache } from "@/ipc/photos/handlers/stats";
-import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { getAiControlState } from "@/services/ai/state";
+import { deletePhotoVectors, embedAllPhotos } from "@/services/ai-embedder";
 import { reloadFolderMatcher } from "@/services/folder-matcher";
 import {
   scanFolder as scanFolderService,
@@ -34,10 +34,10 @@ export interface ImportTask {
   newPhotoCount?: number;
   /** Result from scanFolderService, set once scanning completes. */
   photoCount?: number;
-  /** Number of supported files that could not be indexed. */
-  skipped?: number;
   /** 1-based position in queue (only meaningful while status === "queued"). */
   position: number;
+  /** Number of supported files that could not be indexed. */
+  skipped?: number;
   status: ImportTaskStatus;
 }
 
@@ -84,6 +84,7 @@ function dequeueTask(): ImportTask | null {
 
 // ── Cancel cleanup ──────────────────────────────────────────────────
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Cancellation cleanup must remove photos, vectors, thumbnails, and folders in one lifecycle path.
 function cleanupCancelledImport(
   folderId: number,
   newPhotoIds: number[],

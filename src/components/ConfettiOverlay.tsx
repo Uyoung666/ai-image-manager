@@ -30,6 +30,49 @@ const COLORS = [
   "#C084FC",
 ];
 
+function updateParticle(particle: Particle) {
+  particle.life++;
+  if (particle.life >= particle.maxLife) {
+    return false;
+  }
+
+  particle.x += particle.vx;
+  particle.vy += 0.14;
+  particle.y += particle.vy;
+  particle.vx *= 0.985;
+  particle.rotation += particle.rotationSpeed;
+  return true;
+}
+
+function drawParticle(ctx: CanvasRenderingContext2D, particle: Particle) {
+  const lifeRatio = particle.life / particle.maxLife;
+  const alpha = lifeRatio < 0.65 ? 1 : 1 - (lifeRatio - 0.65) / 0.35;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(particle.x, particle.y);
+  ctx.rotate((particle.rotation * Math.PI) / 180);
+  ctx.fillStyle = particle.color;
+
+  if (particle.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(0, -particle.size / 2);
+    ctx.lineTo(-particle.size * 0.45, particle.size / 2);
+    ctx.lineTo(particle.size * 0.45, particle.size / 2);
+    ctx.closePath();
+    ctx.fill();
+  } else if (particle.shape === "rect") {
+    const height = particle.size * 0.55;
+    ctx.fillRect(-particle.size / 2, -height / 2, particle.size, height);
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, particle.size / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 interface ConfettiOverlayProps {
   active: boolean;
   onDone?: () => void;
@@ -52,6 +95,13 @@ export function ConfettiOverlay({
     const particles: Particle[] = [];
     for (let i = 0; i < count; i++) {
       const shapeRand = Math.random();
+      let shape: Particle["shape"] = "circle";
+      if (shapeRand < 0.15) {
+        shape = "triangle";
+      } else if (shapeRand < 0.55) {
+        shape = "rect";
+      }
+
       particles.push({
         x: Math.random() * window.innerWidth,
         y: -30 - Math.random() * 120,
@@ -63,8 +113,7 @@ export function ConfettiOverlay({
         rotationSpeed: (Math.random() - 0.5) * 12,
         life: 0,
         maxLife: 100 + Math.random() * 160,
-        shape:
-          shapeRand < 0.15 ? "triangle" : shapeRand < 0.55 ? "rect" : "circle",
+        shape,
       });
     }
     return particles;
@@ -120,6 +169,7 @@ export function ConfettiOverlay({
 
     startTimeRef.current = performance.now();
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: animation loop intentionally coordinates particle updates and lifecycle
     const animate = (now: number) => {
       const elapsed = now - startTimeRef.current;
       const duration = 5000;
@@ -133,47 +183,12 @@ export function ConfettiOverlay({
 
       const particles = particlesRef.current;
       let allDead = true;
-      const gravity = 0.14;
-
-      for (const p of particles) {
-        p.life++;
-        if (p.life >= p.maxLife) {
+      for (const particle of particles) {
+        if (!updateParticle(particle)) {
           continue;
         }
         allDead = false;
-
-        p.x += p.vx;
-        p.vy += gravity;
-        p.y += p.vy;
-        p.vx *= 0.985;
-        p.rotation += p.rotationSpeed;
-
-        const lifeRatio = p.life / p.maxLife;
-        const alpha = lifeRatio < 0.65 ? 1 : 1 - (lifeRatio - 0.65) / 0.35;
-
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.translate(p.x, p.y);
-        ctx.rotate((p.rotation * Math.PI) / 180);
-        ctx.fillStyle = p.color;
-
-        if (p.shape === "triangle") {
-          ctx.beginPath();
-          ctx.moveTo(0, -p.size / 2);
-          ctx.lineTo(-p.size * 0.45, p.size / 2);
-          ctx.lineTo(p.size * 0.45, p.size / 2);
-          ctx.closePath();
-          ctx.fill();
-        } else if (p.shape === "rect") {
-          const h = p.size * 0.55;
-          ctx.fillRect(-p.size / 2, -h / 2, p.size, h);
-        } else {
-          ctx.beginPath();
-          ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        ctx.restore();
+        drawParticle(ctx, particle);
       }
 
       if (elapsed > duration - 1000) {

@@ -1,10 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
-
-interface Photo {
-  id: number;
-  [key: string]: any;
-}
+import type { Photo } from "@/types/photo";
 
 interface UsePhotoDetailPanelReturn {
   detailDismissed: boolean;
@@ -59,9 +55,13 @@ export function usePhotoDetailPanel(
   // 它们由本 effect 输出（setState），通过 ref 解耦避免循环。
   useLayoutEffect(() => {
     if (selectedIds.size === 1) {
-      const id = selectedIds.values().next().value as number;
-      if (id !== prevSelectedIdRef.current) {
-        // 规则 1：不同照片，总是打开
+      const id = selectedIds.values().next().value;
+      if (id === undefined) {
+        return;
+      }
+      const isNewSelection = id !== prevSelectedIdRef.current;
+      const shouldReopen = isNewSelection || userDismissedRef.current;
+      if (shouldReopen) {
         userDismissedRef.current = false;
         setDetailDismissed(false);
         prevSelectedIdRef.current = id;
@@ -69,33 +69,26 @@ export function usePhotoDetailPanel(
         const photo = photos.find((p) => p.id === id);
         setDetailPhoto(photo ?? null);
         detailPhotoIdRef.current = photo?.id ?? null;
-      } else if (userDismissedRef.current) {
-        // 规则 3：相同照片但用户已主动 dismiss → 用户再次点击同一照片才重新打开
-        userDismissedRef.current = false;
-        setDetailDismissed(false);
-        saveSession(routeKey, { detailDismissed: false });
-        const photo = photos.find((p) => p.id === id);
-        setDetailPhoto(photo ?? null);
-        detailPhotoIdRef.current = photo?.id ?? null;
       } else {
-        // 规则 2：相同照片，保持打开，仅在 photo 对象变化时更新引用
         const photo = photos.find((p) => p.id === id);
         if (photo && photo.id !== detailPhotoIdRef.current) {
           setDetailPhoto(photo);
           detailPhotoIdRef.current = photo.id;
         }
       }
-    } else if (selectedIds.size === 0) {
-      // 规则 4：无选中 → 关闭
-      if (detailPhotoIdRef.current !== null) {
-        setDetailPhoto(null);
-        detailPhotoIdRef.current = null;
-      }
-      prevSelectedIdRef.current = null;
-      userDismissedRef.current = false;
+      return;
     }
-  }, [selectedIds, photos, routeKey, saveSession]);
 
+    if (selectedIds.size !== 0) {
+      return;
+    }
+    if (detailPhotoIdRef.current !== null) {
+      setDetailPhoto(null);
+      detailPhotoIdRef.current = null;
+    }
+    prevSelectedIdRef.current = null;
+    userDismissedRef.current = false;
+  }, [selectedIds, photos, routeKey, saveSession]);
   const dismissDetail = useCallback(() => {
     userDismissedRef.current = true;
     setDetailDismissed(true);

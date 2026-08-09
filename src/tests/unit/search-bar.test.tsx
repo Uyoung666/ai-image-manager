@@ -11,9 +11,9 @@ vi.mock("@/ipc/manager", () => ({
       faces: { listFaceIdentities: vi.fn().mockResolvedValue([]) },
       photos: {
         getExifCandidates: vi.fn().mockResolvedValue({}),
-        getTags: vi.fn().mockResolvedValue([
-          { color: "#4f46e5", id: 42, name: "自行车" },
-        ]),
+        getTags: vi
+          .fn()
+          .mockResolvedValue([{ color: "#4f46e5", id: 42, name: "自行车" }]),
       },
     },
   },
@@ -284,9 +284,7 @@ describe("SearchBar", () => {
     await user.hover(button);
 
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent(
-      "以图搜图 — 选择参考图片寻找相似照片"
-    );
+    expect(tooltip).toHaveTextContent("以图搜图 — 选择参考图片寻找相似照片");
     const tooltipContent = tooltip.closest('[data-slot="tooltip-content"]');
     expect(tooltipContent).not.toBeNull();
     expect(tooltipContent).toHaveAttribute("data-slot", "tooltip-content");

@@ -69,8 +69,10 @@ async function copyDir(src: string, dest: string): Promise<void> {
     await fs.promises.cp(src, dest, { recursive: true });
     const destEntries = fs.readdirSync(dest, { recursive: true }).length;
     console.error(`[copyDir] done — dest entries=${destEntries}`);
-  } catch (err: any) {
-    console.error(`[copyDir] failed: ${err.message}`);
+  } catch (err: unknown) {
+    console.error(
+      `[copyDir] failed: ${err instanceof Error ? err.message : String(err)}`
+    );
     throw err;
   }
 }
@@ -83,7 +85,7 @@ let _modelCopyPromise: Promise<void> | null = null;
  * callers invoke it concurrently. Callers that arrive while a copy is already
  * in-flight will wait for (and reuse) that existing copy.
  */
-export async function copyModelsOnce(): Promise<void> {
+export function copyModelsOnce(): Promise<void> {
   const dataPath = getDataPath();
   const modelsDir = path.join(dataPath, "models");
   const visionMarker = getEmbeddingModelFile(
@@ -110,7 +112,7 @@ export async function copyModelsOnce(): Promise<void> {
     fs.existsSync(translationEncoder) &&
     fs.existsSync(translationDecoder)
   ) {
-    return;
+    return Promise.resolve();
   }
 
   // Copy already in progress — wait for it.
@@ -118,7 +120,7 @@ export async function copyModelsOnce(): Promise<void> {
     return _modelCopyPromise;
   }
 
-  _modelCopyPromise = (async () => {
+  const copyPromise = (async (): Promise<void> => {
     try {
       if (app.isPackaged) {
         const bundledModels = path.join(
@@ -144,8 +146,9 @@ export async function copyModelsOnce(): Promise<void> {
       _modelCopyPromise = null; // clear on failure to allow retry
     }
   })();
+  _modelCopyPromise = copyPromise;
 
-  return _modelCopyPromise;
+  return copyPromise;
 }
 
 export async function ensureLocalModel(): Promise<string> {
@@ -255,9 +258,11 @@ async function initializeModel(): Promise<void> {
   setEmbeddingModel({
     // embedImage is intentionally NOT provided here — image embedding goes
     // through embedImageInWorker() to keep the WASM heap within limits.
-    embedImage: async (_imagePath: string) => {
-      throw new Error(
-        "embedImage not available in main process — use embedImageInWorker()"
+    embedImage: (_imagePath: string) => {
+      return Promise.reject(
+        new Error(
+          "embedImage not available in main process — use embedImageInWorker()"
+        )
       );
     },
     embedText: async (text: string) => {

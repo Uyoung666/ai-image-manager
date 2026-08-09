@@ -8,13 +8,22 @@ export const MIN_VECTORS_FOR_INDEX = 10_000;
 export const BATCH_SIZE = 20; // Photos per worker process
 export const WORKER_TIMEOUT = 300_000; // 5 minutes per batch
 
-export function disposeTensors(output: Record<string, any>): void {
+interface DisposableTensor {
+  dispose(): void;
+}
+
+function isDisposableTensor(value: unknown): value is DisposableTensor {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "dispose" in value &&
+    typeof value.dispose === "function"
+  );
+}
+
+export function disposeTensors(output: Record<string, unknown>): void {
   for (const value of Object.values(output)) {
-    if (
-      value &&
-      typeof value === "object" &&
-      typeof value.dispose === "function"
-    ) {
+    if (isDisposableTensor(value)) {
       try {
         value.dispose();
       } catch {

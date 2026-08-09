@@ -50,11 +50,14 @@ function hammingDistance(a: string, b: string): number {
   try {
     const va = BigInt(`0x${a}`);
     const vb = BigInt(`0x${b}`);
-    let xor = va ^ vb;
+    const width = Math.max(va.toString(2).length, vb.toString(2).length);
+    const vaBits = va.toString(2).padStart(width, "0");
+    const vbBits = vb.toString(2).padStart(width, "0");
     let dist = 0;
-    while (xor > 0n) {
-      dist += Number(xor & 1n);
-      xor >>= 1n;
+    for (let i = 0; i < width; i++) {
+      if (vaBits[i] !== vbBits[i]) {
+        dist++;
+      }
     }
     return dist;
   } catch {

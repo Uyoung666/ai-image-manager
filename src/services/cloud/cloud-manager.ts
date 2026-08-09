@@ -12,7 +12,7 @@ export function getProvider(type: CloudProviderType): CloudProvider {
   return type === "webdav" ? webdavProvider : s3Provider;
 }
 
-export async function testConnection(configId: number) {
+export function testConnection(configId: number) {
   const db = getDatabase();
   const cfg = db
     .select()
@@ -109,10 +109,13 @@ export async function uploadPhoto(
     }
 
     return url;
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (logResult) {
       db.update(cloudSyncLog)
-        .set({ status: "failed", error: err.message })
+        .set({
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+        })
         .where(eq(cloudSyncLog.id, logResult.insertedId))
         .run();
     }

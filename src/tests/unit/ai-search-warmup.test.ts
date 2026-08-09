@@ -1,3 +1,7 @@
+import type {
+  Connection as LanceConnection,
+  Table as LanceTable,
+} from "@lancedb/lancedb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getActiveEmbeddingModel } from "@/services/ai/model-config";
 import {
@@ -33,7 +37,7 @@ function createVectorTable(results: Record<string, unknown>[] = []) {
     countRows: vi.fn().mockResolvedValue(10),
     query: vi.fn().mockReturnValue(query),
     vectorSearch: vi.fn().mockReturnValue(query),
-  };
+  } as unknown as LanceTable;
 }
 
 function createEmbeddingVector(): number[] {
@@ -51,7 +55,7 @@ function installReadyAi(
   });
   setIsModelLoaded(true);
   setPhotoTable(table);
-  setVectordb({});
+  setVectordb({} as unknown as LanceConnection);
   setIsVectorDBReady(true);
 }
 

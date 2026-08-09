@@ -10,6 +10,7 @@ import sharp from "sharp";
 
 const TEST_IMAGES_DIR = process.argv[2] || "D:/8806/ai-image-manager测试用例";
 const DECODE_DIR = path.join(os.tmpdir(), "ai-image-manager-decoded");
+const JPEG_FILE_PATTERN = /\.jpe?g$/i;
 
 if (!fs.existsSync(DECODE_DIR)) {
   fs.mkdirSync(DECODE_DIR, { recursive: true });
@@ -17,7 +18,7 @@ if (!fs.existsSync(DECODE_DIR)) {
 
 const files = fs
   .readdirSync(TEST_IMAGES_DIR)
-  .filter((f) => /\.jpe?g$/i.test(f))
+  .filter((f) => JPEG_FILE_PATTERN.test(f))
   .filter((f) => {
     try {
       return fs.statSync(path.join(TEST_IMAGES_DIR, f)).size > 1024;
@@ -46,7 +47,7 @@ for (const f of sampleFiles) {
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
-    const outPath = path.join(DECODE_DIR, f + ".raw");
+    const outPath = path.join(DECODE_DIR, `${f}.raw`);
     // Save: width(4B) + height(4B) + channels(4B) + pixelData
     const header = Buffer.alloc(12);
     header.writeInt32LE(info.width, 0);
@@ -70,4 +71,4 @@ fs.writeFileSync(
   JSON.stringify(manifest)
 );
 console.log(`${manifest.length} images decoded to ${DECODE_DIR}`);
-console.log("MANIFEST:" + path.join(DECODE_DIR, "manifest.json"));
+console.log(`MANIFEST:${path.join(DECODE_DIR, "manifest.json")}`);

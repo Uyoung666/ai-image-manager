@@ -19,6 +19,7 @@ interface DragWindowRegionProps {
 }
 
 export default function DragWindowRegion({ title }: DragWindowRegionProps) {
+  const { t } = useTranslation();
   const [platform, setPlatform] = useState<string | null>(null);
 
   const [isMaximized, setIsMaximized] = useState(false);
@@ -65,15 +66,33 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
 
   return (
     <div className="flex w-full min-w-0 items-stretch justify-between">
-      <div className="draglayer min-w-0 flex-1" onDoubleClick={maximizeWindow}>
+      <button
+        aria-label={t("windowMaximize")}
+        className="draglayer min-w-0 flex-1 border-0 bg-transparent p-0 text-left"
+        onDoubleClick={maximizeWindow}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            maximizeWindow();
+          }
+        }}
+        tabIndex={0}
+        type="button"
+      >
         {title && !isMacOS && (
           <div className="flex min-w-0 flex-1 select-none items-center gap-1.5 whitespace-nowrap p-2 text-muted-foreground text-xs">
-            <img alt="" className="h-3.5 w-3.5" src={icon} />
+            <img
+              alt=""
+              className="h-3.5 w-3.5"
+              height={14}
+              src={icon}
+              width={14}
+            />
             <span className="min-w-0 truncate">{title}</span>
           </div>
         )}
         {isMacOS && <div className="flex flex-1" style={{ height: 28 }} />}
-      </div>
+      </button>
       {!isMacOS && (
         <div className="window-buttons shrink-0">
           <WindowButtons isMaximized={isMaximized} />

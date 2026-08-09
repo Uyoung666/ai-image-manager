@@ -11,7 +11,7 @@ interface FolderEntry {
 
 export class FolderMatcher {
   private folders: FolderEntry[] = [];
-  private cache = new Map<string, number | null>();
+  private readonly cache = new Map<string, number | null>();
   private readonly MAX_CACHE_SIZE = 10_000;
 
   constructor() {
@@ -40,13 +40,14 @@ export class FolderMatcher {
   match(filePath: string): number | null {
     const normalized = this.normalizePath(filePath);
 
-    if (this.cache.has(normalized)) {
-      return this.cache.get(normalized)!;
+    const cached = this.cache.get(normalized);
+    if (cached !== undefined || this.cache.has(normalized)) {
+      return cached ?? null;
     }
 
     let matchedId: number | null = null;
     for (const folder of this.folders) {
-      if (normalized.startsWith(folder.normalizedPath + "/")) {
+      if (normalized.startsWith(`${folder.normalizedPath}/`)) {
         matchedId = folder.id;
         break;
       }

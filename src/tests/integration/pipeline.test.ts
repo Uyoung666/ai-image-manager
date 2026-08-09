@@ -13,6 +13,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // ── Electron mock (hoisted) ────────────────────────────────────────
 const TEST_DATA_DIR = path.join(os.tmpdir(), "ai-image-manager-test");
+const IMAGE_FILE_PATTERN =
+  /\.(jpg|jpeg|png|webp|avif|tiff?|heic|heif|gif|bmp)$/i;
+const JPG_FILE_PATTERN = /\.jpe?g$/i;
+const PHASH_PATTERN = /^[0-9a-f]{16}$/;
 
 vi.mock("electron", () => ({
   app: {
@@ -32,7 +36,7 @@ vi.mock("electron", () => ({
     whenReady(): Promise<void> {
       return Promise.resolve();
     },
-    on(_event: string, _cb: Function): void {
+    on(_event: string, _cb: (...args: never[]) => unknown): void {
       /* noop */
     },
     exit(_code?: number): void {
@@ -48,14 +52,24 @@ vi.mock("electron", () => ({
   Tray: class {},
   Menu: { buildFromTemplate: () => ({}) },
   nativeImage: { createFromBuffer: () => ({}) },
-  ipcMain: { on: () => {} },
+  ipcMain: {
+    on: () => {
+      /* Intentionally empty: integration tests do not dispatch IPC events. */
+    },
+  },
   protocol: {
-    registerSchemesAsPrivileged: () => {},
-    handle: () => {},
+    registerSchemesAsPrivileged: () => {
+      /* Intentionally empty: protocol registration is outside these tests. */
+    },
+    handle: () => {
+      /* Intentionally empty: protocol handlers are not exercised here. */
+    },
   },
   globalShortcut: {
     register: () => true,
-    unregisterAll: () => {},
+    unregisterAll: () => {
+      /* Intentionally empty: shortcuts are not registered by the test suite. */
+    },
   },
 }));
 
@@ -108,7 +122,7 @@ interface TimingResult {
 }
 
 class MetricsCollector {
-  private timings: TimingResult[] = [];
+  private readonly timings: TimingResult[] = [];
 
   async time<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
     const start = performance.now();
@@ -182,15 +196,13 @@ describe("Pipeline Integration Test (500 images)", () => {
     it("应正确发现测试目录中的500张图片", () => {
       const files = fs
         .readdirSync(TEST_IMAGES_DIR)
-        .filter((f) =>
-          /\.(jpg|jpeg|png|webp|avif|tiff?|heic|heif|gif|bmp)$/i.test(f)
-        );
+        .filter((f) => IMAGE_FILE_PATTERN.test(f));
       expect(files.length).toBe(500);
     });
 
     it("应正确识别JPG文件格式", () => {
       const files = fs.readdirSync(TEST_IMAGES_DIR);
-      const jpgs = files.filter((f) => /\.jpe?g$/i.test(f));
+      const jpgs = files.filter((f) => JPG_FILE_PATTERN.test(f));
       expect(jpgs.length).toBe(500); // all files should be JPG
     });
 
@@ -484,7 +496,7 @@ describe("Pipeline Integration Test (500 images)", () => {
 
       for (const p of allPhotos) {
         if (p.phash) {
-          expect(p.phash).toMatch(/^[0-9a-f]{16}$/);
+          expect(p.phash).toMatch(PHASH_PATTERN);
         }
       }
     });

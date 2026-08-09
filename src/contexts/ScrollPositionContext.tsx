@@ -9,6 +9,17 @@ import {
 
 // ── 内存日志缓冲区（绕过 Electron console 重定向） ──────────
 const MAX_LOG_ENTRIES = 500;
+interface ScrollDebugEntry {
+  detail?: unknown;
+  label: string;
+  ts: number;
+}
+
+interface ScrollDebugWindow extends Window {
+  __inspectScrollPositions?: () => Map<string, ScrollPosition>;
+  __scrollLog?: ScrollDebugEntry[];
+}
+
 const SCROLL_DEBUG_ENABLED = (() => {
   if (!import.meta.env.DEV || typeof window === "undefined") {
     return false;
@@ -25,7 +36,9 @@ function debugLog(label: string, detail?: unknown) {
     return;
   }
   const entry = { ts: Date.now(), label, detail };
-  const buf = ((window as any).__scrollLog = (window as any).__scrollLog || []);
+  const debugWindow = window as ScrollDebugWindow;
+  const buf = debugWindow.__scrollLog ?? [];
+  debugWindow.__scrollLog = buf;
   buf.push(entry);
   if (buf.length > MAX_LOG_ENTRIES) {
     buf.shift();
@@ -49,7 +62,7 @@ function debugLog(label: string, detail?: unknown) {
  * - `offsetRatio`：比例如 0~1，用于窗口 resize / detail panel 展开后的鲁棒恢复
  *   计算公式：offsetRatio = offsetFromTop / itemRenderedHeight
  */
-interface ScrollAnchor {
+export interface ScrollAnchor {
   /** 该 item 在加载数据集中的序号（0-based），用于预加载页码计算 */
   estimatedGlobalIndex?: number;
   /** 可见区域第一个 item 的 ID */
@@ -66,7 +79,7 @@ interface ScrollAnchor {
  * 完整的滚动位置信息
  * 优先使用 anchor（内容可寻址），fallback 到 scrollTop（像素降级）
  */
-interface ScrollPosition {
+export interface ScrollPosition {
   /** 锚点信息（推荐，内容可寻址） */
   anchor?: ScrollAnchor;
   /** 降级像素位置 */
@@ -134,6 +147,124 @@ const POSITION_EXPIRY_MS = 30 * 60 * 1000;
 
 // 最大缓存路由数量（LRU 策略）
 const MAX_CACHED_ROUTES = 30;
+
+function readStoredScrollPosition(routeKey: string): ScrollPosition | null {
+  try {
+    const stored = sessionStorage.getItem(`scroll_position_${routeKey}`);
+    return stored ? (JSON.parse(stored) as ScrollPosition) : null;
+  } catch (error) {
+    console.debug("[ScrollPositionContext] sessionStorage read failed:", error);
+    return null;
+  }
+}
+
+function routeKeysMatch(routeKey: string, candidateKey: string): boolean {
+  return (
+    candidateKey.startsWith(`${routeKey}-`) ||
+    routeKey.startsWith(`${candidateKey}-`)
+  );
+}
+
+function findFuzzyMemoryPosition(
+  routeKey: string,
+  positions: Map<string, ScrollPosition>
+): ScrollPosition | null {
+  let result: ScrollPosition | null = null;
+  for (const [key, position] of positions.entries()) {
+    if (
+      routeKeysMatch(routeKey, key) &&
+      (!result || position.timestamp > result.timestamp)
+    ) {
+      result = position;
+    }
+  }
+  return result;
+}
+
+function findFuzzyStoredPosition(routeKey: string): ScrollPosition | null {
+  let result: ScrollPosition | null = null;
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const storageKey = sessionStorage.key(i);
+      if (!storageKey?.startsWith("scroll_position_")) {
+        continue;
+      }
+      const storedRouteKey = storageKey.replace("scroll_position_", "");
+      if (!routeKeysMatch(routeKey, storedRouteKey)) {
+        continue;
+      }
+      const stored = sessionStorage.getItem(storageKey);
+      if (!stored) {
+        continue;
+      }
+      const position = JSON.parse(stored) as ScrollPosition;
+      if (!result || position.timestamp > result.timestamp) {
+        result = position;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return result;
+}
+
+interface ScrollPositionLookup {
+  fuzzyMatched: boolean;
+  position: ScrollPosition | null;
+  source: "memory" | "none" | "sessionStorage";
+}
+
+function lookupScrollPosition(
+  routeKey: string,
+  positions: Map<string, ScrollPosition>
+): ScrollPositionLookup {
+  let position: ScrollPosition | null = positions.get(routeKey) ?? null;
+  let source: ScrollPositionLookup["source"] = position ? "memory" : "none";
+  let fuzzyMatched = false;
+
+  if (!position) {
+    position = readStoredScrollPosition(routeKey);
+    if (position) {
+      source = "sessionStorage";
+      positions.set(routeKey, position);
+    }
+  }
+  if (!position) {
+    position = findFuzzyMemoryPosition(routeKey, positions);
+    if (position) {
+      source = "memory";
+      fuzzyMatched = true;
+    }
+  }
+  if (!position) {
+    position = findFuzzyStoredPosition(routeKey);
+    if (position) {
+      source = "sessionStorage";
+      fuzzyMatched = true;
+    }
+  }
+  if (fuzzyMatched && position) {
+    positions.set(routeKey, position);
+    try {
+      sessionStorage.setItem(
+        `scroll_position_${routeKey}`,
+        JSON.stringify(position)
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { fuzzyMatched, position, source };
+}
+
+function removeStoredScrollPosition(routeKey: string): void {
+  try {
+    sessionStorage.removeItem(`scroll_position_${routeKey}`);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function ScrollPositionProvider({ children }: { children: ReactNode }) {
   // 使用 useRef 而非 useState 避免不必要的 re-render
@@ -214,7 +345,10 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
           scrollTop,
           anchorId: anchor?.itemId ?? null,
           anchorOffset: anchor?.offsetFromTop ?? null,
-          stack: new Error().stack?.split("\n").slice(2, 4).join(" ← "),
+          stack: new Error("scroll-position debug snapshot").stack
+            ?.split("\n")
+            .slice(2, 4)
+            .join(" ← "),
         });
       }
 
@@ -235,89 +369,9 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
   );
 
   const getScrollPosition = useCallback((routeKey: string) => {
-    // 优先从内存读取
-    let position = positionsRef.current.get(routeKey);
-    let source = position ? "memory" : "none";
-    let fuzzyMatched = false;
+    const lookup = lookupScrollPosition(routeKey, positionsRef.current);
+    const { fuzzyMatched, position, source } = lookup;
 
-    // Fallback 到 sessionStorage（页面刷新场景）
-    if (!position) {
-      try {
-        const stored = sessionStorage.getItem(`scroll_position_${routeKey}`);
-        if (stored) {
-          position = JSON.parse(stored) as ScrollPosition;
-          source = "sessionStorage";
-          positionsRef.current.set(routeKey, position);
-        }
-      } catch (err) {
-        console.debug(
-          "[ScrollPositionContext] sessionStorage read failed:",
-          err
-        );
-      }
-    }
-
-    // ── 冗余模糊匹配 ──────────────────────────────────────
-    // 在卸载期，SidebarFilterContext 的状态可能被重置，导致 Key
-    // 末尾多出 "undefined" 等杂质。例如：
-    //   保存时: home-all-date-desc
-    //   读取时: home-all-undefined-date-desc
-    // 此时精确匹配失败，通过前缀搜索找回。
-    if (!position) {
-      const prefix = routeKey + "-";
-      // 搜索内存
-      for (const [key, pos] of positionsRef.current.entries()) {
-        if (
-          (key.startsWith(prefix) || routeKey.startsWith(key + "-")) &&
-          (!position || pos.timestamp > position.timestamp)
-        ) {
-          position = pos;
-          source = "memory";
-          fuzzyMatched = true;
-        }
-      }
-      // 搜索 sessionStorage
-      if (!position) {
-        try {
-          for (let i = 0; i < sessionStorage.length; i++) {
-            const storageKey = sessionStorage.key(i);
-            if (!storageKey?.startsWith("scroll_position_")) {
-              continue;
-            }
-            const storedKey = storageKey.replace("scroll_position_", "");
-            if (
-              storedKey.startsWith(prefix) ||
-              routeKey.startsWith(storedKey + "-")
-            ) {
-              const pos = JSON.parse(
-                sessionStorage.getItem(storageKey)!
-              ) as ScrollPosition;
-              if (!position || pos.timestamp > position.timestamp) {
-                position = pos;
-                source = "sessionStorage";
-                fuzzyMatched = true;
-              }
-            }
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-      // 将模糊匹配到的数据迁移到精确 Key 下
-      if (position) {
-        positionsRef.current.set(routeKey, position);
-        try {
-          sessionStorage.setItem(
-            `scroll_position_${routeKey}`,
-            JSON.stringify(position)
-          );
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-
-    // ── LOG_READ ───────────────────────────────────────────
     debugLog("LOG_READ", {
       routeKey,
       found: !!position,
@@ -331,25 +385,18 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
     if (!position) {
       return null;
     }
-
-    // 检查是否过期
     if (Date.now() - position.timestamp > POSITION_EXPIRY_MS) {
       debugLog("LOG_READ_EXPIRED", {
         routeKey,
         ageMs: Date.now() - position.timestamp,
       });
       positionsRef.current.delete(routeKey);
-      try {
-        sessionStorage.removeItem(`scroll_position_${routeKey}`);
-      } catch {
-        /* ignore */
-      }
+      removeStoredScrollPosition(routeKey);
       return null;
     }
 
     return position;
   }, []);
-
   const clearScrollPosition = useCallback((routeKey: string) => {
     positionsRef.current.delete(routeKey);
     pendingWritesRef.current.delete(routeKey);
@@ -391,7 +438,7 @@ export function ScrollPositionProvider({ children }: { children: ReactNode }) {
   const markRouteDirty = useCallback((routeKey: string) => {
     // 不清除位置，只标记锚点为 null，下次恢复时走像素 fallback
     const existing = positionsRef.current.get(routeKey);
-    if (existing && existing.anchor) {
+    if (existing?.anchor) {
       const dirtyPosition = {
         ...existing,
         anchor: undefined,
@@ -457,7 +504,8 @@ export function useScrollPosition(): ScrollPositionContextValue {
 
 // 开发环境调试工具
 if (import.meta.env.DEV) {
-  (window as any).__inspectScrollPositions = () => {
+  const debugWindow = window as ScrollDebugWindow;
+  debugWindow.__inspectScrollPositions = () => {
     const positions = new Map<string, ScrollPosition>();
     // 从 sessionStorage 读取所有位置
     try {
@@ -465,8 +513,11 @@ if (import.meta.env.DEV) {
         const key = sessionStorage.key(i);
         if (key?.startsWith("scroll_position_")) {
           const routeKey = key.replace("scroll_position_", "");
-          const data = JSON.parse(sessionStorage.getItem(key)!);
-          positions.set(routeKey, data);
+          const stored = sessionStorage.getItem(key);
+          if (stored) {
+            const data = JSON.parse(stored) as ScrollPosition;
+            positions.set(routeKey, data);
+          }
         }
       }
     } catch {

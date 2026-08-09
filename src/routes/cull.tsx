@@ -80,7 +80,7 @@ function CullListPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadSessions();
@@ -94,7 +94,7 @@ function CullListPage() {
       console.error("[loadFolders] failed:", err);
       toast.error(t("cullActionFailed"));
     }
-  }, []);
+  }, [t]);
 
   async function handleCreate() {
     if (creating) {
@@ -209,6 +209,7 @@ function CullListPage() {
           <button
             className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
+            type="button"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -231,6 +232,7 @@ function CullListPage() {
             loadFolders();
             setCreateOpen(true);
           }}
+          type="button"
         >
           <Plus className="h-3.5 w-3.5" />
           {t("cullNew")}
@@ -299,11 +301,15 @@ function CullListPage() {
           <div className="space-y-4 pt-2">
             {/* Name */}
             <div>
-              <label className="mb-1 block text-[12px] text-muted-foreground">
+              <label
+                className="mb-1 block text-[12px] text-muted-foreground"
+                htmlFor="cull-session-name"
+              >
                 {t("cullSessionName")}
               </label>
               <input
                 className="w-full rounded-[6px] border border-input bg-transparent px-3 py-2 text-[13px] text-foreground outline-none focus:border-primary"
+                id="cull-session-name"
                 onChange={(e) => setNewName(e.target.value)}
                 onCompositionEnd={() => {
                   composingRef.current = false;
@@ -323,9 +329,9 @@ function CullListPage() {
 
             {/* Mode */}
             <div>
-              <label className="mb-1 block text-[12px] text-muted-foreground">
+              <p className="mb-1 block text-[12px] text-muted-foreground">
                 {t("cullMode")}
-              </label>
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {(["duel", "curate"] as const).map((mode) => (
                   <button
@@ -336,6 +342,7 @@ function CullListPage() {
                     }`}
                     key={mode}
                     onClick={() => setNewMode(mode)}
+                    type="button"
                   >
                     {getModeIcon(mode)}
                     {getModeLabel(mode)}
@@ -347,9 +354,9 @@ function CullListPage() {
             {/* Sort strategy (only for curate) */}
             {newMode === "curate" && (
               <div>
-                <label className="mb-1 block text-[12px] text-muted-foreground">
+                <p className="mb-1 block text-[12px] text-muted-foreground">
                   {t("cullSortStrategy")}
-                </label>
+                </p>
                 <div className="space-y-1">
                   {(["time", "similarity"] as const).map((strategy) => (
                     <button
@@ -360,6 +367,7 @@ function CullListPage() {
                       }`}
                       key={strategy}
                       onClick={() => setNewSortStrategy(strategy)}
+                      type="button"
                     >
                       <div className="font-medium">
                         {strategy === "time"
@@ -380,9 +388,9 @@ function CullListPage() {
             {/* PK sub-mode (only for duel) */}
             {newMode === "duel" && (
               <div>
-                <label className="mb-1 block text-[12px] text-muted-foreground">
+                <p className="mb-1 block text-[12px] text-muted-foreground">
                   {t("cullPkModeLabel")}
-                </label>
+                </p>
                 <div className="space-y-1">
                   {(["quick", "standard", "fine"] as const).map((mode) => (
                     <button
@@ -393,6 +401,7 @@ function CullListPage() {
                       }`}
                       key={mode}
                       onClick={() => setNewPkMode(mode)}
+                      type="button"
                     >
                       <div className="font-medium">
                         {(() => {
@@ -422,9 +431,9 @@ function CullListPage() {
 
             {/* Folder selector */}
             <div>
-              <label className="mb-1 block text-[12px] text-muted-foreground">
+              <p className="mb-1 block text-[12px] text-muted-foreground">
                 {t("cullSelectFolder")}
-              </label>
+              </p>
               {folders.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground/50">
                   {t("cullNoFolders")}
@@ -444,6 +453,7 @@ function CullListPage() {
                           selectedFolderId === f.id ? null : f.id
                         )
                       }
+                      type="button"
                     >
                       <span className="break-all">{f.displayName}</span>
                       <span className="ml-2 text-[10px] text-muted-foreground/50">
@@ -470,6 +480,7 @@ function CullListPage() {
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => setCreateOpen(false)}
+                type="button"
               >
                 {t("cancel")}
               </button>
@@ -477,6 +488,7 @@ function CullListPage() {
                 className="rounded-[6px] bg-primary px-4 py-2 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 disabled={creating}
                 onClick={handleCreate}
+                type="button"
               >
                 {t("cullStart")}
               </button>

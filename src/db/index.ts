@@ -61,8 +61,7 @@ const schema = {
 };
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let sqliteConnection: any = null;
+let sqliteConnection: Database.Database | null = null;
 
 interface SQLiteTableColumn {
   name: string;
@@ -204,10 +203,7 @@ export function initDatabase(): ReturnType<typeof drizzle> {
     migrate(dbInstance, { migrationsFolder });
     console.log("[DB] Migrations complete");
     const provenanceRepair = repairPhotoTagProvenanceSchema(sqlite);
-    if (
-      provenanceRepair.addedOrigin ||
-      provenanceRepair.addedUserConfirmed
-    ) {
+    if (provenanceRepair.addedOrigin || provenanceRepair.addedUserConfirmed) {
       console.warn(
         `[DB] Repaired photo tag provenance columns: origin=${provenanceRepair.addedOrigin} userConfirmed=${provenanceRepair.addedUserConfirmed}`
       );

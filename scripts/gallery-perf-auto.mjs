@@ -99,10 +99,14 @@ async function main() {
     );
 
     console.log(`Wrote ${path.relative(projectRoot, snapshotPath)}`);
-    execFileSync(process.execPath, ["scripts/gallery-perf-report.mjs", snapshotPath], {
-      cwd: projectRoot,
-      stdio: "inherit",
-    });
+    execFileSync(
+      process.execPath,
+      ["scripts/gallery-perf-report.mjs", snapshotPath],
+      {
+        cwd: projectRoot,
+        stdio: "inherit",
+      }
+    );
   } finally {
     await electronApp?.close();
   }

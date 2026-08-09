@@ -8,6 +8,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [
     tanstackRouter({
+      routeFileIgnorePattern: "home-sort-storage",
       target: "react",
     }),
     tailwindcss(),
@@ -19,5 +20,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
     },
+  },
+  optimizeDeps: {
+    entries: ["index.html"],
   },
 });

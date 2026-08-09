@@ -91,18 +91,7 @@ function removeFilesByExt(dir: string, ext: string, label: string) {
   }
 }
 
-// 清理 node_modules 中的非 Windows 平台二进制和开发文件
-// 需要在 afterCopy、afterPrune、postPackage 三个阶段都调用，
-// 因为 Electron Packager 的 prune 步骤会重新恢复被删文件
-function cleanBuildNodeModules(buildPath: string) {
-  const nmPath = path.join(buildPath, "node_modules");
-  if (!fs.existsSync(nmPath)) {
-    return;
-  }
-
-  // Transformers may contain a developer-side model cache. It is never a
-  // release dependency; shipping it could accidentally include retired model
-  // weights that are not part of the product manifest.
+function cleanModelCaches(nmPath: string): void {
   for (const cacheDir of [
     path.join(nmPath, "@xenova", "transformers", ".cache"),
     path.join(nmPath, "@huggingface", ".cache"),
@@ -112,8 +101,9 @@ function cleanBuildNodeModules(buildPath: string) {
       console.log(`[cleanup] removed model cache ${cacheDir}`);
     }
   }
+}
 
-  // 删除 onnxruntime 非 Windows 平台二进制
+function cleanNonWindowsOnnxBinaries(nmPath: string): void {
   const onnxPlatforms = [
     path.join(nmPath, "onnxruntime-node", "bin", "napi-v6"),
     path.join(
@@ -131,10 +121,10 @@ function cleanBuildNodeModules(buildPath: string) {
       continue;
     }
     for (const platform of ["darwin", "linux"]) {
-      const pd = path.join(onnxDir, platform);
-      if (fs.existsSync(pd)) {
-        fs.rmSync(pd, { recursive: true, force: true });
-        console.log(`[cleanup] removed ${pd}`);
+      const platformDir = path.join(onnxDir, platform);
+      if (fs.existsSync(platformDir)) {
+        fs.rmSync(platformDir, { recursive: true, force: true });
+        console.log(`[cleanup] removed ${platformDir}`);
       }
     }
     const arm64Dir = path.join(onnxDir, "win32", "arm64");
@@ -143,13 +133,9 @@ function cleanBuildNodeModules(buildPath: string) {
       console.log(`[cleanup] removed ${arm64Dir}`);
     }
   }
+}
 
-  // 删除开发文件
-  for (const ext of [".map", ".ts", ".tsx", ".md", ".c", ".h", ".cc", ".cpp"]) {
-    removeFilesByExt(nmPath, ext, ext);
-  }
-
-  // 删除嵌套 sharp 的非 Windows vendor 二进制
+function cleanNestedSharpVendor(nmPath: string): void {
   const nestedSharpVendor = path.join(
     nmPath,
     "@xenova",
@@ -158,16 +144,37 @@ function cleanBuildNodeModules(buildPath: string) {
     "sharp",
     "vendor"
   );
-  if (fs.existsSync(nestedSharpVendor)) {
-    const entries = fs.readdirSync(nestedSharpVendor, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith("win32")) {
-        const vp = path.join(nestedSharpVendor, entry.name);
-        fs.rmSync(vp, { recursive: true, force: true });
-        console.log(`[cleanup] removed sharp vendor ${vp}`);
-      }
+  if (!fs.existsSync(nestedSharpVendor)) {
+    return;
+  }
+  const entries = fs.readdirSync(nestedSharpVendor, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith("win32")) {
+      const vendorPath = path.join(nestedSharpVendor, entry.name);
+      fs.rmSync(vendorPath, { recursive: true, force: true });
+      console.log(`[cleanup] removed sharp vendor ${vendorPath}`);
     }
   }
+}
+
+// 清理 node_modules 中的非 Windows 平台二进制和开发文件
+// 需要在 afterCopy、afterPrune、postPackage 三个阶段都调用，
+// 因为 Electron Packager 的 prune 步骤会重新恢复被删文件
+function cleanBuildNodeModules(buildPath: string) {
+  const nmPath = path.join(buildPath, "node_modules");
+  if (!fs.existsSync(nmPath)) {
+    return;
+  }
+
+  cleanModelCaches(nmPath);
+  cleanNonWindowsOnnxBinaries(nmPath);
+
+  // 删除开发文件
+  for (const ext of [".map", ".ts", ".tsx", ".md", ".c", ".h", ".cc", ".cpp"]) {
+    removeFilesByExt(nmPath, ext, ext);
+  }
+
+  cleanNestedSharpVendor(nmPath);
 }
 
 const config: ForgeConfig = {
@@ -352,6 +359,7 @@ const config: ForgeConfig = {
         );
         cleanBuildNodeModules(path.join(outputPath, "resources", "app"));
       }
+      return Promise.resolve();
     },
   },
 };

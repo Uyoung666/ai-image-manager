@@ -263,9 +263,7 @@ describe("dashboard chart data", () => {
         from: "2026-02-01",
         to: "2026-02-28",
       })
-    ).toBe(
-      "/dashboard?tab=places&range=custom&from=2026-02-01&to=2026-02-28"
-    );
+    ).toBe("/dashboard?tab=places&range=custom&from=2026-02-01&to=2026-02-28");
   });
 
   it("only accepts validated internal dashboard return targets", () => {

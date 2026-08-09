@@ -51,7 +51,6 @@ describe("GpuSettingsCard", () => {
       dmlAvailable: true,
       gpuName: "Test GPU",
       probeTimeMs: 12,
-      timestamp: Date.now(),
     });
 
     render(

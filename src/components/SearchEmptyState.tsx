@@ -1,3 +1,5 @@
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
+// biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 import {
   Brain,
   Calendar,
@@ -121,7 +123,9 @@ export function SearchEmptyState({
             primary: true,
           },
         ]}
-        description={t("emptyFilterAndQueryDesc", { query: truncate(query, 40) })}
+        description={t("emptyFilterAndQueryDesc", {
+          query: truncate(query, 40),
+        })}
         icon={<FilterX className="h-5 w-5" />}
         title={t("emptyFilterAndQueryTitle")}
       />
@@ -149,7 +153,9 @@ export function SearchEmptyState({
   if (searchMode === "image") {
     return (
       <EmptyStateCard
-        actions={[{ label: t("emptyBrowseAll"), onClick: onClearSearch, primary: true }]}
+        actions={[
+          { label: t("emptyBrowseAll"), onClick: onClearSearch, primary: true },
+        ]}
         description={t("emptyImageSearchDesc")}
         icon={<ImageUp className="h-5 w-5" />}
         title={t("emptyImageSearchTitle")}
@@ -160,7 +166,9 @@ export function SearchEmptyState({
   if (searchMode === "color") {
     return (
       <EmptyStateCard
-        actions={[{ label: t("emptyBrowseAll"), onClick: onClearSearch, primary: true }]}
+        actions={[
+          { label: t("emptyBrowseAll"), onClick: onClearSearch, primary: true },
+        ]}
         description={t("emptyColorSearchDesc")}
         icon={<Filter className="h-5 w-5" />}
         title={t("emptyColorSearchTitle")}

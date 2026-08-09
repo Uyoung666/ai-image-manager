@@ -115,7 +115,11 @@ async function handleProbe(modelsDir) {
   const probeStart = Date.now();
 
   // Probe with the active YuNet detector.
-  const yunetModel = path.join(modelsDir, "face", "face_detection_yunet_2023mar.onnx");
+  const yunetModel = path.join(
+    modelsDir,
+    "face",
+    "face_detection_yunet_2023mar.onnx"
+  );
   const faceModel = yunetModel;
 
   if (!fs.existsSync(faceModel)) {

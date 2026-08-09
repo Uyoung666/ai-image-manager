@@ -18,6 +18,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import sharp from "sharp";
 
 const [userDataDir, enabledArg, photoCountArg] = process.argv.slice(2);
 if (!userDataDir) {
@@ -41,6 +42,10 @@ sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 migrate(drizzle(sqlite), { migrationsFolder: path.join(root, "drizzle") });
 
+const insertFolder = sqlite.prepare(
+  "INSERT INTO folders (path, display_name, photo_count, created_at) VALUES (?, ?, ?, ?)"
+);
+
 const now = new Date();
 const todayPrior = new Date(
   now.getFullYear() - 2,
@@ -53,11 +58,29 @@ const todayPrior = new Date(
 const historicalDay = new Date(2023, 4, 15, 12, 0, 0).getTime(); // 2023-05-15
 const yesterday = Date.now() - 24 * 60 * 60 * 1000;
 
+const folderResult = insertFolder.run(
+  photoDir,
+  "E2E Wander",
+  photoCount,
+  Date.now()
+);
+const folderId = Number(folderResult.lastInsertRowid);
+const fixtureJpeg = await sharp({
+  create: {
+    background: { b: 180, g: 120, r: 80 },
+    channels: 3,
+    height: 2,
+    width: 2,
+  },
+})
+  .jpeg({ quality: 70 })
+  .toBuffer();
+
 const insertPhoto = sqlite.prepare(`
   INSERT INTO photos
     (path, folder_id, filename, file_size, file_date, width, height, format,
      is_indexed, is_ai_processed, is_face_processed, is_favorite, deleted_at, created_at)
-  VALUES (?, NULL, ?, ?, ?, ?, ?, 'jpg', 1, 0, 0, ?, NULL, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, 'jpg', 1, 0, 0, ?, NULL, ?)
 `);
 const insertExif = sqlite.prepare(
   "INSERT INTO exif_data (photo_id, date_taken) VALUES (?, ?)"
@@ -79,7 +102,7 @@ const insertSetting = sqlite.prepare(
 const photoIds = [];
 for (let i = 0; i < photoCount; i += 1) {
   const filePath = path.join(photoDir, `photo-${i + 1}.jpg`);
-  fs.writeFileSync(filePath, "E2E wander fixture");
+  fs.writeFileSync(filePath, fixtureJpeg);
   const fileDate = (() => {
     if (i < 4) {
       return todayPrior;
@@ -91,6 +114,7 @@ for (let i = 0; i < photoCount; i += 1) {
   })();
   const info = insertPhoto.run(
     filePath,
+    folderId,
     `photo-${i + 1}.jpg`,
     1,
     fileDate,

@@ -97,7 +97,8 @@ vi.mock("react-i18next", () => ({
         emptyWelcomeTitle: "添加照片文件夹开始整理",
         emptyWelcomeDescription: "选择包含照片的文件夹。所有处理都在本地完成。",
         emptyImportingTitle: "正在导入照片",
-        emptyImportingDescription: "正在扫描文件夹并生成缩略图，照片很快会出现在这里。",
+        emptyImportingDescription:
+          "正在扫描文件夹并生成缩略图，照片很快会出现在这里。",
         photoDetail: "照片详情",
         photoInfo: "基本信息",
         exifInfo: "EXIF 信息",
@@ -213,7 +214,10 @@ vi.mock("react-i18next", () => ({
       return translated;
     },
     i18n: {
-      changeLanguage: () => new Promise(() => {}),
+      changeLanguage: () =>
+        new Promise(() => {
+          /* Keep the mocked language change pending; tests do not await it. */
+        }),
       language: "zh",
     },
   }),

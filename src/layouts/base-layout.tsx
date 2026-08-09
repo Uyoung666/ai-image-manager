@@ -86,11 +86,7 @@ function SidebarSlot() {
         />
       )}
       <div
-        aria-label={
-          isHomePage && compactViewport && compactOpen
-            ? t("sidebarFolders")
-            : undefined
-        }
+        aria-label={t("sidebarFolders")}
         aria-modal={
           isHomePage && compactViewport && compactOpen ? true : undefined
         }
@@ -102,9 +98,7 @@ function SidebarSlot() {
             : "hidden"
         }
         ref={compactLayerRef}
-        role={
-          isHomePage && compactViewport && compactOpen ? "dialog" : undefined
-        }
+        role="dialog"
       >
         <Sidebar
           activeFolderId={filter.activeFolderId}
@@ -211,8 +205,12 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
                       ? `home-workspace ${zones.dragKind ? "home-import-dragging" : ""}`
                       : ""
                   }`}
-                  onDragEnter={isHomePage ? zones.handleRootDragEnter : undefined}
-                  onDragLeave={isHomePage ? zones.handleRootDragLeave : undefined}
+                  onDragEnter={
+                    isHomePage ? zones.handleRootDragEnter : undefined
+                  }
+                  onDragLeave={
+                    isHomePage ? zones.handleRootDragLeave : undefined
+                  }
                   onDragOver={isHomePage ? zones.handleRootDragOver : undefined}
                   onDrop={isHomePage ? zones.handleRootDrop : undefined}
                   role="application"

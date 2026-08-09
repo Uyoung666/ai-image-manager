@@ -310,7 +310,7 @@ function DashboardPage() {
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [data]);
+  }, []);
 
   const heavyEnabled = tab === "places" && statsQuery.data !== undefined;
   const colorQuery = useQuery({
@@ -562,6 +562,40 @@ function DashboardPage() {
       setStartingAi(false);
     }
   };
+
+  let nextActionContent: React.ReactNode;
+  if (data.coverage.ai < sampleTotal) {
+    nextActionContent = (
+      <div className="mt-4">
+        <p className="text-[12px] text-foreground">
+          {t("dashboardContinueAi", {
+            count: sampleTotal - data.coverage.ai,
+          })}
+        </p>
+        <Button
+          className="mt-3 h-8 text-[11px]"
+          disabled={startingAi}
+          onClick={startAi}
+        >
+          {startingAi ? t("dashboardStartingAi") : t("dashboardStartAi")}
+        </Button>
+      </div>
+    );
+  } else if ((data.exifCompleteness?.withoutExif ?? 0) > 0) {
+    nextActionContent = (
+      <p className="mt-4 text-[12px] text-foreground">
+        {t("dashboardMissingExifAction", {
+          count: data.exifCompleteness?.withoutExif,
+        })}
+      </p>
+    );
+  } else {
+    nextActionContent = (
+      <p className="mt-4 text-[12px] text-muted-foreground">
+        {t("dashboardHealthGood")}
+      </p>
+    );
+  }
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
@@ -884,34 +918,7 @@ function DashboardPage() {
                       {t("dashboardNextActions")}
                     </h2>
                   </div>
-                  {data.coverage.ai < sampleTotal ? (
-                    <div className="mt-4">
-                      <p className="text-[12px] text-foreground">
-                        {t("dashboardContinueAi", {
-                          count: sampleTotal - data.coverage.ai,
-                        })}
-                      </p>
-                      <Button
-                        className="mt-3 h-8 text-[11px]"
-                        disabled={startingAi}
-                        onClick={startAi}
-                      >
-                        {startingAi
-                          ? t("dashboardStartingAi")
-                          : t("dashboardStartAi")}
-                      </Button>
-                    </div>
-                  ) : (data.exifCompleteness?.withoutExif ?? 0) > 0 ? (
-                    <p className="mt-4 text-[12px] text-foreground">
-                      {t("dashboardMissingExifAction", {
-                        count: data.exifCompleteness?.withoutExif,
-                      })}
-                    </p>
-                  ) : (
-                    <p className="mt-4 text-[12px] text-muted-foreground">
-                      {t("dashboardHealthGood")}
-                    </p>
-                  )}
+                  {nextActionContent}
                   {advancedExifQuery.data && (
                     <div className="mt-4 border-border border-t pt-3">
                       <p className="text-[11px] text-muted-foreground">
@@ -1474,71 +1481,83 @@ function TrendChart({
       sampleTotal={sampleTotal}
       title={title}
     >
-      {displayMode === "heatmap" && hasCalendarData ? (
-        <CalendarHeatmap
-          data={calendarData}
-          onDateClick={(date) => onDateClick?.(date)}
-        />
-      ) : data.some((point) => point.count > 0) ? (
-        <div className="h-[clamp(12rem,36dvh,14.375rem)] min-w-0">
-          <ResponsiveContainer height="100%" width="100%">
-          <AreaChart
-            data={data}
-            margin={{ bottom: 18, left: 0, right: 8, top: 4 }}
-            onClick={(state) => {
-              const dashboardPoint = state?.activePayload?.[0]?.payload as
-                | DashboardPoint
-                | undefined;
-              if (dashboardPoint && dashboardPoint.count > 0) {
-                onPointClick?.(dashboardPoint);
-              }
-            }}
-          >
-            <defs>
-              <linearGradient id={`trend-${title}`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid
-              stroke="var(--border)"
-              strokeDasharray="3 3"
-              vertical={false}
+      {(() => {
+        if (displayMode === "heatmap" && hasCalendarData) {
+          return (
+            <CalendarHeatmap
+              data={calendarData}
+              onDateClick={(date) => onDateClick?.(date)}
             />
-            <XAxis
-              axisLine={false}
-              dataKey="name"
-              interval="preserveStartEnd"
-              tick={axisTick}
-              tickLine={false}
-            />
-            <YAxis
-              axisLine={false}
-              tick={axisTick}
-              tickLine={false}
-              width={42}
-            />
-            <Tooltip
-              content={<DashboardChartTooltip />}
-              cursor={{ fill: "var(--muted)" }}
-            />
-            <Area
-              animationDuration={400}
-              animationEasing="ease-out"
-              dataKey="count"
-              fill={`url(#trend-${title})`}
-              isAnimationActive={!noMotion}
-              stroke={color}
-              strokeWidth={2}
-              style={onPointClick ? { cursor: "pointer" } : undefined}
-              type="linear"
-            />
-          </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      ) : (
-        <EmptyChart message={t("dashboardEmptyForRange")} />
-      )}
+          );
+        }
+        if (!data.some((point) => point.count > 0)) {
+          return <EmptyChart message={t("dashboardEmptyForRange")} />;
+        }
+        return (
+          <div className="h-[clamp(12rem,36dvh,14.375rem)] min-w-0">
+            <ResponsiveContainer height="100%" width="100%">
+              <AreaChart
+                data={data}
+                margin={{ bottom: 18, left: 0, right: 8, top: 4 }}
+                onClick={(state) => {
+                  const dashboardPoint = state?.activePayload?.[0]?.payload as
+                    | DashboardPoint
+                    | undefined;
+                  if (dashboardPoint && dashboardPoint.count > 0) {
+                    onPointClick?.(dashboardPoint);
+                  }
+                }}
+              >
+                <defs>
+                  <linearGradient
+                    id={`trend-${title}`}
+                    x1="0"
+                    x2="0"
+                    y1="0"
+                    y2="1"
+                  >
+                    <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  stroke="var(--border)"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+                <XAxis
+                  axisLine={false}
+                  dataKey="name"
+                  interval="preserveStartEnd"
+                  tick={axisTick}
+                  tickLine={false}
+                />
+                <YAxis
+                  axisLine={false}
+                  tick={axisTick}
+                  tickLine={false}
+                  width={42}
+                />
+                <Tooltip
+                  content={<DashboardChartTooltip />}
+                  cursor={{ fill: "var(--muted)" }}
+                />
+                <Area
+                  animationDuration={400}
+                  animationEasing="ease-out"
+                  dataKey="count"
+                  fill={`url(#trend-${title})`}
+                  isAnimationActive={!noMotion}
+                  stroke={color}
+                  strokeWidth={2}
+                  style={onPointClick ? { cursor: "pointer" } : undefined}
+                  type="linear"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })()}
     </ChartSection>
   );
 }
@@ -1768,7 +1787,7 @@ function OverviewTrend({
     return null;
   }
   return (
-    <div aria-label={title} className="min-w-0 w-full">
+    <section aria-label={title} className="w-full min-w-0">
       {displayMode === "heatmap" ? (
         <CalendarHeatmap
           color={color}
@@ -1817,7 +1836,7 @@ function OverviewTrend({
           </ResponsiveContainer>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 function Insight({

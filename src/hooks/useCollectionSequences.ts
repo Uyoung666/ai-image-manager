@@ -1,4 +1,3 @@
-// biome-ignore-all lint/style/useFilenamingConvention: hooks follow the repository's existing useXxx filename convention.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ipc } from "@/ipc/manager";

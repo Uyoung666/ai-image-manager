@@ -3,7 +3,51 @@ import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 
 interface Photo {
   id: number;
-  [key: string]: any;
+}
+
+interface ClickSelectionResult {
+  index: number;
+  selectedIds: Set<number>;
+  shouldUpdateLastClicked: boolean;
+}
+
+function applyClickSelection(
+  currentIds: Set<number>,
+  id: number,
+  event: React.MouseEvent,
+  photos: Photo[],
+  lastClickedIdx: number
+): ClickSelectionResult {
+  const selectedIds = new Set(currentIds);
+  const index = photos.findIndex((photo) => photo.id === id);
+
+  if (event.shiftKey && lastClickedIdx >= 0 && index >= 0) {
+    const [from, to] =
+      lastClickedIdx < index
+        ? [lastClickedIdx, index]
+        : [index, lastClickedIdx];
+    for (let i = from; i <= to; i++) {
+      selectedIds.add(photos[i].id);
+    }
+    return { index, selectedIds, shouldUpdateLastClicked: false };
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+  } else {
+    selectedIds.clear();
+    selectedIds.add(id);
+  }
+
+  return {
+    index,
+    selectedIds,
+    shouldUpdateLastClicked: index >= 0,
+  };
 }
 
 interface UsePhotoSelectionReturn {
@@ -61,7 +105,7 @@ export function usePhotoSelection(
     );
     setSelectedIds(new Set(validIds));
     setLastClickedIdx(session.lastClickedIdx);
-  }, [routeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routeKey, getSession, photos.some]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 持久化：selectedIds 变化时保存
   const selectedIdsRef = useRef(selectedIds);
@@ -78,51 +122,34 @@ export function usePhotoSelection(
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeKey]);
+  }, [routeKey, saveSession]);
 
   const handleSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
       setSelectedIds((prev) => {
-        const next = new Set(prev);
-        const idx = photos.findIndex((p) => p.id === id);
-
-        if (event.shiftKey && lastClickedIdxRef.current >= 0 && idx >= 0) {
-          const [from, to] =
-            lastClickedIdxRef.current < idx
-              ? [lastClickedIdxRef.current, idx]
-              : [idx, lastClickedIdxRef.current];
-          for (let i = from; i <= to; i++) {
-            next.add(photos[i].id);
-          }
-        } else if (event.ctrlKey || event.metaKey) {
-          if (next.has(id)) {
-            next.delete(id);
-          } else {
-            next.add(id);
-          }
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
-        } else {
-          next.clear();
-          next.add(id);
-          if (idx >= 0) {
-            setLastClickedIdx(idx);
-          }
+        const result = applyClickSelection(
+          prev,
+          id,
+          event,
+          photos,
+          lastClickedIdxRef.current
+        );
+        if (result.shouldUpdateLastClicked) {
+          setLastClickedIdx(result.index);
         }
 
         // 持久化到 BrowseSessionContext
         saveSession(routeKey, {
-          selectedIds: Array.from(next),
-          lastClickedIdx: idx >= 0 ? idx : lastClickedIdxRef.current,
+          selectedIds: Array.from(result.selectedIds),
+          lastClickedIdx:
+            result.index >= 0 ? result.index : lastClickedIdxRef.current,
         });
 
-        return next;
+        return result.selectedIds;
       });
     },
     [photos, routeKey, saveSession]
   );
-
   const handleKeyboardSelect = useCallback(
     (id: number) => {
       setSelectedIds(new Set([id]));

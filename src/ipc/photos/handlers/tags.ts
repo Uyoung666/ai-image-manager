@@ -3,12 +3,12 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "@/db";
 import { folders, photos, photoTags, tags } from "@/db/schema";
-import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
 import {
   getAiControlState,
   isAutoTaggingActive,
   isAutoTaggingPhoto,
 } from "@/services/ai/state";
+import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
 import { IdSchema } from "./shared";
 
@@ -89,7 +89,10 @@ export const getTags = os
 
     const allTags = db.select().from(tags).orderBy(tags.name).all();
 
-    type TagPhotoRow = { tagId: number; photoId: number };
+    interface TagPhotoRow {
+      photoId: number;
+      tagId: number;
+    }
     const baseQuery = db
       .select({ tagId: photoTags.tagId, photoId: photoTags.photoId })
       .from(photoTags)

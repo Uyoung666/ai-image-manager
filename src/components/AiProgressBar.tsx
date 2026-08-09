@@ -25,6 +25,7 @@ interface AiProgress {
   total: number;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this component coordinates existing UI state and rendering branches
 export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   const { t } = useTranslation();
   const [progress, setProgress] = useState<AiProgress | null>(null);

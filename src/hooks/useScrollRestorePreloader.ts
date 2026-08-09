@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
 
@@ -91,8 +97,7 @@ export function useScrollRestorePreloader({
       savedScrollTop: saved?.scrollTop ?? 0,
     });
   };
-  const [preloadState, setPreloadState] =
-    useState<PreloadState>(readState);
+  const [preloadState, setPreloadState] = useState<PreloadState>(readState);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timeoutRouteKeyRef = useRef<string | null>(null);
   const onTimeoutRef = useRef(onTimeout);
@@ -150,9 +155,7 @@ export function useScrollRestorePreloader({
       clearPreloadTimeout();
     }
 
-    setPreloadState((current) =>
-      current === nextState ? current : nextState
-    );
+    setPreloadState((current) => (current === nextState ? current : nextState));
   }, [
     clearPreloadTimeout,
     currentItemCount,

@@ -5,6 +5,9 @@ interface HSL {
   s: number;
 }
 
+const LEADING_HASH_PATTERN = /^#/;
+const HEX_PATTERN = /^[0-9A-F]{3}$|^[0-9A-F]{6}$/;
+
 // Hue → [zhName, enName] mapping table (sorted by hue midpoint)
 const HUE_MAP: [number, string, string][] = [
   [0, "红色", "Red"],
@@ -151,7 +154,7 @@ function findHueName(h: number): [string, string] {
 // hex → SigLIP-friendly search prompt (for AI fallback)
 export function hexToSearchPrompt(hex: string): string {
   const hsl = hexToHsl(hex);
-  const [zhHue, enHue] = findHueName(hsl.h);
+  const [_zhHue, enHue] = findHueName(hsl.h);
   const satDesc = describeSaturation(hsl.s, "en");
   const lightDesc = describeLightness(hsl.l, "en");
 
@@ -181,8 +184,8 @@ export function hexToColorName(hex: string, lang: "zh" | "en" = "zh"): string {
 // Validate and normalize hex string
 // "#F53" → "FF5533", "FF5733" → "FF5733", "xyz" → null
 export function normalizeHex(input: string): string | null {
-  const cleaned = input.replace(/^#/, "").trim().toUpperCase();
-  if (!/^[0-9A-F]{3}$|^[0-9A-F]{6}$/.test(cleaned)) {
+  const cleaned = input.replace(LEADING_HASH_PATTERN, "").trim().toUpperCase();
+  if (!HEX_PATTERN.test(cleaned)) {
     return null;
   }
   if (cleaned.length === 3) {

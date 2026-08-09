@@ -1,3 +1,4 @@
+// biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
 import { Cloud, Copy, ExternalLink, Share2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -91,8 +92,9 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       } else {
         toast.error(res.error || t("shareFailed"));
       }
-    } catch (err: any) {
-      toast.error(err?.message || t("shareException"));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : undefined;
+      toast.error(message || t("shareException"));
     }
     setLoading(false);
   }
@@ -149,12 +151,16 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
               </div>
             )}
             <div>
-              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label
+                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+                htmlFor="share-link"
+              >
                 {t("shareLink")}
               </label>
               <div className="flex min-w-0 items-center gap-2">
                 <input
                   className="h-8 min-w-0 flex-1 rounded-[4px] border border-input bg-card px-3 font-mono text-[12px] text-foreground outline-none"
+                  id="share-link"
                   readOnly
                   value={result.url}
                 />
@@ -209,7 +215,10 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
         ) : (
           <>
             <div>
-              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label
+                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+                htmlFor="share-provider"
+              >
                 {t("uploadTo")}
               </label>
               <div className="max-h-[min(15rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
@@ -221,6 +230,9 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
                         : "border-input text-muted-foreground hover:border-muted-foreground"
                     }`}
                     disabled={loading}
+                    id={
+                      cfg.id === configs[0]?.id ? "share-provider" : undefined
+                    }
                     key={cfg.id}
                     onClick={() => setSelectedId(cfg.id)}
                     type="button"

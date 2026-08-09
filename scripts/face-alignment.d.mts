@@ -1,11 +1,11 @@
-export type Affine2x3 = {
+export interface Affine2x3 {
   a: number;
   b: number;
   c: number;
   d: number;
   tx: number;
   ty: number;
-};
+}
 
 /** ArcFace-standard 5-point target landmarks for a 112x112 aligned crop. */
 export const ARCFACE_TARGET_POINTS: number[][];

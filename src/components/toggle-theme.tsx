@@ -11,7 +11,7 @@ interface ToggleThemeProps {
 }
 
 export default function ToggleTheme({ onChange }: ToggleThemeProps) {
-  const [mode, setMode] = useState<ThemeMode>("dark");
+  const [_mode, setMode] = useState<ThemeMode>("dark");
 
   useEffect(() => {
     getCurrentTheme().then(setMode);
@@ -32,7 +32,7 @@ export default function ToggleTheme({ onChange }: ToggleThemeProps) {
 
   useEffect(() => {
     getResolvedTheme().then((resolved) => setIsDark(resolved === "dark"));
-  }, [mode]);
+  }, []);
 
   return (
     <label className="theme-toggle-switch">
@@ -45,58 +45,122 @@ export default function ToggleTheme({ onChange }: ToggleThemeProps) {
       <div className="theme-toggle-slider">
         <div className="theme-toggle-sun-moon">
           {/* 月亮斑点 */}
-          <svg className="theme-toggle-moon-dot theme-toggle-moon-dot-1" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-moon-dot theme-toggle-moon-dot-1"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-moon-dot theme-toggle-moon-dot-2" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-moon-dot theme-toggle-moon-dot-2"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-moon-dot theme-toggle-moon-dot-3" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-moon-dot theme-toggle-moon-dot-3"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
           {/* 光线 */}
-          <svg className="theme-toggle-light-ray theme-toggle-light-ray-1" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-light-ray theme-toggle-light-ray-1"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-light-ray theme-toggle-light-ray-2" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-light-ray theme-toggle-light-ray-2"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-light-ray theme-toggle-light-ray-3" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-light-ray theme-toggle-light-ray-3"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
           {/* 暗色云朵 */}
-          <svg className="theme-toggle-cloud-dark theme-toggle-cloud-1" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-dark theme-toggle-cloud-1"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-cloud-dark theme-toggle-cloud-2" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-dark theme-toggle-cloud-2"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-cloud-dark theme-toggle-cloud-3" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-dark theme-toggle-cloud-3"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
           {/* 亮色云朵 */}
-          <svg className="theme-toggle-cloud-light theme-toggle-cloud-4" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-light theme-toggle-cloud-4"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-cloud-light theme-toggle-cloud-5" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-light theme-toggle-cloud-5"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
-          <svg className="theme-toggle-cloud-light theme-toggle-cloud-6" viewBox="0 0 100 100">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-cloud-light theme-toggle-cloud-6"
+            viewBox="0 0 100 100"
+          >
             <circle cx="50" cy="50" r="50" />
           </svg>
         </div>
         {/* 星星 */}
         <div className="theme-toggle-stars">
-          <svg className="theme-toggle-star theme-toggle-star-1" viewBox="0 0 20 20">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-star theme-toggle-star-1"
+            viewBox="0 0 20 20"
+          >
             <path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" />
           </svg>
-          <svg className="theme-toggle-star theme-toggle-star-2" viewBox="0 0 20 20">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-star theme-toggle-star-2"
+            viewBox="0 0 20 20"
+          >
             <path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" />
           </svg>
-          <svg className="theme-toggle-star theme-toggle-star-3" viewBox="0 0 20 20">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-star theme-toggle-star-3"
+            viewBox="0 0 20 20"
+          >
             <path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" />
           </svg>
-          <svg className="theme-toggle-star theme-toggle-star-4" viewBox="0 0 20 20">
+          <svg
+            aria-hidden="true"
+            className="theme-toggle-star theme-toggle-star-4"
+            viewBox="0 0 20 20"
+          >
             <path d="M 0 10 C 10 10,10 10 ,0 10 C 10 10 , 10 10 , 10 20 C 10 10 , 10 10 , 20 10 C 10 10 , 10 10 , 10 0 C 10 10,10 10 ,0 10 Z" />
           </svg>
         </div>

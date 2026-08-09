@@ -47,10 +47,10 @@ describe("SequenceFocusTray", () => {
 
     expect(screen.getByRole("button", { name: "移出" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "在序列中前移" })
+      screen.getByRole("button", { name: "sequenceMoveUp" })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "在序列中后移" })
+      screen.getByRole("button", { name: "sequenceMoveDown" })
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "从此拆分" })

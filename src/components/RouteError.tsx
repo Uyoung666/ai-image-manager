@@ -15,7 +15,7 @@ export function RouteError({ error, reset }: RouteErrorProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
       <div className="text-center">
-        <p className="text-[14px] font-medium text-foreground">
+        <p className="font-medium text-[14px] text-foreground">
           {t("routeErrorTitle")}
         </p>
         <p className="mt-1 text-[12px] text-muted-foreground">
@@ -23,7 +23,7 @@ export function RouteError({ error, reset }: RouteErrorProps) {
         </p>
       </div>
       <button
-        className="rounded-[6px] bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        className="rounded-[6px] bg-primary px-4 py-2 font-medium text-[13px] text-primary-foreground transition-colors hover:bg-primary/90"
         onClick={reset}
         type="button"
       >

@@ -54,7 +54,9 @@ function ensureBKTree(): BKTree {
     .all();
 
   for (const p of allHashes) {
-    bkTreeInstance.insert(p.id, p.phash!);
+    if (p.phash) {
+      bkTreeInstance.insert(p.id, p.phash);
+    }
   }
   bkTreeBuiltForMaxId = maxId;
   return bkTreeInstance;
@@ -69,6 +71,7 @@ export function insertIntoBKTree(photoId: number, phash: string): void {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate detection intentionally combines exact hash and perceptual hash paths for one database update.
 export function checkNewPhotoDuplicates(
   photoId: number,
   phash: string | null,

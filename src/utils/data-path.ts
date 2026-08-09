@@ -22,8 +22,15 @@ function readConfigFileDirectly(): string {
     const filePath = path.join(app.getPath("userData"), "app-config.json");
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, "utf-8");
-      const parsed = JSON.parse(raw);
-      return (parsed as any).dataPath || "";
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "dataPath" in parsed &&
+        typeof parsed.dataPath === "string"
+      ) {
+        return parsed.dataPath;
+      }
     }
   } catch {
     // ignore

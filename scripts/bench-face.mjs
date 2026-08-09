@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { fork } from "node:child_process";
 /**
  * Face detection/embedding benchmark + smoke test (forks face-worker.mjs).
  *
@@ -12,7 +13,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fork } from "node:child_process";
 
 const IMG_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"]);
 
@@ -29,22 +29,26 @@ function collectImages(dir, out = []) {
 }
 
 const [dirArg, maxArg] = process.argv.slice(2);
-if (!dirArg || !fs.existsSync(dirArg)) {
+if (!(dirArg && fs.existsSync(dirArg))) {
   console.error("Usage: node scripts/bench-face.mjs <dir> [maxPhotos]");
   process.exit(1);
 }
 
 const allImages = collectImages(dirArg);
 const images = maxArg ? allImages.slice(0, Number(maxArg)) : allImages;
-console.log(`[bench-face] ${images.length}/${allImages.length} images in ${dirArg}`);
+console.log(
+  `[bench-face] ${images.length}/${allImages.length} images in ${dirArg}`
+);
 
-const worker = fork(path.resolve("scripts/face-worker.mjs"), [], { stdio: "ignore" });
+const worker = fork(path.resolve("scripts/face-worker.mjs"), [], {
+  stdio: "ignore",
+});
 const BATCH = 40;
 const startedAt = Date.now();
 let initAt = 0;
 let detectStartedAt = 0;
 const results = [];
-let pendingResolve = null;
+const _pendingResolve = null;
 let photoQueue = [];
 let idCounter = 0;
 
@@ -64,11 +68,9 @@ worker.on("message", (msg) => {
     detectStartedAt = Date.now();
     sendBatch();
   }
-  if (msg.type === "ready") {
-    if (msg.error) {
-      console.error("[bench-face] init failed:", msg.error);
-      process.exit(1);
-    }
+  if (msg.type === "ready" && msg.error) {
+    console.error("[bench-face] init failed:", msg.error);
+    process.exit(1);
   }
   if (msg.type === "result") {
     results.push(...msg.results);
@@ -86,17 +88,27 @@ function finish() {
   const dims = new Set();
   for (const r of results) {
     for (const f of r.faces) {
-      if (f.embedding) dims.add(f.embedding.length);
+      if (f.embedding) {
+        dims.add(f.embedding.length);
+      }
     }
   }
   const faceCounts = results.map((r) => r.faces.length);
   const withFaces = faceCounts.filter((c) => c > 0).length;
 
-  console.log(`\n[bench-face] results (YuNet+SFace, ${results.length} photos):`);
-  console.log(`  detect+embed time: ${detectMs}ms (${(detectMs / Math.max(1, results.length)).toFixed(0)}ms/photo)`);
-  console.log(`  total faces: ${totalFaces} (avg ${(totalFaces / Math.max(1, results.length)).toFixed(2)}/photo)`);
+  console.log(
+    `\n[bench-face] results (YuNet+SFace, ${results.length} photos):`
+  );
+  console.log(
+    `  detect+embed time: ${detectMs}ms (${(detectMs / Math.max(1, results.length)).toFixed(0)}ms/photo)`
+  );
+  console.log(
+    `  total faces: ${totalFaces} (avg ${(totalFaces / Math.max(1, results.length)).toFixed(2)}/photo)`
+  );
   console.log(`  photos with >=1 face: ${withFaces}/${results.length}`);
-  console.log(`  face count distribution: max=${faceCounts.length ? Math.max(...faceCounts) : 0} | >1 face: ${faceCounts.filter((c) => c > 1).length}`);
+  console.log(
+    `  face count distribution: max=${faceCounts.length ? Math.max(...faceCounts) : 0} | >1 face: ${faceCounts.filter((c) => c > 1).length}`
+  );
   console.log(`  embedding dims: ${[...dims].join(", ") || "none"}`);
   worker.send({ type: "shutdown" });
   worker.kill();
@@ -106,7 +118,7 @@ function finish() {
 // Init
 const photos = images.map((p) => ({ id: ++idCounter, path: p }));
 photoQueue = [...photos];
-  worker.send({ type: "init", modelsDir: path.resolve("models"), useGPU: false });
+worker.send({ type: "init", modelsDir: path.resolve("models"), useGPU: false });
 
 setTimeout(() => {
   console.error("[bench-face] TIMEOUT");

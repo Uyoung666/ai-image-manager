@@ -62,8 +62,11 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     const dimensions = adapterA.embeddingSpace.dimensions;
 
     await vectorDb.initVectorDB();
-    expect(state.photoTable).not.toBeNull();
-    await state.photoTable.add([
+    const initialTable = state.photoTable;
+    if (!initialTable) {
+      throw new Error("Expected vector table to be initialized");
+    }
+    await initialTable.add([
       {
         photo_id: 1,
         vector: normalizedVector(dimensions),
@@ -99,7 +102,11 @@ describe.sequential("real vector store fingerprint compatibility", () => {
 
     adapterModule.setActiveEmbeddingAdapter(adapterA.id);
     await vectorDb.initVectorDB();
-    expect(await state.photoTable.countRows()).toBe(1);
+    const restoredTable = state.photoTable;
+    if (!restoredTable) {
+      throw new Error("Expected vector table to be restored");
+    }
+    expect(await restoredTable.countRows()).toBe(1);
     expect((await vectorDb.getPhotoVectors([1])).get(1)).toEqual(
       normalizedVector(dimensions)
     );
@@ -113,7 +120,11 @@ describe.sequential("real vector store fingerprint compatibility", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
 
     await vectorDb.initVectorDB();
-    expect(await state.photoTable.countRows()).toBe(1);
+    const legacyTable = state.photoTable;
+    if (!legacyTable) {
+      throw new Error("Expected legacy vector table to be initialized");
+    }
+    expect(await legacyTable.countRows()).toBe(1);
     expect(state.getActiveEmbeddingRuntime()?.vectorCompatibility).toBe(
       "legacy-compatible"
     );

@@ -23,25 +23,14 @@ import { SelectionActionBar } from "@/components/SelectionActionBar";
 import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
-import { useCollectionSequences } from "@/hooks/useCollectionSequences";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
+import { useCollectionSequences } from "@/hooks/useCollectionSequences";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-
-interface PhotoInfo {
-  filename: string;
-  fileSize: number;
-  height: number;
-  id: number;
-  isFavorite?: boolean;
-  isIndexed: boolean;
-  path: string;
-  thumbnailPath: string | null;
-  width: number;
-}
+import type { Photo } from "@/types/photo";
 
 interface AlbumDetail {
   coverPhotoId: number | null;
@@ -50,7 +39,7 @@ interface AlbumDetail {
   isSmart?: boolean;
   matchCount?: number;
   name: string;
-  photos: PhotoInfo[];
+  photos: Photo[];
 }
 
 const GRID_SORT_FIELD_KEY = "album_grid_sort_field";
@@ -80,6 +69,7 @@ function loadSortOrder(): SortOrder {
   return "desc";
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates the existing album interactions
 function AlbumDetailPage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1023px)");
@@ -187,7 +177,7 @@ function AlbumDetailPage() {
   const sequenceView = useCollectionSequences({
     onClearSelection: clearSelection,
     onRemoveSelection: removeFromSelection,
-    photos: photos as any,
+    photos,
     storageKey: "album_sequence_view_mode",
   });
   const handleSequenceSelect = useCallback(
@@ -209,7 +199,7 @@ function AlbumDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
+  const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
     usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
 
   // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
@@ -227,7 +217,7 @@ function AlbumDetailPage() {
   const [allFavorite, setAllFavorite] = useState(false);
   const [confirmDeleteIds, setConfirmDeleteIds] = useState<number[]>([]);
 
-  async function handleFavoriteSelected() {
+  async function _handleFavoriteSelected() {
     const ids = Array.from(selectedIds);
     const nextFav = !allFavorite;
     try {
@@ -301,10 +291,10 @@ function AlbumDetailPage() {
         }
       );
     },
-    []
+    [t, sequenceView.updateMemberFavorite]
   );
 
-  async function handleDeleteSelected() {
+  function handleDeleteSelected() {
     setConfirmDeleteIds(Array.from(selectedIds));
   }
 
@@ -442,14 +432,17 @@ function AlbumDetailPage() {
     }
   }
 
-  const handleDoubleClick = useCallback((id: number) => {
-    const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      clearSelection();
-      dismissDetail();
-      setLightboxIndex(idx);
-    }
-  }, [clearSelection, dismissDetail]);
+  const handleDoubleClick = useCallback(
+    (id: number) => {
+      const idx = photosRef.current.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        clearSelection();
+        dismissDetail();
+        setLightboxIndex(idx);
+      }
+    },
+    [clearSelection, dismissDetail]
+  );
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -586,6 +579,7 @@ function AlbumDetailPage() {
   // Keyboard shortcuts
   // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard shortcuts intentionally share one event boundary
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
@@ -761,6 +755,7 @@ function AlbumDetailPage() {
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/albums" as const })}
+            type="button"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -801,14 +796,17 @@ function AlbumDetailPage() {
                   </button>
                 </div>
               ) : (
-                <h1
-                  className="min-w-0 truncate font-semibold text-[20px] text-foreground tracking-tight hover:text-primary sm:text-[24px]"
-                  onClick={() => {
-                    setNameInput(album?.name || "");
-                    setEditingName(true);
-                  }}
-                >
-                  {album?.name || t("loading")}
+                <h1 className="min-w-0 truncate font-semibold text-[20px] text-foreground tracking-tight sm:text-[24px]">
+                  <button
+                    className="min-w-0 max-w-full truncate text-left hover:text-primary"
+                    onClick={() => {
+                      setNameInput(album?.name || "");
+                      setEditingName(true);
+                    }}
+                    type="button"
+                  >
+                    {album?.name || t("loading")}
+                  </button>
                 </h1>
               )}
               {album?.isSmart && (
@@ -837,6 +835,7 @@ function AlbumDetailPage() {
             <button
               className="rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               onClick={handleRemoveSelected}
+              type="button"
             >
               {t("removePhotosCount", { count: selectedIds.size })}
             </button>
@@ -845,6 +844,7 @@ function AlbumDetailPage() {
             <button
               className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
               onClick={() => setConfirmDelete(true)}
+              type="button"
             >
               <Trash2 className="h-3.5 w-3.5" />
               {t("deleteAlbum")}
@@ -858,12 +858,14 @@ function AlbumDetailPage() {
               <button
                 className="rounded-[6px] bg-destructive px-3 py-1 text-[12px] text-white hover:opacity-90"
                 onClick={handleDeleteAlbum}
+                type="button"
               >
                 {t("confirm")}
               </button>
               <button
                 className="rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground"
                 onClick={() => setConfirmDelete(false)}
+                type="button"
               >
                 {t("cancel")}
               </button>
@@ -904,7 +906,7 @@ function AlbumDetailPage() {
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
-            photos={photos as any}
+            photos={photos}
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceMode={sequenceView.mode}
@@ -917,7 +919,7 @@ function AlbumDetailPage() {
             allFavorite={
               selectedIds.size > 0 &&
               [...selectedIds].every(
-                (id) => (photos as any[]).find((p) => p.id === id)?.isFavorite
+                (id) => photos.find((p) => p.id === id)?.isFavorite
               )
             }
             onAddToAlbum={() => {
@@ -1000,60 +1002,58 @@ function AlbumDetailPage() {
           />
         )}
         <div
-          aria-label={t("photoDetail")}
-          aria-modal={compactDetailOverlay ? true : undefined}
           className="absolute inset-y-0 right-0 z-40 max-w-[calc(100%-0.5rem)] overflow-hidden shadow-[-16px_0_36px_-24px_rgb(0_0_0/0.55)] lg:static lg:z-auto lg:max-w-none lg:overflow-visible lg:shadow-none"
           ref={detailOverlayRef}
           role={compactDetailOverlay ? "dialog" : "complementary"}
         >
           {sequenceView.selectedSequence ? (
             <SequenceDetailPanel
-            onClose={() => sequenceView.setSelectedSequence(null)}
-            onOpenPhoto={(photoId) => {
-              const member = sequenceView.selectedSequence?.members.find(
-                (m) => m.id === photoId
-              );
-              sequenceView.setSelectedSequence(null);
-              handleKeyboardSelect(photoId);
-              if (member) {
-                showPhoto(member);
-              }
-            }}
-            onPlay={() => {
-              if (sequenceView.selectedSequence) {
-                sequenceView.setOpenSequence(sequenceView.selectedSequence);
-              }
-            }}
-            onSetRepresentative={(sequenceId, photoId) => {
-              ipc.client.photos
-                .setSequenceRepresentative({ id: sequenceId, photoId })
-                .then(() => {
-                  sequenceView.setSelectedSequence((current) =>
-                    current?.id === sequenceId
-                      ? {
-                          ...current,
-                          representativePhotoId: photoId,
-                          source: "manual",
-                          userLocked: true,
-                        }
-                      : current
-                  );
-                  toast.success("已设为手动代表帧");
-                })
-                .catch(() => toast.error("设置代表帧失败"));
-            }}
-            sequence={sequenceView.selectedSequence}
-            width={360}
+              onClose={() => sequenceView.setSelectedSequence(null)}
+              onOpenPhoto={(photoId) => {
+                const member = sequenceView.selectedSequence?.members.find(
+                  (m) => m.id === photoId
+                );
+                sequenceView.setSelectedSequence(null);
+                handleKeyboardSelect(photoId);
+                if (member) {
+                  showPhoto(member);
+                }
+              }}
+              onPlay={() => {
+                if (sequenceView.selectedSequence) {
+                  sequenceView.setOpenSequence(sequenceView.selectedSequence);
+                }
+              }}
+              onSetRepresentative={(sequenceId, photoId) => {
+                ipc.client.photos
+                  .setSequenceRepresentative({ id: sequenceId, photoId })
+                  .then(() => {
+                    sequenceView.setSelectedSequence((current) =>
+                      current?.id === sequenceId
+                        ? {
+                            ...current,
+                            representativePhotoId: photoId,
+                            source: "manual",
+                            userLocked: true,
+                          }
+                        : current
+                    );
+                    toast.success("已设为手动代表帧");
+                  })
+                  .catch(() => toast.error("设置代表帧失败"));
+              }}
+              sequence={sequenceView.selectedSequence}
+              width={360}
             />
           ) : (
             <PhotoDetailPanel
-            onClose={() => {
-              dismissDetail();
-              clearSelection();
-            }}
-            onNavigate={navigateDetail}
-            onOpenExplorer={handleOpenExplorer}
-            photo={detailPhoto as any}
+              onClose={() => {
+                dismissDetail();
+                clearSelection();
+              }}
+              onNavigate={navigateDetail}
+              onOpenExplorer={handleOpenExplorer}
+              photo={detailPhoto}
             />
           )}
         </div>
@@ -1067,7 +1067,7 @@ function AlbumDetailPage() {
           onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={photos as any}
+          photos={photos}
         />
       )}
       {sequenceView.openSequence && (
@@ -1098,7 +1098,7 @@ function AlbumDetailPage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={photos[quickPreviewIndex] as any}
+          photo={photos[quickPreviewIndex]}
         />
       )}
 
@@ -1119,7 +1119,7 @@ function AlbumDetailPage() {
         onBatchToggleFavorite={() => {
           const ids = [...selectedIds];
           const allFav = ids.every(
-            (id) => (photos as any[]).find((p) => p.id === id)?.isFavorite
+            (id) => photos.find((p) => p.id === id)?.isFavorite
           );
           const newVal = !allFav;
           ipc.client.photos

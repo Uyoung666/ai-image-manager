@@ -323,8 +323,8 @@
   #app {
     width: 100%;
     min-width: 0;
-    height: 100%;
     max-width: 100%;
+    height: 100%;
   }
 
   #app {
@@ -388,8 +388,8 @@
 
   [data-masonry-scroll]::-webkit-scrollbar {
     display: none;
-    height: 0;
     width: 0;
+    height: 0;
   }
 
   .masonry-scrollbar {
@@ -412,10 +412,10 @@
     right: 2px;
     width: 6px;
     min-height: 24px;
-    background: color-mix(in srgb, var(--primary) 30%, transparent);
-    border-radius: 9999px;
     pointer-events: auto;
     cursor: grab;
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius: 9999px;
   }
 
   .masonry-scrollbar-thumb:hover {
@@ -423,8 +423,8 @@
   }
 
   .masonry-scrollbar-thumb:active {
-    background: color-mix(in srgb, var(--primary) 75%, transparent);
     cursor: grabbing;
+    background: color-mix(in srgb, var(--primary) 75%, transparent);
   }
 
   /* ── 选中文本颜色 ──────────────────── */
@@ -760,9 +760,9 @@
       transparent 42%
     ),
     color-mix(in srgb, var(--gallery-canvas) 91%, transparent);
+  opacity: 1;
   -webkit-backdrop-filter: blur(10px) saturate(1.08);
   backdrop-filter: blur(10px) saturate(1.08);
-  opacity: 1;
   transition: opacity 180ms ease-out;
 }
 
@@ -773,11 +773,11 @@
 
 .home-gallery-restore-status {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   padding: 7px 11px;
-  color: var(--muted-foreground);
   font-size: 11px;
+  color: var(--muted-foreground);
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   border: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
   border-radius: 999px;
@@ -853,9 +853,9 @@
 
 .compact-sidebar-layer {
   z-index: 1;
-  height: 100%;
-  min-width: 0;
   flex-shrink: 0;
+  min-width: 0;
+  height: 100%;
 }
 
 @media (max-width: 840px) {
@@ -1034,7 +1034,8 @@ html.transitioning [data-theme-sensitive] {
 
 .update-changelog-list {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: 0 14px 30px -28px color-mix(in srgb, var(--foreground) 48%, transparent);
+  box-shadow: 0 14px 30px -28px
+    color-mix(in srgb, var(--foreground) 48%, transparent);
 }
 
 .update-changelog-item {
@@ -1060,7 +1061,8 @@ html[data-reduced-motion="true"] * {
 
 /* Keep status feedback, skeletons, progress indicators, and startup waiting
    alive; they communicate work that is still in progress. */
-html[data-reduced-motion="true"] :where(
+html[data-reduced-motion="true"]
+:where(
   *:not([role="status"]):not([role="status"] *):not([data-slot="skeleton"]):not(
       [data-slot="skeleton"] *
     ):not([data-reduced-motion-keep]):not([data-reduced-motion-keep] *):not(
@@ -1145,9 +1147,9 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   z-index: 1;
   width: 7em;
   height: 3.75em;
-  animation: hamster var(--dur) ease-in-out infinite;
   transform: rotate(4deg) translate(-0.8em, 1.85em);
   transform-origin: 50% 0;
+  animation: hamster var(--dur) ease-in-out infinite;
 }
 
 .wheel-and-hamster .hamster__head {
@@ -1205,8 +1207,8 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   box-shadow:
     0.1em 0.75em 0 hsl(30deg 90% 55%) inset,
     0.15em -0.5em 0 hsl(30deg 90% 80%) inset;
-  transform-style: preserve-3d;
   transform-origin: 17% 50%;
+  transform-style: preserve-3d;
   animation: hamsterBody var(--dur) ease-in-out infinite;
 }
 
@@ -1221,19 +1223,13 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 }
 
 .wheel-and-hamster .hamster__limb--fr {
-  background: linear-gradient(
-    hsl(30deg 90% 80%) 80%,
-    hsl(0deg 90% 75%) 80%
-  );
+  background: linear-gradient(hsl(30deg 90% 80%) 80%, hsl(0deg 90% 75%) 80%);
   transform: rotate(15deg) translateZ(-1px);
   animation: hamsterFRLimb var(--dur) linear infinite;
 }
 
 .wheel-and-hamster .hamster__limb--fl {
-  background: linear-gradient(
-    hsl(30deg 90% 90%) 80%,
-    hsl(0deg 90% 85%) 80%
-  );
+  background: linear-gradient(hsl(30deg 90% 90%) 80%, hsl(0deg 90% 85%) 80%);
   transform: rotate(15deg);
   animation: hamsterFLLimb var(--dur) linear infinite;
 }
@@ -1245,24 +1241,27 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   width: 1.5em;
   height: 2.5em;
   border-radius: 0.75em 0.75em 0 0;
-  clip-path: polygon(0 0, 100% 0, 100% 30%, 70% 90%, 70% 100%, 30% 100%, 40% 90%, 0% 30%);
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% 30%,
+    70% 90%,
+    70% 100%,
+    30% 100%,
+    40% 90%,
+    0% 30%
+  );
   transform-origin: 50% 30%;
 }
 
 .wheel-and-hamster .hamster__limb--br {
-  background: linear-gradient(
-    hsl(30deg 90% 80%) 90%,
-    hsl(0deg 90% 75%) 90%
-  );
+  background: linear-gradient(hsl(30deg 90% 80%) 90%, hsl(0deg 90% 75%) 90%);
   transform: rotate(-25deg) translateZ(-1px);
   animation: hamsterBRLimb var(--dur) linear infinite;
 }
 
 .wheel-and-hamster .hamster__limb--bl {
-  background: linear-gradient(
-    hsl(30deg 90% 90%) 90%,
-    hsl(0deg 90% 85%) 90%
-  );
+  background: linear-gradient(hsl(30deg 90% 90%) 90%, hsl(0deg 90% 85%) 90%);
   transform: rotate(-25deg);
   animation: hamsterBLLimb var(--dur) linear infinite;
 }
@@ -1291,7 +1290,8 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
       hsl(0deg 0% 55% / 0%) 46.9%,
       hsl(0deg 0% 65%) 47% 52.9%,
       hsl(0deg 0% 65% / 0%) 53%
-    ) 50% 50% / 99% 99% no-repeat;
+    )
+    50% 50% / 99% 99% no-repeat;
   animation: spoke var(--dur) linear infinite;
 }
 
@@ -2767,7 +2767,8 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   object-fit: cover;
   border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
   border-radius: 7px;
-  box-shadow: 0 4px 10px -7px color-mix(in srgb, var(--primary) 60%, transparent);
+  box-shadow: 0 4px 10px -7px
+    color-mix(in srgb, var(--primary) 60%, transparent);
 }
 
 .whats-new-close {
@@ -2975,6 +2976,9 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent)
+    transparent;
+  scrollbar-width: thin;
   background: color-mix(in srgb, var(--surface) 54%, transparent);
   border: 1px solid var(--border);
   border-top: 0;
@@ -2982,9 +2986,6 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   border-radius: 0 0 14px 14px;
   box-shadow: 0 16px 34px -30px
     color-mix(in srgb, var(--foreground) 48%, transparent);
-  scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent)
-    transparent;
-  scrollbar-width: thin;
 }
 
 .whats-new-highlight-list::-webkit-scrollbar {
@@ -2997,9 +2998,9 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 .whats-new-highlight-list::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--foreground) 24%, transparent);
+  background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 999px;
-  background-clip: padding-box;
 }
 
 .whats-new-highlight {

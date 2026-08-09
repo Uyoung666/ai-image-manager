@@ -144,7 +144,7 @@ resetLog();
 simulateNew();
 // Reset and re-run to get clean new log
 resetLog();
-const nc = simulateNew_();
+const _nc = simulateNew_();
 function simulateNew_() {
   resetLog();
   let callCount = 0;

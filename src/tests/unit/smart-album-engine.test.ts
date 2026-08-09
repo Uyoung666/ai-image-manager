@@ -23,8 +23,12 @@ vi.mock("electron", () => ({
     whenReady(): Promise<void> {
       return Promise.resolve();
     },
-    on(_event: string, _cb: Function): void {},
-    exit(_code?: number): void {},
+    on(_event: string, _cb: (...args: never[]) => unknown): void {
+      /* Intentionally empty: the smart album tests do not use app events. */
+    },
+    exit(_code?: number): void {
+      /* Intentionally empty: tests must not terminate the process. */
+    },
   },
   screen: {
     getPrimaryDisplay(): { scaleFactor: number } {
@@ -35,14 +39,24 @@ vi.mock("electron", () => ({
   Tray: class {},
   Menu: { buildFromTemplate: () => ({}) },
   nativeImage: { createFromBuffer: () => ({}) },
-  ipcMain: { on: () => {} },
+  ipcMain: {
+    on: () => {
+      /* Intentionally empty: integration tests do not dispatch IPC events. */
+    },
+  },
   protocol: {
-    registerSchemesAsPrivileged: () => {},
-    handle: () => {},
+    registerSchemesAsPrivileged: () => {
+      /* Intentionally empty: protocol registration is outside these tests. */
+    },
+    handle: () => {
+      /* Intentionally empty: protocol handlers are not exercised here. */
+    },
   },
   globalShortcut: {
     register: () => true,
-    unregisterAll: () => {},
+    unregisterAll: () => {
+      /* Intentionally empty: shortcuts are not registered by the test suite. */
+    },
   },
 }));
 

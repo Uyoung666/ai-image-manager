@@ -30,15 +30,15 @@ import {
   parseChineseQuery,
 } from "@/services/ai/query-parser";
 import {
+  getActiveSearchSensitivity,
+  getSensitivityMultiplier,
+} from "@/services/ai/search-sensitivity";
+import {
   searchByImage as aiSearchByImage,
   searchByText as aiSearchByText,
   searchByTextWithPlan as aiSearchByTextWithPlan,
   isAiSearchReady,
 } from "@/services/ai-embedder";
-import {
-  getActiveSearchSensitivity,
-  getSensitivityMultiplier,
-} from "@/services/ai/search-sensitivity";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import {
@@ -130,7 +130,7 @@ const SEARCH_PIPELINE_VERSION =
   process.env.AI_SEARCH_PIPELINE === "v2" ? "v2" : "hybrid-v3";
 
 const searchSessions = new SearchSessionStore();
-const SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
+const _SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
 // ── Hue bucket helper ──────────────────────────────────────────────────
 // RGB → HSL hue → 36-bucket index (0-35), used for color-search pre-filter.
@@ -156,9 +156,20 @@ function rgbToHueBucket(r: number, g: number, b: number): number {
 }
 
 // EXIF filter cache: cache key -> { result, timestamp }
-const filterCache = new Map<string, { result: any; timestamp: number }>();
+export interface CachedSearchResult {
+  results: unknown[];
+  total: number;
+}
+
+const filterCache = new Map<
+  string,
+  { result: CachedSearchResult; timestamp: number }
+>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_SIZE = 50;
+const FTS5_QUOTE_RE = /["]/;
+const WHITESPACE_RE = /\s+/g;
+const WHITESPACE_SPLIT_RE = /\s+/;
 
 function getCacheKey(params: Record<string, unknown>): string {
   // Create a deterministic key excluding non-filter params
@@ -182,7 +193,7 @@ function getCachedResult(cacheKey: string) {
   return null;
 }
 
-function setCachedResult(cacheKey: string, result: any) {
+function setCachedResult(cacheKey: string, result: CachedSearchResult) {
   // Evict oldest if at capacity
   if (filterCache.size >= MAX_CACHE_SIZE) {
     const firstKey = filterCache.keys().next().value;
@@ -254,11 +265,12 @@ export const searchByImage = os
     let results: Array<{ photoId: number; similarity: number }> = [];
     try {
       results = await aiSearchByImage(input.imagePath, input.limit);
-    } catch (err: any) {
-      console.error("[searchByImage] AI search failed:", err?.message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[searchByImage] AI search failed:", message);
       return {
         results: [],
-        error: `AI 搜索失败: ${err?.message || "未知错误"}`,
+        error: `AI 搜索失败: ${message || "未知错误"}`,
       };
     }
 
@@ -327,7 +339,7 @@ function withTimeout<T>(
 // ── 从时间过滤器中构建 temporalBoost ───────────────────────────────
 // 自动补全不完整的时间边界（如 "今年" 只有 from，补 to=Date.now()）
 
-function buildTemporalBoost(
+function _buildTemporalBoost(
   dateFrom?: number,
   dateTo?: number
 ): { targetFrom: number; targetTo: number; factor: number } | undefined {
@@ -356,6 +368,7 @@ function buildTemporalBoost(
 // Compound search: text + EXIF filters
 export const searchCompound = os
   .input(CompoundSearchSchema)
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Compound search coordinates independent search branches and ranking.
   .handler(async ({ input }) => {
     const db = getDatabase();
     const {
@@ -981,7 +994,7 @@ export const searchCompound = os
       // 构建 OR LIKE 条件：column LIKE '%token1%' OR column LIKE '%token2%' ...
       function buildTokenConditions(
         tokens: string[],
-        field: any,
+        field: Parameters<typeof like>[0],
         fallbackQ: string
       ): SQL[] {
         // 始终包含完整 q 的 LIKE 条件 + 所有 n-gram token 的 OR 条件
@@ -1041,15 +1054,15 @@ export const searchCompound = os
                 .all()
             ),
         // 路 3：文件名搜索 — FTS5 MATCH 优先，LIKE 回退
-        (async () => {
+        (() => {
           // FTS5 简单模式下仅 " 为特殊字符；
           // * 和 ? 已由上方的 glob 短路路径处理，不会到达此处。
-          const needsFts5Escape = /["]/.test(q);
+          const needsFts5Escape = FTS5_QUOTE_RE.test(q);
           if (!needsFts5Escape && q.trim().length > 0) {
             try {
-              const normalized = q.trim().replace(/\s+/g, " ");
+              const normalized = q.trim().replace(WHITESPACE_RE, " ");
               const terms = normalized
-                .split(/\s+/)
+                .split(WHITESPACE_SPLIT_RE)
                 .map((t) => `"${t}"*`)
                 .join(" ");
               const ftsResults = db.all(
@@ -1627,7 +1640,9 @@ export const searchCompound = os
     )
       .limit(limit)
       .all();
-    const exifPhotoIds = filteredExif.map((e) => e.photoId!).filter(Boolean);
+    const exifPhotoIds = filteredExif.flatMap((e) =>
+      e.photoId == null ? [] : [e.photoId]
+    );
 
     if (exifPhotoIds.length === 0) {
       const emptyResult = { results: [], total: 0 };
@@ -1660,13 +1675,13 @@ export const searchSpotlight = os
     // 两路快速召回：FTS5 文件名 + 标签 LIKE（跳过 AI 和人脸）
     const settled = await Promise.allSettled([
       // 路 1：FTS5 文件名 MATCH（优先）→ LIKE 回退
-      (async () => {
-        const needsFts5Escape = /["]/.test(q);
+      (() => {
+        const needsFts5Escape = FTS5_QUOTE_RE.test(q);
         if (!needsFts5Escape && q.length > 0) {
           try {
-            const normalized = q.replace(/\s+/g, " ");
+            const normalized = q.replace(WHITESPACE_RE, " ");
             const terms = normalized
-              .split(/\s+/)
+              .split(WHITESPACE_SPLIT_RE)
               .map((t) => `"${t}"*`)
               .join(" ");
             const ftsResults = db.all(

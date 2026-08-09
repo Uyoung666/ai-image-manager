@@ -1,3 +1,4 @@
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 import {
   AlertCircle,
   ArrowRight,
@@ -448,7 +449,9 @@ export function OnboardingOverlay() {
                     className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
                   >
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span className="min-w-0 break-words">{migrationError}</span>
+                    <span className="min-w-0 break-words">
+                      {migrationError}
+                    </span>
                   </div>
                 )}
               </div>

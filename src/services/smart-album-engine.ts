@@ -1,4 +1,14 @@
-import { and, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gte,
+  inArray,
+  like,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { getDatabase } from "@/db";
 import { exifData, photos, photoTags, tags } from "@/db/schema";
 
@@ -127,6 +137,7 @@ function resolveDateRange(
 
 // --- Rule evaluation (returns photo IDs) ---
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Each smart-album rule type maps directly to its existing SQL semantics in one dispatcher.
 function evaluateRule(rule: SmartRule): number[] {
   const db = getDatabase();
 
@@ -221,7 +232,7 @@ function evaluateRule(rule: SmartRule): number[] {
     }
 
     case "focalLength": {
-      let cond;
+      let cond: SQL<unknown> | undefined;
       if (rule.operator === ">=") {
         cond = gte(exifData.focalLengthNum, rule.value);
       } else if (rule.operator === "<=") {
@@ -241,7 +252,7 @@ function evaluateRule(rule: SmartRule): number[] {
     }
 
     case "aperture": {
-      let cond;
+      let cond: SQL<unknown> | undefined;
       if (rule.operator === ">=") {
         cond = gte(exifData.aperture, rule.value);
       } else if (rule.operator === "<=") {
@@ -261,7 +272,7 @@ function evaluateRule(rule: SmartRule): number[] {
     }
 
     case "iso": {
-      let cond;
+      let cond: SQL<unknown> | undefined;
       if (rule.operator === ">=") {
         cond = gte(exifData.iso, rule.value);
       } else if (rule.operator === "<=") {
@@ -343,7 +354,7 @@ export function invalidateSmartAlbumCache(): void {
 }
 
 export function evaluateSmartAlbum(rules: SmartAlbumRules): number[] {
-  if (!(rules.rules && rules.rules.length)) {
+  if (!rules.rules?.length) {
     return [];
   }
 
@@ -357,7 +368,9 @@ export function evaluateSmartAlbum(rules: SmartAlbumRules): number[] {
   // LRU 淘汰
   if (albumCache.size >= MAX_ALBUM_CACHE) {
     const lru = albumCache.keys().next().value;
-    if (lru !== undefined) albumCache.delete(lru);
+    if (lru !== undefined) {
+      albumCache.delete(lru);
+    }
   }
 
   const idSets = rules.rules.map(evaluateRule);
@@ -378,8 +391,12 @@ export function validateSmartRules(rulesJson: string): {
     }
     const ids = evaluateSmartAlbum(rules);
     return { valid: true, matchCount: ids.length };
-  } catch (e: any) {
-    return { valid: false, matchCount: 0, error: e.message ?? "无效的 JSON" };
+  } catch (e: unknown) {
+    return {
+      valid: false,
+      matchCount: 0,
+      error: e instanceof Error ? e.message : "无效的 JSON",
+    };
   }
 }
 

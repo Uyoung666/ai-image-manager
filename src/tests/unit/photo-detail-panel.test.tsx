@@ -67,9 +67,7 @@ describe("PhotoDetailPanel preview", () => {
       />
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "returnToSequence" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "returnToSequence" }));
 
     expect(onReturnToSequence).toHaveBeenCalledOnce();
   });

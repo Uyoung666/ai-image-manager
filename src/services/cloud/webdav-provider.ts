@@ -1,10 +1,13 @@
 import type { CloudProvider } from "./abstract-provider";
 
+const TRAILING_SLASH_RE = /\/$/;
+const HREF_RE = /<d:href>([^<]+)<\/d:href>/g;
+
 export const webdavProvider: CloudProvider = {
   provider: "webdav",
 
   async checkConnection(config) {
-    const url = config.url?.replace(/\/$/, "") || "";
+    const url = config.url?.replace(TRAILING_SLASH_RE, "") || "";
     if (!url) {
       return { success: false, error: "URL 未配置" };
     }
@@ -23,13 +26,16 @@ export const webdavProvider: CloudProvider = {
         return { success: true, latencyMs: Date.now() - start };
       }
       return { success: false, error: `HTTP ${res.status}` };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 
   async upload(buffer, remotePath, contentType, config) {
-    const baseUrl = config.url?.replace(/\/$/, "") || "";
+    const baseUrl = config.url?.replace(TRAILING_SLASH_RE, "") || "";
     const url = `${baseUrl}/${remotePath}`;
     const authHeaders: Record<string, string> = {};
     if (config.username || config.password) {
@@ -71,7 +77,7 @@ export const webdavProvider: CloudProvider = {
   },
 
   async listFiles(prefix, config) {
-    const baseUrl = config.url?.replace(/\/$/, "") || "";
+    const baseUrl = config.url?.replace(TRAILING_SLASH_RE, "") || "";
     const headers: Record<string, string> = { Depth: "1" };
     if (config.username || config.password) {
       const token = Buffer.from(
@@ -91,10 +97,10 @@ export const webdavProvider: CloudProvider = {
 
     // Parse XML response for href elements
     const hrefs: string[] = [];
-    const hrefRegex = /<d:href>([^<]+)<\/d:href>/g;
-    let match;
-    while ((match = hrefRegex.exec(xml)) !== null) {
+    let match = HREF_RE.exec(xml);
+    while (match !== null) {
       hrefs.push(decodeURIComponent(match[1]));
+      match = HREF_RE.exec(xml);
     }
     return hrefs;
   },

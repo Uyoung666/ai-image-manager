@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoCard } from "@/components/PhotoCard";
 
+const PERCENTAGE_PATTERN = /%/;
+
 describe("PhotoCard", () => {
   const baseProps = {
     filename: "test-photo.jpg",
@@ -81,8 +83,8 @@ describe("PhotoCard", () => {
     render(
       <PhotoCard
         {...baseProps}
-        thumbnailSmallPath="C:/AppData/thumbnails/small123.webp"
         thumbnailPath="C:/AppData/thumbnails/abc123.jpg"
+        thumbnailSmallPath="C:/AppData/thumbnails/small123.webp"
       />
     );
     const img = document.querySelector("img");
@@ -151,21 +153,15 @@ describe("PhotoCard", () => {
 
   it("labels exact tag matches without a percentage", () => {
     render(
-      <PhotoCard
-        {...baseProps}
-        match={{ kind: "exact", source: "tag" }}
-      />
+      <PhotoCard {...baseProps} match={{ kind: "exact", source: "tag" }} />
     );
     expect(screen.getByText("标签命中")).toBeInTheDocument();
-    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(PERCENTAGE_PATTERN)).not.toBeInTheDocument();
   });
 
   it("labels an automatic tag source in pure tag-filter results", () => {
     render(
-      <PhotoCard
-        {...baseProps}
-        match={{ kind: "tagFilter", origin: "auto" }}
-      />
+      <PhotoCard {...baseProps} match={{ kind: "tagFilter", origin: "auto" }} />
     );
     expect(screen.getByText("AI 标签")).toBeInTheDocument();
   });

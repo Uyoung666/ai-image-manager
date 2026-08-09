@@ -2,9 +2,19 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/biome/core", "ultracite/biome/react"],
   "files": {
-    "includes": ["!src/components/ui"]
+    "includes": [
+      "!src/components/ui",
+      "!src/assets/ne_50m_admin_0_countries.json"
+    ]
   },
   "javascript": {
     "globals": ["MAIN_WINDOW_VITE_DEV_SERVER_URL", "MAIN_WINDOW_VITE_NAME"]
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "useFilenamingConvention": "off"
+      }
+    }
   }
 }

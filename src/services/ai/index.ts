@@ -1,6 +1,7 @@
 // Public API — re-exports from split modules.
 // Existing imports from "@/services/ai-embedder" can be changed to "@/services/ai".
 
+// biome-ignore lint/performance/noBarrelFile: This facade preserves the established AI service import surface.
 export { cleanupPartialEmbedding, embedAllPhotos } from "./embedder";
 export type { AiHealthStatus, AiReadiness } from "./health";
 export { checkAiHealth, getAiReadiness } from "./health";

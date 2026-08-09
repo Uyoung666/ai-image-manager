@@ -58,11 +58,11 @@ function SkeletonBlock({
       aria-hidden="true"
       className={`animate-pulse space-y-2 ${className ?? ""}`}
     >
-      {Array.from({ length: lines }).map((_, i) => (
+      {Array.from({ length: lines }, (_, index) => index).map((lineIndex) => (
         <div
           className="h-3 rounded bg-muted-foreground/10"
-          key={`skeleton-line-${i}`}
-          style={{ width: `${[90, 70, 50][i] ?? 40}%` }}
+          key={`skeleton-line-${lineIndex}`}
+          style={{ width: `${[90, 70, 50][lineIndex] ?? 40}%` }}
         />
       ))}
     </div>

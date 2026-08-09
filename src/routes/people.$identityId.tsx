@@ -31,12 +31,12 @@ import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
 import { Switch } from "@/components/ui/switch";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import {
   shouldShowSequenceEmptyState,
   useCollectionSequences,
 } from "@/hooks/useCollectionSequences";
-import { useMediaQuery } from "@/hooks/use-media-query";
-import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
@@ -100,6 +100,55 @@ function loadSortOrder(): SortOrder {
   return "desc";
 }
 
+function PersonSequenceEmptyState({
+  onRetry,
+  onViewPhotos,
+  showEmpty,
+  sequencesError,
+}: {
+  onRetry: () => void;
+  onViewPhotos: () => void;
+  showEmpty: boolean;
+  sequencesError: string | null;
+}) {
+  const { t } = useTranslation();
+
+  if (sequencesError) {
+    return (
+      <div className="flex flex-col items-center gap-3 px-6 text-center">
+        <p className="text-[13px] text-muted-foreground/70">{sequencesError}</p>
+        <button
+          className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+          onClick={onRetry}
+          type="button"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    );
+  }
+
+  if (showEmpty) {
+    return (
+      <div className="flex flex-col items-center gap-3 px-6 text-center">
+        <p className="text-[13px] text-muted-foreground/70">
+          {t("sequenceEmptyTitle")}
+        </p>
+        <button
+          className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
+          onClick={onViewPhotos}
+          type="button"
+        >
+          {t("sequenceEmptyViewPhotos")}
+        </button>
+      </div>
+    );
+  }
+
+  return undefined;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates the existing person interactions
 function PersonDetailPage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1023px)");
@@ -285,13 +334,8 @@ function PersonDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const {
-    detailPhoto,
-    detailDismissed,
-    dismissDetail,
-    navigateDetail,
-    showPhoto,
-  } = usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+  const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
+    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
   const [returnSequence, setReturnSequence] =
     useState<PhotoSequenceDetail | null>(null);
 
@@ -421,7 +465,7 @@ function PersonDetailPage() {
         }
       );
     },
-    []
+    [t, sequenceView.updateMemberFavorite]
   );
 
   function handleDeletePhoto(id: number) {
@@ -536,7 +580,7 @@ function PersonDetailPage() {
   }
 
   // Remove photo(s) from person identity
-  function handleRemoveFace(photoId: number) {
+  function _handleRemoveFace(photoId: number) {
     if (!identity) {
       return;
     }
@@ -602,7 +646,7 @@ function PersonDetailPage() {
     }
   }
 
-  async function handleFavoriteSelected() {
+  async function _handleFavoriteSelected() {
     const ids = Array.from(selectedIds);
     const nextFav = !allFavorite;
     try {
@@ -752,6 +796,7 @@ function PersonDetailPage() {
   // Keyboard shortcuts
   // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard shortcuts intentionally share one event boundary
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
@@ -976,11 +1021,14 @@ function PersonDetailPage() {
                 </button>
               </div>
             ) : (
-              <h1
-                className="min-w-0 truncate font-semibold text-[20px] text-foreground tracking-tight hover:text-primary"
-                onClick={() => setEditingName(true)}
-              >
-                {identity?.name || t("unnamedPerson")}
+              <h1 className="min-w-0 truncate font-semibold text-[20px] text-foreground tracking-tight">
+                <button
+                  className="min-w-0 max-w-full truncate text-left hover:text-primary"
+                  onClick={() => setEditingName(true)}
+                  type="button"
+                >
+                  {identity?.name || t("unnamedPerson")}
+                </button>
               </h1>
             )}
             <p className="mt-0.5 text-[11px] text-muted-foreground/70">
@@ -1022,37 +1070,16 @@ function PersonDetailPage() {
         >
           <PhotoGrid
             emptyState={
-              sequenceView.sequencesError ? (
-                <div className="flex flex-col items-center gap-3 px-6 text-center">
-                  <p className="text-[13px] text-muted-foreground/70">
-                    {sequenceView.sequencesError}
-                  </p>
-                  <button
-                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
-                    onClick={sequenceView.refreshSequences}
-                    type="button"
-                  >
-                    {t("retry")}
-                  </button>
-                </div>
-              ) : shouldShowSequenceEmptyState({
+              <PersonSequenceEmptyState
+                onRetry={sequenceView.refreshSequences}
+                onViewPhotos={() => sequenceView.setMode("photos")}
+                sequencesError={sequenceView.sequencesError}
+                showEmpty={shouldShowSequenceEmptyState({
                   mode: sequenceView.mode,
                   sequenceCount: sequenceView.sequences.length,
                   sequencesLoaded: !sequenceView.sequencesLoading,
-                }) ? (
-                <div className="flex flex-col items-center gap-3 px-6 text-center">
-                  <p className="text-[13px] text-muted-foreground/70">
-                    {t("sequenceEmptyTitle")}
-                  </p>
-                  <button
-                    className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5"
-                    onClick={() => sequenceView.setMode("photos")}
-                    type="button"
-                  >
-                    {t("sequenceEmptyViewPhotos")}
-                  </button>
-                </div>
-              ) : undefined
+                })}
+              />
             }
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
@@ -1087,7 +1114,7 @@ function PersonDetailPage() {
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
-            photos={photos as any}
+            photos={photos}
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
@@ -1187,69 +1214,69 @@ function PersonDetailPage() {
           />
         )}
         <div
-          aria-label={t("photoDetail")}
-          aria-modal={compactDetailOverlay ? true : undefined}
           className="absolute inset-y-0 right-0 z-40 max-w-[calc(100%-0.5rem)] overflow-hidden shadow-[-16px_0_36px_-24px_rgb(0_0_0/0.55)] lg:static lg:z-auto lg:max-w-none lg:overflow-visible lg:shadow-none"
           ref={detailOverlayRef}
           role={compactDetailOverlay ? "dialog" : "complementary"}
         >
           {sequenceView.selectedSequence ? (
             <SequenceDetailPanel
-            onClose={() => sequenceView.setSelectedSequence(null)}
-            onOpenPhoto={(photoId) => {
-              const sequence = sequenceView.selectedSequence;
-              const member = sequence?.members.find((m) => m.id === photoId);
-              setReturnSequence(sequence ?? null);
-              sequenceView.setSelectedSequence(null);
-              handleKeyboardSelect(photoId);
-              if (member) {
-                showPhoto(member);
-              }
-            }}
-            onPlay={() => {
-              if (sequenceView.selectedSequence) {
-                sequenceView.setOpenSequence(sequenceView.selectedSequence);
-              }
-            }}
-            onSetRepresentative={(sequenceId, photoId) => {
-              ipc.client.photos
-                .setSequenceRepresentative({ id: sequenceId, photoId })
-                .then(() => {
-                  sequenceView.setSelectedSequence((current) =>
-                    current?.id === sequenceId
-                      ? {
-                          ...current,
-                          representativePhotoId: photoId,
-                          source: "manual",
-                          userLocked: true,
-                        }
-                      : current
+              onClose={() => sequenceView.setSelectedSequence(null)}
+              onOpenPhoto={(photoId) => {
+                const sequence = sequenceView.selectedSequence;
+                const member = sequence?.members.find((m) => m.id === photoId);
+                setReturnSequence(sequence ?? null);
+                sequenceView.setSelectedSequence(null);
+                handleKeyboardSelect(photoId);
+                if (member) {
+                  showPhoto(member);
+                }
+              }}
+              onPlay={() => {
+                if (sequenceView.selectedSequence) {
+                  sequenceView.setOpenSequence(sequenceView.selectedSequence);
+                }
+              }}
+              onSetRepresentative={(sequenceId, photoId) => {
+                ipc.client.photos
+                  .setSequenceRepresentative({ id: sequenceId, photoId })
+                  .then(() => {
+                    sequenceView.setSelectedSequence((current) =>
+                      current?.id === sequenceId
+                        ? {
+                            ...current,
+                            representativePhotoId: photoId,
+                            source: "manual",
+                            userLocked: true,
+                          }
+                        : current
+                    );
+                    toast.success(t("sequenceManualRepresentativeSet"));
+                  })
+                  .catch(() =>
+                    toast.error(t("sequenceRepresentativeSetFailed"))
                   );
-                  toast.success(t("sequenceManualRepresentativeSet"));
-                })
-                .catch(() => toast.error(t("sequenceRepresentativeSetFailed")));
-            }}
-            sequence={sequenceView.selectedSequence}
-            width={360}
+              }}
+              sequence={sequenceView.selectedSequence}
+              width={360}
             />
           ) : (
             <PhotoDetailPanel
-            onClose={() => {
-              setReturnSequence(null);
-              dismissDetail();
-              clearSelection();
-            }}
-            onNavigate={navigateDetail}
-            onOpenExplorer={handleOpenExplorer}
-            onReturnToSequence={
-              returnSequence
-                ? () => {
-                    sequenceView.setSelectedSequence(returnSequence);
-                    setReturnSequence(null);
-                  }
-                : undefined
-            }
-            photo={detailPhoto as any}
+              onClose={() => {
+                setReturnSequence(null);
+                dismissDetail();
+                clearSelection();
+              }}
+              onNavigate={navigateDetail}
+              onOpenExplorer={handleOpenExplorer}
+              onReturnToSequence={
+                returnSequence
+                  ? () => {
+                      sequenceView.setSelectedSequence(returnSequence);
+                      setReturnSequence(null);
+                    }
+                  : undefined
+              }
+              photo={detailPhoto}
             />
           )}
         </div>
@@ -1263,7 +1290,7 @@ function PersonDetailPage() {
           onClose={() => setLightboxIndex(-1)}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
-          photos={photos as any}
+          photos={photos}
         />
       )}
       {sequenceView.openSequence && (
@@ -1294,7 +1321,7 @@ function PersonDetailPage() {
             setLightboxIndex(quickPreviewIndex);
             setQuickPreviewIndex(-1);
           }}
-          photo={photos[quickPreviewIndex] as any}
+          photo={photos[quickPreviewIndex]}
         />
       )}
 

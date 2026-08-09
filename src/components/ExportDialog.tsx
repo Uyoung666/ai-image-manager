@@ -51,7 +51,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         defaultName,
         title: t("exportGalleryTitle"),
       });
-      const savePath = (dialogResult as any)?.path;
+      const savePath = (dialogResult as { path?: string } | null)?.path;
       if (!savePath) {
         setExporting(false);
         return;
@@ -122,7 +122,10 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         </DialogHeader>
 
         <div>
-          <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+          <label
+            className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+            htmlFor="export-format"
+          >
             {t("exportFormat")}
           </label>
           <div className="flex gap-2">
@@ -146,11 +149,15 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
         {format === "compressed" && (
           <>
             <div>
-              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label
+                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+                htmlFor="export-quality"
+              >
                 {t("exportQuality", { quality })}
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                id="export-quality"
                 max={100}
                 min={10}
                 onChange={(e) => setQuality(Number(e.target.value))}
@@ -160,11 +167,15 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
               />
             </div>
             <div>
-              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+              <label
+                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+                htmlFor="export-max-width"
+              >
                 {t("exportMaxWidth", { width: maxWidth })}
               </label>
               <input
                 className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                id="export-max-width"
                 max={3840}
                 min={640}
                 onChange={(e) => setMaxWidth(Number(e.target.value))}

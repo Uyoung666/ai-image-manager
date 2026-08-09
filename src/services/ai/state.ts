@@ -1,6 +1,10 @@
 // Shared mutable state across AI sub-modules.
 // Centralised here so that split modules can read/write the same singletons.
 
+import type {
+  Connection as LanceConnection,
+  Table as LanceTable,
+} from "@lancedb/lancedb";
 import type { VectorCompatibility } from "./model-fingerprint";
 import type { CalibrationStatus } from "./threshold-profile";
 
@@ -51,10 +55,10 @@ export interface EmbeddingModel {
   embedTexts?: (texts: string[]) => Promise<number[][]>;
 }
 
-export let vectordb: any = null;
-export let photoTable: any = null;
+export let vectordb: LanceConnection | null = null;
+export let photoTable: LanceTable | null = null;
 /** LanceDB 颜色向量表（3D RGB），用于替代 SQLite closest_color_dist JS UDF */
-export let colorTable: any = null;
+export let colorTable: LanceTable | null = null;
 export let isModelLoaded = false;
 export let isVectorDBReady = false;
 export let embeddingModel: EmbeddingModel | null = null;
@@ -82,13 +86,13 @@ export let currentProgress: EmbedProgress = {
 export let _localModelPath: string | null = null;
 let activeEmbeddingRuntime: ActiveEmbeddingRuntime | null = null;
 
-export function setVectordb(v: any): void {
+export function setVectordb(v: LanceConnection | null): void {
   vectordb = v;
 }
-export function setPhotoTable(t: any): void {
+export function setPhotoTable(t: LanceTable | null): void {
   photoTable = t;
 }
-export function setColorTable(t: any): void {
+export function setColorTable(t: LanceTable | null): void {
   colorTable = t;
 }
 export function setIsModelLoaded(v: boolean): void {

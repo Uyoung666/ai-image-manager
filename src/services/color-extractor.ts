@@ -103,7 +103,11 @@ function isValidPixel(r: number, g: number, b: number) {
 // ── Histogram binning ─────────────────────────────────────────────────
 
 function binIndex(r: number, g: number, b: number) {
-  return (r >> SHIFT) * BINS * BINS + (g >> SHIFT) * BINS + (b >> SHIFT);
+  return (
+    Math.floor(r / 2 ** SHIFT) * BINS * BINS +
+    Math.floor(g / 2 ** SHIFT) * BINS +
+    Math.floor(b / 2 ** SHIFT)
+  );
 }
 
 function binToRgb(idx: number): [number, number, number] {
@@ -111,7 +115,11 @@ function binToRgb(idx: number): [number, number, number] {
   const gBin = Math.floor(idx / BINS) % BINS;
   const rBin = Math.floor(idx / (BINS * BINS));
   const halfBin = BIN_SIZE / 2;
-  return [rBin * BIN_SIZE + halfBin, gBin * BIN_SIZE + halfBin, bBin * BIN_SIZE + halfBin];
+  return [
+    rBin * BIN_SIZE + halfBin,
+    gBin * BIN_SIZE + halfBin,
+    bBin * BIN_SIZE + halfBin,
+  ];
 }
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -257,18 +265,21 @@ export async function extractDominantColors(
   imageInput: string | Buffer
 ): Promise<string | null> {
   const palette = await extractPerPhotoPalette(imageInput);
-  if (!(palette && palette.colors) || palette.colors.length === 0) {
+  if (!palette?.colors || palette.colors.length === 0) {
     return null;
   }
   return JSON.stringify(palette.colors);
 }
 
 function rgbToHex(r: number, g: number, b: number) {
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  return `#${[r, g, b]
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 // ── Global aggregation ────────────────────────────────────────────────
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Palette aggregation keeps histogram, hue, and saturation calculations consistent in one pass.
 function aggregateDistribution(
   palettes: PerPhotoPalette[],
   totalPhotos: number
@@ -412,10 +423,9 @@ function aggregateDistribution(
  * 从已存储的 dominant_colors JSON 数据中聚合全局色彩分布。
  * 与 aggregateDistribution 不同，此函数不依赖 histogram。
  */
-export function aggregateFromStoredColors(
-  allColors: Array<Array<PaletteColor>>
-): {
-  palette: Array<PaletteColor>;
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Stored-color aggregation preserves the same matching and weighting semantics as histogram aggregation.
+export function aggregateFromStoredColors(allColors: PaletteColor[][]): {
+  palette: PaletteColor[];
   hueDistribution: Array<{
     hueRange: [number, number];
     count: number;
@@ -477,7 +487,7 @@ export function aggregateFromStoredColors(
   const totalWeight = palette.reduce((sum, c) => sum + c.weight, 0);
   if (totalWeight > 0) {
     for (const c of palette) {
-      c.weight = c.weight / totalWeight;
+      c.weight /= totalWeight;
     }
   }
 

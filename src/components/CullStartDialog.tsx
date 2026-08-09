@@ -20,6 +20,22 @@ interface CullStartDialogProps {
   photoIds: number[];
 }
 
+const PK_MODE_LABELS = {
+  quick: "cullPkModeQuick",
+  standard: "cullPkModeStandard",
+  fine: "cullPkModeFine",
+} as const;
+
+function getPkWorkConfig(pkMode: "quick" | "standard" | "fine") {
+  if (pkMode === "quick") {
+    return { minComparisons: 5, recompareFactor: 0 };
+  }
+  if (pkMode === "fine") {
+    return { minComparisons: 12, recompareFactor: 0.3 };
+  }
+  return { minComparisons: 8, recompareFactor: 0.15 };
+}
+
 export function CullStartDialog({
   defaultName = "",
   onClose,
@@ -48,9 +64,7 @@ export function CullStartDialog({
     if (mode === "curate") {
       return photoIds.length;
     }
-    const minComparisons = pkMode === "quick" ? 5 : pkMode === "fine" ? 12 : 8;
-    const recompareFactor =
-      pkMode === "quick" ? 0 : pkMode === "fine" ? 0.3 : 0.15;
+    const { minComparisons, recompareFactor } = getPkWorkConfig(pkMode);
     return (
       Math.ceil((photoIds.length * minComparisons) / 2) +
       Math.ceil(photoIds.length * recompareFactor)
@@ -129,13 +143,7 @@ export function CullStartDialog({
                   onClick={() => setPkMode(value)}
                   type="button"
                 >
-                  {t(
-                    value === "quick"
-                      ? "cullPkModeQuick"
-                      : value === "fine"
-                        ? "cullPkModeFine"
-                        : "cullPkModeStandard"
-                  )}
+                  {t(PK_MODE_LABELS[value])}
                 </button>
               ))}
             </div>

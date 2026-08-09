@@ -41,36 +41,36 @@ export interface FaceModelConfig {
 }
 
 const ACTIVE_FACE_MODEL: FaceModelConfig = {
-    kind: "yunet-sface",
-    displayName: "YuNet + SFace",
-    detection: {
-      fileName: "face_detection_yunet_2023mar.onnx",
-      inputSizeW: 640,
-      inputSizeH: 640,
-      // Retain candidates at 0.5 so low-confidence detections can be reviewed;
-      // automatic grouping remains protected by clustering.confidenceFilter.
-      confidenceThreshold: 0.5,
-      nmsIoU: 0.3,
-      maxFaces: 20,
-      minFaceSize: 40,
-    },
-    recognition: {
-      fileName: "face_recognition_sface_2021dec.onnx",
-      inputSize: 112,
-      vectorDimensions: 128,
-      useLandmarkAlign: true,
-    },
-    clustering: {
-      threshold: 0.363, // SFace official cosine threshold (calibration seed)
-      // Do not let low-confidence detector candidates create identities.
-      confidenceFilter: 0.85,
-      // Keep lower-confidence detections for the review queue.
-      reviewConfidenceFloor: 0.5,
-    },
-    modelFiles: [
-      "face_detection_yunet_2023mar.onnx",
-      "face_recognition_sface_2021dec.onnx",
-    ],
+  kind: "yunet-sface",
+  displayName: "YuNet + SFace",
+  detection: {
+    fileName: "face_detection_yunet_2023mar.onnx",
+    inputSizeW: 640,
+    inputSizeH: 640,
+    // Retain candidates at 0.5 so low-confidence detections can be reviewed;
+    // automatic grouping remains protected by clustering.confidenceFilter.
+    confidenceThreshold: 0.5,
+    nmsIoU: 0.3,
+    maxFaces: 20,
+    minFaceSize: 40,
+  },
+  recognition: {
+    fileName: "face_recognition_sface_2021dec.onnx",
+    inputSize: 112,
+    vectorDimensions: 128,
+    useLandmarkAlign: true,
+  },
+  clustering: {
+    threshold: 0.363, // SFace official cosine threshold (calibration seed)
+    // Do not let low-confidence detector candidates create identities.
+    confidenceFilter: 0.85,
+    // Keep lower-confidence detections for the review queue.
+    reviewConfidenceFloor: 0.5,
+  },
+  modelFiles: [
+    "face_detection_yunet_2023mar.onnx",
+    "face_recognition_sface_2021dec.onnx",
+  ],
 };
 
 export function getActiveFaceModel(): FaceModelConfig {

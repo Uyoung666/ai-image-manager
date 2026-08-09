@@ -72,9 +72,15 @@ export function svd2x2(m00, m01, m10, m11) {
   // Contract: M = u * diag(s) * vt. Columns of u are left singular vectors;
   // rows of vt are right singular vectors (V^T).
   return {
-    u: [[u1x, u2x], [u1y, u2y]],
+    u: [
+      [u1x, u2x],
+      [u1y, u2y],
+    ],
     s: [s1, s2],
-    vt: [[v1x, v1y], [v2x, v2y]],
+    vt: [
+      [v1x, v1y],
+      [v2x, v2y],
+    ],
   };
 }
 
@@ -84,8 +90,14 @@ function det2(m) {
 
 function matMul2(a, b) {
   return [
-    [a[0][0] * b[0][0] + a[0][1] * b[1][0], a[0][0] * b[0][1] + a[0][1] * b[1][1]],
-    [a[1][0] * b[0][0] + a[1][1] * b[1][0], a[1][0] * b[0][1] + a[1][1] * b[1][1]],
+    [
+      a[0][0] * b[0][0] + a[0][1] * b[1][0],
+      a[0][0] * b[0][1] + a[0][1] * b[1][1],
+    ],
+    [
+      a[1][0] * b[0][0] + a[1][1] * b[1][0],
+      a[1][0] * b[0][1] + a[1][1] * b[1][1],
+    ],
   ];
 }
 
@@ -101,7 +113,9 @@ function matMul2(a, b) {
 export function solveSimilarityTransform(src, dst) {
   const n = src.length;
   if (n < 2 || src.length !== dst.length) {
-    throw new Error(`solveSimilarityTransform: need >=2 matched points, got ${n}`);
+    throw new Error(
+      `solveSimilarityTransform: need >=2 matched points, got ${n}`
+    );
   }
 
   let mx = 0;
@@ -143,7 +157,9 @@ export function solveSimilarityTransform(src, dst) {
   c11 /= n;
 
   if (sigmaSrc2 < 1e-12) {
-    throw new Error("solveSimilarityTransform: degenerate source points (all identical)");
+    throw new Error(
+      "solveSimilarityTransform: degenerate source points (all identical)"
+    );
   }
 
   // SVD of C
@@ -151,7 +167,7 @@ export function solveSimilarityTransform(src, dst) {
 
   // Reflection handling: flip last singular value if det(UV^T) < 0
   const uvt = matMul2(u, vt);
-  let d0 = 1;
+  const d0 = 1;
   let d1 = 1;
   if (det2(uvt) < 0) {
     d1 = -1;

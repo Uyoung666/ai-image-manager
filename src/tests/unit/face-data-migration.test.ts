@@ -160,21 +160,34 @@ function createDatabase() {
 function readState(dbPath: string) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
+    const readRequiredRow = <T>(query: string): T => {
+      const row = db.prepare(query).get() as T | undefined;
+      if (!row) {
+        throw new Error(`Expected a row for query: ${query}`);
+      }
+      return row;
+    };
+
     return {
-      vectors: db.prepare("SELECT count(*) AS count FROM face_vectors").get()
-        .count,
-      identities: db
-        .prepare("SELECT count(*) AS count FROM face_identities")
-        .get().count,
-      members: db
-        .prepare("SELECT count(*) AS count FROM face_identity_members")
-        .get().count,
-      processed: db
-        .prepare("SELECT is_face_processed FROM photos WHERE id = 1")
-        .get().is_face_processed,
-      kind: db
-        .prepare("SELECT value FROM app_settings WHERE key = 'face.model.kind'")
-        .get()?.value,
+      vectors: readRequiredRow<{ count: number }>(
+        "SELECT count(*) AS count FROM face_vectors"
+      ).count,
+      identities: readRequiredRow<{ count: number }>(
+        "SELECT count(*) AS count FROM face_identities"
+      ).count,
+      members: readRequiredRow<{ count: number }>(
+        "SELECT count(*) AS count FROM face_identity_members"
+      ).count,
+      processed: readRequiredRow<{ is_face_processed: number }>(
+        "SELECT is_face_processed FROM photos WHERE id = 1"
+      ).is_face_processed,
+      kind: (
+        db
+          .prepare(
+            "SELECT value FROM app_settings WHERE key = 'face.model.kind'"
+          )
+          .get() as { value: string } | undefined
+      )?.value,
     };
   } finally {
     db.close();

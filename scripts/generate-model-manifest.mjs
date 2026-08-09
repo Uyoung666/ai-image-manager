@@ -32,7 +32,7 @@ const FILES = [
   "face/face_recognition_sface_2021dec.onnx",
 ];
 
-async function sha256File(filePath) {
+function sha256File(filePath) {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
     const stream = createReadStream(filePath);

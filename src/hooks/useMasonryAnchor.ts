@@ -11,10 +11,10 @@ import type { MasonryItem } from "@/hooks/useMasonryLayout";
 import { binarySearchVisibilityStart } from "@/utils/masonry-utils";
 
 export interface MasonryAnchor {
+  estimatedGlobalIndex?: number;
   itemId: number;
   offsetFromTop: number;
   offsetRatio: number;
-  estimatedGlobalIndex?: number;
 }
 
 export interface MasonryGridHandle {
@@ -27,8 +27,8 @@ export interface MasonryGridHandle {
 
 interface UseMasonryAnchorOptions<T extends { id: number }> {
   containerWidth: number;
-  forwardedRef: ForwardedRef<MasonryGridHandle>;
   forceUnlockRef: RefObject<(() => void) | null>;
+  forwardedRef: ForwardedRef<MasonryGridHandle>;
   idToIndexMap: Map<number, number>;
   items: T[];
   positions: MasonryItem[];
@@ -39,7 +39,6 @@ interface UseMasonryAnchorOptions<T extends { id: number }> {
 const ENFORCE_LOCK_MS = 800;
 
 export function useMasonryAnchor<T extends { id: number }>({
-  containerWidth,
   forwardedRef,
   forceUnlockRef,
   idToIndexMap,
@@ -107,9 +106,7 @@ export function useMasonryAnchor<T extends { id: number }>({
     const item = curItems[firstVisibleIdx];
     const offsetFromTop = currentScrollTop - pos.top;
     const offsetRatio =
-      pos.height > 0
-        ? Math.max(0, Math.min(1, offsetFromTop / pos.height))
-        : 0;
+      pos.height > 0 ? Math.max(0, Math.min(1, offsetFromTop / pos.height)) : 0;
 
     const anchor = {
       itemId: item.id,
@@ -121,61 +118,57 @@ export function useMasonryAnchor<T extends { id: number }>({
     return anchor;
   }, [scrollRef]);
 
-  useImperativeHandle(
-    forwardedRef,
-    () => {
-      const api: MasonryGridHandle = {
-        scrollToItem(itemId: number, offsetRatio: number) {
-          enforceLockRef.current = {
-            itemId,
-            ratio: offsetRatio,
-            expiresAt: Date.now() + ENFORCE_LOCK_MS,
-          };
+  useImperativeHandle(forwardedRef, () => {
+    const api: MasonryGridHandle = {
+      scrollToItem(itemId: number, offsetRatio: number) {
+        enforceLockRef.current = {
+          itemId,
+          ratio: offsetRatio,
+          expiresAt: Date.now() + ENFORCE_LOCK_MS,
+        };
 
-          // Apply the restored position before the browser can paint the grid
-          // at scrollTop=0. The RAF loop remains as a short geometry lock.
-          enforceScroll();
+        // Apply the restored position before the browser can paint the grid
+        // at scrollTop=0. The RAF loop remains as a short geometry lock.
+        enforceScroll();
 
-          const frameLoop = () => {
-            const lock = enforceLockRef.current;
-            if (!lock) {
-              return;
-            }
-            if (Date.now() > lock.expiresAt) {
-              enforceLockRef.current = null;
-              return;
-            }
-            enforceScroll();
-            requestAnimationFrame(frameLoop);
-          };
-          requestAnimationFrame(frameLoop);
-        },
-        scrollToPixel(scrollTop: number) {
-          const el = scrollRef.current;
-          if (el) {
-            el.scrollTop = Math.max(0, scrollTop);
+        const frameLoop = () => {
+          const lock = enforceLockRef.current;
+          if (!lock) {
+            return;
           }
-        },
-        get scrollElement() {
-          return scrollRef.current;
-        },
-        cancelEnforceLock() {
-          enforceLockRef.current = null;
-        },
-        getCurrentAnchor,
-      };
-      gridRef.current = api;
-      return api;
-    },
-    [enforceScroll, forwardedRef, getCurrentAnchor, scrollRef]
-  );
+          if (Date.now() > lock.expiresAt) {
+            enforceLockRef.current = null;
+            return;
+          }
+          enforceScroll();
+          requestAnimationFrame(frameLoop);
+        };
+        requestAnimationFrame(frameLoop);
+      },
+      scrollToPixel(scrollTop: number) {
+        const el = scrollRef.current;
+        if (el) {
+          el.scrollTop = Math.max(0, scrollTop);
+        }
+      },
+      get scrollElement() {
+        return scrollRef.current;
+      },
+      cancelEnforceLock() {
+        enforceLockRef.current = null;
+      },
+      getCurrentAnchor,
+    };
+    gridRef.current = api;
+    return api;
+  }, [enforceScroll, getCurrentAnchor, scrollRef]);
 
   useLayoutEffect(() => {
     const lock = enforceLockRef.current;
     if (lock && Date.now() < lock.expiresAt) {
       enforceScroll();
     }
-  }, [positions, containerWidth, enforceScroll]);
+  }, [enforceScroll]);
 
   useEffect(() => {
     const el = scrollRef.current;

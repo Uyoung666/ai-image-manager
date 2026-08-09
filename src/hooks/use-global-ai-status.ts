@@ -107,6 +107,52 @@ function getFolderDisplayName(fullPath: string): string {
   return parts.at(-1) || fullPath;
 }
 
+interface QueueHistoryState {
+  completedBatchRef: {
+    current: { folders: number; photos: number };
+  };
+  prevQueueDoneIdsRef: { current: Set<number> };
+  seenTerminalTaskIdsRef: { current: Set<number> };
+}
+
+function processQueueTask(
+  task: QueueTask,
+  state: QueueHistoryState,
+  onFailure: (task: QueueTask) => void
+): void {
+  if (state.seenTerminalTaskIdsRef.current.has(task.id)) {
+    return;
+  }
+  state.seenTerminalTaskIdsRef.current.add(task.id);
+  if (task.status === "done") {
+    state.completedBatchRef.current.folders++;
+    state.completedBatchRef.current.photos += task.newPhotoCount ?? 0;
+  } else if (task.status === "failed") {
+    onFailure(task);
+  }
+}
+
+function processQueueHistory(
+  history: QueueTask[],
+  state: QueueHistoryState,
+  onFailure: (task: QueueTask) => void
+): boolean {
+  if (history.length === 0) {
+    return false;
+  }
+  for (const task of history) {
+    processQueueTask(task, state, onFailure);
+  }
+  const doneIds = new Set(
+    history.filter((task) => task.status === "done").map((task) => task.id)
+  );
+  const hasNewDoneTask = [...doneIds].some(
+    (id) => !state.prevQueueDoneIdsRef.current.has(id)
+  );
+  state.prevQueueDoneIdsRef.current = doneIds;
+  return hasNewDoneTask;
+}
+
 interface ProgressSnapshot {
   aiPercent: number;
   aiPhase: AiProgressPayload["phase"];
@@ -366,41 +412,28 @@ function useGlobalAiStatusState(): GlobalAiProgress {
       const hasActive = payload.current !== null || payload.pending.length > 0;
       setQueueRunning(hasActive);
 
-      if (payload.history.length > 0) {
-        for (const task of payload.history) {
-          if (seenTerminalTaskIdsRef.current.has(task.id)) {
-            continue;
-          }
-          seenTerminalTaskIdsRef.current.add(task.id);
-          if (task.status === "done") {
-            completedBatchRef.current.folders++;
-            completedBatchRef.current.photos += task.newPhotoCount ?? 0;
-          } else if (task.status === "failed") {
-            toast.error(
-              t("toastImportFailed", {
-                folder: getFolderDisplayName(task.folderPath),
-                error: task.error ?? "",
-              })
-            );
-          }
+      const hasNewDoneTask = processQueueHistory(
+        payload.history,
+        {
+          completedBatchRef,
+          prevQueueDoneIdsRef,
+          seenTerminalTaskIdsRef,
+        },
+        (task) => {
+          toast.error(
+            t("toastImportFailed", {
+              folder: getFolderDisplayName(task.folderPath),
+              error: task.error ?? "",
+            })
+          );
         }
-        const doneIds = new Set(
-          payload.history
-            .filter((task) => task.status === "done")
-            .map((task) => task.id)
-        );
-        const prevIds = prevQueueDoneIdsRef.current;
-        for (const id of doneIds) {
-          if (!prevIds.has(id)) {
-            queryClient.invalidateQueries({ queryKey: ["folders"] });
-            queryClient.invalidateQueries({
-              queryKey: ["photos"],
-              refetchType: "active",
-            });
-            break;
-          }
-        }
-        prevQueueDoneIdsRef.current = doneIds;
+      );
+      if (hasNewDoneTask) {
+        queryClient.invalidateQueries({ queryKey: ["folders"] });
+        queryClient.invalidateQueries({
+          queryKey: ["photos"],
+          refetchType: "active",
+        });
       }
 
       if (!hasActive && completedBatchRef.current.folders > 0) {
@@ -410,7 +443,6 @@ function useGlobalAiStatusState(): GlobalAiProgress {
     },
     [t]
   );
-
   const handleScanMsg = useCallback((payload: ScanPayload) => {
     setScan(payload);
     if (payload.phase === "complete") {

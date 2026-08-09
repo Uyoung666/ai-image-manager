@@ -6,9 +6,10 @@ import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { createLogger } from "@/utils/logger";
 
-const log = createLogger("face-worker-pool");
+const _log = createLogger("face-worker-pool");
 
 export interface FaceDetectionResult {
+  error?: string;
   faces: Array<{
     faceIndex: number;
     bbox: { x: number; y: number; width: number; height: number };
@@ -16,16 +17,20 @@ export interface FaceDetectionResult {
     embedding?: number[] | null;
   }>;
   id: number;
-  error?: string;
-}
-
-interface FaceBatchError {
-  error?: string;
-  faces: never[];
-  id: number;
 }
 
 type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
+
+interface FaceWorkerMessage {
+  error?: string;
+  percent?: number;
+  results?: FaceDetectionResult[];
+  type?: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 interface WorkerSlot {
   consecutiveFailures: number;
@@ -113,7 +118,11 @@ function spawnWorker(index: number): WorkerSlot {
     }
   });
 
-  child.on("message", (msg: any) => {
+  child.on("message", (rawMessage: unknown) => {
+    if (typeof rawMessage !== "object" || rawMessage === null) {
+      return;
+    }
+    const msg = rawMessage as FaceWorkerMessage;
     // Clear any pending dispatch timeout when worker responds
     if (slot.timeoutId) {
       clearTimeout(slot.timeoutId);
@@ -142,7 +151,7 @@ function spawnWorker(index: number): WorkerSlot {
       slot.pendingReject = null;
       slot.status = "idle";
       slot.consecutiveFailures = 0;
-      const results = (msg.results as FaceDetectionResult[]) ?? [];
+      const results = msg.results ?? [];
       resolve?.(
         msg.error
           ? results.map((result) => ({ ...result, error: String(msg.error) }))
@@ -224,7 +233,10 @@ function drainQueue(): void {
       break;
     }
 
-    const request = requestQueue.shift()!;
+    const request = requestQueue.shift();
+    if (!request) {
+      break;
+    }
     dispatchToSlot(idleSlot, request.photos, request.resolve, request.reject);
   }
 }
@@ -437,12 +449,12 @@ async function processResultsFallback(
   }
   try {
     return await dispatchBatch(batch);
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (batch.length === 1) {
       console.warn(
-        `[FacePool] Skipping corrupted photo ${batch[0].id}: ${err.message}`
+        `[FacePool] Skipping corrupted photo ${batch[0].id}: ${getErrorMessage(err)}`
       );
-      return [{ id: batch[0].id, faces: [], error: err.message }];
+      return [{ id: batch[0].id, faces: [], error: getErrorMessage(err) }];
     }
     const mid = Math.floor(batch.length / 2);
     const left = await processResultsFallback(batch.slice(0, mid));
@@ -494,8 +506,8 @@ export async function detectFacesWithPool(
       try {
         const results = await dispatchBatch(batch);
         allResults.push(...results);
-      } catch (err: any) {
-        console.warn(`[FacePool] Batch failed: ${err.message}`);
+      } catch (err: unknown) {
+        console.warn(`[FacePool] Batch failed: ${getErrorMessage(err)}`);
         // If cancelled, don't retry — just mark failed and move on
         if (shouldCancel?.()) {
           allResults.push(

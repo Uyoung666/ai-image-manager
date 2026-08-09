@@ -4,7 +4,8 @@ import path from "node:path";
 import sharp from "sharp";
 
 const TEST_DIR = "D:/8806/ai-image-manager测试用例";
-const files = fs.readdirSync(TEST_DIR).filter((f) => /\.jpe?g$/i.test(f));
+const JPEG_FILE_PATTERN = /\.jpe?g$/i;
+const files = fs.readdirSync(TEST_DIR).filter((f) => JPEG_FILE_PATTERN.test(f));
 
 console.log(`Total image files: ${files.length}`);
 
@@ -44,9 +45,7 @@ if (failures.length > 0) {
 // Also show file size distribution
 const sizes = files.map((f) => fs.statSync(path.join(TEST_DIR, f)).size);
 sizes.sort((a, b) => a - b);
-console.log(
-  `\nFile size range: ${sizes[0]} - ${sizes[sizes.length - 1]} bytes`
-);
+console.log(`\nFile size range: ${sizes[0]} - ${sizes.at(-1)} bytes`);
 console.log(`Files < 1KB: ${sizes.filter((s) => s < 1024).length}`);
 console.log(
   `Files 1KB-100KB: ${sizes.filter((s) => s >= 1024 && s < 102_400).length}`

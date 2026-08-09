@@ -67,7 +67,7 @@ const sendMigrateProgress = (payload: MigrateProgress) => {
 
 export const getAppSetting = os
   .input(z.object({ key: z.string() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const value = getSetting(input.key);
     if (value === null) {
       return null;
@@ -77,14 +77,14 @@ export const getAppSetting = os
 
 export const setAppSetting = os
   .input(z.object({ key: z.string(), value: z.string() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     setSetting(input.key, input.value);
     return { ok: true };
   });
 
 export const getAllAppSettings = os
   .input(z.object({ prefix: z.string().optional() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const settings = getAllSettings(input.prefix);
     return { settings };
   });
@@ -205,6 +205,7 @@ export const getDataPathInfo = os.handler(() => {
 
 export const setDataPath = os
   .input(z.object({ newPath: z.string().min(1) }))
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Data-path migration preserves validation, progress, rollback, and restart ordering.
   .handler(async ({ input }) => {
     diagLog("setDataPath: START");
     const oldPath = getDataPath();
@@ -432,7 +433,7 @@ export const setMirrorSettings = os
       customUrl: z.string().optional(),
     })
   )
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     setSetting("ai.mirror", input.mirror);
     if (input.customUrl) {
       setSetting("ai.mirror.customUrl", input.customUrl);
@@ -479,7 +480,7 @@ export const setGpuSettings = os
       enabled: z.boolean(),
     })
   )
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     setSetting("gpu.enabled", String(input.enabled));
     return { ok: true };
   });
@@ -505,7 +506,7 @@ export const getOpenAtLogin = os.handler(() => {
 
 export const setOpenAtLogin = os
   .input(z.object({ openAtLogin: z.boolean() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     app.setLoginItemSettings({ openAtLogin: input.openAtLogin });
     return { ok: true };
   });

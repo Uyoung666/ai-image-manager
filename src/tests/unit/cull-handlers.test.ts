@@ -65,7 +65,7 @@ describe("PK_MODE_CONFIG", () => {
   });
 
   it("config fallback works for unknown mode", () => {
-    const config = PK_MODE_CONFIG["unknown"] ?? PK_MODE_CONFIG.standard;
+    const config = PK_MODE_CONFIG.unknown ?? PK_MODE_CONFIG.standard;
     expect(config).toBe(PK_MODE_CONFIG.standard);
   });
 });

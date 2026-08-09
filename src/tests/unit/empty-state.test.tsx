@@ -39,7 +39,9 @@ describe("gallery empty states", () => {
     );
 
     expect(screen.getByText("AI 索引尚未完成（12 / 24）")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "前往 AI 设置" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "前往 AI 设置" })
+    ).toBeInTheDocument();
   });
 
   it("uses one clear action to preserve a query while clearing filters", () => {

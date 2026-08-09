@@ -47,7 +47,7 @@ const ASPECT_RATIOS = [
 function generateMinimalJpeg(width, height) {
   // Build a minimal valid JPEG with a solid gray pixel
   // This is a ~1KB JPEG that sharp can read
-  const side = Math.max(
+  const _side = Math.max(
     2,
     Math.min(64, Math.floor(Math.min(width, height) / 10))
   );

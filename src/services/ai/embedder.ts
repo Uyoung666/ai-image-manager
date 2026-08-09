@@ -102,7 +102,14 @@ interface EmbedResult {
   vector?: number[];
 }
 
-function batchUpdatePhotoStatus(db: any, photoIds: number[]): void {
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function batchUpdatePhotoStatus(
+  db: ReturnType<typeof getDatabase>,
+  photoIds: number[]
+): void {
   if (photoIds.length === 0) {
     return;
   }
@@ -117,7 +124,7 @@ function batchUpdatePhotoStatus(db: any, photoIds: number[]): void {
         .set({ isAiProcessed: true })
         .where(inArray(photos.id, chunk))
         .run();
-    } catch (err: any) {
+    } catch {
       console.warn(
         `[AI] Batch update failed for chunk ${i}-${i + chunk.length}, falling back to individual updates`
       );
@@ -134,6 +141,22 @@ function batchUpdatePhotoStatus(db: any, photoIds: number[]): void {
       }
     }
   }
+}
+
+interface EmbedWorkerMessage {
+  adapterId?: string;
+  error?: string;
+  file?: string;
+  fingerprint?: string;
+  loaded?: number;
+  percent?: number;
+  results?: EmbedResult[];
+  total?: number;
+  type?: string;
+}
+
+function isEmbedWorkerMessage(message: unknown): message is EmbedWorkerMessage {
+  return typeof message === "object" && message !== null;
 }
 
 function runEmbedBatch(
@@ -180,7 +203,12 @@ function runEmbedBatch(
       }
     });
 
-    child.on("message", (msg: any) => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Worker protocol handling must keep all terminal and progress states synchronized.
+    child.on("message", (rawMessage: unknown) => {
+      if (!isEmbedWorkerMessage(rawMessage)) {
+        return;
+      }
+      const msg = rawMessage;
       if (msg.type === "init-progress") {
         const loaded = Number(msg.loaded ?? 0);
         const total = Number(msg.total ?? 0);
@@ -223,10 +251,9 @@ function runEmbedBatch(
           reject(new Error("Stale image embedding worker result discarded"));
           return;
         }
+        const results = msg.results ?? [];
         appendAiWorkerLog(
-          `[Batch Worker] result ok=${(msg.results as EmbedResult[]).filter((r) => r.vector && r.vector.length > 0).length} errors=${(
-            msg.results as EmbedResult[]
-          )
+          `[Batch Worker] result ok=${results.filter((r) => r.vector && r.vector.length > 0).length} errors=${results
             .filter((r) => r.error)
             .map((r) => `${r.id}:${r.error}`)
             .join(" | ")
@@ -234,7 +261,7 @@ function runEmbedBatch(
         );
         resolved = true;
         clearTimeout(timeout);
-        resolve(msg.results as EmbedResult[]);
+        resolve(results);
       }
     });
 
@@ -317,6 +344,7 @@ export async function cleanupPartialEmbedding(
   console.log(`[AI] Cleanup complete: ${ids.length} photos reverted`);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Embedding orchestration preserves cancellation, recovery, persistence, and auto-tagging lifecycle in one transaction-like flow.
 export async function embedAllPhotos(
   onProgress?: EmbedProgressCallback
 ): Promise<number> {
@@ -383,14 +411,14 @@ export async function embedAllPhotos(
     try {
       const workerScript = findWorkerScript();
       console.log(`[AI] Embed worker found: ${workerScript}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setCurrentProgress({
         processed: 0,
         total: 0,
         phase: "error",
         currentFile: "",
         downloadPercent: undefined,
-        error: `嵌入 Worker 脚本未找到: ${err.message}`,
+        error: `嵌入 Worker 脚本未找到: ${getErrorMessage(err)}`,
       });
       onProgress?.(currentProgress);
       finishRun("idle");
@@ -411,8 +439,9 @@ export async function embedAllPhotos(
     onProgress?.(currentProgress);
 
     // Ensure model path is resolved (worker needs the local model path)
+    const modelPath = _localModelPath ?? (await ensureLocalModel());
     if (!_localModelPath) {
-      setLocalModelPath(await ensureLocalModel());
+      setLocalModelPath(modelPath);
     }
     if (shouldStopRun()) {
       return await settleStoppedRun(0);
@@ -530,9 +559,9 @@ export async function embedAllPhotos(
               .run();
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.warn(
-          `[AI] Could not check LanceDB for missing vectors: ${err?.message}`
+          `[AI] Could not check LanceDB for missing vectors: ${getErrorMessage(err)}`
         );
       }
     }
@@ -562,6 +591,7 @@ export async function embedAllPhotos(
       return 0;
     }
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Persistence keeps vector writes, cancellation cleanup, and SQLite status updates atomic from the caller's perspective.
     async function persistEmbedResults(
       results: EmbedResult[]
     ): Promise<number> {
@@ -606,9 +636,9 @@ export async function embedAllPhotos(
       }));
       try {
         await photoTable.add(records);
-      } catch (lanceErr: any) {
+      } catch (lanceErr: unknown) {
         console.warn(
-          `[AI] Batch add failed (${lanceErr?.message}), falling back to individual writes`
+          `[AI] Batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
         );
         for (const record of records) {
           try {
@@ -685,7 +715,7 @@ export async function embedAllPhotos(
       }, 300);
 
       try {
-        await initWorkerPool(_localModelPath!, useGPU);
+        await initWorkerPool(modelPath, useGPU);
       } finally {
         clearInterval(poolProgressInterval);
         // Mark init complete at 100%
@@ -748,9 +778,9 @@ export async function embedAllPhotos(
         }));
         try {
           await photoTable.add(records);
-        } catch (lanceErr: any) {
+        } catch (lanceErr: unknown) {
           console.warn(
-            `[AI] Batch add failed (${lanceErr?.message}), falling back to individual writes`
+            `[AI] Batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
           );
           for (const record of records) {
             try {
@@ -809,8 +839,8 @@ export async function embedAllPhotos(
         shutdownPool();
         return processed;
       }
-    } catch (poolErr: any) {
-      console.error("[AI] Worker pool failed:", poolErr?.message);
+    } catch (poolErr: unknown) {
+      console.error("[AI] Worker pool failed:", getErrorMessage(poolErr));
     }
 
     // If pool was cancelled or paused, don't proceed to fallback
@@ -820,6 +850,12 @@ export async function embedAllPhotos(
 
     // If pool is not available, fall back to legacy per-batch fork
     if (!poolReady) {
+      const legacyTable = photoTable;
+      if (!legacyTable) {
+        return await settleStoppedRun(processed);
+      }
+
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Legacy worker fallback recursively bisects failed batches while preserving the existing retry behavior.
       async function processBatch(
         batch: Array<{ id: number; path: string }>
       ): Promise<number> {
@@ -828,7 +864,7 @@ export async function embedAllPhotos(
         }
 
         try {
-          const results = await runEmbedBatch(batch, _localModelPath!);
+          const results = await runEmbedBatch(batch, modelPath);
           if (!isRunWritable(runId)) {
             return 0;
           }
@@ -855,7 +891,7 @@ export async function embedAllPhotos(
           if (successBatch.length > 0) {
             const ids = successBatch.map((r) => r.id);
             try {
-              await photoTable.delete(buildPhotoIdFilter(ids));
+              await legacyTable.delete(buildPhotoIdFilter(ids));
             } catch {
               /* best-effort */
             }
@@ -866,11 +902,11 @@ export async function embedAllPhotos(
               created_at: Date.now(),
             }));
             try {
-              await photoTable.add(records);
+              await legacyTable.add(records);
             } catch {
               for (const record of records) {
                 try {
-                  await photoTable.add([record]);
+                  await legacyTable.add([record]);
                 } catch {
                   /* skip */
                 }
@@ -915,10 +951,10 @@ export async function embedAllPhotos(
             return persistedIds.length;
           }
           return 0;
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (batch.length === 1) {
             console.warn(
-              `[AI] Skipping photo ${batch[0].id} — worker crash: ${err.message}`
+              `[AI] Skipping photo ${batch[0].id} — worker crash: ${getErrorMessage(err)}`
             );
             return 0;
           }
@@ -1025,8 +1061,8 @@ export async function embedAllPhotos(
         console.log(
           `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
         );
-      } catch (err: any) {
-        tagError = err?.message || String(err);
+      } catch (err: unknown) {
+        tagError = getErrorMessage(err);
         console.error("[AI] Auto-tag failed:", tagError);
       }
     }
@@ -1065,14 +1101,14 @@ export async function embedAllPhotos(
 
     finishRun("idle");
     return processed;
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (!isCurrentEmbeddingRun(runId)) {
       return 0;
     }
     if (getAiControlState() === "cancelling") {
       return await settleStoppedRun(0);
     }
-    const message = err?.message || String(err);
+    const message = getErrorMessage(err);
     setCurrentProgress({
       processed: 0,
       total: 0,

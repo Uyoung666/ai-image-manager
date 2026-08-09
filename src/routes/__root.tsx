@@ -7,11 +7,11 @@ import {
 import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { consumeUpdateWelcome } from "@/actions/update-changelog";
 import {
   getDiagnosticsOverview,
   recordRendererIncident,
 } from "@/actions/diagnostics";
+import { consumeUpdateWelcome } from "@/actions/update-changelog";
 import DragWindowRegion from "@/components/drag-window-region";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartupSplash } from "@/components/startup-splash";
@@ -27,6 +27,7 @@ import {
 
 const STARTUP_READY_TIMEOUT_MS = 15_000;
 const STARTUP_SPLASH_FADE_MS = 180;
+const ROUTE_DIAGNOSTIC_PATTERN = /^\/(albums|people|cull)\/[^/]+/;
 
 function RouteSuspense() {
   return (
@@ -55,7 +56,7 @@ function Root() {
 
   useEffect(() => {
     const route = location.pathname.replace(
-      /^\/(albums|people|cull)\/[^/]+/,
+      ROUTE_DIAGNOSTIC_PATTERN,
       "/$1/:id"
     );
     const record = (action: string, message: string, stack?: string) => {

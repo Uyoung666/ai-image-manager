@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ORPCError, os } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  like,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import {
@@ -269,6 +278,7 @@ export function invalidateCountCache(): void {
 const totalCache = new Map<string, { value: number; timestamp: number }>();
 
 // Photo listing
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Listing keeps filter, count-cache, and pagination behavior in one route.
 export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   const db = getDatabase();
   const {
@@ -308,7 +318,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
     .$dynamic();
 
   // Always exclude soft-deleted photos
-  const conditions: ReturnType<typeof isNull>[] = [isNull(photos.deletedAt)];
+  const conditions: SQL[] = [isNull(photos.deletedAt)];
 
   if (folderId) {
     const folderHierarchy = db
@@ -317,18 +327,22 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
       .all();
     const folderIds = getFolderSubtreeIds(folderHierarchy, folderId);
     conditions.push(
-      (folderIds.length > 0
+      folderIds.length > 0
         ? inArray(photos.folderId, folderIds)
-        : eq(photos.folderId, folderId)) as any
+        : eq(photos.folderId, folderId)
     );
   }
 
   // Multi-tag filtering with AND/OR support
   // Backward compat: if tagId is provided without tagIds, treat as single-tag OR
-  const effectiveTagIds =
-    tagIds && tagIds.length > 0 ? tagIds : tagId == null ? null : [tagId];
-  const effectiveTagMode =
-    tagIds && tagIds.length > 0 ? (tagMode ?? "or") : "or";
+  let effectiveTagIds: number[] | null = null;
+  let effectiveTagMode: "and" | "or" = "or";
+  if (tagIds && tagIds.length > 0) {
+    effectiveTagIds = tagIds;
+    effectiveTagMode = tagMode ?? "or";
+  } else if (tagId != null) {
+    effectiveTagIds = [tagId];
+  }
   let selectedDescendantIds: number[] = [];
 
   if (effectiveTagIds && effectiveTagIds.length > 0) {
@@ -384,7 +398,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
           sql`, `
         );
         conditions.push(
-          sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${inClause}))` as any
+          sql`${photos.id} IN (SELECT pt.photo_id FROM photo_tags pt WHERE pt.tag_id IN (${inClause}))`
         );
       }
     } else {
@@ -400,7 +414,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
             sql`, `
           );
           conditions.push(
-            sql`EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = ${photos.id} AND pt.tag_id IN (${inClause}))` as any
+            sql`EXISTS (SELECT 1 FROM photo_tags pt WHERE pt.photo_id = ${photos.id} AND pt.tag_id IN (${inClause}))`
           );
         }
       }
@@ -408,25 +422,26 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
   }
   if (search) {
     if (GLOB_WILDCARD_RE.test(search)) {
-      conditions.push(
-        sql`LOWER(${photos.filename}) GLOB LOWER(${search})` as any
-      );
+      conditions.push(sql`LOWER(${photos.filename}) GLOB LOWER(${search})`);
     } else {
-      conditions.push(like(photos.filename, `%${search}%`) as any);
+      conditions.push(like(photos.filename, `%${search}%`));
     }
   }
   if (favoriteOnly) {
-    conditions.push(eq(photos.isFavorite, true) as any);
+    conditions.push(eq(photos.isFavorite, true));
   }
 
   query = query.where(and(...conditions));
 
-  const sortCol =
-    sort === "name"
-      ? photos.filename
-      : sort === "size"
-        ? photos.fileSize
-        : photos.fileDate;
+  let sortCol:
+    | typeof photos.fileDate
+    | typeof photos.filename
+    | typeof photos.fileSize = photos.fileDate;
+  if (sort === "name") {
+    sortCol = photos.filename;
+  } else if (sort === "size") {
+    sortCol = photos.fileSize;
+  }
   query = query.orderBy(order === "asc" ? sortCol : desc(sortCol));
 
   // Build cache key from filter-relevant params (excluding sort/order/offset/limit)
@@ -487,9 +502,7 @@ export const listPhotos = os.input(ListSchema).handler(({ input }) => {
       .all();
     const trustedPhotoIds = new Set(
       matchingTagSources
-        .filter(
-          (row) => row.origin === "manual" || Boolean(row.userConfirmed)
-        )
+        .filter((row) => row.origin === "manual" || Boolean(row.userConfirmed))
         .map((row) => row.photoId)
     );
     items = items.map((photo) => ({

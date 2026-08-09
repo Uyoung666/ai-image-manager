@@ -185,6 +185,7 @@ render(filteredData);
 </html>`;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Share generation keeps database selection, asset preparation, and cleanup-compatible output assembly together.
 export async function generateSharePage(
   photoIds: number[],
   locale = "zh-CN"

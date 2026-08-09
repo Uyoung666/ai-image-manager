@@ -15,9 +15,7 @@ const DEFAULT_SETTINGS: WatermarkPreviewSettings = {
   text: "",
 };
 
-function renderControls(
-  overrides: Partial<WatermarkPreviewSettings> = {}
-) {
+function renderControls(overrides: Partial<WatermarkPreviewSettings> = {}) {
   const onSettingsChange = vi.fn();
   render(
     <WatermarkControls
@@ -46,13 +44,11 @@ describe("WatermarkControls", () => {
     renderControls({ imagePath: "C:/logo.png", mode: "image" });
 
     expect(screen.getByText("watermarkAssetReady")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "anchor_bottomRight" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    expect(screen.getByRole("button", { name: "anchor_topLeft" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    expect(
+      screen.getByRole("button", { name: "anchor_bottomRight" })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: "anchor_topLeft" })
+    ).toHaveAttribute("aria-pressed", "false");
   });
 });

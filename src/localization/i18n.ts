@@ -723,7 +723,8 @@ i18n.use(initReactI18next).init({
         cleanOrphanThumbConfirmDesc:
           "将删除 {{count}} 个无对应照片的缩略图缓存，释放约 {{size}} MB。正常缓存不受影响。确定清理吗？",
         watermarkSettings: "水印设置",
-        watermarkSettingsDescription: "为导出的照片添加文字或图片水印，修改会自动保存。",
+        watermarkSettingsDescription:
+          "为导出的照片添加文字或图片水印，修改会自动保存。",
         watermarkDisabled: "水印未启用",
         watermarkEnabled: "水印已启用",
         enableWatermark: "启用水印",
@@ -795,7 +796,8 @@ i18n.use(initReactI18next).init({
         diagnosticsNewReport: "新建问题反馈",
         diagnosticsIncident: "关联故障事件",
         diagnosticsPendingTitle: "发现 {{count}} 个待反馈故障",
-        diagnosticsPendingHint: "选择最近发生的故障，可以让诊断包与错误日志精准对应。",
+        diagnosticsPendingHint:
+          "选择最近发生的故障，可以让诊断包与错误日志精准对应。",
         diagnosticsPendingStartup:
           "检测到 {{count}} 个待反馈故障，可前往“帮助与诊断”生成安全报告",
         diagnosticsOpenPage: "前往诊断",
@@ -827,8 +829,7 @@ i18n.use(initReactI18next).init({
           "无法自动打开 GitHub，Issue 内容已复制到剪贴板",
         diagnosticsIssueFallbackCopyFailed:
           "无法打开 GitHub 或复制 Issue 内容，请点击下方按钮重试",
-        diagnosticsExplorerFailed:
-          "诊断包已生成，但无法自动在资源管理器中选中",
+        diagnosticsExplorerFailed: "诊断包已生成，但无法自动在资源管理器中选中",
         diagnosticsReadyTitle: "诊断包已准备好",
         diagnosticsStepOne: "浏览器中已打开预填好的 GitHub Issue",
         diagnosticsIssueNotOpened: "GitHub 未能自动打开，请点击下方按钮重试",
@@ -2145,8 +2146,10 @@ i18n.use(initReactI18next).init({
         sequenceReasonJoin: ",",
         sequenceFrameLabel: "Frame {{frame}}",
         sequenceOpenFrameAria: "Open frame {{frame}}: {{name}}",
-        sequenceLoadingRecommendationAria: "Loading representative recommendation",
-        sequenceRecommendRepresentative: "Recommend frame {{frame}} as representative",
+        sequenceLoadingRecommendationAria:
+          "Loading representative recommendation",
+        sequenceRecommendRepresentative:
+          "Recommend frame {{frame}} as representative",
         sequenceRecommendBasis: "Basis: {{reasons}}",
         sequenceApplyRecommendation: "Apply",
         sequenceSetRepresentative: "Set representative",
@@ -2680,18 +2683,21 @@ i18n.use(initReactI18next).init({
         cleanOrphanThumbConfirmDesc:
           "This will delete {{count}} thumbnail cache files with no matching photos, freeing ~{{size}} MB. Active thumbnails will not be affected. Continue?",
         watermarkSettings: "Watermark Settings",
-        watermarkSettingsDescription: "Add a text or image watermark to exported photos. Changes save automatically.",
+        watermarkSettingsDescription:
+          "Add a text or image watermark to exported photos. Changes save automatically.",
         watermarkDisabled: "Watermark disabled",
         watermarkEnabled: "Watermark enabled",
         enableWatermark: "Enable Watermark",
         watermarkEnableHint: "The watermark is applied to exported photos.",
         watermarkLivePreview: "Live preview",
         watermarkPreviewSample: "Preview sample",
-        watermarkPreviewCanvasLabel: "Live watermark preview. Drag to adjust its position.",
+        watermarkPreviewCanvasLabel:
+          "Live watermark preview. Drag to adjust its position.",
         watermarkNoPreviewPhoto: "No photo available for preview",
         watermarkPreviewDisabled: "Preview only · not enabled for export",
         watermarkContent: "Watermark content",
-        watermarkContentHint: "Choose one watermark type. Content for the other type is kept.",
+        watermarkContentHint:
+          "Choose one watermark type. Content for the other type is kept.",
         watermarkType: "Watermark type",
         watermarkTextMode: "Text watermark",
         watermarkImageMode: "Image watermark",
@@ -2707,7 +2713,8 @@ i18n.use(initReactI18next).init({
         watermarkImageFormats: "PNG, JPG, WebP and SVG supported",
         watermarkAssetReady: "Ready",
         watermarkAssetLoading: "Loading image…",
-        watermarkAssetError: "The image cannot be read. Choose another file or clear it.",
+        watermarkAssetError:
+          "The image cannot be read. Choose another file or clear it.",
         watermarkImageScale: "Image size {{value}}%",
         orDragPreview: "Or drag in preview",
         dragToPosition: "Drag to position",
@@ -2729,7 +2736,8 @@ i18n.use(initReactI18next).init({
         watermarkReadout:
           "Anchor {{anchor}}  Margin {{marginPx}}px ({{marginPct}}%)",
         watermarkPosition: "Position",
-        watermarkPositionHint: "Drag the preview for quick positioning, or use the grid for precision.",
+        watermarkPositionHint:
+          "Drag the preview for quick positioning, or use the grid for precision.",
         watermarkResetPosition: "Reset position",
         positionTopLeft: "Top Left",
         positionTopRight: "Top Right",
@@ -2761,7 +2769,8 @@ i18n.use(initReactI18next).init({
         diagnosticsLastAction: "Last action before the problem",
         diagnosticsLastActionPlaceholder:
           'For example: after importing a folder, I clicked "Start AI indexing"',
-        diagnosticsLastActionRequired: "Describe the last action before the problem",
+        diagnosticsLastActionRequired:
+          "Describe the last action before the problem",
         diagnosticsActualBehavior: "What happened",
         diagnosticsActualBehaviorPlaceholder:
           "For example: progress stopped at 32%, then the page became blank",
@@ -2782,7 +2791,8 @@ i18n.use(initReactI18next).init({
         diagnosticsGenerating: "Collecting and redacting…",
         diagnosticsBundleReady:
           "Diagnostic bundle created and selected in File Explorer",
-        diagnosticsBundleFailed: "Failed to create the diagnostic bundle. Try again.",
+        diagnosticsBundleFailed:
+          "Failed to create the diagnostic bundle. Try again.",
         diagnosticsIssueFallback:
           "GitHub could not be opened. The issue content was copied to the clipboard.",
         diagnosticsIssueFallbackCopyFailed:
@@ -2793,7 +2803,8 @@ i18n.use(initReactI18next).init({
         diagnosticsStepOne: "A prefilled GitHub issue is open in your browser",
         diagnosticsIssueNotOpened:
           "GitHub did not open automatically. Use the retry button below.",
-        diagnosticsStepTwo: "Drag the selected ZIP from File Explorer into the issue",
+        diagnosticsStepTwo:
+          "Drag the selected ZIP from File Explorer into the issue",
         diagnosticsStepThree: "Review the description and submit the issue",
         diagnosticsRetryIssue: "Retry opening GitHub",
         diagnosticsFeedbackThisError: "Report this problem",
@@ -3180,7 +3191,8 @@ i18n.use(initReactI18next).init({
           "Unsupported: the gallery accepts one image; the file tree accepts folders only",
         toastImageDropFailed: "Failed to read the dropped image",
         toastFolderDropFailed: "No importable folder was found",
-        toastImportAlreadyQueued: "{{count}} folders are already in the import queue",
+        toastImportAlreadyQueued:
+          "{{count}} folders are already in the import queue",
         imageSearchTitle:
           "Image search — choose a reference image to find similar photos",
         exifFilterTitle: "EXIF Filters",
@@ -3991,4 +4003,5 @@ i18n.use(initReactI18next).init({
     },
   },
 });
-export default i18n;
+const configuredI18n = i18n;
+export default configuredI18n;

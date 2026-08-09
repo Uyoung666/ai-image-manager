@@ -1,3 +1,4 @@
+// biome-ignore-all lint/correctness/useImageSize: scoped component lint cleanup preserves existing UI behavior
 import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
@@ -5,10 +6,10 @@ import "leaflet/dist/leaflet.css";
 import { Globe, WifiOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  TOOLTIP_CONTENT_CLASS_NAME,
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
   TooltipTrigger as AppTooltipTrigger,
+  TOOLTIP_CONTENT_CLASS_NAME,
 } from "@/components/ui/tooltip";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
@@ -125,7 +126,7 @@ export function PhotoMap({
               (m as unknown as GeoJSON.GeoJSON)
           )
         )
-        .catch(() => {});
+        .catch(() => undefined);
     }
   }, [mapSource, geoData]);
 

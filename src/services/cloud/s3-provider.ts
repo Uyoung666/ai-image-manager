@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import type { CloudProvider } from "./abstract-provider";
 
+const PROTOCOL_RE = /^https?:\/\//;
+const TRAILING_SLASH_RE = /\/$/;
+const KEY_RE = /<Key>([^<]+)<\/Key>/g;
+
 function getDate() {
   return new Date().toUTCString();
 }
@@ -18,8 +22,7 @@ function ossSign(
   secretKey: string
 ): string {
   // VERB\nContent-MD5\nContent-Type\nDate\nCanonicalizedOSSHeaders + CanonicalizedResource
-  const stringToSign =
-    method + "\n\n" + contentType + "\n" + date + "\n" + resource;
+  const stringToSign = `${method}\n\n${contentType}\n${date}\n${resource}`;
   return hmacSha1(secretKey, stringToSign);
 }
 
@@ -39,11 +42,11 @@ function buildRequest(
   objectPath?: string,
   query?: string
 ) {
-  const host = endpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const host = endpoint.replace(PROTOCOL_RE, "").replace(TRAILING_SLASH_RE, "");
   // CanonicalizedResource ALWAYS starts with /{bucket} for OSS
   const ossResource = objectPath
-    ? `/${bucket}/${objectPath}` + (query ? `?${query}` : "")
-    : `/${bucket}/` + (query ? `?${query}` : "");
+    ? `/${bucket}/${objectPath}${query ? `?${query}` : ""}`
+    : `/${bucket}/${query ? `?${query}` : ""}`;
 
   if (isOss(endpoint)) {
     const base = `https://${bucket}.${host}`;
@@ -97,8 +100,11 @@ export const s3Provider: CloudProvider = {
         success: false,
         error: `HTTP ${res.status}: ${errBody.slice(0, 200)}`,
       };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 
@@ -130,14 +136,16 @@ export const s3Provider: CloudProvider = {
     }
 
     if (isOss(endpoint)) {
-      const publicBase = config.publicBase?.replace(/\/$/, "");
+      const publicBase = config.publicBase?.replace(TRAILING_SLASH_RE, "");
       if (publicBase) {
         return `${publicBase}/${remotePath}`;
       }
-      const host = endpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const host = endpoint
+        .replace(PROTOCOL_RE, "")
+        .replace(TRAILING_SLASH_RE, "");
       return `https://${bucket}.${host}/${remotePath}`;
     }
-    const baseUrl = endpoint.replace(/\/$/, "");
+    const baseUrl = endpoint.replace(TRAILING_SLASH_RE, "");
     return `${baseUrl}/${bucket}/${remotePath}`;
   },
 
@@ -170,10 +178,10 @@ export const s3Provider: CloudProvider = {
     const xml = await res.text();
 
     const keys: string[] = [];
-    const keyRegex = /<Key>([^<]+)<\/Key>/g;
-    let match;
-    while ((match = keyRegex.exec(xml)) !== null) {
+    let match = KEY_RE.exec(xml);
+    while (match !== null) {
       keys.push(match[1]);
+      match = KEY_RE.exec(xml);
     }
     return keys;
   },

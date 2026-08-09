@@ -394,7 +394,8 @@ function buildCalendarWeeks(
         count,
         date,
         day: current.getDate(),
-        level: count === 0 || maxCount === 0 ? 0 : Math.ceil((count / maxCount) * 4),
+        level:
+          count === 0 || maxCount === 0 ? 0 : Math.ceil((count / maxCount) * 4),
       });
     }
     weeks.push(week);

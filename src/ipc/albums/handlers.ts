@@ -87,68 +87,66 @@ function refreshSmartAlbumCover(albumId: number): void {
   }
 }
 
-export const listAlbums = os
-  .input(ListAlbumsSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    let query = db
-      .select()
-      .from(albums)
-      .orderBy(desc(albums.createdAt))
-      .$dynamic();
-    if (input.isSmart !== undefined) {
-      query = query.where(eq(albums.isSmart, input.isSmart));
-    }
-    const list = query.all();
+export const listAlbums = os.input(ListAlbumsSchema).handler(({ input }) => {
+  const db = getDatabase();
+  let query = db
+    .select()
+    .from(albums)
+    .orderBy(desc(albums.createdAt))
+    .$dynamic();
+  if (input.isSmart !== undefined) {
+    query = query.where(eq(albums.isSmart, input.isSmart));
+  }
+  const list = query.all();
 
-    // 始终刷新智能相册封面（refreshSmartAlbumCover 内部做"仅变更时写入"短路）
-    for (const album of list) {
-      if (album.isSmart && album.smartRules) {
-        try {
-          refreshSmartAlbumCover(album.id);
-          // 重新读取更新后的 coverPhotoId
-          const refreshed = db
-            .select({ coverPhotoId: albums.coverPhotoId })
-            .from(albums)
-            .where(eq(albums.id, album.id))
-            .get();
-          album.coverPhotoId = refreshed?.coverPhotoId ?? null;
-        } catch {
-          /* skip */
-        }
+  // 始终刷新智能相册封面（refreshSmartAlbumCover 内部做"仅变更时写入"短路）
+  for (const album of list) {
+    if (album.isSmart && album.smartRules) {
+      try {
+        refreshSmartAlbumCover(album.id);
+        // 重新读取更新后的 coverPhotoId
+        const refreshed = db
+          .select({ coverPhotoId: albums.coverPhotoId })
+          .from(albums)
+          .where(eq(albums.id, album.id))
+          .get();
+        album.coverPhotoId = refreshed?.coverPhotoId ?? null;
+      } catch {
+        /* skip */
       }
     }
+  }
 
-    // 批量查询封面缩略图路径，避免前端 N+1 查询
-    const coverIds = list
-      .filter((a) => a.coverPhotoId !== null)
-      .map((a) => a.coverPhotoId as number);
+  // 批量查询封面缩略图路径，避免前端 N+1 查询
+  const coverIds = list
+    .filter((a) => a.coverPhotoId !== null)
+    .map((a) => a.coverPhotoId as number);
 
-    const coverThumbnailMap = new Map<number, string>();
-    if (coverIds.length > 0) {
-      const coverRows = db
-        .select({
-          id: photos.id,
-          thumbnailPath: photos.thumbnailPath,
-          path: photos.path,
-        })
-        .from(photos)
-        .where(inArray(photos.id, coverIds))
-        .all();
-      for (const row of coverRows) {
-        coverThumbnailMap.set(row.id, row.thumbnailPath || row.path);
-      }
+  const coverThumbnailMap = new Map<number, string>();
+  if (coverIds.length > 0) {
+    const coverRows = db
+      .select({
+        id: photos.id,
+        thumbnailPath: photos.thumbnailPath,
+        path: photos.path,
+      })
+      .from(photos)
+      .where(inArray(photos.id, coverIds))
+      .all();
+    for (const row of coverRows) {
+      coverThumbnailMap.set(row.id, row.thumbnailPath || row.path);
     }
+  }
 
-    return list.map((album) => ({
-      ...album,
-      coverThumbnailPath: album.coverPhotoId
-        ? (coverThumbnailMap.get(album.coverPhotoId) ?? null)
-        : null,
-    }));
-  });
+  return list.map((album) => ({
+    ...album,
+    coverThumbnailPath: album.coverPhotoId
+      ? (coverThumbnailMap.get(album.coverPhotoId) ?? null)
+      : null,
+  }));
+});
 
-export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
+export const getAlbum = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
   const album = db.select().from(albums).where(eq(albums.id, input.id)).get();
 
@@ -223,69 +221,65 @@ export const getAlbum = os.input(IdSchema).handler(async ({ input }) => {
   return { ...album, photos: photoRows };
 });
 
-export const createAlbum = os
-  .input(CreateAlbumSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const result = db
-      .insert(albums)
-      .values({
-        name: input.name,
-        description: input.description,
-        coverPhotoId: input.coverPhotoId,
-        isSmart: input.isSmart ?? false,
-        smartRules: input.smartRules,
-      })
-      .run();
-    const created = db
-      .select()
-      .from(albums)
-      .where(eq(albums.id, Number(result.lastInsertRowid)))
-      .get();
-    return created;
-  });
+export const createAlbum = os.input(CreateAlbumSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const result = db
+    .insert(albums)
+    .values({
+      name: input.name,
+      description: input.description,
+      coverPhotoId: input.coverPhotoId,
+      isSmart: input.isSmart ?? false,
+      smartRules: input.smartRules,
+    })
+    .run();
+  const created = db
+    .select()
+    .from(albums)
+    .where(eq(albums.id, Number(result.lastInsertRowid)))
+    .get();
+  return created;
+});
 
-export const updateAlbum = os
-  .input(UpdateAlbumSchema)
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    const { id, ...fields } = input;
+export const updateAlbum = os.input(UpdateAlbumSchema).handler(({ input }) => {
+  const db = getDatabase();
+  const { id, ...fields } = input;
 
-    const existing = db.select().from(albums).where(eq(albums.id, id)).get();
-    if (!existing) {
-      throw new Error("相册不存在");
-    }
+  const existing = db.select().from(albums).where(eq(albums.id, id)).get();
+  if (!existing) {
+    throw new Error("相册不存在");
+  }
 
-    const updates: Record<string, unknown> = {};
-    if (fields.name !== undefined) {
-      updates.name = fields.name;
-    }
-    if (fields.description !== undefined) {
-      updates.description = fields.description;
-    }
-    if (fields.coverPhotoId !== undefined) {
-      updates.coverPhotoId = fields.coverPhotoId;
-    }
-    if (fields.isSmart !== undefined) {
-      updates.isSmart = fields.isSmart;
-    }
-    if (fields.smartRules !== undefined) {
-      updates.smartRules = fields.smartRules;
-    }
+  const updates: Record<string, unknown> = {};
+  if (fields.name !== undefined) {
+    updates.name = fields.name;
+  }
+  if (fields.description !== undefined) {
+    updates.description = fields.description;
+  }
+  if (fields.coverPhotoId !== undefined) {
+    updates.coverPhotoId = fields.coverPhotoId;
+  }
+  if (fields.isSmart !== undefined) {
+    updates.isSmart = fields.isSmart;
+  }
+  if (fields.smartRules !== undefined) {
+    updates.smartRules = fields.smartRules;
+  }
 
-    if (Object.keys(updates).length > 0) {
-      db.update(albums).set(updates).where(eq(albums.id, id)).run();
-    }
+  if (Object.keys(updates).length > 0) {
+    db.update(albums).set(updates).where(eq(albums.id, id)).run();
+  }
 
-    // 智能相册规则变更后刷新封面
-    if (fields.smartRules !== undefined && existing.isSmart) {
-      refreshSmartAlbumCover(id);
-    }
+  // 智能相册规则变更后刷新封面
+  if (fields.smartRules !== undefined && existing.isSmart) {
+    refreshSmartAlbumCover(id);
+  }
 
-    return db.select().from(albums).where(eq(albums.id, id)).get();
-  });
+  return db.select().from(albums).where(eq(albums.id, id)).get();
+});
 
-export const deleteAlbum = os.input(IdSchema).handler(async ({ input }) => {
+export const deleteAlbum = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
   const existing = db
     .select()
@@ -304,7 +298,7 @@ export const deleteAlbum = os.input(IdSchema).handler(async ({ input }) => {
 
 export const addPhotosToAlbum = os
   .input(AddPhotosSchema)
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const { albumId, photoIds } = input;
 
@@ -366,7 +360,7 @@ export const addPhotosToAlbum = os
 
 export const removePhotosFromAlbum = os
   .input(RemovePhotosSchema)
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const { albumId, photoIds } = input;
 
@@ -405,7 +399,7 @@ export const removePhotosFromAlbum = os
 
 export const reorderAlbumPhotos = os
   .input(ReorderPhotosSchema)
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const { albumId, photoIds } = input;
 
@@ -428,7 +422,7 @@ export const reorderAlbumPhotos = os
 
 export const evaluateSmartAlbumHandler = os
   .input(z.object({ albumId: z.number() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const album = db
       .select()
@@ -472,6 +466,6 @@ export const evaluateSmartAlbumHandler = os
 
 export const validateSmartAlbumRules = os
   .input(z.object({ smartRules: z.string() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     return validateSmartRules(input.smartRules);
   });

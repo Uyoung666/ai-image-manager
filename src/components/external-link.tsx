@@ -21,6 +21,7 @@ export default function ExternalLink({
   return (
     <button
       className={cn("cursor-pointer underline", className)}
+      type="button"
       {...props}
       onClick={open}
     >

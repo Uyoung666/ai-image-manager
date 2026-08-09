@@ -55,9 +55,9 @@ interface ThumbnailCacheConfig {
 
 const CACHE_CONFIG: ThumbnailCacheConfig = {
   maxMemoryMB: 250,
-  maxDiskMB: 20480, // 20GB（含对比预览 .jpg）
+  maxDiskMB: 20_480, // 20GB（含对比预览 .jpg）
   maxDiskFiles: 100_000,
-  cleanupThresholdMB: 18432, // ~90% of max, triggers cleanup at 18GB
+  cleanupThresholdMB: 18_432, // ~90% of max, triggers cleanup at 18GB
 };
 
 let thumbnailDir: string;
@@ -865,9 +865,13 @@ export async function cleanOrphanThumbnails(): Promise<{
         await fs.promises.unlink(entryPath);
         freedBytes += fileSize;
         removed++;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const code =
+          typeof err === "object" && err !== null && "code" in err
+            ? String(err.code)
+            : "unknown";
         log.error(
-          `[Thumbnailer] Failed to delete orphan: ${entry} (code: ${err?.code || "unknown"})`
+          `[Thumbnailer] Failed to delete orphan: ${entry} (code: ${code})`
         );
       }
     }

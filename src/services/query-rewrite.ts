@@ -43,10 +43,10 @@ const STOP_WORDS = new Set([
 // 替代纯硬编码字符串匹配，支持灵活的自然语言时间描述
 
 interface DynamicTimeRange {
-  /** 提取到的时间范围 */
-  timeFilter: { from: number; to: number };
   /** 匹配到的原始文本（用于从查询中移除） */
   matchedText: string;
+  /** 提取到的时间范围 */
+  timeFilter: { from: number; to: number };
 }
 
 // 相对时间：N天前 / N周前 / N个月前 / N年前 / 过去N天 等
@@ -55,7 +55,7 @@ const RELATIVE_TIME_RE =
 
 // 绝对时间：2024年 / 2024年3月 / 2024年3月15日 / 3月15日 等
 const ABSOLUTE_DATE_RE =
-  /(\d{4})\s*[年\/\-\.]\s*(\d{1,2})\s*(?:[月\/\-\.]\s*(\d{1,2})\s*[日号]?)?/;
+  /(\d{4})\s*[年/\-.]\s*(\d{1,2})\s*(?:[月/\-.]\s*(\d{1,2})\s*[日号]?)?/;
 
 // 口语化季节+年份组合：去年夏天 / 2024年春天 等
 const YEAR_QUALIFIED_SEASON_RE =
@@ -64,6 +64,7 @@ const YEAR_QUALIFIED_SEASON_RE =
 // 纯季节（无年份限定）
 const BARE_SEASON_RE = /(春天|夏天|秋天|冬天|春季|夏季|秋季|冬季)/;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Dynamic time parsing keeps relative, absolute, and seasonal syntax resolution ordered.
 function parseDynamicTime(query: string, now: Date): DynamicTimeRange | null {
   // 1. 尝试相对时间（N天前/周前等）
   const relMatch = RELATIVE_TIME_RE.exec(query);
@@ -99,11 +100,11 @@ function parseDynamicTime(query: string, now: Date): DynamicTimeRange | null {
       }
       const from = new Date(year, month, day ?? 1, 0, 0, 0, 0);
       let to: Date;
-      if (day !== undefined) {
-        to = new Date(year, month, day, 23, 59, 59, 999);
-      } else {
+      if (day === undefined) {
         // 只有年月 → 到月末
         to = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      } else {
+        to = new Date(year, month, day, 23, 59, 59, 999);
       }
       return {
         timeFilter: { from: from.getTime(), to: to.getTime() },
@@ -177,7 +178,6 @@ function resolveYearQualifier(
       return now.getFullYear() + 1;
     case "前年":
       return now.getFullYear() - 2;
-    case "今年":
     default:
       return now.getFullYear();
   }
@@ -186,10 +186,18 @@ function resolveYearQualifier(
 function inferSeasonYear(season: string, now: Date): number {
   const month = now.getMonth();
   const seasonStartMonths: Record<string, number> = {
-    "春": 2, "春天": 2, "春季": 2,
-    "夏": 5, "夏天": 5, "夏季": 5,
-    "秋": 8, "秋天": 8, "秋季": 8,
-    "冬": 11, "冬天": 11, "冬季": 11,
+    春: 2,
+    春天: 2,
+    春季: 2,
+    夏: 5,
+    夏天: 5,
+    夏季: 5,
+    秋: 8,
+    秋天: 8,
+    秋季: 8,
+    冬: 11,
+    冬天: 11,
+    冬季: 11,
   };
   const startMonth = seasonStartMonths[season] ?? 0;
   // 如果当前月份 >= 季节开始月份，用今年；否则用去年
@@ -202,10 +210,18 @@ function buildSeasonRange(
   matchedText: string
 ): DynamicTimeRange | null {
   const seasonMonths: Record<string, [number, number]> = {
-    "春": [2, 4], "春天": [2, 4], "春季": [2, 4],
-    "夏": [5, 7], "夏天": [5, 7], "夏季": [5, 7],
-    "秋": [8, 10], "秋天": [8, 10], "秋季": [8, 10],
-    "冬": [11, 13], "冬天": [11, 13], "冬季": [11, 13], // 13 → 次年1月
+    春: [2, 4],
+    春天: [2, 4],
+    春季: [2, 4],
+    夏: [5, 7],
+    夏天: [5, 7],
+    夏季: [5, 7],
+    秋: [8, 10],
+    秋天: [8, 10],
+    秋季: [8, 10],
+    冬: [11, 13],
+    冬天: [11, 13],
+    冬季: [11, 13], // 13 → 次年1月
   };
   const [startMonth, endMonth] = seasonMonths[season] ?? [0, 2];
   const from = new Date(year, startMonth, 1, 0, 0, 0, 0);
@@ -330,8 +346,7 @@ function removeColloquialisms(query: string): {
     let idx = cleaned.indexOf(phrase);
     while (idx !== -1) {
       removed.push(phrase);
-      cleaned =
-        cleaned.slice(0, idx) + " " + cleaned.slice(idx + phrase.length);
+      cleaned = `${cleaned.slice(0, idx)} ${cleaned.slice(idx + phrase.length)}`;
       idx = cleaned.indexOf(phrase);
     }
   }
@@ -382,7 +397,9 @@ const MAX_REWRITE_CACHE = 50;
 
 function getCachedRewrite(key: string): RewrittenQuery | null {
   const entry = rewriteCache.get(key);
-  if (!entry) return null;
+  if (!entry) {
+    return null;
+  }
   if (Date.now() - entry.ts > REWRITE_CACHE_TTL) {
     rewriteCache.delete(key);
     return null;
@@ -396,7 +413,9 @@ function getCachedRewrite(key: string): RewrittenQuery | null {
 function setCachedRewrite(key: string, result: RewrittenQuery): void {
   if (rewriteCache.size >= MAX_REWRITE_CACHE) {
     const lru = rewriteCache.keys().next().value;
-    if (lru !== undefined) rewriteCache.delete(lru);
+    if (lru !== undefined) {
+      rewriteCache.delete(lru);
+    }
   }
   rewriteCache.set(key, { result, ts: Date.now() });
 }
@@ -404,7 +423,9 @@ function setCachedRewrite(key: string, result: RewrittenQuery): void {
 export function rewriteQuery(query: string): RewrittenQuery {
   const cacheKey = query.trim();
   const cached = getCachedRewrite(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const originalQuery = query.trim();
 
@@ -423,7 +444,10 @@ export function rewriteQuery(query: string): RewrittenQuery {
 
   // 3. 从 cleanQuery 中移除匹配到的时间文本
   if (matchedText && cleanQuery.includes(matchedText)) {
-    cleanQuery = cleanQuery.replace(matchedText, " ").replace(/\s+/g, " ").trim();
+    cleanQuery = cleanQuery
+      .replace(matchedText, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   // 4. 如果 cleanQuery 只剩下时间词（纯时间查询），清空 cleanQuery

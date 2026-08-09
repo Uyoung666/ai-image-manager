@@ -178,7 +178,7 @@ async function moveFilesToSystemTrash(
   }
 }
 
-export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
+export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
   const db = getDatabase();
   const photo = db
     .select({
@@ -215,7 +215,7 @@ export const deletePhoto = os.input(IdSchema).handler(async ({ input }) => {
 
 export const deletePhotos = os
   .input(BatchPhotoIdsSchema)
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     // Only target active (non-soft-deleted) photos for idempotency
     const targetPhotos = db
@@ -369,7 +369,7 @@ export function getOrphanPhotoIds(
 // is NULL or points to a deleted folder. When the original folder is gone there
 // is nothing to restore, so trashed orphans are cleaned up together with active ones.
 // Also recalculates folder photoCounts.
-export const cleanupOrphanPhotos = os.handler(async () => {
+export const cleanupOrphanPhotos = os.handler(() => {
   const db = getDatabase();
 
   const orphanIds = getOrphanPhotoIds(db);
@@ -415,7 +415,7 @@ export const cleanupOrphanPhotos = os.handler(async () => {
 // Move photos to a different folder (drag-and-drop in sidebar)
 export const movePhotos = os
   .input(z.object({ ids: z.array(z.number()), targetFolderId: z.number() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const targetFolder = db
       .select({ path: folders.path })
@@ -475,8 +475,11 @@ export const movePhotos = os
           .run();
 
         results.push({ id });
-      } catch (err: any) {
-        results.push({ id, error: err?.message || "Move failed" });
+      } catch (err) {
+        results.push({
+          id,
+          error: err instanceof Error ? err.message : "Move failed",
+        });
       }
     }
     return { moved: results.filter((r) => !r.error).length, results };
@@ -486,21 +489,26 @@ function applyRenamePattern(
   pattern: string,
   filename: string,
   index: number,
-  exif: Record<string, any> | null | undefined,
+  exif:
+    | Record<string, boolean | number | string | null | undefined>
+    | null
+    | undefined,
   fileDate: number | string | null
 ): string {
   const ext = path.extname(filename);
   const base = path.basename(filename, ext);
-  const date = exif?.dateTaken
-    ? new Date(exif.dateTaken)
-    : new Date(fileDate ?? Date.now());
+  const dateTaken = exif?.dateTaken;
+  const date =
+    typeof dateTaken === "string" || typeof dateTaken === "number"
+      ? new Date(dateTaken)
+      : new Date(fileDate ?? Date.now());
   let newBase = pattern
     .replace(/\{yyyy\}/g, date.getFullYear().toString())
     .replace(/\{mm\}/g, String(date.getMonth() + 1).padStart(2, "0"))
     .replace(/\{dd\}/g, String(date.getDate()).padStart(2, "0"))
     .replace(
       /\{camera\}/g,
-      (exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, "")
+      String(exif?.cameraModel || "Unknown").replace(/[<>:"/\\|?*]/g, "")
     )
     .replace(/\{iso\}/g, exif?.iso?.toString() || "")
     .replace(/\{focal\}/g, (exif?.focalLength || "").toString())
@@ -517,7 +525,7 @@ function applyRenamePattern(
 
 export const previewRename = os
   .input(z.object({ id: z.number(), pattern: z.string().min(1) }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const photo = db.select().from(photos).where(eq(photos.id, input.id)).get();
     if (!photo) {
@@ -543,7 +551,8 @@ export const renamePhotos = os
       pattern: z.string().min(1),
     })
   )
-  .handler(async ({ input }) => {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Batch rename preserves per-photo ordering and error reporting.
+  .handler(({ input }) => {
     const db = getDatabase();
     const results: Array<{
       id: number;
@@ -614,7 +623,9 @@ export const renamePhotos = os
         }
         if (!thumbMigrated) {
           // Generate new thumbnail asynchronously (don't block rename)
-          generateThumbnail(newPath, "md").catch(() => {});
+          generateThumbnail(newPath, "md").catch(() => {
+            // Thumbnail generation is best-effort during rename.
+          });
         }
         db.update(photos)
           .set({
@@ -629,12 +640,12 @@ export const renamePhotos = os
           oldName: photo.filename,
           newName: newFilename,
         });
-      } catch (e: any) {
+      } catch (e) {
         results.push({
           id: photo.id,
           oldName: photo.filename,
           newName: newFilename,
-          error: e.message,
+          error: e instanceof Error ? e.message : String(e),
         });
       }
     }
@@ -782,7 +793,7 @@ export const backfillMissingThumbnails = os
 
 export const toggleFavorite = os
   .input(z.object({ ids: z.array(z.number()), favorite: z.boolean() }))
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     db.update(photos)
       .set({ isFavorite: input.favorite })
@@ -794,6 +805,7 @@ export const toggleFavorite = os
 
 export const listDeletedPhotos = os
   .input(TrashListSchema)
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Trash cleanup preserves the existing retention and filesystem flow.
   .handler(({ input }) => {
     const db = getDatabase();
 
@@ -917,7 +929,7 @@ export const listDeletedPhotos = os
 
 export const restorePhotos = os
   .input(BatchPhotoIdsSchema)
-  .handler(async ({ input }) => {
+  .handler(({ input }) => {
     const db = getDatabase();
     const targetPhotos = db
       .select({ id: photos.id, folderId: photos.folderId, path: photos.path })
@@ -1041,7 +1053,7 @@ export const permanentlyDeletePhotos = os
     return result;
   });
 
-export const emptyTrash = os.handler(async () => {
+export const emptyTrash = os.handler(() => {
   const db = getDatabase();
   const deletedPhotos = db
     .select({ id: photos.id, path: photos.path })

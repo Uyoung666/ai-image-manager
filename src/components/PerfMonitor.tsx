@@ -1,3 +1,4 @@
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 import { useEffect, useState } from "react";
 
 interface FrameMetrics {
@@ -6,6 +7,12 @@ interface FrameMetrics {
   fps: number;
   frameCount: number;
   minFps: number;
+}
+
+interface PerformanceWithMemory extends Performance {
+  memory?: {
+    usedJSHeapSize: number;
+  };
 }
 
 /**
@@ -61,8 +68,10 @@ export function usePerfMonitor(enabled = false) {
 
         // Memory (if available)
         if ("memory" in performance) {
-          const mem = (performance as any).memory;
-          setMemory(mem.usedJSHeapSize / 1024 / 1024);
+          const mem = (performance as PerformanceWithMemory).memory;
+          if (mem) {
+            setMemory(mem.usedJSHeapSize / 1024 / 1024);
+          }
         }
 
         frames = 0;
@@ -92,8 +101,12 @@ export function PerfOverlay({
     return null;
   }
 
-  const fpsColor =
-    metrics.fps >= 55 ? "#4ade80" : metrics.fps >= 30 ? "#facc15" : "#ef4444";
+  let fpsColor = "#ef4444";
+  if (metrics.fps >= 55) {
+    fpsColor = "#4ade80";
+  } else if (metrics.fps >= 30) {
+    fpsColor = "#facc15";
+  }
 
   return (
     <div className="pointer-events-none fixed right-3 bottom-3 z-50 rounded-[6px] border border-border bg-background/90 px-3 py-2 font-mono text-[11px] backdrop-blur-sm">

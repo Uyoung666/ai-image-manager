@@ -91,8 +91,7 @@ export function getSendToFilePaths(): string[] {
   const paths: string[] = [];
 
   // Filter out electron/chromium flags
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+  for (const arg of args) {
     if (
       arg === "--sendto" ||
       arg.startsWith("--allow-file-access-from-files") ||

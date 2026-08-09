@@ -92,7 +92,7 @@ function benchmarkOrphanCleanup() {
   const COST_PER_CHECK_HDD = 0.5; // ms
 
   console.log("  照片数量  │  SSD阻塞时间  │  HDD阻塞时间  │  修复后(异步)");
-  console.log("  " + "─".repeat(56));
+  console.log(`  ${"─".repeat(56)}`);
 
   for (const count of PHOTO_COUNTS) {
     const ssdTime = (count * COST_PER_CHECK_SSD).toFixed(0);
@@ -124,7 +124,7 @@ function benchmarkFallbackStrategy() {
   //      split 10+10 → left succeeds, right fails → ... keeps halving
   //      until finding the 1 bad photo ≈ O(logN) splits
 
-  function simulateOldIPC(batchSize, badCount) {
+  function simulateOldIPC(batchSize, _badCount) {
     // 1 batch call fails, then all photos tried one-by-one
     return 1 + batchSize;
   }
@@ -270,7 +270,7 @@ function runAll() {
   console.log("╚══════════════════════════════════════════════════════╝");
   console.log("");
   console.log("  优化项                          │  节省的调用/时间");
-  console.log("  " + "─".repeat(55));
+  console.log(`  ${"─".repeat(55)}`);
   console.log(
     `  PK筛选: 消除双次IPC             │  ${r1.savedCalls}次调用 / ${((r1.savedCalls * 75) / 1000).toFixed(1)}秒`
   );

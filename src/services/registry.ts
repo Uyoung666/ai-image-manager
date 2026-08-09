@@ -1,4 +1,6 @@
 import { closeDatabase, getDatabase, initDatabase } from "@/db";
+import { shutdownTextWorker } from "@/services/ai/text-worker-client";
+import { shutdownTranslationWorker } from "@/services/ai/translation-worker-client";
 import {
   closeVectorDB,
   embedAllPhotos,
@@ -14,8 +16,6 @@ import {
   wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
-import { shutdownTextWorker } from "@/services/ai/text-worker-client";
-import { shutdownTranslationWorker } from "@/services/ai/translation-worker-client";
 import {
   cleanupOrphanedRecordsAsync,
   startWatching,
@@ -29,14 +29,22 @@ import {
 
 // ── Service lifecycle types ───────────────────────────────────────────
 
-export enum ServiceLevel {
+export const ServiceLevel = {
   /** App cannot function without this */
-  Critical = 1,
+  Critical: 1,
   /** App can start but features are degraded */
-  Essential = 2,
+  Essential: 2,
   /** Optional enhancement, failure is non-blocking */
-  Optional = 3,
-}
+  Optional: 3,
+} as const;
+
+export type ServiceLevel = (typeof ServiceLevel)[keyof typeof ServiceLevel];
+
+const serviceLevelNames: Record<ServiceLevel, string> = {
+  [ServiceLevel.Critical]: "Critical",
+  [ServiceLevel.Essential]: "Essential",
+  [ServiceLevel.Optional]: "Optional",
+};
 
 export interface ServiceHealth {
   detail?: string;
@@ -48,11 +56,13 @@ export interface ServiceHealth {
 export interface ServiceDescriptor {
   /** Names of services that must be healthy before this one starts */
   dependencies?: string[];
-  health: () => Promise<Omit<ServiceHealth, "name" | "level">>;
+  health: () =>
+    | Omit<ServiceHealth, "name" | "level">
+    | Promise<Omit<ServiceHealth, "name" | "level">>;
   level: ServiceLevel;
   name: string;
-  start: () => Promise<void>;
-  stop: () => Promise<void>;
+  start: () => void | Promise<void>;
+  stop: () => void | Promise<void>;
 }
 
 export interface HealthReport {
@@ -64,7 +74,7 @@ export interface HealthReport {
 // ── Registry ──────────────────────────────────────────────────────────
 
 class ServiceRegistry {
-  private services = new Map<string, ServiceDescriptor>();
+  private readonly services = new Map<string, ServiceDescriptor>();
   private startOrder: string[] = [];
 
   register(desc: ServiceDescriptor): void {
@@ -111,13 +121,16 @@ class ServiceRegistry {
         continue;
       }
 
-      const svc = this.services.get(name)!;
+      const svc = this.services.get(name);
+      if (!svc) {
+        continue;
+      }
 
       if (opts.maxLevel !== undefined && svc.level > opts.maxLevel) {
         continue;
       }
 
-      const levelLabel = ServiceLevel[svc.level];
+      const levelLabel = serviceLevelNames[svc.level];
 
       try {
         console.log(`[ServiceRegistry] Starting ${name} (${levelLabel})…`);
@@ -232,19 +245,20 @@ class ServiceRegistry {
 // ── Singleton ─────────────────────────────────────────────────────────
 
 export const registry = new ServiceRegistry();
+let thumbnailCleanupInterval: ReturnType<typeof setInterval> | undefined;
 
 // ── Service definitions ───────────────────────────────────────────────
 
 registry.register({
   name: "database",
   level: ServiceLevel.Critical,
-  start: async () => {
+  start: () => {
     initDatabase();
   },
-  stop: async () => {
+  stop: () => {
     closeDatabase();
   },
-  health: async () => {
+  health: () => {
     try {
       const db = getDatabase();
       // Run a cheap query to verify the connection is alive
@@ -260,13 +274,13 @@ registry.register({
   name: "thumbnailer",
   level: ServiceLevel.Critical,
   dependencies: ["database"],
-  start: async () => {
+  start: () => {
     initThumbnailer();
   },
-  stop: async () => {
+  stop: () => {
     // Thumbnails are file-based; no explicit cleanup needed
   },
-  health: async () => {
+  health: () => {
     // The thumbnailer is a thin wrapper around sharp — it cannot "fail"
     return { status: "ok" as const };
   },
@@ -298,7 +312,7 @@ registry.register({
     stopScanning();
     await stopWatching();
   },
-  health: async () => {
+  health: () => {
     return { status: "ok" as const };
   },
 });
@@ -336,7 +350,7 @@ registry.register({
   stop: async () => {
     await closeVectorDB();
   },
-  health: async () => {
+  health: () => {
     if (isVectorDBInitialized()) {
       return { status: "ok" as const };
     }
@@ -356,7 +370,7 @@ registry.register({
       console.warn("[Registry] AI search warmup failed:", err?.message);
     });
   },
-  stop: async () => {
+  stop: () => {
     stopEmbedding();
     // Reset model state so the next start() reloads from the
     // current getDataPath() — essential after data-path migration
@@ -372,7 +386,7 @@ registry.register({
       /* pool may not have been started */
     }
   },
-  health: async () => {
+  health: () => {
     if (isAiModelLoaded()) {
       return { status: "ok" as const };
     }
@@ -435,22 +449,23 @@ registry.register({
               );
             }
           })
-          .catch(() => {});
+          .catch(() => {
+            // Cleanup runs again on the next scheduled interval.
+          });
       },
       24 * 60 * 60 * 1000
     );
 
     // Store interval for cleanup
-    (global as any).__thumbnailCleanupInterval = cleanupInterval;
+    thumbnailCleanupInterval = cleanupInterval;
   },
-  stop: async () => {
-    const interval = (global as any).__thumbnailCleanupInterval;
-    if (interval) {
-      clearInterval(interval);
-      delete (global as any).__thumbnailCleanupInterval;
+  stop: () => {
+    if (thumbnailCleanupInterval) {
+      clearInterval(thumbnailCleanupInterval);
+      thumbnailCleanupInterval = undefined;
     }
   },
-  health: async () => {
+  health: () => {
     return { status: "ok" as const };
   },
 });

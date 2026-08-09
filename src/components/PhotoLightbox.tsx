@@ -175,7 +175,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   useEffect(() => {
     setLoaded(false);
     setImageError(false);
-  }, [photo?.id, previewPlayback]);
+  }, []);
 
   useEffect(() => {
     if (!(open && photo)) {
@@ -248,12 +248,12 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const handleWheelZoom = useCallback(
     (event: ReactWheelEvent<HTMLImageElement>) => {
       event.preventDefault();
-      const modeMultiplier =
-        event.deltaMode === 1
-          ? 16
-          : event.deltaMode === 2
-            ? window.innerHeight
-            : 1;
+      let modeMultiplier = 1;
+      if (event.deltaMode === 1) {
+        modeMultiplier = 16;
+      } else if (event.deltaMode === 2) {
+        modeMultiplier = window.innerHeight;
+      }
       const delta = clamp(event.deltaY * modeMultiplier, -120, 120);
       const next = clamp(
         wheelZoomRef.current * Math.exp(-delta * 0.0018),
@@ -950,7 +950,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               width={photo.width || undefined}
             />
           )}
-          {!(previewPlayback && previewUrl) && !(loaded || imageError) && (
+          {!((previewPlayback && previewUrl) || loaded || imageError) && (
             <div className="absolute inset-0 flex items-center justify-center">
               <LoadingSpinner
                 aria-label={t("loading")}

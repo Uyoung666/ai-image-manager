@@ -15,9 +15,9 @@ const OnboardingContext = createContext<OnboardingContextValue>({
   needsOnboarding: false,
   exiting: false,
   preRenderContent: false,
-  setNeedsOnboarding: () => {},
-  setExiting: () => {},
-  setPreRenderContent: () => {},
+  setNeedsOnboarding: () => undefined,
+  setExiting: () => undefined,
+  setPreRenderContent: () => undefined,
 });
 
 export function useOnboarding() {

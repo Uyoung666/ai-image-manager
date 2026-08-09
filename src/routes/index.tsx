@@ -1,3 +1,4 @@
+import type { InfiniteData } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   useCallback,
@@ -61,7 +62,7 @@ import { usePhotos } from "@/hooks/usePhotos";
 import { useScrollRestorePreloader } from "@/hooks/useScrollRestorePreloader";
 import { ipc } from "@/ipc/manager";
 import { queryClient } from "@/providers/QueryProvider";
-import type { Photo, SearchResponse } from "@/types/photo";
+import type { Photo, PhotoListResponse, SearchResponse } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
@@ -72,7 +73,6 @@ import {
   parseDashboardReturnTarget,
 } from "@/utils/dashboard-data";
 import { recordGalleryPerf } from "@/utils/gallery-perf";
-import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import {
   canPaginateGalleryPhotos,
   createSearchResultSourceKey,
@@ -81,6 +81,7 @@ import {
   isGalleryRevealPending,
   isSequenceSourceReady,
 } from "@/utils/gallery-view-state";
+import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import {
   loadSortField,
   loadSortOrder,
@@ -88,8 +89,8 @@ import {
 } from "./home-sort-storage";
 
 interface SemanticSearchMeta {
-  candidateMinimum?: number;
   candidateDepth?: number;
+  candidateMinimum?: number;
   consensusCutoff?: number;
   cutoffReason?: string;
   finalCutoff?: number;
@@ -133,6 +134,39 @@ interface SequenceRebuildPreview {
 type PendingSequenceAction =
   | { id: number; type: "restore" }
   | { id: number; type: "ungroup" };
+
+interface CompoundSearchParams {
+  advancedField?: ExifFilters["advancedField"];
+  advancedValue?: string;
+  apertureMax?: number;
+  apertureMin?: number;
+  cameraModel?: string;
+  colorHex?: string;
+  creator?: string;
+  cursor?: string;
+  dateFrom?: number;
+  dateHour?: number;
+  dateMonth?: number;
+  dateTo?: number;
+  focalMax?: number;
+  focalMin?: number;
+  isoMax?: number;
+  isoMin?: number;
+  lensModel?: string;
+  limit: number;
+  offset?: number;
+  query?: string;
+  shutterMax?: number;
+  shutterMin?: number;
+}
+
+type PhotoPagesData = InfiniteData<PhotoListResponse>;
+type SearchHandler = (
+  query: string,
+  filters?: ExifFilters,
+  paramColorHex?: string,
+  preserveDashboardReturn?: boolean
+) => Promise<void>;
 
 const SEARCH_MODES: SearchMode[] = ["text", "image", "exif", "color"];
 const EMPTY_PHOTOS: Photo[] = [];
@@ -208,6 +242,7 @@ function resolveSearchMode(query: string, color?: string | null): SearchMode {
   return "exif";
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this route coordinates the existing gallery interactions
 function HomePage() {
   const { t } = useTranslation();
   const compactDetailOverlay = useMediaQuery("(max-width: 1120px)");
@@ -380,6 +415,12 @@ function HomePage() {
     navigate({ to: "/", search: {}, replace: true });
   }, [clearDashboardReturnTarget, navigate, saveBrowseSession]);
 
+  const searchHandlerRef = useRef<SearchHandler | null>(null);
+  const handleSearch = useCallback<SearchHandler>(
+    (...args) => searchHandlerRef.current?.(...args) ?? Promise.resolve(),
+    []
+  );
+
   const handledSearchResetVersion = useRef(filter.searchResetVersion);
   useLayoutEffect(() => {
     if (handledSearchResetVersion.current === filter.searchResetVersion) {
@@ -389,6 +430,7 @@ function HomePage() {
     resetHomeSearchState();
   }, [filter.searchResetVersion, resetHomeSearchState]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: drill-down state transitions intentionally stay atomic
   useEffect(() => {
     const hasParams = Object.entries(drillParams).some(
       ([key, value]) => key !== "dashboardReturn" && value !== undefined
@@ -516,7 +558,18 @@ function HomePage() {
     // Clear URL params and trigger search
     navigate({ to: "/", search: {}, replace: true });
     handleSearch(textQuery, filters, colorHexParam, true);
-  }, [drillParams, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    drillParams,
+    navigate,
+    filter.setFavoriteOnly, // Set tag filter via Context — need to set activeTagIds directly
+    // No direct setter exposed; use toggleTag for single tag
+    filter.toggleTag,
+    filter.setActiveFolderId,
+    saveBrowseSession,
+    resetHomeSearchState,
+    handleSearch,
+    clearDashboardReturnTarget,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for photo-drop:album event from sidebar
   useEffect(() => {
@@ -598,8 +651,8 @@ function HomePage() {
       return;
     }
     pendingSemanticRefreshRef.current = null;
-    void handleSearch(pending.query, pending.filters, pending.colorHex, true);
-  }, [aiStatus?.coverageState, searchMode, searchQuery]);
+    handleSearch(pending.query, pending.filters, pending.colorHex, true);
+  }, [aiStatus?.coverageState, searchMode, searchQuery, handleSearch]);
 
   // Flatten paginated photos
   const pagedPhotos = useMemo(
@@ -776,8 +829,7 @@ function HomePage() {
                   ...previous,
                   ...sequence,
                   matchedCount: orderedMatchedIds.length,
-                  matchedPhoto:
-                    previous.matchedPhoto ?? sequence.matchedPhoto,
+                  matchedPhoto: previous.matchedPhoto ?? sequence.matchedPhoto,
                   matchedPhotoIds: orderedMatchedIds,
                 });
               }
@@ -849,7 +901,7 @@ function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [filter.activeFolderId, sequenceRefresh]);
+  }, [filter.activeFolderId]);
 
   const handleOpenSequence = useCallback(
     (sequenceId: number) => {
@@ -1012,18 +1064,6 @@ function HomePage() {
         timelapseSegments: preview.timelapseSegments,
       });
       return;
-      if (
-        !window.confirm(
-          `将替换 ${preview.existingAutomatic} 个未锁定自动片段，预计生成 ${preview.nextAutomatic} 个片段（其中延时 ${preview.timelapseSegments} 个）。手动或锁定序列不会受到影响。继续吗？`
-        )
-      ) {
-        return;
-      }
-      await ipc.client.photos.rebuildSequences({
-        folderId,
-      });
-      setSequenceRefresh((value) => value + 1);
-      toast.success(t("sequenceDetectComplete"));
     } catch {
       toast.error(t("sequenceDetectFailed"));
     } finally {
@@ -1084,28 +1124,31 @@ function HomePage() {
                   : photo;
               }) ?? current
           );
-          queryClient.setQueriesData({ queryKey: ["photos"] }, (data: any) => {
-            if (!data?.pages) {
-              return data;
+          queryClient.setQueriesData<PhotoPagesData>(
+            { queryKey: ["photos"] },
+            (data) => {
+              if (!data?.pages) {
+                return data;
+              }
+              let changed = false;
+              const pages = data.pages.map((page) => ({
+                ...page,
+                items: page.items.map((photo) => {
+                  const updatedPhoto = thumbnailPathById.get(photo.id);
+                  if (!updatedPhoto) {
+                    return photo;
+                  }
+                  changed = true;
+                  return {
+                    ...photo,
+                    thumbnailPath: updatedPhoto.thumbnailPath,
+                    thumbnailSmallPath: updatedPhoto.thumbnailSmallPath,
+                  };
+                }),
+              }));
+              return changed ? { ...data, pages } : data;
             }
-            let changed = false;
-            const pages = data.pages.map((page: any) => ({
-              ...page,
-              items: page.items.map((photo: Photo) => {
-                const updatedPhoto = thumbnailPathById.get(photo.id);
-                if (!updatedPhoto) {
-                  return photo;
-                }
-                changed = true;
-                return {
-                  ...photo,
-                  thumbnailPath: updatedPhoto.thumbnailPath,
-                  thumbnailSmallPath: updatedPhoto.thumbnailSmallPath,
-                };
-              }),
-            }));
-            return changed ? { ...data, pages } : data;
-          });
+          );
         })
         .catch(() => {
           for (const id of missingIds) {
@@ -1208,7 +1251,7 @@ function HomePage() {
       };
       setTimeout(trySearch, 300);
     }
-  }, []); // 仅首次挂载
+  }, [getBrowseSession, handleSearch, drillParams, filter.applySearch]); // 仅首次挂载
 
   // 动态 routeKey：区分搜索/筛选/排序状态
   // ⚠️ 所有 filter 字段必须做 ?? fallback，防止卸载期 SidebarFilterContext
@@ -1246,7 +1289,7 @@ function HomePage() {
     setExpandedSequenceComplete(null);
     setExpandingSequenceId(null);
     expandedSequenceCacheRef.current.clear();
-  }, [routeKey]);
+  }, []);
 
   // ── 网格 ref（用于原子化滚动定位）─────────────────────────────
   const gridRef = useRef<MasonryGridHandle>(null);
@@ -1308,7 +1351,6 @@ function HomePage() {
   // 共享 Hooks：选中状态、详情面板
   const {
     selectedIds,
-    lastClickedIdx,
     handleSelect,
     handleSelectMany,
     addToSelection,
@@ -1346,7 +1388,7 @@ function HomePage() {
     setExpandedSequenceComplete(null);
     setSequenceRefresh((value) => value + 1);
   }, []);
-  const { detailPhoto, detailDismissed, dismissDetail, navigateDetail, showPhoto } =
+  const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
     usePhotoDetailPanel(
       selectedIds,
       actionPhotos,
@@ -1519,8 +1561,14 @@ function HomePage() {
     searchSemantic?.state,
     searchSemantic?.totalPhotos,
     navigate,
+    filter.searchDraft.query,
+    filter.setSearchDraftFilters,
+    handleSearch,
+    filter.setFavoriteOnly,
+    filter.clearSearch,
   ]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pagination keeps browse and search continuation in one callback
   const handleEndReached = useCallback(() => {
     if (!isSearching && hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
@@ -1543,7 +1591,7 @@ function HomePage() {
       const startTime = performance.now();
       const requestedCursor = searchNextCursorRef.current;
       const requestedOffset = searchNextOffsetRef.current;
-      const searchParams: any = requestedCursor
+      const searchParams: CompoundSearchParams = requestedCursor
         ? { cursor: requestedCursor, limit: 100 }
         : { limit: 100, offset: requestedOffset };
       if (p.query.trim()) {
@@ -1608,7 +1656,8 @@ function HomePage() {
 
       ipc.client.photos
         .searchCompound(searchParams)
-        .then((result: SearchResponse) => {
+        .then((rawResult) => {
+          const result = rawResult as SearchResponse;
           if (
             generation !== searchGenerationRef.current ||
             (requestedCursor !== null &&
@@ -1672,7 +1721,9 @@ function HomePage() {
       // 同步更新展开的序列成员状态，因为 expandedSequence 是本地状态，
       // 不会随 TanStack Query 重新获取而更新
       setExpandedSequence((prev) => {
-        if (!prev) return prev;
+        if (!prev) {
+          return prev;
+        }
         return {
           ...prev,
           members: prev.members.map((m) =>
@@ -1681,7 +1732,9 @@ function HomePage() {
         };
       });
       setExpandedSequenceComplete((prev) => {
-        if (!prev) return prev;
+        if (!prev) {
+          return prev;
+        }
         return {
           ...prev,
           members: prev.members.map((m) =>
@@ -1705,7 +1758,9 @@ function HomePage() {
               });
               // 撤销时同步恢复序列成员状态
               setExpandedSequence((prev) => {
-                if (!prev) return prev;
+                if (!prev) {
+                  return prev;
+                }
                 return {
                   ...prev,
                   members: prev.members.map((m) =>
@@ -1714,7 +1769,9 @@ function HomePage() {
                 };
               });
               setExpandedSequenceComplete((prev) => {
-                if (!prev) return prev;
+                if (!prev) {
+                  return prev;
+                }
                 return {
                   ...prev,
                   members: prev.members.map((m) =>
@@ -1731,18 +1788,22 @@ function HomePage() {
         }
       );
     },
-    []
+    [t]
   );
 
-  const handleDoubleClick = useCallback((id: number) => {
-    const idx = photosRef.current.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      clearSelection();
-      dismissDetail();
-      setLightboxIndex(idx);
-    }
-  }, [clearSelection, dismissDetail]);
-  async function handleSearch(
+  const handleDoubleClick = useCallback(
+    (id: number) => {
+      const idx = photosRef.current.findIndex((p) => p.id === id);
+      if (idx >= 0) {
+        clearSelection();
+        dismissDetail();
+        setLightboxIndex(idx);
+      }
+    },
+    [clearSelection, dismissDetail]
+  );
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search fallback and semantic refresh share one request lifecycle
+  async function performSearch(
     query: string,
     filters?: ExifFilters,
     paramColorHex?: string,
@@ -1789,28 +1850,7 @@ function HomePage() {
     setSearchHasMore(false);
 
     try {
-      const searchParams: {
-        query?: string;
-        colorHex?: string;
-        dateFrom?: number;
-        dateMonth?: number;
-        dateHour?: number;
-        dateTo?: number;
-        cameraModel?: string;
-        creator?: string;
-        lensModel?: string;
-        advancedField?: ExifFilters["advancedField"];
-        advancedValue?: string;
-        focalMin?: number;
-        focalMax?: number;
-        apertureMin?: number;
-        apertureMax?: number;
-        isoMin?: number;
-        isoMax?: number;
-        shutterMin?: number;
-        shutterMax?: number;
-        limit: number;
-      } = { limit: 100 };
+      const searchParams: CompoundSearchParams = { limit: 100 };
       if (query.trim()) {
         searchParams.query = query.trim();
       }
@@ -1966,7 +2006,7 @@ function HomePage() {
           if (gen !== searchGenerationRef.current) {
             return;
           }
-          const fallbackResults = (fallback as any).items || [];
+          const fallbackResults = (fallback as { items?: Photo[] }).items ?? [];
           setSearchResults(fallbackResults);
           setSearchResultGeneration(gen);
           setSearchResultSourceKey(
@@ -1994,6 +2034,7 @@ function HomePage() {
       }
     }
   }
+  searchHandlerRef.current = performSearch;
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       const card = (e.target as HTMLElement).closest(
@@ -2045,12 +2086,12 @@ function HomePage() {
     setAddToAlbumOpen(true);
   }
 
-  async function handleExportPhoto(id: number) {
+  function handleExportPhoto(id: number) {
     setExportIds([id]);
     setExportDialogOpen(true);
   }
 
-  async function handleExportSelected() {
+  function handleExportSelected() {
     setExportIds(Array.from(selectedIds));
     setExportDialogOpen(true);
   }
@@ -2195,7 +2236,7 @@ function HomePage() {
       if (result.error) {
         console.warn("[ImageSearch]", result.error);
       }
-      const results = (result as any).results || [];
+      const results = (result as { results?: Photo[] }).results ?? [];
       setSearchResults(results);
       setSearchResultGeneration(gen);
       setSearchResultSourceKey(
@@ -2205,11 +2246,14 @@ function HomePage() {
         )
       );
       setSearchTime(Math.round(performance.now() - startTime));
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (gen !== searchGenerationRef.current) {
         return;
       }
-      console.error("[ImageSearch] failed:", err?.message || err);
+      console.error(
+        "[ImageSearch] failed:",
+        err instanceof Error ? err.message : err
+      );
       toast.error(t("toastImageSearchFailed"));
       setSearchResults([]);
       setSearchResultGeneration(gen);
@@ -2225,6 +2269,7 @@ function HomePage() {
   // Keyboard shortcuts for batch operations
   // biome-ignore lint/correctness/useExhaustiveDependencies: handler functions are intentionally excluded
   useEffect(() => {
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keyboard shortcuts intentionally share one event boundary
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
@@ -2304,7 +2349,9 @@ function HomePage() {
         ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
           for (const favId of ids) {
             setExpandedSequence((prev) => {
-              if (!prev) return prev;
+              if (!prev) {
+                return prev;
+              }
               return {
                 ...prev,
                 members: prev.members.map((m) =>
@@ -2313,7 +2360,9 @@ function HomePage() {
               };
             });
             setExpandedSequenceComplete((prev) => {
-              if (!prev) return prev;
+              if (!prev) {
+                return prev;
+              }
               return {
                 ...prev,
                 members: prev.members.map((m) =>
@@ -2340,7 +2389,9 @@ function HomePage() {
                   });
                   for (const favId of ids) {
                     setExpandedSequence((prev) => {
-                      if (!prev) return prev;
+                      if (!prev) {
+                        return prev;
+                      }
                       return {
                         ...prev,
                         members: prev.members.map((m) =>
@@ -2349,7 +2400,9 @@ function HomePage() {
                       };
                     });
                     setExpandedSequenceComplete((prev) => {
-                      if (!prev) return prev;
+                      if (!prev) {
+                        return prev;
+                      }
                       return {
                         ...prev,
                         members: prev.members.map((m) =>
@@ -2477,12 +2530,10 @@ function HomePage() {
 
   return (
     <>
-      <div
-        className="relative flex h-full min-w-0 flex-col"
-      >
+      <div className="relative flex h-full min-w-0 flex-col">
         <div
-          inert={compactDetailOverlay && detailOverlayOpen}
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
+          inert={compactDetailOverlay && detailOverlayOpen}
           ref={galleryToolbarRef}
           style={{
             right:
@@ -2566,26 +2617,6 @@ function HomePage() {
                           return;
                         }
                         setPendingSequenceMerge(suggestion);
-                        return;
-                        if (
-                          !window.confirm(
-                            "检测到暂停后恢复同一节奏的两个片段。确认合并为锁定的手动序列吗？"
-                          )
-                        ) {
-                          return;
-                        }
-                        ipc.client.photos
-                          .mergeSequences({
-                            sequenceIds: [
-                              suggestion.firstSequenceId,
-                              suggestion.secondSequenceId,
-                            ],
-                          })
-                          .then(() => {
-                            setSequenceRefresh((value) => value + 1);
-                            toast.success("已合并为手动锁定序列");
-                          })
-                          .catch(() => toast.error("合并序列失败"));
                       }}
                       type="button"
                     >
@@ -2631,7 +2662,7 @@ function HomePage() {
           {showDrillBanner && (
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-primary/20 border-b bg-primary/10 px-4 py-2 dark:border-primary/40 dark:bg-primary/20">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 [overflow-wrap:anywhere] text-primary text-sm">
+                <span className="min-w-0 text-primary text-sm [overflow-wrap:anywhere]">
                   {t("drillDownActiveHint")}
                 </span>
               </div>
@@ -2731,8 +2762,8 @@ function HomePage() {
                   restoreGateReady={restoreGateReady}
                   routeKey={routeKey}
                   searchQuery={searchQuery}
-                  semanticTopSimilarity={searchSemantic?.topSimilarity}
                   selectedIds={selectedIds}
+                  semanticTopSimilarity={searchSemantic?.topSimilarity}
                   sequenceMode={displayedSequenceMode}
                   sequences={sequences}
                   showToolbar={false}
@@ -2848,129 +2879,112 @@ function HomePage() {
                   }}
                   type="button"
                 />
-                <div
+                <aside
                   aria-label={t("photoDetail")}
-                  aria-modal={compactDetailOverlay ? true : undefined}
                   className="home-detail-panel-container relative shrink-0 overflow-hidden"
                   ref={detailOverlayRef}
                   role={compactDetailOverlay ? "dialog" : "complementary"}
                   style={{ width: detailPanelWidth }}
                 >
-                {/* 照片详情层 — 始终挂载，序列激活时交叉淡出 */}
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    opacity: selectedSequence || sequenceDetailsLoading ? 0 : 1,
-                    pointerEvents:
-                      selectedSequence || sequenceDetailsLoading
-                        ? "none"
-                        : "auto",
-                    transition: "opacity 200ms ease",
-                  }}
-                >
-                  <PhotoDetailPanel
-                    onClose={() => {
-                      dismissDetail();
-                      clearSelection();
-                      setSequenceReturnTarget(null);
-                    }}
-                    onNavigate={navigateDetail}
-                    onOpenExplorer={handleOpenExplorer}
-                    onReturnToSequence={
-                      sequenceReturnTarget
-                        ? () => {
-                            dismissDetail();
-                            clearSelection();
-                            setSelectedSequence(sequenceReturnTarget);
-                            setSequenceReturnTarget(null);
-                          }
-                        : undefined
-                    }
-                    onWidthChange={setDetailPanelWidth}
-                    photo={detailPhoto as any}
-                  />
-                </div>
-
-                {/* 序列详情层 — 需要时才挂载，挂载后淡入 */}
-                {(selectedSequence || sequenceDetailsLoading) && (
+                  <h2 className="sr-only">{t("photoDetail")}</h2>
+                  {/* 照片详情层 — 始终挂载，序列激活时交叉淡出 */}
                   <div
                     className="absolute inset-0"
-                    style={{ transition: "opacity 200ms ease" }}
+                    style={{
+                      opacity:
+                        selectedSequence || sequenceDetailsLoading ? 0 : 1,
+                      pointerEvents:
+                        selectedSequence || sequenceDetailsLoading
+                          ? "none"
+                          : "auto",
+                      transition: "opacity 200ms ease",
+                    }}
                   >
-                    <SequenceDetailPanel
+                    <PhotoDetailPanel
                       onClose={() => {
-                        setSelectedSequence(null);
-                        setSequenceDetailsLoading(false);
+                        dismissDetail();
+                        clearSelection();
+                        setSequenceReturnTarget(null);
                       }}
+                      onNavigate={navigateDetail}
+                      onOpenExplorer={handleOpenExplorer}
+                      onReturnToSequence={
+                        sequenceReturnTarget
+                          ? () => {
+                              dismissDetail();
+                              clearSelection();
+                              setSelectedSequence(sequenceReturnTarget);
+                              setSequenceReturnTarget(null);
+                            }
+                          : undefined
+                      }
                       onWidthChange={setDetailPanelWidth}
-                      onDeleteManual={(id) => {
-                        setPendingSequenceAction({ id, type: "ungroup" });
-                        return;
-                        ipc.client.photos
-                          .deleteManualSequence({ id })
-                          .then(() => {
-                            setSelectedSequence(null);
-                            setSequenceRefresh((value) => value + 1);
-                            toast.success("已删除手动序列");
-                          })
-                          .catch(() => toast.error("无法删除手动序列"));
-                      }}
-                      onOpenPhoto={(photoId) => {
-                        const member = selectedSequence?.members.find(
-                          (m) => m.id === photoId
-                        );
-                        setSequenceReturnTarget(selectedSequence);
-                        setSelectedSequence(null);
-                        handleKeyboardSelect(photoId);
-                        // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
-                        if (member) {
-                          showPhoto(member);
-                        }
-                      }}
-                      onPlay={() => {
-                        setSequenceAutoPlay(true);
-                        setOpenSequence(selectedSequence);
-                      }}
-                      onRestoreAutomatic={(id) => {
-                        setPendingSequenceAction({ id, type: "restore" });
-                        return;
-                        ipc.client.photos
-                          .restoreAutomaticSequence({ id })
-                          .then(() => {
-                            setSelectedSequence(null);
-                            setSequenceRefresh((value) => value + 1);
-                            toast.success("已恢复自动识别");
-                          })
-                          .catch(() => toast.error("恢复自动识别失败"));
-                      }}
-                      onSetRepresentative={(sequenceId, photoId) => {
-                        ipc.client.photos
-                          .setSequenceRepresentative({
-                            id: sequenceId,
-                            photoId,
-                          })
-                          .then(() => {
-                            handleOpenSequenceDetails(sequenceId);
-                            setSequenceRefresh((value) => value + 1);
-                          })
-                          .catch(() => toast.error("设置代表帧失败"));
-                      }}
-                      onSplit={(sequenceId, position) => {
-                        ipc.client.photos
-                          .splitSequence({ id: sequenceId, position })
-                          .then(() => {
-                            setSelectedSequence(null);
-                            setSequenceRefresh((value) => value + 1);
-                            toast.success("已拆分为两个手动锁定序列");
-                          })
-                          .catch(() => toast.error("拆分序列失败"));
-                      }}
-                      sequence={selectedSequence}
-                      width={detailPanelWidth}
+                      photo={detailPhoto}
                     />
                   </div>
-                )}
-                </div>
+
+                  {/* 序列详情层 — 需要时才挂载，挂载后淡入 */}
+                  {(selectedSequence || sequenceDetailsLoading) && (
+                    <div
+                      className="absolute inset-0"
+                      style={{ transition: "opacity 200ms ease" }}
+                    >
+                      <SequenceDetailPanel
+                        onClose={() => {
+                          setSelectedSequence(null);
+                          setSequenceDetailsLoading(false);
+                        }}
+                        onDeleteManual={(id) => {
+                          setPendingSequenceAction({ id, type: "ungroup" });
+                        }}
+                        onOpenPhoto={(photoId) => {
+                          const member = selectedSequence?.members.find(
+                            (m) => m.id === photoId
+                          );
+                          setSequenceReturnTarget(selectedSequence);
+                          setSelectedSequence(null);
+                          handleKeyboardSelect(photoId);
+                          // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
+                          if (member) {
+                            showPhoto(member);
+                          }
+                        }}
+                        onPlay={() => {
+                          setSequenceAutoPlay(true);
+                          setOpenSequence(selectedSequence);
+                        }}
+                        onRestoreAutomatic={(id) => {
+                          setPendingSequenceAction({ id, type: "restore" });
+                        }}
+                        onSetRepresentative={(sequenceId, photoId) => {
+                          ipc.client.photos
+                            .setSequenceRepresentative({
+                              id: sequenceId,
+                              photoId,
+                            })
+                            .then(() => {
+                              handleOpenSequenceDetails(sequenceId);
+                              setSequenceRefresh((value) => value + 1);
+                            })
+                            .catch(() => toast.error("设置代表帧失败"));
+                        }}
+                        onSplit={(sequenceId, position) => {
+                          ipc.client.photos
+                            .splitSequence({ id: sequenceId, position })
+                            .then(() => {
+                              setSelectedSequence(null);
+                              setSequenceRefresh((value) => value + 1);
+                              toast.success("已拆分为两个手动锁定序列");
+                            })
+                            .catch(() => toast.error("拆分序列失败"));
+                        }}
+                        onWidthChange={setDetailPanelWidth}
+                        sequence={selectedSequence}
+                        width={detailPanelWidth}
+                      />
+                    </div>
+                  )}
+                </aside>
               </>
             )}
           </div>

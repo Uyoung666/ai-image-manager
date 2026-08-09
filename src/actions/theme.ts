@@ -2,7 +2,7 @@ import { LOCAL_STORAGE_KEYS } from "@/constants";
 import { ipc } from "@/ipc/manager";
 import type { ThemeMode } from "@/types/theme-mode";
 
-export type { ThemeMode };
+export type { ThemeMode } from "@/types/theme-mode";
 
 interface TemporaryThemeOverride {
   mode: "dark";
@@ -12,11 +12,11 @@ interface TemporaryThemeOverride {
 let temporaryThemeOverride: TemporaryThemeOverride | null = null;
 let latestSystemResolvedTheme: "dark" | "light" | null = null;
 
-export async function getCurrentTheme(): Promise<ThemeMode> {
+export function getCurrentTheme(): Promise<ThemeMode> {
   const local = localStorage.getItem(
     LOCAL_STORAGE_KEYS.THEME
   ) as ThemeMode | null;
-  return local || "system";
+  return Promise.resolve(local || "system");
 }
 
 export async function getResolvedTheme(): Promise<"dark" | "light"> {

@@ -106,7 +106,9 @@ function generateMarkdown(report) {
   lines.push("");
   lines.push("## Thumbnail Counters");
   lines.push("");
-  lines.push(`- Requests: ${formatNumber(report.galleryMedia.thumbnailRequest)}`);
+  lines.push(
+    `- Requests: ${formatNumber(report.galleryMedia.thumbnailRequest)}`
+  );
   lines.push(`- Cache hits: ${formatNumber(report.galleryMedia.thumbnailHit)}`);
   lines.push(`- Hit rate: ${report.galleryMedia.thumbnailHitRate}%`);
   lines.push(
@@ -127,7 +129,9 @@ function generateMarkdown(report) {
   lines.push("- Scroll for 60 seconds with normal and fast wheel gestures.");
   lines.push("- Navigate away and back once to verify restoration stability.");
   lines.push("- Select 1 photo and marquee-select about 100 photos.");
-  lines.push("- Compare masonryScrollFrameMs avg/max and masonryVisibleItems max.");
+  lines.push(
+    "- Compare masonryScrollFrameMs avg/max and masonryVisibleItems max."
+  );
   return `${lines.join("\n")}\n`;
 }
 

@@ -55,7 +55,7 @@ export const app = {
   whenReady(): Promise<void> {
     return Promise.resolve();
   },
-  on(_event: string, _cb: Function): void {
+  on(_event: string, _cb: (...args: never[]) => unknown): void {
     /* noop */
   },
   exit(_code?: number): void {
@@ -83,12 +83,22 @@ export const nativeImage = {
     return {};
   },
 };
-export const ipcMain = { on: () => {} };
+export const ipcMain = {
+  on: () => {
+    /* Intentionally empty: integration tests do not dispatch IPC events. */
+  },
+};
 export const protocol = {
-  registerSchemesAsPrivileged: () => {},
-  handle: () => {},
+  registerSchemesAsPrivileged: () => {
+    /* Intentionally empty: protocol registration is outside these tests. */
+  },
+  handle: () => {
+    /* Intentionally empty: protocol handlers are not exercised here. */
+  },
 };
 export const globalShortcut = {
   register: () => true,
-  unregisterAll: () => {},
+  unregisterAll: () => {
+    /* Intentionally empty: shortcuts are not registered by the test suite. */
+  },
 };

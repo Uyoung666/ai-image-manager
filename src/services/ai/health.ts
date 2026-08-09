@@ -45,6 +45,22 @@ export interface AiHealthStatus {
   vectorTableRows: number;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getListSize(type: unknown): number | undefined {
+  if (
+    typeof type === "object" &&
+    type !== null &&
+    "listSize" in type &&
+    typeof type.listSize === "number"
+  ) {
+    return type.listSize;
+  }
+  return undefined;
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: health probing keeps database, model, and readiness checks together.
 export async function checkAiHealth(): Promise<AiHealthStatus> {
   const runtime = getActiveEmbeddingRuntime();
@@ -78,29 +94,36 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
       setVectordb(await lancedb.connect(vectorPath));
     }
 
-    const tableNames = await vectordb.tableNames();
+    const connection = vectordb;
+    if (!connection) {
+      throw new Error("Vector database connection is unavailable");
+    }
+    const tableNames = await connection.tableNames();
     status.lancedb = "ok";
     status.lancedbDetail = `connected, tables: ${tableNames.join(", ") || "(none)"}`;
 
     if (tableNames.includes("photo_embeddings")) {
       if (!photoTable) {
-        setPhotoTable(await vectordb.openTable("photo_embeddings"));
+        setPhotoTable(await connection.openTable("photo_embeddings"));
       }
 
-      const rowCount = await photoTable.countRows();
+      const table = photoTable;
+      if (!table) {
+        throw new Error("Photo embedding table is unavailable");
+      }
+      const rowCount = await table.countRows();
       status.vectorTable = "ok";
       status.vectorTableRows = rowCount;
 
       // Verify schema: vector column must be FixedSizeList
       try {
-        const schema = await photoTable.schema();
-        const vectorField = schema.fields.find((f: any) => f.name === "vector");
-        if (
-          vectorField &&
-          typeof vectorField.type === "object" &&
-          (vectorField.type as any).listSize > 0
-        ) {
-          status.lancedbDetail += `, schema: FixedSizeList<${(vectorField.type as any).listSize}>`;
+        const schema = await table.schema();
+        const vectorField = schema.fields.find(
+          (field) => field.name === "vector"
+        );
+        const listSize = getListSize(vectorField?.type);
+        if (listSize !== undefined && listSize > 0) {
+          status.lancedbDetail += `, schema: FixedSizeList<${listSize}>`;
         } else {
           status.lancedbDetail +=
             ", schema: WARNING — vector column not FixedSizeList";
@@ -110,9 +133,9 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
       }
 
       try {
-        const indices = await photoTable.listIndices();
+        const indices = await table.listIndices();
         const hasIndex = indices.some(
-          (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
+          (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
         );
         status.vectorIndex = hasIndex ? "ok" : "missing";
       } catch {
@@ -122,9 +145,9 @@ export async function checkAiHealth(): Promise<AiHealthStatus> {
       status.vectorTable = "missing";
       status.vectorIndex = "missing";
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     status.lancedb = "error";
-    status.lancedbDetail = err?.message || "unknown error";
+    status.lancedbDetail = getErrorMessage(err);
     status.vectorTable = "error";
     status.vectorIndex = "error";
   }
@@ -235,9 +258,10 @@ export async function getAiReadiness(options?: {
 
   try {
     await initVectorDB();
-    if (photoTable) {
+    const table = photoTable;
+    if (table) {
       readiness.vectorDB = "ready";
-      const rowCount = await photoTable.countRows();
+      const rowCount = await table.countRows();
       // Cap at non-deleted photo count to exclude orphan vectors from trashed photos
       const nonDeletedCount = readiness.totalPhotos;
       readiness.vectorCount = Math.min(rowCount, nonDeletedCount);
@@ -250,9 +274,9 @@ export async function getAiReadiness(options?: {
       readiness.hasVectors = readiness.vectorCount > 0;
 
       if (rowCount >= MIN_VECTORS_FOR_INDEX) {
-        const indices = await photoTable.listIndices();
+        const indices = await table.listIndices();
         readiness.indexReady = indices.some(
-          (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
+          (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
         );
       } else if (rowCount > 0) {
         // Below threshold — brute-force search works, mark index as "ready enough"

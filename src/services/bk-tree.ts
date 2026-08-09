@@ -1,10 +1,30 @@
 // Popcount for 32-bit unsigned integers (SWAR algorithm)
-function popcount32(n: number): number {
-  n = n - ((n >>> 1) & 0x55_55_55_55);
-  n = (n & 0x33_33_33_33) + ((n >>> 2) & 0x33_33_33_33);
-  n = (n + (n >>> 4)) & 0x0f_0f_0f_0f;
-  return (n * 0x01_01_01_01) >>> 24;
-}
+const NIBBLE_BITS = [
+  "0000",
+  "0001",
+  "0010",
+  "0011",
+  "0100",
+  "0101",
+  "0110",
+  "0111",
+  "1000",
+  "1001",
+  "1010",
+  "1011",
+  "1100",
+  "1101",
+  "1110",
+  "1111",
+];
+const NIBBLE_DISTANCE = NIBBLE_BITS.map((left) =>
+  NIBBLE_BITS.map((right) =>
+    [...left].reduce(
+      (distance, bit, index) => distance + (bit === right[index] ? 0 : 1),
+      0
+    )
+  )
+);
 
 export function hammingDistance(a: string, b: string): number {
   if (a.length !== b.length) {
@@ -12,11 +32,13 @@ export function hammingDistance(a: string, b: string): number {
   }
   // Split 64-bit phash into two 32-bit halves and use native XOR + popcount.
   // This avoids BigInt overhead (~3us/call → ~0.05us/call, ~60x faster).
-  const aHi = Number.parseInt(a.slice(0, 8), 16);
-  const aLo = Number.parseInt(a.slice(8, 16), 16);
-  const bHi = Number.parseInt(b.slice(0, 8), 16);
-  const bLo = Number.parseInt(b.slice(8, 16), 16);
-  return popcount32((aHi ^ bHi) >>> 0) + popcount32((aLo ^ bLo) >>> 0);
+  let distance = 0;
+  for (let index = 0; index < 16; index++) {
+    const left = Number.parseInt(a[index], 16);
+    const right = Number.parseInt(b[index], 16);
+    distance += NIBBLE_DISTANCE[left]?.[right] ?? 0;
+  }
+  return distance;
 }
 
 interface BKNode {
@@ -77,7 +99,10 @@ export class BKTree {
     const stack: BKNode[] = [this.root];
 
     while (stack.length > 0) {
-      const node = stack.pop()!;
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
       const dist = hammingDistance(node.phash, phash);
       if (dist <= threshold) {
         results.push({

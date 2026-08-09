@@ -1,18 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   ARCFACE_TARGET_POINTS,
   solveSimilarityTransform,
-  warpSimilarity,
   svd2x2,
+  warpSimilarity,
 } from "../../../scripts/face-alignment.mjs";
 
 const applyAffine = (
   T: { a: number; b: number; c: number; d: number; tx: number; ty: number },
   p: number[]
-) => [
-  T.a * p[0] + T.b * p[1] + T.tx,
-  T.c * p[0] + T.d * p[1] + T.ty,
-];
+) => [T.a * p[0] + T.b * p[1] + T.tx, T.c * p[0] + T.d * p[1] + T.ty];
 
 describe("svd2x2", () => {
   it("recovers singular values of a diagonal matrix", () => {
@@ -22,13 +19,16 @@ describe("svd2x2", () => {
   });
 
   it("reconstructs the input matrix via U * diag(s) * Vt", () => {
-    const m00 = 2, m01 = 1, m10 = -1, m11 = 3;
+    const m00 = 2,
+      m01 = 1,
+      m10 = -1,
+      m11 = 3;
     const { u, s, vt } = svd2x2(m00, m01, m10, m11);
     // U * diag(s) * Vt
-    const r00 = (u[0][0] * s[0] * vt[0][0] + u[0][1] * s[1] * vt[1][0]);
-    const r01 = (u[0][0] * s[0] * vt[0][1] + u[0][1] * s[1] * vt[1][1]);
-    const r10 = (u[1][0] * s[0] * vt[0][0] + u[1][1] * s[1] * vt[1][0]);
-    const r11 = (u[1][0] * s[0] * vt[0][1] + u[1][1] * s[1] * vt[1][1]);
+    const r00 = u[0][0] * s[0] * vt[0][0] + u[0][1] * s[1] * vt[1][0];
+    const r01 = u[0][0] * s[0] * vt[0][1] + u[0][1] * s[1] * vt[1][1];
+    const r10 = u[1][0] * s[0] * vt[0][0] + u[1][1] * s[1] * vt[1][0];
+    const r11 = u[1][0] * s[0] * vt[0][1] + u[1][1] * s[1] * vt[1][1];
     expect(r00).toBeCloseTo(m00, 9);
     expect(r01).toBeCloseTo(m01, 9);
     expect(r10).toBeCloseTo(m10, 9);
@@ -73,7 +73,10 @@ describe("solveSimilarityTransform", () => {
 
   it("projects ArcFace target points back onto themselves", () => {
     // identity transform over the canonical target set
-    const est = solveSimilarityTransform(ARCFACE_TARGET_POINTS, ARCFACE_TARGET_POINTS);
+    const est = solveSimilarityTransform(
+      ARCFACE_TARGET_POINTS,
+      ARCFACE_TARGET_POINTS
+    );
     expect(est.a).toBeCloseTo(1, 8);
     expect(est.d).toBeCloseTo(1, 8);
     expect(est.b).toBeCloseTo(0, 8);
@@ -98,8 +101,12 @@ describe("solveSimilarityTransform", () => {
     const est = solveSimilarityTransform(src, ARCFACE_TARGET_POINTS);
     const mapped = src.map((p) => applyAffine(est, p));
     for (let i = 0; i < 5; i++) {
-      expect(Math.abs(mapped[i][0] - ARCFACE_TARGET_POINTS[i][0])).toBeLessThan(1);
-      expect(Math.abs(mapped[i][1] - ARCFACE_TARGET_POINTS[i][1])).toBeLessThan(1);
+      expect(Math.abs(mapped[i][0] - ARCFACE_TARGET_POINTS[i][0])).toBeLessThan(
+        1
+      );
+      expect(Math.abs(mapped[i][1] - ARCFACE_TARGET_POINTS[i][1])).toBeLessThan(
+        1
+      );
     }
   });
 

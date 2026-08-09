@@ -1,5 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import type {
+  Connection as LanceConnection,
+  Table as LanceTable,
+} from "@lancedb/lancedb";
 import {
   Field,
   FixedSizeList,
@@ -45,6 +49,54 @@ import {
 import { getActiveThresholdProfile } from "./threshold-profile";
 import { planVectorReconciliation } from "./vector-reconciliation";
 
+type MaintenanceTable = LanceTable & {
+  cleanupOldVersions?: () => Promise<void>;
+  compactFiles?: () => Promise<void>;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = error.code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+function getListSize(type: unknown): number | undefined {
+  if (
+    typeof type === "object" &&
+    type !== null &&
+    "listSize" in type &&
+    typeof type.listSize === "number"
+  ) {
+    return type.listSize;
+  }
+  return undefined;
+}
+
+interface ArrayLikeVector {
+  toArray: () => ArrayLike<number>;
+}
+
+function isArrayLikeVector(value: unknown): value is ArrayLikeVector {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "toArray" in value &&
+    typeof value.toArray === "function"
+  );
+}
+
+function isNumberIterable(value: unknown): value is Iterable<number> {
+  return (
+    typeof value === "object" && value !== null && Symbol.iterator in value
+  );
+}
+
 // ── 向量数据库定期维护 ──────────────────────────────────────────────
 // 数据追加后 LanceDB 产生碎片和旧版本文件，定期压缩清理释放磁盘空间。
 // 首次延迟 30s 避开启动 I/O 高峰，后续每 24h 静默执行一次。
@@ -60,24 +112,29 @@ async function runVectorMaintenance(): Promise<void> {
   try {
     // Phase 1: compact files — merges fragmented data shards
     try {
-      if (typeof (photoTable as any).compactFiles === "function") {
-        await (photoTable as any).compactFiles();
+      const maintenanceTable = photoTable as MaintenanceTable;
+      if (maintenanceTable.compactFiles) {
+        await maintenanceTable.compactFiles();
         console.log("[AI] Maintenance: compactFiles OK");
       }
-    } catch (err: any) {
-      console.warn("[AI] Maintenance: compactFiles skipped:", err?.message);
+    } catch (err: unknown) {
+      console.warn(
+        "[AI] Maintenance: compactFiles skipped:",
+        getErrorMessage(err)
+      );
     }
 
     // Phase 2: cleanup old versions — removes stale version history
     try {
-      if (typeof (photoTable as any).cleanupOldVersions === "function") {
-        await (photoTable as any).cleanupOldVersions();
+      const maintenanceTable = photoTable as MaintenanceTable;
+      if (maintenanceTable.cleanupOldVersions) {
+        await maintenanceTable.cleanupOldVersions();
         console.log("[AI] Maintenance: cleanupOldVersions OK");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn(
         "[AI] Maintenance: cleanupOldVersions skipped:",
-        err?.message
+        getErrorMessage(err)
       );
     }
   } finally {
@@ -216,12 +273,13 @@ async function initializeVectorDB(): Promise<void> {
   console.log(`[AI] Initializing vector DB at: ${vectorPath}`);
   const lancedb = await import("@lancedb/lancedb");
 
-  let db: any;
+  let db: LanceConnection;
   try {
     db = await lancedb.connect(vectorPath);
-  } catch (err: any) {
-    console.error("[AI] LanceDB connect failed:", err?.message);
-    throw new Error(`Failed to connect to vector database: ${err?.message}`);
+  } catch (err: unknown) {
+    const message = getErrorMessage(err);
+    console.error("[AI] LanceDB connect failed:", message);
+    throw new Error(`Failed to connect to vector database: ${message}`);
   }
   setVectordb(db);
   const model = getActiveEmbeddingModel();
@@ -230,18 +288,18 @@ async function initializeVectorDB(): Promise<void> {
   const tableNames = await db.tableNames();
 
   if (tableNames.includes("photo_embeddings")) {
-    let table: any;
+    let table: LanceTable | null = null;
     try {
       table = await db.openTable("photo_embeddings");
-    } catch (err: any) {
-      console.error("[AI] LanceDB openTable failed:", err?.message);
+    } catch (err: unknown) {
+      console.error("[AI] LanceDB openTable failed:", getErrorMessage(err));
       // Table exists but can't be opened — likely corrupted. Drop and recreate.
       try {
         await db.dropTable("photo_embeddings");
       } catch {
         // best-effort cleanup
       }
-      setPhotoTable(null as any);
+      setPhotoTable(null);
       // Fall through to create fresh table below
     }
 
@@ -266,12 +324,14 @@ async function initializeVectorDB(): Promise<void> {
 
       // Model changes also change the vector schema and require re-indexing.
       const schema = await table.schema();
-      const vectorField = schema.fields.find((f: any) => f.name === "vector");
+      const vectorField = schema.fields.find(
+        (field) => field.name === "vector"
+      );
       const schemaValid =
         vectorField &&
         vectorField.type !== null &&
         typeof vectorField.type === "object" &&
-        (vectorField.type as any).listSize === vectorDimensions;
+        getListSize(vectorField.type) === vectorDimensions;
 
       if (schemaValid) {
         console.log("[AI] Opened existing photo_embeddings table (schema OK)");
@@ -308,7 +368,7 @@ async function initializeVectorDB(): Promise<void> {
 
           // 后台回填已有的 dominant_colors 到 LanceDB 颜色表
           backfillColorVectors().catch((err) =>
-            console.warn("[AI] Color backfill failed:", err?.message)
+            console.warn("[AI] Color backfill failed:", getErrorMessage(err))
           );
 
           setIsVectorDBReady(true);
@@ -353,7 +413,7 @@ async function initializeVectorDB(): Promise<void> {
         `[AI] Schema mismatch — expected FixedSizeList<${vectorDimensions}> for ${model.displayName}. Recreating...`
       );
       await db.dropTable("photo_embeddings");
-      setPhotoTable(null as any);
+      setPhotoTable(null);
       const resetCount = resetAllAiProcessedFlags();
       console.log(
         `[AI] Model migration: ${resetCount} photos marked for ${model.displayName} re-index`
@@ -385,7 +445,7 @@ async function initializeVectorDB(): Promise<void> {
 
   // 后台回填已有的 dominant_colors 到 LanceDB 颜色表（不阻塞启动）
   backfillColorVectors().catch((err) =>
-    console.warn("[AI] Color backfill failed:", err?.message)
+    console.warn("[AI] Color backfill failed:", getErrorMessage(err))
   );
 
   setIsVectorDBReady(true);
@@ -460,8 +520,8 @@ export async function cleanupOrphanVectors(
         `[AI] Vector reconciliation: removed ${deleted} rows (${orphanIds.length} orphan photo IDs, ${duplicateIds.length} duplicate photo IDs re-queued)`
       );
     }
-  } catch (err: any) {
-    console.error("[AI] Orphan vector cleanup failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] Orphan vector cleanup failed:", getErrorMessage(err));
   }
   return deleted;
 }
@@ -489,8 +549,8 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
     console.log(
       `[AI] Deleted vectors for ${uniqueIds.length} photos from LanceDB`
     );
-  } catch (err: any) {
-    console.error("[AI] Failed to delete vectors:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] Failed to delete vectors:", getErrorMessage(err));
     throw err;
   }
 }
@@ -519,12 +579,12 @@ export async function getPhotoVectors(
       let vec: number[];
       if (Array.isArray(rawVec)) {
         vec = rawVec as number[];
-      } else if (typeof (rawVec as any).toArray === "function") {
-        vec = Array.from((rawVec as any).toArray());
+      } else if (isArrayLikeVector(rawVec)) {
+        vec = Array.from(rawVec.toArray());
       } else if (ArrayBuffer.isView(rawVec)) {
         vec = Array.from(rawVec as Float32Array);
-      } else if (typeof (rawVec as any)[Symbol.iterator] === "function") {
-        vec = Array.from(rawVec as Iterable<number>);
+      } else if (isNumberIterable(rawVec)) {
+        vec = Array.from(rawVec);
       } else {
         continue;
       }
@@ -533,8 +593,8 @@ export async function getPhotoVectors(
         map.set(pid, vec);
       }
     }
-  } catch (err: any) {
-    console.error("[AI] getPhotoVectors failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] getPhotoVectors failed:", getErrorMessage(err));
   }
   return map;
 }
@@ -547,7 +607,7 @@ export async function ensureVectorIndex(force = false): Promise<boolean> {
   try {
     const indices = await photoTable.listIndices();
     const hasIndex = indices.some(
-      (idx: any) => idx.column === "vector" || idx.name === "vector_idx"
+      (idx) => idx.columns.includes("vector") || idx.name === "vector_idx"
     );
 
     if (hasIndex && !force) {
@@ -578,8 +638,8 @@ export async function ensureVectorIndex(force = false): Promise<boolean> {
     console.log("[AI] Vector index ready");
     markIndexReady();
     return true;
-  } catch (err: any) {
-    console.error("[AI] Index creation failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] Index creation failed:", getErrorMessage(err));
     return false;
   }
 }
@@ -607,10 +667,10 @@ export async function validateVectorDB(): Promise<{
   let rowCount = 0;
   try {
     rowCount = await photoTable.countRows();
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       healthy: false,
-      reason: `countRows failed (data file corruption): ${err?.message ?? "unknown"}`,
+      reason: `countRows failed (data file corruption): ${getErrorMessage(err)}`,
     };
   }
 
@@ -618,10 +678,10 @@ export async function validateVectorDB(): Promise<{
   if (rowCount > 0) {
     try {
       await photoTable.query().limit(1).toArray();
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         healthy: false,
-        reason: `query failed (vector data corruption): ${err?.message ?? "unknown"}`,
+        reason: `query failed (vector data corruption): ${getErrorMessage(err)}`,
       };
     }
   }
@@ -629,10 +689,10 @@ export async function validateVectorDB(): Promise<{
   // Phase 3: listIndices — 验证索引元数据可读
   try {
     await photoTable.listIndices();
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       healthy: false,
-      reason: `listIndices failed (IVF_PQ index corruption): ${err?.message ?? "unknown"}`,
+      reason: `listIndices failed (IVF_PQ index corruption): ${getErrorMessage(err)}`,
     };
   }
 
@@ -655,8 +715,11 @@ export function resetAllAiProcessedFlags(): number {
       `[AI] Reset isAiProcessed flags: ${result.changes} photos marked for re-index`
     );
     return result.changes;
-  } catch (err: any) {
-    console.error("[AI] Failed to reset isAiProcessed flags:", err?.message);
+  } catch (err: unknown) {
+    console.error(
+      "[AI] Failed to reset isAiProcessed flags:",
+      getErrorMessage(err)
+    );
     return 0;
   }
 }
@@ -681,10 +744,10 @@ export async function rebuildVectorDB(): Promise<{
         try {
           await vectordb.dropTable("photo_embeddings");
           console.log("[AI] rebuildVectorDB: dropped via LanceDB API");
-        } catch (dropErr: any) {
+        } catch (dropErr: unknown) {
           console.warn(
             "[AI] rebuildVectorDB: dropTable failed, will use filesystem fallback:",
-            dropErr?.message
+            getErrorMessage(dropErr)
           );
         }
       }
@@ -695,8 +758,11 @@ export async function rebuildVectorDB(): Promise<{
     if (vectordb) {
       try {
         await vectordb.close();
-      } catch (err: any) {
-        console.warn("[AI] rebuildVectorDB: close failed:", err?.message);
+      } catch (err: unknown) {
+        console.warn(
+          "[AI] rebuildVectorDB: close failed:",
+          getErrorMessage(err)
+        );
       }
       setVectordb(null);
       setPhotoTable(null);
@@ -709,9 +775,10 @@ export async function rebuildVectorDB(): Promise<{
       try {
         await fs.promises.rm(vectorPath, { recursive: true, force: true });
         console.log(`[AI] rebuildVectorDB: removed ${vectorPath}`);
-      } catch (rmErr: any) {
+      } catch (rmErr: unknown) {
         // Windows mmap 锁：重命名绕过，下次启动时清理
-        if (rmErr.code === "EPERM" || rmErr.code === "EBUSY") {
+        const code = getErrorCode(rmErr);
+        if (code === "EPERM" || code === "EBUSY") {
           const bakPath = path.join(getDataPath(), `vectors.bak.${Date.now()}`);
           await fs.promises.rename(vectorPath, bakPath);
           console.log(
@@ -735,8 +802,8 @@ export async function rebuildVectorDB(): Promise<{
     await initVectorDB();
 
     return { success: true };
-  } catch (err: any) {
-    const message = err?.message ?? String(err);
+  } catch (err: unknown) {
+    const message = getErrorMessage(err);
     console.error("[AI] rebuildVectorDB failed:", message);
     return { success: false, error: message };
   }
@@ -774,8 +841,8 @@ export async function closeVectorDB(): Promise<void> {
       await vectordb.close();
       diagLog("closeVectorDB: OK");
       markIndexReady();
-    } catch (err: any) {
-      diagLog(`closeVectorDB: ERROR ${err?.message ?? err}`);
+    } catch (err: unknown) {
+      diagLog(`closeVectorDB: ERROR ${getErrorMessage(err)}`);
     }
     setVectordb(null);
     setPhotoTable(null);
@@ -833,7 +900,7 @@ function isIndexCleanShutdown(): boolean {
 const COLOR_TABLE_NAME = "color_embeddings";
 const COLOR_VECTOR_DIM = 3;
 
-async function initColorTable(db: any): Promise<void> {
+async function initColorTable(db: LanceConnection): Promise<void> {
   try {
     const tableNames = await db.tableNames();
 
@@ -858,8 +925,8 @@ async function initColorTable(db: any): Promise<void> {
     console.log(
       "[AI] Created color_embeddings table (FixedSizeList<Float32>[3])"
     );
-  } catch (err: any) {
-    console.warn("[AI] Color table init skipped:", err?.message);
+  } catch (err: unknown) {
+    console.warn("[AI] Color table init skipped:", getErrorMessage(err));
     // 非关键路径：颜色搜索降级为 SQLite UDF
   }
 }
@@ -879,10 +946,10 @@ export async function upsertColorVector(
     await colorTable.delete(`photo_id = ${photoId}`);
     // 写入新记录
     await colorTable.add([{ photo_id: photoId, vector: [r, g, b] }]);
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(
       `[AI] Upsert color vector failed for photo ${photoId}:`,
-      err?.message
+      getErrorMessage(err)
     );
   }
 }
@@ -905,8 +972,11 @@ export async function upsertColorVectors(
     }));
     await colorTable.add(rows);
     console.log(`[AI] Upserted ${entries.length} color vectors`);
-  } catch (err: any) {
-    console.error("[AI] Batch upsert color vectors failed:", err?.message);
+  } catch (err: unknown) {
+    console.error(
+      "[AI] Batch upsert color vectors failed:",
+      getErrorMessage(err)
+    );
   }
 }
 
@@ -937,8 +1007,8 @@ export async function searchByColorVector(
       // SQLite closest_color_dist.
       distanceSquared: row._distance as number,
     }));
-  } catch (err: any) {
-    console.error("[AI] Color vector search failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] Color vector search failed:", getErrorMessage(err));
     return null;
   }
 }
@@ -950,8 +1020,8 @@ export async function deleteColorVectors(photoIds: number[]): Promise<void> {
   }
   try {
     await colorTable.delete(`photo_id IN (${photoIds.join(",")})`);
-  } catch (err: any) {
-    console.error("[AI] Delete color vectors failed:", err?.message);
+  } catch (err: unknown) {
+    console.error("[AI] Delete color vectors failed:", getErrorMessage(err));
   }
 }
 
@@ -977,6 +1047,7 @@ function diagLog(msg: string) {
 // ── 颜色向量回填 ─────────────────────────────────────────────────────
 // 将已有 dominant_colors 但 LanceDB 中无颜色向量的照片批量回填。
 // 首次启动时自动运行，后续跳过（通过 app_settings 标记）。
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Backfill coordinates marker checks, JSON normalization, batch writes, and yielding without changing startup lifecycle.
 export async function backfillColorVectors(): Promise<{
   total: number;
   backfilled: number;
@@ -1036,7 +1107,10 @@ export async function backfillColorVectors(): Promise<{
 
     for (const row of batch) {
       try {
-        const palette = JSON.parse(row.dominantColors!) as Array<{
+        if (!row.dominantColors) {
+          continue;
+        }
+        const palette = JSON.parse(row.dominantColors) as Array<{
           r: number;
           g: number;
           b: number;
@@ -1055,8 +1129,11 @@ export async function backfillColorVectors(): Promise<{
       try {
         await upsertColorVectors(entries);
         backfilled += entries.length;
-      } catch (err: any) {
-        console.error("[AI] Color backfill batch failed:", err?.message);
+      } catch (err: unknown) {
+        console.error(
+          "[AI] Color backfill batch failed:",
+          getErrorMessage(err)
+        );
       }
     }
 

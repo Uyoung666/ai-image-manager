@@ -87,8 +87,9 @@ export function FormatConvertDialog({
         outputDir,
       });
       setResult(res);
-    } catch (e: any) {
-      setError(e.message || t("convertFailed"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      setError(message || t("convertFailed"));
     } finally {
       setExecuting(false);
     }
@@ -156,10 +157,16 @@ export function FormatConvertDialog({
         ) : (
           <>
             <div>
-              <label className="mb-2 block text-[12px] text-muted-foreground">
+              <label
+                className="mb-2 block text-[12px] text-muted-foreground"
+                htmlFor="convert-format"
+              >
                 {t("targetFormat")}
               </label>
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(10rem,100%),1fr))] gap-2">
+              <div
+                className="grid grid-cols-[repeat(auto-fit,minmax(min(10rem,100%),1fr))] gap-2"
+                id="convert-format"
+              >
                 {FORMATS.map((f) => (
                   <button
                     className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
@@ -182,7 +189,10 @@ export function FormatConvertDialog({
 
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[12px] text-muted-foreground">
+                <label
+                  className="text-[12px] text-muted-foreground"
+                  htmlFor="convert-quality"
+                >
                   {t("quality")}
                 </label>
                 <span className="font-mono text-[13px] text-foreground">
@@ -191,6 +201,7 @@ export function FormatConvertDialog({
               </div>
               <input
                 className="w-full"
+                id="convert-quality"
                 max={100}
                 min={10}
                 onChange={(e) => setQuality(Number(e.target.value))}
@@ -205,11 +216,15 @@ export function FormatConvertDialog({
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[12px] text-muted-foreground">
+              <label
+                className="mb-1.5 block text-[12px] text-muted-foreground"
+                htmlFor="convert-max-width"
+              >
                 {t("maxWidthOptional")}
               </label>
               <input
                 className="w-32 rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[14px] text-foreground outline-none focus:border-primary"
+                id="convert-max-width"
                 onChange={(e) => setMaxWidth(e.target.value.replace(/\D/g, ""))}
                 placeholder={t("noLimit")}
                 value={maxWidth}
@@ -217,13 +232,19 @@ export function FormatConvertDialog({
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[12px] text-muted-foreground">
+              <label
+                className="mb-1.5 block text-[12px] text-muted-foreground"
+                htmlFor="convert-output-dir"
+              >
                 {t("outputDir")}
               </label>
               <div className="flex flex-wrap items-center gap-2">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="min-w-0 flex-[1_1_12rem] truncate rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[12px] text-muted-foreground/70">
+                    <span
+                      className="min-w-0 flex-[1_1_12rem] truncate rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[12px] text-muted-foreground/70"
+                      id="convert-output-dir"
+                    >
                       {outputDir || t("defaultTempDir")}
                     </span>
                   </TooltipTrigger>

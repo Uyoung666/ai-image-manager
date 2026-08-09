@@ -32,16 +32,18 @@ describe("ScrollPositionContext", () => {
         result.current.saveScrollPosition("home", 500, {
           itemId: 42,
           offsetFromTop: 10,
+          offsetRatio: 0.1,
           timestamp: Date.now(),
         });
       });
 
       const saved = result.current.getScrollPosition("home");
       expect(saved).not.toBeNull();
-      expect(saved!.scrollTop).toBe(500);
-      expect(saved!.anchor).toEqual({
+      expect(saved?.scrollTop).toBe(500);
+      expect(saved?.anchor).toEqual({
         itemId: 42,
         offsetFromTop: 10,
+        offsetRatio: 0.1,
         timestamp: expect.any(Number),
       });
     });
@@ -56,7 +58,10 @@ describe("ScrollPositionContext", () => {
 
       const stored = sessionStorage.getItem("scroll_position_home");
       expect(stored).not.toBeNull();
-      const parsed = JSON.parse(stored!);
+      if (stored === null) {
+        throw new Error("Expected scroll position to be stored");
+      }
+      const parsed = JSON.parse(stored);
       expect(parsed.scrollTop).toBe(1234);
     });
 
@@ -117,7 +122,7 @@ describe("ScrollPositionContext", () => {
 
       const saved = result.current.getScrollPosition("home");
       expect(saved).not.toBeNull();
-      expect(saved!.scrollTop).toBe(500);
+      expect(saved?.scrollTop).toBe(500);
     });
 
     it("should fallback to sessionStorage when memory is empty", () => {
@@ -134,7 +139,7 @@ describe("ScrollPositionContext", () => {
 
       const saved = result.current.getScrollPosition("home");
       expect(saved).not.toBeNull();
-      expect(saved!.scrollTop).toBe(999);
+      expect(saved?.scrollTop).toBe(999);
     });
 
     it("should return null for expired positions", () => {
@@ -263,7 +268,9 @@ describe("ScrollPositionContext", () => {
   describe("useScrollPosition outside provider", () => {
     it("should throw when used outside ScrollPositionProvider", () => {
       // Suppress console.error for the expected error boundary test
-      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {
+        /* Suppress the expected provider error during this test. */
+      });
 
       expect(() => {
         renderHook(() => useScrollPosition());

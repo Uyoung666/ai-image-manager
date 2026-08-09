@@ -6,10 +6,23 @@ import {
   useMemo,
   useRef,
 } from "react";
-import { useScrollPosition } from "@/contexts/ScrollPositionContext";
+import {
+  type ScrollPosition,
+  useScrollPosition,
+} from "@/contexts/ScrollPositionContext";
 
 // ── 内存日志缓冲区 ──────────────────────────────────────────
 const MAX_LOG_ENTRIES = 500;
+interface ScrollDebugEntry {
+  detail?: unknown;
+  label: string;
+  ts: number;
+}
+
+interface ScrollDebugWindow extends Window {
+  __scrollLog?: ScrollDebugEntry[];
+}
+
 const SCROLL_DEBUG_ENABLED = (() => {
   if (!import.meta.env.DEV || typeof window === "undefined") {
     return false;
@@ -26,7 +39,9 @@ function debugLog(label: string, detail?: unknown) {
     return;
   }
   const entry = { ts: Date.now(), label, detail };
-  const buf = ((window as any).__scrollLog = (window as any).__scrollLog || []);
+  const debugWindow = window as ScrollDebugWindow;
+  const buf = debugWindow.__scrollLog ?? [];
+  debugWindow.__scrollLog = buf;
   buf.push(entry);
   if (buf.length > MAX_LOG_ENTRIES) {
     buf.shift();
@@ -55,6 +70,398 @@ interface PendingRestore {
   targetScrollTop: number;
 }
 
+interface RestoreGridHandle {
+  cancelEnforceLock(): void;
+  getCurrentAnchor(): {
+    estimatedGlobalIndex?: number;
+    itemId: number;
+    offsetFromTop: number;
+    offsetRatio: number;
+  } | null;
+  readonly scrollElement: HTMLDivElement | null;
+  scrollToItem(itemId: number, offsetRatio: number): void;
+  scrollToPixel(scrollTop: number): void;
+}
+
+interface RestoreRefs {
+  hasInitialPositionedRef: { current: boolean };
+  hasRestoredRef: { current: boolean };
+  isRestoringRef: { current: boolean };
+  lastLoadMoreItemCountRef: { current: number };
+  lastRestoredItemCountRef: { current: number };
+  pendingRestoreRef: { current: PendingRestore | null };
+}
+
+interface RestoreTarget {
+  anchorId?: number;
+  mode: "anchor" | "pixel";
+  offsetFromTop?: number;
+  offsetRatio?: number;
+  targetScrollTop: number;
+}
+
+interface AppliedRestore {
+  anchorId?: number;
+  anchorOffset?: number;
+  scrollTop: number;
+}
+
+interface RestoreContext {
+  cancelUnlockTimer: () => void;
+  debug: (label: string, detail?: unknown) => void;
+  el: HTMLElement;
+  gridRef?: React.RefObject<RestoreGridHandle | null>;
+  hasMore: boolean;
+  itemCount: number;
+  lastLoadMoreItemCountRef: { current: number };
+  logId: (label: string, detail?: unknown) => void;
+  notifyRestoreSettled: () => void;
+  onLoadMore?: () => void;
+  refs: RestoreRefs;
+  resolvePixelOffset: (
+    itemId: number,
+    offsetFromTop: number,
+    offsetRatio: number
+  ) => number;
+  restoreFromAnchor?: (anchorItemId: number) => number | null;
+  routeKey: string;
+  scheduleForcedUnlock: (
+    anchorItemId?: number,
+    anchorOffset?: number,
+    anchorOffsetRatio?: number
+  ) => void;
+  scheduleUnlock: () => void;
+  scrollPosition: {
+    getScrollPosition: (routeKey: string) => ScrollPosition | null;
+  };
+  seedSnapshotAfterRestore: (
+    scrollTop: number,
+    scrollHeight: number,
+    anchorItemId?: number,
+    anchorOffset?: number,
+    anchorOffsetRatio?: number,
+    estimatedGlobalIndex?: number
+  ) => void;
+}
+
+function getInitialRestoreTarget(
+  saved: ScrollPosition,
+  el: HTMLElement,
+  restoreFromAnchor?: (anchorItemId: number) => number | null
+): RestoreTarget | PendingRestore | null {
+  if (saved.anchor && restoreFromAnchor) {
+    const targetScrollTop = restoreFromAnchor(saved.anchor.itemId);
+    if (targetScrollTop === null) {
+      return {
+        anchorId: saved.anchor.itemId,
+        offsetFromTop: saved.anchor.offsetFromTop,
+        offsetRatio: saved.anchor.offsetRatio ?? 0,
+        targetScrollTop: saved.scrollTop,
+      };
+    }
+    return {
+      anchorId: saved.anchor.itemId,
+      mode: "anchor",
+      offsetFromTop: saved.anchor.offsetFromTop,
+      offsetRatio: saved.anchor.offsetRatio ?? 0,
+      targetScrollTop,
+    };
+  }
+
+  if (saved.scrollTop > 0) {
+    if (saved.scrollTop > el.scrollHeight) {
+      return { targetScrollTop: saved.scrollTop };
+    }
+    return {
+      mode: "pixel",
+      targetScrollTop: Math.min(
+        saved.scrollTop,
+        el.scrollHeight - el.clientHeight
+      ),
+    };
+  }
+  return null;
+}
+
+function getPendingRestoreTarget(
+  pending: PendingRestore,
+  el: HTMLElement,
+  restoreFromAnchor: RestoreContext["restoreFromAnchor"]
+): RestoreTarget | null {
+  if (pending.anchorId !== undefined && restoreFromAnchor) {
+    const targetScrollTop = restoreFromAnchor(pending.anchorId);
+    if (targetScrollTop !== null) {
+      return {
+        anchorId: pending.anchorId,
+        mode: "anchor",
+        offsetFromTop: pending.offsetFromTop,
+        offsetRatio: pending.offsetRatio ?? 0,
+        targetScrollTop,
+      };
+    }
+  }
+
+  if (
+    pending.targetScrollTop > 0 &&
+    el.scrollHeight >= pending.targetScrollTop
+  ) {
+    return { mode: "pixel", targetScrollTop: pending.targetScrollTop };
+  }
+  return null;
+}
+
+function applyRestoreTarget(
+  context: RestoreContext,
+  target: RestoreTarget
+): AppliedRestore {
+  if (target.mode === "anchor" && target.anchorId !== undefined) {
+    if (context.gridRef?.current?.scrollToItem) {
+      context.gridRef.current.scrollToItem(
+        target.anchorId,
+        target.offsetRatio ?? 0
+      );
+      context.scheduleForcedUnlock(
+        target.anchorId,
+        target.offsetFromTop,
+        target.offsetRatio
+      );
+    } else {
+      const pixelOffset = context.resolvePixelOffset(
+        target.anchorId,
+        target.offsetFromTop ?? 0,
+        target.offsetRatio ?? 0
+      );
+      context.el.scrollTop = Math.max(0, target.targetScrollTop + pixelOffset);
+    }
+    return {
+      anchorId: target.anchorId,
+      anchorOffset: target.offsetFromTop ?? 0,
+      scrollTop: context.el.scrollTop,
+    };
+  }
+
+  if (context.gridRef?.current?.scrollToPixel) {
+    context.gridRef.current.scrollToPixel(target.targetScrollTop);
+  } else {
+    const maxScroll = context.el.scrollHeight - context.el.clientHeight;
+    context.el.scrollTop = Math.min(target.targetScrollTop, maxScroll);
+  }
+  return { scrollTop: context.el.scrollTop };
+}
+
+function completeRestore(
+  context: RestoreContext,
+  scrollTop: number,
+  anchorId?: number,
+  anchorOffset?: number
+): void {
+  context.refs.hasRestoredRef.current = true;
+  context.refs.hasInitialPositionedRef.current = true;
+  context.refs.lastRestoredItemCountRef.current = context.itemCount;
+  context.seedSnapshotAfterRestore(
+    scrollTop,
+    context.el.scrollHeight,
+    anchorId,
+    anchorOffset
+  );
+  context.notifyRestoreSettled();
+  context.scheduleUnlock();
+}
+
+function processPendingRestore(context: RestoreContext): boolean {
+  const pending = context.refs.pendingRestoreRef.current;
+  if (!pending) {
+    return false;
+  }
+
+  context.debug("restore: PENDING retry", {
+    anchorId: pending.anchorId,
+    targetScrollTop: pending.targetScrollTop,
+    itemCount: context.itemCount,
+    hasMore: context.hasMore,
+  });
+  const target = getPendingRestoreTarget(
+    pending,
+    context.el,
+    context.restoreFromAnchor
+  );
+  if (target) {
+    context.cancelUnlockTimer();
+    context.refs.isRestoringRef.current = true;
+    const applied = applyRestoreTarget(context, target);
+    context.refs.pendingRestoreRef.current = null;
+    context.refs.lastLoadMoreItemCountRef.current = 0;
+    completeRestore(
+      context,
+      applied.scrollTop,
+      applied.anchorId,
+      applied.anchorOffset
+    );
+    context.logId("LOG_RESTORE", {
+      routeKey: context.routeKey,
+      result: "pending_resolved",
+      scrollTop: context.el.scrollTop,
+      scrollHeight: context.el.scrollHeight,
+      anchorId: applied.anchorId,
+      hasPending: false,
+    });
+    return true;
+  }
+
+  if (
+    context.onLoadMore &&
+    context.hasMore &&
+    context.itemCount !== context.lastLoadMoreItemCountRef.current
+  ) {
+    context.lastLoadMoreItemCountRef.current = context.itemCount;
+    context.debug("pending: calling onLoadMore()", {
+      itemCount: context.itemCount,
+    });
+    context.onLoadMore();
+  }
+  return true;
+}
+
+function processSavedRestore(
+  context: RestoreContext,
+  saved: ScrollPosition
+): boolean {
+  const target = getInitialRestoreTarget(
+    saved,
+    context.el,
+    context.restoreFromAnchor
+  );
+  if (!target) {
+    return false;
+  }
+
+  if (!("mode" in target)) {
+    if (!context.hasMore) {
+      const bestAvailableScrollTop = Math.max(
+        0,
+        Math.min(
+          target.targetScrollTop,
+          context.el.scrollHeight - context.el.clientHeight
+        )
+      );
+      const applied = applyRestoreTarget(context, {
+        mode: "pixel",
+        targetScrollTop: bestAvailableScrollTop,
+      });
+      context.refs.pendingRestoreRef.current = null;
+      completeRestore(context, applied.scrollTop);
+      return true;
+    }
+
+    context.refs.pendingRestoreRef.current = target;
+    context.refs.hasRestoredRef.current = true;
+    context.refs.hasInitialPositionedRef.current = true;
+    context.refs.lastRestoredItemCountRef.current = context.itemCount;
+    context.logId("LOG_RESTORE", {
+      routeKey: context.routeKey,
+      result: "pending",
+      targetScrollTop: target.targetScrollTop,
+      anchorId: target.anchorId,
+      hasPending: true,
+    });
+    if (context.onLoadMore && context.hasMore) {
+      context.lastLoadMoreItemCountRef.current = context.itemCount;
+      context.debug("pending: initial onLoadMore() call", {
+        itemCount: context.itemCount,
+      });
+      context.onLoadMore();
+    }
+    return true;
+  }
+
+  const applied = applyRestoreTarget(context, target);
+  completeRestore(
+    context,
+    applied.scrollTop,
+    applied.anchorId,
+    applied.anchorOffset
+  );
+  context.logId("LOG_RESTORE", {
+    routeKey: context.routeKey,
+    result: "restored",
+    scrollTop: context.el.scrollTop,
+    scrollHeight: context.el.scrollHeight,
+    anchorId: applied.anchorId,
+    hasPending: false,
+  });
+  return true;
+}
+
+function runRestoreEffect(
+  context: RestoreContext,
+  restoreReady: boolean,
+  isPlaceholderData: boolean
+): void {
+  if (isPlaceholderData) {
+    context.debug("restore: BLOCKED (isPlaceholderData)");
+    return;
+  }
+  if (!restoreReady) {
+    context.debug("restore: BLOCKED (restoreReady=false)");
+    return;
+  }
+  if (processPendingRestore(context)) {
+    return;
+  }
+
+  if (context.refs.hasRestoredRef.current) {
+    const itemCountGrew =
+      context.itemCount > context.refs.lastRestoredItemCountRef.current;
+    if (itemCountGrew && context.refs.pendingRestoreRef.current) {
+      context.debug("restore: RETRY (itemCount grew, pending active)", {
+        prev: context.refs.lastRestoredItemCountRef.current,
+        now: context.itemCount,
+      });
+      context.refs.hasRestoredRef.current = false;
+    } else {
+      return;
+    }
+  }
+
+  context.cancelUnlockTimer();
+  context.refs.isRestoringRef.current = true;
+  const saved = context.scrollPosition.getScrollPosition(context.routeKey);
+  context.logId("LOG_RESTORE", {
+    routeKey: context.routeKey,
+    hasSaved: !!saved,
+    savedScrollTop: saved?.scrollTop ?? null,
+    savedAnchorId: saved?.anchor?.itemId ?? null,
+    scrollHeight: context.el.scrollHeight,
+    clientHeight: context.el.clientHeight,
+    itemCount: context.itemCount,
+    isPending: false,
+    phase: "priority1",
+  });
+
+  if (saved && processSavedRestore(context, saved)) {
+    return;
+  }
+  if (!saved) {
+    context.logId("LOG_RESTORE", {
+      routeKey: context.routeKey,
+      result: "no_saved_position",
+      hasSaved: false,
+      hasPending: false,
+    });
+  }
+
+  context.refs.hasRestoredRef.current = true;
+  context.refs.hasInitialPositionedRef.current = true;
+  context.refs.lastRestoredItemCountRef.current = context.itemCount;
+  context.logId("LOG_RESTORE", {
+    routeKey: context.routeKey,
+    result: "fallthrough_unlock",
+    hasPending: false,
+  });
+  context.notifyRestoreSettled();
+  context.scheduleUnlock();
+}
+
 /**
  * 为当前路由自动管理滚动位置的保存和恢复。
  *
@@ -65,6 +472,89 @@ interface PendingRestore {
  *
  * @returns forceUnlock — 用户介入时立刻砸碎所有锁
  */
+interface ScrollFrameAnchor {
+  estimatedGlobalIndex?: number;
+  itemId: number;
+  offsetFromTop: number;
+  offsetRatio: number;
+}
+
+interface ScrollFrameState {
+  anchor: ScrollFrameAnchor | null;
+  scrollHeight: number;
+  scrollTop: number;
+}
+
+interface ScrollFrameContext {
+  debug: (label: string, detail?: unknown) => void;
+  el: HTMLElement;
+  getCurrentAnchor: () => ScrollFrameAnchor | null | undefined;
+  isNavigatingAwayRef: { current: boolean };
+  isRestoringRef: { current: boolean };
+  lastKnownGoodStateRef: { current: ScrollFrameState | null };
+  lastSaveRouteKeyRef: { current: string };
+  pendingRestoreRef: { current: PendingRestore | null };
+  routeKey: string;
+  saveScrollPosition: (
+    routeKey: string,
+    scrollTop: number,
+    anchor?: ScrollFrameAnchor & { timestamp: number }
+  ) => void;
+}
+
+function saveScrollFrame(context: ScrollFrameContext): void {
+  if (context.isNavigatingAwayRef.current) {
+    context.debug("RAF save: BLOCKED (navigating away in RAF)");
+    return;
+  }
+  if (!context.el.isConnected) {
+    context.debug("RAF save: SKIPPED (disconnected)");
+    return;
+  }
+  if (context.isRestoringRef.current || context.pendingRestoreRef.current) {
+    context.debug("RAF save: BLOCKED (RAF)");
+    return;
+  }
+
+  const scrollTop = context.el.scrollTop;
+  const anchor = context.getCurrentAnchor();
+  context.lastKnownGoodStateRef.current = {
+    scrollTop,
+    scrollHeight: context.el.scrollHeight,
+    anchor: anchor
+      ? {
+          itemId: anchor.itemId,
+          offsetFromTop: anchor.offsetFromTop,
+          offsetRatio: anchor.offsetRatio,
+          estimatedGlobalIndex: anchor.estimatedGlobalIndex,
+        }
+      : null,
+  };
+  context.lastSaveRouteKeyRef.current = context.routeKey;
+
+  if (SCROLL_DEBUG_ENABLED) {
+    context.debug("RAF save: executing", {
+      routeKey: context.routeKey,
+      scrollTop,
+      anchorId: anchor?.itemId ?? null,
+      offsetRatio: anchor?.offsetRatio,
+    });
+  }
+  context.saveScrollPosition(
+    context.routeKey,
+    scrollTop,
+    anchor
+      ? {
+          itemId: anchor.itemId,
+          offsetFromTop: anchor.offsetFromTop,
+          offsetRatio: anchor.offsetRatio,
+          estimatedGlobalIndex: anchor.estimatedGlobalIndex,
+          timestamp: Date.now(),
+        }
+      : undefined
+  );
+}
+
 export function useRouteScrollRestoration(
   scrollRef: React.RefObject<HTMLElement | null>,
   options?: {
@@ -119,15 +609,6 @@ export function useRouteScrollRestoration(
     },
     [iid]
   );
-
-  useEffect(() => {
-    logId("MOUNTED", {
-      routeKey,
-      restoreReady,
-      isPlaceholder: isPlaceholderData,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const hasRestoredRef = useRef(false);
   const hasInitialPositionedRef = useRef(false);
@@ -252,6 +733,15 @@ export function useRouteScrollRestoration(
   }, [routeKey]);
 
   // ── 种子函数：将恢复成功后的位置写入快照 ──────────────────
+  useEffect(() => {
+    logId("MOUNTED", {
+      routeKey,
+      restoreReady,
+      isPlaceholder: isPlaceholderData,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaceholderData, restoreReady, logId, routeKey]);
+
   const seedSnapshotAfterRestore = useCallback(
     (
       scrollTop: number,
@@ -395,7 +885,14 @@ export function useRouteScrollRestoration(
     lastKnownGoodStateRef.current = null;
     lastSaveRouteKeyRef.current = routeKey;
     // isNavigatingAwayRef 由挂载/卸载 useLayoutEffect 管理，此处不触动
-  }, [routeKey, scrollPosition, scrollRef, cancelUnlockTimer, logId]);
+  }, [
+    routeKey,
+    scrollPosition,
+    scrollRef,
+    cancelUnlockTimer,
+    logId,
+    gridRef?.current?.cancelEnforceLock,
+  ]);
 
   // ── 保存：scroll 事件（三层冻结防御） ──────────────────────
   const getCurrentAnchorRef = useRef(getCurrentAnchor);
@@ -456,65 +953,18 @@ export function useRouteScrollRestoration(
 
       rafIdRef.current = requestAnimationFrame(() => {
         rafIdRef.current = 0;
-
-        // RAF 回调内再次冻结检查（防御在 RAF 排队期间发生的导航）
-        if (isNavigatingAwayRef.current) {
-          debugLog("RAF save: BLOCKED (navigating away in RAF)");
-          return;
-        }
-        if (!el.isConnected) {
-          debugLog("RAF save: SKIPPED (disconnected)");
-          return;
-        }
-        if (isRestoringRef.current || pendingRestoreRef.current) {
-          debugLog("RAF save: BLOCKED (RAF)");
-          return;
-        }
-
-        const scrollTop = el.scrollTop;
-        const anchor = getCurrentAnchorRef.current?.();
-
-        // offsetRatio 已由 getCurrentAnchor 纯数学计算提供，
-        // 无需 DOM 查找——彻底消除"纯净浏览态"下 DOM 采样失败的隐患。
-
-        // 更新"最后已知良好快照"
-        lastKnownGoodStateRef.current = {
-          scrollTop,
-          scrollHeight: el.scrollHeight,
-          anchor: anchor
-            ? {
-                itemId: anchor.itemId,
-                offsetFromTop: anchor.offsetFromTop,
-                offsetRatio: anchor.offsetRatio,
-                estimatedGlobalIndex: anchor.estimatedGlobalIndex,
-              }
-            : null,
-        };
-
-        // 固化 Key：记录此次写入使用的 routeKey
-        lastSaveRouteKeyRef.current = routeKey;
-
-        if (SCROLL_DEBUG_ENABLED) {
-          debugLog("RAF save: executing", {
-            routeKey,
-            scrollTop,
-            anchorId: anchor?.itemId ?? null,
-            offsetRatio: anchor?.offsetRatio,
-          });
-        }
-        scrollPosition.saveScrollPosition(
+        saveScrollFrame({
+          debug: debugLog,
+          el,
+          getCurrentAnchor: () => getCurrentAnchorRef.current?.(),
+          isNavigatingAwayRef,
+          isRestoringRef,
+          lastKnownGoodStateRef,
+          lastSaveRouteKeyRef,
+          pendingRestoreRef,
           routeKey,
-          scrollTop,
-          anchor
-            ? {
-                itemId: anchor.itemId,
-                offsetFromTop: anchor.offsetFromTop,
-                offsetRatio: anchor.offsetRatio,
-                estimatedGlobalIndex: anchor.estimatedGlobalIndex,
-                timestamp: Date.now(),
-              }
-            : undefined
-        );
+          saveScrollPosition: scrollPosition.saveScrollPosition,
+        });
       });
     };
 
@@ -550,7 +1000,7 @@ export function useRouteScrollRestoration(
         rafIdRef.current = 0;
       }
     };
-  }, [scrollRef, routeKey, scrollPosition]);
+  }, [scrollRef, routeKey, scrollPosition, logId, cancelUnlockTimer]);
 
   // ── 保存：路由离开 cleanup（DOM 直读 + 同步锚点双重保障） ──
   //
@@ -612,357 +1062,54 @@ export function useRouteScrollRestoration(
       );
       scrollPosition.flushPendingWrites();
     };
-  }, [routeKey, scrollPosition, cancelUnlockTimer, logId]);
+  }, [
+    routeKey,
+    scrollPosition,
+    cancelUnlockTimer,
+    logId,
+    scrollRef.current,
+    gridRef?.current?.getCurrentAnchor,
+  ]);
 
   // ── 恢复：数据驱动 + 长效 Pending ──────────────────────────
   useLayoutEffect(() => {
-    if (isPlaceholderData) {
-      debugLog("restore: BLOCKED (isPlaceholderData)");
-      return;
-    }
-    if (!restoreReady) {
-      debugLog("restore: BLOCKED (restoreReady=false)");
-      return;
-    }
-
     const el = scrollRef.current;
     if (!el) {
       debugLog("restore: SKIPPED (no scrollRef)");
       return;
     }
 
-    // ═══════════════════════════════════════════════════════
-    // Priority 0：解析挂起的 Pending 恢复
-    // ═══════════════════════════════════════════════════════
-    const pending = pendingRestoreRef.current;
-    if (pending) {
-      debugLog("restore: PENDING retry", {
-        anchorId: pending.anchorId,
-        targetScrollTop: pending.targetScrollTop,
-        itemCount,
+    runRestoreEffect(
+      {
+        cancelUnlockTimer,
+        debug: debugLog,
+        el,
+        gridRef,
         hasMore,
-      });
-
-      let resolved = false;
-      let resolvedScrollTop = 0;
-      let resolvedAnchorId: number | undefined;
-      let resolvedAnchorOffset: number | undefined;
-
-      if (pending.anchorId !== undefined && restoreFromAnchor) {
-        const targetScrollTop = restoreFromAnchor(pending.anchorId);
-        if (targetScrollTop !== null) {
-          cancelUnlockTimer();
-          isRestoringRef.current = true;
-
-          // 优先使用 gridRef.scrollToItem（内容可寻址原子定位）
-          if (gridRef?.current?.scrollToItem) {
-            gridRef.current.scrollToItem(
-              pending.anchorId,
-              pending.offsetRatio ?? 0
-            );
-            scheduleForcedUnlock(
-              pending.anchorId,
-              pending.offsetFromTop,
-              pending.offsetRatio
-            );
-            debugLog("pending: RESOLVED via gridRef.scrollToItem", {
-              anchorId: pending.anchorId,
-            });
-          } else {
-            const pixelOffset = resolvePixelOffset(
-              pending.anchorId,
-              pending.offsetFromTop ?? 0,
-              pending.offsetRatio ?? 0
-            );
-            const desired = targetScrollTop + pixelOffset;
-            el.scrollTop = Math.max(0, desired);
-            debugLog("pending: RESOLVED via anchor (DOM scrollTop)", {
-              anchorId: pending.anchorId,
-              desired,
-              pixelOffset,
-            });
-          }
-
-          resolvedScrollTop = el.scrollTop;
-          resolvedAnchorId = pending.anchorId;
-          resolvedAnchorOffset = pending.offsetFromTop ?? 0;
-          resolved = true;
-        }
-      }
-
-      if (
-        !resolved &&
-        pending.targetScrollTop > 0 &&
-        el.scrollHeight >= pending.targetScrollTop
-      ) {
-        cancelUnlockTimer();
-        isRestoringRef.current = true;
-        if (gridRef?.current?.scrollToPixel) {
-          gridRef.current.scrollToPixel(pending.targetScrollTop);
-        } else {
-          const maxScroll = el.scrollHeight - el.clientHeight;
-          el.scrollTop = Math.min(pending.targetScrollTop, maxScroll);
-        }
-        debugLog("pending: RESOLVED via pixel fallback", {
-          targetScrollTop: pending.targetScrollTop,
-          scrollHeight: el.scrollHeight,
-        });
-        resolvedScrollTop = el.scrollTop;
-        resolved = true;
-      }
-
-      if (resolved) {
-        pendingRestoreRef.current = null;
-        lastLoadMoreItemCountRef.current = 0;
-        hasRestoredRef.current = true;
-        hasInitialPositionedRef.current = true;
-        lastRestoredItemCountRef.current = itemCount;
-
-        seedSnapshotAfterRestore(
-          resolvedScrollTop,
-          el.scrollHeight,
-          resolvedAnchorId,
-          resolvedAnchorOffset
-        );
-
-        logId("LOG_RESTORE", {
-          routeKey,
-          result: "pending_resolved",
-          scrollTop: el.scrollTop,
-          scrollHeight: el.scrollHeight,
-          anchorId: resolvedAnchorId,
-          hasPending: false,
-        });
-
-        notifyRestoreSettled();
-        scheduleUnlock();
-        return;
-      }
-
-      if (
-        onLoadMore &&
-        hasMore &&
-        itemCount !== lastLoadMoreItemCountRef.current
-      ) {
-        lastLoadMoreItemCountRef.current = itemCount;
-        debugLog("pending: calling onLoadMore()", { itemCount });
-        onLoadMore();
-      }
-      return;
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Priority 1：首次恢复 或 itemCount 增长重试
-    // ═══════════════════════════════════════════════════════
-    // 仅在存活的 pending 恢复周期内，itemCount 增长才触发重试。
-    // 避免恢复成功后用户正常滚动触发无限加载 → itemCount 增长 →
-    // 误触发重新恢复 → 将用户拖回旧位置的回归 Bug。
-    if (hasRestoredRef.current) {
-      if (
-        itemCount > lastRestoredItemCountRef.current &&
-        pendingRestoreRef.current
-      ) {
-        debugLog("restore: RETRY (itemCount grew, pending active)", {
-          prev: lastRestoredItemCountRef.current,
-          now: itemCount,
-        });
-        hasRestoredRef.current = false;
-      } else {
-        return;
-      }
-    }
-
-    cancelUnlockTimer();
-    isRestoringRef.current = true;
-    const saved = scrollPosition.getScrollPosition(routeKey);
-
-    logId("LOG_RESTORE", {
-      routeKey,
-      hasSaved: !!saved,
-      savedScrollTop: saved?.scrollTop ?? null,
-      savedAnchorId: saved?.anchor?.itemId ?? null,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      itemCount,
-      isPending: false,
-      phase: "priority1",
-    });
-
-    if (saved) {
-      debugLog("restore: ATTEMPTING", {
+        itemCount,
+        lastLoadMoreItemCountRef,
+        logId,
+        notifyRestoreSettled,
+        onLoadMore,
+        resolvePixelOffset,
+        restoreFromAnchor,
         routeKey,
-        savedScrollTop: saved.scrollTop,
-        savedAnchorId: saved.anchor?.itemId ?? null,
-        savedAnchorOffset: saved.anchor?.offsetFromTop ?? null,
-        scrollHeight: el.scrollHeight,
-        clientHeight: el.clientHeight,
-      });
-
-      let restored = false;
-      let restoredScrollTop = 0;
-      let restoredAnchorId: number | undefined;
-      let restoredAnchorOffset: number | undefined;
-      let newPending: PendingRestore | null = null;
-
-      if (saved.anchor && restoreFromAnchor) {
-        const targetScrollTop = restoreFromAnchor(saved.anchor.itemId);
-        if (targetScrollTop === null) {
-          debugLog("restore: anchor NOT FOUND, entering PENDING", {
-            anchorId: saved.anchor.itemId,
-          });
-          newPending = {
-            anchorId: saved.anchor.itemId,
-            offsetFromTop: saved.anchor.offsetFromTop,
-            offsetRatio: saved.anchor.offsetRatio ?? 0,
-            targetScrollTop: saved.scrollTop,
-          };
-        } else {
-          // 优先使用 gridRef.scrollToItem（内容可寻址原子定位）
-          if (gridRef?.current?.scrollToItem) {
-            gridRef.current.scrollToItem(
-              saved.anchor.itemId,
-              saved.anchor.offsetRatio ?? 0
-            );
-            scheduleForcedUnlock(
-              saved.anchor.itemId,
-              saved.anchor.offsetFromTop,
-              saved.anchor.offsetRatio
-            );
-            debugLog("restore: anchor FOUND via gridRef.scrollToItem", {
-              anchorId: saved.anchor.itemId,
-            });
-          } else {
-            const pixelOffset = resolvePixelOffset(
-              saved.anchor.itemId,
-              saved.anchor.offsetFromTop,
-              saved.anchor.offsetRatio ?? 0
-            );
-            const desired = targetScrollTop + pixelOffset;
-            el.scrollTop = Math.max(0, desired);
-            debugLog("restore: anchor FOUND (DOM scrollTop)", {
-              desired,
-              pixelOffset,
-            });
-          }
-          restoredScrollTop = el.scrollTop;
-          restoredAnchorId = saved.anchor.itemId;
-          restoredAnchorOffset = saved.anchor.offsetFromTop;
-          restored = true;
-        }
-      }
-
-      if (!(restored || newPending) && saved.scrollTop > 0) {
-        if (saved.scrollTop > el.scrollHeight) {
-          debugLog("restore: pixel exceeds scrollHeight, entering PENDING", {
-            targetScrollTop: saved.scrollTop,
-            scrollHeight: el.scrollHeight,
-          });
-          newPending = { targetScrollTop: saved.scrollTop };
-        } else {
-          const maxScroll = el.scrollHeight - el.clientHeight;
-          debugLog("restore: pixel fallback", { scrollTop: saved.scrollTop });
-          el.scrollTop = Math.min(saved.scrollTop, maxScroll);
-          restoredScrollTop = el.scrollTop;
-          restored = true;
-        }
-      }
-
-      if (newPending) {
-        if (!hasMore) {
-          const bestAvailableScrollTop = Math.max(
-            0,
-            Math.min(
-              newPending.targetScrollTop,
-              el.scrollHeight - el.clientHeight
-            )
-          );
-          if (gridRef?.current?.scrollToPixel) {
-            gridRef.current.scrollToPixel(bestAvailableScrollTop);
-          } else {
-            el.scrollTop = bestAvailableScrollTop;
-          }
-          pendingRestoreRef.current = null;
-          hasRestoredRef.current = true;
-          hasInitialPositionedRef.current = true;
-          lastRestoredItemCountRef.current = itemCount;
-          seedSnapshotAfterRestore(
-            el.scrollTop,
-            el.scrollHeight,
-            undefined,
-            undefined
-          );
-          notifyRestoreSettled();
-          scheduleUnlock();
-          return;
-        }
-
-        pendingRestoreRef.current = newPending;
-        hasRestoredRef.current = true;
-        hasInitialPositionedRef.current = true;
-        lastRestoredItemCountRef.current = itemCount;
-
-        logId("LOG_RESTORE", {
-          routeKey,
-          result: "pending",
-          targetScrollTop: newPending.targetScrollTop,
-          anchorId: newPending.anchorId,
-          hasPending: true,
-        });
-
-        if (onLoadMore && hasMore) {
-          lastLoadMoreItemCountRef.current = itemCount;
-          debugLog("pending: initial onLoadMore() call", { itemCount });
-          onLoadMore();
-        }
-        return;
-      }
-
-      if (restored) {
-        hasRestoredRef.current = true;
-        hasInitialPositionedRef.current = true;
-        lastRestoredItemCountRef.current = itemCount;
-
-        seedSnapshotAfterRestore(
-          restoredScrollTop,
-          el.scrollHeight,
-          restoredAnchorId,
-          restoredAnchorOffset
-        );
-
-        logId("LOG_RESTORE", {
-          routeKey,
-          result: "restored",
-          scrollTop: el.scrollTop,
-          scrollHeight: el.scrollHeight,
-          anchorId: restoredAnchorId,
-          hasPending: false,
-        });
-
-        notifyRestoreSettled();
-        scheduleUnlock();
-        return;
-      }
-    } else {
-      logId("LOG_RESTORE", {
-        routeKey,
-        result: "no_saved_position",
-        hasSaved: false,
-        hasPending: false,
-      });
-    }
-
-    hasRestoredRef.current = true;
-    hasInitialPositionedRef.current = true;
-    lastRestoredItemCountRef.current = itemCount;
-
-    logId("LOG_RESTORE", {
-      routeKey,
-      result: "fallthrough_unlock",
-      hasPending: false,
-    });
-
-    notifyRestoreSettled();
-    scheduleUnlock();
+        scheduleForcedUnlock,
+        scheduleUnlock,
+        scrollPosition,
+        seedSnapshotAfterRestore,
+        refs: {
+          hasInitialPositionedRef,
+          hasRestoredRef,
+          isRestoringRef,
+          lastLoadMoreItemCountRef,
+          lastRestoredItemCountRef,
+          pendingRestoreRef,
+        },
+      },
+      restoreReady,
+      isPlaceholderData
+    );
   }, [
     scrollRef,
     routeKey,
@@ -975,6 +1122,12 @@ export function useRouteScrollRestoration(
     hasMore,
     seedSnapshotAfterRestore,
     notifyRestoreSettled,
+    gridRef,
+    scheduleUnlock,
+    logId,
+    scheduleForcedUnlock,
+    resolvePixelOffset,
+    cancelUnlockTimer,
   ]);
 
   return { initialScrollTop, hasInitialPositionedRef, forceUnlock };

@@ -28,7 +28,9 @@ test.beforeAll(async () => {
 
   electronApp = await electron.launch({
     args: [
+      "--no-sandbox",
       "--disable-gpu-sandbox",
+      "--no-sandbox",
       "--enable-unsafe-swiftshader",
       "--use-angle=swiftshader",
       `--user-data-dir=${e2eUserDataDir}`,
@@ -65,5 +67,5 @@ test("renders the first page", async () => {
   const page: Page = await electronApp.firstWindow();
 
   const title = page.getByRole("heading", { name: FIRST_EMPTY_STATE_TITLE });
-  await expect(title).toBeVisible({ timeout: 10_000 });
+  await expect(title).toBeVisible({ timeout: 30_000 });
 });

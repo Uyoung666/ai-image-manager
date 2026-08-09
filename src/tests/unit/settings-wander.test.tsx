@@ -40,6 +40,9 @@ vi.mock("@/components/ui/switch", () => ({
 
 function renderPage() {
   const Page = Route.options.component;
+  if (!Page) {
+    throw new Error("Expected settings.wander route component");
+  }
   return render(<Page />);
 }
 

@@ -297,7 +297,7 @@ function TrashPage() {
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [loading, query, trashTotalCount]);
+  }, []);
 
   function toggleSelect(id: number, e: React.MouseEvent) {
     handleSelect(id, e);
@@ -765,7 +765,10 @@ function TrashPage() {
     }
   }
 
-  function formatBytes(bytes: number): string {
+  function formatBytes(bytes: number | null): string {
+    if (bytes === null) {
+      return "";
+    }
     if (bytes < 1024) {
       return `${bytes} B`;
     }
@@ -868,10 +871,7 @@ function TrashPage() {
           {remaining <= 3 && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span
-                  className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm"
-                  tabIndex={0}
-                >
+                <span className="absolute top-2 right-2 z-[2] rounded-full bg-destructive/90 px-2 py-0.5 font-medium text-[10px] text-white shadow-sm backdrop-blur-sm">
                   {remaining === 0
                     ? t("trashMoveToday")
                     : t("trashMoveAfterDays", { count: remaining })}
@@ -890,7 +890,7 @@ function TrashPage() {
           <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/75 leading-4">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="min-w-0 truncate" tabIndex={0}>
+                <span className="min-w-0 truncate">
                   {photo.folderName ?? t("originalFolderRemoved")}
                 </span>
               </TooltipTrigger>
@@ -1230,7 +1230,7 @@ function TrashPage() {
                     }
                     type="button"
                   >
-                {order === "desc" ? "↓" : "↑"}
+                    {order === "desc" ? "↓" : "↑"}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>

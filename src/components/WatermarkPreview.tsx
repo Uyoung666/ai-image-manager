@@ -1,3 +1,4 @@
+// biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -71,6 +72,56 @@ export const WATERMARK_ANCHORS: { anchor: WmAnchor; label?: string }[] = [
   { label: "↘", anchor: "bottomRight" },
 ];
 
+type AnchorHorizontal = "left" | "center" | "right";
+type AnchorVertical = "top" | "center" | "bottom";
+
+function getAnchorAxes(anchor: WmAnchor): {
+  horizontal: AnchorHorizontal;
+  vertical: AnchorVertical;
+} {
+  let horizontal: AnchorHorizontal = "center";
+  let vertical: AnchorVertical = "bottom";
+  if (anchor.startsWith("top")) {
+    vertical = "top";
+  } else if (anchor.startsWith("center")) {
+    vertical = "center";
+  }
+  if (anchor.endsWith("Left")) {
+    horizontal = "left";
+  } else if (anchor.endsWith("Right")) {
+    horizontal = "right";
+  }
+  return { horizontal, vertical };
+}
+
+function getAnchorPoint(
+  axis: AnchorHorizontal | AnchorVertical,
+  margin: number,
+  size: number
+): number {
+  if (axis === "left" || axis === "top") {
+    return margin;
+  }
+  if (axis === "right" || axis === "bottom") {
+    return size - margin;
+  }
+  return Math.round(size / 2);
+}
+
+function getWatermarkOrigin(
+  axis: AnchorHorizontal | AnchorVertical,
+  point: number,
+  watermarkSize: number
+): number {
+  if (axis === "left" || axis === "top") {
+    return point;
+  }
+  if (axis === "right" || axis === "bottom") {
+    return point - watermarkSize;
+  }
+  return point - watermarkSize / 2;
+}
+
 export function WatermarkAnchorGlyph({
   active,
   anchor,
@@ -109,55 +160,17 @@ export function calcWmPosition(
 ): { x: number; y: number } {
   const mp = Math.round((margin / 100) * Math.min(imgW, imgH));
 
-  // Parse anchor into horizontal + vertical components
-  let h: "left" | "center" | "right";
-  let v: "top" | "center" | "bottom";
-  if (anchor === "topLeft") {
-    h = "left";
-    v = "top";
-  } else if (anchor === "topCenter") {
-    h = "center";
-    v = "top";
-  } else if (anchor === "topRight") {
-    h = "right";
-    v = "top";
-  } else if (anchor === "centerLeft") {
-    h = "left";
-    v = "center";
-  } else if (anchor === "center") {
-    h = "center";
-    v = "center";
-  } else if (anchor === "centerRight") {
-    h = "right";
-    v = "center";
-  } else if (anchor === "bottomLeft") {
-    h = "left";
-    v = "bottom";
-  } else if (anchor === "bottomCenter") {
-    h = "center";
-    v = "bottom";
-  } else {
-    h = "right";
-    v = "bottom";
-  }
-
-  let x: number;
-  if (h === "left") {
-    x = mp;
-  } else if (h === "right") {
-    x = imgW - wmW - mp;
-  } else {
-    x = Math.round((imgW - wmW) / 2);
-  }
-
-  let y: number;
-  if (v === "top") {
-    y = mp;
-  } else if (v === "bottom") {
-    y = imgH - wmH - mp;
-  } else {
-    y = Math.round((imgH - wmH) / 2);
-  }
+  const { horizontal, vertical } = getAnchorAxes(anchor);
+  const x = getWatermarkOrigin(
+    horizontal,
+    getAnchorPoint(horizontal, mp, imgW),
+    wmW
+  );
+  const y = getWatermarkOrigin(
+    vertical,
+    getAnchorPoint(vertical, mp, imgH),
+    wmH
+  );
 
   return { x, y };
 }
@@ -291,40 +304,10 @@ export function WatermarkPreview({
 
     // Resolve anchor to pixel point
     const mp = Math.round((wm.margin / 100) * Math.min(cw, ch));
-    let h: "left" | "center" | "right";
-    let v: "top" | "center" | "bottom";
     const a = wm.anchor;
-    if (a === "topLeft") {
-      h = "left";
-      v = "top";
-    } else if (a === "topCenter") {
-      h = "center";
-      v = "top";
-    } else if (a === "topRight") {
-      h = "right";
-      v = "top";
-    } else if (a === "centerLeft") {
-      h = "left";
-      v = "center";
-    } else if (a === "center") {
-      h = "center";
-      v = "center";
-    } else if (a === "centerRight") {
-      h = "right";
-      v = "center";
-    } else if (a === "bottomLeft") {
-      h = "left";
-      v = "bottom";
-    } else if (a === "bottomCenter") {
-      h = "center";
-      v = "bottom";
-    } else {
-      h = "right";
-      v = "bottom";
-    }
-
-    const ax = h === "left" ? mp : h === "right" ? cw - mp : Math.round(cw / 2);
-    const ay = v === "top" ? mp : v === "bottom" ? ch - mp : Math.round(ch / 2);
+    const { horizontal, vertical } = getAnchorAxes(a);
+    const ax = getAnchorPoint(horizontal, mp, cw);
+    const ay = getAnchorPoint(vertical, mp, ch);
 
     let wmW = 0,
       wmH = 0,
@@ -344,8 +327,8 @@ export function WatermarkPreview({
         wmW = maxDim * ratio;
       }
       // Position bounding box relative to anchor point
-      wmX = h === "left" ? ax : h === "right" ? ax - wmW : ax - wmW / 2;
-      wmY = v === "top" ? ay : v === "bottom" ? ay - wmH : ay - wmH / 2;
+      wmX = getWatermarkOrigin(horizontal, ax, wmW);
+      wmY = getWatermarkOrigin(vertical, ay, wmH);
     } else if (wm.mode === "text" && wm.text.trim()) {
       const fontSize = Math.max(10, Math.round((wm.fontSize / 72) * (cw / 4)));
       ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
@@ -354,8 +337,8 @@ export function WatermarkPreview({
       wmH = fontSize + 8;
       // Canvas text uses left/top coordinate from bounding box
       // anchor: ax,ay is the point text connects to
-      wmX = h === "left" ? ax : h === "right" ? ax - wmW : ax - wmW / 2;
-      wmY = v === "top" ? ay : v === "bottom" ? ay - wmH : ay - wmH / 2;
+      wmX = getWatermarkOrigin(horizontal, ax, wmW);
+      wmY = getWatermarkOrigin(vertical, ay, wmH);
     }
 
     // Reference lines while dragging

@@ -65,6 +65,8 @@ const TEMPLATES = [
   { labelKey: "templateDateOriginal", value: "{yyyy}{mm}{dd}_{orig}" },
 ];
 
+const FILENAME_EXTENSION_REGEX = /\.[^.]+$/;
+
 export function BatchRenameDialog({
   onClose,
   onRename,
@@ -121,8 +123,8 @@ export function BatchRenameDialog({
   const previewName = useCallback(() => {
     let name = pattern;
     const now = new Date();
-    const base = sampleFilename.replace(/\.[^.]+$/, "");
-    const ext = sampleFilename.match(/\.[^.]+$/)?.[0] ?? ".jpg";
+    const base = sampleFilename.replace(FILENAME_EXTENSION_REGEX, "");
+    const ext = sampleFilename.match(FILENAME_EXTENSION_REGEX)?.[0] ?? ".jpg";
     name = name.replace(/\{yyyy\}/g, now.getFullYear().toString());
     name = name.replace(/\{mm\}/g, String(now.getMonth() + 1).padStart(2, "0"));
     name = name.replace(/\{dd\}/g, String(now.getDate()).padStart(2, "0"));
@@ -278,11 +280,15 @@ export function BatchRenameDialog({
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[12px] text-muted-foreground">
+              <label
+                className="mb-1.5 block text-[12px] text-muted-foreground"
+                htmlFor="batch-rename-pattern"
+              >
                 {t("batchRenamePattern")}
               </label>
               <input
                 className="w-full rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[14px] text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                id="batch-rename-pattern"
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder={t("batchRenamePatternPlaceholder")}
                 value={pattern}

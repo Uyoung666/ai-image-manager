@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { rgbToNCHW } from "../../../scripts/face-preprocess.mjs";
 
 describe("rgbToNCHW", () => {
@@ -34,7 +34,9 @@ describe("rgbToNCHW", () => {
     const w = 2;
     const h = 2;
     const rgb = new Uint8Array(w * h * 3);
-    for (let i = 0; i < rgb.length; i++) rgb[i] = i;
+    for (let i = 0; i < rgb.length; i++) {
+      rgb[i] = i;
+    }
     const out = rgbToNCHW(rgb, w, h);
     const pixels = w * h;
     // pixel (0,0) = R rgb[0]

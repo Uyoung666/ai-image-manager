@@ -36,7 +36,9 @@ describe("compound search filters", () => {
   it("accepts an opaque UUID cursor and rejects malformed cursors", () => {
     const cursor = "8af4bf7d-8d8e-44e3-834f-d67ed01f4f6d";
     expect(CompoundSearchSchema.parse({ cursor })).toMatchObject({ cursor });
-    expect(() => CompoundSearchSchema.parse({ cursor: "offset:100" })).toThrow();
+    expect(() =>
+      CompoundSearchSchema.parse({ cursor: "offset:100" })
+    ).toThrow();
   });
 
   it("isolates synchronous branch failures inside allSettled", async () => {

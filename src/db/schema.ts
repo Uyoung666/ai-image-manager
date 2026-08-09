@@ -1,3 +1,4 @@
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   index,
   integer,
@@ -372,7 +373,7 @@ export const tags = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull().unique(),
-    parentId: integer("parent_id").references((): any => tags.id, {
+    parentId: integer("parent_id").references((): AnySQLiteColumn => tags.id, {
       onDelete: "set null",
     }),
     color: text("color"),

@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
+
 // Test hammingDistance utility (extracted from handlers.ts)
 function hammingDistance(a: string, b: string): number {
   let dist = 0;
   for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    const xor = Number.parseInt(a[i], 16) ^ Number.parseInt(b[i], 16);
-    dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
+    const left = Number.parseInt(a[i], 16);
+    const right = Number.parseInt(b[i], 16);
+    const leftBits = (Number.isNaN(left) ? 0 : left)
+      .toString(2)
+      .padStart(4, "0");
+    const rightBits = (Number.isNaN(right) ? 0 : right)
+      .toString(2)
+      .padStart(4, "0");
+    for (let bit = 0; bit < 4; bit++) {
+      if (leftBits[bit] !== rightBits[bit]) {
+        dist++;
+      }
+    }
   }
   return dist;
 }
@@ -38,7 +51,7 @@ function getTagColor(name: string): string {
   ];
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    hash = name.charCodeAt(i) + Math.imul(hash, 31);
   }
   return colors[Math.abs(hash) % colors.length];
 }
@@ -85,7 +98,7 @@ describe("formatFileSize", () => {
 describe("getTagColor", () => {
   it("returns a valid hex color", () => {
     const color = getTagColor("风景");
-    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(color).toMatch(HEX_COLOR_PATTERN);
   });
 
   it("returns same color for same name", () => {

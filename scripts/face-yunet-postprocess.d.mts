@@ -1,15 +1,15 @@
 export interface YuNetRawOutput {
-  dims: number[];
   data: Float32Array;
+  dims: number[];
 }
 
 export interface YuNetFace {
+  h: number;
+  landmarks: number[][];
+  score: number;
+  w: number;
   x1: number;
   y1: number;
-  w: number;
-  h: number;
-  score: number;
-  landmarks: number[][];
 }
 
 export const YUNET_STRIDES: number[];
@@ -23,7 +23,7 @@ export function decodeYuNet(
 
 /** Greedy NMS over candidate faces; returns kept indices sorted by score. */
 export function nmsBoxes(
-  faces: Array<Pick<YuNetFace, "x1" | "y1" | "w" | "h" | "score">>,
+  faces: Pick<YuNetFace, "x1" | "y1" | "w" | "h" | "score">[],
   nmsThreshold: number,
   topK?: number
 ): number[];

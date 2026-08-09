@@ -202,10 +202,10 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
                       {t(s.labelKey)}
                     </span>
                     <div className="flex flex-wrap items-center justify-end gap-1">
-                      {s.keyLabels.map((k, j) => (
+                      {s.keyLabels.map((k) => (
                         <span
                           className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-medium text-[11px] text-muted-foreground"
-                          key={j}
+                          key={`${s.labelKey}-${k}`}
                         >
                           {keyLabel(k)}
                         </span>

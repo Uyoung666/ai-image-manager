@@ -153,43 +153,47 @@ export function DashboardBarChart({
   return (
     <div className="h-[clamp(12rem,36dvh,14.375rem)] min-w-0">
       <ResponsiveContainer height="100%" width="100%">
-      <BarChart
-        data={data}
-        layout="horizontal"
-        margin={{ bottom: 24, left: 0, right: 8, top: 4 }}
-      >
-        <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical />
-        <XAxis
-          axisLine={false}
-          dataKey="name"
-          interval="preserveStartEnd"
-          tick={axisTick}
-          tickLine={false}
-        />
-        <YAxis axisLine={false} tick={axisTick} tickLine={false} width={42} />
-        <Tooltip
-          content={<CountTooltip sampleTotal={sampleTotal} />}
-          cursor={{ fill: "var(--muted)" }}
-        />
-        <Bar
-          animationDuration={400}
-          animationEasing="ease-out"
-          dataKey="count"
-          isAnimationActive={!noMotion}
-          onClick={(point) => {
-            const dashboardPoint = point as DashboardPoint;
-            if (dashboardPoint.count > 0) {
-              onPointClick?.(dashboardPoint);
-            }
-          }}
-          radius={[4, 4, 0, 0]}
-          style={onPointClick ? { cursor: "pointer" } : undefined}
+        <BarChart
+          data={data}
+          layout="horizontal"
+          margin={{ bottom: 24, left: 0, right: 8, top: 4 }}
         >
-          {data.map((point) => (
-            <Cell fill={color} key={point.name} />
-          ))}
-        </Bar>
-      </BarChart>
+          <CartesianGrid
+            stroke="var(--border)"
+            strokeDasharray="3 3"
+            vertical
+          />
+          <XAxis
+            axisLine={false}
+            dataKey="name"
+            interval="preserveStartEnd"
+            tick={axisTick}
+            tickLine={false}
+          />
+          <YAxis axisLine={false} tick={axisTick} tickLine={false} width={42} />
+          <Tooltip
+            content={<CountTooltip sampleTotal={sampleTotal} />}
+            cursor={{ fill: "var(--muted)" }}
+          />
+          <Bar
+            animationDuration={400}
+            animationEasing="ease-out"
+            dataKey="count"
+            isAnimationActive={!noMotion}
+            onClick={(point) => {
+              const dashboardPoint = point as DashboardPoint;
+              if (dashboardPoint.count > 0) {
+                onPointClick?.(dashboardPoint);
+              }
+            }}
+            radius={[4, 4, 0, 0]}
+            style={onPointClick ? { cursor: "pointer" } : undefined}
+          >
+            {data.map((point) => (
+              <Cell fill={color} key={point.name} />
+            ))}
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );
@@ -294,41 +298,39 @@ function ChartDataTable({
         </tr>
       </thead>
       <tbody>
-        {data.map((point) => (
-          <tr className="border-border border-t" key={point.name}>
-            <td className="px-3 py-2">
-              {onPointClick && point.count > 0 ? (
-                <button
-                  className="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={() => onPointClick(point)}
-                  type="button"
-                >
-                  {point.isGap
-                    ? t("dashboardNoDataYears", {
-                        from: point.gapStart,
-                        to: point.gapEnd,
-                      })
-                    : point.name}
-                </button>
-              ) : point.isGap ? (
-                t("dashboardNoDataYears", {
-                  from: point.gapStart,
-                  to: point.gapEnd,
-                })
-              ) : (
-                point.name
-              )}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-              {point.count.toLocaleString(i18n.language)}
-            </td>
-            <td className="px-3 py-2 text-right tabular-nums">
-              {sampleTotal
-                ? `${((point.count / sampleTotal) * 100).toFixed(1)}%`
-                : "—"}
-            </td>
-          </tr>
-        ))}
+        {data.map((point) => {
+          const pointLabel = point.isGap
+            ? t("dashboardNoDataYears", {
+                from: point.gapStart,
+                to: point.gapEnd,
+              })
+            : point.name;
+          return (
+            <tr className="border-border border-t" key={point.name}>
+              <td className="px-3 py-2">
+                {onPointClick && point.count > 0 ? (
+                  <button
+                    className="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={() => onPointClick(point)}
+                    type="button"
+                  >
+                    {pointLabel}
+                  </button>
+                ) : (
+                  pointLabel
+                )}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {point.count.toLocaleString(i18n.language)}
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">
+                {sampleTotal
+                  ? `${((point.count / sampleTotal) * 100).toFixed(1)}%`
+                  : "—"}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

@@ -53,6 +53,7 @@ export async function launchWanderApp(
   const app = await _electron.launch({
     args: [
       "--disable-gpu-sandbox",
+      "--no-sandbox",
       "--enable-unsafe-swiftshader",
       "--use-angle=swiftshader",
       `--user-data-dir=${userDataDir}`,

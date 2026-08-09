@@ -71,7 +71,10 @@ export function PreviewContextMenu({
         viewportMargin,
         Math.min(
           menu.x,
-          Math.max(viewportMargin, window.innerWidth - bounds.width - viewportMargin)
+          Math.max(
+            viewportMargin,
+            window.innerWidth - bounds.width - viewportMargin
+          )
         )
       );
       const top = Math.max(
@@ -85,9 +88,7 @@ export function PreviewContextMenu({
         )
       );
       setPosition((current) =>
-        current.left === left && current.top === top
-          ? current
-          : { left, top }
+        current.left === left && current.top === top ? current : { left, top }
       );
     };
     updatePosition();
@@ -110,15 +111,16 @@ export function PreviewContextMenu({
         disabled={!menu.photoPath}
         onClick={async () => {
           if (menu.photoPath) {
-            const ok = await (
-              window as any
-            ).electronAPI?.copyImageToClipboard?.(menu.photoPath);
+            const ok = await window.electronAPI?.copyImageToClipboard?.(
+              menu.photoPath
+            );
             if (ok) {
               toast.success(t("imageCopiedToClipboard"));
             }
           }
           onClose();
         }}
+        type="button"
       >
         <Image className="h-3.5 w-3.5 flex-shrink-0" />
         {t("copyImage")}
@@ -134,6 +136,7 @@ export function PreviewContextMenu({
           }
           onClose();
         }}
+        type="button"
       >
         <Copy className="h-3.5 w-3.5 flex-shrink-0" />
         {t("copyPath")}
@@ -147,6 +150,7 @@ export function PreviewContextMenu({
           }
           onClose();
         }}
+        type="button"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
         {t("openInExplorer")}

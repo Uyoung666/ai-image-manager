@@ -41,10 +41,7 @@ export function recordGalleryPerf(name: string, value: number): void {
 }
 
 export function recordGalleryMediaStat(name: string): void {
-  if (
-    typeof process !== "undefined" &&
-    process.env.NODE_ENV === "production"
-  ) {
+  if (typeof process !== "undefined" && process.env.NODE_ENV === "production") {
     return;
   }
   const mediaGlobal = globalThis as GalleryMediaGlobal;

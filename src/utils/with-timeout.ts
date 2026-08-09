@@ -16,9 +16,7 @@ export async function withTimeout<T>(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(
-        new Error(
-          `IPC 调用${label ? ` "${label}"` : ""} 超时 (${timeoutMs}ms)`
-        )
+        new Error(`IPC 调用${label ? ` "${label}"` : ""} 超时 (${timeoutMs}ms)`)
       );
     }, timeoutMs);
   });
