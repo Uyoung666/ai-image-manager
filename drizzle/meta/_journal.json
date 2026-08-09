@@ -302,6 +302,13 @@
       "when": 1786500000018,
       "tag": "0042_add_photo_view_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786500000019,
+      "tag": "0043_repair_fts5_search",
+      "breakpoints": true
     }
   ]
 }

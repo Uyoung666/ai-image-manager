@@ -210,7 +210,6 @@ export function initDatabase(): ReturnType<typeof drizzle> {
     }
   } catch (err) {
     closeDatabase();
-    dbInstance = null;
     throw err;
   }
 
@@ -328,25 +327,55 @@ function dbDiag(msg: string) {
 }
 
 export function closeDatabase(): void {
-  if (sqliteConnection) {
+  const connection = sqliteConnection;
+  if (!connection) {
+    dbDiag("closeDatabase: sqliteConnection already null, skip");
+    console.warn("[DB] Connection was already null/undefined, skipping close");
+    dbInstance = null;
+    return;
+  }
+
+  let closed = false;
+  try {
+    // A busy/failing checkpoint must not prevent close(). close() itself also
+    // flushes committed WAL pages, and retaining the reference until it has
+    // actually succeeded lets a later shutdown retry a failed close.
     try {
-      // Flush WAL to main database file so the copy captures all committed data
-      sqliteConnection.pragma("wal_checkpoint(TRUNCATE)");
-      dbDiag("closeDatabase: wal_checkpoint OK, calling close()");
-      sqliteConnection.close();
-      dbDiag("closeDatabase: OK");
-      console.log("[DB] Connection closed gracefully");
+      const checkpoint = connection.pragma(
+        "wal_checkpoint(TRUNCATE)"
+      ) as Array<{
+        busy?: number;
+      }>;
+      if (checkpoint[0]?.busy) {
+        dbDiag("closeDatabase: wal_checkpoint busy");
+        console.warn("[DB] WAL checkpoint was busy; continuing with close()");
+      } else {
+        dbDiag("closeDatabase: wal_checkpoint OK");
+      }
     } catch (err) {
-      dbDiag(`closeDatabase: ERROR ${(err as Error)?.message ?? err}`);
+      dbDiag(
+        `closeDatabase: wal_checkpoint ERROR ${(err as Error)?.message ?? err}`
+      );
       console.error(
-        "[DB] Non-fatal error during close:",
+        "[DB] WAL checkpoint failed; continuing with close():",
         (err as Error)?.message ?? err
       );
     }
-    sqliteConnection = null;
-  } else {
-    dbDiag("closeDatabase: sqliteConnection already null, skip");
-    console.warn("[DB] Connection was already null/undefined, skipping close");
+
+    connection.close();
+    closed = true;
+    dbDiag("closeDatabase: OK");
+    console.log("[DB] Connection closed gracefully");
+  } catch (err) {
+    dbDiag(`closeDatabase: close ERROR ${(err as Error)?.message ?? err}`);
+    console.error(
+      "[DB] Non-fatal error during close:",
+      (err as Error)?.message ?? err
+    );
+  } finally {
+    if (closed) {
+      sqliteConnection = null;
+      dbInstance = null;
+    }
   }
-  dbInstance = null;
 }

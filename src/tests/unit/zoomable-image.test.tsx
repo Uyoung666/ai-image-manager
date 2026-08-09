@@ -159,4 +159,37 @@ describe("ZoomableImage", () => {
     expect(onSync).not.toHaveBeenCalled();
     frameSpy.mockRestore();
   });
+
+  it("cancels inertia frames when it unmounts", () => {
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const frameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frameCallbacks.push(callback);
+        return frameCallbacks.length;
+      });
+    const cancelSpy = vi.spyOn(window, "cancelAnimationFrame");
+    const performanceSpy = vi
+      .spyOn(performance, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValue(16);
+    const { unmount } = render(
+      <ZoomableImage alt="photo" filePath="original.jpg" />
+    );
+    const image = screen.getByRole("img", { name: "photo" });
+
+    fireEvent.keyDown(document, { key: "+" });
+    fireEvent.mouseDown(image, { clientX: 0, clientY: 0 });
+    fireEvent.mouseMove(window, { clientX: 100, clientY: 0 });
+    fireEvent.mouseUp(window);
+
+    expect(frameCallbacks.length).toBeGreaterThan(0);
+    const inertiaFrame = frameCallbacks.length;
+    unmount();
+
+    expect(cancelSpy).toHaveBeenCalledWith(inertiaFrame);
+    frameSpy.mockRestore();
+    cancelSpy.mockRestore();
+    performanceSpy.mockRestore();
+  });
 });

@@ -76,16 +76,6 @@ function notifyDownloaded(payload: UpdatePayload) {
   }
 }
 
-function getVersionFromInfo(info: unknown): string | undefined {
-  if (!info || typeof info !== "object") {
-    return undefined;
-  }
-  const value =
-    (info as { version?: unknown; releaseName?: unknown }).version ??
-    (info as { releaseName?: unknown }).releaseName;
-  return typeof value === "string" ? value : undefined;
-}
-
 function attachListeners() {
   if (listenersAttached) {
     return;
@@ -96,9 +86,9 @@ function attachListeners() {
     on: (event: string, listener: (...args: unknown[]) => void) => void;
   };
   updater.on("checking-for-update", () => broadcast({ phase: "checking" }));
-  updater.on("update-available", (...args) =>
-    broadcast({ phase: "downloading", version: getVersionFromInfo(args[1]) })
-  );
+  // Electron's update-available event does not carry update metadata. The
+  // downloaded event below is the first point where release details exist.
+  updater.on("update-available", () => broadcast({ phase: "downloading" }));
   updater.on("update-not-available", () => broadcast({ phase: "up-to-date" }));
   updater.on("error", (...args) => {
     const error = args[0];
@@ -119,7 +109,8 @@ function attachListeners() {
   });
 
   updater.on("update-downloaded", (...args) => {
-    const [releaseNotes, releaseName, releaseDate, updateURL] = args as [
+    const [, releaseNotes, releaseName, releaseDate, updateURL] = args as [
+      unknown,
       string | null | undefined,
       string | null | undefined,
       string | null | undefined,

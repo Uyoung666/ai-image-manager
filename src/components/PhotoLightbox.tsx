@@ -89,6 +89,14 @@ function isEditableTarget(target: EventTarget | null) {
   );
 }
 
+function getFocusableElements(root: HTMLElement) {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the viewer intentionally coordinates its mutually constrained review modes in one owner.
 export const PhotoLightbox = memo(function PhotoLightbox({
   photos,
@@ -113,6 +121,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const wheelZoomRef = useRef(1);
   const wheelActiveRef = useRef(false);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const focusFrameRef = useRef<number | null>(null);
   const currentPhotoIdRef = useRef<number | null>(null);
   const thumbnailRefs = useRef(new Map<number, HTMLButtonElement>());
   const dragRef = useRef<{
@@ -447,8 +456,24 @@ export const PhotoLightbox = memo(function PhotoLightbox({
       return;
     }
     previousFocusRef.current = document.activeElement as HTMLElement | null;
-    requestAnimationFrame(() => rootRef.current?.focus());
-    return () => previousFocusRef.current?.focus?.();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = null;
+      rootRef.current?.focus();
+    });
+    return () => {
+      if (focusFrameRef.current !== null) {
+        cancelAnimationFrame(focusFrameRef.current);
+        focusFrameRef.current = null;
+      }
+      document.body.style.overflow = previousOverflow;
+      const previousFocus = previousFocusRef.current;
+      previousFocusRef.current = null;
+      if (previousFocus?.isConnected) {
+        previousFocus.focus();
+      }
+    };
   }, [open]);
 
   useEffect(() => {
@@ -535,6 +560,28 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         return;
       }
       if (event.key === "Tab") {
+        const root = rootRef.current;
+        if (root) {
+          const focusable = getFocusableElements(root);
+          if (focusable.length === 0) {
+            event.preventDefault();
+            root.focus();
+          } else {
+            const currentIndex = focusable.indexOf(
+              document.activeElement as HTMLElement
+            );
+            let nextIndex: number;
+            if (event.shiftKey) {
+              nextIndex =
+                currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1;
+            } else {
+              nextIndex =
+                currentIndex === focusable.length - 1 ? 0 : currentIndex + 1;
+            }
+            event.preventDefault();
+            focusable[nextIndex]?.focus();
+          }
+        }
         revealControls();
         return;
       }
@@ -645,6 +692,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     // biome-ignore lint/a11y/noNoninteractiveElementInteractions: the modal dialog surface owns global reveal and image context-menu interactions.
     <div
       aria-label={t("lightboxReview")}
+      aria-modal="true"
       className={`lightbox-interactive fixed inset-0 z-[1000] flex overflow-hidden bg-[#09090b] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
       onContextMenu={(event) => {
         const target = event.target as HTMLElement;
@@ -785,7 +833,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                     icon={<FolderOpen className="h-4 w-4" />}
                     label={t("openInExplorer")}
                     onClick={() => {
-                      ipc.client.shell.openInExplorer({ path: photo.path });
+                      ipc.client.shell
+                        .openInExplorer({ path: photo.path })
+                        .catch(() => undefined);
                       setMoreOpen(false);
                     }}
                   />
@@ -844,9 +894,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                 </button>
                 <button
                   className="lightbox-secondary-button"
-                  onClick={() =>
-                    ipc.client.shell.openInExplorer({ path: photo.path })
-                  }
+                  onClick={() => {
+                    ipc.client.shell
+                      .openInExplorer({ path: photo.path })
+                      .catch(() => undefined);
+                  }}
                   type="button"
                 >
                   <FolderOpen className="h-3.5 w-3.5" />
@@ -1173,7 +1225,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         <LightboxInfoPanel
           onClose={() => setInfoVisible(false)}
           onOpenExplorer={(path) => {
-            ipc.client.shell.openInExplorer({ path });
+            ipc.client.shell.openInExplorer({ path }).catch(() => undefined);
           }}
           photo={photo}
         />
@@ -1183,7 +1235,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         menu={previewMenu}
         onClose={() => setPreviewMenu((value) => ({ ...value, open: false }))}
         onOpenExplorer={(path) => {
-          ipc.client.shell.openInExplorer({ path });
+          ipc.client.shell.openInExplorer({ path }).catch(() => undefined);
         }}
       />
     </div>,

@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -17,7 +18,7 @@ import { getDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { recordGalleryMediaStat } from "@/utils/gallery-perf";
 import { createLogger } from "@/utils/logger";
-import { isSafePath } from "@/utils/path-security";
+import { resolveSafePath as resolveSecurePath } from "@/utils/path-security";
 
 const log = createLogger("http-server");
 
@@ -26,6 +27,7 @@ const log = createLogger("http-server");
 let server: http.Server | null = null;
 let serverPort: number | null = null;
 let isServerStarted = false;
+const authToken = randomBytes(32).toString("hex");
 // 保存首次分配的端口号，重启时复用，避免 renderer 持有的
 // preload 注入端口（通过 --http-port）在迁移后失效。
 let lastUsedPort: number | null = null;
@@ -201,21 +203,52 @@ function safeEndError(
 
 // ── CORS 响应头 ───────────────────────────────────────────────────────
 
-function setCorsHeaders(res: http.ServerResponse): void {
-  res.setHeader("access-control-allow-origin", "*");
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin || origin === "null") {
+    return origin === "null";
+  }
+  try {
+    const parsed = new URL(origin);
+    return (
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function setCorsHeaders(res: http.ServerResponse, origin?: string): void {
+  if (typeof origin !== "string" || !isAllowedOrigin(origin)) {
+    return;
+  }
+  res.setHeader("access-control-allow-origin", origin);
+  res.setHeader("vary", "Origin");
+}
+
+function isValidAuthToken(candidate: string | undefined): boolean {
+  if (!candidate || candidate.length !== authToken.length) {
+    return false;
+  }
+  return timingSafeEqual(Buffer.from(candidate), Buffer.from(authToken));
+}
+
+function isAuthorized(
+  req: http.IncomingMessage,
+  searchParams: URLSearchParams
+): boolean {
+  const queryToken = searchParams.get("token") ?? undefined;
+  const headerToken = req.headers["x-ai-image-manager-token"];
+  const candidate =
+    queryToken ?? (typeof headerToken === "string" ? headerToken : undefined);
+  return isValidAuthToken(candidate);
 }
 
 // ── 路径安全校验 ──────────────────────────────────────────────────────
 
 function resolveSafePath(targetPath: string): string | null {
-  const resolved = path.resolve(targetPath);
   const allowedRoots = [getDataPath(), ...getFolderPaths()];
-
-  if (!isSafePath(resolved, allowedRoots)) {
-    return null;
-  }
-
-  return resolved;
+  return resolveSecurePath(targetPath, allowedRoots);
 }
 
 // ── 路由：GET /thumbnail ──────────────────────────────────────────────
@@ -757,8 +790,14 @@ function handleRequest(
     return;
   }
 
+  if (!isAuthorized(req, searchParams)) {
+    res.writeHead(401);
+    res.end("Unauthorized");
+    return;
+  }
+
   if (req.method === "OPTIONS") {
-    setCorsHeaders(res);
+    setCorsHeaders(res, req.headers.origin);
     res.setHeader("access-control-allow-methods", "GET, OPTIONS");
     res.setHeader("access-control-allow-headers", "*");
     res.writeHead(204);
@@ -767,15 +806,17 @@ function handleRequest(
   }
 
   if (req.method !== "GET") {
-    setCorsHeaders(res);
+    setCorsHeaders(res, req.headers.origin);
     res.writeHead(405);
     res.end("Method Not Allowed");
     return;
   }
 
+  setCorsHeaders(res, req.headers.origin);
+
   const filePath = searchParams.get("path");
   if (!filePath) {
-    setCorsHeaders(res);
+    setCorsHeaders(res, req.headers.origin);
     res.writeHead(400);
     res.end("Missing 'path' query parameter");
     return;
@@ -783,7 +824,7 @@ function handleRequest(
 
   const safePath = resolveSafePath(filePath);
   if (!safePath) {
-    setCorsHeaders(res);
+    setCorsHeaders(res, req.headers.origin);
     res.writeHead(403);
     res.end("Forbidden");
     log.warn(`[HttpServer] Security: blocked access to ${filePath}`);
@@ -804,7 +845,7 @@ function handleRequest(
       handleDuelPreview(safePath, res);
       break;
     default:
-      setCorsHeaders(res);
+      setCorsHeaders(res, req.headers.origin);
       res.writeHead(501);
       res.end("Not Implemented");
   }
@@ -906,6 +947,10 @@ export function stopHttpServer(): Promise<void> {
 
 export function getHttpServerPort(): number | null {
   return serverPort;
+}
+
+export function getHttpServerAuthToken(): string {
+  return authToken;
 }
 
 export function isHttpServerRunning(): boolean {

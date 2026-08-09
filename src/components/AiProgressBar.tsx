@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { openExternalLink } from "@/actions/shell";
 import { ipc } from "@/ipc/manager";
 
 interface AiProgress {
@@ -43,11 +44,16 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
     fetchProgress().then((p) => {
-      if (p) {
+      if (!disposed && p) {
         setProgress(p);
       }
     });
+
+    return () => {
+      disposed = true;
+    };
   }, [fetchProgress]);
 
   // Poll while active (fast: 500ms)
@@ -58,9 +64,13 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
 
     pollingRef.current = true;
     let timer: ReturnType<typeof setTimeout>;
+    let disposed = false;
 
     const poll = async () => {
       const p = await fetchProgress();
+      if (disposed) {
+        return;
+      }
       if (p) {
         setProgress(p);
       }
@@ -74,6 +84,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     timer = setTimeout(poll, 500);
 
     return () => {
+      disposed = true;
       clearTimeout(timer);
       pollingRef.current = false;
     };
@@ -88,9 +99,13 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
 
     slowPollRef.current = true;
     let timer: ReturnType<typeof setTimeout>;
+    let disposed = false;
 
     const poll = async () => {
       const p = await fetchProgress();
+      if (disposed) {
+        return;
+      }
       if (p) {
         setProgress(p);
       }
@@ -105,6 +120,7 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
     timer = setTimeout(poll, 2000);
 
     return () => {
+      disposed = true;
       clearTimeout(timer);
       slowPollRef.current = false;
     };
@@ -187,8 +203,12 @@ export function AiProgressBar({ disabled = false }: { disabled?: boolean }) {
               </p>
               <button
                 className="w-full rounded-[4px] bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20"
-                onClick={() => {
-                  window.open("https://hf-mirror.com", "_blank");
+                onClick={async () => {
+                  try {
+                    await openExternalLink("https://hf-mirror.com");
+                  } catch {
+                    // The shell action reports its own failure to the caller.
+                  }
                 }}
                 type="button"
               >

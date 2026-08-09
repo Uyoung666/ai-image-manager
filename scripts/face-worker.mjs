@@ -8,9 +8,9 @@
  *
  * IPC Protocol:
  *   Parent sends: { type: "init", modelsDir, useGPU }
- *                 { type: "detect", photos: [{ id, path }, ...] }
+ *                 { type: "detect", requestId, photos: [{ id, path }, ...] }
  *   Worker sends: { type: "ready" | "init-progress" }
- *                 { type: "result", results: [{ id, faces: [{ faceIndex, bbox, confidence, embedding }] }] }
+ *                 { type: "result", requestId, results: [{ id, faces: [{ faceIndex, bbox, confidence, embedding }] }] }
  */
 
 import fs from "node:fs";
@@ -434,21 +434,33 @@ async function handleInitMessage(msg) {
   }
 }
 
-async function processDetectBatch(photos) {
-  const batchTimeout = setTimeout(() => {
-    console.error("[FaceWorker] Batch timeout reached");
+async function processDetectBatch(photos, requestId) {
+  const results = [];
+  let resultSent = false;
+  const sendResult = (batchResults, error) => {
+    if (resultSent) {
+      return;
+    }
+    resultSent = true;
     process.send?.({
       type: "result",
-      results: photos.map((p) => ({ id: p.id, faces: [] })),
-      error: "Batch timeout",
+      requestId,
+      results: batchResults,
+      ...(error ? { error } : {}),
     });
+  };
+  const batchTimeout = setTimeout(() => {
+    console.error("[FaceWorker] Batch timeout reached");
+    aborted = true;
+    sendResult(
+      photos.map((p) => ({ id: p.id, faces: [] })),
+      "Batch timeout"
+    );
   }, WORKER_TIMEOUT_MS);
 
   console.error(`[FaceWorker] Processing ${photos.length} photos`);
   const batchStartMs = Date.now();
   const PER_PHOTO_TIMEOUT_MS = 60_000;
-  const results = [];
-
   // Reset abort flag for new batch
   aborted = false;
 
@@ -490,13 +502,14 @@ async function processDetectBatch(photos) {
   );
 
   clearTimeout(batchTimeout);
-  process.send?.({ type: "result", results });
+  sendResult(results);
 }
 
 async function handleDetectMessage(msg) {
   if (!modelsReady) {
     process.send?.({
       type: "result",
+      requestId: msg.requestId,
       results: msg.photos.map((p) => ({ id: p.id, faces: [] })),
       error: "Models not initialized",
     });
@@ -505,11 +518,11 @@ async function handleDetectMessage(msg) {
 
   const { photos } = msg;
   if (!photos?.length) {
-    process.send?.({ type: "result", results: [] });
+    process.send?.({ type: "result", requestId: msg.requestId, results: [] });
     return;
   }
 
-  await processDetectBatch(photos);
+  await processDetectBatch(photos, msg.requestId);
 }
 
 async function handleWorkerMessage(msg) {
@@ -542,6 +555,7 @@ function reportWorkerMessageError(msg, err) {
   if (msg.type === "detect") {
     process.send?.({
       type: "result",
+      requestId: msg.requestId,
       results: (msg.photos || []).map((p) => ({ id: p.id, faces: [] })),
       error: err.message,
     });

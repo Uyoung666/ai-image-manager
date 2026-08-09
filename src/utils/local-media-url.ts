@@ -4,6 +4,23 @@ import { preloadImagesWithConcurrency } from "./image-preloader";
 const DISPLAY_PIPELINE_VERSION = 2;
 const MEDIA_PRELOAD_CONCURRENCY = 4;
 
+function getHttpAuthToken(): string {
+  const api = window.electronAPI as typeof window.electronAPI & {
+    httpAuthToken?: unknown;
+  };
+  return typeof api?.httpAuthToken === "string" ? api.httpAuthToken : "";
+}
+
+function buildHttpMediaUrl(
+  port: number,
+  route: string,
+  filePath: string
+): string {
+  const token = getHttpAuthToken();
+  const auth = token ? `&token=${encodeURIComponent(token)}` : "";
+  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}${auth}`;
+}
+
 /**
  * 将本地文件路径转换为可访问的媒体 URL。
  *
@@ -24,7 +41,7 @@ export function toLocalMediaUrl(filePath: string | null | undefined): string {
     // webp 缩略图走 /thumbnail 路由，非 webp 原始文件走 /image 路由
     const lower = filePath.toLowerCase();
     const route = lower.endsWith(".webp") ? "thumbnail" : "image";
-    return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
+    return buildHttpMediaUrl(port, route, filePath);
   }
 
   // ── 回退：原有 local-media:// 协议 ──────────────────────────────
@@ -47,7 +64,7 @@ export function toPreviewUrl(filePath: string | null | undefined): string {
 
   const port = getHttpPortSync();
   if (port !== null) {
-    return `http://127.0.0.1:${port}/preview?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
+    return buildHttpMediaUrl(port, "preview", filePath);
   }
 
   // 回退：提取 preview 对 local-media:// 无意义，走通用 URL
@@ -68,7 +85,7 @@ export async function toHttpMediaUrl(
   const port = await getHttpPort();
   const lower = filePath.toLowerCase();
   const route = lower.endsWith(".webp") ? "thumbnail" : "image";
-  return `http://127.0.0.1:${port}/${route}?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
+  return buildHttpMediaUrl(port, route, filePath);
 }
 
 /**
@@ -81,7 +98,7 @@ export function toDuelPreviewUrl(filePath: string | null | undefined): string {
   }
   const port = getHttpPortSync();
   if (port !== null) {
-    return `http://127.0.0.1:${port}/duel-preview?path=${encodeURIComponent(filePath)}&v=${DISPLAY_PIPELINE_VERSION}`;
+    return buildHttpMediaUrl(port, "duel-preview", filePath);
   }
   // 回退：JPEG 走 /image 路由
   return toLocalMediaUrl(filePath);

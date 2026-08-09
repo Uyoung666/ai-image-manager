@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { it } from "vitest";
 import {
   renderMemoryLocalizationMarkdown,
   summarizeMemoryLocalization,
@@ -25,7 +25,7 @@ function memorySample(completed, generation, phase, parentRss, workerRss) {
   };
 }
 
-test("memory localization attributes restart-released RSS to the worker", () => {
+it("memory localization attributes restart-released RSS to the worker", () => {
   const samples = [
     memorySample(0, 1, "workers-ready", 100, 200),
     memorySample(100, 1, "segment", 105, 220),

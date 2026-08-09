@@ -51,4 +51,36 @@ describe("migration journal", () => {
     );
     expect(migration).toContain("ON DELETE cascade");
   });
+
+  it("registers the FTS5 compensation migration", () => {
+    const journal = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), "drizzle", "meta", "_journal.json"),
+        "utf8"
+      )
+    ) as { entries: Array<{ tag: string; when: number }> };
+    const entry = journal.entries.find(
+      ({ tag }) => tag === "0043_repair_fts5_search"
+    );
+
+    expect(entry).toBeDefined();
+    expect(
+      fs.existsSync(
+        path.join(process.cwd(), "drizzle", "0043_repair_fts5_search.sql")
+      )
+    ).toBe(true);
+  });
+
+  it("reinstalls complete FTS5 photo and EXIF triggers", () => {
+    const migration = fs.readFileSync(
+      path.join(process.cwd(), "drizzle", "0043_repair_fts5_search.sql"),
+      "utf8"
+    );
+
+    expect(migration).toContain("content=photo_search_source");
+    expect(migration).toContain("DROP TABLE IF EXISTS photos_fts");
+    expect(migration).toContain("DROP TRIGGER IF EXISTS exif_fts_delete");
+    expect(migration).toContain("CREATE TRIGGER photos_fts_hard_delete");
+    expect(migration).toContain("CREATE TRIGGER exif_fts_delete");
+  });
 });

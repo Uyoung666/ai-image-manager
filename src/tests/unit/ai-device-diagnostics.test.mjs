@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { it } from "vitest";
 import {
   aggregateDiagnostics,
   createExecutionPlan,
   parseArguments,
 } from "../../../scripts/run-ai-device-diagnostics.mjs";
 
-test("device diagnostics rotates all three configurations", () => {
+it("device diagnostics rotates all three configurations", () => {
   assert.deepEqual(createExecutionPlan(2), [
     { profileId: "low-1x1", round: 1 },
     { profileId: "automatic", round: 1 },
@@ -17,14 +17,14 @@ test("device diagnostics rotates all three configurations", () => {
   ]);
 });
 
-test("device diagnostics validates long-run bounds", () => {
+it("device diagnostics validates long-run bounds", () => {
   assert.equal(parseArguments([]).count, 1000);
   assert.throws(() => parseArguments(["--count", "499"]));
   assert.throws(() => parseArguments(["--count", "1001"]));
   assert.throws(() => parseArguments(["--trials", "0"]));
 });
 
-test("device diagnostics separates parent and worker memory aggregates", () => {
+it("device diagnostics separates parent and worker memory aggregates", () => {
   const trial = {
     profileId: "automatic",
     status: "complete",

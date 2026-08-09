@@ -3,8 +3,15 @@ import path from "node:path";
 import process from "node:process";
 import electronPath from "electron";
 
-const vitestPath = path.resolve("node_modules", "vitest", "vitest.mjs");
+const projectRoot = path.resolve(import.meta.dirname, "..");
+const vitestPath = path.join(
+  projectRoot,
+  "node_modules",
+  "vitest",
+  "vitest.mjs"
+);
 const result = spawnSync(electronPath, [vitestPath, ...process.argv.slice(2)], {
+  cwd: projectRoot,
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",

@@ -12,6 +12,7 @@
 
 const DEFAULT_CONCURRENCY = 12;
 const SINGLE_TIMEOUT_MS = 8000;
+const LOADED_URL_CACHE_MAX = 512;
 
 interface PreloadTask {
   resolve: (result: "loaded" | "failed") => void;
@@ -74,6 +75,12 @@ function pumpQueue() {
       .then((result) => {
         if (result === "loaded") {
           loadedUrls.add(task.url);
+          if (loadedUrls.size > LOADED_URL_CACHE_MAX) {
+            const oldestUrl = loadedUrls.values().next().value;
+            if (oldestUrl !== undefined) {
+              loadedUrls.delete(oldestUrl);
+            }
+          }
         }
         task.resolve(result);
       })

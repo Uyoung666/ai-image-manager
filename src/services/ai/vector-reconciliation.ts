@@ -3,6 +3,14 @@ export interface VectorReconciliationPlan {
   orphanIds: number[];
 }
 
+export function getUnreconciledVectorIds(
+  targetIds: Iterable<number>,
+  remainingIds: Iterable<number>
+): number[] {
+  const remaining = new Set(remainingIds);
+  return [...new Set(targetIds)].filter((photoId) => remaining.has(photoId));
+}
+
 export function planVectorReconciliation(
   vectorPhotoIds: number[],
   validPhotoIds: Iterable<number>,

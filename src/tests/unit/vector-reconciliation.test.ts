@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { planVectorReconciliation } from "@/services/ai/vector-reconciliation";
+import {
+  getUnreconciledVectorIds,
+  planVectorReconciliation,
+} from "@/services/ai/vector-reconciliation";
 
 describe("vector reconciliation", () => {
   it("识别已从 SQLite 删除的文件夹照片向量", () => {
@@ -24,5 +27,16 @@ describe("vector reconciliation", () => {
     const plan = planVectorReconciliation([0, -1, Number.NaN, 1], [1]);
 
     expect(plan).toEqual({ orphanIds: [], duplicateIds: [] });
+  });
+
+  it("在删除目标同时存在重复向量时仍只返回一个目标 ID", () => {
+    const plan = planVectorReconciliation([7, 7, 8], [7, 8], [7]);
+
+    expect(plan).toEqual({ orphanIds: [7], duplicateIds: [] });
+  });
+
+  it("不会用行数差代替对每个删除目标的确认", () => {
+    expect(getUnreconciledVectorIds([1, 2, 2], [2, 3])).toEqual([2]);
+    expect(getUnreconciledVectorIds([1, 2], [3, 4])).toEqual([]);
   });
 });

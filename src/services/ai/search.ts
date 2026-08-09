@@ -51,7 +51,7 @@ import {
   getTranslationModelVersion,
   warmupTranslationWorker,
 } from "./translation-worker-client";
-import { initVectorDB } from "./vector-db";
+import { initVectorDB, withVectorDbOperation } from "./vector-db";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -802,7 +802,12 @@ export async function searchByTextWithPlan(
     return cached;
   }
 
-  const searchPromise = performTextSearch(query, limit, cacheKey, sensitivity);
+  const searchPromise = (async () => {
+    await initVectorDB();
+    return withVectorDbOperation(() =>
+      performTextSearch(query, limit, cacheKey, sensitivity)
+    );
+  })();
   pendingTextSearches.set(cacheKey, searchPromise);
   try {
     return await searchPromise;
@@ -851,7 +856,6 @@ async function performTextSearch(
     };
   }
 
-  await initVectorDB();
   const initMs = Date.now() - initStartedAt;
 
   const vectorCompatibility = getEffectiveVectorCompatibility();
@@ -1009,16 +1013,23 @@ export function warmupAiSearch(): Promise<void> {
   return warmupPromise;
 }
 
-export async function searchByImage(
+export function searchByImage(
   imagePath: string,
   limit = 20
+): Promise<Array<{ photoId: number; similarity: number }>> {
+  return initVectorDB().then(() =>
+    withVectorDbOperation(() => performSearchByImage(imagePath, limit))
+  );
+}
+
+async function performSearchByImage(
+  imagePath: string,
+  limit: number
 ): Promise<Array<{ photoId: number; similarity: number }>> {
   if (!(imagePath && fs.existsSync(imagePath))) {
     console.warn("[AI] searchByImage: image file not found:", imagePath);
     return [];
   }
-
-  await initVectorDB();
 
   const vectorCompatibility = getEffectiveVectorCompatibility();
   if (

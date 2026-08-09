@@ -18,8 +18,42 @@ export interface SharePhoto {
   width: number;
 }
 
-function buildSharePageHtml(items: SharePhoto[], locale = "zh-CN"): string {
-  const itemsJson = JSON.stringify(
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character
+  );
+}
+
+function serializeForInlineScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+export function buildSharePageHtml(
+  items: SharePhoto[],
+  locale = "zh-CN"
+): string {
+  let normalizedLocale = "zh-CN";
+  try {
+    normalizedLocale =
+      Intl.DateTimeFormat.supportedLocalesOf([locale])[0] ?? normalizedLocale;
+  } catch {
+    // Invalid locale input must not prevent a share page from rendering.
+  }
+
+  const itemsJson = serializeForInlineScript(
     items.map((p) => ({
       fn: p.filename,
       dt: p.dateTaken,
@@ -154,9 +188,12 @@ search.addEventListener("input",function(){
 render(filteredData);
 })();`;
 
-  const title = `AI Image Manager — ${new Date().toLocaleDateString(locale)}`;
+  const title = escapeHtml(
+    `AI Image Manager — ${new Date().toLocaleDateString(normalizedLocale)}`
+  );
+  const safeLocale = escapeHtml(normalizedLocale);
   return `<!DOCTYPE html>
-<html lang="${locale}">
+<html lang="${safeLocale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">

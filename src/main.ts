@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   app,
@@ -46,6 +47,7 @@ import {
   sanitizeRendererRoute,
 } from "@/services/diagnostics/sanitizer";
 import {
+  getHttpServerAuthToken,
   getHttpServerPort,
   startHttpServerEarly,
 } from "@/services/http-server";
@@ -78,7 +80,7 @@ import { getFolderPaths } from "@/utils/folder-paths";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
-import { isSafePath } from "./utils/path-security.js";
+import { resolveSafePath } from "./utils/path-security.js";
 
 const log = createLogger("main");
 installConsoleDiagnostics();
@@ -728,13 +730,21 @@ function applyUiZoomScale() {
 }
 
 // ── Create main window ───────────────────────────────────────────────
-function createWindow(httpPort: number) {
+function createWindow(httpPort: number, httpAuthToken: string) {
   const modulePath = getBasePath();
   const basePath =
     path.basename(modulePath) === "chunks"
       ? path.dirname(modulePath)
       : modulePath;
   const preload = path.join(basePath, "preload.js");
+  const rendererEntry = path.join(
+    basePath,
+    `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`
+  );
+  const trustedRendererUrl =
+    typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
+      ? pathToFileURL(rendererEntry).toString()
+      : MAIN_WINDOW_VITE_DEV_SERVER_URL;
 
   const store = getWindowStore();
   const windowPreferences = getWindowPreferences();
@@ -767,6 +777,7 @@ function createWindow(httpPort: number) {
     webPreferences: {
       additionalArguments: [
         `--http-port=${httpPort}`,
+        `--http-token=${httpAuthToken}`,
         ...(process.env.CI === "e2e" ? ["--e2e"] : []),
       ],
       devTools: inDevelopment,
@@ -778,6 +789,25 @@ function createWindow(httpPort: number) {
     trafficLightPosition:
       process.platform === "darwin" ? { x: 12, y: 9 } : undefined,
   });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        shell.openExternal(url).catch(() => undefined);
+      }
+    } catch {
+      // Invalid and non-web URLs are intentionally denied.
+    }
+    return { action: "deny" };
+  });
+  const preventUntrustedNavigation = (event: Electron.Event, url: string) => {
+    if (!ipcContext.isTrustedRendererUrl(url)) {
+      event.preventDefault();
+    }
+  };
+  mainWindow.webContents.on("will-navigate", preventUntrustedNavigation);
+  mainWindow.webContents.on("will-redirect", preventUntrustedNavigation);
 
   wanderLifecycleBridge?.dispose();
   const lifecycleWindow = mainWindow;
@@ -961,14 +991,12 @@ function createWindow(httpPort: number) {
       });
   });
 
-  ipcContext.setMainWindow(mainWindow);
+  ipcContext.setMainWindow(mainWindow, trustedRendererUrl);
 
   // typeof guard: prevents ReferenceError in production strict mode
   const windowLoad =
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
-      ? mainWindow.loadFile(
-          path.join(basePath, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
-        )
+      ? mainWindow.loadFile(rendererEntry)
       : mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   windowLoad.catch((error) => {
     const incident = recordDiagnosticIncident({
@@ -1114,7 +1142,10 @@ function checkForUpdates() {
   */
 }
 
-ipcMain.on("app:restart", () => {
+ipcMain.on("app:restart", (event) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return;
+  }
   app.relaunch({
     args: process.argv.slice(1).concat(["--relaunch"]),
     execPath: process.execPath,
@@ -1122,7 +1153,10 @@ ipcMain.on("app:restart", () => {
   app.quit();
 });
 
-ipcMain.on("app:install-update", () => {
+ipcMain.on("app:install-update", (event) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return;
+  }
   fs.writeFileSync(
     path.join(logDir, "startup.log"),
     `${new Date().toISOString()} install-update: quitAndInstall\n`,
@@ -1132,15 +1166,29 @@ ipcMain.on("app:install-update", () => {
 });
 
 // Sync language from renderer to main process (updates tray menu labels)
-ipcMain.on("app:language-changed", (_event, lang: string) => {
+ipcMain.on("app:language-changed", (event, lang: string) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return;
+  }
   if (lang && (lang === "zh" || lang === "en")) {
     getTrayLangStore().set("language", lang);
     rebuildTrayMenu();
   }
 });
 
-ipcMain.on("shell:open-external", (_event, url: string) => {
+ipcMain.on("shell:open-external", (event, url: string) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return;
+  }
   if (url && typeof url === "string") {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return;
+      }
+    } catch {
+      return;
+    }
     shell.openExternal(url).catch((err) => {
       log.error("Failed to open external URL:", err);
     });
@@ -1148,6 +1196,10 @@ ipcMain.on("shell:open-external", (_event, url: string) => {
 });
 
 ipcMain.on(IPC_CHANNELS.IS_DIRECTORY_PATH, (event, filePath: unknown) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    event.returnValue = false;
+    return;
+  }
   if (typeof filePath !== "string" || !filePath) {
     event.returnValue = false;
     return;
@@ -1159,11 +1211,17 @@ ipcMain.on(IPC_CHANNELS.IS_DIRECTORY_PATH, (event, filePath: unknown) => {
   }
 });
 
-ipcMain.handle("app:get-http-port", () => {
+ipcMain.handle("app:get-http-port", (event) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return null;
+  }
   return getHttpServerPort();
 });
 
-ipcMain.handle("clipboard:copy-image", async (_event, filePath: string) => {
+ipcMain.handle("clipboard:copy-image", async (event, filePath: string) => {
+  if (!ipcContext.isTrustedSender(event)) {
+    return false;
+  }
   if (!filePath || typeof filePath !== "string") {
     return false;
   }
@@ -1189,14 +1247,22 @@ ipcMain.handle("clipboard:copy-image", async (_event, filePath: string) => {
 
 // ── IPC / oRPC setup ─────────────────────────────────────────────────
 async function setupORPC() {
-  const { rpcHandler } = await import("./ipc/handler");
+  const { upgradeRpcPort } = await import("./ipc/handler");
   ipcMain.on(IPC_CHANNELS.START_ORPC_SERVER, (event) => {
+    if (!ipcContext.isTrustedSender(event) || event.ports.length !== 1) {
+      return;
+    }
     const [serverPort] = event.ports;
-    rpcHandler.upgrade(serverPort);
-    serverPort.start();
+    if (!serverPort) {
+      return;
+    }
+    upgradeRpcPort(serverPort);
   });
 
   ipcMain.on(IPC_CHANNELS.NATIVE_FILE_DRAG, (event, filePath: string) => {
+    if (!ipcContext.isTrustedSender(event)) {
+      return;
+    }
     if (!(filePath && fs.existsSync(filePath))) {
       return;
     }
@@ -1360,7 +1426,7 @@ async function ensureLocalMediaFile(resolved: string): Promise<boolean> {
     return true;
   }
   const thumbDir = getThumbnailDir();
-  if (!(thumbDir && resolved.startsWith(thumbDir))) {
+  if (!(thumbDir && resolveSafePath(resolved, [thumbDir]))) {
     return false;
   }
   const photo = getDatabase()
@@ -1435,13 +1501,14 @@ async function handleLocalMediaRequest(request: {
     const filePath = decodeURIComponent(encodedPath);
     const resolved = path.resolve(filePath);
     const allowedPaths = [getDataPath(), ...getFolderPaths()];
-    if (!isSafePath(resolved, allowedPaths)) {
+    const safePath = resolveSafePath(resolved, allowedPaths);
+    if (!safePath) {
       log.warn({ filePath }, "Security: local-media blocked");
       return new Response(null, { status: 403 });
     }
     await mediaSemaphore.acquire();
     try {
-      return await renderLocalMedia(resolved);
+      return await renderLocalMedia(safePath);
     } finally {
       mediaSemaphore.release();
     }
@@ -1481,7 +1548,7 @@ app.whenReady().then(async () => {
     log.info({ port: httpPort }, "HTTP server started");
 
     await setupORPC();
-    createWindow(httpPort);
+    createWindow(httpPort, getHttpServerAuthToken());
     createTray();
     registerGlobalShortcuts();
     await applyProxyConfig();
@@ -1577,7 +1644,7 @@ app.on("activate", () => {
     showMainWindow();
   } else {
     mainWindow = null;
-    createWindow(getHttpServerPort() ?? 0);
+    createWindow(getHttpServerPort() ?? 0, getHttpServerAuthToken());
   }
 });
 

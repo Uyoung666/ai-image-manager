@@ -10,10 +10,15 @@ export interface TrashOperationResult {
 }
 
 interface TrashMoveDependencies {
-  fileExists: (path: string) => boolean;
+  fileExists: (path: string) => Promise<boolean>;
   hardDelete: (ids: number[]) => void;
   onFailure?: (photo: { id: number; path: string }, message: string) => void;
   trashFile: (path: string) => Promise<void>;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 /**
@@ -29,11 +34,18 @@ export async function executeSystemTrashMove(
 
   for (const photo of targetPhotos) {
     try {
-      if (dependencies.fileExists(photo.path)) {
+      if (await dependencies.fileExists(photo.path)) {
         await dependencies.trashFile(photo.path);
       }
       succeededIds.push(photo.id);
     } catch (error) {
+      // The file may disappear between lstat and trashItem. Treat only an
+      // explicit missing-file error as idempotent; permission/path errors
+      // must not be converted into a destructive database delete.
+      if (isMissingFileError(error)) {
+        succeededIds.push(photo.id);
+        continue;
+      }
       const message = (error as Error)?.message ?? String(error);
       failed.push({
         code: "FILE_OPERATION_FAILED",

@@ -1,10 +1,11 @@
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
-  testDir: "./src/tests/e2e",
+  testDir: path.resolve(import.meta.dirname, "src/tests/e2e"),
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

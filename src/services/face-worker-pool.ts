@@ -24,6 +24,7 @@ type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
 interface FaceWorkerMessage {
   error?: string;
   percent?: number;
+  requestId?: string;
   results?: FaceDetectionResult[];
   type?: string;
 }
@@ -34,10 +35,14 @@ function getErrorMessage(error: unknown): string {
 
 interface WorkerSlot {
   consecutiveFailures: number;
+  deathHandled: boolean;
+  generation: number;
   index: number;
   pendingReject: ((err: Error) => void) | null;
   pendingResolve: ((results: FaceDetectionResult[]) => void) | null;
   process: ChildProcess;
+  requestId: string | null;
+  respawnTimer: ReturnType<typeof setTimeout> | null;
   status: WorkerStatus;
   timeoutId?: ReturnType<typeof setTimeout> | null;
 }
@@ -45,6 +50,7 @@ interface WorkerSlot {
 interface QueuedRequest {
   photos: Array<{ id: number; path: string }>;
   reject: (err: Error) => void;
+  requestId: string;
   resolve: (results: FaceDetectionResult[]) => void;
 }
 
@@ -58,6 +64,10 @@ let poolModelsDir: string | null = null;
 let poolUseGPU = false;
 let initialized = false;
 let poolSize = 0;
+let poolGeneration = 0;
+let requestSequence = 0;
+let initPromise: Promise<void> | null = null;
+let shuttingDown = false;
 
 /** Per-worker init progress: Map<workerIndex, percent 0-100> */
 const workerInitProgress = new Map<number, number>();
@@ -94,7 +104,7 @@ function findWorkerScript(): string {
   throw new Error("face-worker.mjs not found");
 }
 
-function spawnWorker(index: number): WorkerSlot {
+function spawnWorker(index: number, generation = poolGeneration): WorkerSlot {
   const workerScript = findWorkerScript();
   const child = fork(workerScript, [], {
     stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -109,6 +119,10 @@ function spawnWorker(index: number): WorkerSlot {
     pendingResolve: null,
     pendingReject: null,
     consecutiveFailures: 0,
+    deathHandled: false,
+    generation,
+    requestId: null,
+    respawnTimer: null,
   };
 
   child.stderr?.on("data", (data: Buffer) => {
@@ -118,16 +132,15 @@ function spawnWorker(index: number): WorkerSlot {
     }
   });
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Worker protocol handling keeps init, stale-result, and failure transitions together.
   child.on("message", (rawMessage: unknown) => {
+    if (slot.generation !== poolGeneration || slots[slot.index] !== slot) {
+      return;
+    }
     if (typeof rawMessage !== "object" || rawMessage === null) {
       return;
     }
     const msg = rawMessage as FaceWorkerMessage;
-    // Clear any pending dispatch timeout when worker responds
-    if (slot.timeoutId) {
-      clearTimeout(slot.timeoutId);
-      slot.timeoutId = null;
-    }
     if (msg.type === "init-progress") {
       const pct = Number(msg.percent ?? 0);
       workerInitProgress.set(index, pct);
@@ -145,10 +158,19 @@ function spawnWorker(index: number): WorkerSlot {
       }
       return;
     }
-    if (msg.type === "result" && slot.status === "busy") {
+    if (
+      msg.type === "result" &&
+      slot.status === "busy" &&
+      (msg.requestId === undefined || msg.requestId === slot.requestId)
+    ) {
+      if (slot.timeoutId) {
+        clearTimeout(slot.timeoutId);
+        slot.timeoutId = null;
+      }
       const resolve = slot.pendingResolve;
       slot.pendingResolve = null;
       slot.pendingReject = null;
+      slot.requestId = null;
       slot.status = "idle";
       slot.consecutiveFailures = 0;
       const results = msg.results ?? [];
@@ -176,48 +198,68 @@ function spawnWorker(index: number): WorkerSlot {
   return slot;
 }
 
-function handleWorkerDeath(slot: WorkerSlot): void {
-  if (slot.status === "dead") {
+function handleWorkerDeath(slot: WorkerSlot, reason?: Error): void {
+  if (slot.deathHandled) {
     return;
   }
 
+  slot.deathHandled = true;
+  if (slot.timeoutId) {
+    clearTimeout(slot.timeoutId);
+    slot.timeoutId = null;
+  }
   const hadPending = slot.pendingReject !== null;
   const reject = slot.pendingReject;
   slot.status = "dead";
   slot.pendingResolve = null;
   slot.pendingReject = null;
+  slot.requestId = null;
   slot.consecutiveFailures++;
 
   if (hadPending && reject) {
-    reject(new Error(`Worker ${slot.index} died during processing`));
+    reject(reason ?? new Error(`Worker ${slot.index} died during processing`));
   }
 
-  const aliveCount = slots.filter((s) => s.status !== "dead").length;
-  if (aliveCount === 0) {
+  const isCurrentSlot =
+    slot.generation === poolGeneration && slots[slot.index] === slot;
+  const aliveCount = slots.filter(
+    (s) => s.generation === poolGeneration && s.status !== "dead"
+  ).length;
+  if (isCurrentSlot && aliveCount === 0) {
     initialized = false;
-    for (const req of requestQueue) {
-      req.reject(new Error("All workers died, pool reset"));
-    }
-    requestQueue = [];
-    return;
   }
 
-  if (slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES && poolModelsDir) {
-    setTimeout(() => {
-      if (slot.status !== "dead") {
+  if (
+    isCurrentSlot &&
+    !shuttingDown &&
+    slot.consecutiveFailures < MAX_CONSECUTIVE_FAILURES &&
+    poolModelsDir
+  ) {
+    slot.respawnTimer = setTimeout(() => {
+      slot.respawnTimer = null;
+      if (
+        shuttingDown ||
+        slot.generation !== poolGeneration ||
+        slots[slot.index] !== slot ||
+        slot.status !== "dead"
+      ) {
         return;
       }
       console.log(
         `[FacePool] Respawning worker ${slot.index} (attempt ${slot.consecutiveFailures})`
       );
-      const newSlot = spawnWorker(slot.index);
+      const newSlot = spawnWorker(slot.index, poolGeneration);
       newSlot.consecutiveFailures = slot.consecutiveFailures;
       slots[slot.index] = newSlot;
-      newSlot.process.send({
-        type: "init",
-        modelsDir: poolModelsDir,
-        useGPU: poolUseGPU,
-      });
+      try {
+        newSlot.process.send({
+          type: "init",
+          modelsDir: poolModelsDir,
+          useGPU: poolUseGPU,
+        });
+      } catch (_error) {
+        handleWorkerDeath(newSlot);
+      }
     }, RESPAWN_DELAY_MS);
   } else {
     console.warn(
@@ -227,6 +269,9 @@ function handleWorkerDeath(slot: WorkerSlot): void {
 }
 
 function drainQueue(): void {
+  if (shuttingDown) {
+    return;
+  }
   while (requestQueue.length > 0) {
     const idleSlot = slots.find((s) => s.status === "idle");
     if (!idleSlot) {
@@ -237,17 +282,25 @@ function drainQueue(): void {
     if (!request) {
       break;
     }
-    dispatchToSlot(idleSlot, request.photos, request.resolve, request.reject);
+    dispatchToSlot(
+      idleSlot,
+      request.photos,
+      request.requestId,
+      request.resolve,
+      request.reject
+    );
   }
 }
 
 function dispatchToSlot(
   slot: WorkerSlot,
   photos: Array<{ id: number; path: string }>,
+  requestId: string,
   resolve: (results: FaceDetectionResult[]) => void,
   reject: (err: Error) => void
 ): void {
   slot.status = "busy";
+  slot.requestId = requestId;
   slot.pendingResolve = resolve;
   slot.pendingReject = reject;
 
@@ -256,81 +309,166 @@ function dispatchToSlot(
   );
 
   slot.timeoutId = setTimeout(() => {
-    if (slot.status === "busy" && slot.pendingReject) {
-      const rej = slot.pendingReject;
-      slot.pendingResolve = null;
-      slot.pendingReject = null;
-      slot.status = "dead";
-      slot.process.kill();
-      rej(new Error(`Worker ${slot.index} timed out`));
-      handleWorkerDeath(slot);
+    if (
+      slot.status === "busy" &&
+      slot.requestId === requestId &&
+      slot.pendingReject
+    ) {
+      handleWorkerDeath(slot, new Error(`Worker ${slot.index} timed out`));
+      try {
+        slot.process.kill();
+      } catch {
+        /* ignore */
+      }
     }
   }, WORKER_TIMEOUT);
 
-  slot.process.send({ type: "detect", photos });
+  try {
+    slot.process.send({ type: "detect", photos, requestId });
+  } catch (error) {
+    handleWorkerDeath(
+      slot,
+      error instanceof Error ? error : new Error(String(error))
+    );
+  }
+}
+
+function rejectRequests(error: Error): void {
+  const queued = requestQueue;
+  requestQueue = [];
+  for (const request of queued) {
+    request.reject(error);
+  }
+}
+
+function terminateSlots(slotsToTerminate: WorkerSlot[]): void {
+  for (const slot of slotsToTerminate) {
+    if (slot.timeoutId) {
+      clearTimeout(slot.timeoutId);
+      slot.timeoutId = null;
+    }
+    if (slot.respawnTimer) {
+      clearTimeout(slot.respawnTimer);
+      slot.respawnTimer = null;
+    }
+    slot.deathHandled = true;
+    slot.status = "dead";
+    slot.requestId = null;
+    const reject = slot.pendingReject;
+    slot.pendingResolve = null;
+    slot.pendingReject = null;
+    reject?.(new Error(`Face worker ${slot.index} was stopped`));
+    try {
+      slot.process.send({ type: "shutdown" });
+    } catch {
+      /* ignore */
+    }
+    try {
+      slot.process.kill();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function waitForWorkerReady(slot: WorkerSlot): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const check = setInterval(() => {
+      if (slot.status === "idle") {
+        settled = true;
+        clearInterval(check);
+        clearTimeout(timer);
+        resolve();
+      } else if (slot.status === "dead") {
+        settled = true;
+        clearInterval(check);
+        clearTimeout(timer);
+        reject(new Error(`Worker ${slot.index} died during init`));
+      }
+    }, 50);
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearInterval(check);
+      reject(new Error(`Worker ${slot.index} init timed out`));
+    }, 60_000);
+  });
 }
 
 /** Start the face-worker pool. Workers load ONNX models once and stay alive. */
-export async function initFaceWorkerPool(
+export function initFaceWorkerPool(
   modelsDir: string,
   useGPU: boolean
 ): Promise<void> {
-  if (initialized && slots.some((s) => s.status !== "dead")) {
-    return;
+  if (initialized && !shuttingDown && slots.some((s) => s.status !== "dead")) {
+    return Promise.resolve();
+  }
+
+  if (initPromise) {
+    return initPromise;
   }
 
   poolModelsDir = modelsDir;
   poolUseGPU = useGPU;
-  slots = [];
-  requestQueue = [];
-  workerInitProgress.clear();
+  shuttingDown = false;
+  const promise = (async () => {
+    // Invalidate all handlers/timers from a failed or previous generation before
+    // replacing the slot array. This also prevents old workers from respawning.
+    poolGeneration++;
+    const oldSlots = slots;
+    slots = [];
+    initialized = false;
+    workerInitProgress.clear();
+    terminateSlots(oldSlots);
 
-  const cpuCount = os.cpus().length;
-  // Face models are lightweight (~200MB per worker including DML context)
-  poolSize = cpuCount >= 8 ? 3 : 2;
-  const workerScript = findWorkerScript();
-  console.log(
-    `[FacePool] Starting ${poolSize} persistent face-workers: ${workerScript}`
-  );
-
-  const readyPromises: Promise<void>[] = [];
-
-  for (let i = 0; i < poolSize; i++) {
-    const slot = spawnWorker(i);
-    slots.push(slot);
-
-    readyPromises.push(
-      new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          reject(new Error(`Worker ${i} init timed out`));
-        }, 60_000);
-
-        const check = setInterval(() => {
-          if (slot.status === "idle") {
-            clearInterval(check);
-            clearTimeout(timer);
-            resolve();
-          } else if (slot.status === "dead") {
-            clearInterval(check);
-            clearTimeout(timer);
-            reject(new Error(`Worker ${i} died during init`));
-          }
-        }, 50);
-      })
+    const cpuCount = os.cpus().length;
+    // Face models are lightweight (~200MB per worker including DML context)
+    poolSize = cpuCount >= 8 ? 3 : 2;
+    const workerScript = findWorkerScript();
+    console.log(
+      `[FacePool] Starting ${poolSize} persistent face-workers: ${workerScript}`
     );
-  }
 
-  for (const slot of slots) {
-    slot.process.send({
-      type: "init",
-      modelsDir,
-      useGPU,
-    });
-  }
+    const generation = poolGeneration;
+    const readyPromises: Promise<void>[] = [];
+    for (let i = 0; i < poolSize; i++) {
+      const slot = spawnWorker(i, generation);
+      slots.push(slot);
+      readyPromises.push(waitForWorkerReady(slot));
+    }
 
-  await Promise.all(readyPromises);
-  console.log(`[FacePool] All ${poolSize} workers ready`);
-  initialized = true;
+    try {
+      for (const slot of slots) {
+        slot.process.send({ type: "init", modelsDir, useGPU });
+      }
+      await Promise.all(readyPromises);
+      if (generation !== poolGeneration || shuttingDown) {
+        throw new Error("Face worker pool initialization was cancelled");
+      }
+      initialized = true;
+      drainQueue();
+      console.log(`[FacePool] All ${poolSize} workers ready`);
+    } catch (error) {
+      initialized = false;
+      poolGeneration++;
+      const failedSlots = slots;
+      slots = [];
+      terminateSlots(failedSlots);
+      rejectRequests(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  })();
+  const trackedPromise = promise.finally(() => {
+    if (initPromise === trackedPromise) {
+      initPromise = null;
+    }
+  });
+  initPromise = trackedPromise;
+
+  return initPromise;
 }
 
 /** Send a batch of photos to an available worker. */
@@ -338,29 +476,29 @@ function dispatchBatch(
   photos: Array<{ id: number; path: string }>
 ): Promise<FaceDetectionResult[]> {
   return new Promise((resolve, reject) => {
-    if (!initialized || slots.every((s) => s.status === "dead")) {
-      if (!poolModelsDir) {
-        reject(new Error("Face pool not initialized"));
-        return;
-      }
-      initFaceWorkerPool(poolModelsDir, poolUseGPU)
-        .then(() => {
-          const idleSlot = slots.find((s) => s.status === "idle");
-          if (idleSlot) {
-            dispatchToSlot(idleSlot, photos, resolve, reject);
-          } else {
-            requestQueue.push({ photos, resolve, reject });
-          }
-        })
-        .catch(reject);
+    if (shuttingDown) {
+      reject(new Error("Face worker pool is shutting down"));
       return;
     }
 
-    const idleSlot = slots.find((s) => s.status === "idle");
-    if (idleSlot) {
-      dispatchToSlot(idleSlot, photos, resolve, reject);
-    } else {
-      requestQueue.push({ photos, resolve, reject });
+    const request: QueuedRequest = {
+      photos,
+      requestId: `face-${poolGeneration}-${++requestSequence}`,
+      resolve,
+      reject,
+    };
+    requestQueue.push(request);
+    drainQueue();
+
+    if (!(initialized || initPromise) && poolModelsDir) {
+      initFaceWorkerPool(poolModelsDir, poolUseGPU).catch((error) => {
+        rejectRequests(
+          error instanceof Error ? error : new Error(String(error))
+        );
+      });
+    } else if (!(initialized || poolModelsDir)) {
+      requestQueue = requestQueue.filter((item) => item !== request);
+      reject(new Error("Face pool not initialized"));
     }
   });
 }
@@ -378,29 +516,14 @@ export function abortAllFaceWorkers(): void {
 
 /** Shut down all workers gracefully. */
 export function shutdownFacePool(): void {
-  // Send abort first so workers can stop mid-batch if idle enough
-  // to receive the message, then send shutdown + kill.
-  for (const slot of slots) {
-    try {
-      slot.process.send({ type: "abort" });
-    } catch {
-      /* ignore */
-    }
-  }
-  // Small grace period for abort messages to be processed
-  const killAll = () => {
-    for (const slot of slots) {
-      try {
-        slot.process.kill();
-      } catch {
-        /* ignore */
-      }
-    }
-    slots = [];
-    requestQueue = [];
-    initialized = false;
-  };
-  setTimeout(killAll, 500);
+  shuttingDown = true;
+  initialized = false;
+  poolGeneration++;
+  const oldSlots = slots;
+  slots = [];
+  workerInitProgress.clear();
+  rejectRequests(new Error("Face worker pool shut down"));
+  terminateSlots(oldSlots);
 }
 
 /** Aggregate init progress across all face workers (0-100). Returns 0 if no workers have reported yet. */

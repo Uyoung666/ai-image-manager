@@ -48,6 +48,7 @@ import {
   ensureVectorIndex,
   initVectorDB,
   persistActiveVectorFingerprint,
+  withVectorDbOperation,
 } from "./vector-db";
 
 function appendAiWorkerLog(message: string): void {
@@ -109,12 +110,13 @@ function getErrorMessage(error: unknown): string {
 function batchUpdatePhotoStatus(
   db: ReturnType<typeof getDatabase>,
   photoIds: number[]
-): void {
+): number[] {
   if (photoIds.length === 0) {
-    return;
+    return [];
   }
 
   const CHUNK_SIZE = 500;
+  const updatedIds: number[] = [];
 
   for (let i = 0; i < photoIds.length; i += CHUNK_SIZE) {
     const chunk = photoIds.slice(i, i + CHUNK_SIZE);
@@ -124,6 +126,7 @@ function batchUpdatePhotoStatus(
         .set({ isAiProcessed: true })
         .where(inArray(photos.id, chunk))
         .run();
+      updatedIds.push(...chunk);
     } catch {
       console.warn(
         `[AI] Batch update failed for chunk ${i}-${i + chunk.length}, falling back to individual updates`
@@ -135,12 +138,14 @@ function batchUpdatePhotoStatus(
             .set({ isAiProcessed: true, vectorId: `vec_${id}` })
             .where(eq(photos.id, id))
             .run();
+          updatedIds.push(id);
         } catch {
           /* skip */
         }
       }
     }
   }
+  return updatedIds;
 }
 
 interface EmbedWorkerMessage {
@@ -634,8 +639,12 @@ export async function embedAllPhotos(
         vector: r.vector,
         created_at: Date.now(),
       }));
+      const writtenIds = new Set<number>();
       try {
         await photoTable.add(records);
+        for (const id of batchIds) {
+          writtenIds.add(id);
+        }
       } catch (lanceErr: unknown) {
         console.warn(
           `[AI] Batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
@@ -643,16 +652,24 @@ export async function embedAllPhotos(
         for (const record of records) {
           try {
             await photoTable.add([record]);
-          } catch {
-            /* skip */
+            writtenIds.add(record.photo_id);
+          } catch (individualErr: unknown) {
+            console.warn(
+              `[AI] Vector write failed for photo ${record.photo_id}: ${getErrorMessage(individualErr)}`
+            );
           }
         }
       }
 
       if (!isRunWritable(runId)) {
-        await deletePhotoVectors(batchIds).catch(() => {
+        await deletePhotoVectors([...writtenIds]).catch(() => {
           /* best-effort */
         });
+        return 0;
+      }
+
+      const writtenBatchIds = [...writtenIds];
+      if (writtenBatchIds.length === 0) {
         return 0;
       }
 
@@ -661,29 +678,36 @@ export async function embedAllPhotos(
           .select({ id: photos.id })
           .from(photos)
           .where(
-            sql`${photos.id} IN (${sql.raw(batchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
+            sql`${photos.id} IN (${sql.raw(writtenBatchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
           )
           .all()
           .map((row) => row.id)
       );
-      const removedDuringWrite = batchIds.filter(
+      const removedDuringWrite = writtenBatchIds.filter(
         (photoId) => !stillActiveIds.has(photoId)
       );
       if (removedDuringWrite.length > 0) {
         await deletePhotoVectors(removedDuringWrite);
       }
-      const persistedIds = batchIds.filter((photoId) =>
+      const persistedIds = writtenBatchIds.filter((photoId) =>
         stillActiveIds.has(photoId)
       );
       if (persistedIds.length === 0) {
         return 0;
       }
 
-      batchUpdatePhotoStatus(db, persistedIds);
-      addWrittenPhotoIdsForRun(runId, persistedIds);
-      addPendingAutoTagPhotoIds(persistedIds);
-      successfulIds.push(...persistedIds);
-      return persistedIds.length;
+      const statusIds = batchUpdatePhotoStatus(db, persistedIds);
+      const statusIdSet = new Set(statusIds);
+      const failedStatusIds = persistedIds.filter((id) => !statusIdSet.has(id));
+      if (failedStatusIds.length > 0) {
+        await deletePhotoVectors(failedStatusIds).catch(() => {
+          /* best-effort */
+        });
+      }
+      addWrittenPhotoIdsForRun(runId, statusIds);
+      addPendingAutoTagPhotoIds(statusIds);
+      successfulIds.push(...statusIds);
+      return statusIds.length;
     }
 
     console.log(`[AI] Starting embedding for ${total} photos via Worker Pool`);
@@ -755,7 +779,9 @@ export async function embedAllPhotos(
         },
         shouldStopRun,
         async (results) => {
-          processed += await persistEmbedResults(results);
+          processed += await withVectorDbOperation(() =>
+            persistEmbedResults(results)
+          );
         }
       );
       // Persist results to LanceDB and SQLite — batch write
@@ -901,22 +927,37 @@ export async function embedAllPhotos(
               vector: r.vector,
               created_at: Date.now(),
             }));
+            const writtenIds = new Set<number>();
             try {
               await legacyTable.add(records);
-            } catch {
+              for (const id of ids) {
+                writtenIds.add(id);
+              }
+            } catch (lanceErr: unknown) {
+              console.warn(
+                `[AI] Legacy batch add failed (${getErrorMessage(lanceErr)}), falling back to individual writes`
+              );
               for (const record of records) {
                 try {
                   await legacyTable.add([record]);
-                } catch {
-                  /* skip */
+                  writtenIds.add(record.photo_id);
+                } catch (individualErr: unknown) {
+                  console.warn(
+                    `[AI] Legacy vector write failed for photo ${record.photo_id}: ${getErrorMessage(individualErr)}`
+                  );
                 }
               }
             }
 
             if (!isRunWritable(runId)) {
-              await deletePhotoVectors(ids).catch(() => {
+              await deletePhotoVectors([...writtenIds]).catch(() => {
                 /* best-effort */
               });
+              return 0;
+            }
+
+            const writtenBatchIds = [...writtenIds];
+            if (writtenBatchIds.length === 0) {
               return 0;
             }
 
@@ -925,30 +966,39 @@ export async function embedAllPhotos(
                 .select({ id: photos.id })
                 .from(photos)
                 .where(
-                  sql`${photos.id} IN (${sql.raw(ids.join(","))}) AND ${photos.deletedAt} IS NULL`
+                  sql`${photos.id} IN (${sql.raw(writtenBatchIds.join(","))}) AND ${photos.deletedAt} IS NULL`
                 )
                 .all()
                 .map((row) => row.id)
             );
-            const removedDuringWrite = ids.filter(
+            const removedDuringWrite = writtenBatchIds.filter(
               (photoId) => !stillActiveIds.has(photoId)
             );
             if (removedDuringWrite.length > 0) {
               await deletePhotoVectors(removedDuringWrite);
             }
-            const persistedIds = ids.filter((photoId) =>
+            const persistedIds = writtenBatchIds.filter((photoId) =>
               stillActiveIds.has(photoId)
             );
             if (persistedIds.length === 0) {
               return 0;
             }
 
-            batchUpdatePhotoStatus(db, persistedIds);
+            const statusIds = batchUpdatePhotoStatus(db, persistedIds);
+            const statusIdSet = new Set(statusIds);
+            const failedStatusIds = persistedIds.filter(
+              (id) => !statusIdSet.has(id)
+            );
+            if (failedStatusIds.length > 0) {
+              await deletePhotoVectors(failedStatusIds).catch(() => {
+                /* best-effort */
+              });
+            }
             // Track written IDs for potential cancel cleanup
-            addWrittenPhotoIdsForRun(runId, persistedIds);
-            addPendingAutoTagPhotoIds(persistedIds);
-            successfulIds.push(...persistedIds);
-            return persistedIds.length;
+            addWrittenPhotoIdsForRun(runId, statusIds);
+            addPendingAutoTagPhotoIds(statusIds);
+            successfulIds.push(...statusIds);
+            return statusIds.length;
           }
           return 0;
         } catch (err: unknown) {

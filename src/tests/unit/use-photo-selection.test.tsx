@@ -109,6 +109,29 @@ describe("usePhotoSelection", () => {
       rerender({ routeKey: "route-a" });
       expect(result.current.selectedIds).toEqual(new Set([1]));
     });
+
+    it("restores session selection after photos arrive asynchronously", () => {
+      sessionStorage.setItem(
+        "browse_session_async-photos",
+        JSON.stringify({
+          selectedIds: [2],
+          searchQuery: "",
+          searchMode: null,
+          colorHex: null,
+          lastClickedIdx: 0,
+          detailDismissed: false,
+        })
+      );
+      const { result, rerender } = renderHook(
+        ({ photos }) => usePhotoSelection("async-photos", photos),
+        { wrapper, initialProps: { photos: [] as typeof mockPhotos } }
+      );
+
+      expect(result.current.selectedIds).toEqual(new Set());
+      rerender({ photos: mockPhotos });
+
+      expect(result.current.selectedIds).toEqual(new Set([2]));
+    });
   });
 
   describe("handleSelect", () => {

@@ -273,6 +273,9 @@ export const setDataPath = os
     // hundreds of MB (e.g. the ~300 MB models directory).
     let copied = 0;
     const errors: string[] = [];
+    const copiedDirs = new Set<string>();
+    const destinationDirs = new Set<string>();
+    let canCleanupOldPath = false;
     for (let i = 0; i < subDirs.length; i++) {
       const dir = subDirs[i];
       const index = i + 1;
@@ -298,6 +301,12 @@ export const setDataPath = os
       }
       try {
         diagLog(`setDataPath: copying ${dir}…`);
+        // Rollback may remove only destination directories that were absent
+        // immediately before this copy. Never delete a pre-existing user
+        // directory if a copy races with another process.
+        if (!fs.existsSync(dst)) {
+          destinationDirs.add(dst);
+        }
         sendMigrateProgress({ phase: "copying", dir, index, total });
         await fsp.cp(src, dst, {
           recursive: true,
@@ -305,6 +314,7 @@ export const setDataPath = os
           errorOnExist: false,
         });
         copied++;
+        copiedDirs.add(dir);
         diagLog(`setDataPath: copy ${dir} OK`);
         sendMigrateProgress({ phase: "copied", dir, index, total });
       } catch (err) {
@@ -322,7 +332,18 @@ export const setDataPath = os
       }
     }
 
-    if (copied === 0 && errors.length > 0) {
+    if (errors.length > 0) {
+      const rollbackErrors: string[] = [];
+      for (const dst of destinationDirs) {
+        try {
+          await fsp.rm(dst, { recursive: true, force: true });
+        } catch (err) {
+          rollbackErrors.push(
+            `${path.basename(dst)}: ${(err as Error)?.message ?? String(err)}`
+          );
+        }
+      }
+      errors.push(...rollbackErrors.map((error) => `rollback: ${error}`));
       sendMigrateProgress({ phase: "done", copied, errors });
       // Try to bring services back up on the OLD path so the app stays usable.
       try {
@@ -352,7 +373,7 @@ export const setDataPath = os
     // any other files the user may have placed there.
     let cleaned = 0;
     const cleanupErrors: string[] = [];
-    if (errors.length === 0) {
+    if (canCleanupOldPath) {
       for (const dir of subDirs) {
         const oldSub = path.join(oldPath, dir);
         let exists = false;
@@ -399,6 +420,14 @@ export const setDataPath = os
       const msg = (err as Error)?.message ?? String(err);
       diagLog(`setDataPath: registry.start() FAILED: ${msg}`);
       console.error("[Settings] Failed to restart services:", msg);
+      setCustomDataPath(oldPath);
+      try {
+        await registry.start();
+      } catch (rollbackErr) {
+        diagLog(
+          `setDataPath: old-path restart FAILED: ${(rollbackErr as Error)?.message ?? rollbackErr}`
+        );
+      }
       sendMigrateProgress({
         phase: "done",
         copied,
@@ -410,13 +439,30 @@ export const setDataPath = os
       };
     }
 
+    canCleanupOldPath = true;
+    let cleanedAfterStart = 0;
+    const cleanupErrorsAfterStart: string[] = [];
+    for (const dir of copiedDirs) {
+      try {
+        await fsp.rm(path.join(oldPath, dir), { recursive: true, force: true });
+        cleanedAfterStart++;
+      } catch (err) {
+        cleanupErrorsAfterStart.push(
+          `${dir}: ${(err as Error)?.message ?? String(err)}`
+        );
+      }
+    }
+
     sendMigrateProgress({ phase: "done", copied, errors });
     return {
       ok: true,
       copied,
-      cleaned,
+      cleaned: cleanedAfterStart,
       errors: errors.length > 0 ? errors : undefined,
-      cleanupErrors: cleanupErrors.length > 0 ? cleanupErrors : undefined,
+      cleanupErrors:
+        cleanupErrorsAfterStart.length > 0
+          ? cleanupErrorsAfterStart
+          : undefined,
     };
   });
 

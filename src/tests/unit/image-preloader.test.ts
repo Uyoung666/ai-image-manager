@@ -61,4 +61,20 @@ describe("image preloader", () => {
     TestImage.instances[1].onload?.();
     await expect(retryRequest).resolves.toEqual({ loaded: 1, failed: 0 });
   });
+
+  it("bounds the loaded URL cache", async () => {
+    const urls = Array.from({ length: 513 }, (_, index) => `preload-${index}`);
+    const request = preloadImagesWithConcurrency(urls, 513);
+
+    expect(TestImage.instances).toHaveLength(513);
+    for (const image of TestImage.instances) {
+      image.onload?.();
+    }
+    await expect(request).resolves.toEqual({ loaded: 513, failed: 0 });
+
+    const retry = preloadImagesWithConcurrency(["preload-0"], 1);
+    expect(TestImage.instances).toHaveLength(514);
+    TestImage.instances.at(-1)?.onload?.();
+    await expect(retry).resolves.toEqual({ loaded: 1, failed: 0 });
+  });
 });

@@ -10,10 +10,9 @@ export default defineConfig({
   test: {
     environment: "node",
     fileParallelism: false,
-    hookTimeout: 300_000,
-    include: ["src/tests/integration/ai-*.test.{ts,tsx,js,jsx,mjs}"],
+    include: ["src/tests/integration/ai-worker-pool-recovery.test.ts"],
     maxWorkers: 1,
     reporters: ["verbose"],
-    testTimeout: 300_000,
+    testTimeout: 60_000,
   },
 });

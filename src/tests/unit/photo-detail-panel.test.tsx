@@ -2,12 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoDetailPanel } from "@/components/PhotoDetailPanel";
 
-const { getPhotoTagAnalysisStatusMock, getPhotoTagsMock, getTagsMock } =
-  vi.hoisted(() => ({
-    getPhotoTagAnalysisStatusMock: vi.fn(),
-    getPhotoTagsMock: vi.fn(() => new Promise(() => undefined)),
-    getTagsMock: vi.fn(() => new Promise(() => undefined)),
-  }));
+const {
+  getPhotoTagAnalysisStatusMock,
+  getPhotoTagsMock,
+  getTagsMock,
+  suggestTagsMock,
+} = vi.hoisted(() => ({
+  getPhotoTagAnalysisStatusMock: vi.fn(),
+  getPhotoTagsMock: vi.fn(() => new Promise(() => undefined)),
+  getTagsMock: vi.fn(() => new Promise(() => undefined)),
+  suggestTagsMock: vi.fn(),
+}));
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
@@ -17,6 +22,7 @@ vi.mock("@/ipc/manager", () => ({
         getPhotoTagAnalysisStatus: getPhotoTagAnalysisStatusMock,
         getPhotoTags: getPhotoTagsMock,
         getTags: getTagsMock,
+        suggestTags: suggestTagsMock,
       },
     },
   },
@@ -35,6 +41,7 @@ const basePhoto = {
 describe("PhotoDetailPanel preview", () => {
   beforeEach(() => {
     getPhotoTagAnalysisStatusMock.mockResolvedValue({ state: "ready" });
+    suggestTagsMock.mockReset();
   });
   it("keeps a stable preview frame and uses the cached thumbnail", () => {
     const { container } = render(
@@ -146,5 +153,73 @@ describe("PhotoDetailPanel preview", () => {
     expect(
       screen.queryByRole("button", { name: "分析建议标签" })
     ).not.toBeInTheDocument();
+  });
+
+  it("ignores a suggestion response after navigating to another photo", async () => {
+    let resolveSuggestion: ((value: unknown) => void) | undefined;
+    suggestTagsMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSuggestion = resolve;
+        })
+    );
+    const { rerender } = render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "analyzeSuggestedTags" })
+    );
+    rerender(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={{ ...basePhoto, id: 2, filename: "second.jpg" }}
+      />
+    );
+    resolveSuggestion?.({ suggestions: [{ confidence: 0.9, tag: "stale" }] });
+
+    await waitFor(() => {
+      expect(screen.queryByText("stale")).not.toBeInTheDocument();
+    });
+  });
+
+  it("ignores a stale tag-analysis status after navigating to another photo", async () => {
+    const statusResolvers: Array<(value: unknown) => void> = [];
+    getPhotoTagAnalysisStatusMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          statusResolvers.push(resolve);
+        })
+    );
+    const { rerender } = render(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={basePhoto}
+      />
+    );
+    await waitFor(() => expect(statusResolvers).toHaveLength(1));
+
+    rerender(
+      <PhotoDetailPanel
+        onClose={vi.fn()}
+        onOpenExplorer={vi.fn()}
+        photo={{ ...basePhoto, id: 2, filename: "second.jpg" }}
+      />
+    );
+    await waitFor(() => expect(statusResolvers).toHaveLength(2));
+    statusResolvers[1]?.({ state: "ready" });
+    statusResolvers[0]?.({ state: "tagging" });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "analyzeSuggestedTags" })
+      ).toBeInTheDocument();
+    });
   });
 });

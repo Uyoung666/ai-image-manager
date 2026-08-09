@@ -31,4 +31,16 @@ describe("local media URL cache version", () => {
       "&v=2"
     );
   });
+
+  it("adds the HTTP media authentication token when preload provides one", () => {
+    Object.defineProperty(window, "electronAPI", {
+      configurable: true,
+      value: { httpAuthToken: "test-token" },
+    });
+
+    expect(toLocalMediaUrl("C:\\photos\\one.jpg")).toContain(
+      "&token=test-token"
+    );
+    Reflect.deleteProperty(window, "electronAPI");
+  });
 });

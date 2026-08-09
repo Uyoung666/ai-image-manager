@@ -14,13 +14,15 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install --ignore-scripts
-      - name: Download Electron binary
-        run: node node_modules/electron/install.js
-      - name: Build better-sqlite3 for Node 22
-        run: npm rebuild better-sqlite3
+        run: npm ci
+      - name: Rebuild Electron native modules
+        run: npm run rebuild:native
       - name: Run unit tests
-        run: npm run test:unit
+        run: npm run test:unit -- run
+      - name: Run AI integration tests
+        run: npm run test:ai-integration
+      - name: Run worker tests
+        run: npm run test:worker
 
   test-e2e:
     timeout-minutes: 10
@@ -31,14 +33,14 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+      - name: Rebuild Electron native modules
+        run: npm run rebuild:native
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
-      - name: Create models placeholder
-        run: node -e "fs.mkdirSync('models',{recursive:true})"
-      - name: Create Executable
-        run: npm run make
       - name: Run Playwright tests
+        env:
+          AIM_E2E_PREPARE_MODELS: "1"
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()

@@ -8,8 +8,18 @@ import type { CloudProvider, CloudProviderType } from "./abstract-provider";
 import { s3Provider } from "./s3-provider";
 import { webdavProvider } from "./webdav-provider";
 
+const PATH_BASENAME_RE = /^.*[\\/]/;
+
 export function getProvider(type: CloudProviderType): CloudProvider {
   return type === "webdav" ? webdavProvider : s3Provider;
+}
+
+export function buildPhotoRemotePath(
+  photoId: number,
+  filename: string
+): string {
+  const basename = filename.replace(PATH_BASENAME_RE, "") || `photo-${photoId}`;
+  return `ai-image-manager/photos/${photoId}/${basename}`;
 }
 
 export function testConnection(configId: number) {
@@ -78,7 +88,7 @@ export async function uploadPhoto(
 
   const buffer = fs.readFileSync(photo.path);
   const ext = path.extname(photo.filename);
-  const remotePath = `ai-image-manager/${photo.filename}`;
+  const remotePath = buildPhotoRemotePath(photo.id, photo.filename);
 
   // Log pending
   const logResult = db

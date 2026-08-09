@@ -118,6 +118,12 @@ export const getAiHealth = os.handler(() => {
  * 调用方应随后调用 startAiIndexing 以自动重新索引。
  */
 export const resetAiIndex = os.handler(async () => {
+  if (aiControlState !== "idle" || isAutoTaggingActive()) {
+    return {
+      busy: true,
+      success: false,
+    };
+  }
   const rebuildResult = await rebuildVectorDB();
   if (!rebuildResult.success) {
     return {

@@ -21,6 +21,9 @@ jobs:
       - name: Install and build
         run: npm ci
 
+      - name: Rebuild Electron native modules
+        run: npm run rebuild:native
+
       - name: Publish Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

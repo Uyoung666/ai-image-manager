@@ -529,6 +529,11 @@ const ZoomableImageComponent = forwardRef<
     return () => {
       if (transformRafRef.current !== null) {
         cancelAnimationFrame(transformRafRef.current);
+        transformRafRef.current = null;
+      }
+      if (inertiaRafRef.current !== null) {
+        cancelAnimationFrame(inertiaRafRef.current);
+        inertiaRafRef.current = null;
       }
       if (wheelEndTimerRef.current) {
         clearTimeout(wheelEndTimerRef.current);
@@ -538,7 +543,13 @@ const ZoomableImageComponent = forwardRef<
       }
       if (releaseTimerRef.current) {
         clearTimeout(releaseTimerRef.current);
+        releaseTimerRef.current = null;
       }
+      if (zoomCheckTimerRef.current) {
+        clearTimeout(zoomCheckTimerRef.current);
+        zoomCheckTimerRef.current = null;
+      }
+      dragging.current = false;
       if (originalAbortRef.current) {
         originalAbortRef.current.abort();
       }

@@ -95,9 +95,11 @@ export function usePhotoSelection(
   const [lastClickedIdx, setLastClickedIdx] = useState<number>(
     () => getSession(routeKey).lastClickedIdx
   );
+  const photoIdsKey = photos.map((photo) => photo.id).join(",");
 
   // 当 routeKey 在同一个组件实例内变化时（如首页切换文件夹/排序），
   // 重新从 session 加载对应路由的选中状态，避免跨 filter 的选中污染。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: photoIdsKey tracks async photo list changes without depending on Array.prototype.some.
   useEffect(() => {
     const session = getSession(routeKey);
     const validIds = session.selectedIds.filter((id) =>
@@ -105,7 +107,7 @@ export function usePhotoSelection(
     );
     setSelectedIds(new Set(validIds));
     setLastClickedIdx(session.lastClickedIdx);
-  }, [routeKey, getSession, photos.some]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routeKey, getSession, photoIdsKey]);
 
   // 持久化：selectedIds 变化时保存
   const selectedIdsRef = useRef(selectedIds);

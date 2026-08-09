@@ -67,6 +67,43 @@ const photos = [
 ];
 
 describe("PhotoLightbox", () => {
+  it("traps keyboard focus and restores body state on close", () => {
+    const trigger = document.createElement("button");
+    document.body.append(trigger);
+    trigger.focus();
+    document.body.style.overflow = "scroll";
+    const { rerender } = render(
+      <PhotoLightbox
+        initialIndex={0}
+        onClose={vi.fn()}
+        onToggleFavorite={vi.fn().mockResolvedValue(undefined)}
+        open
+        photos={photos}
+      />
+    );
+
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    expect(document.body.style.overflow).toBe("hidden");
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(
+      screen
+        .getByRole("dialog")
+        .querySelector<HTMLElement>('[tabindex="0"], button:not([disabled])')
+    );
+
+    rerender(
+      <PhotoLightbox
+        initialIndex={0}
+        onClose={vi.fn()}
+        open={false}
+        photos={photos}
+      />
+    );
+    expect(document.body.style.overflow).toBe("scroll");
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+
   it("keeps secondary review surfaces collapsed by default", () => {
     render(
       <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />

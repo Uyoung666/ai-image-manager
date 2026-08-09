@@ -590,19 +590,23 @@ export async function computeColorDistribution(
 
   const palettes: PerPhotoPalette[] = [];
   let processed = 0;
+  let failed = 0;
 
   for (const p of samplePhotos) {
     try {
       const imgPath = p.thumbnailPath || p.path;
-      if (!fs.existsSync(imgPath)) {
-        continue;
-      }
-      const palette = await extractPerPhotoPalette(imgPath);
-      if (palette) {
-        palettes.push(palette);
+      if (fs.existsSync(imgPath)) {
+        const palette = await extractPerPhotoPalette(imgPath);
+        if (palette) {
+          palettes.push(palette);
+        } else {
+          failed++;
+        }
+      } else {
+        failed++;
       }
     } catch {
-      /* skip bad files */
+      failed++;
     }
     processed++;
     if (processed % 20 === 0) {
@@ -618,11 +622,15 @@ export async function computeColorDistribution(
       sampled: palettes.length,
       totalPhotos,
     };
-    colorCache = { result: emptyResult, totalPhotos, timestamp: Date.now() };
+    if (failed === 0) {
+      colorCache = { result: emptyResult, totalPhotos, timestamp: Date.now() };
+    }
     return emptyResult;
   }
 
   const result = aggregateDistribution(palettes, totalPhotos);
-  colorCache = { result, totalPhotos, timestamp: Date.now() };
+  if (failed === 0) {
+    colorCache = { result, totalPhotos, timestamp: Date.now() };
+  }
   return result;
 }

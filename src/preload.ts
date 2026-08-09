@@ -3,16 +3,37 @@ import { IPC_CHANNELS, type WanderLifecycleState } from "./constants";
 
 let latestWanderLifecycleState: WanderLifecycleState | null = null;
 
+function postToRenderer(message: unknown): void {
+  const targetOrigin = window.location.origin;
+  window.postMessage(message, targetOrigin === "null" ? "*" : targetOrigin);
+}
+
 ipcRenderer.on(IPC_CHANNELS.WANDER_LIFECYCLE, (_event, payload) => {
   latestWanderLifecycleState = payload as WanderLifecycleState;
-  window.postMessage(latestWanderLifecycleState, "*");
+  postToRenderer(latestWanderLifecycleState);
 });
 
 window.addEventListener("message", (event) => {
-  if (event.data === IPC_CHANNELS.START_ORPC_SERVER) {
-    const [serverPort] = event.ports;
-    ipcRenderer.postMessage(IPC_CHANNELS.START_ORPC_SERVER, null, [serverPort]);
+  const currentOrigin = window.location.origin;
+  if (
+    event.source !== window ||
+    event.origin !== (currentOrigin === "null" ? "null" : currentOrigin) ||
+    event.data !== IPC_CHANNELS.START_ORPC_SERVER ||
+    event.ports.length !== 1
+  ) {
+    return;
   }
+
+  const [serverPort] = event.ports;
+  if (
+    !serverPort ||
+    typeof serverPort.start !== "function" ||
+    typeof serverPort.postMessage !== "function"
+  ) {
+    return;
+  }
+
+  ipcRenderer.postMessage(IPC_CHANNELS.START_ORPC_SERVER, null, [serverPort]);
 });
 
 // 从 additionalArguments 读取主进程传入的 HTTP 端口号
@@ -21,6 +42,10 @@ const httpPortArg = process.argv.find((a) => a.startsWith("--http-port="));
 const httpPort = httpPortArg
   ? Number.parseInt(httpPortArg.split("=")[1], 10)
   : 0;
+const httpTokenArg = process.argv.find((a) => a.startsWith("--http-token="));
+const httpAuthToken = httpTokenArg
+  ? httpTokenArg.slice("--http-token=".length)
+  : "";
 
 // E2E 测试模式：跳过引导流程
 const isE2E = process.argv.includes("--e2e");
@@ -39,6 +64,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   preloadReady: true,
   // HTTP 服务器端口（由主进程在 createWindow 时通过 additionalArguments 注入）
   httpPort,
+  httpAuthToken,
   // E2E 测试模式
   isE2E,
   getWanderLifecycleState: (): WanderLifecycleState | null =>
@@ -70,71 +96,68 @@ contextBridge.exposeInMainWorld("electronAPI", {
 });
 
 ipcRenderer.on("global-shortcut:search", () => {
-  window.postMessage("global-shortcut:search", "*");
+  postToRenderer("global-shortcut:search");
 });
 
 ipcRenderer.on(IPC_CHANNELS.FILE_CHANGE, (_event, payload) => {
-  window.postMessage({ channel: IPC_CHANNELS.FILE_CHANGE, ...payload }, "*");
+  postToRenderer({ channel: IPC_CHANNELS.FILE_CHANGE, ...payload });
 });
 
 ipcRenderer.on("scan-progress", (_event, payload) => {
-  window.postMessage({ channel: "scan-progress", ...payload }, "*");
+  postToRenderer({ channel: "scan-progress", ...payload });
 });
 
 ipcRenderer.on("ai-embedding-done", () => {
-  window.postMessage({ channel: "ai-embedding-done" }, "*");
+  postToRenderer({ channel: "ai-embedding-done" });
 });
 
 ipcRenderer.on("ai-progress", (_event, payload) => {
-  window.postMessage({ channel: "ai-progress", ...payload }, "*");
+  postToRenderer({ channel: "ai-progress", ...payload });
 });
 
 ipcRenderer.on("ai-auto-repair-started", (_event, payload) => {
-  window.postMessage({ channel: "ai-auto-repair-started", ...payload }, "*");
+  postToRenderer({ channel: "ai-auto-repair-started", ...payload });
 });
 
 ipcRenderer.on("ai-status-changed", (_event, payload) => {
-  window.postMessage({ channel: "ai-status-changed", ...payload }, "*");
+  postToRenderer({ channel: "ai-status-changed", ...payload });
 });
 
 ipcRenderer.on("sequences-changed", (_event, payload) => {
-  window.postMessage({ channel: "sequences-changed", ...payload }, "*");
+  postToRenderer({ channel: "sequences-changed", ...payload });
 });
 
 ipcRenderer.on("import-queue-status", (_event, payload) => {
-  window.postMessage({ channel: "import-queue-status", ...payload }, "*");
+  postToRenderer({ channel: "import-queue-status", ...payload });
 });
 
 ipcRenderer.on("theme:system-changed", (_event, resolved) => {
-  window.postMessage({ channel: "theme:system-changed", resolved }, "*");
+  postToRenderer({ channel: "theme:system-changed", resolved });
 });
 
 ipcRenderer.on("data-path-migrate-progress", (_event, payload) => {
-  window.postMessage(
-    { channel: "data-path-migrate-progress", ...payload },
-    "*"
-  );
+  postToRenderer({ channel: "data-path-migrate-progress", ...payload });
 });
 
 ipcRenderer.on("update:available", (_event, info) => {
-  window.postMessage({ channel: "update:available", ...info }, "*");
+  postToRenderer({ channel: "update:available", ...info });
 });
 
 ipcRenderer.on("update:status", (_event, payload) => {
-  window.postMessage({ channel: "update:status", ...payload }, "*");
+  postToRenderer({ channel: "update:status", ...payload });
 });
 
 // GPU prompt events removed — GPU detection is now integrated into
 // the Onboarding overlay flow (step 2), not a standalone popup.
 
 ipcRenderer.on("face-detection-progress", (_event, payload) => {
-  window.postMessage({ channel: "face-detection-progress", ...payload }, "*");
+  postToRenderer({ channel: "face-detection-progress", ...payload });
 });
 
 ipcRenderer.on("face-detection-done", (_event, payload) => {
-  window.postMessage({ channel: "face-detection-done", ...payload }, "*");
+  postToRenderer({ channel: "face-detection-done", ...payload });
 });
 
 ipcRenderer.on("window:maximize-change", (_event, isMaximized: boolean) => {
-  window.postMessage({ channel: "window:maximize-change", isMaximized }, "*");
+  postToRenderer({ channel: "window:maximize-change", isMaximized });
 });

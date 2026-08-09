@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import nodeOs from "node:os";
 import path from "node:path";
 import { os } from "@orpc/server";
@@ -144,6 +145,49 @@ function performHardDelete(photoIds: number[]): void {
 
 const photoIdsMovingToSystemTrash = new Set<number>();
 
+interface AssetMove {
+  from: string;
+  to: string;
+}
+
+function rollbackAssetMoves(moves: AssetMove[]): void {
+  for (const move of [...moves].reverse()) {
+    try {
+      if (fs.existsSync(move.to) && !fs.existsSync(move.from)) {
+        fs.renameSync(move.to, move.from);
+      }
+    } catch (error) {
+      console.error(
+        `[Photos] Failed to roll back ${move.to} -> ${move.from}:`,
+        error
+      );
+    }
+  }
+}
+
+function movePhotoAssets(oldPath: string, newPath: string): AssetMove[] {
+  const moves: AssetMove[] = [];
+  try {
+    fs.renameSync(oldPath, newPath);
+    moves.push({ from: oldPath, to: newPath });
+
+    for (const size of ["sm", "md", "lg"] as const) {
+      const oldThumb = getThumbnailPath(oldPath, size);
+      if (!fs.existsSync(oldThumb)) {
+        continue;
+      }
+      const newThumb = getThumbnailPath(newPath, size);
+      fs.mkdirSync(path.dirname(newThumb), { recursive: true });
+      fs.renameSync(oldThumb, newThumb);
+      moves.push({ from: oldThumb, to: newThumb });
+    }
+    return moves;
+  } catch (error) {
+    rollbackAssetMoves(moves);
+    throw error;
+  }
+}
+
 async function moveFilesToSystemTrash(
   targetPhotos: Array<{ id: number; path: string }>
 ): Promise<TrashOperationResult> {
@@ -162,7 +206,18 @@ async function moveFilesToSystemTrash(
   }
   try {
     const result = await executeSystemTrashMove(availablePhotos, {
-      fileExists: fs.existsSync,
+      fileExists: async (filePath) => {
+        try {
+          await fsp.lstat(filePath);
+          return true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException)?.code;
+          if (code === "ENOENT" || code === "ENOTDIR") {
+            return false;
+          }
+          throw error;
+        }
+      },
       hardDelete: performHardDelete,
       onFailure: (photo, message) => {
         console.warn(`[Trash] Failed to trash file: ${photo.path}`, message);
@@ -445,34 +500,31 @@ export const movePhotos = os
           continue;
         }
 
-        fs.renameSync(photo.path, newPath);
+        const movedAssets = movePhotoAssets(photo.path, newPath);
+        try {
+          db.transaction(() => {
+            db.update(photos)
+              .set({ path: newPath, folderId: input.targetFolderId })
+              .where(eq(photos.id, id))
+              .run();
 
-        // Move thumbnails (all sizes)
-        for (const size of ["sm", "md", "lg"] as const) {
-          const oldThumb = getThumbnailPath(photo.path, size);
-          if (fs.existsSync(oldThumb)) {
-            const newThumb = getThumbnailPath(newPath, size);
-            fs.mkdirSync(path.dirname(newThumb), { recursive: true });
-            fs.renameSync(oldThumb, newThumb);
-          }
+            // Keep the catalog path and folder counts atomic with the file
+            // move. A database failure is followed by an asset rollback.
+            if (photo.folderId) {
+              db.update(folders)
+                .set({ photoCount: sql`MAX(0, photo_count - 1)` })
+                .where(eq(folders.id, photo.folderId))
+                .run();
+            }
+            db.update(folders)
+              .set({ photoCount: sql`photo_count + 1` })
+              .where(eq(folders.id, input.targetFolderId))
+              .run();
+          });
+        } catch (error) {
+          rollbackAssetMoves(movedAssets);
+          throw error;
         }
-
-        db.update(photos)
-          .set({ path: newPath, folderId: input.targetFolderId })
-          .where(eq(photos.id, id))
-          .run();
-
-        // Update source and target folder photoCounts
-        if (photo.folderId) {
-          db.update(folders)
-            .set({ photoCount: sql`MAX(0, photo_count - 1)` })
-            .where(eq(folders.id, photo.folderId))
-            .run();
-        }
-        db.update(folders)
-          .set({ photoCount: sql`photo_count + 1` })
-          .where(eq(folders.id, input.targetFolderId))
-          .run();
 
         results.push({ id });
       } catch (err) {
@@ -599,7 +651,8 @@ export const renamePhotos = os
           });
           continue;
         }
-        fs.renameSync(photo.path, newPath);
+        const movedAssets = movePhotoAssets(photo.path, newPath);
+
         const newThumbPath = getThumbnailPath(newPath, "md");
 
         // Migrate thumbnails (all sizes): try renaming old thumbnail files first
@@ -627,14 +680,19 @@ export const renamePhotos = os
             // Thumbnail generation is best-effort during rename.
           });
         }
-        db.update(photos)
-          .set({
-            path: newPath,
-            filename: newFilename,
-            thumbnailPath: newThumbPath,
-          })
-          .where(eq(photos.id, photo.id))
-          .run();
+        try {
+          db.update(photos)
+            .set({
+              path: newPath,
+              filename: newFilename,
+              thumbnailPath: newThumbPath,
+            })
+            .where(eq(photos.id, photo.id))
+            .run();
+        } catch (error) {
+          rollbackAssetMoves(movedAssets);
+          throw error;
+        }
         results.push({
           id: photo.id,
           oldName: photo.filename,

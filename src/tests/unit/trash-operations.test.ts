@@ -63,7 +63,7 @@ describe("executeSystemTrashMove", () => {
         { id: 2, path: "failed.jpg" },
       ],
       {
-        fileExists: () => true,
+        fileExists: async () => true,
         hardDelete,
         trashFile,
       }
@@ -87,7 +87,7 @@ describe("executeSystemTrashMove", () => {
     const result = await executeSystemTrashMove(
       [{ id: 5, path: "missing.jpg" }],
       {
-        fileExists: () => false,
+        fileExists: async () => false,
         hardDelete,
         trashFile,
       }
@@ -103,7 +103,7 @@ describe("executeSystemTrashMove", () => {
     const result = await executeSystemTrashMove(
       [{ id: 8, path: "locked.jpg" }],
       {
-        fileExists: () => true,
+        fileExists: async () => true,
         hardDelete,
         trashFile: () => Promise.reject(new Error("locked")),
       }
@@ -111,6 +111,42 @@ describe("executeSystemTrashMove", () => {
 
     expect(result.succeededIds).toEqual([]);
     expect(result.failed).toHaveLength(1);
+    expect(hardDelete).not.toHaveBeenCalled();
+  });
+
+  it("treats a race-time ENOENT as idempotently missing", async () => {
+    const hardDelete = vi.fn();
+    const result = await executeSystemTrashMove(
+      [{ id: 9, path: "vanished.jpg" }],
+      {
+        fileExists: async () => true,
+        hardDelete,
+        trashFile: () =>
+          Promise.reject(
+            Object.assign(new Error("missing"), { code: "ENOENT" })
+          ),
+      }
+    );
+
+    expect(result).toEqual({ failed: [], succeededIds: [9] });
+    expect(hardDelete).toHaveBeenCalledWith([9]);
+  });
+
+  it("does not treat permission errors as missing files", async () => {
+    const hardDelete = vi.fn();
+    const result = await executeSystemTrashMove(
+      [{ id: 10, path: "protected.jpg" }],
+      {
+        fileExists: () =>
+          Promise.reject(
+            Object.assign(new Error("access denied"), { code: "EACCES" })
+          ),
+        hardDelete,
+        trashFile: vi.fn(),
+      }
+    );
+
+    expect(result.failed[0]?.code).toBe("FILE_OPERATION_FAILED");
     expect(hardDelete).not.toHaveBeenCalled();
   });
 });

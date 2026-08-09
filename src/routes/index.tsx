@@ -905,7 +905,7 @@ function HomePage() {
 
   const handleOpenSequence = useCallback(
     (sequenceId: number) => {
-      sequenceDetailsRequestRef.current += 1;
+      const requestId = ++sequenceDetailsRequestRef.current;
       setSelectedSequence(null);
       setSequenceDetailsLoading(false);
       const sequenceSummary = sequences.find(
@@ -919,7 +919,7 @@ function HomePage() {
       ipc.client.photos
         .getSequence({ id: sequenceId })
         .then((sequence) => {
-          if (sequence) {
+          if (sequence && requestId === sequenceDetailsRequestRef.current) {
             setSequenceAutoPlay(false);
             const detail = sequence as unknown as PhotoSequenceDetail;
             const members = detail.members.filter((photo) =>
@@ -937,7 +937,11 @@ function HomePage() {
             });
           }
         })
-        .catch(() => toast.error(t("sequenceOpenFailed")));
+        .catch(() => {
+          if (requestId === sequenceDetailsRequestRef.current) {
+            toast.error(t("sequenceOpenFailed"));
+          }
+        });
     },
     [sequences, t]
   );
@@ -2072,7 +2076,11 @@ function HomePage() {
   );
 
   async function handleOpenExplorer(filePath: string) {
-    await ipc.client.shell.openInExplorer({ path: filePath });
+    try {
+      await ipc.client.shell.openInExplorer({ path: filePath });
+    } catch {
+      // Ignore shell failures; the caller has no recovery action to present.
+    }
   }
 
   function handleDeletePhoto(id: number) {
@@ -2346,80 +2354,83 @@ function HomePage() {
           (id) => photos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
-        ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
-          for (const favId of ids) {
-            setExpandedSequence((prev) => {
-              if (!prev) {
-                return prev;
-              }
-              return {
-                ...prev,
-                members: prev.members.map((m) =>
-                  m.id === favId ? { ...m, isFavorite: newVal } : m
-                ),
-              };
-            });
-            setExpandedSequenceComplete((prev) => {
-              if (!prev) {
-                return prev;
-              }
-              return {
-                ...prev,
-                members: prev.members.map((m) =>
-                  m.id === favId ? { ...m, isFavorite: newVal } : m
-                ),
-              };
-            });
-          }
-          queryClient.invalidateQueries({
-            queryKey: ["photos"],
-            refetchType: "active",
-          });
-          toast.success(
-            newVal
-              ? t("toastFavoriteAddedCount", { count: ids.length })
-              : t("toastFavoriteRemoved"),
-            {
-              action: {
-                label: t("toastUndo"),
-                onClick: async () => {
-                  await ipc.client.photos.toggleFavorite({
-                    ids,
-                    favorite: allFav,
-                  });
-                  for (const favId of ids) {
-                    setExpandedSequence((prev) => {
-                      if (!prev) {
-                        return prev;
-                      }
-                      return {
-                        ...prev,
-                        members: prev.members.map((m) =>
-                          m.id === favId ? { ...m, isFavorite: allFav } : m
-                        ),
-                      };
-                    });
-                    setExpandedSequenceComplete((prev) => {
-                      if (!prev) {
-                        return prev;
-                      }
-                      return {
-                        ...prev,
-                        members: prev.members.map((m) =>
-                          m.id === favId ? { ...m, isFavorite: allFav } : m
-                        ),
-                      };
-                    });
-                  }
-                  queryClient.invalidateQueries({
-                    queryKey: ["photos"],
-                    refetchType: "active",
-                  });
-                },
-              },
+        ipc.client.photos
+          .toggleFavorite({ ids, favorite: newVal })
+          .then(() => {
+            for (const favId of ids) {
+              setExpandedSequence((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                return {
+                  ...prev,
+                  members: prev.members.map((m) =>
+                    m.id === favId ? { ...m, isFavorite: newVal } : m
+                  ),
+                };
+              });
+              setExpandedSequenceComplete((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                return {
+                  ...prev,
+                  members: prev.members.map((m) =>
+                    m.id === favId ? { ...m, isFavorite: newVal } : m
+                  ),
+                };
+              });
             }
-          );
-        });
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
+            });
+            toast.success(
+              newVal
+                ? t("toastFavoriteAddedCount", { count: ids.length })
+                : t("toastFavoriteRemoved"),
+              {
+                action: {
+                  label: t("toastUndo"),
+                  onClick: async () => {
+                    await ipc.client.photos.toggleFavorite({
+                      ids,
+                      favorite: allFav,
+                    });
+                    for (const favId of ids) {
+                      setExpandedSequence((prev) => {
+                        if (!prev) {
+                          return prev;
+                        }
+                        return {
+                          ...prev,
+                          members: prev.members.map((m) =>
+                            m.id === favId ? { ...m, isFavorite: allFav } : m
+                          ),
+                        };
+                      });
+                      setExpandedSequenceComplete((prev) => {
+                        if (!prev) {
+                          return prev;
+                        }
+                        return {
+                          ...prev,
+                          members: prev.members.map((m) =>
+                            m.id === favId ? { ...m, isFavorite: allFav } : m
+                          ),
+                        };
+                      });
+                    }
+                    queryClient.invalidateQueries({
+                      queryKey: ["photos"],
+                      refetchType: "active",
+                    });
+                  },
+                },
+              }
+            );
+          })
+          .catch(() => undefined);
         return;
       }
 
@@ -3194,7 +3205,8 @@ function HomePage() {
                   },
                 }
               );
-            });
+            })
+            .catch(() => undefined);
         }}
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}

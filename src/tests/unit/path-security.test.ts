@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { isSafePath, safeJoin } from "../../utils/path-security";
@@ -110,5 +112,33 @@ describe("路径安全验证", () => {
 
       expect(result).toBeNull();
     });
+  });
+
+  it("拒绝通过 symlink 或 junction 逃逸到白名单外", () => {
+    const fixtureRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ai-image-manager-path-security-")
+    );
+    const allowedRoot = path.join(fixtureRoot, "allowed");
+    const outsideRoot = path.join(fixtureRoot, "outside");
+    const link = path.join(allowedRoot, "linked");
+    fs.mkdirSync(allowedRoot);
+    fs.mkdirSync(outsideRoot);
+    fs.writeFileSync(path.join(outsideRoot, "secret.jpg"), "secret");
+
+    try {
+      fs.symlinkSync(
+        outsideRoot,
+        link,
+        process.platform === "win32" ? "junction" : "dir"
+      );
+    } catch {
+      fs.rmSync(fixtureRoot, { force: true, recursive: true });
+      return;
+    }
+
+    expect(isSafePath(path.join(link, "secret.jpg"), [allowedRoot])).toBe(
+      false
+    );
+    fs.rmSync(fixtureRoot, { force: true, recursive: true });
   });
 });

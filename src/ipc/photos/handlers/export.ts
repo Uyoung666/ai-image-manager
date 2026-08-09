@@ -70,7 +70,10 @@ export const setWatermarkSettings = os
 
 // Export photos as ZIP with HTML gallery
 const ExportSchema = z.object({
-  ids: z.array(z.number()),
+  ids: z
+    .array(z.number().int().positive().max(2_147_483_646))
+    .min(1)
+    .max(50_000),
   format: z.enum(["original", "compressed"]).default("original"),
   maxWidth: z.number().optional().default(1920),
   quality: z.number().min(10).max(100).optional().default(85),
@@ -78,12 +81,89 @@ const ExportSchema = z.object({
   locale: z.string().optional().default("zh-CN"),
 });
 
+const EXPORT_DB_BATCH_SIZE = 250;
+const EXPORT_YIELD_INTERVAL = 8;
+
+export function sanitizeExportFilename(filename: string): string {
+  const baseName = path.posix.basename(filename.replaceAll("\\", "/"));
+  const sanitized = baseName
+    .replace(/[<>:"/|?*]/g, "_")
+    .split("")
+    .filter((character) => character.charCodeAt(0) >= 32)
+    .join("")
+    .replace(/[. ]+$/g, "")
+    .trim();
+  if (!sanitized || sanitized === "." || sanitized === "..") {
+    return "photo";
+  }
+  return sanitized;
+}
+
+export function allocateExportFilename(
+  filename: string,
+  format: "original" | "compressed",
+  usedNames: Set<string>
+): string {
+  const safeName = sanitizeExportFilename(filename);
+  const extension = format === "compressed" ? ".jpg" : path.extname(safeName);
+  const baseName = path.basename(
+    safeName,
+    format === "compressed" ? path.extname(safeName) : extension
+  );
+  const normalizedBase = baseName || "photo";
+  let candidate = `${normalizedBase}${extension}`;
+  let counter = 1;
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${normalizedBase}_${counter}${extension}`;
+    counter++;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+export function resolveExportChildPath(
+  directory: string,
+  filename: string
+): string {
+  const root = path.resolve(directory);
+  const resolved = path.resolve(root, filename);
+  const rootWithSeparator = `${root}${path.sep}`;
+  if (!(resolved.startsWith(rootWithSeparator) && resolved !== root)) {
+    throw new Error("Export filename resolves outside the export directory");
+  }
+  return resolved;
+}
+
+export function resolveExportOutputPath(outputPath?: string): string {
+  const requestedPath =
+    outputPath?.trim() ||
+    path.join(
+      nodeOs.tmpdir(),
+      `gallery-${new Date().toISOString().slice(0, 10)}.zip`
+    );
+  if (requestedPath.includes("\u0000")) {
+    throw new Error("Invalid export output path");
+  }
+  const resolved = path.resolve(requestedPath);
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+    throw new Error("Export output path must be a file");
+  }
+  return resolved;
+}
+
+function throwIfExportAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error("Export cancelled");
+  }
+}
+
 export const exportPhotos = os
   .input(ExportSchema)
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Export orchestration preserves the existing per-photo and cleanup flow.
-  .handler(async ({ input }) => {
+  .handler(async ({ input, signal }) => {
     const db = getDatabase();
     const { ids, format, maxWidth, quality, outputPath, locale } = input;
+    const uniqueIds = [...new Set(ids)];
 
     // Read watermark settings from appSettings
     let wm: {
@@ -131,18 +211,10 @@ export const exportPhotos = os
       /* use defaults */
     }
 
-    const photoList = db
-      .select()
-      .from(photos)
-      .where(inArray(photos.id, ids))
-      .all();
-
-    if (photoList.length === 0) {
-      return { success: false, error: "No photos found" };
-    }
-
     // Prepare temp directory
-    const tmpDir = path.join(nodeOs.tmpdir(), `ai-image-gallery-${Date.now()}`);
+    const tmpDir = fs.mkdtempSync(
+      path.join(nodeOs.tmpdir(), "ai-image-gallery-")
+    );
     const photosDir = path.join(tmpDir, "photos");
     fs.mkdirSync(photosDir, { recursive: true });
 
@@ -328,165 +400,201 @@ export const exportPhotos = os
           ? (await import("sharp")).default
           : null;
 
-      for (const photo of photoList) {
-        // Resolve filename collision
-        let destName = photo.filename;
-        let counter = 1;
-        while (fs.existsSync(path.join(photosDir, destName))) {
-          const ext = path.extname(photo.filename);
-          const base = path.basename(photo.filename, ext);
-          destName = `${base}_${counter}${ext}`;
-          counter++;
-        }
-
-        const destPath = path.join(photosDir, destName);
-
-        if (sharp && (format === "compressed" || wm.enabled)) {
-          try {
-            let pipeline = sharp(photo.path).rotate();
-            const meta = await pipeline.metadata();
-            const imgWidth = meta.width || photo.width || 0;
-            const imgHeight = meta.height || photo.height || 0;
-
-            if (format === "compressed" && imgWidth > maxWidth) {
-              pipeline = pipeline.resize(maxWidth);
-            }
-
-            let outWidth = imgWidth;
-            let outHeight = imgHeight;
-            if (format === "compressed" && imgWidth > maxWidth) {
-              outWidth = maxWidth;
-              outHeight = Math.round(maxWidth * (imgHeight / imgWidth));
-            }
-
-            // Apply the selected image watermark mode
-            if (
-              wm.enabled &&
-              wm.mode === "image" &&
-              wm.imagePath &&
-              fs.existsSync(wm.imagePath) &&
-              outWidth > 0 &&
-              outHeight > 0
-            ) {
-              const maxDim = Math.round(
-                Math.min(outWidth, outHeight) * (wm.imageScale / 100)
-              );
-              const wmResized = sharp(wm.imagePath)
-                .resize(maxDim, maxDim, { fit: "inside" })
-                .ensureAlpha();
-              const wmMeta = await wmResized.metadata();
-              const wmW = wmMeta.width || maxDim;
-              const wmH = wmMeta.height || maxDim;
-              const wmBuffer = await wmResized.png().toBuffer();
-              const { left, top } = wmAnchorPos(
-                wm.anchor || "bottomRight",
-                wm.margin ?? 5,
-                outWidth,
-                outHeight,
-                wmW,
-                wmH
-              );
-              pipeline = pipeline.composite([{ input: wmBuffer, top, left }]);
-            } else if (
-              wm.enabled &&
-              wm.mode === "text" &&
-              wm.text.trim() &&
-              outWidth > 0 &&
-              outHeight > 0
-            ) {
-              // Text watermark SVG
-              const wmSvg = buildWatermarkSvg(outWidth, outHeight);
-              if (wmSvg) {
-                pipeline = pipeline.composite([
-                  { input: wmSvg, top: 0, left: 0 },
-                ]);
-              }
-            }
-
-            if (format === "compressed") {
-              const buffer = await pipeline.jpeg({ quality }).toBuffer();
-              destName = `${path.basename(destName, path.extname(destName))}.jpg`;
-              fs.writeFileSync(path.join(photosDir, destName), buffer);
-            } else if (wm.enabled) {
-              // Watermark in original format: preserve source format
-              const srcFormat = (meta.format || "").toLowerCase();
-              if (srcFormat === "jpeg" || srcFormat === "jpg") {
-                const buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
-                fs.writeFileSync(destPath, buffer);
-              } else if (srcFormat === "webp") {
-                const buffer = await pipeline.webp({ quality: 92 }).toBuffer();
-                fs.writeFileSync(destPath, buffer);
-              } else {
-                const buffer = await pipeline.png().toBuffer();
-                fs.writeFileSync(destPath, buffer);
-              }
-            }
-          } catch {
-            // Fallback: copy original on sharp failure
-            fs.copyFileSync(photo.path, path.join(photosDir, destName));
-          }
-        } else {
-          fs.copyFileSync(photo.path, destPath);
-        }
-
-        // Gather tags
-        const photoTagRows = db
-          .select({ name: tags.name })
-          .from(photoTags)
-          .innerJoin(tags, eq(photoTags.tagId, tags.id))
-          .where(eq(photoTags.photoId, photo.id))
-          .all();
-        const tagNames = photoTagRows.map((t) => t.name);
-
-        // Gather EXIF
-        const exif = db
+      const usedNames = new Set<string>();
+      let exportedPhotoCount = 0;
+      for (
+        let idOffset = 0;
+        idOffset < uniqueIds.length;
+        idOffset += EXPORT_DB_BATCH_SIZE
+      ) {
+        throwIfExportAborted(signal);
+        const photoList = db
           .select()
-          .from(exifData)
-          .where(eq(exifData.photoId, photo.id))
-          .get();
+          .from(photos)
+          .where(
+            inArray(
+              photos.id,
+              uniqueIds.slice(idOffset, idOffset + EXPORT_DB_BATCH_SIZE)
+            )
+          )
+          .all();
 
-        galleryPhotos.push({
-          filename: destName,
-          width: photo.width ?? 0,
-          height: photo.height ?? 0,
-          tags: tagNames,
-          exif: exif
-            ? {
-                camera: exif.cameraModel ?? undefined,
-                lens: exif.lensModel ?? undefined,
-                focalLength: exif.focalLength?.toString(),
-                aperture: exif.aperture?.toString(),
-                shutter: exif.shutterSpeed ?? undefined,
-                iso: exif.iso ?? undefined,
-                dateTaken: exif.dateTaken
-                  ? new Date(exif.dateTaken).toLocaleDateString(locale)
-                  : undefined,
+        for (const photo of photoList) {
+          throwIfExportAborted(signal);
+          const destName = allocateExportFilename(
+            photo.filename,
+            format,
+            usedNames
+          );
+          const destPath = resolveExportChildPath(photosDir, destName);
+
+          if (sharp && (format === "compressed" || wm.enabled)) {
+            try {
+              let pipeline = sharp(photo.path).rotate();
+              const meta = await pipeline.metadata();
+              const imgWidth = meta.width || photo.width || 0;
+              const imgHeight = meta.height || photo.height || 0;
+
+              if (format === "compressed" && imgWidth > maxWidth) {
+                pipeline = pipeline.resize(maxWidth);
               }
-            : null,
-        });
+
+              let outWidth = imgWidth;
+              let outHeight = imgHeight;
+              if (format === "compressed" && imgWidth > maxWidth) {
+                outWidth = maxWidth;
+                outHeight = Math.round(maxWidth * (imgHeight / imgWidth));
+              }
+
+              // Apply the selected image watermark mode
+              if (
+                wm.enabled &&
+                wm.mode === "image" &&
+                wm.imagePath &&
+                fs.existsSync(wm.imagePath) &&
+                outWidth > 0 &&
+                outHeight > 0
+              ) {
+                const maxDim = Math.round(
+                  Math.min(outWidth, outHeight) * (wm.imageScale / 100)
+                );
+                const wmResized = sharp(wm.imagePath)
+                  .resize(maxDim, maxDim, { fit: "inside" })
+                  .ensureAlpha();
+                const wmMeta = await wmResized.metadata();
+                const wmW = wmMeta.width || maxDim;
+                const wmH = wmMeta.height || maxDim;
+                const wmBuffer = await wmResized.png().toBuffer();
+                const { left, top } = wmAnchorPos(
+                  wm.anchor || "bottomRight",
+                  wm.margin ?? 5,
+                  outWidth,
+                  outHeight,
+                  wmW,
+                  wmH
+                );
+                pipeline = pipeline.composite([{ input: wmBuffer, top, left }]);
+              } else if (
+                wm.enabled &&
+                wm.mode === "text" &&
+                wm.text.trim() &&
+                outWidth > 0 &&
+                outHeight > 0
+              ) {
+                // Text watermark SVG
+                const wmSvg = buildWatermarkSvg(outWidth, outHeight);
+                if (wmSvg) {
+                  pipeline = pipeline.composite([
+                    { input: wmSvg, top: 0, left: 0 },
+                  ]);
+                }
+              }
+
+              if (format === "compressed") {
+                const buffer = await pipeline.jpeg({ quality }).toBuffer();
+                fs.writeFileSync(destPath, buffer);
+              } else if (wm.enabled) {
+                // Watermark in original format: preserve source format
+                const srcFormat = (meta.format || "").toLowerCase();
+                if (srcFormat === "jpeg" || srcFormat === "jpg") {
+                  const buffer = await pipeline
+                    .jpeg({ quality: 92 })
+                    .toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                } else if (srcFormat === "webp") {
+                  const buffer = await pipeline
+                    .webp({ quality: 92 })
+                    .toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                } else {
+                  const buffer = await pipeline.png().toBuffer();
+                  fs.writeFileSync(destPath, buffer);
+                }
+              }
+            } catch {
+              // Fallback: copy original on sharp failure
+              fs.copyFileSync(photo.path, destPath);
+            }
+          } else {
+            fs.copyFileSync(photo.path, destPath);
+          }
+
+          // Gather tags
+          const photoTagRows = db
+            .select({ name: tags.name })
+            .from(photoTags)
+            .innerJoin(tags, eq(photoTags.tagId, tags.id))
+            .where(eq(photoTags.photoId, photo.id))
+            .all();
+          const tagNames = photoTagRows.map((t) => t.name);
+
+          // Gather EXIF
+          const exif = db
+            .select()
+            .from(exifData)
+            .where(eq(exifData.photoId, photo.id))
+            .get();
+
+          galleryPhotos.push({
+            filename: destName,
+            width: photo.width ?? 0,
+            height: photo.height ?? 0,
+            tags: tagNames,
+            exif: exif
+              ? {
+                  camera: exif.cameraModel ?? undefined,
+                  lens: exif.lensModel ?? undefined,
+                  focalLength: exif.focalLength?.toString(),
+                  aperture: exif.aperture?.toString(),
+                  shutter: exif.shutterSpeed ?? undefined,
+                  iso: exif.iso ?? undefined,
+                  dateTaken: exif.dateTaken
+                    ? new Date(exif.dateTaken).toLocaleDateString(locale)
+                    : undefined,
+                }
+              : null,
+          });
+          exportedPhotoCount++;
+          if (exportedPhotoCount % EXPORT_YIELD_INTERVAL === 0) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        }
+      }
+
+      if (exportedPhotoCount === 0) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        return { success: false, error: "No photos found" };
       }
 
       // Generate HTML gallery
       const html = buildHtmlGallery(galleryPhotos, locale);
       fs.writeFileSync(path.join(tmpDir, "index.html"), html, "utf-8");
 
-      const zipPath =
-        outputPath ||
-        path.join(
-          nodeOs.tmpdir(),
-          `gallery-${new Date().toISOString().slice(0, 10)}.zip`
-        );
+      throwIfExportAborted(signal);
+      const zipPath = resolveExportOutputPath(outputPath);
 
       const { default: createArchive } = await import("archiver");
       const archive = createArchive("zip", { zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+          archive.abort();
+          output.destroy(new Error("Export cancelled"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
         output.on("close", () => resolve());
+        output.on("error", reject);
         archive.on("error", reject);
         archive.pipe(output);
         archive.directory(tmpDir, false);
-        archive.finalize();
+        archive.finalize().catch(reject);
+        if (signal?.aborted) {
+          onAbort();
+        }
+        output.once("close", () => {
+          signal?.removeEventListener("abort", onAbort);
+        });
       });
 
       // Cleanup temp directory
@@ -497,7 +605,7 @@ export const exportPhotos = os
         success: true,
         path: zipPath,
         filename: path.basename(zipPath),
-        photoCount: photoList.length,
+        photoCount: exportedPhotoCount,
         sizeMB: Number.parseFloat(sizeMB),
       };
     } catch (e) {

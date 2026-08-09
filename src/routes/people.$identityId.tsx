@@ -202,19 +202,20 @@ function PersonDetailPage() {
   const [pendingDeleteSequenceGroup, setPendingDeleteSequenceGroup] =
     useState(false);
 
-  const cancelledRef = useRef(false);
+  const identityRequestRef = useRef(0);
 
   const loadIdentity = useCallback(async () => {
+    const requestId = ++identityRequestRef.current;
     try {
       const result = await faceActions.getIdentity(Number(identityId));
-      if (!cancelledRef.current) {
+      if (requestId === identityRequestRef.current) {
         const data = result as unknown as IdentityDetail;
         setIdentity(data);
         setNameInput(data.name || "");
         setLoading(false);
       }
     } catch (err) {
-      if (!cancelledRef.current) {
+      if (requestId === identityRequestRef.current) {
         console.error("[loadIdentity] failed:", err);
         setLoading(false);
       }
@@ -222,11 +223,10 @@ function PersonDetailPage() {
   }, [identityId]);
 
   useEffect(() => {
-    cancelledRef.current = false;
     setLoading(true);
     loadIdentity();
     return () => {
-      cancelledRef.current = true;
+      identityRequestRef.current += 1;
     };
   }, [loadIdentity]);
 
@@ -403,7 +403,11 @@ function PersonDetailPage() {
   );
 
   async function handleOpenExplorer(filePath: string) {
-    await ipc.client.shell.openInExplorer({ path: filePath });
+    try {
+      await ipc.client.shell.openInExplorer({ path: filePath });
+    } catch {
+      // Ignore shell failures; the caller has no recovery action to present.
+    }
   }
 
   // handleDetailNavigate 由 usePhotoDetailPanel.navigateDetail 提供
@@ -873,47 +877,50 @@ function PersonDetailPage() {
           (id) => photos.find((p) => p.id === id)?.isFavorite
         );
         const newVal = !allFav;
-        ipc.client.photos.toggleFavorite({ ids, favorite: newVal }).then(() => {
-          setIdentity((prev) => {
-            if (!prev) {
-              return prev;
+        ipc.client.photos
+          .toggleFavorite({ ids, favorite: newVal })
+          .then(() => {
+            setIdentity((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              const idSet = new Set(ids);
+              return {
+                ...prev,
+                photos: prev.photos.map((p) =>
+                  idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
+                ),
+              };
+            });
+            for (const favId of ids) {
+              sequenceView.updateMemberFavorite(favId, newVal);
             }
-            const idSet = new Set(ids);
-            return {
-              ...prev,
-              photos: prev.photos.map((p) =>
-                idSet.has(p.id) ? { ...p, isFavorite: newVal } : p
-              ),
-            };
-          });
-          for (const favId of ids) {
-            sequenceView.updateMemberFavorite(favId, newVal);
-          }
-          queryClient.invalidateQueries({
-            queryKey: ["photos"],
-            refetchType: "active",
-          });
-          toast.success(
-            newVal
-              ? t("toastFavoriteAddedCount", { count: ids.length })
-              : t("toastFavoriteRemoved"),
-            {
-              action: {
-                label: t("toastUndo"),
-                onClick: async () => {
-                  await ipc.client.photos.toggleFavorite({
-                    ids,
-                    favorite: allFav,
-                  });
-                  queryClient.invalidateQueries({
-                    queryKey: ["photos"],
-                    refetchType: "active",
-                  });
+            queryClient.invalidateQueries({
+              queryKey: ["photos"],
+              refetchType: "active",
+            });
+            toast.success(
+              newVal
+                ? t("toastFavoriteAddedCount", { count: ids.length })
+                : t("toastFavoriteRemoved"),
+              {
+                action: {
+                  label: t("toastUndo"),
+                  onClick: async () => {
+                    await ipc.client.photos.toggleFavorite({
+                      ids,
+                      favorite: allFav,
+                    });
+                    queryClient.invalidateQueries({
+                      queryKey: ["photos"],
+                      refetchType: "active",
+                    });
+                  },
                 },
-              },
-            }
-          );
-        });
+              }
+            );
+          })
+          .catch(() => undefined);
         return;
       }
 
@@ -1195,7 +1202,8 @@ function PersonDetailPage() {
                       },
                     }
                   );
-                });
+                })
+                .catch(() => undefined);
             }}
             onUploadToCloud={handleUploadSelectedToCloud}
             selectedCount={selectedIds.size}
@@ -1372,7 +1380,8 @@ function PersonDetailPage() {
                   },
                 }
               );
-            });
+            })
+            .catch(() => undefined);
         }}
         onBatchUploadToCloud={handleUploadSelectedToCloud}
         onClose={() => setCtxMenu((prev) => ({ ...prev, open: false }))}

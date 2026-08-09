@@ -163,6 +163,8 @@ export function PhotoDetailPanel({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const photoRequestRef = useRef(0);
+  const aiStatusRequestRef = useRef(0);
+  const aiSuggestionRequestRef = useRef(0);
   const [visible, setVisible] = useState(false);
   const [hasMoreBelow, setHasMoreBelow] = useState(false);
   const lastPhotoRef = useRef<PhotoDetail | null>(null);
@@ -181,6 +183,7 @@ export function PhotoDetailPanel({
   }, [hasPhoto]);
 
   useEffect(() => {
+    aiSuggestionRequestRef.current += 1;
     const cached = photo ? suggestionCache.get(photo.id) : undefined;
     if (cached) {
       setAiSuggestions(cached);
@@ -254,6 +257,8 @@ export function PhotoDetailPanel({
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
   }, [resizing]);
 
@@ -316,6 +321,7 @@ export function PhotoDetailPanel({
   );
 
   useEffect(() => {
+    const requestId = ++aiStatusRequestRef.current;
     if (!photo) {
       setAiTagTaskState("unavailable");
       return;
@@ -335,7 +341,7 @@ export function PhotoDetailPanel({
         })) as {
           state: "ready" | "indexing" | "tagging" | "busy" | "unavailable";
         };
-        if (!active) {
+        if (!active || aiStatusRequestRef.current !== requestId) {
           return;
         }
         if (
@@ -344,13 +350,16 @@ export function PhotoDetailPanel({
             previousState === "busy") &&
           result.state === "ready"
         ) {
-          await loadTags();
+          await loadTags(photoRequestRef.current);
+          if (!active || aiStatusRequestRef.current !== requestId) {
+            return;
+          }
           window.dispatchEvent(new CustomEvent("tags-changed"));
         }
         previousState = result.state;
         setAiTagTaskState(result.state);
       } catch {
-        if (active) {
+        if (active && aiStatusRequestRef.current === requestId) {
           setAiTagTaskState("unavailable");
         }
       }
@@ -465,10 +474,15 @@ export function PhotoDetailPanel({
     if (!photo) {
       return;
     }
+    const requestId = ++aiSuggestionRequestRef.current;
+    const photoId = photo.id;
     setAiLoading(true);
     setAiSuggestions(null);
     try {
-      const result = await ipc.client.photos.suggestTags({ id: photo.id });
+      const result = await ipc.client.photos.suggestTags({ id: photoId });
+      if (aiSuggestionRequestRef.current !== requestId) {
+        return;
+      }
       const taskResult = result as {
         busy?: boolean;
         reason?: "indexing" | "tagging" | "busy";
@@ -483,7 +497,7 @@ export function PhotoDetailPanel({
       setAiSuggestions(suggestions);
       // Cache the result
       if (suggestions.length > 0) {
-        suggestionCache.set(photo.id, suggestions);
+        suggestionCache.set(photoId, suggestions);
         // Limit cache size to 20
         if (suggestionCache.size > SUGGESTION_CACHE_MAX) {
           const firstKey = suggestionCache.keys().next().value;
@@ -493,10 +507,14 @@ export function PhotoDetailPanel({
         }
       }
     } catch {
-      toast.error(t("aiSuggestFailed"));
-      setAiSuggestions([]);
+      if (aiSuggestionRequestRef.current === requestId) {
+        toast.error(t("aiSuggestFailed"));
+        setAiSuggestions([]);
+      }
     } finally {
-      setAiLoading(false);
+      if (aiSuggestionRequestRef.current === requestId) {
+        setAiLoading(false);
+      }
     }
   }
 
@@ -504,12 +522,14 @@ export function PhotoDetailPanel({
     if (!photo) {
       return;
     }
+    const requestId = ++aiSuggestionRequestRef.current;
+    const photoId = photo.id;
     try {
       const existing = allTags.find((t) => t.name === tagName);
       if (existing) {
         if (!photoTagIds.has(existing.id)) {
           await ipc.client.photos.setPhotoTag({
-            photoId: photo.id,
+            photoId,
             tagId: existing.id,
           });
         }
@@ -520,9 +540,12 @@ export function PhotoDetailPanel({
         });
         const tag = created as TagInfo;
         await ipc.client.photos.setPhotoTag({
-          photoId: photo.id,
+          photoId,
           tagId: tag.id,
         });
+      }
+      if (aiSuggestionRequestRef.current !== requestId) {
+        return;
       }
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
@@ -530,7 +553,9 @@ export function PhotoDetailPanel({
         prev ? prev.filter((s) => s.tag !== tagName) : null
       );
     } catch {
-      toast.error(t("applySuggestionFailed"));
+      if (aiSuggestionRequestRef.current === requestId) {
+        toast.error(t("applySuggestionFailed"));
+      }
     }
   }
 

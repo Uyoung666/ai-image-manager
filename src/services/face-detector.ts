@@ -25,6 +25,7 @@ import { getDataPath } from "@/utils/data-path";
 
 const BATCH_SIZE = 40;
 let detectionRunning = false;
+let detectionGeneration = 0;
 
 export class FaceEmbeddingValidationError extends Error {
   constructor(message: string) {
@@ -36,6 +37,7 @@ export class FaceEmbeddingValidationError extends Error {
 /** Cancel a running face detection operation and abort all workers. */
 export function cancelFaceDetection(): void {
   detectionRunning = false;
+  detectionGeneration++;
   abortAllFaceWorkers();
 }
 
@@ -307,6 +309,9 @@ export function resetFaceDataForModelSwitch(): void {
     );
   }
 
+  // Invalidate an already-cancelled run that may still be unwinding in a
+  // worker promise. Its late results must never be persisted after reset.
+  detectionGeneration++;
   backupFaceData();
   const activeModelKind = getActiveFaceModel().kind;
   const db = getDatabase();
@@ -564,7 +569,10 @@ export async function detectFaces(
     );
   }
   detectionRunning = true;
+  const runGeneration = ++detectionGeneration;
   const activeModel = getActiveFaceModel();
+  const isCurrentRun = () =>
+    detectionRunning && detectionGeneration === runGeneration;
 
   const pushProgress = (p: DetectionProgress) => {
     currentProgress = p;
@@ -669,8 +677,12 @@ export async function detectFaces(
             failedPhotos,
           });
         },
-        () => !detectionRunning
+        () => !isCurrentRun()
       );
+
+      if (!isCurrentRun()) {
+        return 0;
+      }
 
       const filtered = filterValidFaceEmbeddings(
         poolResults,
@@ -787,6 +799,9 @@ export async function detectFaces(
     }
 
     // --- Clustering: assign faces to identities ---
+    if (!isCurrentRun()) {
+      return 0;
+    }
     clusterUnassignedFaces();
     setSetting("face.model.kind", activeModel.kind);
 
@@ -804,7 +819,9 @@ export async function detectFaces(
     pushProgress({ processed: 0, total: 0, phase: "idle" });
     throw err;
   } finally {
-    detectionRunning = false;
+    if (detectionGeneration === runGeneration) {
+      detectionRunning = false;
+    }
   }
 
   return totalFaces;
