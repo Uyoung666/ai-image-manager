@@ -56,7 +56,9 @@ jobs:
           AIM_MODEL_SCOPE: face
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run face migration tests
-        run: npm run test:unit -- run --config vitest.face-migration.config.ts
+        env:
+          ELECTRON_RUN_AS_NODE: "1"
+        run: .\\node_modules\\.bin\\electron.cmd --test src/tests/unit/face-data-migration.test.mjs
 
   test-e2e:
     timeout-minutes: 20

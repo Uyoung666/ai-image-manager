@@ -1,8 +1,9 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, it } from "node:test";
 import {
   addFaceBackupChecksum,
   FACE_BACKUP_FORMAT,
@@ -191,6 +192,12 @@ function readState(dbPath) {
   }
 }
 
+function assertStateSubset(actual, expected) {
+  for (const [key, value] of Object.entries(expected)) {
+    assert.equal(actual[key], value, `state.${key}`);
+  }
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -200,12 +207,10 @@ afterEach(() => {
 describe("face backup payload safety", () => {
   it("requires a versioned payload and detects checksum tampering", () => {
     const payload = makePayload();
-    expect(() => validateFaceBackupPayload(payload)).not.toThrow();
+    assert.doesNotThrow(() => validateFaceBackupPayload(payload));
 
     const tampered = { ...payload, faceModelKind: "ultraface-w600k" };
-    expect(() => validateFaceBackupPayload(tampered)).toThrow(
-      CHECKSUM_MISMATCH
-    );
+    assert.throws(() => validateFaceBackupPayload(tampered), CHECKSUM_MISMATCH);
   });
 
   it("rejects an embedding dimension that does not match the model kind", () => {
@@ -224,9 +229,7 @@ describe("face backup payload safety", () => {
         },
       ],
     });
-    expect(() => validateFaceBackupPayload(payload)).toThrow(
-      DIMENSION_MISMATCH
-    );
+    assert.throws(() => validateFaceBackupPayload(payload), DIMENSION_MISMATCH);
   });
 });
 
@@ -251,8 +254,8 @@ describe("face restore safety", () => {
     const backupFile = path.join(path.dirname(dbPath), "invalid.json");
     fs.writeFileSync(backupFile, JSON.stringify(payload), "utf8");
 
-    expect(() => restoreFaceData(dbPath, backupFile)).toThrow(MISSING_PHOTO);
-    expect(readState(dbPath)).toMatchObject({
+    assert.throws(() => restoreFaceData(dbPath, backupFile), MISSING_PHOTO);
+    assertStateSubset(readState(dbPath), {
       vectors: 1,
       identities: 1,
       members: 1,
@@ -265,8 +268,8 @@ describe("face restore safety", () => {
     const backupFile = path.join(path.dirname(dbPath), "valid.json");
     fs.writeFileSync(backupFile, JSON.stringify(makePayload()), "utf8");
 
-    expect(() => restoreFaceData(dbPath, backupFile)).not.toThrow();
-    expect(readState(dbPath)).toMatchObject({
+    assert.doesNotThrow(() => restoreFaceData(dbPath, backupFile));
+    assertStateSubset(readState(dbPath), {
       vectors: 1,
       identities: 1,
       members: 1,
@@ -280,27 +283,29 @@ describe("face restore safety", () => {
     const backupFile = path.join(path.dirname(dbPath), "legacy.json");
     fs.writeFileSync(backupFile, JSON.stringify(makeLegacyPayload()), "utf8");
 
-    expect(() => restoreFaceData(dbPath, backupFile)).toThrow(
+    assert.throws(
+      () => restoreFaceData(dbPath, backupFile),
       LEGACY_KIND_REQUIRED
     );
-    expect(() =>
+    assert.doesNotThrow(() =>
       restoreFaceData(dbPath, backupFile, {
         legacyKind: "ultraface-w600k",
       })
-    ).not.toThrow();
-    expect(readState(dbPath)).toMatchObject({
+    );
+    assertStateSubset(readState(dbPath), {
       vectors: 1,
       identities: 1,
       members: 1,
       kind: "ultraface-w600k",
     });
-    expect(
-      readFaceBackup(backupFile, { legacyKind: "ultraface-w600k" })
-    ).toMatchObject({
-      format: FACE_BACKUP_FORMAT,
-      version: FACE_BACKUP_VERSION,
-      faceModelKind: "ultraface-w600k",
-    });
+    assertStateSubset(
+      readFaceBackup(backupFile, { legacyKind: "ultraface-w600k" }),
+      {
+        format: FACE_BACKUP_FORMAT,
+        version: FACE_BACKUP_VERSION,
+        faceModelKind: "ultraface-w600k",
+      }
+    );
   });
 });
 
@@ -311,7 +316,7 @@ describe("face migration safety", () => {
 
     await runMigration([dbPath, "yunet-sface", "1"]);
 
-    expect(readState(dbPath)).toEqual(before);
+    assert.deepStrictEqual(readState(dbPath), before);
   });
 
   it("rolls back the wipe when worker initialization fails", async () => {
@@ -329,7 +334,8 @@ describe("face migration safety", () => {
     process.env.FACE_MIGRATION_MODELS_DIR = modelsDir;
 
     try {
-      await expect(runMigration([dbPath, "yunet-sface"])).rejects.toThrow(
+      await assert.rejects(
+        () => runMigration([dbPath, "yunet-sface"]),
         ROLLED_BACK
       );
     } finally {
@@ -340,6 +346,6 @@ describe("face migration safety", () => {
       }
     }
 
-    expect(readState(dbPath)).toEqual(before);
+    assert.deepStrictEqual(readState(dbPath), before);
   });
 });
