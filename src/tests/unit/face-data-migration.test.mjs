@@ -13,7 +13,7 @@ import {
 import { runMigration } from "../../../scripts/migrate-face-data.mjs";
 import { restoreFaceData } from "../../../scripts/restore-face-data.mjs";
 
-const tempDirectories: string[] = [];
+const tempDirectories = [];
 const CHECKSUM_MISMATCH = /checksum mismatch/;
 const DIMENSION_MISMATCH = /does not match 128/;
 const LEGACY_KIND_REQUIRED = /legacy-kind/;
@@ -24,7 +24,7 @@ function vector(dimension = 128, value = 0.1) {
   return JSON.stringify(Array.from({ length: dimension }, () => value));
 }
 
-function makePayload(overrides: Record<string, unknown> = {}) {
+function makePayload(overrides = {}) {
   return addFaceBackupChecksum({
     format: FACE_BACKUP_FORMAT,
     version: FACE_BACKUP_VERSION,
@@ -157,11 +157,11 @@ function createDatabase() {
   return dbPath;
 }
 
-function readState(dbPath: string) {
+function readState(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    function readRequiredRow(query: string): Record<string, number> {
-      const row = db.prepare(query).get() as Record<string, number> | undefined;
+    function readRequiredRow(query) {
+      const row = db.prepare(query).get();
       if (!row) {
         throw new Error(`Expected a row for query: ${query}`);
       }
@@ -180,13 +180,9 @@ function readState(dbPath: string) {
       processed: readRequiredRow(
         "SELECT is_face_processed FROM photos WHERE id = 1"
       ).is_face_processed,
-      kind: (
-        db
-          .prepare(
-            "SELECT value FROM app_settings WHERE key = 'face.model.kind'"
-          )
-          .get() as { value: string } | undefined
-      )?.value,
+      kind: db
+        .prepare("SELECT value FROM app_settings WHERE key = 'face.model.kind'")
+        .get()?.value,
     };
   } finally {
     db.close();
