@@ -10,10 +10,10 @@ const UNC_PATH_PATTERN = /\\\\[^\s\\]+\\[^\r\n<>:"|?*]+/g;
 const URL_PATTERN = /\b(?:https?|wss?|s3|webdav):\/\/[^\s"'<>]+/gi;
 const LOCAL_URL_PATTERN = /\b(?:file|local-media):\/\/[^\s"'<>]+/gi;
 const SENSITIVE_VALUE_PATTERN =
-  /\b(token|access[_-]?key|secret|password|passwd|cookie|authorization|api[_-]?key|proxy|prompt|query|search(?:ByText|Term|Text|Query)?|keyword)\b((?:\s+called)?["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/gi;
+  /\b(token|access[_-]?key|secret|password|passwd|cookie|authorization|api[_-]?key|proxy|prompt|query|search(?:ByText|Term|Text|Query)?|keyword|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)\b((?:\s+called)?["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/gi;
 const TRAILING_STACK_PATH_CHARS_PATTERN = /[\s)]+$/;
 const UNREDACTED_SECRET_PATTERN =
-  /\b(?:password|passwd|authorization|api[_-]?key|access[_-]?key|secret|token)["']?\s*[:=]\s*(?!["']?<redacted>)/i;
+  /\b(?:password|passwd|authorization|api[_-]?key|access[_-]?key|secret|token|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)["']?\s*[:=]\s*(?!["']?<redacted>)/i;
 const DYNAMIC_ROUTE_SEGMENT_PATTERN = /^\/(albums|people|cull)\/[^/?#]+/i;
 const UUID_ROUTE_SEGMENT_PATTERN = /\/[0-9a-f]{8}-[0-9a-f-]{27,}(?=\/|$)/gi;
 const SOURCE_CONTEXT_PATTERN = /(?:^|[\s(])(?:src|scripts)\/[a-z0-9_./-]*$/i;
@@ -46,7 +46,15 @@ export class DiagnosticSanitizer {
   sanitize(value: string): string {
     let sanitized = value.replace(
       SENSITIVE_VALUE_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}<REDACTED>`
+      (_match, key: string, separator: string, rawValue: string) => {
+        let quote = "";
+        if (rawValue.startsWith('"')) {
+          quote = '"';
+        } else if (rawValue.startsWith("'")) {
+          quote = "'";
+        }
+        return `${key}${separator}${quote}<REDACTED>${quote}`;
+      }
     );
 
     sanitized = sanitized.replace(LOCAL_URL_PATTERN, (match) =>

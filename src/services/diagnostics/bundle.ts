@@ -123,8 +123,7 @@ export async function assembleDiagnosticEntries(
   const sanitizer = new DiagnosticSanitizer();
   const warnings: string[] = [];
   const manifest = await collectManifest(incident, warnings);
-  const rawLogs = readRecentLogs();
-  let logs = sanitizer.sanitize(rawLogs);
+  let logs = readRecentLogs(sanitizer);
   const forbiddenValues = getForbiddenValues();
   if (containsPotentialSensitiveData(logs, forbiddenValues)) {
     warnings.push(
@@ -427,7 +426,7 @@ function buildReport(
   ].join("\n");
 }
 
-function readRecentLogs(): string {
+function readRecentLogs(sanitizer: DiagnosticSanitizer): string {
   const logDirectory = path.join(app.getPath("userData"), "logs");
   if (!fs.existsSync(logDirectory)) {
     return "No diagnostic logs were found.\n";
@@ -455,13 +454,8 @@ function readRecentLogs(): string {
       continue;
     }
     try {
-      const header = `\n===== ${name} =====\n`;
-      const contentBudget = Math.max(
-        0,
-        remaining - Buffer.byteLength(header, "utf8")
-      );
       const stats = fs.statSync(file);
-      const bytesToRead = Math.min(stats.size, contentBudget);
+      const bytesToRead = Math.min(stats.size, MAX_DIAGNOSTIC_LOG_BYTES);
       if (bytesToRead <= 0) {
         continue;
       }
@@ -478,9 +472,14 @@ function readRecentLogs(): string {
       } finally {
         fs.closeSync(handle);
       }
-      const chunk = `${header}${buffer.toString("utf8")}`;
-      chunks.push(chunk);
-      remaining -= Buffer.byteLength(chunk, "utf8");
+      const sourceOffset = Math.max(0, stats.size - bytesToRead);
+      const lines = buffer.toString("utf8").split(LINE_BREAK_PATTERN);
+      if (sourceOffset > 0) {
+        lines.shift();
+      }
+      const selection = selectRecentLogLines(lines, name, sanitizer, remaining);
+      chunks.push(selection.chunk);
+      remaining -= selection.bytes;
     } catch {
       // Continue collecting other logs if one file is locked or unreadable.
     }
@@ -489,8 +488,63 @@ function readRecentLogs(): string {
   return combined || "No readable diagnostic logs were found.\n";
 }
 
+function selectRecentLogLines(
+  lines: string[],
+  sourceName: string,
+  sanitizer: DiagnosticSanitizer,
+  budget: number
+): { bytes: number; chunk: string } {
+  const selected: string[] = [];
+  let bytes = 0;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const rawLine = lines[index]?.trim();
+    if (!rawLine) {
+      continue;
+    }
+    const normalized = normalizeDiagnosticLogLine(
+      rawLine,
+      sourceName,
+      sanitizer
+    );
+    const serialized = `${normalized}\n`;
+    const size = Buffer.byteLength(serialized, "utf8");
+    if (size > budget - bytes) {
+      continue;
+    }
+    selected.push(serialized);
+    bytes += size;
+  }
+  return { bytes, chunk: selected.reverse().join("") };
+}
+
+function normalizeDiagnosticLogLine(
+  rawLine: string,
+  sourceName: string,
+  sanitizer: DiagnosticSanitizer
+): string {
+  const sanitized = sanitizer.sanitize(rawLine);
+  try {
+    return JSON.stringify(JSON.parse(sanitized));
+  } catch {
+    return JSON.stringify({
+      level: "info",
+      message: sanitized,
+      module: `legacy-${sourceName}`,
+      process: "legacy",
+    });
+  }
+}
+
 function getForbiddenValues(): string[] {
-  const values = [os.homedir(), app.getPath("home"), app.getPath("userData")];
+  const values = [
+    os.homedir(),
+    os.hostname(),
+    os.userInfo().username,
+    app.getPath("home"),
+    app.getPath("userData"),
+    process.env.COMPUTERNAME ?? "",
+    process.env.USERNAME ?? "",
+  ];
   try {
     const configPath = path.join(app.getPath("userData"), "app-config.json");
     if (fs.existsSync(configPath)) {

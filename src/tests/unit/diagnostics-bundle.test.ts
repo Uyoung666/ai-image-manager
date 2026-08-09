@@ -131,6 +131,49 @@ describe("diagnostic bundle metadata", () => {
     expect(result.nativeDumpIncluded).toBe(false);
   });
 
+  it("normalizes current and legacy logs into valid redacted JSONL", async () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-diagnostics-jsonl-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+    const logDirectory = path.join(testDirectory, "logs");
+    fs.mkdirSync(logDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(logDirectory, "app.log"),
+      [
+        JSON.stringify({
+          hostname: "LIUYAN",
+          level: "info",
+          message: "Update proxy configured",
+          proxy: "http://alice:secret@proxy.example/private",
+        }),
+        String.raw`2026-08-09 failed at C:\Users\Alice\Pictures\private.jpg`,
+      ].join("\n"),
+      "utf8"
+    );
+    const { assembleDiagnosticEntries } = await import(
+      "@/services/diagnostics/bundle"
+    );
+
+    const result = await assembleDiagnosticEntries(incident, input);
+    const records = result.logs.trim().split("\n").map(JSON.parse);
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      hostname: "<REDACTED>",
+      proxy: "<REDACTED>",
+    });
+    expect(records[1]).toMatchObject({
+      module: "legacy-app.log",
+      process: "legacy",
+    });
+    expect(result.logs).not.toContain("LIUYAN");
+    expect(result.logs).not.toContain("Alice");
+    expect(Buffer.byteLength(result.logs, "utf8")).toBeLessThanOrEqual(
+      2 * 1024 * 1024
+    );
+  });
+
   it("keeps generating when a diagnostic probe times out", async () => {
     vi.spyOn(app, "getGPUInfo").mockReturnValue(
       new Promise(() => {

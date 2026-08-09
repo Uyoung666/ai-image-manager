@@ -52,6 +52,24 @@ describe("diagnostic sanitizer", () => {
     expect(tokens[0]).toBe(tokens[1]);
   });
 
+  it("redacts machine identity and keeps structured JSON valid", () => {
+    const sanitizer = new DiagnosticSanitizer();
+    const result = sanitizer.sanitize(
+      JSON.stringify({
+        hostname: "LIUYAN",
+        proxy: "http://alice:secret@proxy.example/private",
+        username: "Alice",
+      })
+    );
+    const parsed = JSON.parse(result) as Record<string, string>;
+
+    expect(parsed.hostname).toBe("<REDACTED>");
+    expect(parsed.proxy).toBe("<REDACTED>");
+    expect(parsed.username).toBe("<REDACTED>");
+    expect(result).not.toContain("LIUYAN");
+    expect(result).not.toContain("Alice");
+  });
+
   it("detects a secret that remains after sanitization", () => {
     expect(containsPotentialSensitiveData("token=still-visible")).toBe(true);
     expect(containsPotentialSensitiveData("token=<REDACTED>")).toBe(false);
@@ -67,5 +85,9 @@ describe("diagnostic sanitizer", () => {
       containsPotentialSensitiveData("https://private.example/photos?id=1")
     ).toBe(true);
     expect(containsPotentialSensitiveData("https://github.com")).toBe(false);
+    expect(containsPotentialSensitiveData('{"hostname":"LIUYAN"}')).toBe(true);
+    expect(containsPotentialSensitiveData('{"hostname":"<REDACTED>"}')).toBe(
+      false
+    );
   });
 });
