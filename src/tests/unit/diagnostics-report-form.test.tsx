@@ -90,6 +90,21 @@ describe("DiagnosticsReportForm", () => {
     );
   });
 
+  it("allows a user to dismiss an old incident without exporting a bundle", async () => {
+    render(<DiagnosticsReportForm />);
+
+    const dismissButton = await screen.findByRole("button", {
+      name: "diagnosticsDismissIncident",
+    });
+    fireEvent.click(dismissButton);
+
+    await waitFor(() => {
+      expect(diagnosticsMocks.dismiss).toHaveBeenCalledWith(
+        "AIM-20260809-123456-ABCD"
+      );
+    });
+  });
+
   it("copies the issue text and exposes retry when GitHub cannot open", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const writeText = vi.fn().mockResolvedValue(undefined);

@@ -50,6 +50,7 @@ export function DiagnosticsReportForm({
     useState<DiagnosticReproducibility>("once");
   const [includeNativeDump, setIncludeNativeDump] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const [result, setResult] = useState<DiagnosticBundleResult>();
   const [feedbackRequested, setFeedbackRequested] = useState(false);
   const [issueOpenFailed, setIssueOpenFailed] = useState(false);
@@ -78,6 +79,26 @@ export function DiagnosticsReportForm({
       ),
     [overview, selectedIncidentId]
   );
+
+  async function dismissSelectedIncident() {
+    if (!selectedIncidentId || dismissing || generating) {
+      return;
+    }
+    setDismissing(true);
+    try {
+      const response = await dismissDiagnosticIncident(selectedIncidentId);
+      if (response.dismissed) {
+        setSelectedIncidentId("");
+        await loadOverview();
+        toast.success(t("diagnosticsIncidentDismissed"));
+      }
+    } catch (error) {
+      console.error("[Diagnostics] Failed to dismiss incident", error);
+      toast.error(t("diagnosticsIncidentDismissFailed"));
+    } finally {
+      setDismissing(false);
+    }
+  }
 
   const incidentOptions = useMemo(
     () => [
@@ -183,6 +204,18 @@ export function DiagnosticsReportForm({
             showSelectedCheck
             value={selectedIncidentId}
           />
+          {selectedIncidentId && (
+            <button
+              className="rounded-[6px] border border-border px-2.5 py-1.5 font-medium text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={dismissing || generating}
+              onClick={dismissSelectedIncident}
+              type="button"
+            >
+              {dismissing
+                ? t("diagnosticsDismissingIncident")
+                : t("diagnosticsDismissIncident")}
+            </button>
+          )}
         </div>
       )}
 
@@ -309,7 +342,7 @@ export function DiagnosticsReportForm({
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
         <button
           className="rounded-[6px] border border-border px-3 py-2 font-medium text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={generating}
+          disabled={generating || dismissing}
           onClick={() => generate(false)}
           type="button"
         >
@@ -317,7 +350,7 @@ export function DiagnosticsReportForm({
         </button>
         <button
           className="inline-flex items-center justify-center gap-2 rounded-[6px] bg-primary px-3 py-2 font-medium text-[12px] text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={generating}
+          disabled={generating || dismissing}
           onClick={() => generate(true)}
           type="button"
         >

@@ -799,6 +799,10 @@ i18n.use(initReactI18next).init({
         diagnosticsPendingTitle: "发现 {{count}} 个待反馈故障",
         diagnosticsPendingHint:
           "选择最近发生的故障，可以让诊断包与错误日志精准对应。",
+        diagnosticsDismissIncident: "忽略此故障记录",
+        diagnosticsDismissingIncident: "正在忽略…",
+        diagnosticsIncidentDismissed: "已忽略此故障记录",
+        diagnosticsIncidentDismissFailed: "故障记录忽略失败，请重试",
         diagnosticsPendingStartup:
           "检测到 {{count}} 个待反馈故障，可前往“帮助与诊断”生成安全报告",
         diagnosticsOpenPage: "前往诊断",
@@ -2771,6 +2775,11 @@ i18n.use(initReactI18next).init({
         diagnosticsPendingTitle: "{{count}} incident(s) ready to report",
         diagnosticsPendingHint:
           "Select the recent incident so the bundle can be matched to the correct error logs.",
+        diagnosticsDismissIncident: "Dismiss this incident",
+        diagnosticsDismissingIncident: "Dismissing…",
+        diagnosticsIncidentDismissed: "Incident dismissed",
+        diagnosticsIncidentDismissFailed:
+          "Could not dismiss the incident. Try again.",
         diagnosticsPendingStartup:
           "{{count}} pending problem(s) detected. Open Help & Diagnostics to create a safe report.",
         diagnosticsOpenPage: "Open diagnostics",
