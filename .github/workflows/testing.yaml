@@ -56,7 +56,7 @@ jobs:
           AIM_MODEL_SCOPE: face
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run face migration tests
-        run: npx vitest run src/tests/unit/face-data-migration.test.mjs
+        run: npx vitest run --config vitest.face-migration.config.ts
 
   test-e2e:
     timeout-minutes: 20
