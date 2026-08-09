@@ -160,8 +160,8 @@ function createDatabase() {
 function readState(dbPath: string) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    function readRequiredRow<T>(query: string): T {
-      const row = db.prepare(query).get() as T | undefined;
+    function readRequiredRow(query: string): Record<string, number> {
+      const row = db.prepare(query).get() as Record<string, number> | undefined;
       if (!row) {
         throw new Error(`Expected a row for query: ${query}`);
       }
@@ -169,16 +169,15 @@ function readState(dbPath: string) {
     }
 
     return {
-      vectors: readRequiredRow<{ count: number }>(
-        "SELECT count(*) AS count FROM face_vectors"
-      ).count,
-      identities: readRequiredRow<{ count: number }>(
+      vectors: readRequiredRow("SELECT count(*) AS count FROM face_vectors")
+        .count,
+      identities: readRequiredRow(
         "SELECT count(*) AS count FROM face_identities"
       ).count,
-      members: readRequiredRow<{ count: number }>(
+      members: readRequiredRow(
         "SELECT count(*) AS count FROM face_identity_members"
       ).count,
-      processed: readRequiredRow<{ is_face_processed: number }>(
+      processed: readRequiredRow(
         "SELECT is_face_processed FROM photos WHERE id = 1"
       ).is_face_processed,
       kind: (
