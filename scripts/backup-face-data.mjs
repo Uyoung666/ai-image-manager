@@ -10,9 +10,11 @@
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import sqlite from "node:sqlite";
 import { fileURLToPath } from "node:url";
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
 
 export const FACE_BACKUP_FORMAT = "ai-image-manager.face-backup";
 export const FACE_BACKUP_VERSION = 1;
@@ -21,8 +23,6 @@ export const FACE_MODEL_DIMENSIONS = Object.freeze({
   "ultraface-w600k": 512,
 });
 export const LEGACY_FACE_BACKUP_KINDS = Object.freeze(["ultraface-w600k"]);
-
-const { DatabaseSync } = sqlite;
 
 const VECTOR_COLUMNS =
   "id, photo_id, face_index, bbox_x, bbox_y, bbox_width, bbox_height, confidence, embedding, vector_id, is_rejected, created_at";

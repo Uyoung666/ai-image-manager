@@ -12,15 +12,15 @@
  * FACE_MODEL_ALLOW_RESEARCH_ONLY=1 runtime opt-in.
  */
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import sqlite from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   readFaceBackup,
   validateFaceBackupPayload,
 } from "./backup-face-data.mjs";
 
-const { DatabaseSync } = sqlite;
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
 
 const FACE_TABLES = [
   "face_vectors",

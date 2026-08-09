@@ -17,8 +17,8 @@ import { fork } from "node:child_process";
  * left behind by a failed worker or failed insert.
  */
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import sqlite from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   createFaceBackupPayload,
@@ -26,7 +26,7 @@ import {
   writeFaceBackup,
 } from "./backup-face-data.mjs";
 
-const { DatabaseSync } = sqlite;
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
 
 const CONFIGS = {
   "yunet-sface": {
