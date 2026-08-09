@@ -802,7 +802,13 @@ export const SearchBar = memo(
                 className="home-search-form relative xl:max-w-[720px]"
                 onSubmit={handleSubmit}
               >
-                <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 z-[100] flex w-9 items-center justify-center"
+                  style={{ color: "var(--muted-foreground)", zIndex: 100 }}
+                >
+                  <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
+                </span>
                 <input
                   aria-activedescendant={
                     suggestionIndex >= 0
