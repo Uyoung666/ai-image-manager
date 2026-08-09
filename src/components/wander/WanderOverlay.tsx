@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { recordWanderExposure } from "@/actions/wander";
+import { HamsterWheelLoader } from "@/components/startup-splash";
 import {
   Tooltip,
   TooltipContent,
@@ -170,6 +171,7 @@ export function WanderOverlay({
   const pendingPreviewReadyRef = useRef<number | null>(null);
   const playbackStateRef = useRef({ index, paused, pendingIndex, view });
   const photo = session.photos[index];
+  const isHamsterWheel = session.mode === "hamsterWheel";
   const pendingPhoto =
     pendingIndex === null ? undefined : session.photos[pendingIndex];
   const hintVisible = useWanderHint(view, roundNumber === 1);
@@ -438,9 +440,11 @@ export function WanderOverlay({
     };
   }, [revealControls]);
 
-  if (!photo) {
+  if (!(photo || isHamsterWheel)) {
     return null;
   }
+
+  const currentPhoto = photo;
 
   const themeTitle = t(session.titleKey, session.titleParams ?? {});
   const themeSubtitle = session.subtitleKey
@@ -463,19 +467,23 @@ export function WanderOverlay({
       role="dialog"
       tabIndex={-1}
     >
-      <div className="absolute inset-0">
-        <img
-          alt=""
-          aria-hidden="true"
-          className="h-full w-full scale-110 object-cover opacity-20 blur-3xl"
-          height={photo.height || 1}
-          src={toLocalMediaUrl(photo.thumbnailPath ?? photo.path)}
-          width={photo.width || 1}
-        />
-        <div className="absolute inset-0 bg-black/35" />
-      </div>
+      {currentPhoto && (
+        <div className="absolute inset-0">
+          <img
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full scale-110 object-cover opacity-20 blur-3xl"
+            height={currentPhoto.height || 1}
+            src={toLocalMediaUrl(
+              currentPhoto.thumbnailPath ?? currentPhoto.path
+            )}
+            width={currentPhoto.width || 1}
+          />
+          <div className="absolute inset-0 bg-black/35" />
+        </div>
+      )}
 
-      {view === "intro" ? (
+      {view === "intro" && (
         <div className="absolute inset-0 flex min-h-full min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-16 text-center sm:px-8">
           <div className="text-[11px] text-white/45 uppercase tracking-[0.12em]">
             {t("wander.roundLabel", { round: roundNumber })}
@@ -489,16 +497,28 @@ export function WanderOverlay({
             </p>
           )}
         </div>
-      ) : (
+      )}
+
+      {view === "playing" && isHamsterWheel && (
+        <div className="absolute inset-0 flex min-h-0 min-w-0 items-center justify-center px-4 pt-20 pb-16 sm:px-10 sm:pt-24 sm:pb-20">
+          <div className={`wander-hamster-wheel ${paused ? "is-paused" : ""}`}>
+            <HamsterWheelLoader label={themeTitle} />
+          </div>
+        </div>
+      )}
+
+      {view === "playing" && !isHamsterWheel && (
         <div className="absolute inset-0 flex min-h-0 min-w-0 items-center justify-center px-4 pt-20 pb-16 sm:px-10 sm:pt-24 sm:pb-20">
           <div className="relative h-full min-h-0 w-full min-w-0">
-            <WanderImageStack
-              className="opacity-100"
-              key={photo.id}
-              layer="current"
-              onPreviewError={() => handlePreviewError(index)}
-              photo={photo}
-            />
+            {currentPhoto && (
+              <WanderImageStack
+                className="opacity-100"
+                key={currentPhoto.id}
+                layer="current"
+                onPreviewError={() => handlePreviewError(index)}
+                photo={currentPhoto}
+              />
+            )}
             {pendingPhoto && (
               <WanderImageStack
                 className="opacity-0"
@@ -522,7 +542,11 @@ export function WanderOverlay({
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 bottom-14 z-10 px-4 text-center text-[11px] text-white/50 transition-opacity duration-500 sm:bottom-16"
         >
-          {t("wander.controlsHint")}
+          {t(
+            isHamsterWheel
+              ? "wander.hamsterWheelControlsHint"
+              : "wander.controlsHint"
+          )}
         </div>
       )}
 
@@ -572,7 +596,7 @@ export function WanderOverlay({
         </Tooltip>
       </header>
 
-      {view === "playing" && (
+      {view === "playing" && !isHamsterWheel && (
         <footer
           className={`absolute inset-x-0 bottom-0 flex min-w-0 flex-wrap items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent px-4 pt-12 pb-4 transition-opacity duration-300 sm:flex-nowrap sm:px-6 sm:pt-14 sm:pb-5 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
           data-wander-control
@@ -603,7 +627,7 @@ export function WanderOverlay({
         </footer>
       )}
 
-      {view === "playing" && (
+      {view === "playing" && !isHamsterWheel && (
         <div
           aria-label={t("wander.progress")}
           aria-valuemax={session.photos.length}

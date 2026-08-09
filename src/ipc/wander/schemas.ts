@@ -4,11 +4,12 @@ export const WanderContentModeSchema = z.enum([
   "timeCapsule",
   "theme",
   "rediscovery",
+  "hamsterWheel",
 ]);
 
 export const GetWanderSessionSchema = z.object({
   mode: z.union([z.literal("auto"), WanderContentModeSchema]).default("auto"),
-  allowedModes: z.array(WanderContentModeSchema).min(1).max(3).optional(),
+  allowedModes: z.array(WanderContentModeSchema).min(1).max(4).optional(),
   excludeMode: WanderContentModeSchema.optional(),
   limit: z.number().int().min(2).max(12).default(8),
 });

@@ -1,4 +1,8 @@
-export type WanderContentMode = "timeCapsule" | "theme" | "rediscovery";
+export type WanderContentMode =
+  | "timeCapsule"
+  | "theme"
+  | "rediscovery"
+  | "hamsterWheel";
 
 export type WanderMode = "auto" | WanderContentMode;
 
@@ -36,13 +40,14 @@ export const DEFAULT_WANDER_SETTINGS: WanderSettings = {
   enabled: false,
   idleMinutes: 15,
   intervalSeconds: 5,
-  modes: ["timeCapsule", "theme", "rediscovery"],
+  modes: ["timeCapsule", "theme", "rediscovery", "hamsterWheel"],
 };
 
 const WANDER_CONTENT_MODES: WanderContentMode[] = [
   "timeCapsule",
   "theme",
   "rediscovery",
+  "hamsterWheel",
 ];
 
 /** Parse persisted settings defensively so corrupt/legacy values stay harmless. */

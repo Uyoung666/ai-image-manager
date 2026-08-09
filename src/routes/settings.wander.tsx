@@ -16,6 +16,7 @@ const CONTENT_MODES: WanderContentMode[] = [
   "timeCapsule",
   "theme",
   "rediscovery",
+  "hamsterWheel",
 ];
 
 function WanderSettingsPage() {

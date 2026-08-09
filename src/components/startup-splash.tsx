@@ -4,7 +4,7 @@ interface StartupSplashProps {
   exiting?: boolean;
 }
 
-function HamsterWheelLoader({ label }: { label: string }) {
+export function HamsterWheelLoader({ label }: { label: string }) {
   return (
     <div aria-label={label} className="wheel-and-hamster" role="img">
       <div className="wheel" />

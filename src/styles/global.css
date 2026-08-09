@@ -1466,6 +1466,23 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   }
 }
 
+.wander-hamster-wheel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.wander-hamster-wheel .wheel-and-hamster {
+  --dur: 1.35s;
+  font-size: clamp(12px, min(4vw, 8vh), 32px);
+}
+
+.wander-hamster-wheel.is-paused .wheel-and-hamster,
+.wander-hamster-wheel.is-paused .wheel-and-hamster * {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .startup-splash {
     transition: none;

@@ -140,7 +140,10 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       if (requestId !== requestRef.current) {
         return null;
       }
-      return result.photos.length >= MIN_ROUND_SIZE ? result : null;
+      return result.mode === "hamsterWheel" ||
+        result.photos.length >= MIN_ROUND_SIZE
+        ? result
+        : null;
     },
     []
   );
@@ -177,6 +180,15 @@ export function WanderProvider({ children }: { children: ReactNode }) {
     [fetchRound]
   );
 
+  const prefetchIfPhotoRound = useCallback(
+    (requestId: number, mode: WanderContentMode) => {
+      if (mode !== "hamsterWheel") {
+        prefetchNextRound(requestId).catch(() => undefined);
+      }
+    },
+    [prefetchNextRound]
+  );
+
   const resetWanderState = useCallback(() => {
     requestRef.current += 1;
     sessionRef.current = null;
@@ -204,10 +216,10 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       sessionRef.current = next;
       setSession(next);
       setRoundSeq((value) => value + 1);
-      prefetchNextRound(requestRef.current).catch(() => undefined);
+      prefetchIfPhotoRound(requestRef.current, next.mode);
       setPreparingNext(false);
     },
-    [prefetchNextRound]
+    [prefetchIfPhotoRound]
   );
 
   const waitForNextRound = useCallback(() => {
@@ -282,7 +294,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
         setSession(result);
         setRoundSeq((value) => value + 1);
         consecutiveFailuresRef.current = 0;
-        prefetchNextRound(requestId).catch(() => undefined);
+        prefetchIfPhotoRound(requestId, result.mode);
       } catch {
         if (automatic) {
           scheduleIdleRef.current?.();
@@ -297,7 +309,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [fetchRound, prefetchNextRound, t]
+    [fetchRound, prefetchIfPhotoRound, t]
   );
 
   useEffect(() => {
@@ -413,7 +425,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   );
 
   const save = useCallback(async () => {
-    if (!session || saving) {
+    if (!session || saving || session.mode === "hamsterWheel") {
       return;
     }
     setSaving(true);

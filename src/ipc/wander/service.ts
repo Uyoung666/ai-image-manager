@@ -74,7 +74,12 @@ export function chooseWanderMode(
   }
   const base = allowedModes?.length
     ? allowedModes
-    : (["timeCapsule", "theme", "rediscovery"] as WanderContentMode[]);
+    : ([
+        "timeCapsule",
+        "theme",
+        "rediscovery",
+        "hamsterWheel",
+      ] as WanderContentMode[]);
   // Avoid repeating the previous round's mode; fall back to the full set when
   // exclusion would leave no choices (e.g. only one mode is enabled).
   const choices = excludeMode
@@ -294,6 +299,13 @@ function curateMode(mode: WanderContentMode): CuratedResult {
       return curateTheme();
     case "rediscovery":
       return curateRediscovery();
+    case "hamsterWheel":
+      return {
+        mode: "hamsterWheel",
+        titleKey: "wander.title.hamsterWheel",
+        subtitleKey: "wander.subtitle.hamsterWheel",
+        photos: [],
+      };
     default:
       return curateRediscovery();
   }
@@ -329,6 +341,9 @@ export function getCuratedWanderSession(input: {
     undefined,
     input.excludeMode
   );
+  if (selectedMode === "hamsterWheel") {
+    return curateMode(selectedMode);
+  }
   let result = curateMode(selectedMode);
   if (
     result.photos.length < MIN_SESSION_SIZE &&

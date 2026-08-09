@@ -4,7 +4,11 @@ import {
   RecordWanderExposureSchema,
   SaveWanderSessionToAlbumSchema,
 } from "@/ipc/wander/schemas";
-import { chooseWanderMode, shuffleCandidates } from "@/ipc/wander/service";
+import {
+  chooseWanderMode,
+  getCuratedWanderSession,
+  shuffleCandidates,
+} from "@/ipc/wander/service";
 import { DEFAULT_WANDER_SETTINGS, parseWanderSettings } from "@/types/wander";
 
 describe("wander schemas", () => {
@@ -20,6 +24,9 @@ describe("wander schemas", () => {
     expect(
       GetWanderSessionSchema.safeParse({ mode: "theme", limit: 13 }).success
     ).toBe(false);
+    expect(
+      GetWanderSessionSchema.safeParse({ mode: "hamsterWheel" }).success
+    ).toBe(true);
   });
 
   it("accepts only the two supported exposure sources", () => {
@@ -58,6 +65,20 @@ describe("wander selection helpers", () => {
     expect(
       chooseWanderMode("auto", ["timeCapsule", "rediscovery"], () => 0.99)
     ).toBe("rediscovery");
+  });
+
+  it("creates a hamster-wheel session without querying photos", () => {
+    expect(
+      getCuratedWanderSession({
+        limit: 8,
+        mode: "hamsterWheel",
+      })
+    ).toEqual({
+      mode: "hamsterWheel",
+      photos: [],
+      subtitleKey: "wander.subtitle.hamsterWheel",
+      titleKey: "wander.title.hamsterWheel",
+    });
   });
 
   it("shuffles without mutating the candidate list", () => {

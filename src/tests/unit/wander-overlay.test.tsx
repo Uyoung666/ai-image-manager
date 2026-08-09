@@ -63,6 +63,13 @@ const sessionWithThreePhotos: WanderSession = {
   ],
 };
 
+const hamsterWheelSession: WanderSession = {
+  mode: "hamsterWheel",
+  photos: [],
+  subtitleKey: "wander.subtitle.hamsterWheel",
+  titleKey: "wander.title.hamsterWheel",
+};
+
 function renderOverlay(
   overrides: Partial<Parameters<typeof WanderOverlay>[0]> = {}
 ) {
@@ -146,6 +153,24 @@ describe("WanderOverlay", () => {
 
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByAltText("first.jpg")).toBeInTheDocument();
+  });
+
+  it("renders the hamster wheel as a persistent screen saver", async () => {
+    const onRoundComplete = vi.fn();
+    renderOverlay({ onRoundComplete, session: hamsterWheelSession });
+
+    await advanceTimers(1200);
+
+    expect(
+      screen.getByRole("img", { name: "wander.title.hamsterWheel" })
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "wander.saveRound" })
+    ).not.toBeInTheDocument();
+
+    await advanceTimers(10_000);
+    expect(onRoundComplete).not.toHaveBeenCalled();
   });
 
   it("advances to the next photo after the photo interval", async () => {

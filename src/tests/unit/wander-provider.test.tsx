@@ -195,6 +195,25 @@ describe("WanderProvider", () => {
     expect(getWanderSession).toHaveBeenCalledTimes(2); // initial + prefetch
   });
 
+  it("starts a hamster-wheel session without prefetching another round", async () => {
+    vi.mocked(getWanderSession).mockResolvedValue(
+      makeSession({
+        mode: "hamsterWheel",
+        photos: [],
+        titleKey: "wander.title.hamsterWheel",
+      })
+    );
+    renderProvider();
+    await flush();
+
+    await act(async () => {
+      await requireApi().start("hamsterWheel");
+    });
+
+    expect(api?.active).toBe(true);
+    expect(getWanderSession).toHaveBeenCalledTimes(1);
+  });
+
   it("does not auto-start when wander is disabled", async () => {
     vi.mocked(getWanderSettings).mockResolvedValue({
       ...DEFAULT_WANDER_SETTINGS,
