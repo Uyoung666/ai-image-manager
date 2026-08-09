@@ -12,6 +12,7 @@ import { DiagnosticSanitizer, sanitizeRendererRoute } from "./sanitizer";
 const MAX_INCIDENTS = 20;
 const INCIDENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const LINE_BREAK_PATTERN = /\r?\n/;
+const INCIDENT_KEY_SEPARATOR = "\u0000";
 
 export interface StoredDiagnosticIncident {
   action?: string;
@@ -49,7 +50,8 @@ export function createErrorFingerprint(
   stack?: string
 ): string {
   const normalized = `${message}\n${stack ?? ""}`
-    .replace(/[a-zA-Z]:\\[^\r\n)]+/g, "<PATH>")
+    .replace(/file:\/\/\/[^\r\n)]+/gi, "<PATH>")
+    .replace(/[a-zA-Z]:[\\/][^\r\n)]+/g, "<PATH>")
     .replace(/\\\\[^\r\n)]+/g, "<PATH>")
     .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "<ID>")
     .replace(/:\d+:\d+/g, ":<LINE>")
@@ -89,6 +91,18 @@ export function recordDiagnosticIncident(input: {
     route: input.route ? sanitizeRendererRoute(input.route) : undefined,
     nativeDumpPath: input.nativeDumpPath,
   };
+
+  // A single persistent fault can be reported by several listeners (or by
+  // several workers) during one startup. Keep one actionable pending item per
+  // source/fingerprint until the user dismisses it, otherwise every restart
+  // would create another identical item in the settings page.
+  const existing = findUndismissedIncident(
+    incident.source,
+    incident.fingerprint
+  );
+  if (existing) {
+    return existing;
+  }
   appendIncident(incident);
   return incident;
 }
@@ -105,27 +119,12 @@ export function appendIncident(incident: StoredDiagnosticIncident): void {
 
 export function listStoredIncidents(): StoredDiagnosticIncident[] {
   discoverNativeCrashDumps();
-  const file = getIncidentsFile();
-  if (!fs.existsSync(file)) {
-    return [];
-  }
-  const latestById = new Map<string, StoredDiagnosticIncident>();
-  for (const line of fs.readFileSync(file, "utf8").split(LINE_BREAK_PATTERN)) {
-    if (!line.trim()) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(line) as StoredDiagnosticIncident;
-      if (parsed.id && parsed.occurredAt) {
-        latestById.set(parsed.id, parsed);
-      }
-    } catch {
-      // A partial final line after a crash is intentionally ignored.
-    }
-  }
   const cutoff = Date.now() - INCIDENT_RETENTION_MS;
-  const incidents = [...latestById.values()]
-    .filter((incident) => Date.parse(incident.occurredAt) >= cutoff)
+  const incidents = deduplicateIncidents(
+    readStoredIncidents().filter(
+      (incident) => Date.parse(incident.occurredAt) >= cutoff
+    )
+  )
     .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
     .slice(0, MAX_INCIDENTS);
   compactIncidentsFile(incidents);
@@ -187,6 +186,59 @@ function compactIncidentsFile(incidents: StoredDiagnosticIncident[]): void {
   } catch {
     // Diagnostics must never break the app because retention cleanup failed.
   }
+}
+
+function readStoredIncidents(): StoredDiagnosticIncident[] {
+  const file = getIncidentsFile();
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  const latestById = new Map<string, StoredDiagnosticIncident>();
+  for (const line of fs.readFileSync(file, "utf8").split(LINE_BREAK_PATTERN)) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(line) as StoredDiagnosticIncident;
+      if (parsed.id && parsed.occurredAt) {
+        latestById.set(parsed.id, parsed);
+      }
+    } catch {
+      // A partial final line after a crash is intentionally ignored.
+    }
+  }
+  return [...latestById.values()];
+}
+
+function findUndismissedIncident(
+  source: DiagnosticIncidentSource,
+  fingerprint: string
+): StoredDiagnosticIncident | undefined {
+  const cutoff = Date.now() - INCIDENT_RETENTION_MS;
+  return readStoredIncidents()
+    .filter(
+      (incident) =>
+        incident.source === source &&
+        incident.fingerprint === fingerprint &&
+        !incident.dismissedAt &&
+        Date.parse(incident.occurredAt) >= cutoff
+    )
+    .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))[0];
+}
+
+function deduplicateIncidents(
+  incidents: StoredDiagnosticIncident[]
+): StoredDiagnosticIncident[] {
+  const latestByKey = new Map<string, StoredDiagnosticIncident>();
+  for (const incident of [...incidents].sort(
+    (a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)
+  )) {
+    const key = `${incident.source}${INCIDENT_KEY_SEPARATOR}${incident.fingerprint}`;
+    if (!latestByKey.has(key)) {
+      latestByKey.set(key, incident);
+    }
+  }
+  return [...latestByKey.values()];
 }
 
 function discoverNativeCrashDumps(): void {

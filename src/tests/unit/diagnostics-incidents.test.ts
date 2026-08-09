@@ -7,6 +7,7 @@ import {
   appendIncident,
   createErrorFingerprint,
   createIncidentId,
+  dismissStoredIncident,
   listStoredIncidents,
   recordDiagnosticIncident,
 } from "@/services/diagnostics/incidents";
@@ -39,6 +40,98 @@ describe("diagnostic incident identity", () => {
     );
     expect(first).toHaveLength(12);
     expect(first).toBe(second);
+
+    const fileUrlFirst = createErrorFingerprint(
+      "Failed to load",
+      "Error: Failed to load at file:///C:/Users/A/src/indexer.ts:12:4"
+    );
+    const fileUrlSecond = createErrorFingerprint(
+      "Failed to load",
+      "Error: Failed to load at file:///D:/Work/src/indexer.ts:98:2"
+    );
+    expect(fileUrlFirst).toBe(fileUrlSecond);
+  });
+
+  it("coalesces repeated pending incidents with the same source and fingerprint", () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-incidents-dedupe-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+
+    const first = recordDiagnosticIncident({
+      message: "Renderer failed to start",
+      source: "renderer-error",
+      stack: "Error: Renderer failed to start\n at boot (C:\\app\\main.ts:1:1)",
+    });
+    const second = recordDiagnosticIncident({
+      message: "Renderer failed to start",
+      source: "renderer-error",
+      stack:
+        "Error: Renderer failed to start\n at boot (D:\\app\\main.ts:99:4)",
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(listStoredIncidents()).toHaveLength(1);
+  });
+
+  it("allows a new occurrence after the previous incident was dismissed", () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-incidents-dismiss-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+
+    const first = recordDiagnosticIncident({
+      message: "Renderer failed to start",
+      source: "renderer-error",
+    });
+    expect(dismissStoredIncident(first.id)).toBe(true);
+
+    const second = recordDiagnosticIncident({
+      message: "Renderer failed to start",
+      source: "renderer-error",
+    });
+    expect(second.id).not.toBe(first.id);
+    expect(listStoredIncidents()).toHaveLength(1);
+    expect(listStoredIncidents()[0]?.id).toBe(second.id);
+  });
+
+  it("compacts legacy duplicate records when they are listed", () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-incidents-legacy-dedupe-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+
+    const base = {
+      fingerprint: "duplicate000",
+      message: "Repeated worker failure",
+      source: "worker-crash" as const,
+    };
+    appendIncident({
+      ...base,
+      id: "AIM-OLD",
+      occurredAt: "2026-08-09T12:00:00.000Z",
+    });
+    appendIncident({
+      ...base,
+      id: "AIM-NEW",
+      occurredAt: "2026-08-09T12:01:00.000Z",
+    });
+
+    const incidents = listStoredIncidents();
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.id).toBe("AIM-NEW");
+    expect(
+      fs.readFileSync(
+        path.join(testDirectory, "diagnostics", "incidents.jsonl"),
+        "utf8"
+      )
+    ).toContain('"id":"AIM-NEW"');
+    expect(
+      fs.readFileSync(
+        path.join(testDirectory, "diagnostics", "incidents.jsonl"),
+        "utf8"
+      )
+    ).not.toContain('"id":"AIM-OLD"');
   });
 
   it("redacts incidents before persistence and retains only 20 recent items", () => {

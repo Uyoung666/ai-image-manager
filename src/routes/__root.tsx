@@ -60,9 +60,17 @@ function Root() {
       "/$1/:id"
     );
     const record = (action: string, message: string, stack?: string) => {
-      recordRendererIncident({ action, message, stack, route }).catch(() => {
-        // Diagnostics are best-effort and must never create another UI failure.
-      });
+      try {
+        // Keep the global error handler safe even if a partially initialized
+        // IPC client returns synchronously during renderer startup.
+        Promise.resolve(
+          recordRendererIncident({ action, message, stack, route })
+        ).catch(() => {
+          // Diagnostics are best-effort and must never create another UI failure.
+        });
+      } catch {
+        // A synchronous IPC failure must not become a second renderer error.
+      }
     };
     const handleError = (event: ErrorEvent) => {
       record(
@@ -92,7 +100,7 @@ function Root() {
       return;
     }
     diagnosticNoticeShown.current = true;
-    getDiagnosticsOverview()
+    Promise.resolve(getDiagnosticsOverview())
       .then((overview) => {
         if (overview.pendingIncidents.length === 0) {
           return;

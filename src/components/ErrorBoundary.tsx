@@ -135,21 +135,27 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error.message, info.componentStack);
-    recordRendererIncident({
-      action: "react-render",
-      message: error.message || "React render error",
-      stack: error.stack,
-      componentStack: info.componentStack ?? undefined,
-      route: window.location.pathname,
-    })
-      .then(({ id }) => {
-        if (this.state.error === error) {
-          this.setState({ incidentId: id });
-        }
-      })
-      .catch(() => {
-        // The report dialog can still create a manual incident if IPC failed.
-      });
+    try {
+      Promise.resolve(
+        recordRendererIncident({
+          action: "react-render",
+          message: error.message || "React render error",
+          stack: error.stack,
+          componentStack: info.componentStack ?? undefined,
+          route: window.location.pathname,
+        })
+      )
+        .then(({ id }) => {
+          if (this.state.error === error) {
+            this.setState({ incidentId: id });
+          }
+        })
+        .catch(() => {
+          // The report dialog can still create a manual incident if IPC failed.
+        });
+    } catch {
+      // A synchronous IPC failure must not replace the original render error.
+    }
   }
 
   handleReset = () => {

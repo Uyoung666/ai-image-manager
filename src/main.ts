@@ -998,7 +998,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
     typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
       ? mainWindow.loadFile(rendererEntry)
       : mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  windowLoad.catch((error) => {
+  Promise.resolve(windowLoad).catch((error) => {
     const incident = recordDiagnosticIncident({
       message: error instanceof Error ? error.message : String(error),
       source: "startup-failure",
@@ -1189,9 +1189,13 @@ ipcMain.on("shell:open-external", (event, url: string) => {
     } catch {
       return;
     }
-    shell.openExternal(url).catch((err) => {
+    try {
+      Promise.resolve(shell.openExternal(url)).catch((err) => {
+        log.error("Failed to open external URL:", err);
+      });
+    } catch (err) {
       log.error("Failed to open external URL:", err);
-    });
+    }
   }
 });
 

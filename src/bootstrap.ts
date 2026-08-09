@@ -5,6 +5,7 @@ import path from "node:path";
 import { app, crashReporter, dialog, shell } from "electron";
 
 type BootstrapIncidentSource = "main-crash" | "startup-failure";
+const LINE_BREAK_PATTERN = /\r?\n/;
 
 const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
 if (process.env.CI === "e2e" && e2eUserDataDir) {
@@ -47,16 +48,22 @@ function writePendingIncident(
   const error = normalizeError(reason);
   const id = createIncidentId();
   const normalized = `${error.message}\n${error.stack ?? ""}`
-    .replace(/[a-zA-Z]:\\[^\r\n)]+/g, "<PATH>")
+    .replace(/file:\/\/\/[^\r\n)]+/gi, "<PATH>")
+    .replace(/[a-zA-Z]:[\\/][^\r\n)]+/g, "<PATH>")
     .replace(/:\d+:\d+/g, ":<LINE>")
     .toLowerCase();
+  const fingerprint = crypto
+    .createHash("sha256")
+    .update(normalized)
+    .digest("hex")
+    .slice(0, 12);
+  const existing = findPendingBootstrapIncident(source, fingerprint);
+  if (existing) {
+    return { id: existing.id, ...error };
+  }
   const incident = {
     id,
-    fingerprint: crypto
-      .createHash("sha256")
-      .update(normalized)
-      .digest("hex")
-      .slice(0, 12),
+    fingerprint,
     occurredAt: new Date().toISOString(),
     source,
     message: redactBootstrapText(error.message).slice(0, 4096),
@@ -85,9 +92,64 @@ function writePendingIncident(
   return { id, ...error };
 }
 
+function findPendingBootstrapIncident(
+  source: BootstrapIncidentSource,
+  fingerprint: string
+): { id: string } | undefined {
+  try {
+    const file = path.join(
+      app.getPath("userData"),
+      "diagnostics",
+      "incidents.jsonl"
+    );
+    if (!fs.existsSync(file)) {
+      return undefined;
+    }
+    const latestById = new Map<
+      string,
+      {
+        dismissedAt?: string;
+        fingerprint?: string;
+        id?: string;
+        source?: string;
+      }
+    >();
+    for (const line of fs
+      .readFileSync(file, "utf8")
+      .split(LINE_BREAK_PATTERN)) {
+      if (!line.trim()) {
+        continue;
+      }
+      const parsed = JSON.parse(line) as {
+        dismissedAt?: string;
+        fingerprint?: string;
+        id?: string;
+        source?: string;
+      };
+      if (parsed.id) {
+        latestById.set(parsed.id, parsed);
+      }
+    }
+    for (const parsed of [...latestById.values()].reverse()) {
+      if (
+        parsed.id &&
+        parsed.source === source &&
+        parsed.fingerprint === fingerprint &&
+        !parsed.dismissedAt
+      ) {
+        return { id: parsed.id };
+      }
+    }
+  } catch {
+    // The fatal path must continue even when the incident file is unreadable.
+  }
+  return undefined;
+}
+
 function redactBootstrapText(value: string): string {
   return value
-    .replace(/[a-zA-Z]:\\[^\r\n)]+/g, "<PATH>")
+    .replace(/file:\/\/\/[^\r\n)]+/gi, "<PATH>")
+    .replace(/[a-zA-Z]:[\\/][^\r\n)]+/g, "<PATH>")
     .replace(/\\\\[^\r\n)]+/g, "<PATH>")
     .replace(/([\\/]Users[\\/])[^\\/\s]+/gi, "$1<USER>")
     .replace(
