@@ -13,12 +13,14 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import sqlite from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   readFaceBackup,
   validateFaceBackupPayload,
 } from "./backup-face-data.mjs";
+
+const { DatabaseSync } = sqlite;
 
 const FACE_TABLES = [
   "face_vectors",

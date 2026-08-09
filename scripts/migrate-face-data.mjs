@@ -18,13 +18,15 @@ import { fork } from "node:child_process";
  */
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import sqlite from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   createFaceBackupPayload,
   FACE_MODEL_DIMENSIONS,
   writeFaceBackup,
 } from "./backup-face-data.mjs";
+
+const { DatabaseSync } = sqlite;
 
 const CONFIGS = {
   "yunet-sface": {

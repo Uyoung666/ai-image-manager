@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import sqlite from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   addFaceBackupChecksum,
@@ -12,6 +12,8 @@ import {
 } from "../../../scripts/backup-face-data.mjs";
 import { runMigration } from "../../../scripts/migrate-face-data.mjs";
 import { restoreFaceData } from "../../../scripts/restore-face-data.mjs";
+
+const { DatabaseSync } = sqlite;
 
 const tempDirectories = [];
 const CHECKSUM_MISMATCH = /checksum mismatch/;
