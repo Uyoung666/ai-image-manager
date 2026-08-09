@@ -18,14 +18,14 @@ jobs:
         run: npm ci
       - name: Rebuild Electron native modules
         run: npm run rebuild:native
-      - name: Cache face models
+      - name: Cache unit models
         uses: actions/cache@v4
         with:
           path: models
-          key: ${{ runner.os }}-models-face-${{ hashFiles('src/services/model-downloader.ts') }}
+          key: ${{ runner.os }}-models-unit-${{ hashFiles('src/services/model-downloader.ts') }}
       - name: Prepare models for model-backed tests
         env:
-          AIM_MODEL_SCOPE: face
+          AIM_MODEL_SCOPE: face,Xenova/siglip-base-patch16-224
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
         run: npm run test:unit -- run --exclude src/tests/unit/face-data-migration.test.mjs
