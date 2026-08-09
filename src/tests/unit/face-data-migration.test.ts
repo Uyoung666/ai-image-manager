@@ -160,13 +160,13 @@ function createDatabase() {
 function readState(dbPath: string) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    const readRequiredRow = <T>(query: string): T => {
+    function readRequiredRow<T>(query: string): T {
       const row = db.prepare(query).get() as T | undefined;
       if (!row) {
         throw new Error(`Expected a row for query: ${query}`);
       }
       return row;
-    };
+    }
 
     return {
       vectors: readRequiredRow<{ count: number }>(
