@@ -35,6 +35,8 @@ import {
   shouldShowSequenceEmptyState,
   useCollectionSequences,
 } from "@/hooks/useCollectionSequences";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
 import { usePhotoSelection } from "@/hooks/usePhotoSelection";
 import { ipc } from "@/ipc/manager";
@@ -100,6 +102,8 @@ function loadSortOrder(): SortOrder {
 
 function PersonDetailPage() {
   const { t } = useTranslation();
+  const compactDetailOverlay = useMediaQuery("(max-width: 1023px)");
+  const detailOverlayRef = useRef<HTMLDivElement>(null);
   const { identityId } = Route.useParams() as { identityId: string };
   const navigate = useNavigate();
   const [identity, setIdentity] = useState<IdentityDetail | null>(null);
@@ -903,13 +907,27 @@ function PersonDetailPage() {
     }
   }, []);
 
+  const detailOverlayOpen = Boolean(
+    sequenceView.selectedSequence || detailPhoto
+  );
+  useModalFocusTrap({
+    active: compactDetailOverlay && detailOverlayOpen,
+    containerRef: detailOverlayRef,
+    onEscape: () => {
+      sequenceView.setSelectedSequence(null);
+      dismissDetail();
+      clearSelection();
+    },
+  });
+
   return (
-    <div
-      className="flex h-full flex-col bg-background"
-    >
+    <div className="flex h-full min-w-0 flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div className="flex items-center gap-3">
+      <div
+        className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4"
+        inert={compactDetailOverlay && detailOverlayOpen}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/people" as const })}
@@ -917,17 +935,17 @@ function PersonDetailPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted sm:h-12 sm:w-12">
             <span className="font-semibold text-[18px] text-muted-foreground">
               {(identity?.name || "?")[0]}
             </span>
           </div>
-          <div>
+          <div className="min-w-0">
             {editingName ? (
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <input
                   autoFocus
-                  className="h-8 rounded-[6px] border border-input bg-card px-3 font-semibold text-[16px] text-foreground outline-none focus:border-primary"
+                  className="h-8 min-w-0 max-w-full rounded-[6px] border border-input bg-card px-3 font-semibold text-[16px] text-foreground outline-none focus:border-primary"
                   onChange={(e) => setNameInput(e.target.value)}
                   onCompositionEnd={(e) => {
                     composingRef.current = false;
@@ -959,7 +977,7 @@ function PersonDetailPage() {
               </div>
             ) : (
               <h1
-                className="cursor-pointer font-semibold text-[20px] text-foreground tracking-tight hover:text-primary"
+                className="min-w-0 truncate font-semibold text-[20px] text-foreground tracking-tight hover:text-primary"
                 onClick={() => setEditingName(true)}
               >
                 {identity?.name || t("unnamedPerson")}
@@ -970,8 +988,8 @@ function PersonDetailPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-[12px] text-foreground">
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 text-[12px] text-foreground">
             <Switch
               ariaLabel={
                 showFaceBoxes ? t("faceBoxesHide") : t("faceBoxesShow")
@@ -997,8 +1015,11 @@ function PersonDetailPage() {
       </div>
 
       {/* Content area */}
-      <div className="flex min-h-0 flex-1">
-        <div className="relative flex min-w-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div
+          className="relative flex min-w-0 flex-1"
+          inert={compactDetailOverlay && detailOverlayOpen}
+        >
           <PhotoGrid
             emptyState={
               sequenceView.sequencesError ? (
@@ -1153,8 +1174,27 @@ function PersonDetailPage() {
             selectedCount={selectedIds.size}
           />
         </div>
-        {sequenceView.selectedSequence ? (
-          <SequenceDetailPanel
+        {(sequenceView.selectedSequence || detailPhoto) && (
+          <button
+            aria-label={t("close")}
+            className="absolute inset-0 z-30 border-0 bg-black/20 lg:hidden"
+            onClick={() => {
+              sequenceView.setSelectedSequence(null);
+              dismissDetail();
+              clearSelection();
+            }}
+            type="button"
+          />
+        )}
+        <div
+          aria-label={t("photoDetail")}
+          aria-modal={compactDetailOverlay ? true : undefined}
+          className="absolute inset-y-0 right-0 z-40 max-w-[calc(100%-0.5rem)] overflow-hidden shadow-[-16px_0_36px_-24px_rgb(0_0_0/0.55)] lg:static lg:z-auto lg:max-w-none lg:overflow-visible lg:shadow-none"
+          ref={detailOverlayRef}
+          role={compactDetailOverlay ? "dialog" : "complementary"}
+        >
+          {sequenceView.selectedSequence ? (
+            <SequenceDetailPanel
             onClose={() => sequenceView.setSelectedSequence(null)}
             onOpenPhoto={(photoId) => {
               const sequence = sequenceView.selectedSequence;
@@ -1191,9 +1231,9 @@ function PersonDetailPage() {
             }}
             sequence={sequenceView.selectedSequence}
             width={360}
-          />
-        ) : (
-          <PhotoDetailPanel
+            />
+          ) : (
+            <PhotoDetailPanel
             onClose={() => {
               setReturnSequence(null);
               dismissDetail();
@@ -1210,8 +1250,9 @@ function PersonDetailPage() {
                 : undefined
             }
             photo={detailPhoto as any}
-          />
-        )}
+            />
+          )}
+        </div>
       </div>
 
       {lightboxIndex >= 0 && (

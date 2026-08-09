@@ -580,7 +580,7 @@ export function PhotoDetailPanel({
       >
         {/* Resize handle — drag left edge to resize */}
         <div
-          className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
+          className={`photo-detail-panel-resize-handle absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
             resizing ? "bg-primary" : "hover:bg-primary/50"
           }`}
           onMouseDown={handleResizeStart}
@@ -647,7 +647,7 @@ export function PhotoDetailPanel({
 
         {/* Preview image */}
         <div className="border-border border-b bg-background p-4">
-          <div className="flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted">
+          <div className="photo-detail-preview flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted">
             <img
               alt={displayPhoto.filename}
               className={`max-h-full max-w-full object-contain transition-opacity duration-150 ${
@@ -1037,7 +1037,7 @@ export function PhotoDetailPanel({
               {dirPath}
             </p>
             <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+              className="flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
               onClick={() => onOpenExplorer(displayPhoto.path)}
             >
               <FolderOpen className="h-3.5 w-3.5" />
@@ -1058,11 +1058,11 @@ function InfoRow({
   value: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-2">
+    <div className="flex min-w-0 items-start justify-between gap-2">
       <span className="flex-shrink-0 text-[11px] text-muted-foreground/70">
         {label}
       </span>
-      <span className="truncate text-right text-[11px] text-muted-foreground">
+      <span className="min-w-0 truncate text-right text-[11px] text-muted-foreground">
         {value}
       </span>
     </div>

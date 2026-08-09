@@ -42,7 +42,7 @@ function FeatureStatusRow({
   const { t } = useTranslation();
   const statusKey = active ? "gpuStatusActive" : "gpuStatusInactive";
   return (
-    <div className="flex items-center gap-2 text-[11px]">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px]">
       {active ? (
         <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
       ) : (
@@ -112,7 +112,7 @@ function DetectionStatusLine({
           </span>
         </div>
         {detectError && (
-          <p className="mt-1 text-[11px] text-muted-foreground/50">
+          <p className="mt-1 text-[11px] text-muted-foreground/50 [overflow-wrap:anywhere]">
             {detectError}
           </p>
         )}
@@ -130,7 +130,9 @@ function DetectionStatusLine({
         </span>
       </div>
       {detectError && (
-        <p className="mt-1 text-[11px] text-destructive/70">{detectError}</p>
+        <p className="mt-1 text-[11px] text-destructive/70 [overflow-wrap:anywhere]">
+          {detectError}
+        </p>
       )}
     </div>
   );
@@ -277,22 +279,22 @@ export function GpuSettingsCard({
   // ── Render ─────────────────────────────────────────────────────────
 
   return (
-    <section className="space-y-3">
+    <section className="min-w-0 space-y-3">
       {!hideTitle && (
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("gpuAcceleration")}
         </h2>
       )}
 
-      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         {/* Toggle row */}
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
             <span className="text-[13px] text-muted-foreground">
               {t("gpuEnableAcceleration")}
             </span>
             {detectedInfo?.gpuName && (
-              <p className="mt-0.5 font-medium text-[11px] text-foreground/80">
+              <p className="mt-0.5 break-all font-medium text-[11px] text-foreground/80">
                 {detectedInfo.gpuName}
               </p>
             )}
@@ -308,7 +310,7 @@ export function GpuSettingsCard({
         {/* Feature status */}
         <div className="space-y-1.5 border-border border-t pt-3">
           <FeatureStatusRow active={gpuActive} label={t("gpuStatusFace")} />
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px]">
             <MinusCircle className="h-3 w-3 text-muted-foreground/45" />
             <span className="text-muted-foreground/70">
               {t("gpuStatusEmbed")}
@@ -329,11 +331,11 @@ export function GpuSettingsCard({
         </div>
 
         {/* Action buttons + hint */}
-        <div className="flex items-start justify-between gap-3 border-border border-t pt-3">
-          <p className="pt-1 text-[11px] text-muted-foreground/60 leading-relaxed">
+        <div className="flex min-w-0 flex-col items-stretch gap-3 border-border border-t pt-3 min-[900px]:flex-row min-[900px]:items-start min-[900px]:justify-between">
+          <p className="min-w-0 pt-1 text-[11px] text-muted-foreground/60 leading-relaxed [overflow-wrap:anywhere]">
             {t("gpuRestartHint")}
           </p>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex max-w-full flex-wrap justify-end gap-2 min-[900px]:shrink-0">
             <button
               className="rounded-[6px] border border-input bg-background px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
               disabled={detectPhase === "checking"}

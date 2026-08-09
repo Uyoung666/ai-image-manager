@@ -21,7 +21,7 @@ export function StepIndicator({ currentStep, totalSteps }: StepIndicatorProps) {
         total: totalSteps,
       })}
       aria-live="polite"
-      className="flex items-center justify-center gap-2"
+      className="flex max-w-full flex-wrap items-center justify-center gap-2 px-4"
       role="status"
     >
       {Array.from({ length: totalSteps }, (_, i) => {

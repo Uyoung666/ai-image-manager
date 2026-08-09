@@ -20,9 +20,9 @@ function SettingsLayout() {
   const location = useLocation();
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex items-center gap-4 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
+      <div className="flex shrink-0 items-center gap-3 border-border border-b px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-4 min-[480px]:px-4 min-[480px]:py-3">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -36,16 +36,19 @@ function SettingsLayout() {
           </TooltipTrigger>
           <TooltipContent>{t("settingsBackHome")}</TooltipContent>
         </Tooltip>
-        <h1 className="font-semibold text-[18px] text-foreground">
+        <h1 className="min-w-0 font-semibold text-[18px] text-foreground leading-tight [overflow-wrap:anywhere]">
           {t("settingsTitle")}
         </h1>
       </div>
 
       {/* Body: Sidebar + Content */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <SettingsSidebar />
-        <div className="min-h-0 flex-1 overflow-hidden" key={location.pathname}>
-          <div className="h-full animate-page-enter motion-reduce:animate-none">
+        <div
+          className="min-h-0 min-w-0 flex-1 overflow-hidden"
+          key={location.pathname}
+        >
+          <div className="h-full min-w-0 animate-page-enter motion-reduce:animate-none">
             <Outlet />
           </div>
         </div>

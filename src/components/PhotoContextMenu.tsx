@@ -10,7 +10,8 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -74,6 +75,7 @@ export function PhotoContextMenu({
 }: PhotoContextMenuProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 8, top: 8 });
 
   useEffect(() => {
     if (!menu.open) {
@@ -102,13 +104,49 @@ export function PhotoContextMenu({
     };
   }, [menu.open, onClose]);
 
+  useLayoutEffect(() => {
+    if (!(menu.open && ref.current)) {
+      return;
+    }
+    const viewportMargin = 8;
+    const updatePosition = () => {
+      const element = ref.current;
+      if (!element) {
+        return;
+      }
+      const bounds = element.getBoundingClientRect();
+      const left = Math.max(
+        viewportMargin,
+        Math.min(
+          menu.x,
+          Math.max(viewportMargin, window.innerWidth - bounds.width - viewportMargin)
+        )
+      );
+      const top = Math.max(
+        viewportMargin,
+        Math.min(
+          menu.y,
+          Math.max(
+            viewportMargin,
+            window.innerHeight - bounds.height - viewportMargin
+          )
+        )
+      );
+      setPosition((current) =>
+        current.left === left && current.top === top
+          ? current
+          : { left, top }
+      );
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [menu.open, menu.x, menu.y]);
+
   if (!menu.open) {
     return null;
   }
 
-  // Clamp position to viewport
-  const x = Math.min(menu.x, window.innerWidth - 190);
-  const y = Math.min(menu.y, window.innerHeight - 160);
   let deleteLabel = t("deletePhoto");
   if (menu.sequenceMemberIds) {
     deleteLabel = `删除整个序列（${menu.sequenceMemberIds.length}）`;
@@ -116,11 +154,11 @@ export function PhotoContextMenu({
     deleteLabel = `${t("deletePhoto")} (${menu.selectionCount})`;
   }
 
-  return (
+  return createPortal(
     <div
-      className="surface-elevated fixed z-50 min-w-[210px] animate-context-menu-enter rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+      className="surface-elevated fixed z-50 max-h-[calc(100dvh-1rem)] w-[min(210px,calc(100dvw-1rem))] min-w-0 animate-context-menu-enter overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 [&_button]:min-w-0 [&_button]:whitespace-normal [&_button]:break-words"
       ref={ref}
-      style={{ left: x, top: y }}
+      style={position}
     >
       <button
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10 disabled:text-muted-foreground/50 disabled:hover:bg-transparent"
@@ -342,6 +380,7 @@ export function PhotoContextMenu({
           Delete
         </span>
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }

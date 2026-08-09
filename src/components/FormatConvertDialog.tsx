@@ -7,6 +7,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 
 interface ConvertResult {
@@ -102,6 +107,7 @@ export function FormatConvertDialog({
       open={open}
     >
       <DialogContent
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
           if (blockClose) {
             e.preventDefault();
@@ -124,11 +130,18 @@ export function FormatConvertDialog({
             <div className="flex items-center gap-2 text-[14px] text-success">
               {t("convertSuccessCount", { count: result.converted })}
             </div>
-            <div className="text-[12px] text-muted-foreground">
+            <div className="min-w-0 text-[12px] text-muted-foreground">
               {t("outputDir")}:{" "}
-              <span className="font-mono text-foreground">
-                {result.outputDir}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-block max-w-full truncate align-bottom font-mono text-foreground">
+                    {result.outputDir}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {result.outputDir}
+                </TooltipContent>
+              </Tooltip>
             </div>
             <DialogFooter>
               <button
@@ -146,7 +159,7 @@ export function FormatConvertDialog({
               <label className="mb-2 block text-[12px] text-muted-foreground">
                 {t("targetFormat")}
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(10rem,100%),1fr))] gap-2">
                 {FORMATS.map((f) => (
                   <button
                     className={`rounded-md border px-3 py-2.5 text-left transition-colors ${
@@ -207,10 +220,17 @@ export function FormatConvertDialog({
               <label className="mb-1.5 block text-[12px] text-muted-foreground">
                 {t("outputDir")}
               </label>
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[12px] text-muted-foreground/70">
-                  {outputDir || t("defaultTempDir")}
-                </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-[1_1_12rem] truncate rounded-md border border-border bg-secondary px-3 py-2 font-mono text-[12px] text-muted-foreground/70">
+                      {outputDir || t("defaultTempDir")}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                    {outputDir || t("defaultTempDir")}
+                  </TooltipContent>
+                </Tooltip>
                 <button
                   className="flex-shrink-0 rounded-md border border-border px-3 py-2 text-[12px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   onClick={pickOutputDir}
@@ -222,7 +242,7 @@ export function FormatConvertDialog({
             </div>
 
             {error && (
-              <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
+              <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-[12px] text-destructive [overflow-wrap:anywhere]">
                 {error}
               </div>
             )}

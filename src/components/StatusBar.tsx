@@ -44,16 +44,16 @@ export function StatusBar({
 
   return (
     <div
-      className={`glass-surface flex h-7 items-center justify-between border-border-subtle border-t px-4 text-[11px] ${className ?? ""}`}
+      className={`glass-surface flex h-7 min-w-0 items-center justify-between gap-3 overflow-hidden border-border-subtle border-t px-3 text-[11px] sm:px-4 ${className ?? ""}`}
     >
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <span>
+      <div className="min-w-0 text-muted-foreground">
+        <span className="block truncate">
           {t("totalPhotosStatus", { count: totalPhotos.toLocaleString() })}
         </span>
       </div>
-      <div className={`flex items-center gap-1.5 ${aiColor}`}>
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-        <span>{aiLabel}</span>
+      <div className={`flex min-w-0 items-center gap-1.5 ${aiColor}`}>
+        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+        <span className="truncate">{aiLabel}</span>
       </div>
     </div>
   );

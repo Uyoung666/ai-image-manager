@@ -64,18 +64,18 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
   const isMacOS = platform === "darwin";
 
   return (
-    <div className="flex w-full items-stretch justify-between">
-      <div className="draglayer w-full" onDoubleClick={maximizeWindow}>
+    <div className="flex w-full min-w-0 items-stretch justify-between">
+      <div className="draglayer min-w-0 flex-1" onDoubleClick={maximizeWindow}>
         {title && !isMacOS && (
-          <div className="flex flex-1 select-none items-center gap-1.5 whitespace-nowrap p-2 text-muted-foreground text-xs">
+          <div className="flex min-w-0 flex-1 select-none items-center gap-1.5 whitespace-nowrap p-2 text-muted-foreground text-xs">
             <img alt="" className="h-3.5 w-3.5" src={icon} />
-            {title}
+            <span className="min-w-0 truncate">{title}</span>
           </div>
         )}
         {isMacOS && <div className="flex flex-1" style={{ height: 28 }} />}
       </div>
       {!isMacOS && (
-        <div className="window-buttons">
+        <div className="window-buttons shrink-0">
           <WindowButtons isMaximized={isMaximized} />
         </div>
       )}

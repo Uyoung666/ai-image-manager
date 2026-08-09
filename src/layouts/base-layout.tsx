@@ -29,6 +29,8 @@ import {
   useSidebarFilter,
 } from "@/contexts/SidebarFilterContext";
 import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useFolders } from "@/hooks/useFolders";
 import { WanderProvider } from "@/providers/WanderProvider";
 
@@ -49,38 +51,102 @@ function SidebarSlot() {
   const filter = useSidebarFilter();
   const { data: folders = [] } = useFolders();
   const { zones } = useImportDropContext();
+  const { t } = useTranslation();
+  const compactViewport = useMediaQuery("(max-width: 840px)");
+  const [compactOpen, setCompactOpen] = useState(false);
+  const compactLayerRef = useRef<HTMLDivElement>(null);
+  const effectiveCollapsed = compactViewport ? !compactOpen : filter.collapsed;
+
+  useEffect(() => {
+    if (!(compactViewport && isHomePage)) {
+      setCompactOpen(false);
+    }
+  }, [compactViewport, isHomePage]);
+
+  useModalFocusTrap({
+    active: isHomePage && compactViewport && compactOpen,
+    containerRef: compactLayerRef,
+    onEscape: () => setCompactOpen(false),
+  });
+
+  const closeCompactSidebar = () => {
+    if (compactViewport) {
+      setCompactOpen(false);
+    }
+  };
 
   return (
-    <div
-      className={isHomePage ? "relative h-full shrink-0" : "hidden"}
-    >
-      <Sidebar
-        activeFolderId={filter.activeFolderId}
-        activeTagIds={filter.activeTagIds}
-        collapsed={filter.collapsed}
-        favoriteActive={filter.favoriteOnly}
-        folders={folders}
-        onAddFolder={filter.handleAddFolder}
-        onDeleteFolder={filter.handleDeleteFolder}
-        onSelectAllPhotos={filter.selectAllPhotos}
-        onSelectFavorites={filter.toggleFavorites}
-        onSelectFolder={filter.selectFolder}
-        onToggleCollapse={filter.toggleCollapsed}
-        onToggleTag={filter.toggleTag}
-        onToggleTagMode={filter.toggleTagMode}
-        tagMode={filter.tagMode}
-        totalPhotos={filter.totalPhotos}
-      />
-      {isHomePage && (
-        <ImportDropLayer
-          className={`sidebar-import-drop-layer ${filter.collapsed ? "is-collapsed" : ""}`}
-          kind={zones.dragKind}
-          onDragOver={zones.handleZoneDragOver}
-          onDrop={zones.handleZoneDrop}
-          zone="folders"
+    <>
+      {isHomePage && compactViewport && compactOpen && (
+        <button
+          aria-label={t("close")}
+          className="compact-sidebar-backdrop"
+          onClick={() => setCompactOpen(false)}
+          type="button"
         />
       )}
-    </div>
+      <div
+        aria-label={
+          isHomePage && compactViewport && compactOpen
+            ? t("sidebarFolders")
+            : undefined
+        }
+        aria-modal={
+          isHomePage && compactViewport && compactOpen ? true : undefined
+        }
+        className={
+          isHomePage
+            ? `compact-sidebar-layer relative h-full shrink-0 ${
+                compactViewport && compactOpen ? "is-open" : ""
+              }`
+            : "hidden"
+        }
+        ref={compactLayerRef}
+        role={
+          isHomePage && compactViewport && compactOpen ? "dialog" : undefined
+        }
+      >
+        <Sidebar
+          activeFolderId={filter.activeFolderId}
+          activeTagIds={filter.activeTagIds}
+          collapsed={effectiveCollapsed}
+          favoriteActive={filter.favoriteOnly}
+          folders={folders}
+          onAddFolder={filter.handleAddFolder}
+          onDeleteFolder={filter.handleDeleteFolder}
+          onSelectAllPhotos={() => {
+            filter.selectAllPhotos();
+            closeCompactSidebar();
+          }}
+          onSelectFavorites={() => {
+            filter.toggleFavorites();
+            closeCompactSidebar();
+          }}
+          onSelectFolder={(folderId) => {
+            filter.selectFolder(folderId);
+            closeCompactSidebar();
+          }}
+          onToggleCollapse={
+            compactViewport
+              ? () => setCompactOpen((previous) => !previous)
+              : filter.toggleCollapsed
+          }
+          onToggleTag={filter.toggleTag}
+          onToggleTagMode={filter.toggleTagMode}
+          tagMode={filter.tagMode}
+          totalPhotos={filter.totalPhotos}
+        />
+        {isHomePage && (
+          <ImportDropLayer
+            className={`sidebar-import-drop-layer ${effectiveCollapsed ? "is-collapsed" : ""}`}
+            kind={zones.dragKind}
+            onDragOver={zones.handleZoneDragOver}
+            onDrop={zones.handleZoneDrop}
+            zone="folders"
+          />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -154,7 +220,7 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
                   <DragWindowRegion title="AI Image Manager" />
                   <GlobalProgressBar />
                   <div
-                    className={`flex min-h-0 flex-1 overflow-hidden ${
+                    className={`relative flex min-h-0 flex-1 overflow-hidden ${
                       isHomePage ? "home-workspace-content" : ""
                     }`}
                   >

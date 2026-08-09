@@ -81,7 +81,7 @@ export function CullStartDialog({
 
   return (
     <Dialog onOpenChange={(value) => !value && onClose()} open={open}>
-      <DialogContent className="max-w-[460px]">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[460px] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t("cullNew")}</DialogTitle>
           <DialogDescription>
@@ -95,10 +95,10 @@ export function CullStartDialog({
             placeholder={t("cullSessionNamePlaceholder")}
             value={name}
           />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 max-[420px]:grid-cols-1">
             {(["duel", "curate"] as const).map((value) => (
               <button
-                className={`flex items-center justify-center gap-2 rounded-[6px] border px-3 py-2 text-[12px] ${
+                className={`flex min-w-0 items-center justify-center gap-2 rounded-[6px] border px-3 py-2 text-center text-[12px] ${
                   mode === value
                     ? "border-primary/40 bg-primary/10 text-primary"
                     : "border-border text-muted-foreground"
@@ -117,10 +117,10 @@ export function CullStartDialog({
             ))}
           </div>
           {mode === "duel" ? (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 max-[420px]:grid-cols-1">
               {(["quick", "standard", "fine"] as const).map((value) => (
                 <button
-                  className={`rounded-[6px] px-2 py-2 text-[11px] ${
+                  className={`min-w-0 break-words rounded-[6px] px-2 py-2 text-[11px] ${
                     pkMode === value
                       ? "bg-primary/10 text-primary"
                       : "bg-muted text-muted-foreground"
@@ -140,10 +140,10 @@ export function CullStartDialog({
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 max-[420px]:grid-cols-1">
               {(["time", "similarity"] as const).map((value) => (
                 <button
-                  className={`rounded-[6px] px-3 py-2 text-[11px] ${
+                  className={`min-w-0 break-words rounded-[6px] px-3 py-2 text-[11px] ${
                     sortStrategy === value
                       ? "bg-primary/10 text-primary"
                       : "bg-muted text-muted-foreground"

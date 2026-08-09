@@ -31,11 +31,11 @@ export function ErrorBoundaryMessage({ error }: { error: Error }) {
           />
         </svg>
       </div>
-      <div>
+      <div className="min-w-0 max-w-full">
         <p className="font-medium text-[13px] text-foreground">
           {t("errorBoundaryTitle")}
         </p>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 break-words text-[12px] text-muted-foreground">
           {error.message || t("errorUnknown")}
         </p>
       </div>
@@ -54,27 +54,28 @@ function ErrorBoundaryInner({
   const [showDetails, setShowDetails] = useState(false);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+    <div className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-4 text-center sm:px-6">
       <ErrorBoundaryMessage error={error} />
       <p className="text-[12px] text-muted-foreground">{t("errorGeneric")}</p>
       <details
-        className="max-h-[120px] max-w-[500px] overflow-auto rounded-[6px] bg-muted/50 p-2 text-left"
+        className="max-h-[min(120px,32dvh)] w-full max-w-[min(500px,100%)] overflow-auto overscroll-contain rounded-[6px] bg-muted/50 p-2 text-left"
         onToggle={(e) => setShowDetails(e.currentTarget.open)}
         open={showDetails}
       >
         <summary className="cursor-pointer text-[11px] text-muted-foreground/70">
           {t("errorShowDetails")}
         </summary>
-        <pre className="mt-1 whitespace-pre-wrap font-mono text-[10px] text-muted-foreground">
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[10px] text-muted-foreground">
           {error.message || t("errorUnknown")}
           {"\n\n"}
           {error.stack}
         </pre>
       </details>
-      <div className="flex gap-2">
+      <div className="flex max-w-full flex-wrap justify-center gap-2">
         <button
           className="rounded-[6px] bg-primary/10 px-3 py-1.5 font-medium text-[12px] text-primary transition-colors hover:bg-primary/20"
           onClick={onReset}
+          type="button"
         >
           {t("retry")}
         </button>
@@ -85,6 +86,7 @@ function ErrorBoundaryInner({
               `${error.message}\n\n${error.stack || ""}`
             );
           }}
+          type="button"
         >
           {t("errorCopy")}
         </button>
@@ -93,6 +95,7 @@ function ErrorBoundaryInner({
           onClick={() => {
             window.location.reload();
           }}
+          type="button"
         >
           {t("refresh")}
         </button>

@@ -35,7 +35,7 @@ export function SortDropdown({ sort, order, onChange }: SortDropdownProps) {
   return (
     <FilterDropdown
       ariaLabel={t("sortBy")}
-      className="min-w-[140px]"
+      className="w-[min(140px,100%)] min-w-0 max-w-full"
       onChange={(selectedValue) => {
         const selectedOption = SORT_OPTION_KEYS.find(
           (option) => `${option.field}:${option.order}` === selectedValue

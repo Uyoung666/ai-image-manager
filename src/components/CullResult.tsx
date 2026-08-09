@@ -286,7 +286,7 @@ const CullResultRow = memo(function CullResultRow({
 
   return (
     <div
-      className={`flex cursor-pointer items-center gap-3 rounded-[8px] border p-3 transition-colors ${
+      className={`flex cursor-pointer flex-wrap items-center gap-3 rounded-[8px] border p-3 transition-colors ${
         isSelected
           ? "border-primary/30 bg-primary/[0.04]"
           : item.status === "kept"
@@ -337,7 +337,7 @@ const CullResultRow = memo(function CullResultRow({
         </div>
       </div>
       {isDuel && (
-        <div className="flex items-center gap-3 text-right">
+        <div className="flex shrink-0 items-center gap-3 text-right">
           <div>
             <span className="font-semibold text-[14px] text-foreground">
               {item.rating}
@@ -352,7 +352,7 @@ const CullResultRow = memo(function CullResultRow({
           </div>
         </div>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 max-[760px]:ml-auto max-[760px]:w-full max-[760px]:justify-end">
         {item.status === "kept" && (
           <span className="flex items-center gap-1 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
             <CheckCircle2 className="h-3 w-3" />
@@ -576,7 +576,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       } else if (width >= 640) {
         setGalleryColumns(3);
       } else {
-        setGalleryColumns(2);
+        setGalleryColumns(1);
       }
     };
     updateColumns();
@@ -879,10 +879,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
   // ── Render ──
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       {/* Summary bar — stats row */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-border border-b px-4 py-1.5">
-        <span className="text-[12px] text-muted-foreground">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-border border-b px-3 py-1.5 sm:px-4">
+        <span className="min-w-0 text-[12px] text-muted-foreground">
           {t("cullResultsSummary", {
             total,
             kept: kept.length,
@@ -890,7 +890,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             pending: pending.length,
           })}
         </span>
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 max-[900px]:ml-0 max-[900px]:w-full max-[900px]:justify-start">
           <FilterDropdown
             ariaLabel={t("cullFilterStatus")}
             onChange={(value) => {
@@ -922,7 +922,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           />
           <button
             aria-pressed={favoriteOnly}
-            className={`rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+            className={`shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
               favoriteOnly
                 ? "bg-amber-500/15 text-amber-500"
                 : "text-muted-foreground hover:text-foreground"
@@ -938,7 +938,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           </button>
           <button
             aria-label={t("cullUndo")}
-            className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            className="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
             onClick={handleUndo}
             type="button"
           >
@@ -948,7 +948,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           {/* Top N is meaningful only for Elo-ranked duel sessions. */}
           {isDuel && (
             <input
-              className="w-16 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
+              className="w-16 shrink-0 rounded-[4px] border border-input bg-transparent px-1.5 py-0.5 text-center text-[11px] text-foreground outline-none focus:border-primary"
               onChange={(e) => setTopN(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -964,7 +964,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           )}
           {isDuel && (
             <button
-              className="rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+              className="shrink-0 whitespace-nowrap rounded-[4px] bg-primary/10 px-2 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
               disabled={!topN || isNaN(Number.parseInt(topN, 10))}
               onClick={() => setTopNConfirmOpen(true)}
             >
@@ -973,7 +973,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
           )}
           <span className="h-3 w-px bg-border/50" />
           <button
-            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={kept.length === 0}
             onClick={() => {
               setExportIds(kept.map((i) => i.photo.id));
@@ -984,7 +984,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             {t("cullExportKept")}
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-40"
             disabled={rejected.length === 0 || deleting}
             onClick={() => setTrashConfirmOpen(true)}
           >
@@ -992,7 +992,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             {t("cullTrashRejected")}
           </button>
           <button
-            className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
+            className="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-0.5 text-[10px] text-muted-foreground/50 transition-colors hover:text-foreground"
             onClick={toggleSelectAll}
           >
             {selected.size > 0 && selected.size === visibleItems.length
@@ -1016,33 +1016,33 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
 
       {/* Batch action bar (when items selected) */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-2 border-border border-b bg-primary/[0.03] px-6 py-1.5">
-          <span className="text-[11px] text-muted-foreground">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-border border-b bg-primary/[0.03] px-3 py-1.5 sm:px-6">
+          <span className="shrink-0 text-[11px] text-muted-foreground">
             {t("photosSelected", { count: selected.size })}
           </span>
           <button
-            className="rounded-[4px] bg-success/10 px-2 py-0.5 text-[10px] text-success transition-colors hover:bg-success/20"
+            className="shrink-0 whitespace-nowrap rounded-[4px] bg-success/10 px-2 py-0.5 text-[10px] text-success transition-colors hover:bg-success/20"
             onClick={() => handleBatchStatusChange("kept")}
           >
             <Heart className="mr-1 inline h-3 w-3" />
             {t("cullBatchKeep")}
           </button>
           <button
-            className="rounded-[4px] bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
+            className="shrink-0 whitespace-nowrap rounded-[4px] bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive transition-colors hover:bg-destructive/20"
             onClick={() => handleBatchStatusChange("rejected")}
           >
             <Trash2 className="mr-1 inline h-3 w-3" />
             {t("cullBatchReject")}
           </button>
           <button
-            className="rounded-[4px] bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+            className="shrink-0 whitespace-nowrap rounded-[4px] bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => handleBatchStatusChange("pending")}
           >
             ↺ {t("cullBatchPending")}
           </button>
           <span className="h-3 w-px bg-border" />
           <button
-            className="rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+            className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => {
               setExportIds(selectedIds);
               setExportOpen(true);
@@ -1052,7 +1052,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
             {t("cullExportSelected")}
           </button>
           <button
-            className="rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
+            className="shrink-0 whitespace-nowrap rounded-[4px] px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => {
               setAlbumIds(selectedIds);
               setAlbumOpen(true);
@@ -1067,7 +1067,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       {/* Gallery grid */}
       {viewMode === "gallery" ? (
         <div
-          className="relative flex-1 select-none overflow-y-auto p-4"
+          className="relative min-h-0 min-w-0 flex-1 select-none overflow-y-auto p-2 sm:p-4"
           onMouseDown={handleMarqueeStart}
           ref={containerRef}
         >
@@ -1141,7 +1141,10 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
         </div>
       ) : (
         /* ── Original list view ── */
-        <div className="flex-1 overflow-y-auto p-6" ref={containerRef}>
+        <div
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-2 sm:p-6"
+          ref={containerRef}
+        >
           {visibleItems.length === 0 ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               {t("cullNoPhotosInSession")}
@@ -1189,7 +1192,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       {/* Top N confirm dialog */}
       {topNConfirmOpen && (
         <Dialog onOpenChange={setTopNConfirmOpen} open={topNConfirmOpen}>
-          <DialogContent className="max-w-[360px]">
+          <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t("cullTopN")}</DialogTitle>
               <DialogDescription>
@@ -1217,7 +1220,7 @@ export function CullResult({ session, onUpdate }: CullResultProps) {
       {/* Trash confirm dialog */}
       {trashConfirmOpen && (
         <Dialog onOpenChange={setTrashConfirmOpen} open={trashConfirmOpen}>
-          <DialogContent className="max-w-[360px]">
+          <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t("cullTrashConfirmTitle")}</DialogTitle>
               <DialogDescription>

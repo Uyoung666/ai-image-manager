@@ -30,7 +30,7 @@ function renderDropdown(
 
 describe("FilterDropdown", () => {
   it("uses the shared standard appearance and accessible combobox state", () => {
-    renderDropdown();
+    const { container } = renderDropdown();
     const input = screen.getByRole("combobox", { name: "Choose an option" });
 
     expect(input).toHaveClass(...FILTER_DROPDOWN_CLASS_NAME.split(" "));
@@ -42,7 +42,10 @@ describe("FilterDropdown", () => {
 
     expect(input).toHaveAttribute("aria-expanded", "true");
     expect(input).toHaveAttribute("aria-controls");
-    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    const listbox = screen.getByRole("listbox");
+    expect(listbox).toBeInTheDocument();
+    expect(container).not.toContainElement(listbox);
+    expect(listbox).toHaveClass("max-w-[calc(100vw-1rem)]", "overflow-y-auto");
   });
 
   it("selects an option by click and closes the list", () => {

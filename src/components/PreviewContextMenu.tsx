@@ -1,5 +1,5 @@
 import { Copy, FolderOpen, Image } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ export function PreviewContextMenu({
 }: PreviewContextMenuProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 8, top: 8 });
 
   useEffect(() => {
     if (!menu.open) {
@@ -55,18 +56,54 @@ export function PreviewContextMenu({
     };
   }, [menu.open, onClose]);
 
+  useLayoutEffect(() => {
+    if (!(menu.open && ref.current)) {
+      return;
+    }
+    const viewportMargin = 8;
+    const updatePosition = () => {
+      const element = ref.current;
+      if (!element) {
+        return;
+      }
+      const bounds = element.getBoundingClientRect();
+      const left = Math.max(
+        viewportMargin,
+        Math.min(
+          menu.x,
+          Math.max(viewportMargin, window.innerWidth - bounds.width - viewportMargin)
+        )
+      );
+      const top = Math.max(
+        viewportMargin,
+        Math.min(
+          menu.y,
+          Math.max(
+            viewportMargin,
+            window.innerHeight - bounds.height - viewportMargin
+          )
+        )
+      );
+      setPosition((current) =>
+        current.left === left && current.top === top
+          ? current
+          : { left, top }
+      );
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [menu.open, menu.x, menu.y]);
+
   if (!menu.open) {
     return null;
   }
 
-  const x = Math.min(menu.x, window.innerWidth - 190);
-  const y = Math.min(menu.y, window.innerHeight - 130);
-
   return createPortal(
     <div
-      className="fixed min-w-[210px] animate-context-menu-enter rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+      className="fixed max-h-[calc(100dvh-1rem)] w-[min(210px,calc(100dvw-1rem))] min-w-0 animate-context-menu-enter overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 [&_button]:min-w-0 [&_button]:whitespace-normal [&_button]:break-words"
       ref={ref}
-      style={{ left: x, top: y, zIndex: 99_999 }}
+      style={{ ...position, zIndex: 99_999 }}
     >
       <button
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
@@ -91,7 +128,9 @@ export function PreviewContextMenu({
         disabled={!menu.photoPath}
         onClick={() => {
           if (menu.photoPath) {
-            navigator.clipboard.writeText(menu.photoPath).catch(() => {});
+            navigator.clipboard.writeText(menu.photoPath).catch(() => {
+              /* ignore clipboard errors */
+            });
           }
           onClose();
         }}

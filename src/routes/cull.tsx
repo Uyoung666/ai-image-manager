@@ -202,25 +202,25 @@ function CullListPage() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div className="flex items-center gap-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-border border-b px-3 py-3 sm:px-6 sm:py-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
           <button
-            className="text-muted-foreground hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-semibold text-[18px] text-foreground">
+          <h1 className="min-w-0 truncate font-semibold text-[18px] text-foreground">
             {t("cullTitle")}
           </h1>
-          <span className="text-[13px] text-muted-foreground/70">
+          <span className="shrink-0 text-[13px] text-muted-foreground/70">
             {t("cullSessionCount", { count: sessions.length })}
           </span>
         </div>
         <button
-          className="flex items-center gap-1.5 rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+          className="flex shrink-0 items-center gap-1.5 rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
           onClick={() => {
             setNewName("");
             setNewMode("duel");
@@ -237,7 +237,10 @@ function CullListPage() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-6"
+        ref={scrollRef}
+      >
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-[320px] text-center">
@@ -254,7 +257,13 @@ function CullListPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className="grid gap-3"
+            style={{
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
+            }}
+          >
             {sessions.map((session) => (
               <CullSessionCard
                 getModeIcon={getModeIcon}
@@ -283,7 +292,7 @@ function CullListPage() {
         onOpenChange={(open) => !open && setCreateOpen(false)}
         open={createOpen}
       >
-        <DialogContent className="max-w-[400px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[400px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("cullNew")}</DialogTitle>
           </DialogHeader>
@@ -317,7 +326,7 @@ function CullListPage() {
               <label className="mb-1 block text-[12px] text-muted-foreground">
                 {t("cullMode")}
               </label>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {(["duel", "curate"] as const).map((mode) => (
                   <button
                     className={`flex items-center gap-1 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
@@ -357,7 +366,7 @@ function CullListPage() {
                           ? t("cullSortByTime")
                           : t("cullSortBySimilarity")}
                       </div>
-                      <div className="text-[10px] text-muted-foreground/60">
+                      <div className="break-words text-[10px] text-muted-foreground/60">
                         {strategy === "time"
                           ? t("cullSortByTimeDesc")
                           : t("cullSortBySimilarityDesc")}
@@ -395,7 +404,7 @@ function CullListPage() {
                           return labels[mode];
                         })()}
                       </div>
-                      <div className="text-[10px] text-muted-foreground/60">
+                      <div className="break-words text-[10px] text-muted-foreground/60">
                         {(() => {
                           const labels: Record<string, string> = {
                             quick: t("cullPkModeQuickDesc"),
@@ -436,7 +445,7 @@ function CullListPage() {
                         )
                       }
                     >
-                      {f.displayName}
+                      <span className="break-all">{f.displayName}</span>
                       <span className="ml-2 text-[10px] text-muted-foreground/50">
                         ({f.totalPhotoCount ?? f.photoCount})
                       </span>
@@ -457,7 +466,7 @@ function CullListPage() {
             )}
 
             {/* Actions */}
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => setCreateOpen(false)}
@@ -479,7 +488,7 @@ function CullListPage() {
         onOpenChange={(open) => !open && setRenameSession(null)}
         open={renameSession !== null}
       >
-        <DialogContent className="max-w-[360px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("cullRenameSession")}</DialogTitle>
           </DialogHeader>
@@ -492,7 +501,7 @@ function CullListPage() {
             }
             value={renameSession?.name ?? ""}
           />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <button onClick={() => setRenameSession(null)} type="button">
               {t("cancel")}
             </button>
@@ -510,14 +519,14 @@ function CullListPage() {
         onOpenChange={(open) => !open && setPendingDeleteSessionId(null)}
         open={pendingDeleteSessionId !== null}
       >
-        <DialogContent className="max-w-[360px]">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[360px] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("cullDeleteSessionTitle")}</DialogTitle>
           </DialogHeader>
           <p className="text-[13px] text-muted-foreground">
             {t("cullDeleteSessionDescription")}
           </p>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button
               className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
               onClick={() => setPendingDeleteSessionId(null)}

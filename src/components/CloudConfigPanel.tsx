@@ -183,16 +183,16 @@ export function CloudConfigPanel() {
   }
 
   return (
-    <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="truncate text-[13px] text-muted-foreground">
+          <span className="text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
             {t("cloudConfigTitle")}
           </span>
         </div>
         <button
-          className="shrink-0 rounded-[6px] border border-input px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+          className="max-w-full shrink-0 rounded-[6px] border border-input px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
           onClick={() => {
             resetForm();
             setShowAdd(true);
@@ -204,7 +204,7 @@ export function CloudConfigPanel() {
       </div>
 
       <Dialog onOpenChange={setShowAdd} open={showAdd}>
-        <DialogContent size="lg">
+        <DialogContent className="max-h-[calc(100dvh-1rem)]" size="lg">
           <DialogHeader>
             <DialogTitle>{t("cloudAddConfig")}</DialogTitle>
             <DialogDescription>{t("cloudAddConfigHint")}</DialogDescription>
@@ -214,7 +214,7 @@ export function CloudConfigPanel() {
             <div className="flex gap-2 max-sm:flex-col">
               <FilterDropdown
                 ariaLabel={t("cloudConfigTitle")}
-                className="shrink-0"
+                className="w-[160px] max-w-full max-sm:w-full"
                 onChange={(value) => setProvider(value as "webdav" | "s3")}
                 options={[
                   { label: "WebDAV", value: "webdav" },
@@ -282,7 +282,7 @@ export function CloudConfigPanel() {
                     value={bucket}
                   />
                   <input
-                    className="h-8 w-[45%] shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary max-sm:w-full"
+                    className="h-8 w-[45%] max-w-full shrink-0 rounded-[6px] border border-input bg-card px-2.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary max-sm:w-full"
                     onChange={(e) => setRegion(e.target.value)}
                     placeholder="Region"
                     value={region}
@@ -300,14 +300,14 @@ export function CloudConfigPanel() {
 
           <DialogFooter>
             <button
-              className="rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+              className="max-w-full rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors [overflow-wrap:anywhere] hover:text-foreground"
               onClick={() => setShowAdd(false)}
               type="button"
             >
               {t("cancel")}
             </button>
             <button
-              className="rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              className="max-w-full rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors [overflow-wrap:anywhere] hover:bg-primary/90 disabled:opacity-40"
               disabled={!name.trim() || saving}
               onClick={handleSave}
               type="button"
@@ -321,39 +321,38 @@ export function CloudConfigPanel() {
       {loading && <ConfigSkeleton />}
 
       {!loading && configs.length > 0 && (
-        <div className="space-y-1 border-border border-t pt-3">
+        <div className="max-h-[min(18rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain border-border border-t pt-3 pr-1">
           {configs.map((cfg) => (
             <div
-              className="flex items-center justify-between gap-2 rounded-[6px] px-1 py-1.5 hover:bg-foreground/5"
+              className="flex min-w-0 flex-col items-stretch gap-2 rounded-[6px] px-1 py-1.5 hover:bg-foreground/5 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between"
               key={cfg.id}
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="truncate text-[12px] text-foreground">
+                <span className="min-w-0 flex-1 text-[12px] text-foreground [overflow-wrap:anywhere]">
                   {cfg.name}
                 </span>
                 <span className="shrink-0 rounded-[4px] bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground/70">
                   {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                 </span>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex min-w-0 flex-wrap items-center justify-end gap-1 min-[900px]:shrink-0">
                 {testStates[cfg.id] && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
-                        className={`max-w-[180px] truncate text-[10px] ${
+                        className={`min-w-0 max-w-full flex-1 truncate text-[10px] min-[900px]:max-w-[180px] ${
                           testStates[cfg.id].success
                             ? "text-[#46a758]"
                             : "text-[#e5484d]"
                         }`}
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated status text must expose its Tooltip to keyboard users
                         tabIndex={0}
                       >
                         {testStates[cfg.id].result}
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      {testStates[cfg.id].result}
-                    </TooltipContent>
+                    <TooltipContent>{testStates[cfg.id].result}</TooltipContent>
                   </Tooltip>
                 )}
                 <button

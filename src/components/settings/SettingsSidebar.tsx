@@ -147,10 +147,10 @@ export function SettingsSidebar() {
   })).filter((group) => group.items.length > 0);
 
   return (
-    <nav className="flex w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-border border-r p-3 max-[760px]:w-[60px] max-[760px]:items-center max-[760px]:px-2">
+    <nav className="flex min-h-0 w-[200px] shrink-0 flex-col gap-1 overflow-y-auto overflow-x-hidden overscroll-contain border-border border-r p-3 max-[900px]:w-[64px] max-[900px]:items-center max-[900px]:px-2">
       {groupedItems.map((group) => (
         <Fragment key={group.groupKey}>
-          <div className="px-3 pt-2 pb-1 font-medium text-[10px] text-muted-foreground/45 uppercase tracking-wide first:pt-0 max-[760px]:hidden">
+          <div className="shrink-0 px-3 pt-2 pb-1 font-medium text-[10px] text-muted-foreground/45 uppercase tracking-wide first:pt-0 max-[900px]:hidden">
             {t(group.groupKey)}
           </div>
           {group.items.map((item) => {
@@ -160,7 +160,7 @@ export function SettingsSidebar() {
               <Tooltip key={item.to}>
                 <TooltipTrigger asChild>
                   <button
-                    className={`flex w-full items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[760px]:h-9 max-[760px]:w-9 max-[760px]:justify-center max-[760px]:px-0 ${
+                    className={`flex w-full shrink-0 items-center gap-2.5 rounded-[6px] px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 max-[900px]:h-9 max-[900px]:w-9 max-[900px]:justify-center max-[900px]:px-0 ${
                       isActive
                         ? "bg-primary/15 text-primary"
                         : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
@@ -171,7 +171,7 @@ export function SettingsSidebar() {
                     type="button"
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 truncate max-[760px]:hidden">
+                    <span className="min-w-0 truncate max-[900px]:hidden">
                       {label}
                     </span>
                   </button>

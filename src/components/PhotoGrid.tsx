@@ -811,7 +811,7 @@ export const PhotoGrid = memo(
       [collapsibleSequences]
     );
     const displayPhotos = useMemo<DisplayPhoto[]>(() => {
-      const trayColumns = Math.max(2, Math.min(columnCount, 6));
+      const trayColumns = Math.max(1, Math.min(columnCount, 6));
       const tray = expandedSequence
         ? createSequenceTray(expandedSequence, containerWidth, trayColumns)
         : null;
@@ -1442,7 +1442,7 @@ export const PhotoGrid = memo(
           <MasonryGrid
             className={`scrollbar-thin px-2 ${gridTopInset > 0 ? "" : "pt-2"} ${selectedIds.size > 0 ? "pb-[var(--selection-action-avoid-bottom)]" : "pb-2"}`}
             columnCount={columnCount}
-            containerWidth={containerWidth - 16}
+            containerWidth={Math.max(0, containerWidth - 16)}
             gap={GAP}
             groupHeaders={groupHeaders}
             hasMore={hasMore}

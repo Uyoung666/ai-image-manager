@@ -24,17 +24,20 @@ export function SettingsPageShell({
   title,
 }: SettingsPageShellProps) {
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
+    <div
+      className="h-full min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain p-3 sm:p-6 min-[480px]:p-4"
+      ref={scrollRef}
+    >
       <section
         className={cn(
-          "mx-auto w-full space-y-4",
+          "mx-auto w-full min-w-0 space-y-4",
           maxWidth === "wide" ? "max-w-[1040px]" : "max-w-[820px]"
         )}
       >
         <header>
           <h2 className="font-semibold text-[14px] text-foreground">{title}</h2>
           {description && (
-            <p className="mt-1 text-[12px] text-muted-foreground">
+            <p className="mt-1 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
               {description}
             </p>
           )}
@@ -52,20 +55,20 @@ export function SettingsSection({
   title,
 }: SettingsSectionProps) {
   return (
-    <section className={cn("space-y-3", className)}>
+    <section className={cn("min-w-0 space-y-3", className)}>
       {(title || description) && (
         <div>
           {title && (
             <h3 className="font-medium text-[13px] text-foreground">{title}</h3>
           )}
           {description && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <p className="mt-0.5 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
               {description}
             </p>
           )}
         </div>
       )}
-      <div className="rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         {children}
       </div>
     </section>

@@ -1,6 +1,11 @@
 import { Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -70,23 +75,31 @@ export function SemanticSearchDiagnostics({
     : undefined;
 
   return (
-    <details className="group relative flex h-7 w-5 flex-shrink-0 items-center justify-center text-muted-foreground/45">
+    <Popover>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <summary
-            aria-label={t("semanticSearchDiagnosticsTitle")}
-            className="flex h-6 w-5 cursor-pointer list-none items-center justify-center rounded text-muted-foreground/45 outline-none transition-colors hover:bg-foreground/5 hover:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-          >
-            <Info className="h-3.5 w-3.5" />
-          </summary>
-        </TooltipTrigger>
+        <PopoverTrigger asChild>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={t("semanticSearchDiagnosticsTitle")}
+              className="flex h-7 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground/45 outline-none transition-colors hover:bg-foreground/5 hover:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              type="button"
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+        </PopoverTrigger>
         <TooltipContent>{t("semanticSearchDiagnosticsTitle")}</TooltipContent>
       </Tooltip>
-      <div className="absolute top-full right-0 z-50 mt-1 w-[min(360px,calc(100vw-2rem))] rounded-md border border-border bg-popover p-3 text-[11px] text-muted-foreground shadow-lg">
+      <PopoverContent
+        align="end"
+        className="max-h-[min(20rem,var(--radix-popover-content-available-height))] w-[min(360px,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-3 text-[11px] text-muted-foreground shadow-lg"
+        collisionPadding={8}
+        sideOffset={4}
+      >
         <div className="mb-2 font-medium text-foreground">
           {t("semanticSearchDiagnosticsTitle")}
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))] gap-x-4 gap-y-1 [overflow-wrap:anywhere]">
           <span>
             {t("semanticSearchDiagnosticsSensitivity")}:{" "}
             {t(SENSITIVITY_LABEL_KEYS[sensitivity])} ×{" "}
@@ -115,7 +128,7 @@ export function SemanticSearchDiagnostics({
         <div className="mt-2 text-[10px] text-muted-foreground/80">
           {t("semanticSearchDiagnosticsRawScoreHint")}
         </div>
-      </div>
-    </details>
+      </PopoverContent>
+    </Popover>
   );
 }

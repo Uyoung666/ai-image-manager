@@ -57,8 +57,11 @@ function clearPersistedStep() {
 function Step1Hero() {
   return (
     <div className="flex items-center justify-center">
-      <div className="animate-hero-float rounded-2xl bg-primary/10 p-5">
-        <FolderHeart className="h-16 w-16 text-primary" strokeWidth={1.5} />
+      <div className="animate-hero-float rounded-2xl bg-primary/10 p-4 sm:p-5">
+        <FolderHeart
+          className="h-12 w-12 text-primary sm:h-16 sm:w-16"
+          strokeWidth={1.5}
+        />
       </div>
     </div>
   );
@@ -68,15 +71,18 @@ function Step2Hero({ gpuDetected }: { gpuDetected: boolean }) {
   return (
     <div className="flex items-center justify-center">
       <div
-        className={`animate-hero-float rounded-2xl p-5 transition-colors duration-500 ${
+        className={`animate-hero-float rounded-2xl p-4 transition-colors duration-500 sm:p-5 ${
           gpuDetected ? "bg-primary/10" : "bg-muted/50"
         }`}
       >
         {gpuDetected ? (
-          <Zap className="h-16 w-16 text-primary" strokeWidth={1.5} />
+          <Zap
+            className="h-12 w-12 text-primary sm:h-16 sm:w-16"
+            strokeWidth={1.5}
+          />
         ) : (
           <Cpu
-            className="h-16 w-16 text-muted-foreground/50"
+            className="h-12 w-12 text-muted-foreground/50 sm:h-16 sm:w-16"
             strokeWidth={1.5}
           />
         )}
@@ -88,10 +94,10 @@ function Step2Hero({ gpuDetected }: { gpuDetected: boolean }) {
 function Step3Hero() {
   return (
     <div className="flex items-center justify-center">
-      <div className="animate-hero-float rounded-2xl bg-primary/10 p-5">
+      <div className="animate-hero-float rounded-2xl bg-primary/10 p-4 sm:p-5">
         <img
           alt="App logo"
-          className="h-16 w-16 select-none"
+          className="h-12 w-12 select-none sm:h-16 sm:w-16"
           draggable={false}
           height={64}
           src={appIcon}
@@ -372,7 +378,7 @@ export function OnboardingOverlay() {
 
   return (
     <div
-      className={`onboarding-overlay fixed inset-0 z-[100] flex flex-col items-center overflow-y-auto bg-background py-24 ${overlayAnimClass}`}
+      className={`onboarding-overlay fixed inset-0 z-[100] flex min-h-dvh min-w-0 flex-col items-center overflow-y-auto overflow-x-hidden overscroll-y-contain bg-background py-16 sm:py-24 ${overlayAnimClass}`}
       onAnimationEnd={(e) => {
         if (exiting && e.currentTarget === e.target) {
           handleExitAnimationEnd();
@@ -384,23 +390,23 @@ export function OnboardingOverlay() {
       }}
     >
       {/* Step indicator — top, subtle */}
-      <div className="absolute top-8">
+      <div className="absolute top-4 sm:top-8">
         <StepIndicator currentStep={currentStep} totalSteps={TOTAL_STEPS} />
       </div>
 
       {/* Content area — centered, max-width for readability */}
-      <div className="mx-auto w-full max-w-md px-6">
+      <div className="mx-auto w-full min-w-0 max-w-md px-4 pb-12 sm:px-6">
         <div
           className="flex flex-col items-center gap-6 text-center"
           key={`step-${currentStep}-${stepAnimKey}`}
         >
           {/* ── Step 1: Data directory ─────────────────────────── */}
           {currentStep === 1 && (
-            <div className="flex animate-step-enter flex-col items-center gap-6">
+            <div className="flex w-full min-w-0 animate-step-enter flex-col items-center gap-5 sm:gap-6">
               <Step1Hero />
 
               <div className="space-y-2">
-                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
+                <h2 className="break-words font-semibold text-foreground text-xl tracking-tight sm:text-2xl">
                   {t("onboardingStep1Title")}
                 </h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
@@ -409,7 +415,7 @@ export function OnboardingOverlay() {
               </div>
 
               <div className="w-full space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-5 py-4">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-4 py-3 sm:flex-nowrap sm:px-5 sm:py-4">
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-muted-foreground/70">
                       {t("onboardingStep1CurrentPath")}
@@ -419,7 +425,7 @@ export function OnboardingOverlay() {
                     </p>
                   </div>
                   <button
-                    className="ml-4 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 font-medium text-foreground text-xs transition-all hover:border-foreground/20 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                    className="ml-auto inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 whitespace-normal rounded-lg border border-border bg-background px-3 py-1.5 text-center font-medium text-foreground text-xs transition-all hover:border-foreground/20 hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
                     disabled={isMigrating}
                     onClick={handleChangeDirectory}
                     type="button"
@@ -442,7 +448,7 @@ export function OnboardingOverlay() {
                     className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
                   >
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{migrationError}</span>
+                    <span className="min-w-0 break-words">{migrationError}</span>
                   </div>
                 )}
               </div>
@@ -461,11 +467,11 @@ export function OnboardingOverlay() {
 
           {/* ── Step 2: GPU Acceleration ─────────────────────────── */}
           {currentStep === 2 && (
-            <div className="flex animate-step-enter flex-col items-center gap-6">
+            <div className="flex w-full min-w-0 animate-step-enter flex-col items-center gap-5 sm:gap-6">
               <Step2Hero gpuDetected={gpuDetected} />
 
               <div className="space-y-2">
-                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
+                <h2 className="break-words font-semibold text-foreground text-xl tracking-tight sm:text-2xl">
                   {t("onboardingStep2Title")}
                 </h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
@@ -490,11 +496,11 @@ export function OnboardingOverlay() {
                   className="flex w-full items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
                 >
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{gpuSaveError}</span>
+                  <span className="min-w-0 break-words">{gpuSaveError}</span>
                 </div>
               )}
 
-              <div className="flex w-full items-center justify-between gap-3">
+              <div className="flex w-full flex-wrap items-center justify-between gap-3">
                 <button
                   className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => goToStep(1)}
@@ -504,7 +510,7 @@ export function OnboardingOverlay() {
                 </button>
                 <button
                   aria-busy={isSavingGpu}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
+                  className="ml-auto inline-flex max-w-full items-center justify-center gap-2 whitespace-normal rounded-lg bg-primary px-6 py-2.5 text-center font-medium text-primary-foreground text-sm transition-all hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50"
                   disabled={
                     !gpuSettingsReady || isConfiguringGpu || isSavingGpu
                   }
@@ -529,11 +535,11 @@ export function OnboardingOverlay() {
 
           {/* ── Step 3: Complete ────────────────────────────────── */}
           {currentStep === 3 && (
-            <div className="flex animate-step-enter flex-col items-center gap-8">
+            <div className="flex w-full min-w-0 animate-step-enter flex-col items-center gap-6 sm:gap-8">
               <Step3Hero />
 
               <div className="space-y-3">
-                <h2 className="font-semibold text-2xl text-foreground tracking-tight">
+                <h2 className="break-words font-semibold text-foreground text-xl tracking-tight sm:text-2xl">
                   {t("onboardingStep3Title")}
                 </h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
@@ -542,7 +548,7 @@ export function OnboardingOverlay() {
               </div>
 
               <button
-                className="inline-flex animate-btn-glow items-center gap-2 rounded-lg bg-primary px-10 py-3 font-medium text-base text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-primary/25 hover:shadow-xl active:scale-[0.97] disabled:pointer-events-none disabled:opacity-70"
+                className="inline-flex max-w-full animate-btn-glow items-center justify-center gap-2 whitespace-normal rounded-lg bg-primary px-8 py-3 text-center font-medium text-base text-primary-foreground transition-all hover:bg-primary/90 hover:shadow-primary/25 hover:shadow-xl active:scale-[0.97] disabled:pointer-events-none disabled:opacity-70 sm:px-10"
                 disabled={exiting}
                 onClick={handleFinish}
                 type="button"
@@ -571,7 +577,7 @@ export function OnboardingOverlay() {
       </div>
 
       {/* Language toggle — bottom right, subtle */}
-      <div className="fixed right-4 bottom-4 opacity-70 transition-opacity duration-300 focus-within:opacity-100 hover:opacity-100 sm:right-6 sm:bottom-6">
+      <div className="fixed right-3 bottom-3 z-10 opacity-70 transition-opacity duration-300 focus-within:opacity-100 hover:opacity-100 sm:right-6 sm:bottom-6">
         <LangToggle />
       </div>
     </div>

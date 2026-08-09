@@ -81,9 +81,12 @@ export function CalendarHeatmap({
   }
 
   return (
-    <div data-testid="calendar-heatmap">
-      <div className="overflow-x-auto pb-1" ref={scrollRef}>
-        <div className="flex w-full min-w-max gap-2">
+    <div className="min-w-0 max-w-full" data-testid="calendar-heatmap">
+      <div
+        className="max-w-full overflow-x-auto overscroll-x-contain pb-1"
+        ref={scrollRef}
+      >
+        <div className="flex w-max min-w-full gap-2">
           <div className="mt-[19px] grid grid-rows-7 gap-1 text-[10px] text-muted-foreground">
             {weekdays.map(({ label, weekday }) => (
               <span className="flex h-[15px] items-center" key={weekday}>
@@ -159,7 +162,7 @@ export function CalendarHeatmap({
           </div>
         </div>
       </div>
-      <div className="mt-4 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-1 text-[10px] text-muted-foreground">
         <span>{t("dashboardHeatmapLess")}</span>
         {levelColors.map((levelColor) => (
           <span

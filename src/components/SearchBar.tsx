@@ -322,6 +322,36 @@ export const SearchBar = memo(
       const suggestionListRef = useRef<HTMLDivElement>(null);
       const [locallyDragging, setLocallyDragging] = useState(false);
       const [suggestionIndex, setSuggestionIndex] = useState(-1);
+      const [floatingPanelMaxHeight, setFloatingPanelMaxHeight] = useState(440);
+
+      useEffect(() => {
+        if (!(showFilters || showSuggestionPanel)) {
+          return;
+        }
+
+        const updateAvailableHeight = () => {
+          const toolbarBottom =
+            toolbarRef.current?.getBoundingClientRect().bottom ?? 0;
+          setFloatingPanelMaxHeight(
+            Math.max(120, Math.floor(window.innerHeight - toolbarBottom - 12))
+          );
+        };
+
+        updateAvailableHeight();
+        window.addEventListener("resize", updateAvailableHeight);
+        const observer =
+          typeof ResizeObserver === "undefined"
+            ? null
+            : new ResizeObserver(updateAvailableHeight);
+        if (toolbarRef.current) {
+          observer?.observe(toolbarRef.current);
+        }
+
+        return () => {
+          window.removeEventListener("resize", updateAvailableHeight);
+          observer?.disconnect();
+        };
+      }, [showFilters, showSuggestionPanel]);
 
       function clearHistory() {
         clearSavedHistory();
@@ -713,20 +743,20 @@ export const SearchBar = memo(
       return (
         <div
           aria-label={t("searchPlaceholder")}
-          className="home-unified-toolbar relative border-border border-b transition-colors"
+          className="home-unified-toolbar relative min-w-0 border-border border-b transition-colors"
           ref={toolbarRef}
           role="search"
         >
-          <div className="px-3 py-2">
+          <div className="home-toolbar-inner px-3 py-2">
             {/* Search input row */}
-            <div className="flex min-h-9 items-center gap-2">
+            <div className="home-toolbar-primary-row flex min-h-9 min-w-0 flex-wrap items-center gap-2">
               {leadingContent && (
                 <div className="home-toolbar-context min-w-0 flex-shrink-0">
                   {leadingContent}
                 </div>
               )}
               <form
-                className="relative min-w-[180px] flex-1 xl:max-w-[720px]"
+                className="home-search-form relative min-w-0 basis-[220px] flex-1 xl:max-w-[720px]"
                 onSubmit={handleSubmit}
               >
                 <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
@@ -913,7 +943,7 @@ export const SearchBar = memo(
                   </Tooltip>
                 )}
               {trailingContent && (
-                <div className="home-toolbar-actions ml-auto flex min-w-0 items-center gap-2">
+                <div className="home-toolbar-actions ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
                   {trailingContent}
                 </div>
               )}
@@ -923,20 +953,33 @@ export const SearchBar = memo(
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {selectedTags.map((tag) => (
                   <span
-                    className="inline-flex h-6 items-center gap-1 rounded-[5px] border border-primary/20 bg-primary/10 px-2 text-[11px] font-medium text-primary"
+                    className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-[5px] border border-primary/20 bg-primary/10 px-2 font-medium text-[11px] text-primary"
                     key={tag.id}
                   >
                     <span
-                      className="h-2 w-2 rounded-full"
+                      className="h-2 w-2 shrink-0 rounded-full"
                       style={{
                         backgroundColor: tag.color || "var(--primary)",
                       }}
                     />
-                    {t("tagFilterChip", { name: tag.name })}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="min-w-0 flex-1 truncate"
+                          // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated tag must expose its Tooltip to keyboard users
+                          tabIndex={0}
+                        >
+                          {t("tagFilterChip", { name: tag.name })}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                        {t("tagFilterChip", { name: tag.name })}
+                      </TooltipContent>
+                    </Tooltip>
                     {onTagRemove && (
                       <button
                         aria-label={t("removeTagFilter", { name: tag.name })}
-                        className="-mr-1 flex h-5 w-5 items-center justify-center rounded hover:bg-primary/15"
+                        className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-primary/15"
                         onClick={() => onTagRemove(tag.id)}
                         type="button"
                       >
@@ -1086,8 +1129,9 @@ export const SearchBar = memo(
             {/* Filter panel */}
             {showFilters && (
               <div
-                className="absolute top-full right-4 z-[70] mt-2 max-h-[calc(100vh-170px)] w-[min(900px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-border bg-popover p-4 shadow-2xl ring-1 ring-foreground/5"
+                className="absolute top-full right-4 z-[70] mt-2 w-[min(900px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover p-4 shadow-2xl ring-1 ring-foreground/5"
                 onKeyDown={handleFilterKeyDown}
+                style={{ maxHeight: floatingPanelMaxHeight }}
               >
                 <div className="mb-3 flex items-center justify-between">
                   <div>
@@ -1679,7 +1723,7 @@ export const SearchBar = memo(
           {/* Search suggestions dropdown */}
           {showSuggestionPanel && (
             <div
-              className="absolute top-full left-4 z-[60] mt-1 max-h-[min(440px,calc(100vh-150px))] w-[min(960px,calc(100%-32px))] overflow-y-auto rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
+              className="absolute top-full left-4 z-[60] mt-1 w-[min(960px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
               id="search-suggestions-listbox"
               onBlur={(e) => {
                 // 焦点离开建议列表且没有回到 input 时关闭
@@ -1704,6 +1748,7 @@ export const SearchBar = memo(
                 ).current = node;
               }}
               role="listbox"
+              style={{ maxHeight: Math.min(440, floatingPanelMaxHeight) }}
               tabIndex={0}
             >
               {query.trim() ? (

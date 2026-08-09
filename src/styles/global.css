@@ -318,6 +318,19 @@
     @apply bg-background text-foreground overflow-hidden font-sans antialiased;
   }
 
+  html,
+  body,
+  #app {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    max-width: 100%;
+  }
+
+  #app {
+    overflow: hidden;
+  }
+
   /* ── 焦点环发光 — Tab 切换时柔光扩散，仅作用于可交互元素 ── */
   a:focus-visible,
   button:focus-visible,
@@ -830,18 +843,94 @@
   flex-shrink: 0;
 }
 
+.photo-detail-panel-backdrop {
+  display: none;
+}
+
+.compact-sidebar-backdrop {
+  display: none;
+}
+
+.compact-sidebar-layer {
+  z-index: 1;
+  height: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 840px) {
+  .compact-sidebar-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 59;
+    display: block;
+    cursor: default;
+    background: rgb(0 0 0 / 0.34);
+    border: 0;
+    backdrop-filter: blur(1px);
+  }
+
+  .compact-sidebar-layer.is-open {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    box-shadow: 18px 0 40px -28px rgb(0 0 0 / 0.8);
+  }
+}
+
 @media (max-width: 1120px) {
+  .home-gallery-toolbar-layer {
+    right: 0 !important;
+  }
+
   .home-grid-size-control {
     display: none;
   }
 
-  .photo-detail-panel-shell {
+  .photo-detail-panel-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 54;
+    display: block;
+    cursor: default;
+    background: rgb(0 0 0 / 0.28);
+    border: 0;
+    backdrop-filter: blur(1px);
+  }
+
+  .home-detail-panel-container {
     position: absolute;
     top: 0;
     right: 0;
     bottom: 0;
     z-index: 55;
+    max-width: calc(100% - 8px);
+    background: var(--background);
+    border-left: 1px solid var(--border);
     box-shadow: -16px 0 36px -24px rgb(0 0 0 / 0.55);
+  }
+
+  .home-detail-panel-container .photo-detail-panel-shell {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .home-detail-panel-container .photo-detail-panel-shell > div {
+    width: 100% !important;
+  }
+
+  .home-detail-panel-container .photo-detail-panel-resize-handle {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .home-toolbar-actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
   }
 }
 
@@ -854,6 +943,10 @@
   .home-toolbar-actions {
     gap: 2px;
   }
+
+  .home-filter-summary {
+    display: none;
+  }
 }
 
 @media (max-width: 840px), (max-height: 560px) {
@@ -864,6 +957,30 @@
   .home-gallery-canvas {
     margin: 6px 8px 8px 0;
     border-radius: 9px;
+  }
+
+  .home-toolbar-inner {
+    padding-inline: 8px;
+  }
+
+  .home-search-form {
+    flex-basis: calc(100% - 88px);
+  }
+
+  .home-detail-panel-container {
+    width: min(360px, calc(100% - 8px)) !important;
+  }
+}
+
+@media (max-height: 560px) {
+  .home-detail-panel-container {
+    top: 0;
+    bottom: 0;
+  }
+
+  .home-detail-panel-container .photo-detail-preview,
+  .home-detail-panel-container .sequence-detail-preview {
+    height: 112px;
   }
 }
 

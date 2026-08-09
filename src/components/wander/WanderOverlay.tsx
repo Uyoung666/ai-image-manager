@@ -452,7 +452,7 @@ export function WanderOverlay({
     <div
       aria-label={t("wander.experience")}
       aria-modal="true"
-      className={`fixed inset-0 z-[10000] overflow-hidden bg-[#070709] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
+      className={`fixed inset-0 z-[10000] h-dvh min-h-0 min-w-0 overflow-hidden bg-[#070709] text-white outline-none ${controlsVisible ? "cursor-default" : "cursor-none"}`}
       onMouseMove={handleMouseMove}
       onPointerDown={revealControls}
       onWheel={(event) => {
@@ -476,18 +476,22 @@ export function WanderOverlay({
       </div>
 
       {view === "intro" ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
+        <div className="absolute inset-0 flex min-h-full min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-16 text-center sm:px-8">
           <div className="text-[11px] text-white/45 uppercase tracking-[0.12em]">
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
-          <h2 className="font-medium text-3xl">{themeTitle}</h2>
+          <h2 className="max-w-full break-words font-medium text-2xl sm:text-3xl">
+            {themeTitle}
+          </h2>
           {themeSubtitle && (
-            <p className="text-sm text-white/65">{themeSubtitle}</p>
+            <p className="max-w-full break-words text-sm text-white/65">
+              {themeSubtitle}
+            </p>
           )}
         </div>
       ) : (
-        <div className="absolute inset-0 flex items-center justify-center px-10 pt-24 pb-20">
-          <div className="relative h-full w-full">
+        <div className="absolute inset-0 flex min-h-0 min-w-0 items-center justify-center px-4 pt-20 pb-16 sm:px-10 sm:pt-24 sm:pb-20">
+          <div className="relative h-full min-h-0 w-full min-w-0">
             <WanderImageStack
               className="opacity-100"
               key={photo.id}
@@ -516,7 +520,7 @@ export function WanderOverlay({
       {view === "playing" && hintVisible && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-16 z-10 text-center text-[11px] text-white/50 transition-opacity duration-500"
+          className="pointer-events-none absolute inset-x-0 bottom-14 z-10 px-4 text-center text-[11px] text-white/50 transition-opacity duration-500 sm:bottom-16"
         >
           {t("wander.controlsHint")}
         </div>
@@ -535,23 +539,27 @@ export function WanderOverlay({
       )}
 
       <header
-        className={`absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/65 to-transparent px-6 pt-6 pb-16 transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`absolute inset-x-0 top-0 flex min-w-0 items-start justify-between gap-3 bg-gradient-to-b from-black/65 to-transparent px-4 pt-4 pb-14 transition-opacity duration-300 sm:px-6 sm:pt-6 sm:pb-16 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
         data-wander-control
       >
-        <div>
+        <div className="min-w-0">
           <div className="text-[10px] text-white/50 uppercase tracking-[0.12em]">
             {t("wander.roundLabel", { round: roundNumber })}
           </div>
-          <h1 className="mt-1 font-medium text-lg">{themeTitle}</h1>
+          <h1 className="mt-1 break-words font-medium text-base sm:text-lg">
+            {themeTitle}
+          </h1>
           {themeSubtitle && (
-            <p className="mt-1 text-white/65 text-xs">{themeSubtitle}</p>
+            <p className="mt-1 break-words text-white/65 text-xs">
+              {themeSubtitle}
+            </p>
           )}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               aria-label={t("close")}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/30 text-white/70 hover:bg-black/55 hover:text-white"
               onBlur={handleControlsLeave}
               onClick={onClose}
               onFocus={handleControlsEnter}
@@ -566,7 +574,7 @@ export function WanderOverlay({
 
       {view === "playing" && (
         <footer
-          className={`absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/70 to-transparent px-6 pt-14 pb-5 transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          className={`absolute inset-x-0 bottom-0 flex min-w-0 flex-wrap items-center justify-between gap-2 bg-gradient-to-t from-black/70 to-transparent px-4 pt-12 pb-4 transition-opacity duration-300 sm:flex-nowrap sm:px-6 sm:pt-14 sm:pb-5 ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
           data-wander-control
         >
           {preparingNext ? (
@@ -580,7 +588,7 @@ export function WanderOverlay({
           )}
           <button
             aria-label={t("wander.saveRound")}
-            className="flex h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/15 px-4 text-white/90 text-xs hover:bg-white/20 hover:text-white disabled:opacity-50"
+            className="ml-auto flex h-9 min-w-0 max-w-full items-center justify-center gap-1.5 rounded-full border border-white/10 bg-white/15 px-4 text-white/90 text-xs hover:bg-white/20 hover:text-white disabled:opacity-50"
             disabled={saving}
             onBlur={handleControlsLeave}
             onClick={onSave}
@@ -588,7 +596,9 @@ export function WanderOverlay({
             type="button"
           >
             <Save className="h-3.5 w-3.5" />
-            {saving ? t("wander.saving") : t("wander.saveRound")}
+            <span className="min-w-0 truncate">
+              {saving ? t("wander.saving") : t("wander.saveRound")}
+            </span>
           </button>
         </footer>
       )}

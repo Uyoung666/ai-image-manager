@@ -41,6 +41,11 @@ import {
 } from "@/components/PreviewContextMenu";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -137,6 +142,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     }
   }, [open, showThumbnailsInitially]);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreAnchorRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [slideshowMode, setSlideshowMode] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -666,7 +672,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
           style={{ opacity: controlsVisible ? 1 : 0 }}
         />
         <header
-          className={`absolute inset-x-0 top-0 z-30 flex h-14 items-center justify-between gap-5 px-4 transition-opacity duration-200 motion-reduce:transition-none ${chromeClass}`}
+          className={`absolute inset-x-0 top-0 z-30 flex h-14 min-w-0 items-center justify-between gap-2 px-2 transition-opacity duration-200 motion-reduce:transition-none sm:gap-5 sm:px-4 ${chromeClass}`}
         >
           <div className="flex min-w-0 items-center gap-3">
             <span
@@ -676,7 +682,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             </span>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="truncate font-medium text-[13px] text-white/85">
+                <span
+                  className="truncate font-medium text-[13px] text-white/85"
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
+                  tabIndex={0}
+                >
                   {photo.filename}
                 </span>
               </TooltipTrigger>
@@ -703,16 +713,34 @@ export const PhotoLightbox = memo(function PhotoLightbox({
             >
               <Info className="h-4 w-4" />
             </ControlButton>
-            <div className="relative">
-              <ControlButton
-                active={moreOpen}
-                label={t("more")}
-                onClick={() => setMoreOpen((value) => !value)}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </ControlButton>
+            <Popover onOpenChange={setMoreOpen} open={moreOpen}>
+              <PopoverAnchor asChild>
+                <div ref={moreAnchorRef}>
+                  <ControlButton
+                    active={moreOpen}
+                    label={t("more")}
+                    onClick={() => setMoreOpen((value) => !value)}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </ControlButton>
+                </div>
+              </PopoverAnchor>
               {moreOpen && (
-                <div className="absolute top-11 right-0 w-56 rounded-lg border border-white/10 bg-[#1a1a1e]/95 p-1.5 shadow-2xl backdrop-blur-xl">
+                <PopoverContent
+                  align="end"
+                  className="z-[1100] max-h-[min(20rem,var(--radix-popover-content-available-height))] w-56 max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-[#1a1a1e]/95 p-1.5 text-white shadow-2xl backdrop-blur-xl"
+                  collisionPadding={8}
+                  onCloseAutoFocus={(event) => event.preventDefault()}
+                  onInteractOutside={(event) => {
+                    if (
+                      event.target instanceof Node &&
+                      moreAnchorRef.current?.contains(event.target)
+                    ) {
+                      event.preventDefault();
+                    }
+                  }}
+                  sideOffset={6}
+                >
                   {onAddToAlbum && (
                     <MenuButton
                       icon={<Rows3 className="h-4 w-4" />}
@@ -761,9 +789,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                       setMoreOpen(false);
                     }}
                   />
-                </div>
+                </PopoverContent>
               )}
-            </div>
+            </Popover>
             <ControlButton
               active={isFullscreen}
               label={isFullscreen ? t("exitFullscreen") : t("fullscreen")}
@@ -782,7 +810,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         </header>
 
         <div
-          className="absolute inset-x-0 top-0 flex items-center justify-center overflow-hidden px-16 pt-14 pb-16 transition-[bottom] duration-200 motion-reduce:transition-none"
+          className="absolute inset-x-0 top-0 flex items-center justify-center overflow-hidden px-10 pt-14 pb-16 transition-[bottom] duration-200 motion-reduce:transition-none sm:px-16"
           ref={canvasRef}
           style={{ bottom: thumbnailsVisible ? 96 : 0 }}
         >
@@ -792,10 +820,17 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <p className="text-[13px] text-white/65">
                 {t("imageLoadFailed")}
               </p>
-              <p className="max-w-full truncate text-[11px] text-white/35">
-                {photo.filename}
-              </p>
-              <div className="flex gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="max-w-full truncate text-[11px] text-white/35">
+                    {photo.filename}
+                  </p>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {photo.filename}
+                </TooltipContent>
+              </Tooltip>
+              <div className="flex flex-wrap justify-center gap-2">
                 <button
                   className="lightbox-secondary-button"
                   onClick={() => {
@@ -933,7 +968,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("previousPhoto")}
-                  className={`group absolute top-14 bottom-16 left-0 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
+                  className={`group absolute top-14 bottom-16 left-0 z-10 flex w-10 items-center justify-center transition-opacity duration-200 sm:w-16 ${chromeClass}`}
                   onClick={() => navigate(-1)}
                   type="button"
                 >
@@ -948,7 +983,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               <TooltipTrigger asChild>
                 <button
                   aria-label={t("nextPhoto")}
-                  className={`group absolute top-14 right-0 bottom-16 z-10 flex w-16 items-center justify-center transition-opacity duration-200 ${chromeClass}`}
+                  className={`group absolute top-14 right-0 bottom-16 z-10 flex w-10 items-center justify-center transition-opacity duration-200 sm:w-16 ${chromeClass}`}
                   onClick={() => navigate(1)}
                   type="button"
                 >
@@ -963,11 +998,11 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         )}
 
         <div
-          className={`absolute inset-x-0 z-30 flex justify-center transition-[bottom,opacity] duration-200 motion-reduce:transition-none ${chromeClass}`}
+          className={`absolute inset-x-0 z-30 flex justify-center overflow-hidden px-2 transition-[bottom,opacity] duration-200 motion-reduce:transition-none ${chromeClass}`}
           style={{ bottom: thumbnailsVisible ? 108 : 12 }}
         >
           {slideshowMode ? (
-            <div className="relative flex items-center gap-1 overflow-hidden rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
+            <div className="relative flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
               <div
                 className="absolute bottom-0 left-0 h-0.5 bg-primary transition-[width] duration-100"
                 data-reduced-motion-keep="progress-bar"
@@ -1009,7 +1044,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
+            <div className="flex max-w-full items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-xl border border-white/10 bg-black/65 p-1.5 shadow-2xl backdrop-blur-xl">
               <ControlButton
                 label={t("zoomOut")}
                 onClick={() => updateZoom(zoom / ZOOM_STEP)}

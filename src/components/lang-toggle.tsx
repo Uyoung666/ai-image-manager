@@ -22,10 +22,12 @@ export default function LangToggle() {
           box-sizing: border-box;
           box-shadow: 0 0 0px 1px rgba(0, 0, 0, 0.06);
           padding: 0.25rem;
-          width: 200px;
+          width: min(200px, 100%);
+          max-width: 100%;
           font-size: 14px;
         }
         .lang-radio-group .lang-radio {
+          min-width: 0;
           flex: 1 1 auto;
           text-align: center;
         }
@@ -47,7 +49,8 @@ export default function LangToggle() {
           justify-content: center;
           border-radius: 0.5rem;
           border: none;
-          padding: 0.5rem 0;
+          overflow-wrap: anywhere;
+          padding: 0.5rem 0.25rem;
           color: var(--muted-foreground);
           transition: all 0.15s ease-in-out;
           user-select: none;

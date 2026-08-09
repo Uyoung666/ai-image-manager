@@ -299,13 +299,13 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   return (
-    <section className="space-y-3">
+    <section className="min-w-0 space-y-3">
       <h2 className="font-semibold text-[14px] text-foreground">
         {t("settingsUpdate")}
       </h2>
-      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         {/* Current version */}
-        <div className="flex items-center justify-between">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <span className="text-[13px] text-muted-foreground">
             {t("settingsVersion")}
           </span>
@@ -428,7 +428,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
               </div>
               {releaseNotes && (
                 <div className="mt-2 max-h-32 overflow-y-auto rounded-[6px] border border-border bg-background p-2">
-                  <p className="whitespace-pre-wrap text-[11px] text-muted-foreground">
+                  <p className="whitespace-pre-wrap text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
                     {releaseNotes}
                   </p>
                 </div>
@@ -455,9 +455,9 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           {/* Error */}
           {phase === "error" && (
             <div>
-              <div className="flex items-center gap-2">
-                <XCircle className="h-3.5 w-3.5 text-destructive" />
-                <span className="text-[13px] text-destructive">
+              <div className="flex min-w-0 items-start gap-2">
+                <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                <span className="min-w-0 text-[13px] text-destructive [overflow-wrap:anywhere]">
                   {errorMsg || t("updateError")}
                 </span>
               </div>
@@ -507,7 +507,7 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           >
             {t("updateProxyLabel")}
           </label>
-          <div className="mt-1 flex flex-wrap gap-2">
+          <div className="mt-1 flex min-w-0 flex-wrap gap-2">
             <input
               className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40"
               id="update-proxy"
@@ -533,14 +533,14 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           </div>
           {proxyResult && (
             <p
-              className={`mt-1 text-[11px] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
+              className={`mt-1 text-[11px] [overflow-wrap:anywhere] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
             >
               {proxyResult.ok
                 ? `${t("updateProxyTestOk", { latency: proxyResult.latency ?? "?" })} · ${formatSpeed(proxyResult.bytesPerSecond)}`
                 : `${t("updateProxyTestFail")}${proxyResult.error ? `: ${proxyResult.error}` : ""}`}
             </p>
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground/50">
+          <p className="mt-1 text-[10px] text-muted-foreground/50 [overflow-wrap:anywhere]">
             {t("updateProxyHint")}
           </p>
         </div>

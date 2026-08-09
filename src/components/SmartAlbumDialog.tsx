@@ -11,6 +11,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import i18n from "@/localization/i18n";
 import { getTagDisplayName } from "@/localization/tag-display";
@@ -154,29 +164,49 @@ function AutocompleteInput({
   const datalistId = `${listId}-datalist`;
 
   return (
-    <div className="relative flex-1">
-      <input
-        className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-        list={datalistId}
-        onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-        onChange={(e) => {
-          onChange(e.target.value);
-          setShowDropdown(true);
-        }}
-        onFocus={() => setShowDropdown(true)}
-        placeholder={placeholder}
-        value={value}
-      />
-      <datalist id={datalistId}>
-        {suggestions.slice(0, 200).map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
+    <Popover
+      onOpenChange={setShowDropdown}
+      open={display.length > 0 && showDropdown}
+    >
+      <PopoverAnchor asChild>
+        <div className="relative min-w-0 flex-[1_1_10rem]">
+          <input
+            className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+            list={datalistId}
+            onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+            onChange={(e) => {
+              onChange(e.target.value);
+              setShowDropdown(true);
+            }}
+            onFocus={() => setShowDropdown(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setShowDropdown(false);
+              }
+            }}
+            placeholder={placeholder}
+            value={value}
+          />
+          <datalist id={datalistId}>
+            {suggestions.slice(0, 200).map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </div>
+      </PopoverAnchor>
       {display.length > 0 && showDropdown && (
-        <div className="absolute inset-x-0 top-full z-50 mt-0.5 max-h-[160px] overflow-y-auto rounded-[4px] border border-input bg-card shadow-lg">
+        <PopoverContent
+          align="start"
+          className="z-[60] max-h-[min(10rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-[4px] border border-input bg-card p-0 shadow-lg"
+          collisionPadding={8}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          sideOffset={2}
+        >
           {display.map((s) => (
             <button
-              className="block w-full px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
+              className="block w-full whitespace-normal px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors [overflow-wrap:anywhere] hover:bg-primary/10 hover:text-foreground"
               key={s}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -188,9 +218,9 @@ function AutocompleteInput({
               {s}
             </button>
           ))}
-        </div>
+        </PopoverContent>
       )}
-    </div>
+    </Popover>
   );
 }
 
@@ -223,7 +253,7 @@ function TagSelector({
   );
 
   return (
-    <div className="flex flex-1 flex-col gap-1">
+    <div className="min-w-0 flex-[1_1_14rem] flex-col gap-1">
       <input
         className="h-7 w-full rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
         onChange={(e) => setFilterText(e.target.value)}
@@ -236,7 +266,7 @@ function TagSelector({
             const isSelected = selected.includes(tag.name);
             return (
               <button
-                className={`flex items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+                className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
                   isSelected
                     ? "bg-primary/20 text-primary"
                     : "bg-foreground/5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
@@ -245,8 +275,17 @@ function TagSelector({
                 onClick={() => toggleTag(tag.name)}
                 type="button"
               >
-                {isSelected && <Check className="h-2.5 w-2.5" />}
-                {getTagDisplayName(tag.name, i18n.language)}
+                {isSelected && <Check className="h-2.5 w-2.5 shrink-0" />}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 truncate">
+                      {getTagDisplayName(tag.name, i18n.language)}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                    {getTagDisplayName(tag.name, i18n.language)}
+                  </TooltipContent>
+                </Tooltip>
               </button>
             );
           })}
@@ -495,7 +534,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
       open={open}
     >
       <DialogContent
-        className="max-h-[80vh] overflow-y-auto"
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
           if (creating) {
             e.preventDefault();
@@ -539,11 +578,12 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
           <div className="space-y-2">
             {rules.map((rule, idx) => (
               <div
-                className="flex items-center gap-1.5 rounded-[6px] border border-border bg-card p-2"
+                className="flex min-w-0 flex-wrap items-start gap-1.5 rounded-[6px] border border-border bg-card p-2"
                 key={idx}
               >
                 <FilterDropdown
                   ariaLabel={t("smartAlbumRulesLabel")}
+                  className="w-full min-w-0"
                   onChange={(value) =>
                     updateRule(idx, { type: value as RuleType })
                   }
@@ -555,11 +595,13 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                   )}
                   placeholder={t("smartAlbumRulesLabel")}
                   value={rule.type}
+                  wrapperClassName="min-w-0 flex-[1_1_9rem]"
                 />
 
                 {rule.type === "dateRange" && (
                   <FilterDropdown
                     ariaLabel={t("smartRuleDateTaken")}
+                    className="w-full min-w-0"
                     onChange={(value) =>
                       updateRule(idx, {
                         datePreset: value as DatePreset,
@@ -572,11 +614,13 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     }))}
                     placeholder={t("smartRuleDateTaken")}
                     value={rule.datePreset || "smartPresetLastYearToday"}
+                    wrapperClassName="min-w-0 flex-[1_1_9rem]"
                   />
                 )}
                 {(rule.type === "cameraModel" || rule.type === "lensModel") && (
                   <FilterDropdown
                     ariaLabel={t(RULE_LABELS[rule.type])}
+                    className="w-full min-w-0"
                     onChange={(value) =>
                       updateRule(idx, {
                         stringOp: value as StringOp,
@@ -591,6 +635,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     ]}
                     placeholder={t(RULE_LABELS[rule.type])}
                     value={rule.stringOp || "operatorContains"}
+                    wrapperClassName="min-w-0 flex-[1_1_8rem]"
                   />
                 )}
                 {(rule.type === "focalLength" ||
@@ -598,6 +643,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                   rule.type === "iso") && (
                   <FilterDropdown
                     ariaLabel={t(RULE_LABELS[rule.type])}
+                    className="w-full min-w-0"
                     onChange={(value) =>
                       updateRule(idx, {
                         numberOp: value as NumberOp,
@@ -610,11 +656,13 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     ]}
                     placeholder={t(RULE_LABELS[rule.type])}
                     value={rule.numberOp || "operatorGte"}
+                    wrapperClassName="min-w-0 flex-[1_1_8rem]"
                   />
                 )}
                 {rule.type === "tags" && (
                   <FilterDropdown
                     ariaLabel={t("smartRuleTags")}
+                    className="w-full min-w-0"
                     onChange={(value) =>
                       updateRule(idx, { tagsOp: value as TagsOp })
                     }
@@ -630,15 +678,16 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     ]}
                     placeholder={t("smartRuleTags")}
                     value={rule.tagsOp || "operatorContainsAny"}
+                    wrapperClassName="min-w-0 flex-[1_1_9rem]"
                   />
                 )}
 
                 {rule.type === "dateRange" &&
                 (rule.datePreset === "smartPresetCustom" ||
                   !rule.datePreset) ? (
-                  <div className="flex flex-1 items-center gap-1">
+                  <div className="flex min-w-0 flex-[1_1_16rem] flex-wrap items-center gap-1">
                     <input
-                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
+                      className="h-7 min-w-[8rem] flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
                       onChange={(e) =>
                         updateRule(idx, { dateFrom: e.target.value })
                       }
@@ -649,7 +698,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                       {t("dateRangeTo")}
                     </span>
                     <input
-                      className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
+                      className="h-7 min-w-[8rem] flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none focus:border-primary"
                       onChange={(e) =>
                         updateRule(idx, { dateTo: e.target.value })
                       }
@@ -660,7 +709,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                 ) : rule.type === "fileFormat" ? (
                   <FilterDropdown
                     ariaLabel={t("smartRuleFileFormat")}
-                    className="flex-1"
+                    className="w-full min-w-0"
                     onChange={(value) => updateRule(idx, { value })}
                     options={[
                       { label: t("chooseFormat"), value: "" },
@@ -671,6 +720,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     ]}
                     placeholder={t("chooseFormat")}
                     value={rule.value}
+                    wrapperClassName="min-w-0 flex-[1_1_10rem]"
                   />
                 ) : rule.type === "tags" ? (
                   <TagSelector
@@ -679,7 +729,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                     value={rule.value}
                   />
                 ) : rule.type === "dateRange" ? null : (
-                  <div className="flex flex-1 items-center gap-1">
+                  <div className="flex min-w-0 flex-[1_1_12rem] flex-wrap items-center gap-1">
                     {/* Autocomplete wrapper */}
                     <AutocompleteInput
                       onChange={(val) => updateRule(idx, { value: val })}
@@ -692,7 +742,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                       rule.type === "iso") &&
                       rule.numberOp === "operatorRange" && (
                         <input
-                          className="h-7 w-20 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                          className="h-7 min-w-20 flex-1 rounded-[4px] border border-input bg-card px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                           onChange={(e) =>
                             updateRule(idx, { max: e.target.value })
                           }
@@ -704,7 +754,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
                 )}
 
                 <button
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-destructive"
+                  className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-destructive"
                   onClick={() => removeRule(idx)}
                   type="button"
                 >

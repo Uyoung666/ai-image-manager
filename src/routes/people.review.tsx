@@ -156,8 +156,8 @@ function ReviewPreview({
   const height = candidate.photoHeight || 1;
   const frame = getContainFrame(width, height);
   return (
-    <div className="flex min-h-[360px] flex-1 items-center justify-center overflow-hidden rounded-[12px] border border-border bg-black/90 p-3 shadow-sm">
-      <div className="relative aspect-[4/3] w-full max-w-[min(1200px,calc((100vh-14rem)*4/3))] overflow-hidden rounded-[8px] bg-black">
+    <div className="flex min-h-[220px] min-w-0 flex-1 items-center justify-center overflow-hidden rounded-[12px] border border-border bg-black/90 p-2 shadow-sm sm:min-h-[300px] sm:p-3 xl:min-h-0">
+      <div className="relative aspect-[4/3] max-h-full w-full max-w-[min(1200px,calc((100dvh-14rem)*4/3))] overflow-hidden rounded-[8px] bg-black">
         <div className="absolute" style={frame}>
           <img
             alt={candidateFilename(candidate)}
@@ -430,8 +430,8 @@ function FaceReviewPage() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
+    <div className="flex h-full min-w-0 flex-col bg-background">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
         <div className="flex min-w-0 items-center gap-3">
           <AppTooltip>
             <AppTooltipTrigger asChild>
@@ -465,7 +465,7 @@ function FaceReviewPage() {
 
       <div
         aria-label={t("faceReviewTitle")}
-        className="flex shrink-0 gap-1 overflow-x-auto border-border border-b px-6 py-2"
+        className="flex max-w-full shrink-0 gap-1 overflow-x-auto border-border border-b px-4 py-2 sm:px-6"
         role="tablist"
       >
         {tabs.map((item) => (
@@ -528,7 +528,7 @@ function FaceReviewPage() {
       )}
 
       {!(isLoading || hasError) && activeCandidate && (
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 xl:flex-row xl:overflow-hidden">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 sm:gap-4 sm:p-4 xl:flex-row xl:overflow-hidden">
           <aside className="hidden w-28 shrink-0 flex-col gap-2 overflow-y-auto xl:flex">
             {photoGroups.map((group, index) => {
               const candidate = group[0];
@@ -561,7 +561,7 @@ function FaceReviewPage() {
             })}
           </aside>
 
-          <section className="flex min-h-[540px] min-w-0 flex-1 flex-col gap-3 xl:min-h-0">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
             <ReviewPreview
               candidate={activeCandidate}
               faces={photoFaces}
@@ -611,7 +611,7 @@ function FaceReviewPage() {
                 </button>
               ))}
             </div>
-            <div className="flex items-center justify-between gap-3 px-1">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-1">
               <div className="min-w-0">
                 <AppTooltip>
                   <AppTooltipTrigger asChild>
@@ -627,7 +627,7 @@ function FaceReviewPage() {
                   {candidateReason(activeCandidate, t)}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-[11px] text-muted-foreground tabular-nums">
                   {activeIndex + 1} / {visibleCandidates.length}
                 </span>
@@ -671,8 +671,8 @@ function FaceReviewPage() {
             </div>
           </section>
 
-          <aside className="w-full shrink-0 overflow-y-auto rounded-[12px] border border-border bg-card p-4 xl:w-[360px]">
-            <div className="grid grid-cols-[92px_1fr] gap-3">
+          <aside className="w-full min-w-0 shrink-0 overflow-y-auto rounded-[12px] border border-border bg-card p-3 sm:p-4 xl:w-[min(360px,32vw)]">
+            <div className="grid grid-cols-[minmax(72px,92px)_minmax(0,1fr)] gap-3">
               <FaceCrop candidate={activeCandidate} />
               <div className="min-w-0 self-center">
                 <p className="font-medium text-[13px] text-foreground">

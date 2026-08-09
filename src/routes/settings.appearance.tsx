@@ -53,14 +53,14 @@ function UiScaleControl({
   onChange: (scale: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-[8px] bg-muted p-1">
+    <div className="grid w-full max-w-[280px] grid-cols-3 gap-0.5 rounded-[8px] bg-muted p-1 min-[480px]:grid-cols-6">
       {UI_SCALE_OPTIONS.map((scale) => {
         const active = Math.abs(value - scale) < 0.001;
         return (
           <button
             aria-pressed={active}
             className={cn(
-              "min-w-[44px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
+              "min-w-0 cursor-pointer select-none rounded-[6px] px-1 py-1.5 text-[12px] transition-all duration-150 min-[480px]:px-2",
               active
                 ? "bg-card font-semibold text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
                 : "text-muted-foreground hover:bg-card/50"
@@ -108,7 +108,7 @@ function SensitivityControl({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center rounded-[8px] bg-muted p-1">
+    <div className="grid w-full max-w-[260px] grid-cols-3 rounded-[8px] bg-muted p-1">
       {SENSITIVITY_OPTIONS.map((option) => {
         const active = value === option.value;
         return (
@@ -118,7 +118,7 @@ function SensitivityControl({
                 aria-label={`${t(option.labelKey)}: ${t(option.descriptionKey)}`}
                 aria-pressed={active}
                 className={cn(
-                  "min-w-[52px] cursor-pointer select-none rounded-[6px] px-2 py-1.5 text-[12px] transition-all duration-150",
+                  "min-w-0 cursor-pointer select-none rounded-[6px] px-1 py-1.5 text-[12px] transition-all duration-150 min-[480px]:px-2",
                   active
                     ? "bg-card font-semibold text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
                     : "text-muted-foreground hover:bg-card/50"
@@ -150,7 +150,7 @@ function AccentColorControl({
   return (
     <FilterDropdown
       ariaLabel={t("settingsAccentColor")}
-      className="w-[132px]"
+      className="w-[132px] max-w-full"
       onChange={(nextValue) => onChange(nextValue as AccentColor)}
       options={getAccentColorOptions(theme).map((option) => ({
         color: option.color,

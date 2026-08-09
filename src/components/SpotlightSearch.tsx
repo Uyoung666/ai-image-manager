@@ -18,6 +18,11 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { filterSettingsNavigationItems } from "@/components/settings/SettingsSidebar";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { ipc } from "@/ipc/manager";
 import { getTagDisplayName } from "@/localization/tag-display";
@@ -322,13 +327,13 @@ export function SpotlightSearch() {
         onClick={() => setOpen(false)}
       />
       {/* Dialog */}
-      <div className="absolute top-[20%] right-0 left-0 mx-auto w-full max-w-[560px] px-4">
+      <div className="absolute inset-x-0 top-2 mx-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-[560px] px-3 sm:top-[10dvh] sm:max-h-[calc(90dvh-0.5rem)] sm:px-4">
         <Command
-          className="surface-elevated overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl"
+          className="surface-elevated flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl"
           loop
           shouldFilter={!query.trim()}
         >
-          <div className="flex items-center border-border border-b px-4">
+          <div className="flex min-w-0 shrink-0 items-center border-border border-b px-3 sm:px-4">
             <Search className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
             <Command.Input
               className="flex h-12 w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
@@ -353,7 +358,7 @@ export function SpotlightSearch() {
                     })}
               </div>
             )}
-          <Command.List className="relative max-h-[360px] overflow-y-auto p-2">
+          <Command.List className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
             {searching && (
               <div className="spotlight-loading-shield z-10 flex items-center justify-center bg-popover/50">
                 <div className="flex items-center gap-2 rounded-[6px] bg-popover px-3 py-1.5 text-[12px] text-muted-foreground shadow-sm">
@@ -374,7 +379,7 @@ export function SpotlightSearch() {
               >
                 {photoResults.map((photo) => (
                   <Command.Item
-                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={`photo-${photo.id}`}
                     onSelect={() =>
                       handleSelect(() =>
@@ -394,7 +399,16 @@ export function SpotlightSearch() {
                         <FileImage className="h-4 w-4 text-muted-foreground" />
                       </div>
                     )}
-                    <span className="truncate">{photo.filename}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="min-w-0 flex-1 truncate">
+                          {photo.filename}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                        {photo.filename}
+                      </TooltipContent>
+                    </Tooltip>
                   </Command.Item>
                 ))}
               </Command.Group>
@@ -408,7 +422,7 @@ export function SpotlightSearch() {
               >
                 {tagResults.map((tag) => (
                   <Command.Item
-                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={`tag-${tag.id}`}
                     onSelect={() =>
                       handleSelect(() =>
@@ -468,8 +482,10 @@ export function SpotlightSearch() {
                         <Users className="h-3.5 w-3.5 text-primary" />
                       </div>
                     )}
-                    <span>{person.name}</span>
-                    <span className="ml-auto text-[10px] text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate">
+                      {person.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
                       {person.faceCount} {t("photos")}
                     </span>
                   </Command.Item>
@@ -485,7 +501,7 @@ export function SpotlightSearch() {
               >
                 {albumResults.map((album) => (
                   <Command.Item
-                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={`album-${album.id}`}
                     onSelect={() =>
                       handleSelect(() =>
@@ -498,7 +514,9 @@ export function SpotlightSearch() {
                     value={`album ${album.name}`}
                   >
                     <Album className="h-4 w-4 text-muted-foreground" />
-                    <span>{album.name}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {album.name}
+                    </span>
                   </Command.Item>
                 ))}
               </Command.Group>
@@ -516,7 +534,7 @@ export function SpotlightSearch() {
 
                   return (
                     <Command.Item
-                      className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                       key={`setting-${item.to}`}
                       onSelect={() =>
                         handleSelect(() => navigate({ to: item.to }))
@@ -524,8 +542,8 @@ export function SpotlightSearch() {
                       value={`settings ${label} ${subtitle} ${item.keywords}`}
                     >
                       <Icon className="h-4 w-4 text-muted-foreground" />
-                      <span>{label}</span>
-                      <span className="ml-auto text-[11px] text-muted-foreground">
+                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                      <span className="shrink-0 truncate text-[11px] text-muted-foreground">
                         {subtitle}
                       </span>
                     </Command.Item>
@@ -542,15 +560,17 @@ export function SpotlightSearch() {
               >
                 {navigationItems.map((item) => (
                   <Command.Item
-                    className="flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
+                    className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[6px] px-2 py-2 text-[13px] text-foreground aria-selected:bg-foreground/5"
                     key={item.id}
                     onSelect={() => handleSelect(item.action)}
                     value={`${item.title} ${item.subtitle || ""}`}
                   >
                     <span className="text-muted-foreground">{item.icon}</span>
-                    <span>{item.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {item.title}
+                    </span>
                     {item.subtitle && (
-                      <span className="ml-auto text-[11px] text-muted-foreground">
+                      <span className="shrink-0 truncate text-[11px] text-muted-foreground">
                         {item.subtitle}
                       </span>
                     )}
@@ -561,8 +581,8 @@ export function SpotlightSearch() {
           </Command.List>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-border border-t px-4 py-2">
-            <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <div className="flex shrink-0 items-center justify-between overflow-x-auto border-border border-t px-3 py-2 sm:px-4">
+            <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1">
                 <kbd className="rounded-[3px] border border-border bg-card px-1 font-mono text-[10px]">
                   ↑↓

@@ -564,10 +564,10 @@ function DashboardPage() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col bg-background">
       <header className="border-border border-b px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               aria-label={t("backToHome")}
               className="rounded-[5px] p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -576,16 +576,16 @@ function DashboardPage() {
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
-            <div>
+            <div className="min-w-0">
               <h1 className="font-semibold text-[18px] text-foreground">
                 {t("dashboardTitle")}
               </h1>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="truncate text-[11px] text-muted-foreground">
                 {t("dashboardSubtitle")}
               </p>
             </div>
           </div>
-          <fieldset className="flex flex-wrap items-center gap-2">
+          <fieldset className="flex max-w-full flex-wrap items-center gap-2">
             <legend className="sr-only">{t("dashboardRangeLabel")}</legend>
             {PRESETS.map((item) => (
               <button
@@ -652,7 +652,7 @@ function DashboardPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         <nav
           aria-label={t("dashboardSections")}
           className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex gap-1 overflow-x-auto border-b px-4 py-2 sm:px-6 ${
@@ -674,7 +674,7 @@ function DashboardPage() {
         </nav>
 
         <main
-          className="flex-1 overflow-y-auto p-4 sm:p-6"
+          className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6"
           onScroll={(event) =>
             setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
           }
@@ -695,8 +695,8 @@ function DashboardPage() {
           )}
 
           {tab === "overview" && (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-              <section className="relative order-1 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-5 shadow-sm sm:p-6 xl:col-span-2">
+            <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
+              <section className="relative order-1 min-w-0 overflow-hidden rounded-[12px] border border-primary/25 bg-gradient-to-br from-primary/[0.12] via-secondary to-secondary p-4 shadow-sm sm:p-6 xl:col-span-2">
                 <div className="absolute top-5 right-5 sm:top-6 sm:right-6">
                   <ChartDisplayModeToggle
                     onChange={changeOverviewDisplayMode}
@@ -711,7 +711,7 @@ function DashboardPage() {
                     <p className="mt-3 text-[11px] text-muted-foreground">
                       {t("dashboardScopedPhotos")}
                     </p>
-                    <h2 className="mt-1 font-semibold text-[40px] text-foreground tabular-nums leading-none tracking-tight">
+                    <h2 className="mt-1 break-all font-semibold text-[clamp(2rem,8vw,2.5rem)] text-foreground tabular-nums leading-none tracking-tight">
                       {sampleTotal.toLocaleString(i18n.language)}
                     </h2>
                     <p className="mt-3 max-w-xl text-[11px] text-muted-foreground">
@@ -752,7 +752,7 @@ function DashboardPage() {
                   />
                 </div>
               </section>
-              <section className="order-3 rounded-[10px] border border-border bg-secondary p-5 xl:col-span-3">
+              <section className="order-3 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 xl:col-span-3">
                 <h2 className="font-semibold text-[15px] text-foreground">
                   {t("dashboardLibraryHealth")}
                 </h2>
@@ -794,7 +794,7 @@ function DashboardPage() {
               </section>
               <div className="contents">
                 <section
-                  className={`order-4 rounded-[10px] border border-border bg-secondary p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
+                  className={`order-4 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
                 >
                   <h2 className="font-semibold text-[15px] text-foreground">
                     {t("dashboardPhotographyProfile")}
@@ -877,7 +877,7 @@ function DashboardPage() {
                     />
                   </div>
                 </section>
-                <section className="order-2 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-5 shadow-sm">
+                <section className="order-2 min-w-0 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-4 shadow-sm sm:p-5">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
                     <h2 className="font-semibold text-[15px] text-foreground">
@@ -956,7 +956,7 @@ function DashboardPage() {
                 </section>
               </div>
               {shootingGuidance.length > 0 && (
-                <section className="order-5 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-5">
+                <section className="order-5 min-w-0 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-4 sm:p-5">
                   <div className="flex items-start gap-3">
                     <div className="rounded-full bg-primary/10 p-2 text-primary">
                       <Lightbulb className="h-4 w-4" />
@@ -985,7 +985,7 @@ function DashboardPage() {
           )}
 
           {tab === "gear" && (
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               <ChartBlock
                 color={DASHBOARD_COLORS.gear}
                 data={advancedChart("vendor")}
@@ -1030,8 +1030,8 @@ function DashboardPage() {
           )}
 
           {tab === "exposure" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="min-w-0 space-y-4">
+              <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
                 <ChartBlock
                   color={DASHBOARD_COLORS.exposure}
                   data={focalData}
@@ -1126,7 +1126,7 @@ function DashboardPage() {
           )}
 
           {tab === "technique" && (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
               {[
                 ["focusMode", "metadataFocusMode"],
                 ["subjectTarget", "metadataSubjectTarget"],
@@ -1159,7 +1159,7 @@ function DashboardPage() {
           )}
 
           {tab === "time" && (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]">
+            <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(min(100%,280px),0.85fr)]">
               <TrendChart
                 calendarData={data.dailyStats}
                 color={DASHBOARD_COLORS.time}
@@ -1239,7 +1239,7 @@ function GuidanceCard({
 }) {
   const { t } = useTranslation();
   return (
-    <article className="rounded-[8px] border border-border/80 bg-background/70 p-4">
+    <article className="min-w-0 rounded-[8px] border border-border/80 bg-background/70 p-4">
       <h3 className="font-medium text-[12px] text-foreground">
         {t(`dashboardGuidance_${kind}Title`)}
       </h3>
@@ -1304,7 +1304,11 @@ function ChartBlock({
     >
       {data.some((point) => point.count > 0) ? (
         <div
-          className={horizontal ? "max-h-[520px] overflow-y-auto" : undefined}
+          className={
+            horizontal
+              ? "max-h-[min(520px,55dvh)] min-w-0 overflow-y-auto"
+              : "min-w-0"
+          }
         >
           <DashboardBarChart
             color={color}
@@ -1352,7 +1356,7 @@ function ChartWithExpand({
     >
       {data.length ? (
         <>
-          <div className="max-h-[620px] overflow-y-auto">
+          <div className="max-h-[min(620px,60dvh)] min-w-0 overflow-y-auto">
             <DashboardBarChart
               color={color}
               data={data}
@@ -1476,7 +1480,8 @@ function TrendChart({
           onDateClick={(date) => onDateClick?.(date)}
         />
       ) : data.some((point) => point.count > 0) ? (
-        <ResponsiveContainer height={230} width="100%">
+        <div className="h-[clamp(12rem,36dvh,14.375rem)] min-w-0">
+          <ResponsiveContainer height="100%" width="100%">
           <AreaChart
             data={data}
             margin={{ bottom: 18, left: 0, right: 8, top: 4 }}
@@ -1529,7 +1534,8 @@ function TrendChart({
               type="linear"
             />
           </AreaChart>
-        </ResponsiveContainer>
+          </ResponsiveContainer>
+        </div>
       ) : (
         <EmptyChart message={t("dashboardEmptyForRange")} />
       )}
@@ -1556,7 +1562,7 @@ function PlacesAndColors({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <ChartSection
         description={
           geoData
@@ -1603,7 +1609,9 @@ function GeoContent({
 }) {
   const { t } = useTranslation();
   if (loading) {
-    return <div className="h-[320px] animate-pulse rounded-[6px] bg-muted" />;
+    return (
+      <div className="h-[clamp(14rem,52dvh,20rem)] animate-pulse rounded-[6px] bg-muted" />
+    );
   }
   if (!data?.locations.length) {
     return <EmptyChart message={t("noGeoData")} />;
@@ -1634,7 +1642,7 @@ function ColorContent({
     return <EmptyChart message={t("noColorData")} />;
   }
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <div>
         <h3 className="mb-2 text-[11px] text-muted-foreground uppercase">
           {t("colorPalette")}
@@ -1760,7 +1768,7 @@ function OverviewTrend({
     return null;
   }
   return (
-    <div aria-label={title} className="w-full">
+    <div aria-label={title} className="min-w-0 w-full">
       {displayMode === "heatmap" ? (
         <CalendarHeatmap
           color={color}
@@ -1768,7 +1776,7 @@ function OverviewTrend({
           onDateClick={onDateClick}
         />
       ) : (
-        <div className="h-40" role="img">
+        <div className="h-[clamp(8rem,28dvh,10rem)] min-w-0" role="img">
           <ResponsiveContainer height="100%" width="100%">
             <AreaChart
               data={data}
@@ -1850,9 +1858,9 @@ function DashboardSkeleton() {
     "panel-4",
   ];
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col bg-background">
       <div className="h-16 border-border border-b" />
-      <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-6 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 sm:grid-cols-2 sm:p-6 xl:grid-cols-4">
         {skeletonKeys.map((key) => (
           <div
             className="h-32 animate-pulse rounded-[9px] bg-muted"

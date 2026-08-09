@@ -737,10 +737,10 @@ function PeoplePage() {
   const showContent = !(isLoading || isError);
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col bg-background">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
@@ -748,7 +748,7 @@ function PeoplePage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-semibold text-[24px] text-foreground tracking-tight">
               {t("people")}
             </h1>
@@ -759,7 +759,7 @@ function PeoplePage() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
           {selectMode ? (
             <>
               <span className="text-[13px] text-muted-foreground">
@@ -876,13 +876,13 @@ function PeoplePage() {
       </div>
 
       {/* Grid area */}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         <nav
           aria-label={t("people")}
-          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex items-center justify-between gap-4 overflow-x-auto border-b px-6 py-1.5 ${isToolbarScrolled ? "is-scrolled" : ""}`}
+          className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden border-b px-4 py-1.5 sm:px-6 ${isToolbarScrolled ? "is-scrolled" : ""}`}
           ref={toolbarRef}
         >
-          <div className="inline-flex shrink-0 rounded-[8px] border border-border bg-secondary p-1">
+          <div className="inline-flex max-w-full shrink-0 overflow-x-auto rounded-[8px] border border-border bg-secondary p-1">
             {(
               [
                 ["all", t("peopleAll"), identities.length],
@@ -934,7 +934,7 @@ function PeoplePage() {
             </button>
           </div>
           {(identities.length > 0 || hiddenIdentities.length > 0) && (
-            <label className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
+            <label className="relative w-full min-w-0 flex-1 sm:min-w-[200px] sm:max-w-[280px]">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 aria-label={t("peopleSearch")}
@@ -948,7 +948,7 @@ function PeoplePage() {
           )}
         </nav>
         <div
-          className="flex-1 overflow-y-auto p-6"
+          className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
           onScroll={(event) => {
             setIsToolbarScrolled(event.currentTarget.scrollTop > 4);
           }}
@@ -957,7 +957,7 @@ function PeoplePage() {
         >
         {/* 加载骨架屏：填满视口的卡片矩阵 */}
         {isLoading && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
             {Array.from({ length: skeletonCount }).map((_, i) => (
               <SkeletonCard key={`skel-${i}`} />
             ))}
@@ -985,7 +985,7 @@ function PeoplePage() {
 
         {/* 空状态 */}
         {showContent && personFilter === "hidden" && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-4">
             {isHiddenIdentitiesLoading &&
               ["one", "two", "three", "four"].map((key) => (
                 <SkeletonCard key={`hidden-skeleton-${key}`} />
@@ -1070,7 +1070,7 @@ function PeoplePage() {
           identities.length === 0 && (
             <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground/70">
               <User className="h-12 w-12 opacity-20" />
-              <div className="max-w-md rounded-lg border border-primary/20 bg-primary/[0.04] px-4 py-3 text-center">
+              <div className="max-w-full rounded-lg border border-primary/20 bg-primary/[0.04] px-4 py-3 text-center sm:max-w-md">
                 <p className="font-medium text-[13px] text-foreground">
                   {t("peopleEnableTitle")}
                 </p>
@@ -1112,7 +1112,7 @@ function PeoplePage() {
                 </button>
               </div>
             )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-4">
               {filteredIdentities.map((identity) => (
                 <PersonCard
                   composingRef={composingRef}

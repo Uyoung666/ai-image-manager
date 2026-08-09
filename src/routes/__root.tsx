@@ -183,9 +183,9 @@ function Root() {
 
 function StandaloneLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       <DragWindowRegion title="AI Image Manager" />
-      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }
@@ -194,7 +194,7 @@ function RootError() {
   const { t } = useTranslation();
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+    <div className="flex min-h-dvh min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-4 text-center sm:px-6">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger/10">
         <svg
           aria-hidden="true"
@@ -211,11 +211,11 @@ function RootError() {
           />
         </svg>
       </div>
-      <div>
+      <div className="min-w-0 max-w-full">
         <p className="font-medium text-[13px] text-foreground">
           {t("routeErrorTitle")}
         </p>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 break-words text-[12px] text-muted-foreground">
           {t("routeErrorDescription")}
         </p>
       </div>

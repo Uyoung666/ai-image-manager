@@ -112,7 +112,7 @@ function SaveState({ state }: { state: WatermarkSaveState }) {
     return (
       <span
         aria-live="polite"
-        className="flex items-center gap-1 text-[10px] text-muted-foreground"
+        className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground [overflow-wrap:anywhere]"
       >
         <LoaderCircle aria-hidden="true" className="h-3 w-3 animate-spin" />
         {t("watermarkSaving")}
@@ -123,7 +123,7 @@ function SaveState({ state }: { state: WatermarkSaveState }) {
     return (
       <span
         aria-live="polite"
-        className="flex items-center gap-1 text-[10px] text-success"
+        className="flex min-w-0 items-center gap-1 text-[10px] text-success [overflow-wrap:anywhere]"
       >
         <Check aria-hidden="true" className="h-3 w-3" />
         {t("watermarkSaved")}
@@ -134,7 +134,7 @@ function SaveState({ state }: { state: WatermarkSaveState }) {
     return (
       <span
         aria-live="polite"
-        className="flex items-center gap-1 text-[10px] text-destructive"
+        className="flex min-w-0 items-center gap-1 text-[10px] text-destructive [overflow-wrap:anywhere]"
       >
         <CircleAlert aria-hidden="true" className="h-3 w-3" />
         {t("watermarkSaveError")}
@@ -311,8 +311,8 @@ function WatermarkSettingsPage() {
       title={t("watermarkSettings")}
     >
       <section className="space-y-4">
-        <div className="flex items-center justify-between gap-4 rounded-[8px] border border-border bg-secondary p-4">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 flex-col items-stretch gap-3 rounded-[8px] border border-border bg-secondary p-3 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between min-[900px]:gap-4 min-[480px]:p-4">
+          <div className="flex min-w-0 items-start gap-3 min-[900px]:items-center">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-primary/10 text-primary">
               <ShieldCheck aria-hidden="true" className="h-4 w-4" />
             </span>
@@ -332,7 +332,7 @@ function WatermarkSettingsPage() {
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 min-[900px]:shrink-0">
             <SaveState state={saveState} />
             <Switch
               ariaLabel={t("enableWatermark")}
@@ -343,8 +343,10 @@ function WatermarkSettingsPage() {
         </div>
 
         {settingsLoadError && (
-          <div className="flex items-center justify-between gap-3 rounded-[6px] border border-destructive/25 bg-destructive/8 px-3 py-2 text-[11px] text-destructive">
-            <span>{t("watermarkLoadError")}</span>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-[6px] border border-destructive/25 bg-destructive/8 px-3 py-2 text-[11px] text-destructive">
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              {t("watermarkLoadError")}
+            </span>
             <button
               className="font-medium underline"
               onClick={() => loadWatermarkSettings().catch(() => undefined)}
@@ -355,9 +357,9 @@ function WatermarkSettingsPage() {
           </div>
         )}
 
-        <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-stretch">
+        <div className="grid min-h-0 min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,360px)] xl:items-stretch">
           <div
-            className="min-w-0 lg:sticky lg:top-6 lg:self-start"
+            className="min-w-0 xl:sticky xl:top-6 xl:self-start"
             ref={previewPaneRef}
           >
             <WatermarkPreview
@@ -374,7 +376,7 @@ function WatermarkSettingsPage() {
           </div>
 
           <div
-            className="min-h-0 overflow-hidden lg:h-[var(--watermark-workspace-height)]"
+            className="min-h-0 min-w-0 overflow-hidden xl:h-[var(--watermark-workspace-height)]"
             style={
               previewHeight === null
                 ? undefined
@@ -384,7 +386,7 @@ function WatermarkSettingsPage() {
             }
           >
             <WatermarkControls
-              className="lg:h-full"
+              className="xl:h-full"
               focusTextSignal={focusTextSignal}
               imageStatus={imageStatus}
               onChooseImage={handleChooseImage}

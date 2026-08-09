@@ -191,11 +191,11 @@ function StorageSettingsPage() {
 
   return (
     <SettingsPageShell scrollRef={scrollRef} title={t("settingsStorage")}>
-      <section className="space-y-3">
+      <section className="min-w-0 space-y-3">
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("settingsIndexing")}
         </h2>
-        <div className="rounded-[8px] border border-border bg-secondary p-4">
+        <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
           <SettingRow
             action={
               <AlertDialog
@@ -206,7 +206,7 @@ function StorageSettingsPage() {
                   <TooltipTrigger asChild>
                     <AlertDialogTrigger asChild>
                       <button
-                        className="max-w-[160px] shrink-0 truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                        className="max-w-full truncate rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground min-[900px]:max-w-[160px] min-[900px]:shrink-0"
                         type="button"
                       >
                         {clearCacheStatus || t("settingsClear")}
@@ -240,29 +240,21 @@ function StorageSettingsPage() {
           >
             {indexStats ? (
               <div className="space-y-1">
-                <div className="flex items-baseline gap-2">
+                <div className="flex min-w-0 items-baseline gap-2">
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsThumbnailCacheLocation")}
                   </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        className="truncate font-mono text-[11px] text-muted-foreground/80"
-                        tabIndex={0}
-                      >
-                        {indexStats.thumbnailCacheDir || "-"}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {indexStats.thumbnailCacheDir || "-"}
-                    </TooltipContent>
-                  </Tooltip>
+                  <span className="min-w-0 flex-1 break-all font-mono text-[11px] text-muted-foreground/80">
+                    {indexStats.thumbnailCacheDir || "-"}
+                  </span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button
                         aria-label={t("copyPath")}
                         className="shrink-0 rounded-[4px] p-0.5 text-muted-foreground/50 hover:bg-foreground/5 hover:text-foreground"
-                        onClick={() => handleCopyPath(indexStats.thumbnailCacheDir)}
+                        onClick={() =>
+                          handleCopyPath(indexStats.thumbnailCacheDir)
+                        }
                         type="button"
                       >
                         {copiedPath === indexStats.thumbnailCacheDir ? (
@@ -275,7 +267,7 @@ function StorageSettingsPage() {
                     <TooltipContent>{t("copyPath")}</TooltipContent>
                   </Tooltip>
                 </div>
-                <div className="flex items-baseline gap-2">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsThumbnailCacheSize")}
                   </span>
@@ -302,7 +294,7 @@ function StorageSettingsPage() {
                 >
                   <AlertDialogTrigger asChild>
                     <button
-                      className="shrink-0 rounded-[6px] border border-amber-500/50 px-3 py-1.5 text-[12px] text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-300"
+                      className="max-w-full rounded-[6px] border border-amber-500/50 px-3 py-1.5 text-[12px] text-amber-700 transition-colors [overflow-wrap:anywhere] hover:bg-amber-500/20 min-[900px]:shrink-0 dark:text-amber-300"
                       type="button"
                     >
                       {t("orphanThumbnailsClean")}
@@ -354,7 +346,7 @@ function StorageSettingsPage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    className="flex max-w-[160px] shrink-0 items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5"
+                    className="flex max-w-full items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive/50 hover:bg-destructive/5 min-[900px]:max-w-[160px] min-[900px]:shrink-0"
                     onClick={handleCleanupOrphans}
                     type="button"
                   >
@@ -383,8 +375,8 @@ function StorageSettingsPage() {
           >
             {indexStats ? (
               <div className="space-y-1">
-                <div className="flex items-baseline gap-3">
-                  <div className="flex items-baseline gap-1.5">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
                     <span className="text-[11px] text-muted-foreground/60">
                       {t("settingsValidIndexCount")}
                     </span>
@@ -392,7 +384,7 @@ function StorageSettingsPage() {
                       {indexStats.validPhotoCount.toLocaleString()}
                     </span>
                   </div>
-                  <div className="flex items-baseline gap-1.5">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
                     <span className="text-[11px] text-muted-foreground/60">
                       {t("settingsInvalidIndexCount")}
                     </span>
@@ -407,23 +399,13 @@ function StorageSettingsPage() {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-baseline gap-2">
+                <div className="flex min-w-0 items-baseline gap-2">
                   <span className="shrink-0 text-[11px] text-muted-foreground/60">
                     {t("settingsIndexDbLocation")}
                   </span>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span
-                        className="truncate font-mono text-[11px] text-muted-foreground/80"
-                        tabIndex={0}
-                      >
-                        {indexStats.databasePath || "-"}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {indexStats.databasePath || "-"}
-                    </TooltipContent>
-                  </Tooltip>
+                  <span className="min-w-0 flex-1 break-all font-mono text-[11px] text-muted-foreground/80">
+                    {indexStats.databasePath || "-"}
+                  </span>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <button

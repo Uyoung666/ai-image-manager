@@ -9,6 +9,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 
 interface AlbumInfo {
@@ -114,7 +119,9 @@ export function AddToAlbumDialog({
       open={open}
     >
       <DialogContent
-        className={elevated ? "z-[1101]" : undefined}
+        className={`max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden ${
+          elevated ? "z-[1101]" : ""
+        }`}
         overlayClassName={elevated ? "z-[1100]" : undefined}
         size="sm"
       >
@@ -122,47 +129,62 @@ export function AddToAlbumDialog({
           <DialogTitle>{t("albumAddTitle")}</DialogTitle>
         </DialogHeader>
 
-        <div className="-mx-1 max-h-[300px] overflow-y-auto">
+        <div className="-mx-1 max-h-[min(18.75rem,50dvh)] overflow-y-auto overscroll-contain">
           {albums.length === 0 && !showCreate ? (
             <p className="px-3 py-6 text-center text-[13px] text-muted-foreground/70">
               {t("albumNoAlbumsCreate")}
             </p>
           ) : (
             albums.map((album) => (
-              <button
-                className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-50"
-                disabled={adding.has(album.id)}
-                key={album.id}
-                onClick={() => handleAdd(album.id)}
-                type="button"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
-                  <svg
-                    aria-hidden="true"
-                    fill="none"
-                    height="16"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.5"
-                    viewBox="0 0 24 24"
-                    width="16"
+              <Tooltip key={album.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    className="flex w-full items-center gap-3 rounded-[6px] px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-50"
+                    disabled={adding.has(album.id)}
+                    onClick={() => handleAdd(album.id)}
+                    type="button"
                   >
-                    <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
-                    <path d="M3 9h18" />
-                    <path d="M9 21V9" />
-                  </svg>
-                </div>
-                <span className="flex-1 truncate">{album.name}</span>
-                {adding.has(album.id) && <LoadingSpinner size="sm" />}
-              </button>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-[6px] bg-white/5 text-muted-foreground">
+                      <svg
+                        aria-hidden="true"
+                        fill="none"
+                        height="16"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                        viewBox="0 0 24 24"
+                        width="16"
+                      >
+                        <rect
+                          height="18"
+                          rx="2"
+                          ry="2"
+                          width="18"
+                          x="3"
+                          y="3"
+                        />
+                        <path d="M3 9h18" />
+                        <path d="M9 21V9" />
+                      </svg>
+                    </div>
+                    <span className="min-w-0 flex-1 truncate">
+                      {album.name}
+                    </span>
+                    {adding.has(album.id) && <LoadingSpinner size="sm" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {album.name}
+                </TooltipContent>
+              </Tooltip>
             ))
           )}
 
           {showCreate ? (
-            <div className="flex items-center gap-2 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
               <input
-                className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+                className="h-8 min-w-0 flex-[1_1_12rem] rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
                 onChange={(e) => setNewName(e.target.value)}
                 onCompositionEnd={(e) => {
                   composingRef.current = false;
@@ -189,7 +211,7 @@ export function AddToAlbumDialog({
                 value={newName}
               />
               <button
-                className="flex h-8 items-center gap-1 rounded-[6px] bg-primary px-3 text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex h-8 max-w-full shrink-0 items-center gap-1 rounded-[6px] bg-primary px-3 text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
                 disabled={!newName.trim()}
                 onClick={handleCreateAndAdd}
                 type="button"

@@ -23,12 +23,12 @@ export function UpdateChangelogHistory() {
   const navigate = useNavigate();
 
   return (
-    <section className="update-changelog-history mt-6 space-y-3">
+    <section className="update-changelog-history mt-6 min-w-0 space-y-3">
       <div>
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("updateChangelogTitle")}
         </h2>
-        <p className="mt-1 text-[12px] text-muted-foreground">
+        <p className="mt-1 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
           {t("updateChangelogDescription")}
         </p>
       </div>
@@ -40,7 +40,7 @@ export function UpdateChangelogHistory() {
         ) : (
           changelogEntries.map((entry) => (
             <button
-              className="update-changelog-item flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+              className="update-changelog-item flex w-full min-w-0 flex-wrap items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 min-[900px]:flex-nowrap min-[480px]:px-4"
               key={entry.version}
               onClick={() =>
                 navigate({
@@ -54,7 +54,7 @@ export function UpdateChangelogHistory() {
                 <Sparkles className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-[13px] text-foreground">
+                <span className="block font-medium text-[13px] text-foreground [overflow-wrap:anywhere]">
                   {getLocalizedText(entry.title, i18n.language)}
                 </span>
                 <span className="mt-0.5 block text-[11px] text-muted-foreground">
@@ -62,7 +62,7 @@ export function UpdateChangelogHistory() {
                   {formatReleaseDate(entry.date, i18n.language)}
                 </span>
               </span>
-              <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="ml-11 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground min-[900px]:ml-0">
                 {t("updateChangelogView")}
                 <ChevronRight className="h-3.5 w-3.5" />
               </span>

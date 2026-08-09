@@ -933,7 +933,7 @@ function TrashPage() {
   function renderTrashContent() {
     if (loading) {
       return (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,160px),1fr))] gap-3">
           {TRASH_SKELETON_KEYS.map((key) => (
             <div
               className="overflow-hidden rounded-[10px] border border-border"
@@ -1008,7 +1008,7 @@ function TrashPage() {
                 {label}
               </h2>
             )}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,160px),1fr))] gap-3">
               {items.map(renderPhotoCard)}
             </div>
           </section>
@@ -1043,10 +1043,10 @@ function TrashPage() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col bg-background">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-6 py-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -1060,11 +1060,11 @@ function TrashPage() {
             </TooltipTrigger>
             <TooltipContent>{t("backToHome")}</TooltipContent>
           </Tooltip>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-semibold text-[16px] text-foreground">
               {t("recentlyDeletedTitle")}
             </h1>
-            <p className="text-[12px] text-muted-foreground">
+            <p className="break-words text-[12px] text-muted-foreground">
               {trashTotalCount > 0
                 ? t("trashSummary", {
                     bytes: formatBytes(trashTotalBytes),
@@ -1127,16 +1127,16 @@ function TrashPage() {
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         {/* Selection bar */}
         {!loading && (trashTotalCount > 0 || query) && (
           <div
-            className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-3 border-b px-6 py-2 ${
+            className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden border-b px-4 py-2 sm:px-6 ${
               isToolbarScrolled ? "is-scrolled" : ""
             }`}
             ref={toolbarRef}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
               {photos.length > 0 && (
                 <button
                   className="text-[12px] text-muted-foreground hover:text-foreground"
@@ -1154,7 +1154,7 @@ function TrashPage() {
                   {t("selectedCount", { count: selectedIds.size })}
                 </span>
               )}
-              <span className="text-[12px] text-muted-foreground/70">
+              <span className="min-w-0 break-words text-[12px] text-muted-foreground/70">
                 {query
                   ? t("trashSearchResults", {
                       bytes: formatBytes(totalBytes),
@@ -1163,8 +1163,8 @@ function TrashPage() {
                   : t("trashRetentionHint")}
               </span>
             </div>
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              <label className="relative min-w-36 flex-1 sm:flex-none">
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+              <label className="relative min-w-[min(100%,9rem)] flex-1 sm:flex-none">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
                   aria-keyshortcuts="Control+F Meta+F Escape"
@@ -1203,7 +1203,7 @@ function TrashPage() {
               </label>
               <FilterDropdown
                 ariaLabel={t("sortBy")}
-                className="min-w-[132px]"
+                className="w-full min-w-0"
                 onChange={(value) =>
                   setSort(value as "deletedAt" | "name" | "size")
                 }
@@ -1214,6 +1214,7 @@ function TrashPage() {
                 ]}
                 placeholder={t("sortBy")}
                 value={sort}
+                wrapperClassName="min-w-[min(100%,132px)] flex-1 sm:flex-none"
               />
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -1271,7 +1272,7 @@ function TrashPage() {
         {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: desktop marquee selection intentionally uses the scroll surface */}
         <div
           aria-busy={loading || refreshing}
-          className="relative flex-1 overflow-y-auto p-6"
+          className="relative min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
           onClick={(e) => {
             if (marqueeJustCompleted.current) {
               marqueeJustCompleted.current = false;
@@ -1329,7 +1330,7 @@ function TrashPage() {
       {/* Context menu */}
       {ctxMenu.open && (
         <div
-          className="fixed z-50 min-w-[180px] rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+          className="fixed z-50 max-h-[calc(100dvh-1rem)] min-w-[180px] max-w-[calc(100dvw-1rem)] overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
           id="trash-context-menu"
           role="menu"
           style={{

@@ -221,7 +221,7 @@ export function FaceScanScopeDialog({
       open={open}
     >
       <DialogContent
-        className="grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border/80 bg-popover p-0 shadow-2xl dark:border-white/[0.09] dark:bg-[#121318] dark:ring-white/[0.04]"
+        className="max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border-border/80 bg-popover p-0 shadow-2xl dark:border-white/[0.09] dark:bg-[#121318] dark:ring-white/[0.04]"
         overlayClassName="bg-black/70 backdrop-blur-[2px]"
         size="lg"
       >
@@ -233,7 +233,7 @@ export function FaceScanScopeDialog({
             {t("faceScanScopeDescription")}
           </DialogDescription>
         </DialogHeader>
-        <div className="mx-5 max-h-[55vh] min-h-48 overflow-y-auto rounded-[8px] border border-border/80 bg-background/70 p-1.5 shadow-inner dark:border-white/[0.07] dark:bg-[#090a0e]">
+        <div className="mx-5 h-full min-h-0 overflow-y-auto overscroll-contain rounded-[8px] border border-border/80 bg-background/70 p-1.5 shadow-inner max-[480px]:mx-4 dark:border-white/[0.07] dark:bg-[#090a0e]">
           {tree.length > 0 ? (
             visibleNodes.map((item) => renderNode(item))
           ) : (
@@ -243,7 +243,7 @@ export function FaceScanScopeDialog({
           )}
         </div>
         <DialogFooter className="mt-4 items-stretch border-border/70 border-t bg-muted/20 px-5 py-4 sm:items-center sm:justify-between dark:border-white/[0.07] dark:bg-white/[0.018]">
-          <p className="min-w-0 flex-1 text-left text-[12px] text-muted-foreground dark:text-white/45">
+          <p className="min-w-0 flex-1 text-left text-[12px] text-muted-foreground [overflow-wrap:anywhere] dark:text-white/45">
             {selectedRoots.size > 0
               ? t("faceScanScopeSummary", {
                   count: selectedRoots.size,
@@ -251,7 +251,7 @@ export function FaceScanScopeDialog({
                 })
               : t("faceScanScopeRequired")}
           </p>
-          <div className="grid shrink-0 grid-cols-2 gap-2 sm:flex sm:justify-end">
+          <div className="grid max-w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
             <button
               className="rounded-[6px] border border-transparent px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:border-border hover:bg-foreground/5 hover:text-foreground dark:hover:border-white/10 dark:hover:bg-white/5"
               disabled={saving}

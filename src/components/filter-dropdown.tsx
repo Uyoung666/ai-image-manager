@@ -3,10 +3,16 @@ import {
   type KeyboardEvent,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { cn } from "@/utils/tailwind";
 
 export interface FilterDropdownOption {
@@ -30,6 +36,7 @@ export function FilterDropdown({
   showOptionColors = false,
   showSelectedCheck = false,
   value,
+  wrapperClassName,
 }: {
   ariaLabel?: string;
   className?: string;
@@ -42,11 +49,14 @@ export function FilterDropdown({
   showOptionColors?: boolean;
   showSelectedCheck?: boolean;
   value: string;
+  wrapperClassName?: string;
 }) {
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [contentWidth, setContentWidth] = useState<number>();
+  const anchorRef = useRef<HTMLDivElement>(null);
   const pointerDownStateRef = useRef<{
     wasFocused: boolean;
     wasOpen: boolean;
@@ -94,6 +104,30 @@ export function FilterDropdown({
       return visibleOptions.length > 0 ? 0 : -1;
     });
   }, [open, selectedIndex, visibleOptions.length]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const anchor = anchorRef.current;
+    if (!anchor) {
+      return;
+    }
+
+    const updateWidth = () => {
+      const nextWidth = anchor.getBoundingClientRect().width;
+      setContentWidth(nextWidth > 0 ? nextWidth : undefined);
+    };
+    updateWidth();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [open]);
 
   function selectOption(option: FilterDropdownOption) {
     onChange(option.value);
@@ -165,86 +199,121 @@ export function FilterDropdown({
   }
 
   return (
-    <div className="relative">
-      {showOptionColors && selectedOption?.color && (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full"
-          style={{ backgroundColor: selectedOption.color }}
-        />
-      )}
-      <input
-        aria-activedescendant={
-          open && activeIndex >= 0
-            ? `${inputId}-option-${activeIndex}`
-            : undefined
+    <Popover
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setOpen(false);
+          setActiveIndex(-1);
         }
-        aria-autocomplete={editable ? "list" : "none"}
-        aria-controls={open ? listboxId : undefined}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={ariaLabel}
-        autoComplete="off"
-        className={cn(
-          FILTER_DROPDOWN_CLASS_NAME,
-          className,
-          showOptionColors && selectedOption?.color && "pl-7",
-          !editable && "cursor-pointer pr-7",
-          disabled && "cursor-not-allowed opacity-50"
-        )}
-        disabled={disabled}
-        id={id}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onChange={(event) => {
-          if (editable) {
-            onChange(event.target.value);
-          }
-          setOpen(true);
-        }}
-        onClick={() => {
-          const pointerDownState = pointerDownStateRef.current;
-          pointerDownStateRef.current = null;
-
-          // A real click focuses the input before firing click. In that case
-          // focus already opened a closed dropdown, so the first click should
-          // remain open; subsequent clicks toggle it normally.
-          if (
-            pointerDownState &&
-            !pointerDownState.wasOpen &&
-            !pointerDownState.wasFocused
-          ) {
-            return;
-          }
-
-          setOpen((previous) => !previous);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={handleKeyDown}
-        onMouseDown={(event) => {
-          if (event.button !== 0) {
-            return;
-          }
-          pointerDownStateRef.current = {
-            wasFocused: document.activeElement === event.currentTarget,
-            wasOpen: open,
-          };
-        }}
-        placeholder={placeholder}
-        readOnly={!editable}
-        role="combobox"
-        value={displayValue}
-      />
-      {!editable && (
-        <ChevronDown
-          aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-        />
-      )}
-      {open && visibleOptions.length > 0 && (
+      }}
+      open={open}
+    >
+      <PopoverAnchor asChild>
         <div
-          className="absolute top-full right-0 left-0 z-[60] mt-1 max-h-48 overflow-y-auto rounded-[6px] border border-border bg-popover shadow-lg ring-1 ring-foreground/5"
+          className={cn("relative min-w-0", wrapperClassName)}
+          ref={anchorRef}
+        >
+          {showOptionColors && selectedOption?.color && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-2 z-10 h-2.5 w-2.5 -translate-y-1/2 rounded-full"
+              style={{ backgroundColor: selectedOption.color }}
+            />
+          )}
+          <input
+            aria-activedescendant={
+              open && activeIndex >= 0
+                ? `${inputId}-option-${activeIndex}`
+                : undefined
+            }
+            aria-autocomplete={editable ? "list" : "none"}
+            aria-controls={open ? listboxId : undefined}
+            aria-expanded={open}
+            aria-haspopup="listbox"
+            aria-label={ariaLabel}
+            autoComplete="off"
+            className={cn(
+              FILTER_DROPDOWN_CLASS_NAME,
+              className,
+              showOptionColors && selectedOption?.color && "pl-7",
+              !editable && "cursor-pointer pr-7",
+              disabled && "cursor-not-allowed opacity-50"
+            )}
+            disabled={disabled}
+            id={id}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onChange={(event) => {
+              if (editable) {
+                onChange(event.target.value);
+              }
+              setOpen(true);
+            }}
+            onClick={() => {
+              const pointerDownState = pointerDownStateRef.current;
+              pointerDownStateRef.current = null;
+
+              // A real click focuses the input before firing click. In that case
+              // focus already opened a closed dropdown, so the first click should
+              // remain open; subsequent clicks toggle it normally.
+              if (
+                pointerDownState &&
+                !pointerDownState.wasOpen &&
+                !pointerDownState.wasFocused
+              ) {
+                return;
+              }
+
+              if (pointerDownState) {
+                setOpen(!pointerDownState.wasOpen);
+                return;
+              }
+
+              setOpen((previous) => !previous);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={handleKeyDown}
+            onMouseDown={(event) => {
+              if (event.button !== 0) {
+                return;
+              }
+              pointerDownStateRef.current = {
+                wasFocused: document.activeElement === event.currentTarget,
+                wasOpen: open,
+              };
+            }}
+            placeholder={placeholder}
+            readOnly={!editable}
+            role="combobox"
+            value={displayValue}
+          />
+          {!editable && (
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+          )}
+        </div>
+      </PopoverAnchor>
+      {open && visibleOptions.length > 0 && (
+        <PopoverContent
+          align="start"
+          className="z-[60] max-h-[min(12rem,var(--radix-popover-content-available-height))] min-w-[8rem] max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overflow-x-hidden overscroll-contain rounded-[6px] border border-border bg-popover p-0 shadow-lg ring-1 ring-foreground/5"
+          collisionPadding={8}
           id={listboxId}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onInteractOutside={(event) => {
+            if (
+              event.target instanceof Node &&
+              anchorRef.current?.contains(event.target)
+            ) {
+              event.preventDefault();
+            }
+          }}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.stopPropagation()}
           role="listbox"
+          sideOffset={4}
+          style={contentWidth ? { width: contentWidth } : undefined}
         >
           {visibleOptions.map((option, index) => (
             <button
@@ -282,8 +351,8 @@ export function FilterDropdown({
               )}
             </button>
           ))}
-        </div>
+        </PopoverContent>
       )}
-    </div>
+    </Popover>
   );
 }

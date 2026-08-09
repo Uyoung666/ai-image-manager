@@ -193,21 +193,21 @@ function CullSessionPage() {
   const pendingCount = session.pendingCount;
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-3">
-        <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center justify-between border-border border-b px-3 py-2 sm:px-6 sm:py-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4">
           <button
-            className="text-muted-foreground hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => navigate({ to: "/cull" })}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="font-semibold text-[16px] text-foreground">
+          <h1 className="min-w-0 max-w-full truncate font-semibold text-[16px] text-foreground">
             {session.name}
           </h1>
           {!showResults && (
-            <span className="text-[12px] text-muted-foreground/70">
+            <span className="min-w-0 truncate text-[12px] text-muted-foreground/70">
               {isDuel
                 ? session.status === "completed"
                   ? `${t("cullPkCount", { count: session.completedComparisons })} · ✓`
@@ -241,20 +241,20 @@ function CullSessionPage() {
                   })}
             </span>
           )}
-          <span className="rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
+          <span className="shrink-0 rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
             {t("cullKeptCount", { count: keepCount })}
           </span>
-          <span className="rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
+          <span className="shrink-0 rounded-[4px] bg-destructive/10 px-1.5 py-0.5 font-medium text-[10px] text-destructive">
             {t("cullRejectedCount", { count: rejectCount })}
           </span>
         </div>
       </div>
 
       {/* Toggle bar */}
-      <div className="flex items-center gap-1 border-border border-b px-6 py-2">
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-border border-b px-3 py-1.5 sm:px-6 sm:py-2">
         {isDuel ? (
           <button
-            className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
               showResults
                 ? "text-muted-foreground hover:text-foreground"
                 : "bg-primary/10 font-medium text-primary"
@@ -266,7 +266,7 @@ function CullSessionPage() {
           </button>
         ) : (
           <button
-            className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
               showResults
                 ? "text-muted-foreground hover:text-foreground"
                 : "bg-primary/10 font-medium text-primary"
@@ -278,7 +278,7 @@ function CullSessionPage() {
           </button>
         )}
         <button
-          className={`flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
             showResults
               ? "bg-primary/10 font-medium text-primary"
               : "text-muted-foreground hover:text-foreground"
@@ -296,7 +296,7 @@ function CullSessionPage() {
         </button>
         {session.status === "completed" && (
           <button
-            className="ml-auto flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onClick={async () => {
               try {
                 await ipc.client.cull.resumeSession({ sessionId: session.id });
@@ -319,7 +319,7 @@ function CullSessionPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {showResults ? (
           resultQuery.data ? (
             <CullResult

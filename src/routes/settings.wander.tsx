@@ -46,7 +46,7 @@ function WanderSettingsPage() {
       title={t("settingsWander")}
     >
       <button
-        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 font-medium text-[13px] text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-2 font-medium text-[13px] text-primary-foreground [overflow-wrap:anywhere] hover:bg-primary/90 disabled:opacity-50"
         disabled={wanderActive || wanderLoading}
         onClick={() => startWander()}
         type="button"
@@ -55,7 +55,7 @@ function WanderSettingsPage() {
         {t("wander.startNow")}
       </button>
 
-      <div className="rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         <SettingRow
           action={
             <Switch
@@ -73,6 +73,7 @@ function WanderSettingsPage() {
           action={
             <FilterDropdown
               ariaLabel={t("wander.idleMinutes")}
+              className="max-w-full"
               onChange={(value) =>
                 updatePreference(
                   "idleMinutes",
@@ -94,6 +95,7 @@ function WanderSettingsPage() {
           action={
             <FilterDropdown
               ariaLabel={t("wander.intervalSeconds")}
+              className="max-w-full"
               onChange={(value) =>
                 updatePreference(
                   "intervalSeconds",
@@ -113,12 +115,12 @@ function WanderSettingsPage() {
         />
       </div>
 
-      <div className="rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         <div className="pb-2">
           <div className="font-medium text-[13px] text-foreground">
             {t("wander.contentMode")}
           </div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
             {t("wander.contentModeHint")}
           </div>
         </div>

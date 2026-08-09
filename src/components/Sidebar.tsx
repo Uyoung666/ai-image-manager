@@ -1856,7 +1856,7 @@ export function Sidebar({
       {/* Folder context menu */}
       {folderCtx && (
         <div
-          className="fixed z-[200] min-w-[140px] animate-context-menu-enter overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+          className="fixed z-[200] max-h-[calc(100dvh-1rem)] min-w-[140px] max-w-[calc(100dvw-1rem)] animate-context-menu-enter overflow-y-auto overflow-x-hidden overscroll-contain rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
           ref={ctxRef}
           style={{
             left: Math.min(folderCtx.x, window.innerWidth - 160),

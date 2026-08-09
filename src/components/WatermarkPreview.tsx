@@ -532,12 +532,12 @@ export function WatermarkPreview({
   const canvasCursorClass = dragging ? "cursor-grabbing" : "cursor-grab";
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3 rounded-t-[8px] border border-border border-b-0 bg-secondary px-3 py-2">
-        <span className="font-medium text-[12px] text-foreground">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 flex-col items-start gap-1 rounded-t-[8px] border border-border border-b-0 bg-secondary px-3 py-2 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between min-[900px]:gap-3">
+        <span className="shrink-0 font-medium text-[12px] text-foreground">
           {t("watermarkLivePreview")}
         </span>
-        <span className="min-w-0 truncate text-[10px] text-muted-foreground/70">
+        <span className="min-w-0 max-w-full break-all text-[10px] text-muted-foreground/70 min-[900px]:text-right">
           {samplePhotoName || t("watermarkPreviewSample")}
           {samplePhotoDimensions?.width && samplePhotoDimensions.height
             ? ` · ${samplePhotoDimensions.width} × ${samplePhotoDimensions.height}`
@@ -563,29 +563,29 @@ export function WatermarkPreview({
         />
         {!samplePhotoPath && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-[6px] bg-background/70 px-3 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm">
+            <span className="max-w-[calc(100%-1rem)] rounded-[6px] bg-background/70 px-3 py-1.5 text-center text-[11px] text-muted-foreground backdrop-blur-sm [overflow-wrap:anywhere]">
               {t("watermarkNoPreviewPhoto")}
             </span>
           </div>
         )}
         {wm.mode === "image" && wm.imagePath && !wmImg && !dragging && (
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-[5px] bg-destructive/85 px-2 py-1 text-[10px] text-white shadow-sm">
+          <div className="pointer-events-none absolute right-3 bottom-3 left-3 rounded-[5px] bg-destructive/85 px-2 py-1 text-center text-[10px] text-white shadow-sm [overflow-wrap:anywhere]">
             {t("watermarkAssetError")}
           </div>
         )}
         {!wm.enabled && (
-          <div className="pointer-events-none absolute top-2 left-2 rounded-[5px] bg-background/75 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur-sm">
+          <div className="pointer-events-none absolute top-2 left-2 max-w-[calc(100%-1rem)] rounded-[5px] bg-background/75 px-2 py-1 text-[10px] text-muted-foreground backdrop-blur-sm [overflow-wrap:anywhere]">
             {t("watermarkPreviewDisabled")}
           </div>
         )}
         {!dragging && (
-          <div className="pointer-events-none absolute top-2 right-2 rounded-[4px] bg-background/70 px-2 py-0.5 text-[10px] text-foreground/70 backdrop-blur-sm">
+          <div className="pointer-events-none absolute top-2 right-2 max-w-[calc(100%-1rem)] rounded-[4px] bg-background/70 px-2 py-0.5 text-right text-[10px] text-foreground/70 backdrop-blur-sm [overflow-wrap:anywhere]">
             {t("orDragPreview")}
           </div>
         )}
         {dragging && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-[4px] bg-primary/80 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm">
+            <span className="max-w-[calc(100%-1rem)] rounded-[4px] bg-primary/80 px-2 py-0.5 text-center text-[10px] text-white backdrop-blur-sm [overflow-wrap:anywhere]">
               {t("dragToPosition")}
             </span>
           </div>
@@ -593,10 +593,12 @@ export function WatermarkPreview({
       </div>
       <div
         aria-live="polite"
-        className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground/60"
+        className="flex min-w-0 flex-col items-start gap-1 text-[10px] text-muted-foreground/60 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between min-[900px]:gap-3"
       >
-        <span>{t("orDragPreview")}</span>
-        <span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">
+          {t("orDragPreview")}
+        </span>
+        <span className="min-w-0 [overflow-wrap:anywhere] min-[900px]:text-right">
           {t("watermarkReadout", {
             anchor: t(`anchor_${wm.anchor}`),
             marginPx: wm.margin,

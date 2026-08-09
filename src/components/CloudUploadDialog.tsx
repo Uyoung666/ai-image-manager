@@ -107,6 +107,28 @@ export function CloudUploadDialog({
   const pct = progress
     ? Math.round(((progress.done + progress.fail) / progress.total) * 100)
     : 0;
+  let progressBarClass = "bg-primary";
+  let progressLabel = "";
+  if (progress) {
+    if (done && progress.fail === 0) {
+      progressBarClass = "bg-success";
+    } else if (progress.fail > 0) {
+      progressBarClass = "bg-warning";
+    }
+    if (done && progress.fail === 0) {
+      progressLabel = t("cloudUploadDone", { count: progress.done });
+    } else if (done) {
+      progressLabel = t("cloudUploadDonePartial", {
+        done: progress.done,
+        fail: progress.fail,
+      });
+    } else {
+      progressLabel = t("cloudUploadingProgress", {
+        done: progress.done + progress.fail,
+        total: progress.total,
+      });
+    }
+  }
 
   return (
     <Dialog
@@ -118,6 +140,7 @@ export function CloudUploadDialog({
       open={open}
     >
       <DialogContent
+        className="max-h-[calc(100dvh-1rem)]"
         onEscapeKeyDown={(e) => {
           if (uploading) {
             e.preventDefault();
@@ -144,13 +167,13 @@ export function CloudUploadDialog({
         ) : (
           <>
             <div>
-              <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+              <p className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("cloudTargetStorage")}
-              </label>
-              <div className="space-y-1">
+              </p>
+              <div className="max-h-[min(18rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
                 {configs.map((cfg) => (
                   <button
-                    className={`w-full rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
+                    className={`flex w-full min-w-0 items-start gap-2 rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
                       selectedId === cfg.id
                         ? "border-primary/50 bg-primary/10 text-primary"
                         : "border-input text-muted-foreground hover:border-muted-foreground"
@@ -160,8 +183,10 @@ export function CloudUploadDialog({
                     onClick={() => setSelectedId(cfg.id)}
                     type="button"
                   >
-                    <span className="text-foreground">{cfg.name}</span>
-                    <span className="ml-2 text-[11px] opacity-60">
+                    <span className="min-w-0 flex-1 text-foreground [overflow-wrap:anywhere]">
+                      {cfg.name}
+                    </span>
+                    <span className="shrink-0 text-[11px] opacity-60">
                       {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                     </span>
                   </button>
@@ -173,34 +198,18 @@ export function CloudUploadDialog({
               <div className="space-y-2">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                   <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      done && progress.fail === 0
-                        ? "bg-success"
-                        : progress.fail > 0
-                          ? "bg-warning"
-                          : "bg-primary"
-                    }`}
+                    className={`h-full rounded-full transition-all duration-300 ${progressBarClass}`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  {done
-                    ? progress.fail === 0
-                      ? t("cloudUploadDone", { count: progress.done })
-                      : t("cloudUploadDonePartial", {
-                          done: progress.done,
-                          fail: progress.fail,
-                        })
-                    : t("cloudUploadingProgress", {
-                        done: progress.done + progress.fail,
-                        total: progress.total,
-                      })}
+                <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+                  {progressLabel}
                 </p>
               </div>
             )}
 
             {uploading && (
-              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <div className="flex min-w-0 items-start gap-2 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
                 <LoadingSpinner size="xs" />
                 {t("cloudUploadingHint")}
               </div>
@@ -210,7 +219,7 @@ export function CloudUploadDialog({
 
         <DialogFooter>
           <button
-            className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+            className="max-w-full rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors [overflow-wrap:anywhere] hover:bg-foreground/5 disabled:opacity-40"
             disabled={uploading}
             onClick={onClose}
             type="button"
@@ -219,7 +228,7 @@ export function CloudUploadDialog({
           </button>
           {configs.length > 0 && !done && (
             <button
-              className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity [overflow-wrap:anywhere] hover:opacity-90 disabled:opacity-40"
               disabled={!selectedId || uploading}
               onClick={handleUpload}
               type="button"

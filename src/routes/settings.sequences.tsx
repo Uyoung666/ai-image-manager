@@ -108,10 +108,10 @@ function SequencePresetToggle({
   return (
     <>
       <style>{`
-        .sequence-preset-group { position: relative; display: flex; box-sizing: border-box; width: 260px; padding: 0.25rem; border-radius: 0.5rem; background-color: var(--muted); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06); font-size: 14px; }
-        .sequence-preset-option { flex: 1 1 0; text-align: center; }
+        .sequence-preset-group { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); box-sizing: border-box; width: min(260px, 100%); max-width: 100%; padding: 0.25rem; border-radius: 0.5rem; background-color: var(--muted); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06); font-size: 14px; }
+        .sequence-preset-option { min-width: 0; text-align: center; }
         .sequence-preset-option input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-        .sequence-preset-option span { display: flex; cursor: pointer; align-items: center; justify-content: center; border-radius: 0.5rem; padding: 0.5rem 0; color: var(--muted-foreground); transition: all 0.15s ease-in-out; user-select: none; }
+        .sequence-preset-option span { display: flex; min-width: 0; cursor: pointer; align-items: center; justify-content: center; overflow-wrap: anywhere; border-radius: 0.5rem; padding: 0.5rem 0.25rem; color: var(--muted-foreground); line-height: 1.2; transition: all 0.15s ease-in-out; user-select: none; }
         .sequence-preset-option:hover span { background-color: color-mix(in srgb, var(--surface) 50%, transparent); }
         .sequence-preset-option input:checked + span { position: relative; background-color: var(--surface); color: var(--foreground); font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); animation: sequence-preset-select 0.3s ease; }
         .sequence-preset-option input:focus-visible + span { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -120,6 +120,7 @@ function SequencePresetToggle({
         .sequence-preset-option input:checked + span::after { bottom: -8px; left: 50%; transform: translateX(-50%); --direction: 10px; }
         @keyframes sequence-preset-select { 0% { transform: scale(0.95); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         @keyframes sequence-preset-particles { 0% { opacity: 0; transform: translateX(-50%) translateY(0); } 50% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(var(--direction)); } }
+        @media (max-width: 480px) { .sequence-preset-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (prefers-reduced-motion: reduce) { .sequence-preset-option span, .sequence-preset-option input:checked + span, .sequence-preset-option input:checked + span::before, .sequence-preset-option input:checked + span::after { animation: none; transition: none; } }
       `}</style>
       <fieldset
@@ -223,7 +224,7 @@ function SequenceSettingsPage() {
         <SettingRow
           action={
             <input
-              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              className="w-20 max-w-full rounded border border-border bg-background px-2 py-1 text-sm"
               min={3}
               onChange={(event) =>
                 saveCustom({
@@ -241,7 +242,7 @@ function SequenceSettingsPage() {
         <SettingRow
           action={
             <input
-              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              className="w-20 max-w-full rounded border border-border bg-background px-2 py-1 text-sm"
               max={50}
               min={1}
               onChange={(event) =>
@@ -260,7 +261,7 @@ function SequenceSettingsPage() {
         <SettingRow
           action={
             <input
-              className="w-20 rounded border border-border bg-background px-2 py-1 text-sm"
+              className="w-20 max-w-full rounded border border-border bg-background px-2 py-1 text-sm"
               max={64}
               min={1}
               onChange={(event) =>

@@ -56,7 +56,7 @@ function ModeButton({
   return (
     <button
       aria-pressed={active}
-      className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-3 py-2 text-[12px] transition-all duration-150 ${
+      className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 py-2 text-[12px] transition-all duration-150 min-[480px]:px-3 ${
         active
           ? "bg-card font-medium text-foreground shadow-[0_2px_8px_rgba(0,0,0,0.1)] ring-1 ring-primary/20"
           : "text-muted-foreground hover:bg-card/50 hover:text-foreground"
@@ -64,8 +64,10 @@ function ModeButton({
       onClick={() => onClick(mode)}
       type="button"
     >
-      {icon}
-      {label}
+      <span className="shrink-0">{icon}</span>
+      <span className="min-w-0 text-center leading-tight [overflow-wrap:anywhere]">
+        {label}
+      </span>
     </button>
   );
 }
@@ -85,7 +87,7 @@ function StatusMessage({
   }
   return (
     <div
-      className={`rounded-[6px] border px-2.5 py-2 text-[11px] leading-relaxed ${className}`}
+      className={`min-w-0 rounded-[6px] border px-2.5 py-2 text-[11px] leading-relaxed [overflow-wrap:anywhere] ${className}`}
     >
       {children}
     </div>
@@ -118,7 +120,7 @@ export function WatermarkControls({
   return (
     <div
       className={cn(
-        "min-h-0 space-y-4 overflow-y-auto rounded-[8px] border border-border bg-secondary p-4",
+        "min-h-0 min-w-0 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4",
         className
       )}
     >
@@ -138,7 +140,7 @@ export function WatermarkControls({
           </p>
         </div>
 
-        <fieldset className="flex gap-1 rounded-[8px] bg-muted p-1">
+        <fieldset className="flex min-w-0 gap-1 rounded-[8px] bg-muted p-1">
           <legend className="sr-only">{t("watermarkType")}</legend>
           <ModeButton
             active={wm.mode === "text"}
@@ -180,7 +182,7 @@ export function WatermarkControls({
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
               <span>{t("watermarkImageFile")}</span>
               {imageStatus === "ready" && (
                 <span className="flex items-center gap-1 text-success">
@@ -208,7 +210,7 @@ export function WatermarkControls({
                 )}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] text-foreground">
+                <span className="block text-[12px] text-foreground [overflow-wrap:anywhere]">
                   {wm.imagePath
                     ? wm.imagePath.split(PATH_SEPARATOR_RE).pop()
                     : t("watermarkChooseImage")}
@@ -226,8 +228,8 @@ export function WatermarkControls({
               </StatusMessage>
             )}
             {wm.imagePath && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[10px] text-muted-foreground/60">
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 break-all text-[10px] text-muted-foreground/60">
                   {wm.imagePath}
                 </span>
                 <button
@@ -277,7 +279,7 @@ export function WatermarkControls({
 
         <div className="space-y-1.5">
           <label
-            className="flex items-center justify-between text-[11px] text-muted-foreground"
+            className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-muted-foreground"
             htmlFor="watermark-size"
           >
             <span>
@@ -309,7 +311,7 @@ export function WatermarkControls({
 
         <div className="space-y-1.5">
           <label
-            className="flex items-center justify-between text-[11px] text-muted-foreground"
+            className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-muted-foreground"
             htmlFor="watermark-opacity"
           >
             <span>{t("watermarkOpacity", { value: wm.opacity })}</span>
@@ -336,8 +338,8 @@ export function WatermarkControls({
         aria-labelledby="watermark-position-heading"
         className="space-y-3 border-border border-t pt-4"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
             <h3
               className="font-medium text-[13px] text-foreground"
               id="watermark-position-heading"
@@ -390,7 +392,7 @@ export function WatermarkControls({
 
         <div className="space-y-1.5">
           <label
-            className="flex items-center justify-between text-[11px] text-muted-foreground"
+            className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-muted-foreground"
             htmlFor="watermark-margin"
           >
             <span>{t("watermarkMargin", { value: wm.margin })}</span>
@@ -411,8 +413,10 @@ export function WatermarkControls({
 
       {saveState === "error" && (
         <StatusMessage tone="error">
-          <div className="flex items-center justify-between gap-2">
-            <span>{t("watermarkSaveError")}</span>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              {t("watermarkSaveError")}
+            </span>
             <button
               className="font-medium underline"
               onClick={onRetrySave}

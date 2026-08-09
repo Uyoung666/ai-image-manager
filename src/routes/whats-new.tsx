@@ -79,7 +79,7 @@ export function WhatsNewPage() {
 
   if (!entry) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-center">
+      <div className="flex h-full min-h-0 min-w-0 items-center justify-center overflow-y-auto p-4 text-center sm:p-6">
         <Button
           className="rounded-full bg-primary px-5 py-2.5 font-medium text-primary-foreground text-sm transition-transform hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={handleContinue}
@@ -97,13 +97,13 @@ export function WhatsNewPage() {
   const highlightCount = String(entry.highlights.length).padStart(2, "0");
 
   return (
-    <div className="whats-new-page h-full overflow-hidden">
-      <div className="whats-new-page-inner">
+    <div className="whats-new-page !overflow-x-hidden !overflow-y-auto h-full min-h-0 min-w-0">
+      <div className="whats-new-page-inner min-w-0">
         <nav
           aria-label={t("updateChangelogTitle")}
-          className="whats-new-topbar"
+          className="whats-new-topbar min-w-0 gap-3"
         >
-          <div className="whats-new-brand">
+          <div className="whats-new-brand min-w-0">
             <img
               alt=""
               className="whats-new-brand-icon"
@@ -112,7 +112,7 @@ export function WhatsNewPage() {
               src={appIcon}
               width={22}
             />
-            <span>AI Image Manager</span>
+            <span className="min-w-0 truncate">AI Image Manager</span>
           </div>
           <Button
             aria-label={t("whatsNewClose")}
@@ -126,26 +126,26 @@ export function WhatsNewPage() {
           </Button>
         </nav>
 
-        <main className="whats-new-main">
-          <header className="whats-new-hero">
+        <main className="whats-new-main min-w-0">
+          <header className="whats-new-hero min-w-0">
             <ReleaseVisual version={entry.version} />
-            <div className="whats-new-hero-copy">
+            <div className="whats-new-hero-copy min-w-0 max-w-full">
               <p className="whats-new-eyebrow">{t("whatsNewEyebrow")}</p>
-              <div className="whats-new-meta">
+              <div className="whats-new-meta flex-wrap">
                 <span className="whats-new-version">v{entry.version}</span>
                 <span aria-hidden="true" className="whats-new-meta-dot" />
                 <span>{formatReleaseDate(entry.date, language)}</span>
               </div>
-              <h1 className="whats-new-title">{title}</h1>
-              <p className="whats-new-summary">{summary}</p>
+              <h1 className="whats-new-title break-words">{title}</h1>
+              <p className="whats-new-summary break-words">{summary}</p>
             </div>
           </header>
 
           <section
             aria-labelledby="whats-new-highlights"
-            className="whats-new-highlights"
+            className="whats-new-highlights min-w-0 max-w-full"
           >
-            <div className="whats-new-section-heading">
+            <div className="whats-new-section-heading min-w-0">
               <h2 id="whats-new-highlights">{t("whatsNewHighlights")}</h2>
               <span className="whats-new-highlight-count">
                 {highlightCount}
@@ -153,18 +153,18 @@ export function WhatsNewPage() {
             </div>
             <section
               aria-labelledby="whats-new-highlights"
-              className="whats-new-highlight-list"
+              className="whats-new-highlight-list min-w-0"
             >
               {entry.highlights.map((highlight, index) => (
                 <article
-                  className="whats-new-highlight"
+                  className="whats-new-highlight min-w-0"
                   key={`${entry.version}-${highlight.title.en}`}
                   style={{ "--whats-new-index": index } as CSSProperties}
                 >
                   <span className="whats-new-highlight-number">
                     {String(index + 1).padStart(2, "0")}
                   </span>
-                  <div className="whats-new-highlight-copy">
+                  <div className="whats-new-highlight-copy min-w-0">
                     <h3>{getLocalizedText(highlight.title, language)}</h3>
                     <p>{getLocalizedText(highlight.description, language)}</p>
                   </div>
@@ -188,7 +188,7 @@ export function WhatsNewPage() {
           </section>
         </main>
 
-        <footer className="whats-new-actions">
+        <footer className="whats-new-actions min-w-0 pb-2">
           <Button
             autoFocus
             className="whats-new-continue"

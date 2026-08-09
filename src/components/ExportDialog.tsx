@@ -8,6 +8,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 
@@ -96,6 +101,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
       open={open}
     >
       <DialogContent
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
           if (exporting) {
             e.preventDefault();
@@ -172,19 +178,36 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
 
         {result && (
           <div
-            className={`rounded-[6px] px-3 py-2 text-[12px] ${
+            className={`min-w-0 rounded-[6px] px-3 py-2 text-[12px] ${
               result.error
                 ? "bg-destructive/10 text-destructive"
                 : "bg-success/10 text-success"
             }`}
           >
-            {result.error
-              ? result.error
-              : t("exportComplete", {
-                  filename: result.filename,
-                  count: result.photoCount,
-                  size: result.sizeMB,
-                })}
+            {result.error ? (
+              <span className="block [overflow-wrap:anywhere]">
+                {result.error}
+              </span>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="block truncate">
+                    {t("exportComplete", {
+                      filename: result.filename,
+                      count: result.photoCount,
+                      size: result.sizeMB,
+                    })}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {t("exportComplete", {
+                    filename: result.filename,
+                    count: result.photoCount,
+                    size: result.sizeMB,
+                  })}
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
         )}
 
@@ -199,7 +222,7 @@ export function ExportDialog({ open, onClose, photoIds }: ExportDialogProps) {
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="flex-wrap">
           <button
             className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
             disabled={exporting}

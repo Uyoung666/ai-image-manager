@@ -82,10 +82,10 @@ export function CullSessionCard({
 
   return (
     <button
-      className="group relative flex cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
+      className="group relative flex min-w-0 cursor-pointer flex-col rounded-[8px] border border-border bg-secondary p-4 text-left transition-colors hover:border-primary/30 hover:bg-secondary/80"
       onClick={onClick}
     >
-      <div className="absolute top-1.5 right-1.5 z-10 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+      <div className="absolute top-1.5 right-1.5 z-10 flex opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-[760px]:opacity-100">
         {[
           { action: onRename, icon: Pencil, label: t("rename") },
           { action: onDuplicate, icon: Copy, label: t("duplicate") },
@@ -111,11 +111,11 @@ export function CullSessionCard({
       </div>
 
       {/* Mode badge */}
-      <div className="mb-3 flex items-center gap-1.5">
+      <div className="mb-3 flex min-w-0 items-center gap-1.5 max-[760px]:pr-24">
         <span className="rounded-[4px] bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
           {getModeIcon(session.mode)}
         </span>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
           {getModeLabel(session.mode)}
         </span>
         {session.status === "completed" && (
@@ -131,7 +131,7 @@ export function CullSessionCard({
       </h3>
 
       {/* Meta */}
-      <div className="mt-1.5 text-[11px] text-muted-foreground/70">
+      <div className="mt-1.5 break-words text-[11px] text-muted-foreground/70">
         {t("cullPhotoCount", { count: session.totalPhotos })}
         {session.mode !== "curate" &&
           session.completedComparisons > 0 &&

@@ -115,7 +115,7 @@ export function SelectionActionBar({
 
   return (
     <div
-      className={`selection-action-layer pointer-events-none absolute right-0 left-0 z-40 flex items-center justify-center px-4 transition-all duration-200 ease-out ${
+      className={`selection-action-layer pointer-events-none absolute right-0 left-0 z-40 flex min-w-0 items-center justify-center px-4 transition-all duration-200 ease-out ${
         visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
       }`}
       onTransitionEnd={() => {
@@ -135,7 +135,7 @@ export function SelectionActionBar({
             }
       }
     >
-      <div className="selection-menu pointer-events-auto">
+      <div className="selection-menu pointer-events-auto min-w-0 max-w-full">
         <span className="selection-menu-count">
           {t("selectedPhotos", { count: selectedCount })}
         </span>
@@ -337,7 +337,8 @@ function MoreActions({
       </PopoverTrigger>
       <PopoverContent
         align="center"
-        className="selection-more-menu w-48 gap-0 p-1.5"
+        className="selection-more-menu max-h-[min(20rem,var(--radix-popover-content-available-height))] w-48 max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain p-1.5"
+        collisionPadding={8}
         side="top"
         sideOffset={10}
       >
@@ -370,7 +371,7 @@ function MoreAction({
       <span className="selection-more-menu-icon">
         {executing ? <LoadingSpinner size="sm" variant="inherit" /> : icon}
       </span>
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </button>
   );
 }

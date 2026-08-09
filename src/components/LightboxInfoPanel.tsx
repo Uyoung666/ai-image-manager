@@ -221,12 +221,12 @@ export function LightboxInfoPanel({
   return (
     <aside
       aria-label={t("photoDetail")}
-      className="relative z-20 flex h-full shrink-0 flex-col border-white/10 border-l bg-[#111114] text-white"
+      className="relative z-40 flex h-full shrink-0 flex-col border-white/10 border-l bg-[#111114] text-white max-[800px]:absolute max-[800px]:inset-y-0 max-[800px]:right-0 max-[800px]:max-w-[calc(100vw-3rem)] max-[800px]:shadow-2xl"
       style={{ width }}
     >
       <div
         aria-hidden="true"
-        className={`absolute top-0 -left-1 h-full w-2 cursor-col-resize ${resizing ? "bg-primary/50" : "hover:bg-white/10"}`}
+        className={`absolute top-0 -left-1 h-full w-2 cursor-col-resize max-[800px]:hidden ${resizing ? "bg-primary/50" : "hover:bg-white/10"}`}
         onMouseDown={(event) => {
           event.preventDefault();
           resizeStart.current = { x: event.clientX, width };
@@ -238,7 +238,20 @@ export function LightboxInfoPanel({
       <header className="flex h-14 shrink-0 items-center justify-between border-white/10 border-b px-4">
         <div className="min-w-0">
           <h2 className="font-semibold text-[14px]">{t("photoDetail")}</h2>
-          <p className="truncate text-[11px] text-white/45">{photo.filename}</p>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <p
+                className="truncate text-[11px] text-white/45"
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
+                tabIndex={0}
+              >
+                {photo.filename}
+              </p>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+              {photo.filename}
+            </TooltipContent>
+          </Tooltip>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -371,10 +384,17 @@ export function LightboxInfoPanel({
         )}
 
         <InfoSection title={t("filePath")}>
-          <p className="break-all text-[11px] text-white/55 leading-relaxed">
-            {photo.path}
-          </p>
-          <div className="mt-2 flex gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <p className="truncate text-[11px] text-white/55 leading-relaxed">
+                {photo.path}
+              </p>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+              {photo.path}
+            </TooltipContent>
+          </Tooltip>
+          <div className="mt-2 flex flex-wrap gap-2">
             <button
               className="lightbox-secondary-button"
               onClick={() => {
@@ -424,7 +444,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 text-[11px]">
       <span className="shrink-0 text-white/40">{label}</span>
-      <span className="min-w-0 break-words text-right text-white/75">
+      <span className="min-w-0 text-right text-white/75 [overflow-wrap:anywhere]">
         {value}
       </span>
     </div>

@@ -170,7 +170,7 @@ export function BatchRenameDialog({
       open={open}
     >
       <DialogContent
-        className="max-h-[85vh] overflow-y-auto"
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
           if (blockClose) {
             e.preventDefault();
@@ -192,7 +192,7 @@ export function BatchRenameDialog({
 
         {hasResult ? (
           <>
-            <div className="flex items-center gap-4 text-[14px]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[14px]">
               <span className="text-success">
                 {t("batchRenameSuccess", { count: successResults.length })}
               </span>
@@ -203,17 +203,45 @@ export function BatchRenameDialog({
               )}
             </div>
             {errorResults.length > 0 && (
-              <div className="max-h-[200px] overflow-auto rounded-md border border-border">
+              <div className="max-h-[min(200px,35dvh)] overflow-auto overscroll-contain rounded-md border border-border">
                 {errorResults.map((r) => (
                   <div
-                    className="border-border border-b px-3 py-2 text-[12px] text-muted-foreground last:border-b-0"
+                    className="flex min-w-0 flex-wrap items-center gap-x-1 border-border border-b px-3 py-2 text-[12px] text-muted-foreground last:border-b-0"
                     key={r.id}
                   >
-                    <span className="text-destructive">{r.oldName}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="min-w-0 max-w-[45%] truncate text-destructive"
+                          // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
+                          tabIndex={0}
+                        >
+                          {r.oldName}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                        {r.oldName}
+                      </TooltipContent>
+                    </Tooltip>
                     {" → "}
-                    {r.newName}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="min-w-0 max-w-[45%] truncate"
+                          // biome-ignore lint/a11y/noNoninteractiveTabindex: truncated filename must expose its Tooltip to keyboard users
+                          tabIndex={0}
+                        >
+                          {r.newName}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                        {r.newName}
+                      </TooltipContent>
+                    </Tooltip>
                     {r.error && (
-                      <span className="ml-2 text-destructive">({r.error})</span>
+                      <span className="w-full text-destructive [overflow-wrap:anywhere]">
+                        ({r.error})
+                      </span>
                     )}
                   </div>
                 ))}
@@ -261,13 +289,20 @@ export function BatchRenameDialog({
               />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <span className="text-[11px] text-muted-foreground/70">
                 {t("preview")}{" "}
               </span>
-              <span className="font-mono text-[13px] text-muted-foreground">
-                {serverPreview || previewName()}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-block max-w-full truncate align-bottom font-mono text-[13px] text-muted-foreground">
+                    {serverPreview || previewName()}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {serverPreview || previewName()}
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             <div>
@@ -306,11 +341,11 @@ export function BatchRenameDialog({
               </div>
             )}
 
-            <DialogFooter className="items-center sm:justify-between">
-              <span className="text-[12px] text-muted-foreground/70">
+            <DialogFooter className="items-stretch sm:items-center sm:justify-between">
+              <span className="min-w-0 text-[12px] text-muted-foreground/70 [overflow-wrap:anywhere]">
                 {t("batchRenameNote")}
               </span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button
                   className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground hover:bg-foreground/5 disabled:opacity-40"
                   disabled={executing}

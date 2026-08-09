@@ -179,7 +179,10 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
       }}
       open={open}
     >
-      <DialogContent className="max-h-[80vh] overflow-y-auto" size="lg">
+      <DialogContent
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
+        size="lg"
+      >
         <DialogHeader>
           <DialogTitle>{t("keyboardShortcutsTitle")}</DialogTitle>
         </DialogHeader>
@@ -192,13 +195,13 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
               <div className="space-y-0.5">
                 {SHORTCUTS.filter((s) => s.sectionKey === section).map((s) => (
                   <div
-                    className="flex items-center justify-between py-1"
+                    className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-1"
                     key={s.labelKey}
                   >
-                    <span className="text-[13px] text-muted-foreground">
+                    <span className="min-w-0 flex-[1_1_12rem] text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
                       {t(s.labelKey)}
                     </span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
                       {s.keyLabels.map((k, j) => (
                         <span
                           className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-medium text-[11px] text-muted-foreground"

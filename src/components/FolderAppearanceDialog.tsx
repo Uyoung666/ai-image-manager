@@ -10,6 +10,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   FOLDER_APPEARANCE_COLORS,
   FOLDER_APPEARANCE_ICONS,
   type FolderAppearanceIcon,
@@ -67,7 +72,7 @@ export function FolderAppearanceDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={folder !== null}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-md overflow-y-auto overflow-x-hidden overscroll-contain">
         <DialogHeader>
           <DialogTitle>{t("folderAppearanceTitle")}</DialogTitle>
           <DialogDescription>
@@ -79,9 +84,16 @@ export function FolderAppearanceDialog({
           <div className="flex items-center gap-3 rounded-[8px] border border-border bg-foreground/[0.025] p-3">
             <FolderBadge className="h-9 w-9 text-sm" folder={previewFolder} />
             <div className="min-w-0">
-              <p className="truncate font-medium text-sm">
-                {previewFolder.displayName}
-              </p>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="truncate font-medium text-sm">
+                    {previewFolder.displayName}
+                  </p>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                  {previewFolder.displayName}
+                </TooltipContent>
+              </Tooltip>
               <p className="text-[11px] text-muted-foreground">
                 {t("folderAppearancePreview")}
               </p>
@@ -166,7 +178,7 @@ export function FolderAppearanceDialog({
           )}
         </div>
 
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="items-stretch sm:items-center sm:justify-between">
           <button
             className="rounded-[6px] px-3 py-1.5 text-muted-foreground text-xs hover:bg-foreground/5 hover:text-foreground"
             onClick={() => {
@@ -177,7 +189,7 @@ export function FolderAppearanceDialog({
           >
             {t("folderAppearanceReset")}
           </button>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <button
               className="rounded-[6px] border border-border px-3 py-1.5 text-xs hover:bg-foreground/5"
               onClick={() => onOpenChange(false)}

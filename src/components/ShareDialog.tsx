@@ -119,6 +119,7 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       open={open}
     >
       <DialogContent
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
           if (loading) {
             e.preventDefault();
@@ -151,9 +152,9 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
               <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("shareLink")}
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <input
-                  className="h-8 flex-1 rounded-[4px] border border-input bg-card px-3 font-mono text-[12px] text-foreground outline-none"
+                  className="h-8 min-w-0 flex-1 rounded-[4px] border border-input bg-card px-3 font-mono text-[12px] text-foreground outline-none"
                   readOnly
                   value={result.url}
                 />
@@ -211,10 +212,10 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
               <label className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
                 {t("uploadTo")}
               </label>
-              <div className="space-y-1">
+              <div className="max-h-[min(15rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
                 {configs.map((cfg) => (
                   <button
-                    className={`w-full rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
+                    className={`flex w-full min-w-0 items-center rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
                       selectedId === cfg.id
                         ? "border-primary/50 bg-primary/10 text-primary"
                         : "border-input text-muted-foreground hover:border-muted-foreground"
@@ -224,8 +225,17 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
                     onClick={() => setSelectedId(cfg.id)}
                     type="button"
                   >
-                    <span className="text-foreground">{cfg.name}</span>
-                    <span className="ml-2 text-[11px] opacity-60">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          {cfg.name}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                        {cfg.name}
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className="ml-2 shrink-0 text-[11px] opacity-60">
                       {PROVIDER_LABELS[cfg.provider] || cfg.provider}
                     </span>
                   </button>

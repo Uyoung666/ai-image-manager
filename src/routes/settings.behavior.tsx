@@ -131,7 +131,7 @@ function BehaviorSettingsPage() {
           action={
             <FilterDropdown
               ariaLabel={t("settingsCloseBehavior")}
-              className="min-w-[160px]"
+              className="w-full min-w-0 max-w-[220px]"
               onChange={(value) =>
                 onCloseBehaviorChange(value as CloseBehavior)
               }

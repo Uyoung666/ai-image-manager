@@ -51,6 +51,8 @@ import { useImportDropContext } from "@/contexts/import-drop-context";
 import { useScrollPosition } from "@/contexts/ScrollPositionContext";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
 import { useAiStatus } from "@/hooks/useAiStatus";
 import { useFolders } from "@/hooks/useFolders";
 import { usePhotoDetailPanel } from "@/hooks/usePhotoDetailPanel";
@@ -208,6 +210,8 @@ function resolveSearchMode(query: string, color?: string | null): SearchMode {
 
 function HomePage() {
   const { t } = useTranslation();
+  const compactDetailOverlay = useMediaQuery("(max-width: 1120px)");
+  const detailOverlayRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const filter = useSidebarFilter();
   const { registerImageSearch } = useImportDropContext();
@@ -2442,6 +2446,24 @@ function HomePage() {
     [filter.toggleTag]
   );
 
+  const detailOverlayOpen = Boolean(
+    detailPhoto || selectedSequence || sequenceDetailsLoading
+  );
+  useModalFocusTrap({
+    active: compactDetailOverlay && detailOverlayOpen,
+    containerRef: detailOverlayRef,
+    onEscape: () => {
+      if (selectedSequence || sequenceDetailsLoading) {
+        setSelectedSequence(null);
+        setSequenceDetailsLoading(false);
+        return;
+      }
+      dismissDetail();
+      clearSelection();
+      setSequenceReturnTarget(null);
+    },
+  });
+
   const hasPhotos =
     photos.length > 0 ||
     (loading && photos.length === 0) ||
@@ -2459,6 +2481,7 @@ function HomePage() {
         className="relative flex h-full min-w-0 flex-col"
       >
         <div
+          inert={compactDetailOverlay && detailOverlayOpen}
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
           ref={galleryToolbarRef}
           style={{
@@ -2476,7 +2499,7 @@ function HomePage() {
             filters={filter.searchDraft.filters}
             imageSearchActive={searchMode === "image"}
             leadingContent={
-              <div className="flex min-w-[148px] max-w-[220px] items-center gap-2 pr-1">
+              <div className="flex w-full min-w-0 max-w-[220px] items-center gap-2 pr-1">
                 <div className="min-w-0">
                   <div className="truncate font-medium text-[13px] text-foreground">
                     {galleryContextLabel}
@@ -2504,7 +2527,7 @@ function HomePage() {
             }
             trailingContent={
               <>
-                <div className="flex rounded-md border border-border p-0.5 text-[11px]">
+                <div className="flex min-w-0 flex-wrap rounded-md border border-border p-0.5 text-[11px]">
                   <button
                     className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
                     onClick={() => handleSequenceModeChange("photos")}
@@ -2606,13 +2629,13 @@ function HomePage() {
             )}
           {/* Drill-down banner */}
           {showDrillBanner && (
-            <div className="flex items-center justify-between border-primary/20 border-b bg-primary/10 px-4 py-2 dark:border-primary/40 dark:bg-primary/20">
-              <div className="flex items-center gap-2">
-                <span className="text-primary text-sm">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-primary/20 border-b bg-primary/10 px-4 py-2 dark:border-primary/40 dark:bg-primary/20">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 [overflow-wrap:anywhere] text-primary text-sm">
                   {t("drillDownActiveHint")}
                 </span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   className="rounded-[4px] px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
                   onClick={() => {
@@ -2655,7 +2678,10 @@ function HomePage() {
         </div>
         {hasPhotos ? (
           <div className="home-gallery-body relative flex min-h-0 flex-1">
-            <div className="relative flex min-w-0 flex-1">
+            <div
+              className="relative flex min-w-0 flex-1"
+              inert={compactDetailOverlay && detailOverlayOpen}
+            >
               <div
                 className={`home-gallery-restore-content flex min-w-0 flex-1 ${
                   restorePending ? "is-restoring" : ""
@@ -2806,10 +2832,30 @@ function HomePage() {
               />
             </div>
             {(detailPhoto || selectedSequence || sequenceDetailsLoading) && (
-              <aside
-                className="photo-detail-panel-shell shrink-0 overflow-hidden relative"
-                style={{ width: detailPanelWidth }}
-              >
+              <>
+                <button
+                  aria-label={t("close")}
+                  className="photo-detail-panel-backdrop"
+                  onClick={() => {
+                    if (selectedSequence || sequenceDetailsLoading) {
+                      setSelectedSequence(null);
+                      setSequenceDetailsLoading(false);
+                      return;
+                    }
+                    dismissDetail();
+                    clearSelection();
+                    setSequenceReturnTarget(null);
+                  }}
+                  type="button"
+                />
+                <div
+                  aria-label={t("photoDetail")}
+                  aria-modal={compactDetailOverlay ? true : undefined}
+                  className="home-detail-panel-container relative shrink-0 overflow-hidden"
+                  ref={detailOverlayRef}
+                  role={compactDetailOverlay ? "dialog" : "complementary"}
+                  style={{ width: detailPanelWidth }}
+                >
                 {/* 照片详情层 — 始终挂载，序列激活时交叉淡出 */}
                 <div
                   className="absolute inset-0"
@@ -2924,7 +2970,8 @@ function HomePage() {
                     />
                   </div>
                 )}
-              </aside>
+                </div>
+              </>
             )}
           </div>
         ) : (

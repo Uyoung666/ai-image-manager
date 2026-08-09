@@ -262,7 +262,7 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
           {representative?.thumbnailPath && (
             <img
               alt={representative.filename}
-              className="h-[180px] w-full rounded-[6px] object-contain"
+              className="sequence-detail-preview h-[180px] w-full rounded-[6px] object-contain"
               height={180}
               src={toLocalMediaUrl(representative.thumbnailPath)}
               width={320}

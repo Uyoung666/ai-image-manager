@@ -22,7 +22,9 @@ describe("ConfirmDialog responsive layout", () => {
 
     expect(dialog).toHaveClass(
       "w-[calc(100%-2rem)]",
-      "data-[size=sm]:max-w-sm"
+      "data-[size=sm]:max-w-sm",
+      "max-h-[calc(100dvh-2rem)]",
+      "overflow-y-auto"
     );
     expect(footer).toHaveClass("sm:flex-wrap");
     expect(confirm).toHaveClass("min-w-0", "whitespace-normal", "text-center");

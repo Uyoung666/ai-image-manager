@@ -131,7 +131,7 @@ export function PhotoMap({
 
   if (locations.length === 0) {
     return (
-      <div className="flex h-[320px] items-center justify-center rounded-[8px] border border-border bg-secondary">
+      <div className="flex h-[clamp(240px,55dvh,320px)] items-center justify-center rounded-[8px] border border-border bg-secondary">
         <p className="text-[13px] text-muted-foreground/70">{t("noGeoData")}</p>
       </div>
     );
@@ -139,7 +139,7 @@ export function PhotoMap({
 
   if (!ready) {
     return (
-      <div className="h-[320px] rounded-[8px] border border-border bg-secondary" />
+      <div className="h-[clamp(240px,55dvh,320px)] rounded-[8px] border border-border bg-secondary" />
     );
   }
 
@@ -153,7 +153,7 @@ export function PhotoMap({
       <MapContainer
         attributionControl={false}
         center={center}
-        className="h-[380px] w-full"
+        className="h-[clamp(240px,55dvh,380px)] w-full"
         key={mapSource}
         zoom={5}
         zoomControl={false}
@@ -177,7 +177,7 @@ export function PhotoMap({
             position={[loc.latitude, loc.longitude]}
           >
             <Popup>
-              <div className="min-w-[160px]">
+              <div className="max-h-[min(18rem,calc(100dvh-3rem))] w-[min(160px,calc(100vw-3rem))] min-w-0 overflow-y-auto overscroll-contain">
                 {loc.path && (
                   <img
                     alt={loc.filename || ""}
@@ -185,9 +185,16 @@ export function PhotoMap({
                     src={toLocalMediaUrl(loc.path)}
                   />
                 )}
-                <p className="font-medium text-[12px] text-foreground">
-                  {loc.filename || "—"}
-                </p>
+                <AppTooltip>
+                  <AppTooltipTrigger asChild>
+                    <p className="truncate font-medium text-[12px] text-foreground">
+                      {loc.filename || "—"}
+                    </p>
+                  </AppTooltipTrigger>
+                  <AppTooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                    {loc.filename || "—"}
+                  </AppTooltipContent>
+                </AppTooltip>
                 {loc.width && loc.height && (
                   <p className="text-[10px] text-muted-foreground/70">
                     {loc.width} × {loc.height}
@@ -210,7 +217,7 @@ export function PhotoMap({
                 ? t("mapSwitchToOnline")
                 : t("mapSwitchToOffline")
             }
-            className="absolute top-2 right-2 z-[1000] flex items-center gap-1.5 rounded-[6px] border border-border bg-secondary/90 px-2.5 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:bg-secondary hover:text-foreground"
+            className="absolute top-2 right-2 z-[1000] flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-[6px] border border-border bg-secondary/90 px-2.5 py-1.5 text-[11px] text-muted-foreground backdrop-blur-sm transition-colors hover:bg-secondary hover:text-foreground"
             onClick={() =>
               onMapSourceChange(mapSource === "offline" ? "online" : "offline")
             }
@@ -219,12 +226,12 @@ export function PhotoMap({
             {mapSource === "offline" ? (
               <>
                 <Globe className="h-3.5 w-3.5" />
-                <span>{t("mapModeOnline")}</span>
+                <span className="truncate">{t("mapModeOnline")}</span>
               </>
             ) : (
               <>
                 <WifiOff className="h-3.5 w-3.5" />
-                <span>{t("mapModeOffline")}</span>
+                <span className="truncate">{t("mapModeOffline")}</span>
               </>
             )}
           </button>

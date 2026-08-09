@@ -92,7 +92,10 @@ export function FaceReassignDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent size="sm">
+      <DialogContent
+        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
+        size="sm"
+      >
         <DialogHeader>
           <DialogTitle>{t("faceReassignTitle")}</DialogTitle>
           <DialogDescription className="truncate">
@@ -105,7 +108,7 @@ export function FaceReassignDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-1 max-h-[300px] overflow-y-auto">
+        <div className="-mx-1 max-h-[min(18.75rem,42dvh)] overflow-y-auto overscroll-contain">
           {availableIdentities.length === 0 ? (
             <p className="px-3 py-6 text-center text-[13px] text-muted-foreground/70">
               {t("faceReassignNoIdentities")}
@@ -136,7 +139,16 @@ export function FaceReassignDialog({
                     <User className="h-4 w-4" />
                   </div>
                 )}
-                <span className="flex-1 truncate">{identity.name}</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-1 truncate">
+                      {identity.name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                    {identity.name}
+                  </TooltipContent>
+                </Tooltip>
                 {assigningId === identity.id && <LoadingSpinner size="sm" />}
               </button>
             ))
@@ -172,7 +184,7 @@ export function FaceReassignDialog({
           </label>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-wrap">
           <button
             className="rounded-md border border-border px-3 py-1.5 text-[12px] text-foreground hover:bg-foreground/5 disabled:opacity-40"
             disabled={busy || loading || !newName.trim()}

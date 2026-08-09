@@ -2,6 +2,16 @@ import { Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { ExifFilters } from "@/types/search";
 
 interface FilterPreset {
@@ -89,26 +99,38 @@ export function FilterPresets({
   );
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       {/* Save preset button */}
       {hasActiveFilters && (
-        <div className="relative">
-          <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
-            onClick={() => {
-              setShowSave(!showSave);
+        <Popover
+          onOpenChange={(nextOpen) => {
+            setShowSave(nextOpen);
+            if (nextOpen) {
               setShowLoad(false);
-            }}
-            type="button"
-          >
-            <Save className="h-3 w-3" />
-            {t("filterSavePreset")}
-          </button>
+            }
+          }}
+          open={showSave}
+        >
+          <PopoverTrigger asChild>
+            <button
+              className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+              type="button"
+            >
+              <Save className="h-3 w-3" />
+              {t("filterSavePreset")}
+            </button>
+          </PopoverTrigger>
           {showSave && (
-            <div className="absolute bottom-full left-0 z-50 mb-1 rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5">
-              <div className="flex items-center gap-1.5">
+            <PopoverContent
+              align="start"
+              className="max-h-[min(12rem,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5"
+              collisionPadding={8}
+              side="top"
+              sideOffset={4}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
                 <input
-                  className="h-7 w-32 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
+                  className="h-7 min-w-0 flex-[1_1_9rem] rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
                   onChange={(e) => setPresetName(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -126,53 +148,78 @@ export function FilterPresets({
                   {t("save")}
                 </button>
               </div>
-            </div>
+            </PopoverContent>
           )}
-        </div>
+        </Popover>
       )}
 
       {/* Load preset button */}
       {presets.length > 0 && (
-        <div className="relative">
-          <button
-            className="rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
-            onClick={() => {
-              setShowLoad(!showLoad);
+        <Popover
+          onOpenChange={(nextOpen) => {
+            setShowLoad(nextOpen);
+            if (nextOpen) {
               setShowSave(false);
-            }}
-            type="button"
-          >
-            {t("filterLoadPresets", { count: presets.length })}
-          </button>
+            }
+          }}
+          open={showLoad}
+        >
+          <PopoverTrigger asChild>
+            <button
+              className="rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground"
+              type="button"
+            >
+              {t("filterLoadPresets", { count: presets.length })}
+            </button>
+          </PopoverTrigger>
           {showLoad && (
-            <div className="absolute right-0 bottom-full z-50 mb-1 min-w-[180px] rounded-[6px] border border-border bg-popover p-1.5 shadow-lg ring-1 ring-foreground/5">
+            <PopoverContent
+              align="end"
+              className="max-h-[min(16rem,var(--radix-popover-content-available-height))] w-[min(18rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-1.5 shadow-lg ring-1 ring-foreground/5"
+              collisionPadding={8}
+              side="top"
+              sideOffset={4}
+            >
               {presets.map((preset) => (
                 <div
-                  className="flex items-center justify-between rounded-[4px] px-2 py-1 hover:bg-foreground/5"
+                  className="flex min-w-0 items-center justify-between rounded-[4px] px-2 py-1 hover:bg-foreground/5"
                   key={preset.name}
                 >
-                  <button
-                    className="flex-1 truncate text-left text-[12px] text-foreground"
-                    onClick={() => {
-                      onLoadPreset(preset.filters);
-                      setShowLoad(false);
-                    }}
-                    type="button"
-                  >
-                    {preset.name}
-                  </button>
-                  <button
-                    className="ml-1 text-muted-foreground/70 hover:text-destructive"
-                    onClick={() => handleDelete(preset.name)}
-                    type="button"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="min-w-0 flex-1 truncate text-left text-[12px] text-foreground"
+                        onClick={() => {
+                          onLoadPreset(preset.filters);
+                          setShowLoad(false);
+                        }}
+                        type="button"
+                      >
+                        {preset.name}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                      {preset.name}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("delete")}
+                        className="ml-1 shrink-0 text-muted-foreground/70 hover:text-destructive"
+                        onClick={() => handleDelete(preset.name)}
+                        type="button"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("delete")}</TooltipContent>
+                  </Tooltip>
                 </div>
               ))}
-            </div>
+            </PopoverContent>
           )}
-        </div>
+        </Popover>
       )}
 
       <ConfirmDialog

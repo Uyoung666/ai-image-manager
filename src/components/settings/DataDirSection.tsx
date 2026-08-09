@@ -174,11 +174,11 @@ export function DataDirSection() {
   }
 
   return (
-    <section className="mx-auto w-full max-w-[820px] space-y-3">
+    <section className="mx-auto w-full min-w-0 max-w-[820px] space-y-3">
       <h2 className="font-semibold text-[14px] text-foreground">
         {t("dataDirectory")}
       </h2>
-      <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
+      <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         <div>
           <span className="text-[13px] text-muted-foreground">
             {t("currentPath")}
@@ -207,13 +207,15 @@ export function DataDirSection() {
                   style={{ width: `${percent}%` }}
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground/70">
+              <p className="text-[11px] text-muted-foreground/70 [overflow-wrap:anywhere]">
                 {progress.label}
               </p>
             </div>
           )}
           {msg && (
-            <p className="mt-2 text-[12px] text-muted-foreground">{msg}</p>
+            <p className="mt-2 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
+              {msg}
+            </p>
           )}
         </div>
       </div>

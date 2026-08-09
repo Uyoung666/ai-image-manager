@@ -92,11 +92,11 @@ function AboutSettingsPage() {
       />
       <SignatureOverlay active={signatureActive} onDone={handleSignatureDone} />
 
-      <div className="mx-auto w-full max-w-[820px] space-y-6">
+      <div className="mx-auto w-full min-w-0 max-w-[820px] space-y-6">
         {/* App info */}
         <section className="space-y-3">
-          <div className="space-y-3 rounded-[8px] border border-border bg-secondary p-4">
-            <div className="flex items-center justify-between">
+          <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
               <span className="text-[13px] text-muted-foreground">
                 {t("settingsVersion")}
               </span>
@@ -119,7 +119,7 @@ function AboutSettingsPage() {
             </div>
 
             {/* License */}
-            <div className="flex items-center justify-between border-border border-t pt-3">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-border border-t pt-3">
               <span className="text-[13px] text-muted-foreground">
                 {t("settingsLicense")}
               </span>
@@ -127,7 +127,7 @@ function AboutSettingsPage() {
             </div>
 
             {/* Author */}
-            <div className="flex items-center justify-between border-border border-t pt-3">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-border border-t pt-3">
               <span className="text-[13px] text-muted-foreground">
                 {t("settingsAuthor")}
               </span>
@@ -136,7 +136,7 @@ function AboutSettingsPage() {
           </div>
 
           {/* GitHub — standalone 3D flip button + animated name loader */}
-          <div className="flex items-center gap-3 pt-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-3 pt-1">
             <AnimatedGitHubButton href="https://github.com/Uyoung666/ai-image-manager" />
             <AnimatedNameLoader />
           </div>
@@ -160,11 +160,11 @@ function AboutSettingsPage() {
             </span>
           </button>
           {depsExpanded && (
-            <div className="rounded-[8px] border border-border bg-secondary p-4">
+            <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
               <div className="space-y-1">
                 {DEPENDENCIES.map((dep) => (
                   <div
-                    className="flex items-center justify-between py-0.5"
+                    className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-0.5"
                     key={dep.name}
                   >
                     <span className="text-[12px] text-muted-foreground/80">

@@ -473,22 +473,22 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
   return (
     <div
-      className="relative flex h-full select-none flex-col bg-black"
+      className="relative flex h-full min-h-0 min-w-0 select-none flex-col overflow-hidden bg-black"
       {...chrome}
     >
       {/* Top bar — glass overlay */}
       <div
-        className={`flex items-center justify-between border-white/[0.06] border-b bg-background/70 px-6 py-2 backdrop-blur-xl transition-opacity duration-500 ${
+        className={`flex shrink-0 items-center justify-between gap-3 overflow-x-auto border-white/[0.06] border-b bg-background/70 px-3 py-1.5 backdrop-blur-xl transition-opacity duration-500 sm:px-6 sm:py-2 ${
           chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <span className="text-[11px] text-muted-foreground/70">
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] text-muted-foreground/70">
           {t("cullCurateProgress", {
             done: stats?.completed ?? session.completedComparisons,
             total: stats?.total ?? session.totalPhotos,
           })}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -506,7 +506,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             <TooltipContent>{t("keyboardHelpTitle")}</TooltipContent>
           </Tooltip>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={isSubmitting}
             onClick={() => setFinishConfirmOpen(true)}
           >
@@ -514,7 +514,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             {t("cullFinish")}
           </button>
           <button
-            className="flex items-center gap-1 rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[4px] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             disabled={isSubmitting}
             onClick={() => undoMutation.mutate()}
           >
@@ -526,7 +526,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
       {/* Photo — full-bleed immersive */}
       <div
-        className={`relative flex min-h-0 flex-1 animate-photo-fade-in items-center justify-center ${
+        className={`relative flex min-h-0 min-w-0 flex-1 animate-photo-fade-in items-center justify-center overflow-hidden ${
           showTransition ? "pointer-events-none" : ""
         }`}
         key={photoFetchId}
@@ -535,7 +535,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
         role="none"
       >
         <div
-          className="flex h-full w-full items-center justify-center"
+          className="flex h-full min-h-0 w-full min-w-0 items-center justify-center overflow-hidden"
           data-zoom
         >
           <ZoomableImage
@@ -562,8 +562,8 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
             showExif ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
-          <div className="mx-auto max-w-[600px] px-4 pb-3">
-            <div className="rounded-[8px] bg-black/75 px-4 py-2">
+          <div className="mx-auto max-h-full max-w-[600px] overflow-hidden px-2 pb-2 sm:px-4 sm:pb-3">
+            <div className="overflow-y-auto rounded-[8px] bg-black/75 px-3 py-1.5 sm:px-4 sm:py-2">
               <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5">
                 {exif ? (
                   <>
@@ -623,12 +623,12 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
 
       {/* Action bar — glass overlay */}
       <div
-        className={`flex items-center justify-center gap-6 border-white/[0.06] border-t bg-background/70 px-6 py-3 backdrop-blur-xl transition-opacity duration-500 ${
+        className={`flex shrink-0 items-center justify-start gap-2 overflow-x-auto border-white/[0.06] border-t bg-background/70 px-3 py-2 backdrop-blur-xl transition-opacity duration-500 sm:justify-center sm:gap-6 sm:px-6 sm:py-3 ${
           chrome.visible ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
         <button
-          className="flex items-center gap-2 rounded-full border border-border bg-secondary px-4 py-2 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40"
+          className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-border bg-secondary px-3 py-2 text-[12px] text-muted-foreground transition-all hover:border-foreground/20 hover:bg-secondary/80 hover:text-foreground disabled:opacity-40 sm:px-4"
           disabled={isSubmitting || similarCount === 0}
           onClick={() => {
             if (similarCount > 0) {
@@ -640,7 +640,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           {t("cullSkipSimilar")} (S)
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-destructive/25 bg-destructive/[0.08] px-5 py-2.5 text-[13px] text-destructive backdrop-blur-md transition-all hover:border-destructive/45 hover:bg-destructive/[0.14] hover:text-destructive-foreground hover:shadow-[0_0_16px_-4px_var(--destructive)/25] disabled:opacity-40"
+          className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-destructive/25 bg-destructive/[0.08] px-4 py-2 text-[13px] text-destructive backdrop-blur-md transition-all hover:border-destructive/45 hover:bg-destructive/[0.14] hover:text-destructive-foreground hover:shadow-[0_0_16px_-4px_var(--destructive)/25] disabled:opacity-40 sm:px-5 sm:py-2.5"
           disabled={isSubmitting}
           onClick={() => rejectMutation.mutate(item)}
         >
@@ -648,7 +648,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           {t("cullReject")} ← ↓
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/[0.12] px-6 py-3 font-medium text-[14px] text-foreground backdrop-blur-md transition-all hover:border-amber-500/50 hover:bg-amber-500/[0.20] hover:shadow-[0_0_20px_-4px_var(--amber-500)/30] active:scale-[0.96] disabled:opacity-40"
+          className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-amber-500/30 bg-amber-500/[0.12] px-5 py-2 font-medium text-[14px] text-foreground backdrop-blur-md transition-all hover:border-amber-500/50 hover:bg-amber-500/[0.20] hover:shadow-[0_0_20px_-4px_var(--amber-500)/30] active:scale-[0.96] disabled:opacity-40 sm:px-6 sm:py-3"
           disabled={isSubmitting}
           onClick={() => keepMutation.mutate(item)}
         >
@@ -660,7 +660,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       {/* Dialogs */}
       {finishConfirmOpen && (
         <Dialog onOpenChange={setFinishConfirmOpen} open={finishConfirmOpen}>
-          <DialogContent>
+          <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t("cullFinishConfirmTitle")}</DialogTitle>
             </DialogHeader>
@@ -670,7 +670,7 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
                 total: stats?.total ?? session.totalPhotos,
               })}
             </p>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                 disabled={isSubmitting}
@@ -695,14 +695,14 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
           onOpenChange={setSkipSimilarConfirmOpen}
           open={skipSimilarConfirmOpen}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t("cullSkipSimilarConfirmTitle")}</DialogTitle>
             </DialogHeader>
             <p className="text-[13px] text-muted-foreground">
               {t("cullSkipSimilarConfirmDescription", { count: similarCount })}
             </p>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <button
                 className="rounded-[6px] px-4 py-2 text-[12px] text-muted-foreground"
                 onClick={() => setSkipSimilarConfirmOpen(false)}
@@ -728,14 +728,14 @@ export function CullCurate({ session, onMutationSuccess }: CullCurateProps) {
       {/* Keyboard shortcuts — glass overlay */}
       {shortcutsOpen && (
         <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-black/20"
+          className="absolute inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/20 p-2"
           onClick={() => {
             setShortcutsOpen(false);
             shortcutsOpenRef.current = false;
           }}
         >
           <div
-            className="pointer-events-auto rounded-[12px] border border-white/[0.08] bg-black/60 px-6 py-4 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] backdrop-blur-xl"
+            className="pointer-events-auto max-h-full max-w-full overflow-auto rounded-[12px] border border-white/[0.08] bg-black/60 px-4 py-3 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] backdrop-blur-xl sm:px-6 sm:py-4"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-3 text-center font-medium text-[13px] text-white/80">

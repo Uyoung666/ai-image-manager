@@ -9,12 +9,12 @@ import { ArrowLeft, FolderPlus, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { RouteError } from "@/components/RouteError";
 import { SmartAlbumDialog } from "@/components/SmartAlbumDialog";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
 import { getDateLocale } from "@/utils/date-locale";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
-import { RouteError } from "@/components/RouteError";
 
 interface AlbumInfo {
   coverPhotoId: number | null;
@@ -96,15 +96,15 @@ function AlbumsPage() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-border border-b px-6 py-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             className="flex h-8 w-8 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
             onClick={() => navigate({ to: "/" })}
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
+          <div className="min-w-0">
             <h1 className="font-semibold text-[24px] text-foreground tracking-tight">
               {t("albums")}
             </h1>
@@ -113,7 +113,7 @@ function AlbumsPage() {
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex max-w-full flex-wrap justify-end gap-2">
           <button
             className="flex items-center gap-1.5 rounded-[6px] border border-primary/40 px-4 py-1.5 font-medium text-[13px] text-primary transition-colors hover:border-primary hover:bg-primary/5"
             onClick={() => setShowSmartDialog(true)}
@@ -132,11 +132,11 @@ function AlbumsPage() {
 
       {/* Create dialog inline */}
       {showCreate && (
-        <div className="border-border border-b px-6 py-4">
-          <div className="flex gap-3">
+        <div className="border-border border-b px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex flex-wrap gap-3">
             <input
               autoFocus
-              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+              className="h-8 min-w-[min(100%,12rem)] flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -150,7 +150,7 @@ function AlbumsPage() {
               value={newName}
             />
             <input
-              className="h-8 flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+              className="h-8 min-w-[min(100%,12rem)] flex-1 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
               onChange={(e) => setNewDesc(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -181,9 +181,9 @@ function AlbumsPage() {
       )}
 
       {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-6" ref={scrollRef}>
+      <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6" ref={scrollRef}>
         {loading ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,340px))] gap-5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),340px))] gap-4 sm:gap-5">
             {ALBUM_SKELETON_KEYS.map((key) => (
               <div
                 className="aspect-[16/12] animate-pulse rounded-[10px] bg-card"
@@ -222,7 +222,7 @@ function AlbumsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,340px))] gap-5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),340px))] gap-4 sm:gap-5">
             {albums.map((album) => (
               <Link
                 className={`group overflow-hidden rounded-[10px] bg-card shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md ${
@@ -278,7 +278,7 @@ function AlbumsPage() {
                 <div className="p-4">
                   <div className="flex items-center gap-1.5">
                     {album.isSmart && <Zap className="h-3 w-3 text-primary" />}
-                    <h3 className="truncate font-medium text-[14px] text-foreground">
+                    <h3 className="min-w-0 truncate font-medium text-[14px] text-foreground">
                       {album.name}
                     </h3>
                   </div>
