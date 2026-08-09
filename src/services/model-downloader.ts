@@ -52,6 +52,8 @@ export interface DownloadProgress {
 export interface ModelDownloadOptions {
   /** Include non-required assets when a caller explicitly requests them. */
   includeOptional?: boolean;
+  /** Limit downloads to the listed manifest subpaths when a subset is enough. */
+  subPaths?: readonly string[];
 }
 
 // ── Model Manifest ──────────────────────────────────────────────────────
@@ -987,6 +989,9 @@ function shouldDownloadEntry(
   options: ModelDownloadOptions
 ): boolean {
   if (entry.urls.length === 0) {
+    return false;
+  }
+  if (options.subPaths && !options.subPaths.includes(entry.subPath)) {
     return false;
   }
   return entry.required || options.includeOptional === true;

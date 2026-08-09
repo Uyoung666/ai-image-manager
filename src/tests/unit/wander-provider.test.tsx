@@ -292,6 +292,22 @@ describe("WanderProvider", () => {
     expect(toast.info).not.toHaveBeenCalled();
   });
 
+  it("surfaces a visible error when a manual start has too few photos", async () => {
+    vi.mocked(getWanderSession).mockResolvedValue(
+      makeSession({ photos: makeSession().photos.slice(0, 1) })
+    );
+    renderProvider();
+    await flush();
+
+    await act(async () => {
+      await requireApi().start();
+    });
+
+    expect(requireApi().startError).toBe("notEnoughPhotos");
+    expect(toast.info).toHaveBeenCalledWith("wander.notEnoughPhotos");
+    expect(screen.queryByTestId("wander-overlay")).not.toBeInTheDocument();
+  });
+
   it("prefetches the next round and promotes it on round completion", async () => {
     let callCount = 0;
     vi.mocked(getWanderSession).mockImplementation(() => {

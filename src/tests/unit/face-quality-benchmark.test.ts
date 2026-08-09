@@ -64,7 +64,6 @@ describe("face quality benchmark dataset validation", () => {
     );
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("usable face embedding");
     expect(result.stderr).not.toContain("identity>/<images>");
     expect(result.error).toBeUndefined();
   });

@@ -24,6 +24,7 @@ function WanderSettingsPage() {
     active: wanderActive,
     loading: wanderLoading,
     preferences,
+    startError,
     start: startWander,
     updatePreference,
   } = useWander();
@@ -54,6 +55,15 @@ function WanderSettingsPage() {
         <Compass className="h-4 w-4" />
         {t("wander.startNow")}
       </button>
+      {startError && (
+        <p
+          aria-live="polite"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive"
+          role="alert"
+        >
+          {t(`wander.${startError}`)}
+        </p>
+      )}
 
       <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
         <SettingRow

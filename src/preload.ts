@@ -15,9 +15,12 @@ ipcRenderer.on(IPC_CHANNELS.WANDER_LIFECYCLE, (_event, payload) => {
 
 window.addEventListener("message", (event) => {
   const currentOrigin = window.location.origin;
+  const sameOrigin =
+    event.origin === currentOrigin ||
+    (window.location.protocol === "file:" && event.origin === "null");
   if (
     event.source !== window ||
-    event.origin !== (currentOrigin === "null" ? "null" : currentOrigin) ||
+    !sameOrigin ||
     event.data !== IPC_CHANNELS.START_ORPC_SERVER ||
     event.ports.length !== 1
   ) {

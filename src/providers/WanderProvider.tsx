@@ -40,6 +40,7 @@ interface WanderContextValue {
   loading: boolean;
   preferences: WanderSettings;
   start: (mode?: WanderMode) => Promise<void>;
+  startError: "notEnoughPhotos" | "loadFailed" | null;
   updatePreference: <K extends keyof WanderSettings>(
     key: K,
     value: WanderSettings[K]
@@ -78,6 +79,9 @@ export function WanderProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<WanderSession | null>(null);
   const [roundSeq, setRoundSeq] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [startError, setStartError] = useState<
+    "notEnoughPhotos" | "loadFailed" | null
+  >(null);
   const [saving, setSaving] = useState(false);
   const [preparingNext, setPreparingNext] = useState(false);
   const loadingRef = useRef(false);
@@ -256,6 +260,9 @@ export function WanderProvider({ children }: { children: ReactNode }) {
       const requestId = ++requestRef.current;
       loadingRef.current = true;
       setLoading(true);
+      if (!automatic) {
+        setStartError(null);
+      }
       try {
         const result = await fetchRound(requestedMode ?? "auto", requestId);
         if (requestId !== requestRef.current) {
@@ -266,6 +273,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
             // Silently reset the idle window so the next full idle period retries.
             scheduleIdleRef.current?.();
           } else {
+            setStartError("notEnoughPhotos");
             toast.info(t("wander.notEnoughPhotos"));
           }
           return;
@@ -279,6 +287,7 @@ export function WanderProvider({ children }: { children: ReactNode }) {
         if (automatic) {
           scheduleIdleRef.current?.();
         } else {
+          setStartError("loadFailed");
           toast.error(t("wander.loadFailed"));
         }
       } finally {
@@ -426,11 +435,12 @@ export function WanderProvider({ children }: { children: ReactNode }) {
     () => ({
       active: Boolean(session),
       loading,
+      startError,
       preferences,
       start,
       updatePreference,
     }),
-    [loading, preferences, session, start, updatePreference]
+    [loading, preferences, session, start, startError, updatePreference]
   );
 
   const intervalMsOverride = readOverrideMs("wander.intervalMs");

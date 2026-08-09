@@ -19,7 +19,7 @@ export const router = createRouter({
 if (typeof window !== "undefined") {
   window.__e2eNavigate = async (to: string) => {
     await router.navigate({ to: to as never });
-    window.history.replaceState({}, "", to);
+    return router.state.location.pathname;
   };
 }
 
@@ -33,6 +33,7 @@ router.navigate = ((opts: any) => {
   if (
     typeof document !== "undefined" &&
     document.startViewTransition &&
+    !window.electronAPI?.isE2E &&
     !isReducedMotionEnabled()
   ) {
     const currentPath = router.state.location.pathname;

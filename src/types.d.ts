@@ -9,7 +9,7 @@ declare module "*.css";
 declare module "*.png";
 
 interface Window {
-  __e2eNavigate?: (to: string) => Promise<void>;
+  __e2eNavigate?: (to: string) => Promise<string>;
   electronAPI: {
     getFilePath: (file: File) => string;
     isDirectoryPath?: (filePath: string) => boolean;

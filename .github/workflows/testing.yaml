@@ -7,6 +7,7 @@ on:
 
 jobs:
   tests-unit:
+    timeout-minutes: 20
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -17,6 +18,15 @@ jobs:
         run: npm ci
       - name: Rebuild Electron native modules
         run: npm run rebuild:native
+      - name: Cache face models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-models-face-${{ hashFiles('src/services/model-downloader.ts') }}
+      - name: Prepare models for model-backed tests
+        env:
+          AIM_MODEL_SCOPE: face
+        run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
         run: npm run test:unit -- run
       - name: Run AI integration tests
@@ -25,7 +35,7 @@ jobs:
         run: npm run test:worker
 
   test-e2e:
-    timeout-minutes: 10
+    timeout-minutes: 20
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -36,8 +46,13 @@ jobs:
         run: npm ci
       - name: Rebuild Electron native modules
         run: npm run rebuild:native
+      - name: Cache E2E models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-models-all-${{ hashFiles('src/services/model-downloader.ts') }}
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install chromium --with-deps
       - name: Run Playwright tests
         env:
           AIM_E2E_PREPARE_MODELS: "1"

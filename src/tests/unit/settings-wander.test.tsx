@@ -7,6 +7,7 @@ const { wanderState } = vi.hoisted(() => ({
   wanderState: {
     active: false,
     loading: false,
+    startError: null as "notEnoughPhotos" | "loadFailed" | null,
     preferences: null as unknown as WanderSettings,
     start: vi.fn(),
     updatePreference: vi.fn(),
@@ -57,6 +58,7 @@ describe("settings.wander", () => {
     vi.clearAllMocks();
     wanderState.active = false;
     wanderState.loading = false;
+    wanderState.startError = null;
     wanderState.updatePreference.mockResolvedValue(undefined);
     wanderState.preferences = {
       ...DEFAULT_WANDER_SETTINGS,
@@ -86,6 +88,15 @@ describe("settings.wander", () => {
     fireEvent.click(screen.getByRole("button", { name: "wander.startNow" }));
 
     expect(wanderState.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a visible start error", () => {
+    wanderState.startError = "notEnoughPhotos";
+    renderPage();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "wander.notEnoughPhotos"
+    );
   });
 
   it("converts dropdown values back to numeric wander preferences", () => {

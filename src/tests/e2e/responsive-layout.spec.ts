@@ -90,17 +90,13 @@ async function resizeWindow(width: number, height: number): Promise<void> {
 
 async function navigateTo(route: string): Promise<void> {
   const currentPage = requirePage();
-  await currentPage.evaluate(async (nextRoute) => {
+  const navigatedPath = await currentPage.evaluate((nextRoute) => {
     if (!window.__e2eNavigate) {
       throw new Error("E2E router bridge is unavailable");
     }
-    await window.__e2eNavigate(nextRoute);
+    return window.__e2eNavigate(nextRoute);
   }, route);
-
-  await currentPage.waitForFunction(
-    (expectedPath) => window.location.pathname === expectedPath,
-    route
-  );
+  expect(navigatedPath).toBe(route);
   await currentPage.locator("main").first().waitFor({ state: "visible" });
   await currentPage.evaluate(async () => {
     await document.fonts.ready;

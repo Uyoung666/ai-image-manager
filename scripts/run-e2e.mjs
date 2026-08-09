@@ -5,6 +5,7 @@ import process from "node:process";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const WINDOWS_COMMAND_SCRIPT_PATTERN = /\.(?:cmd|bat)$/iu;
 const playwrightCli = path.join(
   projectRoot,
   "node_modules",
@@ -14,7 +15,16 @@ const playwrightCli = path.join(
 );
 
 function run(command, args, env = process.env) {
-  const result = spawnSync(command, args, {
+  const windowsCommandScript =
+    process.platform === "win32" &&
+    WINDOWS_COMMAND_SCRIPT_PATTERN.test(command);
+  const spawnCommand = windowsCommandScript
+    ? process.env.ComSpec || "cmd.exe"
+    : command;
+  const spawnArgs = windowsCommandScript
+    ? ["/d", "/s", "/c", command, ...args]
+    : args;
+  const result = spawnSync(spawnCommand, spawnArgs, {
     cwd: projectRoot,
     env,
     stdio: "inherit",
@@ -30,24 +40,10 @@ function run(command, args, env = process.env) {
 }
 
 function prepareModels() {
-  const modelsDir = path.join(projectRoot, "models");
-  const downloader = `
-    import { downloadAllModels } from "./src/services/model-downloader.ts";
-    const result = await downloadAllModels(
-      ${JSON.stringify(modelsDir)},
-      ${JSON.stringify(process.env.AIM_MODEL_MIRROR || "https://huggingface.co")}
-    );
-    if (!result.success) {
-      console.error(result.warnings.join("\\n"));
-      process.exitCode = 1;
-    }
-  `;
   return run(process.execPath, [
     "--loader",
     "ts-node/esm",
-    "--input-type=module",
-    "--eval",
-    downloader,
+    path.join(projectRoot, "scripts", "prepare-models.mjs"),
   ]);
 }
 
