@@ -799,7 +799,7 @@ export const SearchBar = memo(
                 </div>
               )}
               <form
-                className="home-search-form relative min-w-0 flex-1 basis-[220px] xl:max-w-[720px]"
+                className="home-search-form relative xl:max-w-[720px]"
                 onSubmit={handleSubmit}
               >
                 <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />

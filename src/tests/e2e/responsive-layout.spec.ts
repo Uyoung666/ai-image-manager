@@ -37,6 +37,13 @@ interface OverflowMeasurement {
   scrollWidth: number;
 }
 
+interface HomeToolbarMeasurement {
+  actionTop: number;
+  formTop: number;
+  formWidth: number;
+  rowHeight: number;
+}
+
 let electronApp: ElectronApplication | undefined;
 let page: Page | undefined;
 
@@ -174,6 +181,36 @@ async function expectShortcutDialogInsideViewport(): Promise<void> {
   await expect(dialog).not.toBeVisible();
 }
 
+async function expectHomeToolbarToShrinkSearchBeforeWrapping(): Promise<void> {
+  const currentPage = requirePage();
+  await navigateTo("/");
+
+  const measurement = await currentPage
+    .locator(".home-toolbar-primary-row")
+    .evaluate((row) => {
+      const form = row.querySelector<HTMLElement>(".home-search-form");
+      const actions = row.querySelector<HTMLElement>(".home-toolbar-actions");
+      if (!(form && actions)) {
+        throw new Error("Home toolbar search form or actions are missing");
+      }
+      const rowBounds = row.getBoundingClientRect();
+      const formBounds = form.getBoundingClientRect();
+      const actionBounds = actions.getBoundingClientRect();
+      return {
+        actionTop: actionBounds.top,
+        formTop: formBounds.top,
+        formWidth: formBounds.width,
+        rowHeight: rowBounds.height,
+      } satisfies HomeToolbarMeasurement;
+    });
+
+  expect(measurement.formWidth).toBeGreaterThanOrEqual(178);
+  expect(
+    Math.abs(measurement.actionTop - measurement.formTop)
+  ).toBeLessThanOrEqual(2);
+  expect(measurement.rowHeight).toBeLessThanOrEqual(48);
+}
+
 test.beforeAll(async () => {
   process.env.CI = "e2e";
   electronApp = await electron.launch({
@@ -224,6 +261,12 @@ for (const { width, height } of WINDOW_SIZES) {
     if (width === 720 && height === 480) {
       await test.step("global shortcuts dialog", async () => {
         await expectShortcutDialogInsideViewport();
+      });
+    }
+
+    if (width <= 900) {
+      await test.step("home toolbar shrinks search before wrapping", async () => {
+        await expectHomeToolbarToShrinkSearchBeforeWrapping();
       });
     }
   });
