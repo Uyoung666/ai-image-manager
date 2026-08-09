@@ -68,6 +68,8 @@ const TRASH_SKELETON_KEYS = Array.from(
   { length: 12 },
   (_, index) => `trash-skeleton-${index + 1}`
 );
+const TRASH_TOOLBAR_FALLBACK_HEIGHT = 48;
+const TRASH_TOOLBAR_CONTENT_GAP = 16;
 const TRASH_EXPIRY_FORMATTER = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -286,18 +288,24 @@ function TrashPage() {
     },
   });
 
+  // Re-measure when the conditional toolbar appears after loading completes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: toolbar visibility changes are intentional re-measure triggers
   useLayoutEffect(() => {
     const element = toolbarRef.current;
     if (!element) {
       setToolbarHeight(0);
       return;
     }
-    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    const updateHeight = () =>
+      setToolbarHeight(element.offsetHeight || TRASH_TOOLBAR_FALLBACK_HEIGHT);
     updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [loading, query, trashTotalCount]);
 
   function toggleSelect(id: number, e: React.MouseEvent) {
     handleSelect(id, e);
@@ -1290,7 +1298,14 @@ function TrashPage() {
             setShowBackToTop(isScrolled);
           }}
           ref={scrollRef}
-          style={{ paddingTop: toolbarHeight, userSelect: "none" }}
+          style={{
+            paddingTop:
+              !loading && (trashTotalCount > 0 || query)
+                ? (toolbarHeight || TRASH_TOOLBAR_FALLBACK_HEIGHT) +
+                  TRASH_TOOLBAR_CONTENT_GAP
+                : 0,
+            userSelect: "none",
+          }}
         >
           {/* Marquee selection overlay */}
           {marquee && (

@@ -48,6 +48,13 @@ describe("FilterDropdown", () => {
     expect(listbox).toHaveClass("max-w-[calc(100vw-1rem)]", "overflow-y-auto");
   });
 
+  it("keeps the popover anchor aligned with constrained input widths", () => {
+    renderDropdown({ className: "w-full max-w-[220px]" });
+
+    const input = screen.getByRole("combobox");
+    expect(input.parentElement).toHaveClass("w-full", "max-w-[220px]");
+  });
+
   it("selects an option by click and closes the list", () => {
     const onChange = vi.fn();
     renderDropdown({ onChange });

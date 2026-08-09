@@ -78,6 +78,9 @@ interface HiddenIdentity {
   name: string | null;
 }
 
+const PEOPLE_TOOLBAR_FALLBACK_HEIGHT = 48;
+const PEOPLE_TOOLBAR_CONTENT_GAP = 16;
+
 // Person cover image with intersection-observer lazy loading + fade-in + error fallback
 const PersonCoverImage = memo(function PersonCoverImage({
   identity,
@@ -373,7 +376,9 @@ function PeoplePage() {
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "people-list" });
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
-  const [toolbarHeight, setToolbarHeight] = useState(0);
+  const [toolbarHeight, setToolbarHeight] = useState(
+    PEOPLE_TOOLBAR_FALLBACK_HEIGHT
+  );
 
   // TanStack Query data fetching
   const {
@@ -421,8 +426,12 @@ function PeoplePage() {
     if (!element) {
       return;
     }
-    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    const updateHeight = () =>
+      setToolbarHeight(element.offsetHeight || PEOPLE_TOOLBAR_FALLBACK_HEIGHT);
     updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
@@ -955,7 +964,11 @@ function PeoplePage() {
             setIsToolbarScrolled(event.currentTarget.scrollTop > 4);
           }}
           ref={scrollRef}
-          style={{ paddingTop: toolbarHeight }}
+          style={{
+            paddingTop:
+              (toolbarHeight || PEOPLE_TOOLBAR_FALLBACK_HEIGHT) +
+              PEOPLE_TOOLBAR_CONTENT_GAP,
+          }}
         >
           {/* 加载骨架屏：填满视口的卡片矩阵 */}
           {isLoading && (

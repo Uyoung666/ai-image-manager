@@ -43,6 +43,8 @@ interface DuplicatesResult {
 }
 
 const EMPTY_GROUPS: DuplicateGroup[] = [];
+const DUPLICATES_TOOLBAR_FALLBACK_HEIGHT = 48;
+const DUPLICATES_TOOLBAR_CONTENT_GAP = 16;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
@@ -258,15 +260,23 @@ export function DuplicatesPage() {
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [toolbarHeight, setToolbarHeight] = useState(0);
+  const [toolbarHeight, setToolbarHeight] = useState(
+    DUPLICATES_TOOLBAR_FALLBACK_HEIGHT
+  );
 
   useLayoutEffect(() => {
     const element = toolbarRef.current;
     if (!element) {
       return;
     }
-    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    const updateHeight = () =>
+      setToolbarHeight(
+        element.offsetHeight || DUPLICATES_TOOLBAR_FALLBACK_HEIGHT
+      );
     updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
@@ -534,7 +544,11 @@ export function DuplicatesPage() {
             setShowBackToTop(isScrolled);
           }}
           ref={parentRef}
-          style={{ paddingTop: toolbarHeight }}
+          style={{
+            paddingTop:
+              (toolbarHeight || DUPLICATES_TOOLBAR_FALLBACK_HEIGHT) +
+              DUPLICATES_TOOLBAR_CONTENT_GAP,
+          }}
         >
           {isLoading ? (
             <div className="space-y-4">

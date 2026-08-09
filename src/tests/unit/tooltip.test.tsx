@@ -51,4 +51,18 @@ describe("Tooltip", () => {
 
     expect(await screen.findByRole("tooltip")).toBeVisible();
   });
+
+  it("closes the tooltip when the application window loses focus", async () => {
+    const user = userEvent.setup();
+    renderTooltip();
+
+    await user.hover(screen.getByRole("button"));
+    expect(await screen.findByRole("tooltip")).toBeVisible();
+
+    fireEvent(window, new Event("blur"));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    });
+  });
 });

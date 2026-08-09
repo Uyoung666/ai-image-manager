@@ -33,6 +33,7 @@ export const MasonryBackToTop = memo(function MasonryBackToTop({
               ? "scale-100 opacity-100"
               : "pointer-events-none scale-75 opacity-0"
           }`}
+          data-text={label}
           onClick={onClick}
           tabIndex={show ? 0 : -1}
           type="button"

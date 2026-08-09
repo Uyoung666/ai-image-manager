@@ -159,6 +159,8 @@ const TABS: DashboardTab[] = [
   "places",
 ];
 const PRESETS: DashboardRangePreset[] = ["all", "year", "last12", "custom"];
+const DASHBOARD_TOOLBAR_FALLBACK_HEIGHT = 48;
+const DASHBOARD_TOOLBAR_CONTENT_GAP = 16;
 
 function DashboardChartTooltip({
   active,
@@ -247,7 +249,9 @@ function DashboardPage() {
   const [customFrom, setCustomFrom] = useState(search.from ?? "");
   const [customTo, setCustomTo] = useState(search.to ?? "");
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
-  const [toolbarHeight, setToolbarHeight] = useState(0);
+  const [toolbarHeight, setToolbarHeight] = useState(
+    DASHBOARD_TOOLBAR_FALLBACK_HEIGHT
+  );
   useRouteScrollRestoration(scrollRef, {
     getRouteKey: () => `dashboard-${tab}`,
   });
@@ -305,8 +309,14 @@ function DashboardPage() {
     if (!element) {
       return;
     }
-    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    const updateHeight = () =>
+      setToolbarHeight(
+        element.offsetHeight || DASHBOARD_TOOLBAR_FALLBACK_HEIGHT
+      );
     updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     return () => observer.disconnect();
@@ -713,7 +723,11 @@ function DashboardPage() {
             setIsToolbarScrolled(event.currentTarget.scrollTop > 4)
           }
           ref={scrollRef}
-          style={{ paddingTop: toolbarHeight }}
+          style={{
+            paddingTop:
+              (toolbarHeight || DASHBOARD_TOOLBAR_FALLBACK_HEIGHT) +
+              DASHBOARD_TOOLBAR_CONTENT_GAP,
+          }}
         >
           {range.from !== undefined && data.scope.excludedUndated > 0 && (
             <div className="mb-4 flex items-start gap-2 rounded-[8px] border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-foreground">

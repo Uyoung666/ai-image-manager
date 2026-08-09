@@ -13,7 +13,15 @@ import {
   Timer,
   Unlink,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { photoSequenceActions } from "@/actions/photo-sequences";
@@ -879,7 +887,10 @@ export const PhotoGrid = memo(
       columnCount,
       containerWidth,
     ]);
-    useEffect(() => {
+    // Re-measure when the conditional loading/empty toolbar is replaced by the
+    // populated grid toolbar; the ref target changes without changing props.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: render-state changes are intentional re-measure triggers
+    useLayoutEffect(() => {
       if (!showToolbar) {
         setToolbarHeight(0);
         return;
@@ -896,7 +907,7 @@ export const PhotoGrid = memo(
       const observer = new ResizeObserver(updateHeight);
       observer.observe(element);
       return () => observer.disconnect();
-    }, [showToolbar]);
+    }, [displayPhotos.length, loading, showToolbar]);
 
     const gridTopInset = Math.max(topInset, showToolbar ? toolbarHeight : 0);
     const keyboardPhotos = useMemo(

@@ -462,10 +462,10 @@
     backdrop-filter: blur(24px) saturate(1.4);
   }
 
-  /* 页面功能条在顶部融入画布；滚动后恢复悬浮毛玻璃层级。 */
+  /* 页面功能条始终保持不透底；滚动后增强悬浮毛玻璃层级。 */
   .page-toolbar {
-    background: transparent;
-    border-color: transparent;
+    background: var(--surface);
+    border-color: var(--border);
     transition:
       background-color 160ms ease,
       border-color 160ms ease,
@@ -475,7 +475,6 @@
 
   .page-toolbar.is-scrolled {
     background: color-mix(in srgb, var(--surface) 85%, transparent);
-    border-color: var(--border);
     box-shadow: 0 8px 24px -20px rgb(0 0 0 / 0.75);
     -webkit-backdrop-filter: blur(12px) saturate(1.2);
     backdrop-filter: blur(12px) saturate(1.2);
@@ -631,7 +630,7 @@
   right: 0;
   left: 0;
   z-index: 40;
-  background: transparent;
+  background: var(--gallery-canvas);
   transition:
     background-color 160ms ease,
     box-shadow 160ms ease,
@@ -1904,13 +1903,32 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 }
 
 .scroll-to-top-btn:hover {
+  width: 110px;
   background-color: var(--primary);
+  border-radius: 50px;
   box-shadow: 0px 0px 0px 3px
     color-mix(in srgb, var(--primary) 40%, transparent);
 }
 
+.scroll-to-top-btn:hover .scroll-to-top-icon {
+  transform: translateY(-200%);
+}
+
 .scroll-to-top-btn:hover .scroll-to-top-icon path {
   fill: var(--primary-foreground);
+}
+
+.scroll-to-top-btn::before {
+  position: absolute;
+  font-size: 0;
+  color: var(--primary-foreground);
+  white-space: nowrap;
+  content: attr(data-text);
+}
+
+.scroll-to-top-btn:hover::before {
+  font-size: 11px;
+  opacity: 1;
 }
 
 /* ── 主题切换开关 (太阳/月亮动画) ──────────────── */

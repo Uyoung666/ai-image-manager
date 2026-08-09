@@ -24,6 +24,16 @@ export interface FilterDropdownOption {
 export const FILTER_DROPDOWN_CLASS_NAME =
   "h-8 rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none focus:border-primary/40";
 
+const FILTER_DROPDOWN_CLASS_SPLIT_PATTERN = /\s+/;
+const FILTER_DROPDOWN_WIDTH_TOKEN_PATTERN =
+  /^(?:[a-z-]+:)*(?:w-|min-w-|max-w-)/;
+
+function getAnchorWidthClasses(className?: string) {
+  return className
+    ?.split(FILTER_DROPDOWN_CLASS_SPLIT_PATTERN)
+    .filter((token) => FILTER_DROPDOWN_WIDTH_TOKEN_PATTERN.test(token));
+}
+
 export function FilterDropdown({
   ariaLabel,
   className,
@@ -77,6 +87,7 @@ export function FilterDropdown({
   const selectedIndex = visibleOptions.findIndex(
     (option) => option.value === value
   );
+  const anchorWidthClasses = getAnchorWidthClasses(className);
 
   function getDefaultActiveIndex() {
     if (selectedIndex >= 0) {
@@ -210,7 +221,12 @@ export function FilterDropdown({
     >
       <PopoverAnchor asChild>
         <div
-          className={cn("relative min-w-0", wrapperClassName)}
+          className={cn(
+            "relative min-w-0 max-w-full",
+            wrapperClassName,
+            !wrapperClassName &&
+              (anchorWidthClasses?.length ? anchorWidthClasses : "w-fit")
+          )}
           ref={anchorRef}
         >
           {showOptionColors && selectedOption?.color && (

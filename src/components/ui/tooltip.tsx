@@ -22,11 +22,56 @@ function TooltipProvider({
 }
 
 function Tooltip({
+  onOpenChange,
+  open: controlledOpen,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
+  const [windowInteractionBlocked, setWindowInteractionBlocked] =
+    React.useState(false);
+
+  React.useEffect(() => {
+    const blockInteraction = () => {
+      setWindowInteractionBlocked(true);
+      setUncontrolledOpen(false);
+      onOpenChange?.(false);
+    };
+    const releaseInteraction = () => setWindowInteractionBlocked(false);
+
+    window.addEventListener("blur", blockInteraction);
+    document.addEventListener("visibilitychange", blockInteraction);
+    window.addEventListener("focusin", releaseInteraction, true);
+    window.addEventListener("pointermove", releaseInteraction, true);
+    return () => {
+      window.removeEventListener("blur", blockInteraction);
+      document.removeEventListener("visibilitychange", blockInteraction);
+      window.removeEventListener("focusin", releaseInteraction, true);
+      window.removeEventListener("pointermove", releaseInteraction, true);
+    };
+  }, [onOpenChange]);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen && windowInteractionBlocked) {
+      return;
+    }
+    if (controlledOpen === undefined) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
+
   return (
     <TooltipProvider>
-      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+      <TooltipPrimitive.Root
+        data-slot="tooltip"
+        onOpenChange={handleOpenChange}
+        open={
+          windowInteractionBlocked
+            ? false
+            : (controlledOpen ?? uncontrolledOpen)
+        }
+        {...props}
+      />
     </TooltipProvider>
   );
 }
