@@ -28,7 +28,9 @@ jobs:
           AIM_MODEL_SCOPE: face
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
-        run: npm run test:unit -- run
+        run: npm run test:unit -- run --exclude src/tests/unit/face-data-migration.test.mjs
+      - name: Run face migration tests in isolation
+        run: npm run test:unit -- run src/tests/unit/face-data-migration.test.mjs
       - name: Run AI integration tests
         run: npm run test:ai-integration
       - name: Run worker tests
