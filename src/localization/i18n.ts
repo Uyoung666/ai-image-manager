@@ -528,6 +528,7 @@ i18n.use(initReactI18next).init({
         settingsGroupData: "数据与性能",
         settingsGroupOutput: "输出与同步",
         settingsGroupUpdates: "更新与关于",
+        settingsGroupHelp: "帮助与支持",
         settingsAppearance: "外观",
         settingsAppearanceDescription: "调整主题、界面显示和搜索匹配体验。",
         settingsBehavior: "应用行为",
@@ -785,6 +786,56 @@ i18n.use(initReactI18next).init({
         watermarkLoadError: "水印设置读取失败。",
         cloudSync: "云同步",
         settingsAbout: "关于",
+        settingsDiagnostics: "帮助与诊断",
+        diagnosticsDescription:
+          "无需寻找日志：软件会在本地生成严格脱敏的诊断包，只有你主动附加到 Issue 时才会离开设备。",
+        diagnosticsSectionDescription:
+          "简单描述问题，软件会整理版本、系统状态和近期错误日志。",
+        diagnosticsReportProblem: "反馈问题",
+        diagnosticsNewReport: "新建问题反馈",
+        diagnosticsIncident: "关联故障事件",
+        diagnosticsPendingTitle: "发现 {{count}} 个待反馈故障",
+        diagnosticsPendingHint: "选择最近发生的故障，可以让诊断包与错误日志精准对应。",
+        diagnosticsPendingStartup:
+          "检测到 {{count}} 个待反馈故障，可前往“帮助与诊断”生成安全报告",
+        diagnosticsOpenPage: "前往诊断",
+        diagnosticsLastAction: "出错前最后一步",
+        diagnosticsLastActionPlaceholder:
+          "例如：导入文件夹后，点击“开始 AI 索引”",
+        diagnosticsLastActionRequired: "请先填写出错前最后一步",
+        diagnosticsActualBehavior: "实际表现",
+        diagnosticsActualBehaviorPlaceholder:
+          "例如：进度停在 32%，随后页面变为空白",
+        diagnosticsFrequency: "出现频率",
+        diagnosticsFrequencyAlways: "总是发生",
+        diagnosticsFrequencySometimes: "偶尔发生",
+        diagnosticsFrequencyOnce: "仅发生一次",
+        diagnosticsNativeDump: "附加原生崩溃转储",
+        diagnosticsNativeDumpWarning:
+          "默认关闭。转储有助于定位 GPU、ONNX 和原生依赖崩溃，但可能包含少量进程内存片段。",
+        diagnosticsPrivacyTitle: "查看将收集的内容和隐私保护",
+        diagnosticsCollects:
+          "收集应用版本、Windows 与硬件摘要、功能状态和严格脱敏的近期日志。",
+        diagnosticsNeverCollects:
+          "绝不收集照片、数据库、EXIF、人脸/向量数据、搜索词或云端凭据。",
+        diagnosticsExportOnly: "仅导出诊断包",
+        diagnosticsGenerateAndReport: "生成诊断包并前往反馈",
+        diagnosticsGenerating: "正在收集并脱敏…",
+        diagnosticsBundleReady: "诊断包已生成，并已在资源管理器中选中",
+        diagnosticsBundleFailed: "诊断包生成失败，请重试",
+        diagnosticsIssueFallback:
+          "无法自动打开 GitHub，Issue 内容已复制到剪贴板",
+        diagnosticsIssueFallbackCopyFailed:
+          "无法打开 GitHub 或复制 Issue 内容，请点击下方按钮重试",
+        diagnosticsExplorerFailed:
+          "诊断包已生成，但无法自动在资源管理器中选中",
+        diagnosticsReadyTitle: "诊断包已准备好",
+        diagnosticsStepOne: "浏览器中已打开预填好的 GitHub Issue",
+        diagnosticsIssueNotOpened: "GitHub 未能自动打开，请点击下方按钮重试",
+        diagnosticsStepTwo: "将资源管理器中选中的 ZIP 拖入 Issue",
+        diagnosticsStepThree: "确认描述后提交 Issue",
+        diagnosticsRetryIssue: "重试打开 GitHub",
+        diagnosticsFeedbackThisError: "反馈此问题",
         settingsVersion: "版本",
         settingsLicense: "许可证",
         settingsAuthor: "作者",
@@ -2421,6 +2472,7 @@ i18n.use(initReactI18next).init({
         settingsGroupData: "Data & performance",
         settingsGroupOutput: "Output & sync",
         settingsGroupUpdates: "Updates & about",
+        settingsGroupHelp: "Help & support",
         settingsAppearance: "Appearance",
         settingsAppearanceDescription:
           "Adjust the theme, interface display, and search matching experience.",
@@ -2692,6 +2744,59 @@ i18n.use(initReactI18next).init({
         watermarkLoadError: "Watermark settings could not be loaded.",
         cloudSync: "Cloud Sync",
         settingsAbout: "About",
+        settingsDiagnostics: "Help & Diagnostics",
+        diagnosticsDescription:
+          "No log hunting required. The app creates a strictly redacted bundle locally, and nothing leaves your device unless you attach it to an issue.",
+        diagnosticsSectionDescription:
+          "Describe the problem briefly and the app will collect version, system status, and recent errors.",
+        diagnosticsReportProblem: "Report a problem",
+        diagnosticsNewReport: "New problem report",
+        diagnosticsIncident: "Related incident",
+        diagnosticsPendingTitle: "{{count}} incident(s) ready to report",
+        diagnosticsPendingHint:
+          "Select the recent incident so the bundle can be matched to the correct error logs.",
+        diagnosticsPendingStartup:
+          "{{count}} pending problem(s) detected. Open Help & Diagnostics to create a safe report.",
+        diagnosticsOpenPage: "Open diagnostics",
+        diagnosticsLastAction: "Last action before the problem",
+        diagnosticsLastActionPlaceholder:
+          'For example: after importing a folder, I clicked "Start AI indexing"',
+        diagnosticsLastActionRequired: "Describe the last action before the problem",
+        diagnosticsActualBehavior: "What happened",
+        diagnosticsActualBehaviorPlaceholder:
+          "For example: progress stopped at 32%, then the page became blank",
+        diagnosticsFrequency: "Frequency",
+        diagnosticsFrequencyAlways: "Always",
+        diagnosticsFrequencySometimes: "Sometimes",
+        diagnosticsFrequencyOnce: "Only once",
+        diagnosticsNativeDump: "Include native crash dump",
+        diagnosticsNativeDumpWarning:
+          "Off by default. A dump helps diagnose GPU, ONNX, and native dependency crashes, but may contain small process-memory fragments.",
+        diagnosticsPrivacyTitle: "Review collected data and privacy protection",
+        diagnosticsCollects:
+          "Includes app version, Windows and hardware summary, feature status, and strictly redacted recent logs.",
+        diagnosticsNeverCollects:
+          "Never includes photos, databases, EXIF, face/vector data, search terms, or cloud credentials.",
+        diagnosticsExportOnly: "Export bundle only",
+        diagnosticsGenerateAndReport: "Generate bundle and report",
+        diagnosticsGenerating: "Collecting and redacting…",
+        diagnosticsBundleReady:
+          "Diagnostic bundle created and selected in File Explorer",
+        diagnosticsBundleFailed: "Failed to create the diagnostic bundle. Try again.",
+        diagnosticsIssueFallback:
+          "GitHub could not be opened. The issue content was copied to the clipboard.",
+        diagnosticsIssueFallbackCopyFailed:
+          "GitHub could not be opened and the issue text could not be copied. Use the retry button below.",
+        diagnosticsExplorerFailed:
+          "The bundle was created, but File Explorer could not select it automatically.",
+        diagnosticsReadyTitle: "Diagnostic bundle is ready",
+        diagnosticsStepOne: "A prefilled GitHub issue is open in your browser",
+        diagnosticsIssueNotOpened:
+          "GitHub did not open automatically. Use the retry button below.",
+        diagnosticsStepTwo: "Drag the selected ZIP from File Explorer into the issue",
+        diagnosticsStepThree: "Review the description and submit the issue",
+        diagnosticsRetryIssue: "Retry opening GitHub",
+        diagnosticsFeedbackThisError: "Report this problem",
         settingsVersion: "Version",
         settingsLicense: "License",
         settingsAuthor: "Author",

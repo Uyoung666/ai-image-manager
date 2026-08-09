@@ -13,13 +13,14 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: "src/main.ts",
+      entry: "src/bootstrap.ts",
       formats: ["es"],
       fileName: () => "[name].js",
     },
     rollupOptions: {
       output: {
-        inlineDynamicImports: true,
+        inlineDynamicImports: false,
+        chunkFileNames: "chunks/[name]-[hash].js",
         banner: requireShim,
       },
       external: [

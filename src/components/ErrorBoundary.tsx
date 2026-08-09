@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { recordRendererIncident } from "@/actions/diagnostics";
+import { DiagnosticsReportDialog } from "@/components/diagnostics-report-form";
 
 interface Props {
   children: ReactNode;
@@ -8,6 +10,7 @@ interface Props {
 
 interface State {
   error: Error | null;
+  incidentId?: string;
 }
 
 export function ErrorBoundaryMessage({ error }: { error: Error }) {
@@ -45,13 +48,16 @@ export function ErrorBoundaryMessage({ error }: { error: Error }) {
 
 function ErrorBoundaryInner({
   error,
+  incidentId,
   onReset,
 }: {
   error: Error;
+  incidentId?: string;
   onReset: () => void;
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col items-center justify-center gap-3 overflow-y-auto px-4 py-4 text-center sm:px-6">
@@ -80,6 +86,13 @@ function ErrorBoundaryInner({
           {t("retry")}
         </button>
         <button
+          className="rounded-[6px] bg-primary px-3 py-1.5 font-medium text-[12px] text-primary-foreground transition-opacity hover:opacity-90"
+          onClick={() => setReportOpen(true)}
+          type="button"
+        >
+          {t("diagnosticsFeedbackThisError")}
+        </button>
+        <button
           className="rounded-[6px] border border-border px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => {
             navigator.clipboard.writeText(
@@ -100,6 +113,12 @@ function ErrorBoundaryInner({
           {t("refresh")}
         </button>
       </div>
+      <DiagnosticsReportDialog
+        actualBehavior={error.message}
+        incidentId={incidentId}
+        onOpenChange={setReportOpen}
+        open={reportOpen}
+      />
     </div>
   );
 }
@@ -111,15 +130,30 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    return { error, incidentId: undefined };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error.message, info.componentStack);
+    recordRendererIncident({
+      action: "react-render",
+      message: error.message || "React render error",
+      stack: error.stack,
+      componentStack: info.componentStack ?? undefined,
+      route: window.location.pathname,
+    })
+      .then(({ id }) => {
+        if (this.state.error === error) {
+          this.setState({ incidentId: id });
+        }
+      })
+      .catch(() => {
+        // The report dialog can still create a manual incident if IPC failed.
+      });
   }
 
   handleReset = () => {
-    this.setState({ error: null });
+    this.setState({ error: null, incidentId: undefined });
   };
 
   render() {
@@ -131,6 +165,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <ErrorBoundaryInner
           error={this.state.error}
+          incidentId={this.state.incidentId}
           onReset={this.handleReset}
         />
       );

@@ -6,6 +6,7 @@ import {
   Image,
   Info,
   Layers,
+  LifeBuoy,
   Paintbrush,
   RefreshCw,
   Settings,
@@ -101,7 +102,15 @@ const NAV_ITEMS: NavItem[] = [
     to: "/settings/update",
   },
   {
-    groupKey: "settingsGroupUpdates",
+    groupKey: "settingsGroupHelp",
+    icon: LifeBuoy,
+    keywords:
+      "帮助 诊断 日志 错误 崩溃 问题 反馈 issue github support help diagnostics logs error crash bug report feedback",
+    labelKey: "settingsDiagnostics",
+    to: "/settings/diagnostics",
+  },
+  {
+    groupKey: "settingsGroupHelp",
     icon: Info,
     keywords:
       "\u66f4\u65b0 \u5173\u4e8e \u7248\u672c \u8bb8\u53ef\u8bc1 \u4f5c\u8005 github \u4f9d\u8d56 about version license author dependencies",
@@ -117,6 +126,7 @@ const GROUP_ORDER = [
   "settingsGroupData",
   "settingsGroupOutput",
   "settingsGroupUpdates",
+  "settingsGroupHelp",
 ];
 
 export { GROUP_ORDER as SETTINGS_GROUP_ORDER, NAV_ITEMS as SETTINGS_NAV_ITEMS };

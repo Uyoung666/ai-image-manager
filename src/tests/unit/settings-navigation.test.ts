@@ -17,13 +17,15 @@ const translations: Record<string, string> = {
   settingsGroupOutput: "输出与同步",
   settingsGroupPhotos: "照片体验",
   settingsGroupUpdates: "更新与关于",
+  settingsGroupHelp: "帮助与支持",
+  settingsDiagnostics: "帮助与诊断",
   settingsStorage: "存储",
 };
 
 const translate = (key: string) => translations[key] || key;
 
 describe("settings navigation", () => {
-  it("keeps the six settings groups in product order", () => {
+  it("keeps the seven settings groups in product order", () => {
     expect(SETTINGS_GROUP_ORDER).toEqual([
       "settingsGroupAppearance",
       "settingsGroupBehavior",
@@ -31,6 +33,7 @@ describe("settings navigation", () => {
       "settingsGroupData",
       "settingsGroupOutput",
       "settingsGroupUpdates",
+      "settingsGroupHelp",
     ]);
   });
 
@@ -41,6 +44,22 @@ describe("settings navigation", () => {
           groupKey: "settingsGroupBehavior",
           to: "/settings/behavior",
         }),
+      ])
+    );
+  });
+
+  it("includes a searchable diagnostics page", () => {
+    expect(SETTINGS_NAV_ITEMS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupKey: "settingsGroupHelp",
+          to: "/settings/diagnostics",
+        }),
+      ])
+    );
+    expect(filterSettingsNavigationItems("日志", translate)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: "/settings/diagnostics" }),
       ])
     );
   });

@@ -23,6 +23,7 @@ import { Route as SettingsWanderRouteImport } from './routes/settings.wander'
 import { Route as SettingsUpdateRouteImport } from './routes/settings.update'
 import { Route as SettingsStorageRouteImport } from './routes/settings.storage'
 import { Route as SettingsSequencesRouteImport } from './routes/settings.sequences'
+import { Route as SettingsDiagnosticsRouteImport } from './routes/settings.diagnostics'
 import { Route as SettingsCloudSyncRouteImport } from './routes/settings.cloud-sync'
 import { Route as SettingsBehaviorRouteImport } from './routes/settings.behavior'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
@@ -103,6 +104,11 @@ const SettingsSequencesRoute = SettingsSequencesRouteImport.update({
   path: '/sequences',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsDiagnosticsRoute = SettingsDiagnosticsRouteImport.update({
+  id: '/diagnostics',
+  path: '/diagnostics',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsCloudSyncRoute = SettingsCloudSyncRouteImport.update({
   id: '/cloud-sync',
   path: '/cloud-sync',
@@ -168,6 +174,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
@@ -193,6 +200,7 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
@@ -219,6 +227,7 @@ export interface FileRoutesById {
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/behavior': typeof SettingsBehaviorRoute
   '/settings/cloud-sync': typeof SettingsCloudSyncRoute
+  '/settings/diagnostics': typeof SettingsDiagnosticsRoute
   '/settings/sequences': typeof SettingsSequencesRoute
   '/settings/storage': typeof SettingsStorageRoute
   '/settings/update': typeof SettingsUpdateRoute
@@ -246,6 +255,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/diagnostics'
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
@@ -271,6 +281,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/diagnostics'
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
@@ -296,6 +307,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/behavior'
     | '/settings/cloud-sync'
+    | '/settings/diagnostics'
     | '/settings/sequences'
     | '/settings/storage'
     | '/settings/update'
@@ -415,6 +427,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSequencesRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/diagnostics': {
+      id: '/settings/diagnostics'
+      path: '/diagnostics'
+      fullPath: '/settings/diagnostics'
+      preLoaderRoute: typeof SettingsDiagnosticsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/cloud-sync': {
       id: '/settings/cloud-sync'
       path: '/cloud-sync'
@@ -521,6 +540,7 @@ interface SettingsRouteChildren {
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsBehaviorRoute: typeof SettingsBehaviorRoute
   SettingsCloudSyncRoute: typeof SettingsCloudSyncRoute
+  SettingsDiagnosticsRoute: typeof SettingsDiagnosticsRoute
   SettingsSequencesRoute: typeof SettingsSequencesRoute
   SettingsStorageRoute: typeof SettingsStorageRoute
   SettingsUpdateRoute: typeof SettingsUpdateRoute
@@ -534,6 +554,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsBehaviorRoute: SettingsBehaviorRoute,
   SettingsCloudSyncRoute: SettingsCloudSyncRoute,
+  SettingsDiagnosticsRoute: SettingsDiagnosticsRoute,
   SettingsSequencesRoute: SettingsSequencesRoute,
   SettingsStorageRoute: SettingsStorageRoute,
   SettingsUpdateRoute: SettingsUpdateRoute,

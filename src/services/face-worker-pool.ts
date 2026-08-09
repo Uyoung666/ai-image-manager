@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("face-worker-pool");
@@ -91,9 +92,10 @@ function findWorkerScript(): string {
 function spawnWorker(index: number): WorkerSlot {
   const workerScript = findWorkerScript();
   const child = fork(workerScript, [], {
-    stdio: ["ignore", "inherit", "pipe", "ipc"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
     timeout: WORKER_TIMEOUT,
   });
+  captureWorkerOutput(child, `face-worker-${index}`);
 
   const slot: WorkerSlot = {
     process: child,

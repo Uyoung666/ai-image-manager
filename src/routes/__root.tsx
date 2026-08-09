@@ -4,9 +4,14 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { Suspense, useEffect, useLayoutEffect, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { consumeUpdateWelcome } from "@/actions/update-changelog";
+import {
+  getDiagnosticsOverview,
+  recordRendererIncident,
+} from "@/actions/diagnostics";
 import DragWindowRegion from "@/components/drag-window-region";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartupSplash } from "@/components/startup-splash";
@@ -32,8 +37,10 @@ function RouteSuspense() {
 }
 
 function Root() {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const diagnosticNoticeShown = useRef(false);
   const isTestEnvironment = Boolean(
     window.electronAPI?.isE2E || !window.electronAPI?.preloadReady
   );
@@ -45,6 +52,70 @@ function Root() {
   const [startupTimedOut, setStartupTimedOut] = useState(false);
   const [renderSplash, setRenderSplash] = useState(!isTestEnvironment);
   const [splashExiting, setSplashExiting] = useState(false);
+
+  useEffect(() => {
+    const route = location.pathname.replace(
+      /^\/(albums|people|cull)\/[^/]+/,
+      "/$1/:id"
+    );
+    const record = (action: string, message: string, stack?: string) => {
+      recordRendererIncident({ action, message, stack, route }).catch(() => {
+        // Diagnostics are best-effort and must never create another UI failure.
+      });
+    };
+    const handleError = (event: ErrorEvent) => {
+      record(
+        "window-error",
+        event.message || "Unhandled renderer error",
+        event.error?.stack
+      );
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      record(
+        "unhandled-rejection",
+        reason instanceof Error ? reason.message : String(reason),
+        reason instanceof Error ? reason.stack : undefined
+      );
+    };
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (diagnosticNoticeShown.current) {
+      return;
+    }
+    diagnosticNoticeShown.current = true;
+    getDiagnosticsOverview()
+      .then((overview) => {
+        if (overview.pendingIncidents.length === 0) {
+          return;
+        }
+        toast.warning(
+          t("diagnosticsPendingStartup", {
+            count: overview.pendingIncidents.length,
+          }),
+          {
+            action: {
+              label: t("diagnosticsOpenPage"),
+              onClick: () => {
+                navigate({ to: "/settings/diagnostics" }).catch(() => {
+                  // The page remains available through Settings.
+                });
+              },
+            },
+          }
+        );
+      })
+      .catch(() => {
+        // Diagnostics are best-effort during renderer startup.
+      });
+  }, [navigate, t]);
 
   useLayoutEffect(() => {
     const handleHomeReady = () => {

@@ -11,6 +11,7 @@ import { fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { getSetting, setSetting } from "@/services/settings-manager";
 import { createLogger } from "@/utils/logger";
 
@@ -94,9 +95,10 @@ export function probeGpuCapability(modelsDir: string): Promise<GpuProbeResult> {
     let resolved = false;
 
     const child = fork(scriptPath, [], {
-      stdio: ["ignore", "inherit", "pipe", "ipc"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
       timeout: PROBE_TIMEOUT_MS,
     });
+    captureWorkerOutput(child, "gpu-probe-worker");
 
     const timeout = setTimeout(() => {
       if (resolved) {

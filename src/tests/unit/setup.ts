@@ -1,5 +1,12 @@
 ﻿import "@testing-library/jest-dom";
+import os from "node:os";
+import path from "node:path";
 import { vi } from "vitest";
+
+const electronTestDataRoot = path.join(
+  os.tmpdir(),
+  `ai-image-manager-vitest-${process.pid}`
+);
 
 // Mock electron globally — CI installs with --ignore-scripts (no Electron binary),
 // and any module that transitively imports electron will crash if the real module
@@ -9,7 +16,11 @@ vi.mock("electron", () => ({
   app: {
     getAppPath: () => process.cwd(),
     getLocale: () => "zh-CN",
-    getPath: () => process.cwd(),
+    getName: () => "AI Image Manager",
+    getPath: (name: string) => path.join(electronTestDataRoot, name),
+    getVersion: () => "1.4.0",
+    getGPUFeatureStatus: () => ({ gpu_compositing: "enabled" }),
+    getGPUInfo: async () => ({ gpuDevice: [] }),
     isPackaged: false,
   },
 }));

@@ -5,6 +5,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { shutdownPool } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
@@ -151,9 +152,10 @@ function runEmbedBatch(
     );
 
     const child = fork(workerScript, [], {
-      stdio: ["ignore", "inherit", "pipe", "ipc"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
     });
+    captureWorkerOutput(child, "embedder-worker");
 
     let stderr = "";
     let resolved = false;

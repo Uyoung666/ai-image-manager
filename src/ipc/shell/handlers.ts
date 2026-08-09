@@ -6,9 +6,9 @@ import { openExternalLinkInputSchema } from "./schemas";
 
 export const openExternalLink = os
   .input(openExternalLinkInputSchema)
-  .handler(({ input }) => {
+  .handler(async ({ input }) => {
     const { url } = input;
-    shell.openExternal(url);
+    await shell.openExternal(url);
   });
 
 export const openFolderDialog = os.handler(async () => {

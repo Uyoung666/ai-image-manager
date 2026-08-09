@@ -2,6 +2,7 @@ import { type ChildProcess, fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { ensureLocalModel } from "./model-loader";
 
 export type TranslationState = "ready" | "loading" | "degraded" | "error";
@@ -133,8 +134,9 @@ export function initTranslationWorker(modelsRoot: string): Promise<void> {
   initPromise = new Promise<void>((resolve, reject) => {
     let settled = false;
     const worker = fork(findWorkerScript(), [], {
-      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
+    captureWorkerOutput(worker, "translation-worker");
     child = worker;
 
     const timer = setTimeout(() => {

@@ -37,44 +37,51 @@ import {
 import { copyModelsOnce } from "@/services/ai/model-loader";
 import { deletePhotoVectors, initVectorDB } from "@/services/ai-embedder";
 import {
-  MODEL_MANIFEST,
-  verifyModelFile,
-} from "@/services/model-downloader";
+  appendDiagnosticLog,
+  installConsoleDiagnostics,
+  recordDiagnosticIncident,
+} from "@/services/diagnostics";
+import {
+  DiagnosticSanitizer,
+  sanitizeRendererRoute,
+} from "@/services/diagnostics/sanitizer";
 import {
   getHttpServerPort,
   startHttpServerEarly,
 } from "@/services/http-server";
+import { MODEL_MANIFEST, verifyModelFile } from "@/services/model-downloader";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
   getSendToFilePaths,
   setupSendToShortcut,
 } from "@/services/sendto-integration";
+import { getSetting } from "@/services/settings-manager";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
+import {
+  installUpdate,
+  startUpdateManager,
+  stopAutomaticChecks,
+} from "@/services/update-manager";
 import {
   createWanderLifecycleBridge,
   type WanderLifecycleBridge,
 } from "@/services/wander-lifecycle";
-import { getDataPath, initDataPath } from "@/utils/data-path";
-import { getFolderPaths } from "@/utils/folder-paths";
-import { getSetting } from "@/services/settings-manager";
 import {
   APP_PREFERENCE_DEFAULTS,
   APP_PREFERENCE_KEYS,
   parseBooleanPreference,
   parseCloseBehavior,
 } from "@/types/app-preferences";
-import {
-  installUpdate,
-  startUpdateManager,
-  stopAutomaticChecks,
-} from "@/services/update-manager";
+import { getDataPath, initDataPath } from "@/utils/data-path";
+import { getFolderPaths } from "@/utils/folder-paths";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
 import { isSafePath } from "./utils/path-security.js";
 
 const log = createLogger("main");
+installConsoleDiagnostics();
 
 // ── Squirrel startup event handling ──────────────────────────────────
 if (started) {
@@ -105,67 +112,46 @@ if (!gotTheLock) {
   process.exit(0);
 }
 
-// ── Fatal error handlers ─────────────────────────────────────────────
-// MUST be registered before ANY fs operation so that crashes during
-// initDataPath, logDir creation, or electron-store loading are caught.
 let logDir: string | null = null;
-
-function crashLog(message: string) {
-  if (logDir) {
-    try {
-      fs.mkdirSync(logDir, { recursive: true });
-      fs.writeFileSync(path.join(logDir, "crash.log"), `${message}\n`, {
-        flag: "a",
-      });
-    } catch {
-      /* best-effort — if we can't write, at least show the dialog */
-    }
-  }
-}
-
-process.on("uncaughtException", (err) => {
-  const message = String(err);
-  const detail = err?.stack ?? message;
-  crashLog(`UNCAUGHT ${message}\n${detail}`);
-  try {
-    log.fatal({ err }, "FATAL - uncaught exception");
-  } catch (logErr) {
-    crashLog(`LOGGER FAILED ${String(logErr)}`);
-  }
-  dialog.showErrorBox("Fatal Error", message);
-  app.quit();
-});
-
-process.on("unhandledRejection", (reason) => {
-  const message = String(reason);
-  const detail = reason instanceof Error ? (reason.stack ?? message) : message;
-  crashLog(`REJECTION ${detail}`);
-  try {
-    log.fatal({ reason }, "FATAL - unhandled rejection");
-  } catch (logErr) {
-    crashLog(`LOGGER FAILED ${String(logErr)}`);
-  }
-  dialog.showErrorBox("Fatal Error", message);
-  app.quit();
-});
+const legacyLogSanitizer = new DiagnosticSanitizer();
 
 // ── Log directory (scoped to app userData, not AppData root) ─────────
 logDir = path.join(app.getPath("userData"), "logs");
 fs.mkdirSync(logDir, { recursive: true });
 fs.writeFileSync(
   path.join(logDir, "startup.log"),
-  `STARTUP ${new Date().toISOString()} argv=${JSON.stringify(process.argv)}\n`,
+  `STARTUP ${new Date().toISOString()} argv=${legacyLogSanitizer.sanitize(JSON.stringify(process.argv))}\n`,
   { flag: "a" }
 );
+
+app.on("child-process-gone", (_event, details) => {
+  if (details.reason === "clean-exit") {
+    return;
+  }
+  const message = `${details.type} process exited: ${details.reason} (${details.exitCode})`;
+  const incident = recordDiagnosticIncident({
+    source: "worker-crash",
+    message,
+  });
+  appendDiagnosticLog({
+    incidentId: incident.id,
+    level: "error",
+    message,
+    module: details.name || details.type,
+    process: "worker",
+  });
+});
 
 function appendStartupLog(filename: string, message: string) {
   if (!logDir) {
     return;
   }
   try {
-    fs.writeFileSync(path.join(logDir, filename), `${message}\n`, {
-      flag: "a",
-    });
+    fs.writeFileSync(
+      path.join(logDir, filename),
+      `${legacyLogSanitizer.sanitize(message)}\n`,
+      { flag: "a" }
+    );
   } catch {
     /* best-effort */
   }
@@ -326,8 +312,14 @@ function isBoundsVisible(bounds: {
 }): boolean {
   try {
     return screen.getAllDisplays().some((display) => {
-      const right = Math.min(bounds.x + bounds.width, display.workArea.x + display.workArea.width);
-      const bottom = Math.min(bounds.y + bounds.height, display.workArea.y + display.workArea.height);
+      const right = Math.min(
+        bounds.x + bounds.width,
+        display.workArea.x + display.workArea.width
+      );
+      const bottom = Math.min(
+        bounds.y + bounds.height,
+        display.workArea.y + display.workArea.height
+      );
       const left = Math.max(bounds.x, display.workArea.x);
       const top = Math.max(bounds.y, display.workArea.y);
       return right - left >= 32 && bottom - top >= 32;
@@ -579,7 +571,10 @@ async function verifyCurrentFaceModels(modelsDir: string): Promise<{
         candidate.subPath === "face" && candidate.fileName === fileName
     );
     const filePath = path.join(modelsDir, "face", fileName);
-    if (!entry || !(await verifyModelFile(filePath, entry.sha256, entry.sizeBytes))) {
+    if (
+      !entry ||
+      !(await verifyModelFile(filePath, entry.sha256, entry.sizeBytes))
+    ) {
       invalidFiles.push(fileName);
     }
   }
@@ -613,7 +608,10 @@ async function ensureModelAvailable(): Promise<void> {
     fs.existsSync(translationDecoder) &&
     faceValidation.valid
   ) {
-    log.info("AI models already cached and face hashes verified at %s", modelsDir);
+    log.info(
+      "AI models already cached and face hashes verified at %s",
+      modelsDir
+    );
     return;
   }
 
@@ -703,7 +701,10 @@ async function ensureModelAvailable(): Promise<void> {
           return;
         }
         log.warn(
-          { invalidFiles: copiedFaceValidation.invalidFiles, source: candidate },
+          {
+            invalidFiles: copiedFaceValidation.invalidFiles,
+            source: candidate,
+          },
           "Dev model copy rejected because the active face model failed hash verification"
         );
       } catch (err) {
@@ -743,7 +744,9 @@ function applyUiZoomScale() {
 
 // ── Create main window ───────────────────────────────────────────────
 function createWindow(httpPort: number) {
-  const basePath = getBasePath();
+  const modulePath = getBasePath();
+  const basePath =
+    path.basename(modulePath) === "chunks" ? path.dirname(modulePath) : modulePath;
   const preload = path.join(basePath, "preload.js");
 
   const store = getWindowStore();
@@ -911,17 +914,88 @@ function createWindow(httpPort: number) {
     lifecycleBridge.publish("initial");
     applyUiZoomScale();
   });
+  mainWindow.webContents.on("console-message", (details) => {
+    if (details.level !== "warning" && details.level !== "error") {
+      return;
+    }
+    appendDiagnosticLog({
+      action: details.level === "error" ? "console-error" : "console-warning",
+      level: details.level === "error" ? "error" : "warn",
+      message: details.message,
+      module: "renderer-console",
+      process: "renderer",
+      route: sanitizeRendererRoute(
+        mainWindow.webContents.getURL().split("#").at(-1) || "/"
+      ),
+      source: `${details.sourceId}:${details.lineNumber}`,
+    });
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    const message = `Renderer process exited: ${details.reason} (${details.exitCode})`;
+    const incident = recordDiagnosticIncident({
+      source: "renderer-crash",
+      message,
+    });
+    appendDiagnosticLog({
+      incidentId: incident.id,
+      level: "error",
+      message,
+      module: "renderer-lifecycle",
+      process: "main",
+    });
+    dialog
+      .showMessageBox({
+        type: "error",
+        title: "AI Image Manager",
+        message: "界面进程意外退出 / The interface process crashed",
+        detail: `事件编号 / Incident: ${incident.id}\n可在“设置 → 帮助与诊断”生成反馈包。`,
+        buttons: ["重新加载 / Reload", "关闭 / Close"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0 && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.reload();
+        }
+      })
+      .catch((error) => {
+        appendDiagnosticLog({
+          incidentId: incident.id,
+          level: "error",
+          message: error instanceof Error ? error.message : String(error),
+          module: "renderer-crash-dialog",
+          process: "main",
+        });
+      });
+  });
 
   ipcContext.setMainWindow(mainWindow);
 
   // typeof guard: prevents ReferenceError in production strict mode
-  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined") {
-    mainWindow.loadFile(
-      path.join(basePath, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
-    );
-  } else {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  }
+  const windowLoad =
+    typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
+      ? mainWindow.loadFile(
+          path.join(
+            basePath,
+            `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`
+          )
+        )
+      : mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  windowLoad.catch((error) => {
+    const incident = recordDiagnosticIncident({
+      message: error instanceof Error ? error.message : String(error),
+      source: "startup-failure",
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    appendDiagnosticLog({
+      incidentId: incident.id,
+      level: "error",
+      message: incident.message,
+      module: "renderer-load",
+      process: "main",
+      stack: incident.stack,
+    });
+  });
 
   const display = screen.getDisplayMatching(mainWindow.getBounds());
   const bounds = display.workArea;

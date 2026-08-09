@@ -2,6 +2,7 @@ import { fork } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { WORKER_TIMEOUT } from "./constants";
 import {
   getActiveEmbeddingModel,
@@ -92,9 +93,10 @@ export function embedImageInWorker(
     const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
     const workerScript = findWorkerScript();
     const child = fork(workerScript, [], {
-      stdio: ["ignore", "inherit", "pipe", "ipc"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
     });
+    captureWorkerOutput(child, "search-worker");
 
     let stderr = "";
     let resolved = false;

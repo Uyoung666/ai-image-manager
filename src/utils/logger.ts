@@ -1,42 +1,19 @@
-import fs from "node:fs";
-import path from "node:path";
-import { app } from "electron";
 import pino from "pino";
+import { createDiagnosticPinoStream } from "@/services/diagnostics/logging";
 
-const logDir = path.join(app.getPath("userData"), "logs");
-
-// 确保日志目录存在
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir, { recursive: true });
-}
-
-// 创建日志文件流
-const logFile = path.join(logDir, "main.log");
-const errorFile = path.join(logDir, "error.log");
-
-// 简化配置，避免 ES module 兼容性问题
 export const logger = pino(
   {
     level: process.env.LOG_LEVEL || "info",
     formatters: {
-      level: (label) => {
-        return { level: label };
-      },
+      level: (label) => ({ level: label }),
     },
+    base: { process: "main" },
     timestamp: pino.stdTimeFunctions.isoTime,
   },
-  pino.destination({
-    dest: logFile,
-    sync: true,
-    mkdir: true,
-  })
+  createDiagnosticPinoStream()
 );
 
-/**
- * 为指定模块创建子日志记录器
- * @param module 模块名称
- * @returns 子日志记录器实例
- */
+/** Create a structured child logger for one app module. */
 export function createLogger(module: string) {
   return logger.child({ module });
 }

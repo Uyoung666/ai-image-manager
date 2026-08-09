@@ -5,6 +5,7 @@ import path from "node:path";
 import { app } from "electron";
 import type { SerializedWorkerAdapter } from "@/services/ai/model-adapter";
 import { getActiveEmbeddingWorkerAdapter } from "@/services/ai/model-config";
+import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 
 interface EmbedResult {
   error?: string;
@@ -206,8 +207,9 @@ function isCurrentSlot(slot: WorkerSlot): boolean {
 function spawnWorker(index: number, generation: number): WorkerSlot {
   const workerScript = findWorkerScript();
   const child = fork(workerScript, [], {
-    stdio: ["ignore", "inherit", "pipe", "ipc"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
+  captureWorkerOutput(child, `embed-worker-${index}`);
 
   const slot: WorkerSlot = {
     process: child,

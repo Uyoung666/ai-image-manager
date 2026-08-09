@@ -8,7 +8,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 describe("SettingsSidebar", () => {
-  it("renders the six settings categories and their navigation", () => {
+  it("renders the seven settings categories and their navigation", () => {
     render(<SettingsSidebar />);
 
     for (const group of [
@@ -18,12 +18,14 @@ describe("SettingsSidebar", () => {
       "settingsGroupData",
       "settingsGroupOutput",
       "settingsGroupUpdates",
+      "settingsGroupHelp",
     ]) {
       expect(screen.getByText(group)).toBeInTheDocument();
     }
 
     expect(screen.getByText("settingsAppearance")).toBeInTheDocument();
     expect(screen.getByText("settingsBehavior")).toBeInTheDocument();
+    expect(screen.getByText("settingsDiagnostics")).toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText("settingsSearchPlaceholder")
     ).not.toBeInTheDocument();
