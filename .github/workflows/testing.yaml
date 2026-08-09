@@ -29,12 +29,34 @@ jobs:
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
         run: npm run test:unit -- run --exclude src/tests/unit/face-data-migration.test.mjs
-      - name: Run face migration tests in isolation
-        run: npm run test:unit -- run src/tests/unit/face-data-migration.test.mjs
       - name: Run AI integration tests
         run: npm run test:ai-integration
       - name: Run worker tests
         run: npm run test:worker
+
+  test-face-migration:
+    timeout-minutes: 20
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Rebuild Electron native modules
+        run: npm run rebuild:native
+      - name: Cache face models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-models-face-${{ hashFiles('src/services/model-downloader.ts') }}
+      - name: Prepare models for model-backed tests
+        env:
+          AIM_MODEL_SCOPE: face
+        run: node --loader ts-node/esm scripts/prepare-models.mjs
+      - name: Run face migration tests
+        run: npm run test:unit -- run src/tests/unit/face-data-migration.test.mjs
 
   test-e2e:
     timeout-minutes: 20
