@@ -11,6 +11,7 @@ vi.mock("@/db", () => ({
 }));
 
 import { updateSequenceMembersInPlace } from "@/ipc/photos/handlers/sequences";
+import { cleanupDeletedPhotoSequenceMembers } from "@/services/photo-sequences";
 
 beforeEach(() => {
   sqlite = new Database(":memory:");
@@ -151,5 +152,29 @@ describe("sequence member management", () => {
         updateSequenceMembersInPlace(testDatabase, 10, [1, 4])
       )
     ).toThrow("one folder");
+  });
+
+  it("removes deleted members and refreshes sequence metadata", () => {
+    sqlite.prepare("UPDATE photos SET deleted_at = 1 WHERE id = 2").run();
+
+    expect(cleanupDeletedPhotoSequenceMembers(testDatabase)).toBe(true);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT photo_id FROM photo_sequence_members WHERE sequence_id = 10 ORDER BY position"
+        )
+        .all()
+        .map((row) => (row as { photo_id: number }).photo_id)
+    ).toEqual([1, 3]);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT representative_photo_id, frame_count FROM photo_sequences WHERE id = 10"
+        )
+        .get()
+    ).toMatchObject({
+      frame_count: 2,
+      representative_photo_id: 1,
+    });
   });
 });

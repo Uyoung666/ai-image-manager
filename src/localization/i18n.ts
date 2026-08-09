@@ -1525,6 +1525,8 @@ i18n.use(initReactI18next).init({
         duplicateConfirmCleanup: "移入回收站",
         duplicateCleanupSuccess: "已将 {{count}} 张重复照片移入回收站",
         duplicateScanFailed: "重复照片扫描失败",
+        duplicateDetailsLoadFailed: "重复照片详情加载失败",
+        duplicateDetailsRetry: "重试加载",
         duplicateIgnoreFailed: "忽略重复组失败",
         duplicateNoIgnored: "暂无已忽略的重复组",
         peopleCount: "{{count}} 个人物分组",
@@ -3554,6 +3556,8 @@ i18n.use(initReactI18next).init({
         duplicateCleanupSuccess:
           "Moved {{count}} duplicate photos to the trash",
         duplicateScanFailed: "Duplicate scan failed",
+        duplicateDetailsLoadFailed: "Failed to load duplicate photo details",
+        duplicateDetailsRetry: "Retry loading",
         duplicateIgnoreFailed: "Failed to ignore duplicate group",
         duplicateNoIgnored: "No ignored duplicate groups",
         peopleCount: "{{count}} people groups",

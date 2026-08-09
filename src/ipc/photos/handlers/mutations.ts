@@ -29,7 +29,15 @@ import {
 } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { deletePhotoVectors } from "@/services/ai-embedder";
-import { validateDuplicateCleanupGroup } from "@/services/duplicate-groups";
+import {
+  type DuplicatePairRecord,
+  groupDuplicatePairs,
+  validateDuplicateCleanupGroup,
+} from "@/services/duplicate-groups";
+import {
+  bumpPhotoSequenceRevision,
+  cleanupDeletedPhotoSequenceMembers,
+} from "@/services/photo-sequences";
 import { invalidateSmartAlbumCache } from "@/services/smart-album-engine";
 import {
   cleanOrphanThumbnails as cleanOrphanThumbnailsService,
@@ -46,6 +54,44 @@ import {
 } from "@/services/trash-operations";
 import { BatchPhotoIdsSchema, IdSchema, TrashListSchema } from "./shared";
 import { invalidateIndexStatsCache, invalidateStatsCache } from "./stats";
+
+function loadPersistedDuplicateGroups(db: ReturnType<typeof getDatabase>) {
+  const photoRows = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      fileDate: photos.fileDate,
+      width: photos.width,
+      height: photos.height,
+      createdAt: photos.createdAt,
+      thumbnailPath: photos.thumbnailPath,
+    })
+    .from(photos)
+    .where(isNull(photos.deletedAt))
+    .all();
+  const photoMap = new Map(photoRows.map((photo) => [photo.id, photo]));
+  const pairs = db.select().from(duplicatePairs).all();
+  const records: DuplicatePairRecord[] = [];
+  for (const pair of pairs) {
+    const photoA = photoMap.get(pair.photoAId);
+    const photoB = photoMap.get(pair.photoBId);
+    if (!(photoA && photoB)) {
+      continue;
+    }
+    records.push({
+      clipSimilarity: pair.clipSimilarity,
+      distance: pair.phashDistance ?? 0,
+      matchType: pair.matchType as DuplicatePairRecord["matchType"],
+      pairId: pair.id,
+      photoA,
+      photoB,
+      status: pair.status as DuplicatePairRecord["status"],
+    });
+  }
+  return groupDuplicatePairs(records);
+}
 
 /**
  * Unified hard-delete: removes photo DB records, updates folder photoCounts,
@@ -138,6 +184,8 @@ function performHardDelete(photoIds: number[]): void {
     console.error("[AI] performHardDelete vector cleanup failed:", err)
   );
 
+  cleanupDeletedPhotoSequenceMembers(db);
+  bumpPhotoSequenceRevision();
   invalidateStatsCache();
   invalidateCountCache();
   invalidateSmartAlbumCache();
@@ -261,6 +309,8 @@ export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
           .run();
       }
     });
+    cleanupDeletedPhotoSequenceMembers(db);
+    bumpPhotoSequenceRevision();
   }
   invalidateStatsCache();
   invalidateCountCache();
@@ -305,6 +355,8 @@ export const deletePhotos = os
           .run();
       }
     });
+    cleanupDeletedPhotoSequenceMembers(db);
+    bumpPhotoSequenceRevision();
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();
@@ -317,9 +369,8 @@ export const cleanDuplicateGroups = os
       groups: z
         .array(
           z.object({
-            deletePhotoIds: z.array(z.number().int().positive()).min(1),
+            groupKey: z.string().min(1),
             keepPhotoId: z.number().int().positive(),
-            pairIds: z.array(z.number().int().positive()).min(1),
           })
         )
         .min(1),
@@ -330,25 +381,45 @@ export const cleanDuplicateGroups = os
     const deleteIds = new Set<number>();
     const keepIds = new Set<number>();
     const claimedPairIds = new Set<number>();
-
-    for (const group of input.groups) {
-      const pairIds = [...new Set(group.pairIds)];
-      if (pairIds.some((id) => claimedPairIds.has(id))) {
-        throw new Error("Duplicate relationship submitted more than once");
-      }
-      const relations = db
+    const currentGroups = loadPersistedDuplicateGroups(db);
+    const relationById = new Map(
+      db
         .select({
           id: duplicatePairs.id,
           photoAId: duplicatePairs.photoAId,
           photoBId: duplicatePairs.photoBId,
         })
         .from(duplicatePairs)
-        .where(inArray(duplicatePairs.id, pairIds))
-        .all();
-      for (const relation of relations) {
-        claimedPairIds.add(relation.id);
+        .all()
+        .map((relation) => [relation.id, relation] as const)
+    );
+
+    for (const group of input.groups) {
+      const currentGroup = currentGroups.find(
+        (candidate) => candidate.groupKey === group.groupKey
+      );
+      if (!currentGroup) {
+        throw new Error("Duplicate group is stale; rescan before cleaning");
       }
-      const groupDeleteIds = validateDuplicateCleanupGroup(relations, group);
+      const pairIds = [...new Set(currentGroup.pairIds)];
+      if (pairIds.some((id) => claimedPairIds.has(id))) {
+        throw new Error("Duplicate relationship submitted more than once");
+      }
+      const relations = currentGroup.pairIds.map((pairId) => {
+        const pair = relationById.get(pairId);
+        if (!pair) {
+          throw new Error("Duplicate group is stale; rescan before cleaning");
+        }
+        claimedPairIds.add(pair.id);
+        return pair;
+      });
+      const groupDeleteIds = validateDuplicateCleanupGroup(relations, {
+        deletePhotoIds: currentGroup.photos
+          .filter((photo) => photo.id !== group.keepPhotoId)
+          .map((photo) => photo.id),
+        keepPhotoId: group.keepPhotoId,
+        pairIds,
+      });
       keepIds.add(group.keepPhotoId);
       for (const id of groupDeleteIds) {
         deleteIds.add(id);
@@ -395,6 +466,8 @@ export const cleanDuplicateGroups = os
           .run();
       }
     });
+    cleanupDeletedPhotoSequenceMembers(db);
+    bumpPhotoSequenceRevision();
     invalidateCountCache();
     invalidateStatsCache();
     return { deleted: activeIds.length };
@@ -449,6 +522,8 @@ export const cleanupOrphanPhotos = os.handler(() => {
     deletePhotoVectors(orphanIds).catch((err) =>
       console.error("[AI] cleanupOrphanPhotos vector cleanup failed:", err)
     );
+    cleanupDeletedPhotoSequenceMembers(db);
+    bumpPhotoSequenceRevision();
   }
   const allFolders = db.select({ id: folders.id }).from(folders).all();
   for (const f of allFolders) {
@@ -1079,6 +1154,11 @@ export const restorePhotos = os
       }
     });
 
+    const succeededIds = [...idsWithValidFolder, ...idsWithoutFolder];
+    if (succeededIds.length > 0) {
+      cleanupDeletedPhotoSequenceMembers(db);
+      bumpPhotoSequenceRevision();
+    }
     invalidateCountCache();
     invalidateStatsCache();
     invalidateSmartAlbumCache();
@@ -1086,7 +1166,7 @@ export const restorePhotos = os
     return {
       failed,
       restoredWithoutFolderIds: idsWithoutFolder,
-      succeededIds: [...idsWithValidFolder, ...idsWithoutFolder],
+      succeededIds,
     };
   });
 

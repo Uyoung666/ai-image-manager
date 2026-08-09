@@ -1,4 +1,12 @@
-import { and, asc, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+} from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import {
@@ -16,9 +24,11 @@ import {
   getSequenceDetectionSettings,
   type SequenceDetectionSettings,
 } from "@/services/sequence-detection-settings";
+import { getSetting, setSetting } from "@/services/settings-manager";
 
 const BURST_GAP_MS = 2000;
 const MAX_BURST_PHASH_DISTANCE = 12;
+const PHOTO_SEQUENCE_REVISION_KEY = "photoSequences.revision";
 
 export interface SequenceDetectionCandidate {
   burstFrameNumber: number | null;
@@ -74,36 +84,36 @@ export function readCaptureMetadata(
   normalizedJson: string | null,
   vendorRawJson: string | null
 ) {
+  const empty: ReturnType<typeof parseCaptureMetadata> = {
+    burstGroupId: null,
+    burstFrameNumber: null,
+    capturedAt: null,
+    isContinuousDrive: false,
+  };
+  let normalized: ReturnType<typeof parseCaptureMetadata> = empty;
+  let vendor: ReturnType<typeof parseCaptureMetadata> = empty;
   if (normalizedJson) {
     try {
-      const normalized = parseCaptureMetadata(JSON.parse(normalizedJson));
-      if (normalized.capturedAt !== null) {
-        return normalized;
-      }
+      normalized = parseCaptureMetadata(JSON.parse(normalizedJson));
     } catch {
-      // Fall through to the stored MakerNote payload when normalized metadata is stale.
+      // Continue with the vendor payload when normalized metadata is invalid.
     }
   }
-  if (!vendorRawJson) {
-    return {
-      burstGroupId: null,
-      burstFrameNumber: null,
-      capturedAt: null,
-      isContinuousDrive: false,
-    };
+  if (vendorRawJson) {
+    try {
+      vendor = parseCaptureMetadata(
+        normalizeAdvancedExif(JSON.parse(vendorRawJson))
+      );
+    } catch {
+      // Keep the normalized payload when the vendor payload is invalid.
+    }
   }
-  try {
-    return parseCaptureMetadata(
-      normalizeAdvancedExif(JSON.parse(vendorRawJson))
-    );
-  } catch {
-    return {
-      burstGroupId: null,
-      burstFrameNumber: null,
-      capturedAt: null,
-      isContinuousDrive: false,
-    };
-  }
+  return {
+    burstGroupId: normalized.burstGroupId ?? vendor.burstGroupId,
+    burstFrameNumber: normalized.burstFrameNumber ?? vendor.burstFrameNumber,
+    capturedAt: normalized.capturedAt ?? vendor.capturedAt,
+    isContinuousDrive: normalized.isContinuousDrive || vendor.isContinuousDrive,
+  };
 }
 
 function hasContinuousBurstEvidence(item: SequenceDetectionCandidate): boolean {
@@ -320,6 +330,71 @@ export function detectSequenceCandidates(
 
 type Database = ReturnType<typeof getDatabase>;
 
+/** Remove soft-deleted members and keep persisted sequence metadata accurate. */
+export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
+  const deletedMemberIds = db
+    .select({ id: photoSequenceMembers.id })
+    .from(photoSequenceMembers)
+    .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+    .where(isNotNull(photos.deletedAt))
+    .all()
+    .map((member) => member.id);
+  if (deletedMemberIds.length > 0) {
+    db.delete(photoSequenceMembers)
+      .where(inArray(photoSequenceMembers.id, deletedMemberIds))
+      .run();
+  }
+
+  let changed = deletedMemberIds.length > 0;
+  const sequences = db
+    .select({
+      frameCount: photoSequences.frameCount,
+      id: photoSequences.id,
+      representativePhotoId: photoSequences.representativePhotoId,
+    })
+    .from(photoSequences)
+    .all();
+  for (const sequence of sequences) {
+    const members = db
+      .select({ photoId: photoSequenceMembers.photoId })
+      .from(photoSequenceMembers)
+      .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+      .where(
+        and(
+          eq(photoSequenceMembers.sequenceId, sequence.id),
+          isNull(photos.deletedAt)
+        )
+      )
+      .orderBy(asc(photoSequenceMembers.position))
+      .all();
+    if (members.length < 2) {
+      db.delete(photoSequences).where(eq(photoSequences.id, sequence.id)).run();
+      changed = true;
+      continue;
+    }
+    const representativePhotoId = members.some(
+      (member) => member.photoId === sequence.representativePhotoId
+    )
+      ? sequence.representativePhotoId
+      : (members[0]?.photoId ?? null);
+    if (
+      sequence.frameCount !== members.length ||
+      sequence.representativePhotoId !== representativePhotoId
+    ) {
+      db.update(photoSequences)
+        .set({
+          frameCount: members.length,
+          representativePhotoId,
+          updatedAt: Date.now(),
+        })
+        .where(eq(photoSequences.id, sequence.id))
+        .run();
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export type SequenceChangeReason =
   | "detection"
   | "manual"
@@ -333,6 +408,7 @@ export function notifySequencesChanged(
   folderId: number | undefined,
   reason: SequenceChangeReason
 ): void {
+  bumpPhotoSequenceRevision();
   sequenceVersion += 1;
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
@@ -343,6 +419,20 @@ export function notifySequencesChanged(
       });
     }
   }
+}
+
+export function getPhotoSequenceRevision(): number {
+  const value = Number.parseInt(
+    getSetting(PHOTO_SEQUENCE_REVISION_KEY) ?? "0",
+    10
+  );
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+export function bumpPhotoSequenceRevision(): number {
+  const next = getPhotoSequenceRevision() + 1;
+  setSetting(PHOTO_SEQUENCE_REVISION_KEY, String(next));
+  return next;
 }
 
 function deleteUnlockedAutomaticSequences(db: Database, folderId?: number) {

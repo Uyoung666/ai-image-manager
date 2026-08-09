@@ -20,6 +20,7 @@ import {
   duplicatePairs,
   exifData,
   photoSequenceMembers,
+  photoSequences,
   photos,
 } from "@/db/schema";
 import { getDuplicateThreshold } from "@/services/ai/threshold-profile";
@@ -33,9 +34,19 @@ import {
   type PaletteColor,
 } from "@/services/color-extractor";
 import {
+  createExactDuplicatePairs,
+  type DuplicateGroupPhotosResult,
+  type DuplicateGroupSummary,
   type DuplicatePairRecord,
+  type DuplicateSequenceSummary,
   groupDuplicatePairs,
 } from "@/services/duplicate-groups";
+import {
+  bumpPhotoSequenceRevision,
+  cleanupDeletedPhotoSequenceMembers,
+  getPhotoSequenceRevision,
+} from "@/services/photo-sequences";
+import { getSetting, setSetting } from "@/services/settings-manager";
 import { getThumbnailDiskUsage } from "@/services/thumbnailer";
 
 type AdvancedCategoryColumn =
@@ -85,6 +96,11 @@ interface ExifCandidatesCacheEntry {
 }
 let exifCandidatesCache: ExifCandidatesCacheEntry | null = null;
 const EXIF_CANDIDATES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const DUPLICATE_SCANNED_SEQUENCE_REVISION_KEY =
+  "duplicates.scannedSequenceRevision";
+const DUPLICATE_PREVIEW_LIMIT = 24;
+const DUPLICATE_DETAIL_LIMIT = 48;
 
 export function invalidateExifCandidatesCache(): void {
   exifCandidatesCache = null;
@@ -1015,9 +1031,164 @@ function getPhotoSequenceIds(
         sequenceId: photoSequenceMembers.sequenceId,
       })
       .from(photoSequenceMembers)
+      .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+      .where(isNull(photos.deletedAt))
       .all()
       .map(({ photoId, sequenceId }) => [photoId, sequenceId])
   );
+}
+
+function getScannedSequenceRevision(): number | null {
+  const value = getSetting(DUPLICATE_SCANNED_SEQUENCE_REVISION_KEY);
+  if (value === null) {
+    return null;
+  }
+  const revision = Number.parseInt(value, 10);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
+}
+
+function setScannedSequenceRevision(revision: number): void {
+  setSetting(DUPLICATE_SCANNED_SEQUENCE_REVISION_KEY, String(revision));
+}
+
+function createDuplicateGroupPreview(
+  group: ReturnType<typeof groupDuplicatePairs>[number]
+): DuplicateGroupSummary {
+  const preview = group.photos.slice(0, DUPLICATE_PREVIEW_LIMIT);
+  if (
+    !preview.some((photo) => photo.id === group.recommendedKeepId) &&
+    group.photos.length > 0
+  ) {
+    const keeper = group.photos.find(
+      (photo) => photo.id === group.recommendedKeepId
+    );
+    if (keeper && preview.length > 0) {
+      preview[preview.length - 1] = keeper;
+    }
+  }
+  return {
+    estimatedReclaimBytes: group.estimatedReclaimBytes,
+    groupKey: group.groupKey,
+    matchType: group.matchType,
+    pairCount: group.pairIds.length,
+    photoCount: group.photos.length,
+    previewPhotos: preview,
+    recommendedKeepId: group.recommendedKeepId,
+    sequenceSummaries: [],
+    status: group.status,
+  };
+}
+
+function addSequenceSummaries(
+  db: ReturnType<typeof getDatabase>,
+  groups: DuplicateGroupSummary[],
+  fullGroups: ReturnType<typeof groupDuplicatePairs>
+): void {
+  const groupPhotoIds = fullGroups.flatMap((group) =>
+    group.photos.map((photo) => photo.id)
+  );
+  const memberships =
+    groupPhotoIds.length === 0
+      ? []
+      : db
+          .select({
+            photoId: photoSequenceMembers.photoId,
+            sequenceId: photoSequenceMembers.sequenceId,
+          })
+          .from(photoSequenceMembers)
+          .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+          .where(
+            and(
+              inArray(photoSequenceMembers.photoId, groupPhotoIds),
+              isNull(photos.deletedAt)
+            )
+          )
+          .all();
+  const sequenceIds = new Set(
+    memberships.map((membership) => membership.sequenceId)
+  );
+  if (sequenceIds.size === 0) {
+    return;
+  }
+  const sequenceRows = db
+    .select({
+      frameCount: photoSequences.frameCount,
+      id: photoSequences.id,
+      representativePhotoId: photoSequences.representativePhotoId,
+      type: photoSequences.type,
+    })
+    .from(photoSequences)
+    .where(inArray(photoSequences.id, [...sequenceIds]))
+    .all();
+  const sequenceByPhoto = new Map(
+    memberships.map((membership) => [membership.photoId, membership.sequenceId])
+  );
+  const sequenceById = new Map(sequenceRows.map((row) => [row.id, row]));
+  const groupByKey = new Map(groups.map((group) => [group.groupKey, group]));
+  for (const fullGroup of fullGroups) {
+    const counts = new Map<number, number>();
+    for (const photo of fullGroup.photos) {
+      const sequenceId = sequenceByPhoto.get(photo.id);
+      if (sequenceId !== undefined) {
+        counts.set(sequenceId, (counts.get(sequenceId) ?? 0) + 1);
+      }
+    }
+    const summary = groupByKey.get(fullGroup.groupKey);
+    if (!summary) {
+      continue;
+    }
+    summary.sequenceSummaries = [...counts.keys()]
+      .map((sequenceId) => {
+        const sequence = sequenceById.get(sequenceId);
+        if (!sequence) {
+          return null;
+        }
+        return {
+          memberCount: sequence.frameCount,
+          representativePhotoId: sequence.representativePhotoId,
+          sequenceId,
+          type: sequence.type as DuplicateSequenceSummary["type"],
+        };
+      })
+      .filter(
+        (summary): summary is DuplicateSequenceSummary => summary !== null
+      )
+      .sort((left, right) => left.sequenceId - right.sequenceId);
+  }
+}
+
+function summarizeDuplicateGroups(
+  db: ReturnType<typeof getDatabase>,
+  groups: ReturnType<typeof groupDuplicatePairs>
+): DuplicateGroupSummary[] {
+  const summaries = groups.map(createDuplicateGroupPreview);
+  addSequenceSummaries(db, summaries, groups);
+  return summaries;
+}
+
+function hydrateDuplicateGroupDetails(
+  db: ReturnType<typeof getDatabase>,
+  groupKey: string,
+  offset: number,
+  limit: number
+): DuplicateGroupPhotosResult {
+  const persisted = db.select().from(duplicatePairs).all();
+  const groups = hydrateDuplicateGroups(db, persisted);
+  const group = groups.find((candidate) => candidate.groupKey === groupKey);
+  if (!group) {
+    throw new Error("Duplicate group is stale; rescan before loading photos");
+  }
+  const safeOffset = Math.max(0, offset);
+  const safeLimit = Math.min(Math.max(1, limit), DUPLICATE_DETAIL_LIMIT);
+  const photosPage = group.photos.slice(safeOffset, safeOffset + safeLimit);
+  return {
+    groupKey,
+    hasMore: safeOffset + photosPage.length < group.photos.length,
+    limit: safeLimit,
+    offset: safeOffset,
+    photos: photosPage,
+    total: group.photos.length,
+  };
 }
 
 export function isSameSequenceVisualPair(
@@ -1118,10 +1289,17 @@ export const findDuplicates = os
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate detection preserves its staged hash and vector pipeline.
   .handler(async ({ input }) => {
     const db = getDatabase();
+    if (cleanupDeletedPhotoSequenceMembers(db)) {
+      bumpPhotoSequenceRevision();
+    }
     const sequenceByPhoto = getPhotoSequenceIds(db);
+    const scanSequenceRevision = getPhotoSequenceRevision();
 
     // If not forcing rescan, return persisted results
-    if (!input.forceRescan) {
+    if (
+      !input.forceRescan &&
+      getScannedSequenceRevision() === scanSequenceRevision
+    ) {
       const existing = db.select().from(duplicatePairs).all();
       const stalePairIds = getStaleSequenceVisualPairIds(
         existing,
@@ -1139,10 +1317,14 @@ export const findDuplicates = os
 
       if (current.length > 0) {
         return {
-          groups: hydrateDuplicateGroups(db, current),
+          groups: summarizeDuplicateGroups(
+            db,
+            hydrateDuplicateGroups(db, current)
+          ),
           fromCache: true,
         };
       }
+      return { groups: [], fromCache: true };
     }
 
     // Full detection scan
@@ -1164,6 +1346,9 @@ export const findDuplicates = os
       .all();
 
     if (allPhotos.length === 0) {
+      if (getPhotoSequenceRevision() === scanSequenceRevision) {
+        setScannedSequenceRevision(scanSequenceRevision);
+      }
       return { groups: [], fromCache: false };
     }
 
@@ -1189,6 +1374,7 @@ export const findDuplicates = os
     }
 
     const candidates: CandidatePair[] = [];
+    const exactHashByPhotoId = new Map<number, string>();
     const seenPairs = new Set<string>();
 
     // Collect all photos across all size-groups that are missing a content hash
@@ -1249,23 +1435,29 @@ export const findDuplicates = os
         if (hGroup.length < 2) {
           continue;
         }
-        for (let i = 0; i < hGroup.length; i++) {
-          for (let j = i + 1; j < hGroup.length; j++) {
-            const aId = Math.min(hGroup[i].id, hGroup[j].id);
-            const bId = Math.max(hGroup[i].id, hGroup[j].id);
-            const key = `${aId}_${bId}`;
-            if (seenPairs.has(key)) {
-              continue;
-            }
-            seenPairs.add(key);
-            candidates.push({
-              photoAId: aId,
-              photoBId: bId,
-              matchType: "exact",
-              phashDistance: 0,
-              clipSimilarity: null,
-            });
+        const contentHash = hGroup[0]?.contentHash;
+        if (!contentHash) {
+          continue;
+        }
+        for (const photo of hGroup) {
+          exactHashByPhotoId.set(photo.id, contentHash);
+        }
+        for (const {
+          photoAId: aId,
+          photoBId: bId,
+        } of createExactDuplicatePairs(hGroup.map((photo) => photo.id))) {
+          const key = `${aId}_${bId}`;
+          if (seenPairs.has(key)) {
+            continue;
           }
+          seenPairs.add(key);
+          candidates.push({
+            photoAId: aId,
+            photoBId: bId,
+            matchType: "exact",
+            phashDistance: 0,
+            clipSimilarity: null,
+          });
         }
       }
     }
@@ -1290,14 +1482,18 @@ export const findDuplicates = os
         }
         const aId = Math.min(p.id, n.photoId);
         const bId = Math.max(p.id, n.photoId);
+        const hashA = exactHashByPhotoId.get(aId);
+        if (hashA !== undefined && hashA === exactHashByPhotoId.get(bId)) {
+          continue;
+        }
+        if (isSameSequenceVisualPair(aId, bId, "phash", sequenceByPhoto)) {
+          continue;
+        }
         const key = `${aId}_${bId}`;
         if (seenPairs.has(key)) {
           continue;
         }
         seenPairs.add(key);
-        if (isSameSequenceVisualPair(aId, bId, "phash", sequenceByPhoto)) {
-          continue;
-        }
         candidates.push({
           photoAId: aId,
           photoBId: bId,
@@ -1399,7 +1595,38 @@ export const findDuplicates = os
 
     // Re-query persisted rows so the response always contains real pair IDs.
     const persisted = db.select().from(duplicatePairs).all();
-    return { groups: hydrateDuplicateGroups(db, persisted), fromCache: false };
+    if (getPhotoSequenceRevision() === scanSequenceRevision) {
+      setScannedSequenceRevision(scanSequenceRevision);
+    }
+    return {
+      groups: summarizeDuplicateGroups(
+        db,
+        hydrateDuplicateGroups(db, persisted)
+      ),
+      fromCache: false,
+    };
+  });
+
+export const getDuplicateGroupPhotos = os
+  .input(
+    z.object({
+      groupKey: z.string().min(1),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(DUPLICATE_DETAIL_LIMIT)
+        .default(24),
+      offset: z.number().int().nonnegative().default(0),
+    })
+  )
+  .handler(({ input }) => {
+    return hydrateDuplicateGroupDetails(
+      getDatabase(),
+      input.groupKey,
+      input.offset,
+      input.limit
+    );
   });
 
 export const dismissDuplicate = os
@@ -1414,13 +1641,20 @@ export const dismissDuplicate = os
   });
 
 export const dismissDuplicates = os
-  .input(z.object({ pairIds: z.array(z.number().int().positive()).min(1) }))
+  .input(z.object({ groupKey: z.string().min(1) }))
   .handler(({ input }) => {
     const db = getDatabase();
+    const group = hydrateDuplicateGroups(
+      db,
+      db.select().from(duplicatePairs).all()
+    ).find((candidate) => candidate.groupKey === input.groupKey);
+    if (!group) {
+      throw new Error("Duplicate group is stale; rescan before ignoring");
+    }
     const result = db
       .update(duplicatePairs)
       .set({ status: "dismissed", resolvedAt: Date.now() })
-      .where(inArray(duplicatePairs.id, [...new Set(input.pairIds)]))
+      .where(inArray(duplicatePairs.id, group.pairIds))
       .run();
     return { dismissed: result.changes };
   });

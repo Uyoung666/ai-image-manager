@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createExactDuplicatePairs,
   type DuplicatePairRecord,
   type DuplicatePhoto,
   groupDuplicatePairs,
@@ -76,6 +77,20 @@ describe("duplicate group clustering", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].photos).toHaveLength(10);
     expect(groups[0].pairIds).toHaveLength(45);
+  });
+
+  it.each([
+    10, 100, 500, 1000,
+  ])("creates a linear exact pair graph for %i photos", (count) => {
+    const pairs = createExactDuplicatePairs(
+      Array.from({ length: count }, (_, index) => count - index)
+    );
+    expect(pairs).toHaveLength(count - 1);
+    expect(pairs[0]).toEqual({ photoAId: 1, photoBId: 2 });
+    expect(pairs.at(-1)).toEqual({
+      photoAId: 1,
+      photoBId: count,
+    });
   });
 
   it("creates disjoint, stable groups from overlapping and reordered edges", () => {

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   memo,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -21,6 +22,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { duplicateActions } from "@/actions/duplicates";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import {
@@ -29,9 +31,9 @@ import {
   TooltipTrigger as AppTooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
-import { ipc } from "@/ipc/manager";
 import type {
-  DuplicateGroup,
+  DuplicateGroupPhotosResult,
+  DuplicateGroupSummary,
   DuplicatePhoto,
 } from "@/services/duplicate-groups";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
@@ -39,12 +41,14 @@ import { toLocalMediaUrl } from "@/utils/local-media-url";
 type GroupFilter = "all" | "exact" | "similar" | "dismissed";
 interface DuplicatesResult {
   fromCache?: boolean;
-  groups: DuplicateGroup[];
+  groups: DuplicateGroupSummary[];
 }
 
-const EMPTY_GROUPS: DuplicateGroup[] = [];
+const EMPTY_GROUPS: DuplicateGroupSummary[] = [];
 const DUPLICATES_TOOLBAR_FALLBACK_HEIGHT = 48;
 const DUPLICATES_TOOLBAR_CONTENT_GAP = 16;
+const DUPLICATE_GROUP_PAGE_SIZE = 48;
+const DUPLICATE_GROUP_VIRTUAL_THRESHOLD = 24;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
@@ -61,6 +65,27 @@ function formatFileSize(bytes: number): string {
 
 function formatResolution(photo: DuplicatePhoto): string {
   return photo.width && photo.height ? `${photo.width}×${photo.height}` : "—";
+}
+
+function estimateReclaimBytes(
+  group: DuplicateGroupSummary,
+  photos: DuplicatePhoto[],
+  keeperId: number
+): number {
+  if (keeperId === group.recommendedKeepId) {
+    return group.estimatedReclaimBytes;
+  }
+  const recommended = group.previewPhotos.find(
+    (photo) => photo.id === group.recommendedKeepId
+  );
+  const keeper = photos.find((photo) => photo.id === keeperId);
+  if (recommended?.fileSize == null || keeper?.fileSize == null) {
+    return group.estimatedReclaimBytes;
+  }
+  return Math.max(
+    0,
+    group.estimatedReclaimBytes + recommended.fileSize - keeper.fileSize
+  );
 }
 
 const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
@@ -138,21 +163,185 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
   );
 });
 
-const DuplicateGroupCard = memo(function DuplicateGroupCard({
+const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
   enabled,
+  error,
   group,
   keeperId,
-  onDismiss,
+  loading,
+  onLoadMore,
   onKeeperChange,
-  onToggleEnabled,
+  photos,
   t,
 }: {
   enabled: boolean;
-  group: DuplicateGroup;
+  error: boolean;
+  group: DuplicateGroupSummary;
+  keeperId: number;
+  loading: boolean;
+  onKeeperChange: (photoId: number) => void;
+  onLoadMore: () => void;
+  photos: DuplicatePhoto[];
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [columnCount, setColumnCount] = useState(1);
+  const shouldVirtualize = group.photoCount > DUPLICATE_GROUP_VIRTUAL_THRESHOLD;
+
+  useLayoutEffect(() => {
+    const element = gridRef.current;
+    if (!element) {
+      return;
+    }
+    const updateColumns = () => {
+      const width = element.clientWidth;
+      setColumnCount(Math.max(1, Math.floor((width + 10) / (180 + 10))));
+    };
+    updateColumns();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateColumns);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const rowCount = Math.ceil(photos.length / columnCount);
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? rowCount : 0,
+    estimateSize: () => 216,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => `duplicate-row-${group.groupKey}-${index}`,
+    overscan: 2,
+  });
+
+  useEffect(() => {
+    if (
+      !shouldVirtualize ||
+      loading ||
+      error ||
+      photos.length >= group.photoCount ||
+      !virtualizer.getVirtualItems().some((item) => item.index >= rowCount - 2)
+    ) {
+      return;
+    }
+    onLoadMore();
+  }, [
+    group.photoCount,
+    error,
+    loading,
+    onLoadMore,
+    photos.length,
+    rowCount,
+    shouldVirtualize,
+    virtualizer,
+  ]);
+
+  if (!shouldVirtualize) {
+    return (
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))] gap-2.5 p-3.5">
+        {photos.map((photo) => (
+          <DuplicatePhotoTile
+            isKeeper={photo.id === keeperId}
+            key={photo.id}
+            onKeep={() => onKeeperChange(photo.id)}
+            pendingDelete={enabled && photo.id !== keeperId}
+            photo={photo}
+            t={t}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  let detailFooter: ReactNode = null;
+  if (loading) {
+    detailFooter = (
+      <div className="py-3 text-center text-[11px] text-muted-foreground">
+        {t("loadingPhotos")}
+      </div>
+    );
+  } else if (error) {
+    detailFooter = (
+      <button
+        className="mx-auto mt-3 block rounded-[6px] border border-border px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+        onClick={onLoadMore}
+        type="button"
+      >
+        {t("duplicateDetailsRetry")}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="max-h-[min(60dvh,720px)] overflow-y-auto p-3.5"
+      ref={scrollRef}
+    >
+      <div
+        className="relative w-full"
+        ref={gridRef}
+        style={{ height: `${virtualizer.getTotalSize()}px` }}
+      >
+        {virtualizer.getVirtualItems().map((row) => {
+          const rowPhotos = photos.slice(
+            row.index * columnCount,
+            (row.index + 1) * columnCount
+          );
+          return (
+            <div
+              className="absolute top-0 left-0 grid w-full gap-2.5"
+              data-index={row.index}
+              key={row.key}
+              ref={virtualizer.measureElement}
+              style={{
+                gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+                transform: `translateY(${row.start}px)`,
+              }}
+            >
+              {rowPhotos.map((photo) => (
+                <DuplicatePhotoTile
+                  isKeeper={photo.id === keeperId}
+                  key={photo.id}
+                  onKeep={() => onKeeperChange(photo.id)}
+                  pendingDelete={enabled && photo.id !== keeperId}
+                  photo={photo}
+                  t={t}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      {detailFooter}
+    </div>
+  );
+});
+
+const DuplicateGroupCard = memo(function DuplicateGroupCard({
+  enabled,
+  group,
+  detailError,
+  loadingPhotos,
+  keeperId,
+  onDismiss,
+  onLoadMore,
+  onKeeperChange,
+  onToggleEnabled,
+  photos,
+  t,
+}: {
+  enabled: boolean;
+  group: DuplicateGroupSummary;
+  detailError: boolean;
+  loadingPhotos: boolean;
   keeperId: number;
   onDismiss: () => void;
+  onLoadMore: () => void;
   onKeeperChange: (photoId: number) => void;
   onToggleEnabled: () => void;
+  photos: DuplicatePhoto[];
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const dismissed = group.status === "dismissed";
@@ -181,8 +370,23 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
             )}
           </span>
           <span className="text-[11px] text-muted-foreground">
-            {t("duplicatePhotoCount", { count: group.photos.length })}
+            {t("duplicatePhotoCount", { count: group.photoCount })}
           </span>
+          {group.sequenceSummaries.map((sequence) => (
+            <span
+              className="rounded-full border border-border bg-background/60 px-2 py-0.5 text-[10px] text-muted-foreground"
+              key={sequence.sequenceId}
+            >
+              {t("sequenceCardLabel", {
+                count: sequence.memberCount,
+                type: t(
+                  sequence.type === "burst"
+                    ? "sequenceBurst"
+                    : "sequenceTimelapse"
+                ),
+              })}
+            </span>
+          ))}
           {group.matchType === "similar" && !dismissed ? (
             <AppTooltip>
               <AppTooltipTrigger asChild>
@@ -198,7 +402,7 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
           ) : null}
           {!dismissed && enabled ? (
             <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive">
-              {t("duplicateWillCleanCount", { count: group.photos.length - 1 })}
+              {t("duplicateWillCleanCount", { count: group.photoCount - 1 })}
             </span>
           ) : null}
         </div>
@@ -229,18 +433,17 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
           )}
         </div>
       </header>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))] gap-2.5 p-3.5">
-        {group.photos.map((photo) => (
-          <DuplicatePhotoTile
-            isKeeper={photo.id === keeperId}
-            key={photo.id}
-            onKeep={() => onKeeperChange(photo.id)}
-            pendingDelete={enabled && photo.id !== keeperId}
-            photo={photo}
-            t={t}
-          />
-        ))}
-      </div>
+      <DuplicatePhotoGrid
+        enabled={enabled}
+        error={detailError}
+        group={group}
+        keeperId={keeperId}
+        loading={loadingPhotos}
+        onKeeperChange={onKeeperChange}
+        onLoadMore={onLoadMore}
+        photos={photos}
+        t={t}
+      />
     </article>
   );
 });
@@ -260,6 +463,16 @@ export function DuplicatesPage() {
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [photosByGroup, setPhotosByGroup] = useState<
+    Record<string, DuplicatePhoto[]>
+  >({});
+  const [detailState, setDetailState] = useState<
+    Record<
+      string,
+      { error: boolean; hasMore: boolean; loading: boolean; total: number }
+    >
+  >({});
+  const loadingGroupKeysRef = useRef(new Set<string>());
   const [toolbarHeight, setToolbarHeight] = useState(
     DUPLICATES_TOOLBAR_FALLBACK_HEIGHT
   );
@@ -284,21 +497,47 @@ export function DuplicatesPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["duplicates"],
-    queryFn: () =>
-      ipc.client.photos.findDuplicates({
-        threshold: 8,
-        forceRescan: false,
-      }) as Promise<DuplicatesResult>,
+    queryFn: () => duplicateActions.scan(false) as Promise<DuplicatesResult>,
     staleTime: 30_000,
   });
   const groups = data?.groups ?? EMPTY_GROUPS;
   const activeGroups = groups.filter((group) => group.status === "active");
 
   useEffect(() => {
+    const validKeys = new Set(groups.map((group) => group.groupKey));
+    setPhotosByGroup((previous) => {
+      const next: Record<string, DuplicatePhoto[]> = {};
+      for (const group of groups) {
+        const loaded = previous[group.groupKey];
+        next[group.groupKey] = loaded?.length ? loaded : group.previewPhotos;
+      }
+      return next;
+    });
+    setDetailState((previous) => {
+      const next: typeof previous = {};
+      for (const group of groups) {
+        const current = previous[group.groupKey];
+        next[group.groupKey] = current ?? {
+          error: false,
+          hasMore: group.previewPhotos.length < group.photoCount,
+          loading: false,
+          total: group.photoCount,
+        };
+      }
+      for (const key of Object.keys(next)) {
+        if (!validKeys.has(key)) {
+          delete next[key];
+        }
+      }
+      return next;
+    });
+  }, [groups]);
+
+  useEffect(() => {
     setKeeperByGroup((previous) => {
       const next = { ...previous };
       for (const group of groups) {
-        if (!group.photos.some((photo) => photo.id === next[group.groupKey])) {
+        if (!(group.groupKey in next)) {
           next[group.groupKey] = group.recommendedKeepId;
         }
       }
@@ -321,57 +560,113 @@ export function DuplicatesPage() {
   }, [groups]);
 
   const rescan = useMutation({
-    mutationFn: () =>
-      ipc.client.photos.findDuplicates({
-        threshold: 8,
-        forceRescan: true,
-      }) as Promise<DuplicatesResult>,
+    mutationFn: () => duplicateActions.scan(true) as Promise<DuplicatesResult>,
     onSuccess: (result) => queryClient.setQueryData(["duplicates"], result),
     onError: () => toast.error(t("duplicateScanFailed")),
   });
 
   const dismiss = useMutation({
-    mutationFn: (group: DuplicateGroup) =>
-      ipc.client.photos.dismissDuplicates({ pairIds: group.pairIds }),
+    mutationFn: (group: DuplicateGroupSummary) =>
+      duplicateActions.dismissGroup(group.groupKey),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["duplicates"] }),
     onError: () => toast.error(t("duplicateIgnoreFailed")),
   });
 
+  const loadGroupPhotos = async (groupKey: string): Promise<void> => {
+    const currentState = detailState[groupKey];
+    const currentPhotos = photosByGroup[groupKey] ?? [];
+    if (
+      loadingGroupKeysRef.current.has(groupKey) ||
+      currentState?.loading ||
+      currentState?.hasMore === false
+    ) {
+      return;
+    }
+    loadingGroupKeysRef.current.add(groupKey);
+    setDetailState((previous) => ({
+      ...previous,
+      [groupKey]: {
+        ...(previous[groupKey] ?? {
+          error: false,
+          hasMore: true,
+          loading: false,
+          total: currentPhotos.length,
+        }),
+        error: false,
+        loading: true,
+      },
+    }));
+    try {
+      const result = (await duplicateActions.getGroupPhotos({
+        groupKey,
+        limit: DUPLICATE_GROUP_PAGE_SIZE,
+        offset: currentPhotos.length,
+      })) as DuplicateGroupPhotosResult;
+      setPhotosByGroup((previous) => {
+        const existing = previous[groupKey] ?? [];
+        const ids = new Set(existing.map((photo) => photo.id));
+        return {
+          ...previous,
+          [groupKey]: [
+            ...existing,
+            ...result.photos.filter((photo) => !ids.has(photo.id)),
+          ],
+        };
+      });
+      setDetailState((previous) => ({
+        ...previous,
+        [groupKey]: {
+          error: false,
+          hasMore: result.hasMore,
+          loading: false,
+          total: result.total,
+        },
+      }));
+    } catch {
+      setDetailState((previous) => ({
+        ...previous,
+        [groupKey]: {
+          ...(previous[groupKey] ?? {
+            hasMore: true,
+            total: currentPhotos.length,
+          }),
+          error: true,
+          loading: false,
+        },
+      }));
+      toast.error(t("duplicateDetailsLoadFailed"));
+    } finally {
+      loadingGroupKeysRef.current.delete(groupKey);
+    }
+  };
+
   const cleanupGroups = activeGroups.filter((group) =>
     enabledGroups.has(group.groupKey)
   );
   const cleanupCount = cleanupGroups.reduce(
-    (sum, group) => sum + group.photos.length - 1,
+    (sum, group) => sum + group.photoCount - 1,
     0
   );
-  const reclaimBytes = cleanupGroups.reduce((sum, group) => {
-    const keeperId = keeperByGroup[group.groupKey] ?? group.recommendedKeepId;
-    return (
+  const reclaimBytes = cleanupGroups.reduce(
+    (sum, group) =>
       sum +
-      group.photos.reduce(
-        (groupSum, photo) =>
-          photo.id === keeperId ? groupSum : groupSum + (photo.fileSize ?? 0),
-        0
-      )
-    );
-  }, 0);
+      estimateReclaimBytes(
+        group,
+        photosByGroup[group.groupKey] ?? group.previewPhotos,
+        keeperByGroup[group.groupKey] ?? group.recommendedKeepId
+      ),
+    0
+  );
 
   const cleanup = useMutation({
     mutationFn: () =>
-      ipc.client.photos.cleanDuplicateGroups({
-        groups: cleanupGroups.map((group) => {
-          const keepPhotoId =
-            keeperByGroup[group.groupKey] ?? group.recommendedKeepId;
-          return {
-            pairIds: group.pairIds,
-            keepPhotoId,
-            deletePhotoIds: group.photos
-              .filter((photo) => photo.id !== keepPhotoId)
-              .map((photo) => photo.id),
-          };
-        }),
-      }),
+      duplicateActions.cleanGroups(
+        cleanupGroups.map((group) => ({
+          groupKey: group.groupKey,
+          keepPhotoId: keeperByGroup[group.groupKey] ?? group.recommendedKeepId,
+        }))
+      ),
     onSuccess: async (result) => {
       setConfirmCleanup(false);
       setEnabledGroups(new Set());
@@ -402,15 +697,21 @@ export function DuplicatesPage() {
   const virtualizer = useVirtualizer({
     count: filteredGroups.length,
     estimateSize: (index) =>
-      230 + Math.ceil(filteredGroups[index].photos.length / 4) * 205,
+      230 +
+      Math.ceil(
+        Math.min(filteredGroups[index].photoCount, DUPLICATE_GROUP_PAGE_SIZE) /
+          4
+      ) *
+        205,
     getScrollElement: () => parentRef.current,
     getItemKey: (index) => filteredGroups[index].groupKey,
     overscan: 3,
   });
 
-  const involvedPhotos = new Set(
-    activeGroups.flatMap((group) => group.photos.map((photo) => photo.id))
-  ).size;
+  const involvedPhotos = activeGroups.reduce(
+    (sum, group) => sum + group.photoCount,
+    0
+  );
   const filters: [GroupFilter, string, number][] = [
     ["all", t("duplicateFilterAll"), activeGroups.length],
     [
@@ -584,6 +885,13 @@ export function DuplicatesPage() {
             >
               {virtualizer.getVirtualItems().map((item) => {
                 const group = filteredGroups[item.index];
+                const loadedPhotos = photosByGroup[group.groupKey] ?? [];
+                const currentDetailState = detailState[group.groupKey] ?? {
+                  error: false,
+                  hasMore: loadedPhotos.length < group.photoCount,
+                  loading: false,
+                  total: group.photoCount,
+                };
                 return (
                   <div
                     className="absolute top-0 left-0 w-full pb-4"
@@ -593,11 +901,13 @@ export function DuplicatesPage() {
                     style={{ transform: `translateY(${item.start}px)` }}
                   >
                     <DuplicateGroupCard
+                      detailError={currentDetailState.error}
                       enabled={enabledGroups.has(group.groupKey)}
                       group={group}
                       keeperId={
                         keeperByGroup[group.groupKey] ?? group.recommendedKeepId
                       }
+                      loadingPhotos={currentDetailState.loading}
                       onDismiss={() => dismiss.mutate(group)}
                       onKeeperChange={(photoId) =>
                         setKeeperByGroup((previous) => ({
@@ -605,6 +915,7 @@ export function DuplicatesPage() {
                           [group.groupKey]: photoId,
                         }))
                       }
+                      onLoadMore={() => loadGroupPhotos(group.groupKey)}
                       onToggleEnabled={() =>
                         setEnabledGroups((previous) => {
                           const next = new Set(previous);
@@ -616,6 +927,7 @@ export function DuplicatesPage() {
                           return next;
                         })
                       }
+                      photos={loadedPhotos}
                       t={t}
                     />
                   </div>

@@ -173,7 +173,12 @@ function sequenceMembers(
     .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
     .leftJoin(exifData, eq(exifData.photoId, photos.id))
     .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
-    .where(eq(photoSequenceMembers.sequenceId, sequenceId))
+    .where(
+      and(
+        eq(photoSequenceMembers.sequenceId, sequenceId),
+        isNull(photos.deletedAt)
+      )
+    )
     .orderBy(asc(photoSequenceMembers.position))
     .all()
     .map((member) => ({
@@ -362,7 +367,12 @@ function sequenceEvidence(
     .from(photoSequenceMembers)
     .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
     .leftJoin(advancedExifData, eq(advancedExifData.photoId, photos.id))
-    .where(eq(photoSequenceMembers.sequenceId, sequenceId))
+    .where(
+      and(
+        eq(photoSequenceMembers.sequenceId, sequenceId),
+        isNull(photos.deletedAt)
+      )
+    )
     .orderBy(asc(photoSequenceMembers.position))
     .all();
   const captures = members.map(
@@ -373,7 +383,9 @@ function sequenceEvidence(
   if (captures.some((value) => value === null) || members.length < 2) {
     return null;
   }
-  const timestamps = captures as number[];
+  const timestamps = captures.filter(
+    (value): value is number => value !== null
+  );
   return {
     firstHash: members[0]?.phash ?? null,
     interval: median(

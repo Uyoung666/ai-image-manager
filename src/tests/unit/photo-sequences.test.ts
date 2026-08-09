@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   detectSequenceCandidates,
+  readCaptureMetadata,
   type SequenceDetectionCandidate,
 } from "@/services/photo-sequences";
 
@@ -26,6 +27,22 @@ function candidate(
 }
 
 describe("high-confidence photo sequence detection", () => {
+  it("merges missing burst fields from vendor metadata when normalized capture time is present", () => {
+    expect(
+      readCaptureMetadata(
+        JSON.stringify({ capture: { captureTimestampMs: 1_700_000_000_000 } }),
+        JSON.stringify({
+          BurstUUID: "burst-vendor",
+          DateTimeOriginal: "2026:07:23 12:00:01",
+          SubSecTimeOriginal: "123",
+        })
+      )
+    ).toMatchObject({
+      burstGroupId: "burst-vendor",
+      capturedAt: 1_700_000_000_000,
+    });
+  });
+
   it("detects only a visually continuous burst with one trusted group id", () => {
     const sequences = detectSequenceCandidates([
       candidate(1, 0, { burstGroupId: "burst-a" }),

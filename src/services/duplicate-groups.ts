@@ -30,6 +30,34 @@ export interface DuplicateGroup {
   status: "active" | "dismissed";
 }
 
+export interface DuplicateSequenceSummary {
+  memberCount: number;
+  representativePhotoId: number | null;
+  sequenceId: number;
+  type: "burst" | "timelapse";
+}
+
+export interface DuplicateGroupSummary {
+  estimatedReclaimBytes: number;
+  groupKey: string;
+  matchType: "exact" | "similar";
+  pairCount: number;
+  photoCount: number;
+  previewPhotos: DuplicatePhoto[];
+  recommendedKeepId: number;
+  sequenceSummaries: DuplicateSequenceSummary[];
+  status: "active" | "dismissed";
+}
+
+export interface DuplicateGroupPhotosResult {
+  groupKey: string;
+  hasMore: boolean;
+  limit: number;
+  offset: number;
+  photos: DuplicatePhoto[];
+  total: number;
+}
+
 export interface DuplicateRelationRef {
   id: number;
   photoAId: number;
@@ -109,6 +137,20 @@ export function recommendDuplicateKeeper(photos: DuplicatePhoto[]): number {
     throw new Error("Cannot recommend a keeper for an empty duplicate group");
   }
   return [...photos].sort(compareKeeperCandidates)[0].id;
+}
+
+export function createExactDuplicatePairs(
+  photoIds: readonly number[]
+): Array<{ photoAId: number; photoBId: number }> {
+  const sortedIds = [...new Set(photoIds)].sort((a, b) => a - b);
+  const anchor = sortedIds[0];
+  if (anchor === undefined) {
+    return [];
+  }
+  return sortedIds.slice(1).map((photoId) => ({
+    photoAId: anchor,
+    photoBId: photoId,
+  }));
 }
 
 /**

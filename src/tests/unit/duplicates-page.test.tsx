@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DuplicatesPage } from "@/routes/duplicates";
-import type { DuplicateGroup } from "@/services/duplicate-groups";
+import type { DuplicateGroupSummary } from "@/services/duplicate-groups";
 
 const mocks = vi.hoisted(() => ({
   cleanDuplicateGroups: vi.fn(),
@@ -76,27 +76,28 @@ function makeGroup(
   groupKey: string,
   matchType: "exact" | "similar",
   ids: number[]
-): DuplicateGroup {
+): DuplicateGroupSummary {
+  const photos = ids.map((id) => ({
+    id,
+    path: `C:\\photos\\${id}.jpg`,
+    filename: `${id}.jpg`,
+    fileSize: 1000,
+    fileDate: 100,
+    width: 100,
+    height: 100,
+    createdAt: 100,
+    thumbnailPath: null,
+  }));
   return {
-    groupKey,
-    matchType,
-    status: "active",
-    pairIds: ids
-      .slice(1)
-      .map((_, index) => index + (matchType === "exact" ? 1 : 10)),
-    recommendedKeepId: ids[0],
     estimatedReclaimBytes: (ids.length - 1) * 1000,
-    photos: ids.map((id) => ({
-      id,
-      path: `C:\\photos\\${id}.jpg`,
-      filename: `${id}.jpg`,
-      fileSize: 1000,
-      fileDate: 100,
-      width: 100,
-      height: 100,
-      createdAt: 100,
-      thumbnailPath: null,
-    })),
+    matchType,
+    groupKey,
+    pairCount: ids.length - 1,
+    photoCount: ids.length,
+    previewPhotos: photos,
+    recommendedKeepId: ids[0],
+    sequenceSummaries: [],
+    status: "active",
   };
 }
 
@@ -140,16 +141,8 @@ describe("DuplicatesPage", () => {
     await waitFor(() => {
       expect(mocks.cleanDuplicateGroups).toHaveBeenCalledWith({
         groups: [
-          {
-            pairIds: [1, 2],
-            keepPhotoId: 1,
-            deletePhotoIds: [2, 3],
-          },
-          {
-            pairIds: [10],
-            keepPhotoId: 5,
-            deletePhotoIds: [4],
-          },
+          { groupKey: "exact:1-2-3", keepPhotoId: 1 },
+          { groupKey: "similar:4-5", keepPhotoId: 5 },
         ],
       });
     });
