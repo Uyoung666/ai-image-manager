@@ -46,6 +46,7 @@ function AlbumCover({
       <img
         alt={album.name}
         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+        draggable={false}
         height={400}
         src={toLocalMediaUrl(coverPath)}
         width={640}
@@ -100,6 +101,7 @@ function AlbumCard({
       className={`group overflow-hidden rounded-[10px] bg-card shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md ${
         album.isSmart ? "border border-primary/20" : "border border-border"
       }`}
+      draggable={false}
       params={{ albumId: album.id.toString() }}
       to="/albums/$albumId"
     >
@@ -139,7 +141,7 @@ function AlbumsContent({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),340px))] gap-4 sm:gap-5">
+      <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4 sm:gap-5">
         {ALBUM_SKELETON_KEYS.map((key) => (
           <div
             className="aspect-[16/12] animate-pulse rounded-[10px] bg-card"
@@ -187,7 +189,7 @@ function AlbumsContent({
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,260px),340px))] gap-4 sm:gap-5">
+    <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4 sm:gap-5">
       {albums.map((album) => (
         <AlbumCard album={album} covers={covers} key={album.id} />
       ))}
@@ -365,7 +367,7 @@ function AlbumsPage() {
 
       {/* Grid */}
       <div
-        className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
         ref={scrollRef}
       >
         <AlbumsContent

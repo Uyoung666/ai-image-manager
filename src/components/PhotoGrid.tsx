@@ -75,6 +75,7 @@ export type SortOrder = "asc" | "desc";
 interface PhotoGridProps {
   columnWidth?: number;
   deletingIds?: Set<number>;
+  disablePhotoDrag?: boolean;
   emptyState?: React.ReactNode;
   error?: string;
   expandedSequence?: PhotoSequenceDetail | null;
@@ -263,6 +264,7 @@ export interface SequenceFocusTrayProps {
   columns: number;
   completeMembers?: readonly Photo[];
   containerWidth: number;
+  disablePhotoDrag?: boolean;
   faceOverlayByPhotoId?: ReadonlyMap<number, FaceOverlay[]>;
   faceOverlaysVisible?: boolean;
   getDragIds: (id: number) => number[];
@@ -283,6 +285,7 @@ export function SequenceFocusTray({
   containerWidth,
   columns,
   completeMembers,
+  disablePhotoDrag = false,
   faceOverlayByPhotoId,
   faceOverlaysVisible = true,
   getDragIds,
@@ -621,6 +624,7 @@ export function SequenceFocusTray({
               >
                 {rowMembers.map((member, columnIndex) => (
                   <PhotoCard
+                    disableDrag={disablePhotoDrag}
                     dominantColors={member.dominantColors}
                     faceOverlays={faceOverlayByPhotoId?.get(member.id)}
                     faceOverlaysVisible={faceOverlaysVisible}
@@ -677,6 +681,7 @@ export const PhotoGrid = memo(
   function PhotoGrid({
     photos,
     columnWidth,
+    disablePhotoDrag = false,
     loading,
     isLoadingMore = false,
     selectedIds,
@@ -1078,6 +1083,7 @@ export const PhotoGrid = memo(
               columns={photo.trayColumns}
               completeMembers={expandedSequenceComplete?.members}
               containerWidth={containerWidth}
+              disablePhotoDrag={disablePhotoDrag}
               faceOverlayByPhotoId={faceOverlayByPhotoId}
               faceOverlaysVisible={faceOverlaysVisible}
               getDragIds={getDragIds}
@@ -1140,6 +1146,7 @@ export const PhotoGrid = memo(
         const photoCard = (
           <PhotoCard
             deleting={deletingIdsRef.current?.has(photo.id)}
+            disableDrag={disablePhotoDrag}
             dominantColors={photo.dominantColors}
             faceOverlays={faceOverlayByPhotoId?.get(photo.id)}
             faceOverlaysVisible={faceOverlaysVisible}
@@ -1217,6 +1224,7 @@ export const PhotoGrid = memo(
         expandedSequenceComplete,
         expandingSequenceId,
         onToggleSequenceExpand,
+        disablePhotoDrag,
         faceOverlayByPhotoId,
         faceOverlaysVisible,
         t,
@@ -1270,7 +1278,7 @@ export const PhotoGrid = memo(
     }, [displayPhotos, sort, i18n.language, routeKey]);
 
     const sequenceModeToggle = onSequenceModeChange ? (
-      <div className="flex rounded-md border border-border p-0.5 text-[11px]">
+      <div className="flex shrink-0 whitespace-nowrap rounded-md border border-border p-0.5 text-[11px]">
         <button
           className={`rounded px-2 py-1 ${sequenceMode === "photos" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
           onClick={() => onSequenceModeChange("photos")}
@@ -1284,12 +1292,44 @@ export const PhotoGrid = memo(
           type="button"
         >
           {t("sequenceViewSequences")}
-          {sequenceCount !== undefined && sequenceCount > 0
-            ? ` ${sequenceCount}`
-            : ""}
+          <span className="inline-block min-w-[2ch] text-left tabular-nums">
+            {sequenceCount !== undefined && sequenceCount > 0
+              ? sequenceCount
+              : "\u00a0"}
+          </span>
         </button>
       </div>
     ) : null;
+
+    const toolbarActions = (
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+        {sequenceModeToggle}
+        {onSortChange && (
+          <SortDropdown onChange={onSortChange} order={sortOrder} sort={sort} />
+        )}
+        <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground/70">
+          <span>{t("gridSize")}</span>
+          <input
+            aria-label={t("gridSize")}
+            className="h-4 w-20 cursor-pointer accent-primary"
+            max={GRID_COLUMN_WIDTH_MAX}
+            min={GRID_COLUMN_WIDTH_MIN}
+            onChange={(event) => {
+              const width = Number(event.target.value);
+              setInternalColumnWidth(width);
+              try {
+                localStorage.setItem(GRID_COLUMN_WIDTH_KEY, String(width));
+              } catch {
+                // Keep the in-memory preference.
+              }
+            }}
+            step={10}
+            type="range"
+            value={targetColWidth}
+          />
+        </label>
+      </div>
+    );
 
     // `displayPhotos` can be temporarily empty while changing presentation
     // modes (for example, before the sequence query resolves). The full-grid
@@ -1341,7 +1381,7 @@ export const PhotoGrid = memo(
               <span className="truncate text-[12px] text-muted-foreground">
                 {t("photosCount", { count: 0 })}
               </span>
-              {sequenceModeToggle}
+              {toolbarActions}
             </div>
           )}
           <div className="flex flex-1 items-center justify-center">
@@ -1410,40 +1450,7 @@ export const PhotoGrid = memo(
               {selectedIds.size > 0 &&
                 t("photosSelected", { count: selectedIds.size })}
             </span>
-            <div className="flex items-center gap-2">
-              {sequenceModeToggle}
-              {onSortChange && (
-                <SortDropdown
-                  onChange={onSortChange}
-                  order={sortOrder}
-                  sort={sort}
-                />
-              )}
-              <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
-                <span>{t("gridSize")}</span>
-                <input
-                  aria-label={t("gridSize")}
-                  className="h-4 w-20 cursor-pointer accent-primary"
-                  max={GRID_COLUMN_WIDTH_MAX}
-                  min={GRID_COLUMN_WIDTH_MIN}
-                  onChange={(event) => {
-                    const width = Number(event.target.value);
-                    setInternalColumnWidth(width);
-                    try {
-                      localStorage.setItem(
-                        GRID_COLUMN_WIDTH_KEY,
-                        String(width)
-                      );
-                    } catch {
-                      // Keep the in-memory preference.
-                    }
-                  }}
-                  step={10}
-                  type="range"
-                  value={targetColWidth}
-                />
-              </label>
-            </div>
+            {toolbarActions}
           </div>
         )}
         <div
@@ -1493,6 +1500,9 @@ export const PhotoGrid = memo(
   },
   (prevProps, nextProps) => {
     if (prevProps.columnWidth !== nextProps.columnWidth) {
+      return false;
+    }
+    if (prevProps.disablePhotoDrag !== nextProps.disablePhotoDrag) {
       return false;
     }
     if (prevProps.photos !== nextProps.photos) {

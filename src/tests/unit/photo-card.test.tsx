@@ -33,6 +33,12 @@ describe("PhotoCard", () => {
     expect(img).not.toBeInTheDocument();
   });
 
+  it("can disable photo dragging for collection views", () => {
+    const { container } = render(<PhotoCard {...baseProps} disableDrag />);
+    const card = container.querySelector("[data-photo-id]");
+    expect(card).toHaveAttribute("draggable", "false");
+  });
+
   it("renders filename in overlay", () => {
     render(<PhotoCard {...baseProps} />);
     expect(screen.getByText("test-photo.jpg")).toBeInTheDocument();

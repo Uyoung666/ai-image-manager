@@ -3,7 +3,7 @@
 // biome-ignore-all lint/correctness/useExhaustiveDependencies: scoped component lint cleanup preserves existing UI behavior
 // biome-ignore-all lint/suspicious/noArrayIndexKey: scoped component lint cleanup preserves existing UI behavior
 import { Check, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FilterDropdown } from "@/components/filter-dropdown";
@@ -335,9 +335,7 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
-  const [previewTimer, setPreviewTimer] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [existingTags, setExistingTags] = useState<TagInfo[]>([]);
   const [candidates, setCandidates] = useState<ExifCandidates>({
     cameraModels: [],
@@ -437,36 +435,46 @@ export function SmartAlbumDialog({ open, onClose, onCreated }: Props) {
     return JSON.stringify({ rules: mapped });
   }
 
-  function updatePreview() {
-    if (previewTimer) {
-      clearTimeout(previewTimer);
+  useEffect(() => {
+    if (previewTimerRef.current !== null) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
     }
+
+    if (rules.length === 0) {
+      setPreviewCount(null);
+      return;
+    }
+
+    let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const rulesJson = buildRulesJson();
         const result = (await ipc.client.albums.validateSmartAlbumRules({
-          smartRules: rulesJson,
+          smartRules: buildRulesJson(),
         })) as { matchCount?: number };
-        setPreviewCount(result.matchCount ?? 0);
+        if (!cancelled) {
+          setPreviewCount(result.matchCount ?? 0);
+        }
       } catch {
-        setPreviewCount(null);
+        if (!cancelled) {
+          setPreviewCount(null);
+        }
+      } finally {
+        if (previewTimerRef.current === timer) {
+          previewTimerRef.current = null;
+        }
       }
     }, 400);
-    setPreviewTimer(timer);
-  }
+    previewTimerRef.current = timer;
 
-  useEffect(() => {
-    if (rules.length > 0) {
-      updatePreview();
-    } else {
-      setPreviewCount(null);
-    }
     return () => {
-      if (previewTimer) {
-        clearTimeout(previewTimer);
+      cancelled = true;
+      if (previewTimerRef.current !== null) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
       }
     };
-  }, [rules, updatePreview, previewTimer]);
+  }, [rules]);
 
   function addRule() {
     setRules((prev) => [

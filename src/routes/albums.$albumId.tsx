@@ -880,11 +880,16 @@ function AlbumDetailPage() {
           inert={compactDetailOverlay && detailOverlayOpen}
         >
           <PhotoGrid
+            disablePhotoDrag
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
             isPlaceholderData={loading}
-            loading={loading}
+            loading={
+              loading ||
+              (sequenceView.mode === "sequences" &&
+                sequenceView.sequencesLoading)
+            }
             onBackgroundClick={() => {
               if (marqueeJustCompleted.current) {
                 marqueeJustCompleted.current = false;
@@ -909,6 +914,7 @@ function AlbumDetailPage() {
             photos={photos}
             routeKey={routeKey}
             selectedIds={selectedIds}
+            sequenceCount={sequenceView.sequences.length}
             sequenceMode={sequenceView.mode}
             sequences={sequenceView.sequences}
             showGroupHeaders={false}

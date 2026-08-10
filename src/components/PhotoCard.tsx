@@ -47,6 +47,7 @@ export function getFaceOverlayStyle(
 
 interface PhotoCardProps {
   deleting?: boolean;
+  disableDrag?: boolean;
   dominantColors?: string | null;
   faceOverlay?: FaceOverlay;
   faceOverlays?: FaceOverlay[];
@@ -75,6 +76,7 @@ interface PhotoCardProps {
 }
 
 interface PhotoCardImageProps {
+  draggable?: boolean;
   filename: string;
   hasThumbnail: boolean;
   height: number;
@@ -154,6 +156,7 @@ function FaceOverlayBox({
 }
 
 function PhotoCardImage({
+  draggable,
   filename,
   hasThumbnail,
   height,
@@ -183,6 +186,7 @@ function PhotoCardImage({
       }`}
       data-load-state={loaded ? "loaded" : "loading"}
       decoding="async"
+      draggable={draggable}
       fetchPriority={loading === "eager" ? "high" : "auto"}
       height={height || undefined}
       loading={loading}
@@ -199,6 +203,7 @@ function PhotoCardImage({
 export const PhotoCard = memo(function PhotoCard({
   id,
   path,
+  disableDrag = false,
   thumbnailPath,
   thumbnailSmallPath,
   loading = "lazy",
@@ -471,11 +476,11 @@ export const PhotoCard = memo(function PhotoCard({
       `}
       data-photo-id={id}
       data-photo-path={path}
-      draggable
+      draggable={!disableDrag}
       onClick={handleClick}
       onContextMenu={undefined}
       onDoubleClick={handleDoubleClick}
-      onDragStart={handleDragStart}
+      onDragStart={disableDrag ? undefined : handleDragStart}
       onKeyDown={handleKeyDown}
       role="option"
       style={{
@@ -485,6 +490,7 @@ export const PhotoCard = memo(function PhotoCard({
       tabIndex={-1}
     >
       <PhotoCardImage
+        draggable={disableDrag ? false : undefined}
         filename={filename}
         hasThumbnail={hasThumbnail}
         height={height}
