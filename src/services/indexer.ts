@@ -17,7 +17,7 @@ import {
   getOrientedDimensions,
   resolveImageOrientation,
 } from "./image-orientation";
-import { extractRawPreview, isRawFile } from "./raw-preview";
+import { extractRawPreview, isRawFile, readRawDimensions } from "./raw-preview";
 import { deletePhotoThumbnails, generateThumbnail } from "./thumbnailer";
 
 const log = createLogger("indexer");
@@ -229,7 +229,8 @@ async function readBasicMeta(filePath: string): Promise<{
 } | null> {
   try {
     const raw = isRawFile(filePath);
-    // For RAW files, read metadata from the embedded JPEG preview
+    // For RAW files, use the embedded JPEG only for decoder metadata and
+    // thumbnail generation. Capture dimensions come from ExifTool below.
     let input: string | Buffer = filePath;
     let thumbnailInput: Buffer | undefined;
     if (raw) {
@@ -241,11 +242,15 @@ async function readBasicMeta(filePath: string): Promise<{
     }
     const meta = await sharp(input).metadata();
     const orientation = await resolveImageOrientation(filePath, meta);
-    const { width, height } = getOrientedDimensions(
-      meta.width,
-      meta.height,
-      orientation
-    );
+    const dimensions = raw
+      ? await readRawDimensions(filePath)
+      : getOrientedDimensions(meta.width, meta.height, orientation);
+    if (!dimensions) {
+      return null;
+    }
+    const { width, height } = raw
+      ? getOrientedDimensions(dimensions.width, dimensions.height, orientation)
+      : dimensions;
     // RAW files: use file extension as format (sharp returns "jpeg" from embedded preview)
     const format = raw
       ? path.extname(filePath).toLowerCase().replace(".", "")

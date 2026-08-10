@@ -20,9 +20,61 @@ export const RAW_EXTENSIONS = new Set([
   ".3fr",
   ".raw",
 ]);
+const IMAGE_SIZE_RE = /^(\d+)x(\d+)$/;
 
 export function isRawFile(filePath: string): boolean {
   return RAW_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+export interface RawDimensions {
+  height: number;
+  width: number;
+}
+
+function toPositiveInteger(value: unknown): number | null {
+  const numberValue =
+    typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
+/**
+ * Read the RAW capture dimensions from ExifTool.
+ *
+ * RAW files often contain a much smaller embedded JPEG. Its dimensions must
+ * never be used as the dimensions of the original capture.
+ */
+export async function readRawDimensions(
+  filePath: string
+): Promise<RawDimensions | null> {
+  try {
+    const tags = await exiftool.read(filePath, { readArgs: ["-fast"] });
+    const width =
+      toPositiveInteger(tags.ImageWidth) ??
+      toPositiveInteger(tags.RawImageWidth) ??
+      toPositiveInteger(tags.ExifImageWidth);
+    const height =
+      toPositiveInteger(tags.ImageHeight) ??
+      toPositiveInteger(tags.RawImageHeight) ??
+      toPositiveInteger(tags.ExifImageHeight);
+
+    if (width && height) {
+      return { height, width };
+    }
+
+    const imageSize = typeof tags.ImageSize === "string" ? tags.ImageSize : "";
+    const sizeMatch = imageSize.match(IMAGE_SIZE_RE);
+    if (sizeMatch) {
+      const fallbackWidth = toPositiveInteger(sizeMatch[1]);
+      const fallbackHeight = toPositiveInteger(sizeMatch[2]);
+      if (fallbackWidth && fallbackHeight) {
+        return { height: fallbackHeight, width: fallbackWidth };
+      }
+    }
+  } catch {
+    // ExifTool may not be able to read a damaged or unsupported RAW file.
+  }
+
+  return null;
 }
 
 /**
