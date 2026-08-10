@@ -36,6 +36,10 @@ import {
   validateDuplicateCleanupGroup,
 } from "@/services/duplicate-groups";
 import {
+  movePhotoFile,
+  type AssetMove as PhotoAssetMove,
+} from "@/services/photo-file-operations";
+import {
   bumpPhotoSequenceRevision,
   cleanupDeletedPhotoSequenceMembers,
 } from "@/services/photo-sequences";
@@ -207,12 +211,7 @@ function performHardDelete(photoIds: number[]): void {
 
 const photoIdsMovingToSystemTrash = new Set<number>();
 
-interface AssetMove {
-  from: string;
-  to: string;
-}
-
-function rollbackAssetMoves(moves: AssetMove[]): void {
+function rollbackAssetMoves(moves: PhotoAssetMove[]): void {
   for (const move of [...moves].reverse()) {
     try {
       if (fs.existsSync(move.to) && !fs.existsSync(move.from)) {
@@ -227,8 +226,8 @@ function rollbackAssetMoves(moves: AssetMove[]): void {
   }
 }
 
-function movePhotoAssets(oldPath: string, newPath: string): AssetMove[] {
-  const moves: AssetMove[] = [];
+function movePhotoAssets(oldPath: string, newPath: string): PhotoAssetMove[] {
+  const moves: PhotoAssetMove[] = [];
   try {
     fs.renameSync(oldPath, newPath);
     moves.push({ from: oldPath, to: newPath });
@@ -740,7 +739,7 @@ export const renamePhotos = os
           });
           continue;
         }
-        const movedAssets = movePhotoAssets(photo.path, newPath);
+        const movedAssets = movePhotoFile(photo.path, newPath);
 
         const newThumbPath = getThumbnailPath(newPath, "md");
 
