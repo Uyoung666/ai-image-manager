@@ -1,5 +1,6 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Layers } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -1054,12 +1055,17 @@ function HomePage() {
         folderId,
         dryRun: true,
       })) as {
+        candidatePhotos: number;
         existingAutomatic: number;
         nextAutomatic: number;
         timelapseSegments: number;
       };
       if (!("nextAutomatic" in preview)) {
         throw new Error("Sequence dry-run did not return a preview");
+      }
+      if (preview.candidatePhotos === 0) {
+        toast.info(t("sequenceDetectNoPhotos"));
+        return;
       }
       setSequenceRebuildPreview({
         existingAutomatic: preview.existingAutomatic,
@@ -1551,8 +1557,25 @@ function HomePage() {
         />
       );
     }
+    if (displayedSequenceMode === "sequences") {
+      return (
+        <EmptyStateCard
+          actions={[
+            {
+              label: t("sequenceEmptyViewPhotos"),
+              onClick: () => handleSequenceModeChange("photos"),
+              primary: true,
+            },
+          ]}
+          description={t("sequenceEmptyDescription")}
+          icon={<Layers aria-hidden="true" className="h-5 w-5" />}
+          title={t("sequenceEmptyTitle")}
+        />
+      );
+    }
     return undefined;
   }, [
+    displayedSequenceMode,
     isSearching,
     filter.favoriteOnly,
     t,
@@ -1570,6 +1593,7 @@ function HomePage() {
     handleSearch,
     filter.setFavoriteOnly,
     filter.clearSearch,
+    handleSequenceModeChange,
   ]);
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pagination keeps browse and search continuation in one callback
@@ -3038,7 +3062,11 @@ function HomePage() {
             .rebuildSequences({ folderId: preview.folderId })
             .then(() => {
               setSequenceRefresh((value) => value + 1);
-              toast.success(t("sequenceDetectComplete"));
+              if (preview.nextAutomatic > 0) {
+                toast.success(t("sequenceDetectComplete"));
+              } else {
+                toast.info(t("sequenceDetectNoMatches"));
+              }
             })
             .catch(() => toast.error(t("sequenceDetectFailed")))
             .finally(() => setRebuildingSequences(false));

@@ -201,7 +201,11 @@ i18n.use(initReactI18next).init({
         sequenceViewPhotos: "照片",
         sequenceViewSequences: "序列",
         sequenceEmptyTitle: "暂无可用序列",
+        sequenceEmptyDescription:
+          "当前没有已识别的序列，请点击“识别序列”重新检测，或查看全部照片。",
         sequenceEmptyViewPhotos: "查看照片",
+        sequenceDetectNoPhotos: "当前没有可用于识别序列的照片",
+        sequenceDetectNoMatches: "未识别到符合条件的序列",
         sequenceManualRepresentativeSet: "已设为手动代表帧",
         sequenceRepresentativeSetFailed: "设置代表帧失败",
         representativeReasonAnalysisFailed: "部分画面无法分析",
@@ -2154,7 +2158,12 @@ i18n.use(initReactI18next).init({
         sequenceViewPhotos: "Photos",
         sequenceViewSequences: "Sequences",
         sequenceEmptyTitle: "No sequences available",
+        sequenceEmptyDescription:
+          "No sequences have been detected. Click “Detect sequences” to try again, or view all photos.",
         sequenceEmptyViewPhotos: "View photos",
+        sequenceDetectNoPhotos:
+          "No photos are available for sequence detection",
+        sequenceDetectNoMatches: "No matching sequences were found",
         sequenceManualRepresentativeSet: "Set as manual representative frame",
         sequenceRepresentativeSetFailed: "Failed to set representative frame",
         representativeReasonAnalysisFailed: "Some frames could not be analyzed",
