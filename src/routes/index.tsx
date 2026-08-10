@@ -67,6 +67,7 @@ import type { Photo, PhotoListResponse, SearchResponse } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
+  SequenceOrderChange,
 } from "@/types/photo-sequence";
 import type { ExifFilters, SearchMode } from "@/types/search";
 import {
@@ -322,6 +323,62 @@ function HomePage() {
     useState<PhotoSequenceDetail | null>(null);
   const [sequenceDetailsLoading, setSequenceDetailsLoading] = useState(false);
   const [sequenceRefresh, setSequenceRefresh] = useState(0);
+  const handleSequenceOrderChange = useCallback(
+    ({ orderedMemberIds, sequenceId }: SequenceOrderChange) => {
+      const reorderMembers = <T extends { id: number }>(members: T[]) => {
+        const membersById = new Map(
+          members.map((member) => [member.id, member])
+        );
+        const seen = new Set<number>();
+        const ordered = orderedMemberIds.flatMap((id) => {
+          const member = membersById.get(id);
+          if (!member || seen.has(id)) {
+            return [];
+          }
+          seen.add(id);
+          return [member];
+        });
+        return ordered.concat(members.filter((member) => !seen.has(member.id)));
+      };
+      const applyOrder = (detail: PhotoSequenceDetail) => ({
+        ...detail,
+        members: reorderMembers(detail.members),
+      });
+      setExpandedSequence((current) =>
+        current?.id === sequenceId ? applyOrder(current) : current
+      );
+      setExpandedSequenceComplete((current) =>
+        current?.id === sequenceId ? applyOrder(current) : current
+      );
+      const cached = expandedSequenceCacheRef.current.get(sequenceId);
+      if (cached) {
+        expandedSequenceCacheRef.current.set(sequenceId, applyOrder(cached));
+      }
+      setSequences((current) =>
+        current.map((sequence) => {
+          if (sequence.id !== sequenceId) {
+            return sequence;
+          }
+          const next = { ...sequence };
+          if (sequence.memberPhotoIds) {
+            const memberIds = new Set(sequence.memberPhotoIds);
+            next.memberPhotoIds = orderedMemberIds.filter((id) =>
+              memberIds.has(id)
+            );
+          }
+          if (sequence.matchedPhotoIds) {
+            const matchedIds = new Set(sequence.matchedPhotoIds);
+            next.matchedPhotoIds = orderedMemberIds.filter((id) =>
+              matchedIds.has(id)
+            );
+            next.matchedCount = next.matchedPhotoIds.length;
+          }
+          return next;
+        })
+      );
+    },
+    []
+  );
   const [rebuildingSequences, setRebuildingSequences] = useState(false);
   const [sequenceRebuildPreview, setSequenceRebuildPreview] =
     useState<SequenceRebuildPreview | null>(null);
@@ -609,12 +666,24 @@ function HomePage() {
         queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
       }
       if (event.data?.channel === "sequences-changed") {
+        if (
+          event.data.reason === "reorder" &&
+          typeof event.data.sequenceId === "number" &&
+          Array.isArray(event.data.orderedMemberIds)
+        ) {
+          handleSequenceOrderChange({
+            orderedMemberIds: event.data.orderedMemberIds,
+            sequenceId: event.data.sequenceId,
+          });
+          return;
+        }
+        expandedSequenceCacheRef.current.clear();
         setSequenceRefresh((value) => value + 1);
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [t]);
+  }, [handleSequenceOrderChange, t]);
 
   const {
     data: photosData,
@@ -2795,6 +2864,7 @@ function HomePage() {
                   onSelectSequence={handleSequenceSelect}
                   onSelectSequenceMembers={handleSelectSequenceMembers}
                   onSequenceMutationComplete={handleSequenceMutationComplete}
+                  onSequenceOrderChange={handleSequenceOrderChange}
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
                   photos={photos}

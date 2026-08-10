@@ -820,7 +820,10 @@ export const updateSequenceMembers = os
       }
       return updated;
     });
-    notifySequencesChanged(undefined, "manual");
+    notifySequencesChanged(undefined, "reorder", {
+      orderedMemberIds: input.photoIds,
+      sequenceId: input.id,
+    });
     return result;
   });
 

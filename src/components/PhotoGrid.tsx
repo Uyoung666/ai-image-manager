@@ -7,6 +7,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   ChevronUp,
   Layers,
   Scissors,
@@ -30,6 +31,7 @@ import type { SearchMatch } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
+  SequenceOrderChange,
 } from "@/types/photo-sequence";
 import {
   buildPhotoGroupHeaders,
@@ -114,6 +116,7 @@ interface PhotoGridProps {
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
   onSequenceModeChange?: (mode: "photos" | "sequences") => void;
   onSequenceMutationComplete?: () => void;
+  onSequenceOrderChange?: (change: SequenceOrderChange) => void;
   onSortChange?: (sort: SortField, order: SortOrder) => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
@@ -273,6 +276,7 @@ export interface SequenceFocusTrayProps {
   onSelect: (id: number, event: React.MouseEvent) => void;
   onSelectSequenceMembers?: (memberIds: number[], selectAll: boolean) => void;
   onSequenceMutationComplete?: () => void;
+  onSequenceOrderChange?: (change: SequenceOrderChange) => void;
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
   renderImage: boolean;
@@ -294,6 +298,7 @@ export function SequenceFocusTray({
   onSelect,
   onSelectSequenceMembers,
   onSequenceMutationComplete,
+  onSequenceOrderChange,
   onToggleFavorite,
   onToggleSequenceExpand,
   renderImage,
@@ -303,16 +308,73 @@ export function SequenceFocusTray({
 }: SequenceFocusTrayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rowCount = Math.ceil(sequence.members.length / columns);
+  const fullMembers = completeMembers ?? sequence.members;
+  const initialMemberOrder = fullMembers.map((member) => member.id);
+  const [memberOrder, setMemberOrder] = useState(initialMemberOrder);
+  const [moveFeedback, setMoveFeedback] = useState<"moving" | "moved" | null>(
+    null
+  );
+  const [movingMemberId, setMovingMemberId] = useState<number | null>(null);
+  const moveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const memberOrderSignature = initialMemberOrder.join(",");
+  const memberOrderSourceRef = useRef(memberOrderSignature);
+  useEffect(() => {
+    if (memberOrderSourceRef.current === memberOrderSignature) {
+      return;
+    }
+    memberOrderSourceRef.current = memberOrderSignature;
+    setMemberOrder(initialMemberOrder);
+  }, [initialMemberOrder, memberOrderSignature]);
+  useEffect(
+    () => () => {
+      if (moveFeedbackTimerRef.current !== null) {
+        clearTimeout(moveFeedbackTimerRef.current);
+      }
+    },
+    []
+  );
+  const orderedFullMembers = useMemo(() => {
+    const membersById = new Map(
+      fullMembers.map((member) => [member.id, member])
+    );
+    const seen = new Set<number>();
+    const ordered = memberOrder.flatMap((id) => {
+      const member = membersById.get(id);
+      if (!member || seen.has(id)) {
+        return [];
+      }
+      seen.add(id);
+      return [member];
+    });
+    return ordered.concat(fullMembers.filter((member) => !seen.has(member.id)));
+  }, [fullMembers, memberOrder]);
+  const visibleMemberIds = useMemo(
+    () => new Set(sequence.members.map((member) => member.id)),
+    [sequence.members]
+  );
+  const displayMembers = useMemo(() => {
+    const orderedVisible = orderedFullMembers.filter((member) =>
+      visibleMemberIds.has(member.id)
+    );
+    const orderedVisibleIds = new Set(
+      orderedVisible.map((member) => member.id)
+    );
+    return orderedVisible.concat(
+      sequence.members.filter((member) => !orderedVisibleIds.has(member.id))
+    );
+  }, [orderedFullMembers, sequence.members, visibleMemberIds]);
+  const rowCount = Math.ceil(displayMembers.length / columns);
   const gridHeight = getSequenceGridHeight(
-    sequence.members,
+    displayMembers,
     containerWidth,
     columns
   );
   const virtualizer = useVirtualizer({
     count: rowCount,
     estimateSize: (rowIndex) =>
-      getSequenceRowHeight(sequence.members, containerWidth, columns, rowIndex),
+      getSequenceRowHeight(displayMembers, containerWidth, columns, rowIndex),
     getScrollElement: () => scrollRef.current,
     initialRect: {
       height: Math.min(gridHeight, SEQUENCE_TRAY_MAX_HEIGHT),
@@ -320,16 +382,17 @@ export function SequenceFocusTray({
     },
     overscan: 2,
   });
-  const selectedMemberCount = sequence.members.filter((member) =>
+  const selectedMemberCount = displayMembers.filter((member) =>
     selectedIds.has(member.id)
   ).length;
-  const fullMembers = completeMembers ?? sequence.members;
-  const selectedMemberIds = sequence.members
+  const selectedMemberIds = displayMembers
     .filter((member) => selectedIds.has(member.id))
     .map((member) => member.id);
   const selectedFullIndex =
     selectedMemberIds.length === 1
-      ? fullMembers.findIndex((member) => member.id === selectedMemberIds[0])
+      ? orderedFullMembers.findIndex(
+          (member) => member.id === selectedMemberIds[0]
+        )
       : -1;
   const [isMutating, setIsMutating] = useState(false);
   const [confirmation, setConfirmation] = useState<{
@@ -361,30 +424,61 @@ export function SequenceFocusTray({
     [fullMembers, onSelectSequenceMembers, onSequenceMutationComplete]
   );
   const handleMove = useCallback(
-    (direction: -1 | 1) => {
+    async (direction: -1 | 1) => {
       if (selectedFullIndex < 0) {
         return;
       }
       const targetIndex = selectedFullIndex + direction;
-      if (targetIndex < 0 || targetIndex >= fullMembers.length) {
+      if (targetIndex < 0 || targetIndex >= orderedFullMembers.length) {
         return;
       }
-      const orderedIds = fullMembers.map((member) => member.id);
+      const selectedMemberId = orderedFullMembers[selectedFullIndex].id;
+      const previousOrder = orderedFullMembers.map((member) => member.id);
+      const orderedIds = [...previousOrder];
       [orderedIds[selectedFullIndex], orderedIds[targetIndex]] = [
         orderedIds[targetIndex],
         orderedIds[selectedFullIndex],
       ];
-      finishMutation(
-        () => photoSequenceActions.updateMembers(sequence.id, orderedIds),
-        "已调整序列顺序"
-      );
+      setMemberOrder(orderedIds);
+      setMovingMemberId(selectedMemberId);
+      setMoveFeedback("moving");
+      setIsMutating(true);
+      try {
+        await photoSequenceActions.updateMembers(sequence.id, orderedIds);
+        onSequenceOrderChange?.({
+          orderedMemberIds: orderedIds,
+          sequenceId: sequence.id,
+        });
+        setMoveFeedback("moved");
+        if (moveFeedbackTimerRef.current !== null) {
+          clearTimeout(moveFeedbackTimerRef.current);
+        }
+        moveFeedbackTimerRef.current = setTimeout(() => {
+          setMoveFeedback(null);
+          setMovingMemberId(null);
+        }, 1200);
+        toast.success(t("sequenceMoveSuccess"));
+      } catch (error) {
+        console.error("[SequenceFocusTray] sequence move failed", error);
+        setMemberOrder(previousOrder);
+        setMoveFeedback(null);
+        setMovingMemberId(null);
+        toast.error(t("sequenceMoveFailed"));
+      } finally {
+        setIsMutating(false);
+      }
     },
-    [finishMutation, fullMembers, selectedFullIndex, sequence.id]
+    [
+      onSequenceOrderChange,
+      orderedFullMembers,
+      selectedFullIndex,
+      sequence.id,
+      t,
+    ]
   );
   const allMembersSelected =
-    sequence.members.length > 0 &&
-    selectedMemberCount === sequence.members.length;
-  let selectionLabel = `${t("selectAll")} (${sequence.members.length})`;
+    displayMembers.length > 0 && selectedMemberCount === displayMembers.length;
+  let selectionLabel = `${t("selectAll")} (${displayMembers.length})`;
   if (allMembersSelected) {
     selectionLabel = t("clearSelection");
   } else if (selectedMemberCount > 0) {
@@ -406,14 +500,32 @@ export function SequenceFocusTray({
             {` · ${sequence.frameCount} ${t("sequenceFrames")}`}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          {moveFeedback && (
+            <span
+              aria-live="polite"
+              className="flex min-w-0 items-center gap-1 text-[11px] text-primary"
+              role="status"
+            >
+              {moveFeedback === "moving" ? (
+                <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-primary/30 border-t-primary" />
+              ) : (
+                <Check className="h-3 w-3 shrink-0" />
+              )}
+              <span className="truncate">
+                {t(
+                  moveFeedback === "moving" ? "sequenceMoving" : "sequenceMoved"
+                )}
+              </span>
+            </span>
+          )}
           {onSelectSequenceMembers && (
             <button
               className="h-8 rounded-md border border-border bg-background/80 px-2 text-[12px] text-foreground hover:bg-muted"
               onClick={(event) => {
                 event.stopPropagation();
                 onSelectSequenceMembers(
-                  sequence.members.map((member) => member.id),
+                  displayMembers.map((member) => member.id),
                   !allMembersSelected
                 );
               }}
@@ -428,6 +540,7 @@ export function SequenceFocusTray({
                 <button
                   aria-label={t("sequenceCollapse")}
                   className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-background/80 px-2 text-[12px] text-foreground hover:bg-primary/10"
+                  disabled={isMutating}
                   onClick={(event) => {
                     event.stopPropagation();
                     onToggleSequenceExpand(sequence.id);
@@ -445,12 +558,17 @@ export function SequenceFocusTray({
       </header>
       <div className="mb-3 flex h-7 items-center gap-2 overflow-x-auto">
         <span className="shrink-0 text-[11px] text-muted-foreground">
-          序列管理
+          {t("sequenceManagement")}
         </span>
         <button
           className="h-7 shrink-0 rounded-md border border-border bg-background/80 px-2 text-[11px] disabled:opacity-40"
-          disabled={isMutating || selectedMemberIds.length === 0}
-          onClick={() =>
+          disabled={
+            isMutating ||
+            moveFeedback !== null ||
+            selectedMemberIds.length === 0
+          }
+          onClick={(event) => {
+            event.stopPropagation();
             setConfirmation({
               confirmText: "移出序列",
               description: `从序列中移出已选 ${selectedMemberIds.length} 张照片。照片文件不会被删除；少于 2 张时序列会自动解散。`,
@@ -461,8 +579,8 @@ export function SequenceFocusTray({
                 ),
               successText: "已移出序列成员",
               title: "确认移出序列",
-            })
-          }
+            });
+          }}
           type="button"
         >
           <Unlink className="mr-1 inline size-3.5" />
@@ -473,8 +591,13 @@ export function SequenceFocusTray({
             <button
               aria-label={t("sequenceMoveUp")}
               className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
-              disabled={isMutating || selectedFullIndex <= 0}
-              onClick={() => handleMove(-1)}
+              disabled={
+                isMutating || moveFeedback !== null || selectedFullIndex <= 0
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                handleMove(-1).catch(() => undefined);
+              }}
               type="button"
             >
               <ArrowLeft className="size-3.5" />
@@ -489,10 +612,14 @@ export function SequenceFocusTray({
               className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/80 disabled:opacity-40"
               disabled={
                 isMutating ||
+                moveFeedback !== null ||
                 selectedFullIndex < 0 ||
-                selectedFullIndex >= fullMembers.length - 1
+                selectedFullIndex >= orderedFullMembers.length - 1
               }
-              onClick={() => handleMove(1)}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleMove(1).catch(() => undefined);
+              }}
               type="button"
             >
               <ArrowRight className="size-3.5" />
@@ -504,10 +631,12 @@ export function SequenceFocusTray({
           className="h-7 shrink-0 rounded-md border border-border bg-background/80 px-2 text-[11px] disabled:opacity-40"
           disabled={
             isMutating ||
+            moveFeedback !== null ||
             selectedFullIndex < 2 ||
             selectedFullIndex > fullMembers.length - 2
           }
-          onClick={() =>
+          onClick={(event) => {
+            event.stopPropagation();
             setConfirmation({
               confirmText: "拆分序列",
               description: `从已选照片前拆分，生成 ${selectedFullIndex} 张和 ${fullMembers.length - selectedFullIndex} 张两个序列。`,
@@ -515,8 +644,8 @@ export function SequenceFocusTray({
                 photoSequenceActions.split(sequence.id, selectedFullIndex),
               successText: "已拆分序列",
               title: "确认拆分序列",
-            })
-          }
+            });
+          }}
           type="button"
         >
           <Scissors className="mr-1 inline size-3.5" />
@@ -524,8 +653,9 @@ export function SequenceFocusTray({
         </button>
         <button
           className="h-7 shrink-0 rounded-md border border-destructive/30 bg-background/80 px-2 text-[11px] text-destructive disabled:opacity-40"
-          disabled={isMutating}
-          onClick={() => {
+          disabled={isMutating || moveFeedback !== null}
+          onClick={(event) => {
+            event.stopPropagation();
             dissolveExcludeRef.current = false;
             setConfirmation({
               confirmText: "解散序列",
@@ -606,7 +736,7 @@ export function SequenceFocusTray({
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const startIndex = virtualRow.index * columns;
-            const rowMembers = sequence.members.slice(
+            const rowMembers = displayMembers.slice(
               startIndex,
               startIndex + columns
             );
@@ -622,35 +752,44 @@ export function SequenceFocusTray({
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                {rowMembers.map((member, columnIndex) => (
-                  <PhotoCard
-                    disableDrag={disablePhotoDrag}
-                    dominantColors={member.dominantColors}
-                    faceOverlays={faceOverlayByPhotoId?.get(member.id)}
-                    faceOverlaysVisible={faceOverlaysVisible}
-                    filename={member.filename}
-                    getDragIds={getDragIds}
-                    height={member.height}
-                    id={member.id}
-                    isFavorite={member.isFavorite}
-                    isSelected={selectedIds.has(member.id)}
-                    key={member.id}
-                    loading={
-                      startIndex + columnIndex < columns * INITIAL_EAGER_ROWS
-                        ? "eager"
-                        : "lazy"
-                    }
-                    onClick={onSelect}
-                    onDoubleClick={onDoubleClick}
-                    onNameFace={onNameFace}
-                    onToggleFavorite={onToggleFavorite}
-                    path={member.path}
-                    renderImage={renderImage}
-                    searchQuery={searchQuery}
-                    thumbnailPath={member.thumbnailPath}
-                    width={member.width}
-                  />
-                ))}
+                {rowMembers.map((member, columnIndex) => {
+                  const isMovingMember = movingMemberId === member.id;
+                  return (
+                    <div
+                      className={`relative rounded-[8px] transition-shadow duration-300 ${isMovingMember ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}`}
+                      data-sequence-member-id={member.id}
+                      key={member.id}
+                    >
+                      <PhotoCard
+                        disableDrag={disablePhotoDrag}
+                        dominantColors={member.dominantColors}
+                        faceOverlays={faceOverlayByPhotoId?.get(member.id)}
+                        faceOverlaysVisible={faceOverlaysVisible}
+                        filename={member.filename}
+                        getDragIds={getDragIds}
+                        height={member.height}
+                        id={member.id}
+                        isFavorite={member.isFavorite}
+                        isSelected={selectedIds.has(member.id)}
+                        loading={
+                          startIndex + columnIndex <
+                          columns * INITIAL_EAGER_ROWS
+                            ? "eager"
+                            : "lazy"
+                        }
+                        onClick={onSelect}
+                        onDoubleClick={onDoubleClick}
+                        onNameFace={onNameFace}
+                        onToggleFavorite={onToggleFavorite}
+                        path={member.path}
+                        renderImage={renderImage}
+                        searchQuery={searchQuery}
+                        thumbnailPath={member.thumbnailPath}
+                        width={member.width}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -702,6 +841,7 @@ export const PhotoGrid = memo(
     onSelectSequence,
     onSelectSequenceMembers,
     onSequenceMutationComplete,
+    onSequenceOrderChange,
     onDoubleClick,
     onContextMenu,
     onEndReached,
@@ -1092,6 +1232,7 @@ export const PhotoGrid = memo(
               onSelect={onSelect}
               onSelectSequenceMembers={onSelectSequenceMembers}
               onSequenceMutationComplete={onSequenceMutationComplete}
+              onSequenceOrderChange={onSequenceOrderChange}
               onToggleFavorite={onToggleFavorite}
               onToggleSequenceExpand={onToggleSequenceExpand}
               renderImage={options.renderImage}
@@ -1210,6 +1351,7 @@ export const PhotoGrid = memo(
         onSelectSequence,
         onSelectSequenceMembers,
         onSequenceMutationComplete,
+        onSequenceOrderChange,
         onDoubleClick,
         onToggleFavorite,
         searchQuery,
@@ -1550,6 +1692,9 @@ export const PhotoGrid = memo(
       prevProps.onSequenceMutationComplete !==
       nextProps.onSequenceMutationComplete
     ) {
+      return false;
+    }
+    if (prevProps.onSequenceOrderChange !== nextProps.onSequenceOrderChange) {
       return false;
     }
     if (prevProps.loading !== nextProps.loading) {

@@ -1,7 +1,21 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SequenceFocusTray } from "@/components/PhotoGrid";
 import type { PhotoSequenceDetail } from "@/types/photo-sequence";
+
+const { updateMembers } = vi.hoisted(() => ({
+  updateMembers: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
+vi.mock("@/actions/photo-sequences", () => ({
+  photoSequenceActions: {
+    dissolve: vi.fn(),
+    dissolveAndExclude: vi.fn(),
+    removeMembers: vi.fn(),
+    split: vi.fn(),
+    updateMembers,
+  },
+}));
 
 const memberCount = 1000;
 const sequence: PhotoSequenceDetail = {
@@ -26,6 +40,56 @@ const sequence: PhotoSequenceDetail = {
 };
 
 describe("SequenceFocusTray", () => {
+  it("optimistically shows the new order without collapsing the tray", async () => {
+    updateMembers.mockClear();
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(560);
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(900);
+    const onSequenceMutationComplete = vi.fn();
+    const onBackgroundClick = vi.fn();
+    document.body.addEventListener("click", onBackgroundClick);
+    try {
+      const { container } = render(
+        <SequenceFocusTray
+          columns={3}
+          completeMembers={sequence.members}
+          containerWidth={900}
+          getDragIds={(id) => [id]}
+          onDoubleClick={vi.fn()}
+          onSelect={vi.fn()}
+          onSequenceMutationComplete={onSequenceMutationComplete}
+          renderImage={false}
+          selectedIds={new Set([3])}
+          sequence={{ ...sequence, members: sequence.members.slice(0, 6) }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "sequenceMoveDown" }));
+
+      await waitFor(() => expect(updateMembers).toHaveBeenCalledOnce());
+      expect(updateMembers.mock.calls[0][1].slice(0, 6)).toEqual([
+        1, 2, 4, 3, 5, 6,
+      ]);
+      expect(
+        Array.from(container.querySelectorAll("[data-sequence-member-id]"))
+          .slice(0, 6)
+          .map((element) =>
+            Number(element.getAttribute("data-sequence-member-id"))
+          )
+      ).toEqual([1, 2, 4, 3, 5, 6]);
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      expect(onSequenceMutationComplete).not.toHaveBeenCalled();
+      expect(onBackgroundClick).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener("click", onBackgroundClick);
+      heightSpy.mockRestore();
+      widthSpy.mockRestore();
+    }
+  });
+
   it("keeps all structural sequence actions in the inline tray", () => {
     render(
       <SequenceFocusTray

@@ -5,6 +5,7 @@ import type { Photo } from "@/types/photo";
 import type {
   PhotoSequence,
   PhotoSequenceDetail,
+  SequenceOrderChange,
 } from "@/types/photo-sequence";
 
 export type CollectionSequenceMode = "photos" | "sequences";
@@ -58,6 +59,44 @@ function scopeDetail(
   };
 }
 
+function reorderMembers<T extends { id: number }>(
+  members: readonly T[],
+  orderedIds: readonly number[]
+): T[] {
+  const membersById = new Map(members.map((member) => [member.id, member]));
+  const seen = new Set<number>();
+  const ordered = orderedIds.flatMap((id) => {
+    const member = membersById.get(id);
+    if (!member || seen.has(id)) {
+      return [];
+    }
+    seen.add(id);
+    return [member];
+  });
+  return ordered.concat(members.filter((member) => !seen.has(member.id)));
+}
+
+function applySequenceOrderToSummary(
+  sequence: PhotoSequence,
+  change: SequenceOrderChange
+): PhotoSequence {
+  const next = { ...sequence };
+  if (sequence.memberPhotoIds) {
+    const memberIds = new Set(sequence.memberPhotoIds);
+    next.memberPhotoIds = change.orderedMemberIds.filter((id) =>
+      memberIds.has(id)
+    );
+  }
+  if (sequence.matchedPhotoIds) {
+    const matchedIds = new Set(sequence.matchedPhotoIds);
+    next.matchedPhotoIds = change.orderedMemberIds.filter((id) =>
+      matchedIds.has(id)
+    );
+    next.matchedCount = next.matchedPhotoIds.length;
+  }
+  return next;
+}
+
 export function useCollectionSequences({
   photos,
   storageKey,
@@ -93,6 +132,31 @@ export function useCollectionSequences({
   const requestRef = useRef(0);
   const detailsRequestRef = useRef(0);
   const detailCacheRef = useRef(new Map<number, PhotoSequenceDetail>());
+  const preserveSequencesDuringRefreshRef = useRef(false);
+
+  const updateSequenceOrder = useCallback((change: SequenceOrderChange) => {
+    const applyOrder = (detail: PhotoSequenceDetail) => ({
+      ...detail,
+      members: reorderMembers(detail.members, change.orderedMemberIds),
+    });
+    setExpandedSequence((current) =>
+      current?.id === change.sequenceId ? applyOrder(current) : current
+    );
+    setExpandedSequenceComplete((current) =>
+      current?.id === change.sequenceId ? applyOrder(current) : current
+    );
+    const cached = detailCacheRef.current.get(change.sequenceId);
+    if (cached) {
+      detailCacheRef.current.set(change.sequenceId, applyOrder(cached));
+    }
+    setSequences((current) =>
+      current.map((sequence) =>
+        sequence.id === change.sequenceId
+          ? applySequenceOrderToSummary(sequence, change)
+          : sequence
+      )
+    );
+  }, []);
 
   const photoIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
   const sequenceRequestKey = `${refreshVersion}:${photoIds.join(",")}`;
@@ -102,13 +166,25 @@ export function useCollectionSequences({
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.data?.channel === "sequences-changed") {
+        if (
+          event.data.reason === "reorder" &&
+          typeof event.data.sequenceId === "number" &&
+          Array.isArray(event.data.orderedMemberIds)
+        ) {
+          updateSequenceOrder({
+            orderedMemberIds: event.data.orderedMemberIds,
+            sequenceId: event.data.sequenceId,
+          });
+          return;
+        }
         detailCacheRef.current.clear();
+        preserveSequencesDuringRefreshRef.current = true;
         setRefreshVersion((value) => value + 1);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [updateSequenceOrder]);
 
   useEffect(() => {
     const requestedVersion = refreshVersion;
@@ -119,7 +195,11 @@ export function useCollectionSequences({
       setLoadedSequenceRequestKey(sequenceRequestKey);
       return;
     }
-    setSequences([]);
+    const preserveExistingSequences = preserveSequencesDuringRefreshRef.current;
+    preserveSequencesDuringRefreshRef.current = false;
+    if (!preserveExistingSequences) {
+      setSequences([]);
+    }
     setSequencesError(null);
     ipc.client.photos
       .listSequences({ photoIds, scope: "members" })
@@ -312,6 +392,7 @@ export function useCollectionSequences({
     setOpenSequence,
     setSelectedSequence,
     toggleExpand,
+    updateSequenceOrder,
     updateMemberFavorite,
   };
 }

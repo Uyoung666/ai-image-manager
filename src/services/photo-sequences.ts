@@ -398,6 +398,7 @@ export function cleanupDeletedPhotoSequenceMembers(db: Database): boolean {
 export type SequenceChangeReason =
   | "detection"
   | "manual"
+  | "reorder"
   | "rebuild"
   | "restore";
 
@@ -406,7 +407,8 @@ let sequenceVersion = 0;
 /** Notify every open renderer after a sequence mutation has committed. */
 export function notifySequencesChanged(
   folderId: number | undefined,
-  reason: SequenceChangeReason
+  reason: SequenceChangeReason,
+  details?: { orderedMemberIds: number[]; sequenceId: number }
 ): void {
   bumpPhotoSequenceRevision();
   sequenceVersion += 1;
@@ -415,6 +417,7 @@ export function notifySequencesChanged(
       window.webContents.send("sequences-changed", {
         folderId,
         reason,
+        ...details,
         version: sequenceVersion,
       });
     }

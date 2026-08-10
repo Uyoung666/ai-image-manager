@@ -2,6 +2,11 @@ import type { Photo } from "./photo";
 
 export type PhotoSequenceType = "burst" | "timelapse";
 
+export interface SequenceOrderChange {
+  orderedMemberIds: number[];
+  sequenceId: number;
+}
+
 export interface PhotoSequence {
   endedAt: number;
   frameCount: number;

@@ -908,6 +908,7 @@ function AlbumDetailPage() {
             onSelectSequenceMembers={handleSelectSequenceMembers}
             onSequenceModeChange={sequenceView.setMode}
             onSequenceMutationComplete={sequenceView.refreshSequences}
+            onSequenceOrderChange={sequenceView.updateSequenceOrder}
             onSortChange={handleSortChange}
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
