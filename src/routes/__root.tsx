@@ -4,7 +4,14 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -18,6 +25,7 @@ import { StartupSplash } from "@/components/startup-splash";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
+import { SidebarFilterProvider } from "@/contexts/SidebarFilterContext";
 import BaseLayout from "@/layouts/base-layout";
 import {
   STARTUP_HOME_READY_EVENT,
@@ -249,15 +257,29 @@ function Root() {
     <>
       <TooltipProvider>
         <ScrollPositionProvider>
-          {location.pathname === "/whats-new" ? (
-            <StandaloneLayout>{content}</StandaloneLayout>
-          ) : (
-            <BaseLayout>{content}</BaseLayout>
-          )}
+          <RootSurface pathname={location.pathname}>{content}</RootSurface>
         </ScrollPositionProvider>
       </TooltipProvider>
       {renderSplash && <StartupSplash exiting={splashExiting} />}
     </>
+  );
+}
+
+export function RootSurface({
+  children,
+  pathname,
+}: {
+  children: ReactNode;
+  pathname: string;
+}) {
+  return (
+    <SidebarFilterProvider>
+      {pathname === "/whats-new" ? (
+        <StandaloneLayout>{children}</StandaloneLayout>
+      ) : (
+        <BaseLayout>{children}</BaseLayout>
+      )}
+    </SidebarFilterProvider>
   );
 }
 

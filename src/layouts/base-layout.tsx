@@ -24,10 +24,7 @@ import {
   ImportDropProvider,
   useImportDropContext,
 } from "@/contexts/import-drop-context";
-import {
-  SidebarFilterProvider,
-  useSidebarFilter,
-} from "@/contexts/SidebarFilterContext";
+import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useModalFocusTrap } from "@/hooks/use-modal-focus-trap";
@@ -196,58 +193,52 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
           <OnboardingOverlay />
           <AppContentGate>
             <BrowseSessionProvider>
-              <SidebarFilterProvider>
-                {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: the application shell owns the native external drag lifecycle */}
+              {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: the application shell owns the native external drag lifecycle */}
+              <div
+                aria-label={t("appName")}
+                className={`relative flex h-screen flex-col overflow-hidden ${
+                  isHomePage
+                    ? `home-workspace ${zones.dragKind ? "home-import-dragging" : ""}`
+                    : ""
+                }`}
+                onDragEnter={isHomePage ? zones.handleRootDragEnter : undefined}
+                onDragLeave={isHomePage ? zones.handleRootDragLeave : undefined}
+                onDragOver={isHomePage ? zones.handleRootDragOver : undefined}
+                onDrop={isHomePage ? zones.handleRootDrop : undefined}
+                role="application"
+              >
+                <DragWindowRegion title="AI Image Manager" />
+                <GlobalProgressBar />
                 <div
-                  aria-label={t("appName")}
-                  className={`relative flex h-screen flex-col overflow-hidden ${
-                    isHomePage
-                      ? `home-workspace ${zones.dragKind ? "home-import-dragging" : ""}`
-                      : ""
+                  className={`relative flex min-h-0 flex-1 overflow-hidden ${
+                    isHomePage ? "home-workspace-content" : ""
                   }`}
-                  onDragEnter={
-                    isHomePage ? zones.handleRootDragEnter : undefined
-                  }
-                  onDragLeave={
-                    isHomePage ? zones.handleRootDragLeave : undefined
-                  }
-                  onDragOver={isHomePage ? zones.handleRootDragOver : undefined}
-                  onDrop={isHomePage ? zones.handleRootDrop : undefined}
-                  role="application"
                 >
-                  <DragWindowRegion title="AI Image Manager" />
-                  <GlobalProgressBar />
-                  <div
-                    className={`relative flex min-h-0 flex-1 overflow-hidden ${
-                      isHomePage ? "home-workspace-content" : ""
+                  <SidebarSlot />
+                  <main
+                    className={`min-w-0 flex-1 overflow-hidden ${
+                      isHomePage ? "home-gallery-canvas relative" : ""
                     }`}
                   >
-                    <SidebarSlot />
-                    <main
-                      className={`min-w-0 flex-1 overflow-hidden ${
-                        isHomePage ? "home-gallery-canvas relative" : ""
-                      }`}
-                    >
-                      {children}
-                      {isHomePage && (
-                        <ImportDropLayer
-                          className="home-import-drop-layer"
-                          kind={zones.dragKind}
-                          onDragOver={zones.handleZoneDragOver}
-                          onDrop={zones.handleZoneDrop}
-                          zone="image"
-                        />
-                      )}
-                    </main>
-                  </div>
-                  <SpotlightSearch />
-                  <KeyboardShortcuts
-                    onClose={() => setShortcutsOpen(false)}
-                    open={shortcutsOpen}
-                  />
-                  {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
+                    {children}
+                    {isHomePage && (
+                      <ImportDropLayer
+                        className="home-import-drop-layer"
+                        kind={zones.dragKind}
+                        onDragOver={zones.handleZoneDragOver}
+                        onDrop={zones.handleZoneDrop}
+                        zone="image"
+                      />
+                    )}
+                  </main>
                 </div>
-              </SidebarFilterProvider>
+                <SpotlightSearch />
+                <KeyboardShortcuts
+                  onClose={() => setShortcutsOpen(false)}
+                  open={shortcutsOpen}
+                />
+                {perfOn && <PerfOverlay memory={memory} metrics={metrics} />}
+              </div>
             </BrowseSessionProvider>
           </AppContentGate>
         </WanderProvider>

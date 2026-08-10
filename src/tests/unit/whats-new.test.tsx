@@ -54,7 +54,9 @@ describe("WhatsNewPage", () => {
     expect(
       screen.getByText(getLocalizedText(entry.highlights[0].title, "zh"))
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("article")).toHaveLength(3);
+    expect(screen.getAllByRole("article")).toHaveLength(
+      entry.highlights.length
+    );
     expect(
       container.querySelectorAll(
         ".whats-new-brand-icon, .whats-new-release-visual-image"
