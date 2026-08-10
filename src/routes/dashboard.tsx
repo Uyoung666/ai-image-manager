@@ -556,12 +556,6 @@ function DashboardPage() {
     exif: calculateCoverage(data.coverage.exif, sampleTotal),
     gps: calculateCoverage(data.coverage.gps, sampleTotal),
   };
-  const weakestCoverageKey =
-    sampleTotal > 0
-      ? Object.entries(overviewCoverage).sort(
-          ([, left], [, right]) => left - right
-        )[0]?.[0]
-      : undefined;
 
   const startAi = async () => {
     setStartingAi(true);
@@ -809,32 +803,26 @@ function DashboardPage() {
                 </p>
                 <div className="mt-4 grid grid-cols-2 overflow-hidden rounded-[8px] border border-border sm:grid-cols-3 xl:grid-cols-6">
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "ai"}
                     label={t("dashboardAiCoverage")}
                     percentage={overviewCoverage.ai}
                   />
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "exif"}
                     label={t("dashboardExifCoverage")}
                     percentage={overviewCoverage.exif}
                   />
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "advancedExif"}
                     label={t("dashboardAdvancedExifCoverage")}
                     percentage={overviewCoverage.advancedExif}
                   />
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "date"}
                     label={t("dashboardDateCoverage")}
                     percentage={overviewCoverage.date}
                   />
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "gps"}
                     label={t("dashboardGpsCoverage")}
                     percentage={overviewCoverage.gps}
                   />
                   <HealthMetric
-                    emphasized={weakestCoverageKey === "color"}
                     label={t("dashboardColorCoverage")}
                     percentage={overviewCoverage.color}
                   />
@@ -1740,22 +1728,15 @@ function ColorContent({
   );
 }
 function HealthMetric({
-  emphasized,
   label,
   percentage,
 }: {
-  emphasized: boolean;
   label: string;
   percentage: number;
 }) {
   return (
-    <div
-      className={`min-w-0 border-border/70 border-r border-b p-4 xl:border-b-0 ${emphasized ? "bg-warning/[0.06]" : "bg-background/30"}`}
-    >
+    <div className="min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0">
       <div className="flex items-center gap-1.5">
-        {emphasized && (
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-        )}
         <AppTooltip>
           <AppTooltipTrigger asChild>
             <p className="truncate text-[10px] text-muted-foreground">
@@ -1772,7 +1753,7 @@ function HealthMetric({
         <div
           className="h-full rounded-full"
           style={{
-            backgroundColor: emphasized ? "var(--warning)" : "var(--primary)",
+            backgroundColor: "var(--primary)",
             width: `${Math.min(100, percentage)}%`,
           }}
         />
