@@ -19,7 +19,7 @@ const DEPENDENCIES = [
   { name: "Electron", version: "41" },
   { name: "React", version: "19" },
   { name: "Vite", version: "8" },
-  { name: "TypeScript", version: "5" },
+  { name: "TypeScript", version: "6" },
   { name: "Tailwind CSS", version: "4" },
   { name: "TanStack Router", version: "1" },
   { name: "TanStack Query", version: "5" },
