@@ -1,7 +1,7 @@
 {
   "name": "ai-image-manager",
   "productName": "AI Image Manager",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "100% 本地 AI 图片管理器 — 自然语言搜索、智能去重、自动标签、人脸识别、云端分享",
   "main": ".vite/build/bootstrap.js",
   "type": "module",

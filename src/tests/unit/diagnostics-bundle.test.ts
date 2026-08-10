@@ -51,7 +51,7 @@ describe("diagnostic bundle metadata", () => {
   it("builds a compact issue without stack traces or private paths", async () => {
     const { buildGitHubIssue } = await import("@/services/diagnostics/bundle");
     const manifest = {
-      app: { version: "1.4.0" },
+      app: { version: "2.0.0" },
       system: { platform: "win32", release: "11", arch: "x64" },
     };
     const result = buildGitHubIssue({ incident, input, manifest });
@@ -76,7 +76,7 @@ describe("diagnostic bundle metadata", () => {
         lastAction: longText,
       },
       manifest: {
-        app: { version: "1.4.0" },
+        app: { version: "2.0.0" },
         system: { arch: "x64", platform: "win32", release: "11" },
       },
     });

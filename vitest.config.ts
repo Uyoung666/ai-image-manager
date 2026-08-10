@@ -11,7 +11,13 @@ export default defineConfig({
   },
   test: {
     include: ["src/tests/unit/**/*.{test,spec}.{ts,tsx,js,jsx,mjs}"],
-    exclude: ["src/tests/e2e/**", "src/tests/integration/**"],
+    exclude: [
+      "src/tests/e2e/**",
+      "src/tests/integration/**",
+      // Runs under Node's native test runner (node:sqlite), not Vitest
+      // (CI runs it via `electron --test` in test-face-migration).
+      "src/tests/unit/face-data-migration.test.mjs",
+    ],
     fileParallelism: !process.env.CI,
     maxWorkers: process.env.CI ? 1 : undefined,
     globals: true,

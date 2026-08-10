@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
-  version: "1.4.0" as string | undefined,
+  version: "2.0.0" as string | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -41,7 +41,7 @@ describe("WhatsNewPage", () => {
     mocks.language = "zh";
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
-    mocks.version = "1.4.0";
+    mocks.version = "2.0.0";
   });
 
   it("renders localized highlights and continues to the gallery", () => {

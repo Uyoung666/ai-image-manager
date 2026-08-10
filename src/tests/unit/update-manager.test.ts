@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("electron", () => ({
   app: {
-    getVersion: () => "1.4.0",
+    getVersion: () => "2.0.0",
     isPackaged: true,
   },
   autoUpdater: {

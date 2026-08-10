@@ -1,5 +1,5 @@
 import type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
-import current from "./v1.4.0";
+import current from "./v2.0.0";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 

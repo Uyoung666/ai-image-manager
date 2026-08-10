@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
     getLocale: () => "zh-CN",
     getName: () => "AI Image Manager",
     getPath: (name: string) => path.join(electronTestDataRoot, name),
-    getVersion: () => "1.4.0",
+    getVersion: () => "2.0.0",
     getGPUFeatureStatus: () => ({ gpu_compositing: "enabled" }),
     getGPUInfo: async () => ({ gpuDevice: [] }),
     isPackaged: false,

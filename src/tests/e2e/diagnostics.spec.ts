@@ -141,7 +141,7 @@ test("exports within the target time and hands off a prefilled issue", async () 
 
   const issueUrl = new URL(handoff?.issueUrl ?? "");
   expect(issueUrl.hostname).toBe("github.com");
-  expect(issueUrl.searchParams.get("title")).toContain("[Bug][v1.4.0]");
+  expect(issueUrl.searchParams.get("title")).toContain("[Bug][v2.0.0]");
   expect(issueUrl.searchParams.get("body")).toContain("Clicked AI indexing");
   expect(issueUrl.searchParams.get("body")).toContain(
     "Drag the ZIP highlighted by the app here."

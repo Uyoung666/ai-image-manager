@@ -4,153 +4,235 @@
 
 **A local-first AI photo manager for Windows**
 
-Index, search, organize, curate, and analyze your photo library with AI—without uploading your images.
+Index, search, organize, curate, analyze, and share your photo library on your own computer without moving the original files.
 
-[![Latest Release](https://img.shields.io/github/v/release/Uyoung666/ai-image-manager?display_name=tag&style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.0.0-2563EB?style=flat-square)](https://github.com/Uyoung666/ai-image-manager/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](#system-requirements)
 [![License](https://img.shields.io/github/license/Uyoung666/ai-image-manager?style=flat-square)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
 
-[Website](https://ai-image-manager.uyoungvision.cn) · [Download](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [User Guide](GUIDE.en.md) · [简体中文](README.md)
+[Website](https://ai-image-manager.uyoungvision.cn) · [Download v2.0.0](https://github.com/Uyoung666/ai-image-manager/releases/latest) · [User Guide](GUIDE.en.md) · [简体中文](README.md)
 
 </div>
 
 ---
 
-## Overview
+## v2.0.0: a new public baseline
 
-AI Image Manager provides an end-to-end local workflow for importing, finding, organizing, curating, and sharing photos. It indexes your existing folders in place, so you do not need to move or duplicate your library. Thumbnails, metadata, vector indexes, and AI inference data remain on your computer.
+v2.0.0 is the new public starting point for AI Image Manager. It is designed for photographers, creators, designers, and anyone with a long-lived photo library on Windows. The workflow is built around your existing folders: index them in place, find photos with natural language, visual similarity, metadata, or folders, then organize, curate, analyze, export, or share them.
 
-All core photo-management and AI features work locally. Data is sent to a remote service only when you explicitly configure WebDAV or S3 and initiate an upload or sharing action.
+The v2.0.0 documentation, performance data, and privacy statements describe the current release only. They do not make an upgrade, data-format, or feature-continuity promise for historical releases.
+
+## Product principles
+
+- **Local-first**: photos, thumbnails, EXIF, AI vectors, and face features are processed and stored on your computer by default.
+- **In-place indexing**: the app reads folders you choose and does not require copying or migrating your original photos.
+- **Network by intent**: automatic updates contact the update service; WebDAV/S3 and diagnostic submission create the corresponding network activity only when enabled or initiated by the user.
+- **Designed for real libraries**: incremental indexing, a virtualized gallery, and isolated AI workers support libraries that keep growing.
+- **One photography workflow**: browsing, culling, people management, duplicate review, EXIF analysis, export, and sharing live in one desktop app.
 
 ![AI Image Manager home screen](screenshots/01-home.png)
 
-## Why AI Image Manager
+## Quick start
 
-- **Local-first by design:** photos, EXIF metadata, vector indexes, and face features remain on your device by default, with no telemetry or background uploads.
-- **Content-aware search:** describe a scene in natural language or use a reference image to find visually similar photos.
-- **A complete photography workflow:** browse, organize, compare, analyze, export, and share from one desktop application.
-- **Built for large libraries:** virtualized masonry rendering, incremental indexing, and isolated AI workers are designed to scale.
-- **Broad format support:** manage common formats alongside HEIC, TIFF, and major camera RAW formats.
+### Download and install
 
-## Quick Start
+Download v2.0.0 from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest):
 
-### Download and Install
+- **Installer**: recommended for long-term use, with Windows installation, shortcuts, and update support.
+- **Portable build**: extract and run without installing into the system installation directory.
 
-Get the latest build from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest):
+On first launch, the setup flow helps you:
 
-- **Installer (recommended):** integrates with Windows, creates shortcuts, and supports automatic updates.
-- **Portable build:** extract and run without installing the application.
+1. Choose the application data directory for the database, thumbnails, vector index, and local models.
+2. Detect and optionally enable DirectML GPU acceleration.
+3. Select Chinese or English as the interface language.
 
-On first launch, the setup wizard helps you choose a data directory, configure optional DirectML GPU acceleration, and select the interface language. AI models are bundled with the application, so no additional first-run download is required.
+The release package includes the model assets required by the current version, so a normal installation does not need an extra model download on first use. If model files are missing or fail verification, the app may offer to retrieve them; that recovery action requires network access.
 
-> For detailed workflows, keyboard shortcuts, and troubleshooting, see the [User Guide](GUIDE.en.md).
+### Import your first folder
 
-### System Requirements
+1. Click **Add Folder** on the home page, or drop a photo folder into the app window.
+2. Let the background queue scan files, create thumbnails, and read EXIF metadata. You can continue browsing existing photos while the queue runs.
+3. Watch **AI Smart Index** in the sidebar. Semantic search, image search, visual duplicate detection, and some AI tagging features require their corresponding index to be ready.
+
+For detailed workflows, shortcuts, and troubleshooting, read the [User Guide](GUIDE.en.md).
+
+## System requirements
 
 | Component | Requirement |
 | --- | --- |
 | Operating system | Windows 10 or 11, 64-bit |
 | Processor | x64 processor |
 | Memory | 8 GB recommended; 16 GB or more for large libraries |
-| Storage | SSD recommended, with additional space for thumbnails, indexes, and AI models |
-| GPU | Optional; a DirectML-compatible GPU can accelerate face detection, with automatic CPU fallback |
+| Storage | SSD recommended, with room for thumbnails, database, vector index, and models |
+| GPU | Optional; DirectML-capable NVIDIA, AMD, or Intel GPU can accelerate some AI tasks, with CPU fallback |
+| Runtime | Visual C++ 2015–2022 x64 Redistributable may be required if an AI Worker or native dependency fails to start |
 
-## Core Features
+Actual performance depends on image format, resolution, library storage, system load, CPU, GPU, and memory.
 
-### AI Search and Smart Organization
+## Main capabilities
 
-- Natural-language semantic search in English and Chinese—for example, “sunset at the beach last autumn”
-- Reverse image search, filename wildcards, and compound filters for dates, tags, and EXIF metadata
-- `Ctrl+K` Spotlight search across photos, tags, albums, people, and application navigation
-- AI-assisted tagging and rule-based smart albums using dates, EXIF fields, tags, and AND/OR conditions
+### 1. AI search and global search
 
-### Fast Browsing and Photo Management
+- Natural-language semantic search in Chinese and English, such as “去年秋天的红叶” or “sunset by the beach”.
+- Image search: choose a reference image and find visually similar photos.
+- Filename wildcard matching, such as `IMG_*.jpg`, `*2025*`, and `DSC_00??.ARW`.
+- Combined filters for date, camera, lens, focal length, aperture, ISO, format, and tags.
+- Press `Ctrl+K` for global search across photos, tags, albums, people, settings, and navigation.
+- If AI is unavailable or indexing is incomplete, filename, tag, people, and metadata search remain available; semantic results require the relevant index.
 
-- Virtualized masonry layout, timeline grouping, and a hierarchical folder tree
-- Quick preview, fullscreen lightbox, slideshows, EXIF details, and precise scroll restoration
-- Drag-and-drop import, marquee selection, favorites, batch rename, format conversion, resize, and watermark tools
-- Soft deletion with a 30-day trash, including restore and cleanup controls
+### 2. Browsing and photo management
 
-| Quick Preview | Photo Details |
+- Virtualized masonry gallery, timeline grouping, and a tree of your real folders.
+- Single selection, multi-selection, range selection, marquee selection, favorites, and scroll restoration.
+- Press `Space` for quick preview. Double-click to open the lightbox with fullscreen, slideshow, zoom, pan, rotation, and thumbnail navigation.
+- A detail panel for file information, EXIF, tags, location, and the original path.
+- Folder appearance settings for colors and icons inside the app; they do not modify real folders on disk.
+- Soft deletion and a 30-day trash with restore, cleanup, and Windows system recycle-bin handling.
+
+| Quick preview | Photo details |
 | :---: | :---: |
 | ![Quick preview](screenshots/04-lightbox-preview.png) | ![EXIF details](screenshots/05-photo-detail.png) |
 
-### Professional Photo Culling
+### 3. AI indexing, tags, and people
 
-- **PK mode:** Elo-based pairwise comparison with Quick, Standard, and Fine intensity levels
-- **Curate mode:** keyboard-first keep, reject, and skip decisions for individual photos
-- **Results view:** ranked output with Top-N selection, multi-select, album actions, and batch export
+- Local image embeddings for semantic search and visual similarity.
+- Pause, resume, and incremental processing for newly added photos.
+- Manual tags, nested tag hierarchies, and AI tag suggestions.
+- Local face detection and feature extraction with identity clustering, naming, merging, hiding, splitting, and reclustering.
+- DirectML can accelerate image embedding and face recognition. The app falls back to CPU when probing or runtime execution fails.
 
-| PK Comparison | Curate Mode | Ranked Results |
+| People management | AI indexing and duplicates |
+| :---: | :---: |
+| ![People](screenshots/06-face-detection.png) | ![Duplicate detection](screenshots/03-duplicate-detection.png) |
+
+### 4. Albums, sequences, and Wander
+
+- Regular albums for manual organization, removal, and cover selection.
+- Smart albums that match rules for dates, camera, lens, tags, focal length, aperture, ISO, and format.
+- Sequence detection for burst photography and timelapse sets, with strict, balanced, relaxed, and custom presets.
+- Sequence management with frame browsing, playback, representative-photo selection, reordering, and splitting.
+- Wander for manual or idle-time rediscovery through time capsules, themes, and overlooked-library selections; save a Wander round as an album.
+
+### 5. Professional photo culling
+
+- **Duel / PK mode**: compare two photos and build a ranking with Elo scoring.
+- **Curate mode**: review photos one by one and mark them keep, reject, or skip similar photos.
+- Quick, Standard, and Fine PK strategies, synchronized zoom, EXIF overlays, undo, and fatigue reminders.
+- Results with rankings, Top-N marking, multi-selection, album actions, export, and trash actions.
+
+| PK comparison | Curate mode | Ranked results |
 | :---: | :---: | :---: |
 | ![PK comparison](screenshots/11-culling-pk.png) | ![Curate mode](screenshots/12-culling-curate.png) | ![Culling results](screenshots/13-culling-result.png) |
 
-### People, Duplicates, and Photo Analytics
+### 6. Duplicate review and photo analytics
 
-- ONNX-based face detection and feature extraction with automatic identity clustering, rename, merge, and split controls
-- DirectML GPU acceleration with automatic CPU fallback; embedded previews enable RAW processing
-- pHash pre-screening combined with CLIP similarity ranking for duplicate and near-duplicate review
-- EXIF dashboards for camera, lens, focal length, aperture, shutter speed, ISO, capture time, color, and GPS distributions
-- Interactive chart drill-down that opens the matching photos directly
+- Detect groups that are byte-for-byte identical, visually identical, or visually similar.
+- Combine file hashes, perceptual hashes, and visual similarity for candidate grouping. Visual similarity is not proof of a duplicate; review before cleanup.
+- Keeper selection, ignored groups, and batch cleanup protected by the 30-day trash.
+- Dashboard views for overview, gear, exposure, technique, time, places, and color.
+- Drill down from charts to matching photos, with all-time, current-year, last-12-month, and custom date ranges.
 
-| People | Duplicate Detection | Analytics Dashboard |
-| :---: | :---: | :---: |
-| ![Face recognition](screenshots/06-face-detection.png) | ![Duplicate detection](screenshots/03-duplicate-detection.png) | ![Analytics dashboard](screenshots/07-dashboard.png) |
+![Analytics dashboard](screenshots/07-dashboard.png)
 
-### Export, Sharing, and Windows Integration
+### 7. Batch processing, export, and sharing
 
-- Batch-export original or compressed photos as a ZIP archive
-- Generate standalone HTML galleries containing thumbnails, EXIF metadata, and tags
-- Optionally configure WebDAV or S3-compatible storage and manually upload photos or galleries
-- System tray, launch-at-login, global shortcuts, and Windows Send To integration
+- Batch favorites, album actions, renaming, format conversion, resizing, and watermarks.
+- Export originals or compressed versions as ZIP archives; compressed export supports quality and maximum-width settings.
+- Generate a single-file HTML gallery with thumbnails, EXIF metadata, and tags.
+- Text or image watermarks with nine anchor positions, opacity, font/image scale, and preview.
+- Optional system tray, launch at login, global shortcuts, and Windows Send To integration.
 
-## How It Works
+### 8. Cloud storage and sharing
 
-```text
-Local photo folders
-       │
-       ├── Scan and watch ─────► SQLite metadata / EXIF
-       ├── Thumbnails and pHash ► Browsing, preview, duplicate detection
-       └── AI workers ─────────► CLIP vectors / face features ─► LanceDB
-                                        │
-                                        └── Semantic search, reverse image search,
-                                            and identity clustering
-```
+Supported user-configured providers:
 
-The application does not copy or take ownership of your original library. The indexer reads folders you select and writes derived data to a configurable application data directory. File changes are synchronized through incremental filesystem monitoring.
+- **WebDAV**: suitable for Nutstore and other compatible WebDAV services.
+- **Amazon S3 / S3-compatible storage**: requires endpoint, bucket, access key, secret key, and related settings.
 
-## Supported Image Formats
+Cloud configuration does not upload photos automatically. Data is sent to the selected provider only after the user configures it and explicitly uploads photos or publishes a share page. Availability, permissions, and privacy terms are controlled by the provider.
+
+## Supported image formats
 
 | Category | Formats |
 | --- | --- |
-| Common formats | JPEG, PNG, WebP, AVIF, TIFF, HEIC / HEIF, GIF, BMP, ICO |
+| Common formats | JPG, JPEG, PNG, WebP, AVIF, TIFF, TIF, HEIC, HEIF, GIF, BMP, ICO |
 | Camera RAW | CR2, CR3, NEF, NRW, ARW, SRF, SR2, DNG, ORF, RW2, RAF, PEF, RWL, 3FR, RAW |
 
-For RAW files, thumbnails, previews, and AI analysis primarily use the embedded JPEG preview. Results depend on whether the camera file contains a usable preview.
+The indexer accepts 27 extensions. RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews read with ExifTool. RAW files without a usable embedded preview may have limited support.
 
-## Performance Reference
+## Performance reference
 
-The following measurements were recorded on Windows 11 with a Ryzen 7 processor, 16 GB RAM, an NVMe SSD, and a quantized CLIP ViT-B/32 model. They illustrate expected scale only; actual performance varies with file format, resolution, storage speed, and hardware.
+This is the only recorded end-to-end observation for the current release:
 
-| Photos | Scan, EXIF, and Thumbnails | AI Embeddings | Total |
+| Workload | Import | AI embedding | Total |
 | ---: | ---: | ---: | ---: |
-| 1,000 | ~1 min | ~1.5 min | **~2.5 min** |
-| 10,000 | ~7 min | ~15 min | **~22 min** |
-| 100,000 | ~70 min | ~40 min | **~1.8 hr** |
+| 1,000 photos | 30 seconds | 32 seconds | **62 seconds** |
 
-After the initial full index, newly added or changed photos are processed incrementally.
+This result comes from one real run with 1,000 photos. The test hardware, image formats, resolutions, and system load were not fully recorded, so this is a single-run baseline rather than a guarantee for every computer, library, or image type. It must not be used to extrapolate fixed times for 10,000 photos or larger libraries.
 
-## Local Development
+## How the app handles your data
+
+```text
+Folders you choose
+        │
+        ├─ Scan and watch ───► SQLite / EXIF / file state
+        ├─ Thumbnails ───────► Local cache / gallery / lightbox
+        └─ AI Workers ───────► SigLIP vectors / face features / AI tags
+                                      │
+                                      └─► Semantic search, image search,
+                                          people clustering, duplicate review
+
+Derived data lives in the application data directory; original photos remain in your folders.
+```
+
+The app does not take ownership of or automatically migrate your original photos. If source files are moved or deleted, their index records may become invalid and can be cleaned from Settings. The database, thumbnails, vector index, models, and logs are controlled by the data-directory setting.
+
+## Privacy, network, and diagnostics
+
+- Photo indexing, thumbnail generation, EXIF reading, vector computation, face features, and search processing run locally by default.
+- The app does not automatically upload photo content. Photos, databases, EXIF, face/vector data, and search terms are not included in diagnostic bundles.
+- When automatic updates are enabled, the app contacts the update service to check for and download releases. Configure automatic updates, reminders, and proxy settings under **Settings → Software Update**.
+- When WebDAV/S3 is configured and an upload or share action is initiated, the corresponding data is sent to the selected service.
+- **Settings → Help & Diagnostics** creates a strictly redacted diagnostic bundle locally. It is not uploaded automatically; it leaves the device only if the user exports it or attaches it to an Issue. Native crash dumps are off by default.
+
+These statements describe the current v2.0.0 implementation and do not replace the privacy policies of connected cloud or update services.
+
+## Bundled AI models and licenses
+
+The release package includes the model assets required by the current version. See [THIRD_PARTY_MODEL_NOTICES.md](THIRD_PARTY_MODEL_NOTICES.md) and [`licenses/`](licenses) for full notices. All of the following models run locally and have separate responsibilities:
+
+| Model | Main capabilities | Explicit boundary | License |
+| --- | --- | --- | --- |
+| **SigLIP Base Patch16-224** | Image and text embeddings in one 768-dimensional, L2-normalized vector space; text-to-image search, image-to-image search, AI tag suggestions, visual duplicate detection, and similar-candidate grouping | Not for image generation, photo editing, OCR, or face recognition | Apache License 2.0 |
+| **OPUS-MT Chinese to English** | Translates Chinese search queries to English locally so they can enter the SigLIP text-embedding flow | Does not generate images or extract image/face features, and is not a general-purpose translation service | CC BY 4.0 |
+| **YuNet** | Local face detection and five-point facial-landmark localization; outputs face boxes and locations for the people workflow | Does not identify people and does not provide general image embeddings or semantic search | MIT License |
+| **SFace** | Local 128-dimensional face embeddings for face similarity, people clustering, and people management | Does not detect faces and does not provide general image embeddings or text-to-image search | Apache License 2.0 |
+
+### Current standard model capabilities
+
+The current standard embedding adapter is `siglip-v1-base-patch16-224` (SigLIP Base Patch16-224):
+
+- Provides both image and text embeddings in one 768-dimensional, L2-normalized vector space.
+- Supports Chinese and English semantic search, or text-to-image search.
+- Supports image-to-image search and visual-similarity ranking.
+- Provides the image/label similarity used for AI tag suggestions.
+- Supports visual duplicate detection and visually similar candidate groups.
+- Uses the current officially calibrated `siglip-v1-base-patch16-224-default` threshold profile.
+
+Before entering the text-to-image flow, Chinese queries may be translated to English locally by OPUS-MT; people-related capabilities are handled separately by YuNet (detection and landmarks) and SFace (face features). Model output supports similarity, retrieval, and assisted organization; it is not an absolute judgment about photo content.
+
+## Local development
 
 ### Prerequisites
 
 - Windows 10 or 11
-- [Node.js 22](https://nodejs.org/), matching the CI environment
+- [Node.js 22](https://nodejs.org/)
 - npm
-- A Windows C++ build environment for native dependencies
+- A Windows C++ build environment for native dependencies such as `better-sqlite3`, LanceDB, Sharp, and ONNX Runtime
 
-### Run the Project
+### Run the project
 
 ```bash
 git clone https://github.com/Uyoung666/ai-image-manager.git
@@ -159,60 +241,52 @@ npm ci
 npm run dev
 ```
 
-The `npm ci` postinstall step rebuilds native dependencies—including `better-sqlite3`, LanceDB, and Transformers.js—for Electron.
+`npm ci` rebuilds Electron native modules. Prepare development model files according to the project instructions; release builds stage only the assets listed in the approved model manifest.
 
 ### Commands
 
-| Command | Description |
+| Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start Electron with Vite hot reload |
-| `npm test` | Run the Vitest suite once |
-| `npm run test:e2e` | Run Playwright end-to-end tests |
-| `npm run check` | Check formatting and lint rules |
-| `npm run fix` | Apply safe automatic formatting and fixes |
-| `npm run make` | Build Windows distributables |
-| `npm run db:generate` | Generate Drizzle database migrations |
-| `npm run db:migrate` | Apply pending database migrations |
+| `npm run dev` | Start the Electron + Vite development environment |
+| `npm test` | Run Vitest tests |
+| `npm run test:e2e` | Run Playwright E2E tests |
+| `npm run check` | Run formatting and lint checks |
+| `npm run make` | Build Windows distribution packages |
+| `npm run db:generate` | Generate a Drizzle migration |
+| `npm run db:migrate` | Apply database migrations |
 
-## Technical Architecture
+## Technical architecture
 
-| Layer | Main Technologies |
+| Layer | Main technologies |
 | --- | --- |
 | Desktop runtime | Electron 41, Electron Forge |
 | Renderer | React 19, TypeScript, TanStack Router / Query |
-| UI and styling | Tailwind CSS 4, shadcn/ui, Radix UI |
-| Type-safe communication | oRPC |
-| Data and indexing | SQLite, better-sqlite3, Drizzle ORM, LanceDB |
-| Images and metadata | sharp, ExifTool, exifr |
+| UI | Tailwind CSS 4, Radix UI, shadcn/ui |
+| Data and indexes | SQLite, better-sqlite3, Drizzle ORM, LanceDB |
+| Images and metadata | Sharp, ExifTool, exifr |
 | AI inference | Transformers.js, ONNX Runtime, DirectML |
-| Tooling and tests | Vite 8, Vitest, Playwright, Biome / Ultracite |
+| Engineering and testing | Vite, Vitest, Playwright, Biome / Ultracite |
 
 Key directories:
 
 ```text
-src/
-├── routes/       # React pages and routes
-├── components/   # UI components
-├── actions/      # Renderer-side IPC wrappers
-├── ipc/          # Typed IPC routes and handlers
-├── services/     # Indexing, thumbnails, AI, faces, and cloud services
-├── db/           # Database schema and access layer
-└── tests/        # Unit, integration, and end-to-end tests
+src/routes/       React pages and routes
+src/components/   Reusable UI components
+src/actions/      Renderer-side IPC wrappers
+src/ipc/          Typed IPC routes and handlers
+src/services/     Indexing, thumbnails, AI, people, cloud, and related services
+src/db/           Database schema and access layer
+src/tests/        Unit, integration, and E2E tests
 ```
-
-## Privacy
-
-AI Image Manager's core workflow runs locally. The application contains no telemetry, behavioral analytics, or unsolicited photo uploads. When cloud sharing is enabled, it communicates with the configured WebDAV or S3 service only after you explicitly initiate an upload. Availability, access controls, and privacy terms for remote storage are governed by the selected provider.
 
 ## Documentation
 
-- [English User Guide](GUIDE.en.md)
 - [中文使用指南](GUIDE.md)
+- [English User Guide](GUIDE.en.md)
 - [中文 README](README.md)
-- [Releases and Downloads](https://github.com/Uyoung666/ai-image-manager/releases)
+- [Third-party model notices](THIRD_PARTY_MODEL_NOTICES.md)
+- [Releases and downloads](https://github.com/Uyoung666/ai-image-manager/releases)
 
 ## License
 
-This project is available under the [MIT License](LICENSE). Copyright © Uyoung.
-
-The project was originally bootstrapped from [electron-shadcn](https://github.com/LuanRoger/electron-shadcn).
+This project is released under the [MIT License](LICENSE). Third-party models and dependencies retain their own licenses; read [THIRD_PARTY_MODEL_NOTICES.md](THIRD_PARTY_MODEL_NOTICES.md) and the notices in [`licenses/`](licenses).
