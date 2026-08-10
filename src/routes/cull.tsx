@@ -40,6 +40,15 @@ interface Folder {
   totalPhotoCount?: number;
 }
 
+function sortCullSessions(sessions: CullSession[]): CullSession[] {
+  return [...sessions].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === "completed" ? 1 : -1;
+    }
+    return b.createdAt - a.createdAt;
+  });
+}
+
 function CullListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -266,7 +275,7 @@ function CullListPage() {
                 "repeat(auto-fit, minmax(min(240px, 100%), 1fr))",
             }}
           >
-            {sessions.map((session) => (
+            {sortCullSessions(sessions).map((session) => (
               <CullSessionCard
                 getModeIcon={getModeIcon}
                 getModeLabel={getModeLabel}

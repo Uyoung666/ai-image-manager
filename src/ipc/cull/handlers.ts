@@ -508,10 +508,14 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
           )
           .get()?.count ?? 0)
       : pending.length;
+  const readyCount = pending.filter(
+    (p) => p.comparisons >= config.minComparisons
+  ).length;
   const stats = {
     total: curateTotal,
     completed: session.completedComparisons,
     remaining: pending.length,
+    ...(session.mode === "duel" ? { ready: readyCount } : {}),
   };
 
   // Completed sessions always return done
@@ -599,10 +603,6 @@ export const getNextPair = os.input(GetNextPairSchema).handler(({ input }) => {
   if (pending.length < 2) {
     return { done: true, stats };
   }
-
-  const readyCount = pending.filter(
-    (p) => p.comparisons >= config.minComparisons
-  ).length;
 
   // All photos compared enough — done (unless recompare is enabled)
   if (readyCount === pending.length && !config.allowRecompare) {

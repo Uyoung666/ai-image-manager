@@ -298,6 +298,29 @@ export function CullDuel({ session, onMutationSuccess }: CullDuelProps) {
     },
   });
 
+  // A session can become exhausted naturally when getNextPair finds no
+  // remaining pair. Persist that state so the session list and its progress
+  // bar agree with the completed result view.
+  const autoCompleteSessionRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      !done ||
+      pairQuery.isLoading ||
+      session.status === "completed" ||
+      autoCompleteSessionRef.current === session.id
+    ) {
+      return;
+    }
+    autoCompleteSessionRef.current = session.id;
+    completeMutation.mutate();
+  }, [
+    completeMutation.mutate,
+    done,
+    pairQuery.isLoading,
+    session.id,
+    session.status,
+  ]);
+
   // Unified "is submitting" gate — disables all action buttons
   const isSubmitting =
     submitMutation.isPending ||

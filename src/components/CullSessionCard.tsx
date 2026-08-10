@@ -1,4 +1,4 @@
-import { Copy, Pencil, Trash2 } from "lucide-react";
+import { Check, Copy, Pencil, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -138,11 +138,6 @@ export function CullSessionCard({
         <span className="min-w-0 truncate text-[11px] text-muted-foreground">
           {getModeLabel(session.mode)}
         </span>
-        {session.status === "completed" && (
-          <span className="ml-auto rounded-[4px] bg-success/10 px-1.5 py-0.5 font-medium text-[10px] text-success">
-            ✓
-          </span>
-        )}
       </div>
 
       {/* Name */}
@@ -161,24 +156,34 @@ export function CullSessionCard({
           ` · ${t("cullReviewedProgress", { done: session.completedComparisons, total: session.totalPhotos })}`}
       </div>
 
-      {/* Progress bar */}
-      {session.status === "active" && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div
-              aria-label={progressTooltip}
-              className="relative mt-3 h-1 w-full overflow-visible rounded-full bg-muted"
-              role="img"
-            >
+      {/* Progress bar / completion mark */}
+      <div className="mt-3 flex min-h-4 items-center">
+        {session.status === "active" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
               <div
-                className="h-full rounded-full bg-primary transition-all duration-300"
-                style={{ width: `${displayProgress}%` }}
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>{progressTooltip}</TooltipContent>
-        </Tooltip>
-      )}
+                aria-label={progressTooltip}
+                className="relative h-1 w-full overflow-visible rounded-full bg-muted"
+                role="img"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  style={{ width: `${displayProgress}%` }}
+                />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{progressTooltip}</TooltipContent>
+          </Tooltip>
+        )}
+        {isCompleted && (
+          <span
+            aria-hidden="true"
+            className="ml-auto flex h-6 w-6 items-center justify-center rounded-[5px] bg-success/10 text-success"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </span>
+        )}
+      </div>
     </div>
   );
 }

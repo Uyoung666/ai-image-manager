@@ -573,8 +573,20 @@ export const exportPhotos = os
       throwIfExportAborted(signal);
       const zipPath = resolveExportOutputPath(outputPath);
 
-      const { default: createArchive } = await import("archiver");
-      const archive = createArchive("zip", { zlib: { level: 9 } });
+      // archiver 8 exposes archive constructors instead of the legacy
+      // default factory function.
+      const { ZipArchive } = (await import("archiver")) as unknown as {
+        ZipArchive: new (options: {
+          zlib: { level: number };
+        }) => {
+          abort: () => void;
+          directory: (source: string, destination: false) => void;
+          finalize: () => Promise<void>;
+          on: (event: string, listener: (...args: unknown[]) => void) => void;
+          pipe: (destination: NodeJS.WritableStream) => void;
+        };
+      };
+      const archive = new ZipArchive({ zlib: { level: 9 } });
       const output = fs.createWriteStream(zipPath);
 
       await new Promise<void>((resolve, reject) => {
