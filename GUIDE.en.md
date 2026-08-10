@@ -46,7 +46,14 @@ AI Image Manager reads the photo folders you choose. It creates a database, thum
 - SSD recommended, with space for derived data
 - DirectML GPU optional; unsupported systems use CPU
 
-Actual timing depends on image format, dimensions, storage, system load, and hardware. The only recorded 1,000-photo observation is 30 seconds to import, 32 seconds for AI embedding, and 62 seconds total. This is a single observation, not a fixed performance guarantee.
+Actual timing depends on image format, dimensions, storage, system load, and hardware. The two observations currently recorded are below; the 10,000-photo run used an isolated data directory and is rounded to whole seconds:
+
+| Workload | Import | AI embedding | Total |
+| ---: | ---: | ---: | ---: |
+| 1,000 photos | 30 seconds | 32 seconds | **62 seconds** |
+| 10,000 JPG photos | about 340 seconds (5m 40s) | about 746 seconds (12m 26s) | **about 1,086 seconds (18m 06s)** |
+
+The 10,000-photo run used 10,000 JPG files. The import phase prepared thumbnails, EXIF, and hashes, followed by SigLIP embedding; all derived data was removed after the test. Test hardware, image resolutions, and system load were not fully recorded, so these are single-run observations rather than fixed performance guarantees or extrapolations to other scales.
 
 ### File formats
 

@@ -11,7 +11,10 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     hookTimeout: 300_000,
-    include: ["src/tests/integration/ai-*.test.{ts,tsx,js,jsx,mjs}"],
+    include: [
+      "src/tests/integration/ai-*.test.{ts,tsx,js,jsx,mjs}",
+      "src/tests/integration/performance-real-dataset.test.ts",
+    ],
     maxWorkers: 1,
     reporters: ["verbose"],
     testTimeout: 300_000,
