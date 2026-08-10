@@ -106,6 +106,7 @@ out/
 
 # Project data (user-specific)
 data/
+diagnostics/
 thumbnails/
 models/
 models-release/
