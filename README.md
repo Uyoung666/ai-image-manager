@@ -31,7 +31,7 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 - **面向真实图库**：增量索引、虚拟化照片网格和独立 AI Worker 适合持续增长的本地图库。
 - **摄影工作流集中**：浏览、筛选、人物整理、重复检测、专业选片、EXIF 分析和导出分享在同一个桌面应用中完成。
 
-![AI Image Manager 首页](screenshots/01-home.png)
+![AI Image Manager 首页](screenshots/v2.0.0/home.png)
 
 ## 快速开始
 
@@ -93,7 +93,7 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 
 | 快速预览 | 照片详情 |
 | :---: | :---: |
-| ![快速预览](screenshots/04-lightbox-preview.png) | ![EXIF 详情](screenshots/05-photo-detail.png) |
+| ![快速预览](screenshots/v2.0.0/quick-preview.png) | ![EXIF 详情](screenshots/v2.0.0/photo-detail.png) |
 
 ### 3. AI 索引、标签与人物
 
@@ -105,7 +105,7 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 
 | 人物整理 | AI 索引与重复检测 |
 | :---: | :---: |
-| ![人物识别](screenshots/06-face-detection.png) | ![重复照片检测](screenshots/03-duplicate-detection.png) |
+| ![人物识别](screenshots/v2.0.0/people.png) | ![重复照片检测](screenshots/v2.0.0/duplicates.png) |
 
 ### 4. 相册、序列与漫游
 
@@ -124,7 +124,7 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 
 | PK 对比 | 甄选模式 | 结果排名 |
 | :---: | :---: | :---: |
-| ![PK 对比](screenshots/11-culling-pk.png) | ![甄选模式](screenshots/12-culling-curate.png) | ![选片结果](screenshots/13-culling-result.png) |
+| ![PK 对比](screenshots/v2.0.0/culling-pk.png) | ![甄选模式](screenshots/v2.0.0/culling-curate.png) | ![选片结果](screenshots/v2.0.0/culling-export.png) |
 
 ### 6. 重复检测与影像分析
 
@@ -134,7 +134,7 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 - 仪表盘按概览、器材、曝光、拍摄技术、时间、地点与色彩展示图库统计。
 - 图表可下钻到匹配照片，统计范围支持全部、今年、近 12 个月和自定义日期。
 
-![数据仪表盘](screenshots/07-dashboard.png)
+![数据仪表盘](screenshots/v2.0.0/dashboard-1.png)
 
 ### 7. 批量处理、导出与分享
 
@@ -152,6 +152,28 @@ v2.0.0 的文档、性能数据和隐私说明均以当前版本实际行为为�
 - **Amazon S3 / S3 兼容存储**：需要 endpoint、bucket、access key 和 secret key 等配置。
 
 云配置不会自动上传照片。只有用户在设置中完成配置并主动执行上传或发布分享页面时，应用才会向所选服务发送对应数据。云服务的可用性、权限和隐私政策由服务提供商决定。
+
+## v2.0.0 界面预览
+
+以下截图来自 v2.0.0 实测界面，补充展示预览、序列、相册、设置、选片和仪表盘流程。
+
+| 灯箱 | 人脸待处理 |
+| :---: | :---: |
+| ![灯箱](screenshots/v2.0.0/lightbox.png) | ![人脸待处理](screenshots/v2.0.0/face-review.png) |
+
+| 序列及序列详情 | 智能相册 |
+| :---: | :---: |
+| ![序列及序列详情](screenshots/v2.0.0/sequences.png) | ![智能相册](screenshots/v2.0.0/smart-albums.png) |
+
+| 快捷键 | 设置页 |
+| :---: | :---: |
+| ![快捷键](screenshots/v2.0.0/keyboard-shortcuts.png) | ![设置页](screenshots/v2.0.0/settings.png) |
+
+| 选片工作区 | 数据仪表盘（二） |
+| :---: | :---: |
+| ![选片工作区](screenshots/v2.0.0/culling-overview.png) | ![数据仪表盘（二）](screenshots/v2.0.0/dashboard-2.png) |
+
+![数据仪表盘（三）](screenshots/v2.0.0/dashboard-3.png)
 
 ## 支持的图片格式
 

@@ -31,7 +31,7 @@ The v2.0.0 documentation, performance data, and privacy statements describe the 
 - **Designed for real libraries**: incremental indexing, a virtualized gallery, and isolated AI workers support libraries that keep growing.
 - **One photography workflow**: browsing, culling, people management, duplicate review, EXIF analysis, export, and sharing live in one desktop app.
 
-![AI Image Manager home screen](screenshots/01-home.png)
+![AI Image Manager home screen](screenshots/v2.0.0/home.png)
 
 ## Quick start
 
@@ -93,7 +93,7 @@ Actual performance depends on image format, resolution, library storage, system 
 
 | Quick preview | Photo details |
 | :---: | :---: |
-| ![Quick preview](screenshots/04-lightbox-preview.png) | ![EXIF details](screenshots/05-photo-detail.png) |
+| ![Quick preview](screenshots/v2.0.0/quick-preview.png) | ![EXIF details](screenshots/v2.0.0/photo-detail.png) |
 
 ### 3. AI indexing, tags, and people
 
@@ -105,7 +105,7 @@ Actual performance depends on image format, resolution, library storage, system 
 
 | People management | AI indexing and duplicates |
 | :---: | :---: |
-| ![People](screenshots/06-face-detection.png) | ![Duplicate detection](screenshots/03-duplicate-detection.png) |
+| ![People](screenshots/v2.0.0/people.png) | ![Duplicate detection](screenshots/v2.0.0/duplicates.png) |
 
 ### 4. Albums, sequences, and Wander
 
@@ -124,7 +124,7 @@ Actual performance depends on image format, resolution, library storage, system 
 
 | PK comparison | Curate mode | Ranked results |
 | :---: | :---: | :---: |
-| ![PK comparison](screenshots/11-culling-pk.png) | ![Curate mode](screenshots/12-culling-curate.png) | ![Culling results](screenshots/13-culling-result.png) |
+| ![PK comparison](screenshots/v2.0.0/culling-pk.png) | ![Curate mode](screenshots/v2.0.0/culling-curate.png) | ![Culling results](screenshots/v2.0.0/culling-export.png) |
 
 ### 6. Duplicate review and photo analytics
 
@@ -134,7 +134,7 @@ Actual performance depends on image format, resolution, library storage, system 
 - Dashboard views for overview, gear, exposure, technique, time, places, and color.
 - Drill down from charts to matching photos, with all-time, current-year, last-12-month, and custom date ranges.
 
-![Analytics dashboard](screenshots/07-dashboard.png)
+![Analytics dashboard](screenshots/v2.0.0/dashboard-1.png)
 
 ### 7. Batch processing, export, and sharing
 
@@ -152,6 +152,28 @@ Supported user-configured providers:
 - **Amazon S3 / S3-compatible storage**: requires endpoint, bucket, access key, secret key, and related settings.
 
 Cloud configuration does not upload photos automatically. Data is sent to the selected provider only after the user configures it and explicitly uploads photos or publishes a share page. Availability, permissions, and privacy terms are controlled by the provider.
+
+## v2.0.0 interface gallery
+
+These screenshots come from the v2.0.0 tested interface and cover preview, sequences, albums, settings, culling, and dashboard workflows.
+
+| Lightbox | Face review |
+| :---: | :---: |
+| ![Lightbox](screenshots/v2.0.0/lightbox.png) | ![Face review](screenshots/v2.0.0/face-review.png) |
+
+| Sequences and sequence details | Smart albums |
+| :---: | :---: |
+| ![Sequences and sequence details](screenshots/v2.0.0/sequences.png) | ![Smart albums](screenshots/v2.0.0/smart-albums.png) |
+
+| Keyboard shortcuts | Settings |
+| :---: | :---: |
+| ![Keyboard shortcuts](screenshots/v2.0.0/keyboard-shortcuts.png) | ![Settings](screenshots/v2.0.0/settings.png) |
+
+| Culling workspace | Analytics dashboard (2) |
+| :---: | :---: |
+| ![Culling workspace](screenshots/v2.0.0/culling-overview.png) | ![Analytics dashboard (2)](screenshots/v2.0.0/dashboard-2.png) |
+
+![Analytics dashboard (3)](screenshots/v2.0.0/dashboard-3.png)
 
 ## Supported image formats
 
