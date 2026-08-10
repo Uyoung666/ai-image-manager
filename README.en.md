@@ -186,14 +186,14 @@ The indexer accepts 27 extensions. RAW thumbnails, previews, and AI analysis pri
 
 ## Performance reference
 
-These are the two end-to-end observations currently recorded for this release. The 10,000-photo values are from one real run on this machine and are rounded to whole seconds:
+These are the recorded performance observations for this release, rounded to whole seconds:
 
 | Workload | Import | AI embedding | Total |
 | ---: | ---: | ---: | ---: |
 | 1,000 photos | 30 seconds | 32 seconds | **62 seconds** |
-| 10,000 JPG photos | about 340 seconds (5m 40s) | about 746 seconds (12m 26s) | **about 1,086 seconds (18m 06s)** |
+| 10,000 JPG photos in one day | about 340 seconds (5m 40s) | about 746 seconds (12m 26s) | **about 1,086 seconds (18m 06s)** |
 
-The 10,000-photo run used the 10,000 JPG files in `D:\8806\10000` (about 2.27 GB in total). Import, thumbnail/EXIF/hash preparation, and SigLIP embedding ran in an isolated data directory, which was removed after the run. Raw measurements were 339.587 seconds for import, 746.478 seconds for AI embedding, and 1,086.065 seconds total. Test hardware, image resolutions, and system load were not fully recorded, so these are single-run observations rather than guarantees for every computer, library, or image type; do not extrapolate fixed times to other scales.
+The one-day 10,000-photo run included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. This is a single observation for the current release, not a guarantee for every computer, library, or image type.
 
 ## How the app handles your data
 

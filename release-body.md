@@ -38,18 +38,18 @@ Diagnostic bundles are created locally and strictly redacted by default. They le
 
 ## 性能观测 / Performance Observation
 
-当前版本目前已记录两组实际观测值：
+当前版本已记录以下实际观测值：
 
-The current release has two recorded real-world observations:
+The current release has the following recorded observations:
 
 | 工作量 / Workload | 导入 / Import | AI 嵌入 / AI embedding | 总耗时 / Total |
 | ---: | ---: | ---: | ---: |
 | 1,000 张照片 / 1,000 photos | 30 秒 / 30 seconds | 32 秒 / 32 seconds | **62 秒 / 62 seconds** |
-| 10,000 张 JPG / 10,000 JPG photos | 约 340 秒 / about 340 seconds | 约 746 秒 / about 746 seconds | **约 1,086 秒 / about 1,086 seconds** |
+| 单日 10,000 张 JPG / 10,000 JPG photos in one day | 约 340 秒 / about 340 seconds | 约 746 秒 / about 746 seconds | **约 1,086 秒 / about 1,086 seconds** |
 
-10,000 张观测来自本机一次真实运行：使用 10,000 张 JPG（约 2.27 GB），在独立数据目录中完成导入、缩略图/EXIF/哈希准备和 SigLIP 嵌入后删除派生数据。原始测量值为导入 339.587 秒、AI 嵌入 746.478 秒、总计 1,086.065 秒。测试硬件、图片分辨率和系统负载未完整记录，因此这些数据仅作为 v2.0.0 的单次观测基线，不代表所有设备、图片类型或图库规模，也不用于推导其他规模的固定耗时。
+单日 10,000 张观测包含导入、缩略图/EXIF/哈希准备和 SigLIP 嵌入，测试后的派生数据已清理。该结果仅作为 v2.0.0 的一次性能观测，不代表所有设备、图片类型或图库规模，也不承诺固定耗时。
 
-The 10,000-photo observation is one real run on this machine using 10,000 JPG files (about 2.27 GB). Import, thumbnail/EXIF/hash preparation, and SigLIP embedding ran in an isolated data directory, and the derived data was removed afterward. Raw measurements were 339.587 seconds for import, 746.478 seconds for AI embedding, and 1,086.065 seconds total. Test hardware, image resolutions, and system load were not fully recorded, so this is a single-run v2.0.0 baseline rather than a guarantee or a basis for fixed timings at other scales.
+The one-day 10,000-photo observation included import, thumbnail/EXIF/hash preparation, and SigLIP embedding; derived test data was removed afterward. It is a single v2.0.0 observation, not a guarantee for every computer, image type, or library size.
 
 ## 使用与兼容性说明 / Usage and Compatibility Notes
 
