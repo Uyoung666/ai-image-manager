@@ -6,7 +6,10 @@ import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
-import { shutdownPool } from "@/services/embed-worker-pool";
+import {
+  isEmbeddingProviderError,
+  shutdownPool,
+} from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
@@ -714,10 +717,14 @@ export async function embedAllPhotos(
 
     // Use persistent worker pool
     let poolReady = false;
-    try {
+    let gpuFallbackAttempted = false;
+    const useGPU = getSetting("gpu.enabled") === "true";
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Pool orchestration keeps initialization, progress, cancellation, persistence, and the single CPU fallback together.
+    async function runPoolEmbedding(
+      attemptUseGPU: boolean
+    ): Promise<number | null> {
       const { initWorkerPool, embedWithPool, getPoolInitProgress } =
         await import("@/services/embed-worker-pool");
-      const useGPU = getSetting("gpu.enabled") === "true";
 
       // Poll real pool init progress while workers load ONNX models.
       // Replaces the old time-based fake progress with worker-reported progress.
@@ -739,7 +746,7 @@ export async function embedAllPhotos(
       }, 300);
 
       try {
-        await initWorkerPool(modelPath, useGPU);
+        await initWorkerPool(modelPath, attemptUseGPU);
       } finally {
         clearInterval(poolProgressInterval);
         // Mark init complete at 100%
@@ -865,8 +872,49 @@ export async function embedAllPhotos(
         shutdownPool();
         return processed;
       }
+      return null;
+    }
+
+    try {
+      const stoppedResult = await runPoolEmbedding(useGPU);
+      if (stoppedResult !== null) {
+        return stoppedResult;
+      }
     } catch (poolErr: unknown) {
-      console.error("[AI] Worker pool failed:", getErrorMessage(poolErr));
+      if (
+        isEmbeddingProviderError(poolErr) &&
+        useGPU &&
+        !gpuFallbackAttempted
+      ) {
+        gpuFallbackAttempted = true;
+        console.warn(
+          `[AI] DirectML embedding failed; cleaning partial vectors and retrying the full run on CPU: ${getErrorMessage(poolErr)}`
+        );
+        appendAiWorkerLog(
+          `[Embedding] DirectML failed; CPU fallback started: ${getErrorMessage(poolErr)}`
+        );
+        await cleanupPartialEmbedding(runId);
+        processed = 0;
+        successfulIds.length = 0;
+        poolReady = false;
+        shutdownPool();
+        try {
+          const stoppedResult = await runPoolEmbedding(false);
+          if (stoppedResult !== null) {
+            return stoppedResult;
+          }
+        } catch (cpuErr: unknown) {
+          console.error(
+            `[AI] CPU retry after DirectML failure also failed: ${getErrorMessage(cpuErr)}`
+          );
+          appendAiWorkerLog(
+            `[Embedding] CPU fallback failed after DirectML failure: ${getErrorMessage(cpuErr)}`
+          );
+          throw cpuErr;
+        }
+      } else {
+        console.error("[AI] Worker pool failed:", getErrorMessage(poolErr));
+      }
     }
 
     // If pool was cancelled or paused, don't proceed to fallback

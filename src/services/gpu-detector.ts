@@ -14,13 +14,18 @@ import { app, BrowserWindow } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { getSetting, setSetting } from "@/services/settings-manager";
 import { createLogger } from "@/utils/logger";
+import { getActiveEmbeddingAdapter } from "./ai/model-adapter";
 
 const log = createLogger("gpu-detector");
+const MODEL_PATH_SEPARATOR = /[\\/]/u;
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface GpuProbeResult {
   dmlAvailable: boolean;
+  embeddingDmlAvailable?: boolean;
+  embeddingError?: string;
+  embeddingProbeTimeMs?: number;
   error?: string;
   gpuName?: string;
   probeTimeMs: number;
@@ -47,36 +52,32 @@ export function findModelsDir(): string {
   return path.join(cwd, "models");
 }
 
-function findProbeScript(): string {
+function findProbeScript(scriptName = "gpu-probe.mjs"): string {
   if (app.isPackaged) {
     const unpacked = path.join(
       process.resourcesPath,
       "app.asar.unpacked",
       "scripts",
-      "gpu-probe.mjs"
+      scriptName
     );
     if (fs.existsSync(unpacked)) {
       return unpacked;
     }
-    const bundled = path.join(
-      process.resourcesPath,
-      "scripts",
-      "gpu-probe.mjs"
-    );
+    const bundled = path.join(process.resourcesPath, "scripts", scriptName);
     if (fs.existsSync(bundled)) {
       return bundled;
     }
   }
   const cwd = process.cwd();
-  const candidate = path.join(cwd, "scripts", "gpu-probe.mjs");
+  const candidate = path.join(cwd, "scripts", scriptName);
   if (fs.existsSync(candidate)) {
     return candidate;
   }
-  const alt = path.join(app.getAppPath(), "scripts", "gpu-probe.mjs");
+  const alt = path.join(app.getAppPath(), "scripts", scriptName);
   if (fs.existsSync(alt)) {
     return alt;
   }
-  throw new Error("gpu-probe.mjs not found");
+  throw new Error(`${scriptName} not found`);
 }
 
 // ── Detection ────────────────────────────────────────────────────────
@@ -88,8 +89,8 @@ const PROBE_TIMEOUT_MS = 15_000;
  * The parent enforces a 15 s timeout — if the worker hangs (driver issue),
  * we return dmlAvailable=false rather than blocking indefinitely.
  */
-export function probeGpuCapability(modelsDir: string): Promise<GpuProbeResult> {
-  const scriptPath = findProbeScript();
+function probeFaceGpuCapability(modelsDir: string): Promise<GpuProbeResult> {
+  const scriptPath = findProbeScript("gpu-probe.mjs");
 
   return new Promise((resolve) => {
     let resolved = false;
@@ -149,6 +150,136 @@ export function probeGpuCapability(modelsDir: string): Promise<GpuProbeResult> {
 
     child.send({ type: "probe", modelsDir });
   });
+}
+
+export interface EmbeddingGpuProbeResult {
+  dmlAvailable: boolean;
+  error?: string;
+  probeTimeMs: number;
+}
+
+const EMBEDDING_PROBE_TIMEOUT_MS = 30_000;
+
+function sanitizeEmbeddingProbeError(error: string, modelsDir: string): string {
+  return error.replaceAll(modelsDir, "<models>");
+}
+
+/** Probe the actual SigLIP vision model in an isolated process. */
+export function probeEmbeddingGpuCapability(
+  modelsDir: string
+): Promise<EmbeddingGpuProbeResult> {
+  let scriptPath: string;
+  let image: ReturnType<
+    typeof getActiveEmbeddingAdapter
+  >["embeddingSpace"]["image"];
+  try {
+    scriptPath = findProbeScript("embedding-gpu-probe.mjs");
+    image = getActiveEmbeddingAdapter().embeddingSpace.image;
+  } catch (error) {
+    return Promise.resolve({
+      dmlAvailable: false,
+      error: error instanceof Error ? error.message : String(error),
+      probeTimeMs: 0,
+    });
+  }
+  const modelPath = path.join(
+    modelsDir,
+    ...image.modelRelativePath.split(MODEL_PATH_SEPARATOR)
+  );
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const child = fork(scriptPath, [], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      timeout: EMBEDDING_PROBE_TIMEOUT_MS,
+    });
+    captureWorkerOutput(child, "embedding-gpu-probe-worker");
+
+    const timeout = setTimeout(() => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      child.kill();
+      resolve({
+        dmlAvailable: false,
+        error: `Embedding detection timed out after ${EMBEDDING_PROBE_TIMEOUT_MS}ms`,
+        probeTimeMs: EMBEDDING_PROBE_TIMEOUT_MS,
+      });
+    }, EMBEDDING_PROBE_TIMEOUT_MS);
+
+    child.on(
+      "message",
+      (msg: {
+        type?: string;
+        dmlAvailable?: boolean;
+        error?: string;
+        probeTimeMs?: number;
+      }) => {
+        if (msg?.type !== "result" || resolved) {
+          return;
+        }
+        resolved = true;
+        clearTimeout(timeout);
+        resolve({
+          dmlAvailable: msg.dmlAvailable === true,
+          error: msg.error
+            ? sanitizeEmbeddingProbeError(msg.error, modelsDir)
+            : undefined,
+          probeTimeMs: msg.probeTimeMs ?? 0,
+        });
+        child.kill();
+      }
+    );
+
+    child.on("exit", () => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      clearTimeout(timeout);
+      resolve({
+        dmlAvailable: false,
+        error: "Embedding probe worker exited unexpectedly",
+        probeTimeMs: 0,
+      });
+    });
+
+    child.on("error", (error) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      clearTimeout(timeout);
+      resolve({
+        dmlAvailable: false,
+        error: error.message,
+        probeTimeMs: 0,
+      });
+    });
+
+    child.send({
+      type: "probe",
+      imageSize: image.imageSize,
+      inputName: image.inputName,
+      modelPath,
+    });
+  });
+}
+
+export async function probeGpuCapability(
+  modelsDir: string
+): Promise<GpuProbeResult> {
+  const [face, embedding] = await Promise.all([
+    probeFaceGpuCapability(modelsDir),
+    probeEmbeddingGpuCapability(modelsDir),
+  ]);
+  return {
+    ...face,
+    embeddingDmlAvailable: embedding.dmlAvailable,
+    embeddingError: embedding.error,
+    embeddingProbeTimeMs: embedding.probeTimeMs,
+  };
 }
 
 // ── Settings cache helpers ───────────────────────────────────────────
@@ -217,7 +348,9 @@ export function shouldPromptUser(): boolean {
     return false; // user chose
   }
   const cached = getCachedDetection();
-  return cached?.dmlAvailable === true;
+  return (
+    cached?.dmlAvailable === true || cached?.embeddingDmlAvailable === true
+  );
 }
 
 export function markPromptShown(): void {
@@ -235,12 +368,17 @@ export function markPromptShown(): void {
 export async function probeAndNotifyIfNeeded(): Promise<void> {
   let result = getCachedDetection();
 
-  if (!result) {
+  if (!result || result.embeddingDmlAvailable === undefined) {
     const modelsDir = findModelsDir();
     result = await probeGpuCapability(modelsDir);
     cacheDetectionResult(result);
     log.info(
-      { dmlAvailable: result.dmlAvailable, gpuName: result.gpuName },
+      {
+        dmlAvailable: result.dmlAvailable,
+        embeddingDmlAvailable: result.embeddingDmlAvailable,
+        embeddingError: result.embeddingError,
+        gpuName: result.gpuName,
+      },
       "GPU detection complete"
     );
   }

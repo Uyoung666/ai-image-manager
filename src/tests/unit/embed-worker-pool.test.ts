@@ -38,6 +38,10 @@ const childProcessMock = vi.hoisted(() => {
   return { children, fork };
 });
 
+const gpuDetectorMock = vi.hoisted(() => ({
+  probeEmbeddingGpuCapability: vi.fn(),
+}));
+
 function getWorkerIdentity(child: (typeof childProcessMock.children)[number]): {
   adapterId: string;
   fingerprint: string;
@@ -65,6 +69,8 @@ vi.mock("node:child_process", () => ({
   },
   fork: childProcessMock.fork,
 }));
+
+vi.mock("@/services/gpu-detector", () => gpuDetectorMock);
 
 vi.mock("electron", () => ({
   app: {
@@ -118,6 +124,7 @@ describe("embed worker pool lifecycle", () => {
     vi.stubEnv("AI_EMBED_WORKERS", "2");
     childProcessMock.children.length = 0;
     childProcessMock.fork.mockClear();
+    gpuDetectorMock.probeEmbeddingGpuCapability.mockReset();
   });
 
   afterEach(() => {
@@ -209,6 +216,77 @@ describe("embed worker pool lifecycle", () => {
     expect(getPoolHealth()).toMatchObject({ alive: 2, dead: 0, idle: 2 });
     shutdownPool();
   });
+
+  it.runIf(process.platform === "win32" && process.arch === "x64")(
+    "sends DirectML to the worker after a successful image probe",
+    async () => {
+      vi.stubEnv("AI_EMBED_WORKERS", "1");
+      gpuDetectorMock.probeEmbeddingGpuCapability.mockResolvedValue({
+        dmlAvailable: true,
+        probeTimeMs: 1,
+      });
+      const { initWorkerPool, shutdownPool } = await import(
+        "@/services/embed-worker-pool"
+      );
+      const initialization = initWorkerPool("model-path", true);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const child = childProcessMock.children[0];
+      expect(child).toBeDefined();
+      expect(child?.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          execution: expect.objectContaining({ provider: "directml" }),
+          type: "init",
+        })
+      );
+      emitReady(child);
+      await vi.advanceTimersByTimeAsync(50);
+      await initialization;
+      expect(
+        gpuDetectorMock.probeEmbeddingGpuCapability
+      ).toHaveBeenCalledOnce();
+      shutdownPool();
+    }
+  );
+
+  it.runIf(process.platform === "win32" && process.arch === "x64")(
+    "restarts on CPU instead of respawning a failed DirectML worker",
+    async () => {
+      vi.stubEnv("AI_EMBED_WORKERS", "1");
+      gpuDetectorMock.probeEmbeddingGpuCapability.mockResolvedValue({
+        dmlAvailable: true,
+        probeTimeMs: 1,
+      });
+      const { initWorkerPool, shutdownPool } = await import(
+        "@/services/embed-worker-pool"
+      );
+      const initialization = initWorkerPool("model-path", true);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const gpuChild = childProcessMock.children[0];
+      expect(gpuChild).toBeDefined();
+      gpuChild?.emit("exit", 1, null);
+      await vi.advanceTimersByTimeAsync(50);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const cpuChild = childProcessMock.children[1];
+      expect(cpuChild).toBeDefined();
+      expect(cpuChild?.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          execution: expect.objectContaining({ provider: "cpu" }),
+          type: "init",
+        })
+      );
+      emitReady(cpuChild);
+      await vi.advanceTimersByTimeAsync(50);
+      await initialization;
+      expect(childProcessMock.fork).toHaveBeenCalledTimes(2);
+      shutdownPool();
+    }
+  );
 
   it("rejects a worker whose ready identity does not match", async () => {
     vi.stubEnv("AI_EMBED_WORKERS", "1");

@@ -88,6 +88,7 @@ let activeAdapter = null;
 let ortSession = null;
 let _ort = null;
 let aborted = false;
+let activeExecutionProvider = "cpu";
 
 function loadOrt() {
   if (_ort) {
@@ -162,10 +163,9 @@ async function handleInit(message) {
     stage: "loading-runtime",
   });
   const { InferenceSession } = loadOrt();
-  // SigLIP v1 remains CPU-only. DirectML is protocol-compatible for future
-  // adapters, while the active adapter/pool deliberately requests CPU.
-  const executionProviders =
-    execution.provider === "directml" ? ["directml", "cpu"] : ["cpu"];
+  const useDirectML = execution.provider === "directml";
+  activeExecutionProvider = useDirectML ? "directml" : "cpu";
+  const executionProviders = useDirectML ? ["dml"] : ["cpu"];
   process.send?.({
     type: "init-progress",
     adapterId: activeAdapter.adapterId,
@@ -176,11 +176,13 @@ async function handleInit(message) {
   ortSession = await InferenceSession.create(onnxPath, {
     executionProviders,
     logSeverityLevel: 3,
-    graphOptimizationLevel: "all",
-    enableCpuMemArena: true,
+    graphOptimizationLevel: useDirectML ? "basic" : "all",
+    ...(useDirectML
+      ? { enableMemPattern: false }
+      : { enableCpuMemArena: true }),
     executionMode: "sequential",
     interOpNumThreads: 1,
-    intraOpNumThreads,
+    intraOpNumThreads: useDirectML ? 1 : intraOpNumThreads,
   });
   process.send?.({
     type: "init-progress",
@@ -193,6 +195,7 @@ async function handleInit(message) {
     type: "ready",
     adapterId: activeAdapter.adapterId,
     fingerprint: activeAdapter.fingerprint,
+    provider: activeExecutionProvider,
   });
 }
 
@@ -216,6 +219,7 @@ function normalizeVector(rawVector) {
   return vector;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Embedding keeps provider failure handling and per-photo CPU error handling in one protocol transaction.
 async function handleEmbed(message) {
   const photos = Array.isArray(message.photos) ? message.photos : [];
   if (!(ortSession && activeAdapter)) {
@@ -233,6 +237,7 @@ async function handleEmbed(message) {
 
   const ort = loadOrt();
   const results = [];
+  let providerError = null;
   for (const photo of photos) {
     if (aborted) {
       break;
@@ -261,11 +266,26 @@ async function handleEmbed(message) {
       }
       results.push({ id: photo.id, vector });
     } catch (error) {
+      if (activeExecutionProvider === "directml") {
+        providerError = error instanceof Error ? error.message : String(error);
+        break;
+      }
       results.push({
         id: photo.id,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  if (providerError) {
+    process.send?.({
+      type: "provider-error",
+      adapterId: activeAdapter.adapterId,
+      fingerprint: activeAdapter.fingerprint,
+      error: providerError,
+      provider: activeExecutionProvider,
+    });
+    return;
   }
 
   process.send?.({

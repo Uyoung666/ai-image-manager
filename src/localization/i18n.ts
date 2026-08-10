@@ -1149,6 +1149,9 @@ i18n.use(initReactI18next).init({
         gpuStatusActive: "GPU 加速中",
         gpuStatusInactive: "未加速",
         gpuStatusUnsupported: "暂不支持",
+        gpuStatusCpuFallback: "GPU 未检测到，使用 CPU",
+        gpuStatusProbeFailed: "GPU 探测失败，使用 CPU",
+        gpuStatusNotEnabled: "当前未启用",
 
         // GPU detection dialog
         gpuDetectionTitle: "检测到支持 GPU 加速",
@@ -1157,7 +1160,8 @@ i18n.use(initReactI18next).init({
         gpuDetectionDescriptionGeneric:
           "检测到您的显卡支持 DirectML 加速，开启后可大幅提升人脸识别速度。",
         gpuDetectionFaceSpeed: "人脸识别预计提速 6.6 倍",
-        gpuDetectionEmbedNote: "图像嵌入暂不支持 GPU（已知上游限制）",
+        gpuDetectionEmbedNote:
+          "图像嵌入支持 DirectML；探测或运行失败时会自动回退 CPU。",
         gpuDetectionHint: "可随时在设置中关闭，仅在索引时占用少量显存。",
         gpuDetectionEnable: "开启 GPU 加速",
         gpuDetectionSkip: "暂不开启",
@@ -3161,6 +3165,9 @@ i18n.use(initReactI18next).init({
         gpuStatusActive: "GPU accelerated",
         gpuStatusInactive: "Not accelerated",
         gpuStatusUnsupported: "Not supported",
+        gpuStatusCpuFallback: "GPU not detected, using CPU",
+        gpuStatusProbeFailed: "GPU probe failed, using CPU",
+        gpuStatusNotEnabled: "Currently disabled",
 
         // GPU detection dialog
         gpuDetectionTitle: "GPU Acceleration Available",
@@ -3170,7 +3177,7 @@ i18n.use(initReactI18next).init({
           "Your GPU supports DirectML acceleration. Enabling it will significantly speed up face recognition.",
         gpuDetectionFaceSpeed: "Face recognition: ~6.6× faster",
         gpuDetectionEmbedNote:
-          "Image embedding not accelerated yet (known upstream limitation)",
+          "Image embedding supports DirectML; probe or runtime failures automatically fall back to CPU.",
         gpuDetectionHint:
           "You can disable this anytime in Settings. GPU acceleration only uses VRAM during indexing.",
         gpuDetectionEnable: "Enable GPU Acceleration",

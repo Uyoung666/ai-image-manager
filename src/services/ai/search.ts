@@ -3,6 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
+import {
+  type EmbeddingExecutionProvider,
+  EmbeddingProviderError,
+  resolveEmbeddingExecutionProvider,
+} from "@/services/embed-worker-pool";
+import { getSetting } from "@/services/settings-manager";
 import { WORKER_TIMEOUT } from "./constants";
 import {
   getActiveEmbeddingModel,
@@ -102,13 +108,15 @@ function findWorkerScript(): string {
   throw new Error("embed-worker.mjs not found");
 }
 
-export function embedImageInWorker(
+function embedImageInWorkerWithProvider(
   imagePath: string,
-  modelPath: string
+  modelPath: string,
+  provider: EmbeddingExecutionProvider
 ): Promise<number[]> {
   return new Promise((resolve, reject) => {
     const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
     const workerScript = findWorkerScript();
+    console.log(`[AI] Starting one-shot image worker provider=${provider}`);
     const child = fork(workerScript, [], {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       timeout: WORKER_TIMEOUT,
@@ -139,13 +147,39 @@ export function embedImageInWorker(
         adapterId?: string;
         fingerprint?: string;
         results?: Array<{ error?: string; vector?: number[] }>;
+        provider?: EmbeddingExecutionProvider;
         type?: string;
       };
       if (msg.type === "ready") {
+        if (msg.provider && msg.provider !== provider) {
+          resolved = true;
+          clearTimeout(timeout);
+          child.kill();
+          reject(
+            new EmbeddingProviderError(
+              `Image worker selected ${msg.provider} instead of ${provider}`
+            )
+          );
+          return;
+        }
         child.send({
           type: "embed",
           photos: [{ id: 1, path: imagePath }],
         });
+      } else if (msg.type === "init-error" && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        child.kill();
+        reject(new Error(msg.error || "Image embed worker init failed"));
+      } else if (msg.type === "provider-error" && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        child.kill();
+        reject(
+          new EmbeddingProviderError(
+            msg.error || "DirectML image embedding failed"
+          )
+        );
       } else if (msg.type === "result" && !resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -194,9 +228,28 @@ export function embedImageInWorker(
     child.send({
       type: "init",
       adapter,
-      execution: { provider: "cpu", intraOpNumThreads: 1 },
+      execution: { provider, intraOpNumThreads: 1 },
     });
   });
+}
+
+export async function embedImageInWorker(
+  imagePath: string,
+  modelPath: string
+): Promise<number[]> {
+  const useGPU = getSetting("gpu.enabled") === "true";
+  const provider = await resolveEmbeddingExecutionProvider(modelPath, useGPU);
+  try {
+    return await embedImageInWorkerWithProvider(imagePath, modelPath, provider);
+  } catch (error) {
+    if (provider !== "directml") {
+      throw error;
+    }
+    console.warn(
+      `[AI] One-shot DirectML image worker failed; retrying on CPU: ${getErrorMessage(error)}`
+    );
+    return embedImageInWorkerWithProvider(imagePath, modelPath, "cpu");
+  }
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Brute-force fallback keeps pagination, vector normalization, scoring, and safety limits in one path.

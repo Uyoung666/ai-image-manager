@@ -71,4 +71,42 @@ describe("GpuSettingsCard", () => {
     });
     expect(onBusyChange.mock.calls).toEqual([[true], [false]]);
   });
+
+  it("shows DirectML image embedding as active when its probe succeeds", async () => {
+    vi.mocked(ipc.client.settings.getGpuSettings).mockResolvedValue({
+      detected: {
+        dmlAvailable: false,
+        embeddingDmlAvailable: true,
+        embeddingProbeTimeMs: 34,
+        probeTimeMs: 12,
+      },
+      enabled: true,
+      promptShown: true,
+    });
+
+    render(<GpuSettingsCard hideSaveButton />);
+    await waitFor(() => {
+      expect(screen.getByText("gpuStatusActive")).toBeInTheDocument();
+    });
+  });
+
+  it("shows CPU fallback after an embedding probe failure without claiming GPU use", async () => {
+    vi.mocked(ipc.client.settings.getGpuSettings).mockResolvedValue({
+      detected: {
+        dmlAvailable: false,
+        embeddingDmlAvailable: false,
+        embeddingError: "model incompatible",
+        probeTimeMs: 12,
+      },
+      enabled: true,
+      promptShown: true,
+    });
+
+    render(<GpuSettingsCard hideSaveButton />);
+
+    await waitFor(() => {
+      expect(screen.getByText("gpuStatusProbeFailed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("gpuStatusActive")).not.toBeInTheDocument();
+  });
 });

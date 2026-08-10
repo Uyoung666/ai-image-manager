@@ -6,11 +6,32 @@ import { app } from "electron";
 import type { SerializedWorkerAdapter } from "@/services/ai/model-adapter";
 import { getActiveEmbeddingWorkerAdapter } from "@/services/ai/model-config";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
+import { probeEmbeddingGpuCapability } from "@/services/gpu-detector";
 
 interface EmbedResult {
   error?: string;
   id: number;
   vector?: number[];
+}
+
+export type EmbeddingExecutionProvider = "cpu" | "directml";
+
+export class EmbeddingProviderError extends Error {
+  readonly code = "GPU_PROVIDER_FAILED";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "EmbeddingProviderError";
+  }
+}
+
+export function isEmbeddingProviderError(error: unknown): boolean {
+  return (
+    error instanceof EmbeddingProviderError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "GPU_PROVIDER_FAILED")
+  );
 }
 
 type WorkerStatus = "initializing" | "idle" | "busy" | "dead";
@@ -54,7 +75,7 @@ let requestQueue: QueuedRequest[] = [];
 let modelPath: string | null = null;
 let workerAdapter: SerializedWorkerAdapter | null = null;
 let poolUseGPU = false;
-let poolExecutionProvider: "cpu" | "directml" = "cpu";
+let poolExecutionProvider: EmbeddingExecutionProvider = "cpu";
 let initialized = false;
 let poolSize = 0;
 let poolBatchSize = DEFAULT_BATCH_SIZE;
@@ -63,6 +84,7 @@ let poolGeneration = 0;
 let activePoolKey: string | null = null;
 let initializationKey: string | null = null;
 let initializationPromise: Promise<void> | null = null;
+let gpuProviderFailure: EmbeddingProviderError | null = null;
 
 /** Per-worker init progress: Map<workerIndex, percent 0-100> */
 const workerInitProgress = new Map<number, number>();
@@ -124,9 +146,8 @@ export function resolveEmbedPoolConfig(
   env: NodeJS.ProcessEnv = process.env
 ): EmbedPoolConfig {
   const safeCpuCount = Math.max(1, cpuCount);
-  // SigLIP vision currently runs CPU-only in embed-worker.mjs because DirectML
-  // crashes on this model. Keep defaults conservative and allow opt-in tuning
-  // with AI_EMBED_WORKERS / AI_EMBED_THREADS.
+  // Keep defaults conservative for both CPU and DirectML. DirectML uses the
+  // same pool sizing but its worker session applies its own safe ORT options.
   let defaultWorkers = 1;
   if ((useGPU && safeCpuCount >= 8) || safeCpuCount >= 12) {
     defaultWorkers = 2;
@@ -246,6 +267,7 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       adapterId?: string;
       fingerprint?: string;
       percent?: number;
+      provider?: EmbeddingExecutionProvider;
       results?: EmbedResult[];
       type?: string;
     };
@@ -269,6 +291,14 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       handleWorkerDeath(slot);
       return;
     }
+    if (message.type === "provider-error") {
+      failGpuPool(
+        new EmbeddingProviderError(
+          message.error || "DirectML image embedding failed"
+        )
+      );
+      return;
+    }
     if (message.type === "ready") {
       if (!isCurrentSlot(slot)) {
         return;
@@ -287,6 +317,17 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
       }
       workerInitProgress.set(index, 100);
       slot.status = "idle";
+      console.log(
+        `[Pool] Worker ${index} ready provider=${message.provider ?? "unknown"}`
+      );
+      if (message.provider && message.provider !== poolExecutionProvider) {
+        failGpuPool(
+          new EmbeddingProviderError(
+            `Embedding worker selected ${message.provider} instead of ${poolExecutionProvider}`
+          )
+        );
+        return;
+      }
       drainQueue();
       return;
     }
@@ -329,8 +370,56 @@ function spawnWorker(index: number, generation: number): WorkerSlot {
   return slot;
 }
 
+function failGpuPool(error: EmbeddingProviderError): void {
+  if (gpuProviderFailure) {
+    return;
+  }
+  gpuProviderFailure = error;
+  initialized = false;
+  activePoolKey = null;
+  poolUseGPU = false;
+  poolGeneration++;
+  const oldSlots = slots;
+  slots = [];
+  workerInitProgress.clear();
+
+  for (const request of requestQueue) {
+    request.reject(error);
+  }
+  requestQueue = [];
+
+  for (const slot of oldSlots) {
+    if (slot.timeoutId) {
+      clearTimeout(slot.timeoutId);
+      slot.timeoutId = null;
+    }
+    slot.pendingResolve = null;
+    slot.pendingReject?.(error);
+    slot.pendingReject = null;
+    slot.status = "dead";
+    try {
+      slot.process.kill();
+    } catch {
+      /* best-effort */
+    }
+  }
+  console.error(`[Pool] DirectML embedding pool failed: ${error.message}`);
+}
+
 function handleWorkerDeath(slot: WorkerSlot): void {
   if (slot.status === "dead") {
+    return;
+  }
+
+  // A native DirectML crash cannot be caught inside the worker. Treat any
+  // current-generation GPU worker death as a pool-level failure so callers
+  // can clean partial vectors and restart the whole run on CPU.
+  if (isCurrentSlot(slot) && poolExecutionProvider === "directml") {
+    failGpuPool(
+      new EmbeddingProviderError(
+        `DirectML worker ${slot.index} exited during embedding`
+      )
+    );
     return;
   }
 
@@ -436,6 +525,14 @@ function dispatchToSlot(
 
   slot.timeoutId = setTimeout(() => {
     if (slot.status === "busy" && slot.pendingReject) {
+      if (poolExecutionProvider === "directml") {
+        failGpuPool(
+          new EmbeddingProviderError(
+            `DirectML worker ${slot.index} timed out during embedding`
+          )
+        );
+        return;
+      }
       const rej = slot.pendingReject;
       slot.pendingResolve = null;
       slot.pendingReject = null;
@@ -451,23 +548,63 @@ function dispatchToSlot(
   });
 }
 
+function createPoolKey(
+  adapter: SerializedWorkerAdapter,
+  executionProvider: EmbeddingExecutionProvider
+): string {
+  return JSON.stringify({
+    adapterId: adapter.adapterId,
+    fingerprint: adapter.fingerprint,
+    modelRoot: adapter.modelRoot,
+    executionProvider,
+  });
+}
+
+export async function resolveEmbeddingExecutionProvider(
+  mp: string,
+  useGPU: boolean
+): Promise<EmbeddingExecutionProvider> {
+  if (!useGPU || process.platform !== "win32" || process.arch !== "x64") {
+    return "cpu";
+  }
+  try {
+    const result = await probeEmbeddingGpuCapability(mp);
+    if (result.dmlAvailable) {
+      console.log(
+        `[Pool] SigLIP DirectML probe passed in ${result.probeTimeMs}ms`
+      );
+      return "directml";
+    }
+    console.warn(
+      `[Pool] SigLIP DirectML unavailable; using CPU: ${result.error || "unknown reason"}`
+    );
+  } catch (error) {
+    console.warn(
+      `[Pool] SigLIP DirectML probe failed; using CPU: ${getErrorMessage(error)}`
+    );
+  }
+  return "cpu";
+}
+
 async function startWorkerPool(
   mp: string,
-  useGPU: boolean,
+  executionProvider: EmbeddingExecutionProvider,
   key: string
 ): Promise<void> {
   const generation = ++poolGeneration;
   modelPath = mp;
   workerAdapter = getActiveEmbeddingWorkerAdapter(mp);
-  poolUseGPU = useGPU;
-  // Current SigLIP v1 vision execution remains CPU-only. The provider is an
-  // adapter concern so a future adapter can opt into DirectML safely.
-  poolExecutionProvider = "cpu";
+  poolUseGPU = executionProvider === "directml";
+  poolExecutionProvider = executionProvider;
+  gpuProviderFailure = null;
   slots = [];
   requestQueue = [];
   workerInitProgress.clear();
 
-  const config = resolveEmbedPoolConfig(os.cpus().length, useGPU);
+  const config = resolveEmbedPoolConfig(
+    os.cpus().length,
+    executionProvider === "directml"
+  );
   // 每个 worker ~200MB，2 个 = 400MB，4 核以上可以 3 个
   // 4 个 worker 在 8GB 机器上容易触发 OOM
   poolSize = config.workers;
@@ -475,7 +612,7 @@ async function startWorkerPool(
   poolIntraOpNumThreads = config.intraOpNumThreads;
   const workerScript = findWorkerScript();
   console.log(
-    `[Pool] Starting ${poolSize} persistent workers (${poolIntraOpNumThreads} ORT threads each, batch=${poolBatchSize}): ${workerScript}`
+    `[Pool] Starting ${poolSize} persistent workers (provider=${poolExecutionProvider}, ${poolIntraOpNumThreads} ORT threads each, batch=${poolBatchSize}): ${workerScript}`
   );
 
   const readyPromises: Promise<void>[] = [];
@@ -547,23 +684,21 @@ async function startWorkerPool(
 /** Start the persistent worker pool exactly once for a given configuration. */
 export function initWorkerPool(mp: string, useGPU = false): Promise<void> {
   const adapter = getActiveEmbeddingWorkerAdapter(mp);
-  const key = JSON.stringify({
-    adapterId: adapter.adapterId,
-    fingerprint: adapter.fingerprint,
-    modelRoot: adapter.modelRoot,
-    executionProvider: "cpu",
-  });
+  const requestedProvider: EmbeddingExecutionProvider = useGPU
+    ? "directml"
+    : "cpu";
+  const requestedKey = createPoolKey(adapter, requestedProvider);
 
   if (
     initialized &&
-    activePoolKey === key &&
+    activePoolKey === requestedKey &&
     slots.some((slot) => slot.status !== "dead")
   ) {
     return Promise.resolve();
   }
 
   if (initializationPromise) {
-    if (initializationKey === key) {
+    if (initializationKey === requestedKey) {
       return initializationPromise;
     }
     return initializationPromise
@@ -575,8 +710,55 @@ export function initWorkerPool(mp: string, useGPU = false): Promise<void> {
     shutdownPool();
   }
 
-  initializationKey = key;
-  const pending = startWorkerPool(mp, useGPU, key).finally(() => {
+  initializationKey = requestedKey;
+  if (!useGPU || process.platform !== "win32") {
+    const pending = startWorkerPool(
+      mp,
+      "cpu",
+      createPoolKey(adapter, "cpu")
+    ).finally(() => {
+      if (initializationPromise === pending) {
+        initializationPromise = null;
+        initializationKey = null;
+      }
+    });
+    initializationPromise = pending;
+    return pending;
+  }
+
+  const pending = (async () => {
+    const executionProvider = await resolveEmbeddingExecutionProvider(
+      mp,
+      useGPU
+    );
+    const key = createPoolKey(adapter, executionProvider);
+
+    if (
+      initialized &&
+      activePoolKey === key &&
+      slots.some((slot) => slot.status !== "dead")
+    ) {
+      return;
+    }
+
+    if (initialized || slots.length > 0) {
+      shutdownPool();
+    }
+
+    try {
+      await startWorkerPool(mp, executionProvider, key);
+    } catch (error) {
+      if (executionProvider !== "directml") {
+        throw error;
+      }
+
+      console.warn(
+        `[Pool] DirectML worker initialization failed; restarting with CPU: ${getErrorMessage(error)}`
+      );
+      shutdownPool();
+      await startWorkerPool(mp, "cpu", createPoolKey(adapter, "cpu"));
+    }
+  })().finally(() => {
     if (initializationPromise === pending) {
       initializationPromise = null;
       initializationKey = null;
@@ -641,6 +823,7 @@ export function shutdownPool(): void {
   slots = [];
   initialized = false;
   activePoolKey = null;
+  gpuProviderFailure = null;
   initializationPromise = null;
   initializationKey = null;
   workerInitProgress.clear();
@@ -720,7 +903,7 @@ export async function embedSingleImage(
   mp: string
 ): Promise<number[]> {
   if (!initialized || slots.every((s) => s.status === "dead")) {
-    await initWorkerPool(mp);
+    await initWorkerPool(mp, poolUseGPU);
   }
   const results = await dispatchBatch([{ id: 0, path: imagePath }]);
   const result = results[0];
@@ -796,6 +979,9 @@ export async function embedWithPool(
         allResults.push(...results);
         await publishBatchResults(results, batch);
       } catch (err: unknown) {
+        if (isEmbeddingProviderError(err)) {
+          throw err;
+        }
         const message = getErrorMessage(err);
         console.warn(`[Pool] Batch failed: ${message}`);
         // If cancelled, don't retry — just mark failed and move on
@@ -826,7 +1012,15 @@ export async function embedWithPool(
 
   // 启动 poolSize 个并发调度 worker
   const workers = Array.from({ length: concurrency }, () => worker());
-  await Promise.all(workers);
+  try {
+    await Promise.all(workers);
+  } catch (error) {
+    // A provider failure can happen while a previous batch's persistence
+    // callback is still running. Wait for that callback before the caller
+    // deletes partial vectors and starts the CPU retry.
+    await callbackChain;
+    throw error;
+  }
   await callbackChain;
 
   return allResults;
@@ -841,6 +1035,9 @@ async function processResultsFallback(
   try {
     return await dispatchBatch(batch);
   } catch (err: unknown) {
+    if (isEmbeddingProviderError(err)) {
+      throw err;
+    }
     const message = getErrorMessage(err);
     if (batch.length === 1) {
       console.warn(

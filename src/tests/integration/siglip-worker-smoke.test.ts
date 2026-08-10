@@ -17,6 +17,7 @@ interface WorkerMessage {
   adapterId?: string;
   error?: string;
   fingerprint?: string;
+  provider?: "cpu" | "directml";
   requestId?: number;
   results?: Array<{ error?: string; id: number; vector?: number[] }>;
   type?: string;
@@ -36,6 +37,7 @@ interface WorkerSmokeResult {
 }
 
 const projectRoot = process.cwd();
+const MODEL_PATH_SEPARATOR = /[\\/]/u;
 const packagedResources = process.env.AIM_WORKER_SMOKE_RESOURCES?.trim();
 const modelRoot = packagedResources
   ? path.join(packagedResources, "models-release")
@@ -162,7 +164,8 @@ function cosineSimilarity(left: number[], right: number[]): number {
 
 async function runProductionWorkerSmoke(
   layoutWorkerRoot: string,
-  layoutModelRoot: string
+  layoutModelRoot: string,
+  imageProvider: "cpu" | "directml" = "cpu"
 ): Promise<WorkerSmokeResult> {
   const layoutImageWorker = path.join(layoutWorkerRoot, "embed-worker.mjs");
   const layoutTextWorker = path.join(layoutWorkerRoot, "text-embed-worker.mjs");
@@ -189,13 +192,14 @@ async function runProductionWorkerSmoke(
       {
         type: "init",
         adapter: workerAdapter,
-        execution: { intraOpNumThreads: 1, provider: "cpu" },
+        execution: { intraOpNumThreads: 1, provider: imageProvider },
       },
       (message) => message.type === "ready" || message.type === "init-error"
     );
     expect(imageReady.error).toBeUndefined();
     expect(imageReady.adapterId).toBe(runtimeInfo.adapterId);
     expect(imageReady.fingerprint).toBe(runtimeInfo.fingerprint);
+    expect(imageReady.provider).toBe(imageProvider);
 
     const imageResult = await sendAndWait(
       imageWorker,
@@ -248,6 +252,58 @@ async function runProductionWorkerSmoke(
   }
 }
 
+function probeSiglipDirectML(layoutModelRoot: string): Promise<boolean> {
+  if (process.platform !== "win32") {
+    return false;
+  }
+  const adapter = getActiveEmbeddingAdapter();
+  const modelPath = path.join(
+    layoutModelRoot,
+    ...adapter.embeddingSpace.image.modelRelativePath.split(
+      MODEL_PATH_SEPARATOR
+    )
+  );
+  const probe = fork(path.join(workerRoot, "embedding-gpu-probe.mjs"), [], {
+    cwd: projectRoot,
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
+  });
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      probe.kill();
+      resolve(available);
+    };
+    const timeout = setTimeout(() => finish(false), 45_000);
+    probe.on(
+      "message",
+      (message: WorkerMessage & { dmlAvailable?: boolean }) => {
+        if (message.type === "result") {
+          clearTimeout(timeout);
+          finish(message.dmlAvailable === true);
+        }
+      }
+    );
+    probe.on("exit", () => {
+      clearTimeout(timeout);
+      finish(false);
+    });
+    probe.on("error", () => {
+      clearTimeout(timeout);
+      finish(false);
+    });
+    probe.send({
+      type: "probe",
+      imageSize: adapter.embeddingSpace.image.imageSize,
+      inputName: adapter.embeddingSpace.image.inputName,
+      modelPath,
+    });
+  });
+}
+
 let selectedLayoutResult: WorkerSmokeResult | null = null;
 
 describe.sequential("SigLIP v1 production worker smoke", () => {
@@ -285,6 +341,21 @@ describe.sequential("SigLIP v1 production worker smoke", () => {
     );
     expect(fs.existsSync(testUserDataPath)).toBe(true);
     expect(fs.existsSync(testVectorPath)).toBe(true);
+  });
+
+  it("uses DirectML for the SigLIP image worker when the real probe passes", async () => {
+    if (!(await probeSiglipDirectML(modelRoot))) {
+      console.warn(
+        "DirectML SigLIP probe unavailable; keeping CPU coverage only"
+      );
+      return;
+    }
+    const result = await runProductionWorkerSmoke(
+      workerRoot,
+      modelRoot,
+      "directml"
+    );
+    expectNormalizedVector(result.imageVector, 768);
   });
 
   it.runIf(Boolean(packagedResources))(

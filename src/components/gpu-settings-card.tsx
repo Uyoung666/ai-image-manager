@@ -16,6 +16,9 @@ type DetectPhase =
 
 interface GpuDetectedInfo {
   dmlAvailable: boolean;
+  embeddingDmlAvailable?: boolean;
+  embeddingError?: string;
+  embeddingProbeTimeMs?: number;
   error?: string;
   gpuName?: string;
   probeTimeMs: number;
@@ -35,12 +38,15 @@ type GpuCapabilityResponse = GpuDetectedInfo;
 function FeatureStatusRow({
   active,
   label,
+  statusKey,
 }: {
   active: boolean;
   label: string;
+  statusKey?: string;
 }) {
   const { t } = useTranslation();
-  const statusKey = active ? "gpuStatusActive" : "gpuStatusInactive";
+  const resolvedStatusKey =
+    statusKey ?? (active ? "gpuStatusActive" : "gpuStatusInactive");
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px]">
       {active ? (
@@ -49,7 +55,7 @@ function FeatureStatusRow({
         <MinusCircle className="h-3 w-3 text-muted-foreground/45" />
       )}
       <span className="text-muted-foreground/70">{label}</span>
-      <span className="text-muted-foreground/40">{t(statusKey)}</span>
+      <span className="text-muted-foreground/40">{t(resolvedStatusKey)}</span>
     </div>
   );
 }
@@ -194,7 +200,9 @@ export function GpuSettingsCard({
         if (r.detected) {
           setDetectedInfo(r.detected);
           setDetectPhase(
-            r.detected.dmlAvailable ? "detected-ok" : "detected-unsupported"
+            r.detected.dmlAvailable || r.detected.embeddingDmlAvailable
+              ? "detected-ok"
+              : "detected-unsupported"
           );
           if (r.detected.error) {
             setDetectError(r.detected.error);
@@ -223,7 +231,7 @@ export function GpuSettingsCard({
         {}
       )) as GpuCapabilityResponse;
       setDetectedInfo(result);
-      if (result.dmlAvailable) {
+      if (result.dmlAvailable || result.embeddingDmlAvailable) {
         setDetectPhase("detected-ok");
         if (!enabled) {
           setEnabled(true);
@@ -274,7 +282,19 @@ export function GpuSettingsCard({
     [onEnabledChange]
   );
 
-  const gpuActive = enabled && detectPhase === "detected-ok";
+  const faceGpuActive = enabled && detectedInfo?.dmlAvailable === true;
+  const embeddingGpuActive =
+    enabled && detectedInfo?.embeddingDmlAvailable === true;
+  let embeddingStatusKey = "gpuStatusNotEnabled";
+  if (enabled) {
+    if (detectPhase === "detected-error" || detectedInfo?.embeddingError) {
+      embeddingStatusKey = "gpuStatusProbeFailed";
+    } else if (detectedInfo?.embeddingDmlAvailable === true) {
+      embeddingStatusKey = "gpuStatusActive";
+    } else {
+      embeddingStatusKey = "gpuStatusCpuFallback";
+    }
+  }
 
   // ── Render ─────────────────────────────────────────────────────────
 
@@ -309,16 +329,12 @@ export function GpuSettingsCard({
 
         {/* Feature status */}
         <div className="space-y-1.5 border-border border-t pt-3">
-          <FeatureStatusRow active={gpuActive} label={t("gpuStatusFace")} />
-          <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11px]">
-            <MinusCircle className="h-3 w-3 text-muted-foreground/45" />
-            <span className="text-muted-foreground/70">
-              {t("gpuStatusEmbed")}
-            </span>
-            <span className="text-muted-foreground/40">
-              {t("gpuStatusUnsupported")}
-            </span>
-          </div>
+          <FeatureStatusRow active={faceGpuActive} label={t("gpuStatusFace")} />
+          <FeatureStatusRow
+            active={embeddingGpuActive}
+            label={t("gpuStatusEmbed")}
+            statusKey={embeddingStatusKey}
+          />
         </div>
 
         {/* Detection status */}
