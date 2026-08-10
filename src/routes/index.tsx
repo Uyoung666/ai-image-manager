@@ -82,6 +82,7 @@ import {
   isGalleryRevealPending,
   isSequenceSourceReady,
 } from "@/utils/gallery-view-state";
+import { shouldRestoreSavedSearch } from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
 import {
   loadSortField,
@@ -1220,15 +1221,18 @@ function HomePage() {
   aiStatusRef.current = aiStatus;
   const restoredSearchRef = useRef(false);
   useEffect(() => {
-    if (restoredSearchRef.current) {
-      return;
-    }
     // 如果 URL 已有钻取参数（如从仪表盘色块点击），跳过恢复：
     // 钻取参数优先于 sessionStorage，否则旧颜色会 setTimeout 覆盖新钻取结果。
     const hasDrillParams = Object.values(drillParams).some(
       (v) => v !== undefined
     );
-    if (hasDrillParams) {
+    if (
+      !shouldRestoreSavedSearch({
+        drillConsumed: drillConsumed.current,
+        hasDrillParams,
+        restored: restoredSearchRef.current,
+      })
+    ) {
       return;
     }
     const saved = getBrowseSession("home-search");
