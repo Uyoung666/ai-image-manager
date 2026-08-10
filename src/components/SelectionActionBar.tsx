@@ -6,11 +6,9 @@ import {
   FolderPlus,
   Heart,
   ImageIcon,
-  Layers,
   Pencil,
   Share2,
   Swords,
-  Timer,
   Trash2,
   X,
 } from "lucide-react";
@@ -32,8 +30,6 @@ interface SelectionActionBarProps {
   onAddToAlbum?: ActionHandler;
   onClearSelection: ActionHandler;
   onConvert?: ActionHandler;
-  onCreateBurstSequence?: ActionHandler;
-  onCreateTimelapseSequence?: ActionHandler;
   onDelete?: ActionHandler;
   onExport?: ActionHandler;
   onRename?: ActionHandler;
@@ -55,8 +51,6 @@ export function SelectionActionBar({
   onConvert,
   onDelete,
   onClearSelection,
-  onCreateBurstSequence,
-  onCreateTimelapseSequence,
   onUploadToCloud,
   onShare,
   onStartCull,
@@ -178,8 +172,6 @@ export function SelectionActionBar({
         )}
 
         {(onStartCull ||
-          onCreateBurstSequence ||
-          onCreateTimelapseSequence ||
           onUploadToCloud ||
           onShare ||
           onRename ||
@@ -198,30 +190,6 @@ export function SelectionActionBar({
                 icon={<Swords size={16} />}
                 label={t("cullStart")}
                 onClick={wrapAction("cull", onStartCull, { closeMore: true })}
-              />
-            )}
-            {onCreateBurstSequence && (
-              <MoreAction
-                disabled={executing !== null}
-                executing={executing === "create-burst"}
-                icon={<Layers size={16} />}
-                label={t("createBurstSequence")}
-                onClick={wrapAction("create-burst", onCreateBurstSequence, {
-                  closeMore: true,
-                })}
-              />
-            )}
-            {onCreateTimelapseSequence && (
-              <MoreAction
-                disabled={executing !== null}
-                executing={executing === "create-timelapse"}
-                icon={<Timer size={16} />}
-                label={t("createTimelapseSequence")}
-                onClick={wrapAction(
-                  "create-timelapse",
-                  onCreateTimelapseSequence,
-                  { closeMore: true }
-                )}
               />
             )}
             {onUploadToCloud && (

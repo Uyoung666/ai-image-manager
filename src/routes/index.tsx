@@ -2834,24 +2834,6 @@ function HomePage() {
                 }}
                 onClearSelection={clearSelection}
                 onConvert={() => setConvertDialogOpen(true)}
-                onCreateBurstSequence={async () => {
-                  await ipc.client.photos.createSequence({
-                    type: "burst",
-                    photoIds: Array.from(selectedIds),
-                  });
-                  clearSelection();
-                  setSequenceRefresh((value) => value + 1);
-                  toast.success("已创建连拍序列");
-                }}
-                onCreateTimelapseSequence={async () => {
-                  await ipc.client.photos.createSequence({
-                    type: "timelapse",
-                    photoIds: Array.from(selectedIds),
-                  });
-                  clearSelection();
-                  setSequenceRefresh((value) => value + 1);
-                  toast.success("已创建延时序列");
-                }}
                 onDelete={handleDeleteSelected}
                 onExport={handleExportSelected}
                 onRename={() => setRenameDialogOpen(true)}
