@@ -60,6 +60,12 @@ export function GlobalProgressBar() {
         requestAnimationFrame(() => setVisible(true))
       );
       prevRunningRef.current = true;
+    } else if (status.isRunning && render) {
+      // A new task can start while the previous task is still in its
+      // slide-out window. The exit effect cleanup cancels that timer, but
+      // the bar must also be made visible again.
+      setVisible(true);
+      prevRunningRef.current = true;
     } else if (!status.isRunning && render) {
       // Exit: animate out, then unmount after transition
       setVisible(false);
