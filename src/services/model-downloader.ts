@@ -991,10 +991,23 @@ function shouldDownloadEntry(
   if (entry.urls.length === 0) {
     return false;
   }
-  if (options.subPaths && !options.subPaths.includes(entry.subPath)) {
+  if (
+    options.subPaths &&
+    !options.subPaths.some((subPath) => subPathMatches(subPath, entry.subPath))
+  ) {
     return false;
   }
   return entry.required || options.includeOptional === true;
+}
+
+/**
+ * Whether a manifest subPath falls under a requested scope prefix. A scope like
+ * `Xenova/siglip-base-patch16-224` must cover nested subPaths such as
+ * `Xenova/siglip-base-patch16-224/onnx` (the ONNX weights), so CI can request a
+ * model family without naming every sub-directory explicitly.
+ */
+function subPathMatches(scope: string, subPath: string): boolean {
+  return subPath === scope || subPath.startsWith(`${scope}/`);
 }
 
 export function getMissingModels(
