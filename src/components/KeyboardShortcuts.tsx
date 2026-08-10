@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -162,7 +163,38 @@ interface KeyboardShortcutsProps {
 
 export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
   const { t } = useTranslation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [hasMoreBelow, setHasMoreBelow] = useState(false);
   const sections = [...new Set(SHORTCUTS.map((s) => s.sectionKey))];
+  const updateBottomFade = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) {
+      setHasMoreBelow(false);
+      return;
+    }
+    setHasMoreBelow(
+      element.scrollHeight - element.scrollTop - element.clientHeight > 2
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setHasMoreBelow(false);
+      return;
+    }
+    const element = scrollRef.current;
+    if (!element) {
+      return;
+    }
+    updateBottomFade();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(updateBottomFade);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [open, updateBottomFade]);
+
   const keyLabel = (key: string) => {
     if (["doubleClick", "click", "rightClick"].includes(key)) {
       return t(key);
@@ -180,42 +212,51 @@ export function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsProps) {
       open={open}
     >
       <DialogContent
-        className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
+        className="flex max-h-[calc(100dvh-5rem)] min-h-0 flex-col overflow-hidden max-[480px]:max-h-[calc(100dvh-3rem)]"
         size="lg"
       >
         <DialogHeader>
           <DialogTitle>{t("keyboardShortcutsTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
-          {sections.map((section) => (
-            <div key={section}>
-              <h3 className="mb-1.5 font-semibold text-[13px] text-foreground uppercase tracking-wider">
-                {t(section)}
-              </h3>
-              <div className="space-y-0.5">
-                {SHORTCUTS.filter((s) => s.sectionKey === section).map((s) => (
-                  <div
-                    className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-1"
-                    key={s.labelKey}
-                  >
-                    <span className="min-w-0 flex-[1_1_12rem] text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
-                      {t(s.labelKey)}
-                    </span>
-                    <div className="flex flex-wrap items-center justify-end gap-1">
-                      {s.keyLabels.map((k) => (
-                        <span
-                          className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-medium text-[11px] text-muted-foreground"
-                          key={`${s.labelKey}-${k}`}
-                        >
-                          {keyLabel(k)}
+        <div
+          className="resource-tree-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          data-bottom-fade={hasMoreBelow}
+          onScroll={updateBottomFade}
+          ref={scrollRef}
+        >
+          <div className="space-y-4">
+            {sections.map((section) => (
+              <div key={section}>
+                <h3 className="mb-1.5 font-semibold text-[13px] text-foreground uppercase tracking-wider">
+                  {t(section)}
+                </h3>
+                <div className="space-y-0.5">
+                  {SHORTCUTS.filter((s) => s.sectionKey === section).map(
+                    (s) => (
+                      <div
+                        className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-1"
+                        key={s.labelKey}
+                      >
+                        <span className="min-w-0 flex-[1_1_12rem] text-[13px] text-muted-foreground [overflow-wrap:anywhere]">
+                          {t(s.labelKey)}
                         </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          {s.keyLabels.map((k) => (
+                            <span
+                              className="min-w-[28px] rounded-[4px] border border-border bg-secondary px-1.5 py-0.5 text-center font-medium text-[11px] text-muted-foreground"
+                              key={`${s.labelKey}-${k}`}
+                            >
+                              {keyLabel(k)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
