@@ -1166,13 +1166,24 @@ function summarizeDuplicateGroups(
   return summaries;
 }
 
+function loadNonSequenceDuplicatePairs(
+  db: ReturnType<typeof getDatabase>
+): PersistedDuplicatePair[] {
+  const persisted = db.select().from(duplicatePairs).all();
+  const sequenceByPhoto = getPhotoSequenceIds(db);
+  const excludedPairIds = new Set(
+    getSequencePhotoPairIds(persisted, sequenceByPhoto)
+  );
+  return persisted.filter((pair) => !excludedPairIds.has(pair.id));
+}
+
 function hydrateDuplicateGroupDetails(
   db: ReturnType<typeof getDatabase>,
   groupKey: string,
   offset: number,
   limit: number
 ): DuplicateGroupPhotosResult {
-  const persisted = db.select().from(duplicatePairs).all();
+  const persisted = loadNonSequenceDuplicatePairs(db);
   const groups = hydrateDuplicateGroups(db, persisted);
   const group = groups.find((candidate) => candidate.groupKey === groupKey);
   if (!group) {
@@ -1191,38 +1202,18 @@ function hydrateDuplicateGroupDetails(
   };
 }
 
-export function isSameSequenceVisualPair(
-  photoAId: number,
-  photoBId: number,
-  matchType: string,
-  sequenceByPhoto: ReadonlyMap<number, number>
-): boolean {
-  if (matchType === "exact") {
-    return false;
-  }
-  const sequenceAId = sequenceByPhoto.get(photoAId);
-  return (
-    sequenceAId !== undefined && sequenceAId === sequenceByPhoto.get(photoBId)
-  );
-}
-
-export function getStaleSequenceVisualPairIds(
+export function getSequencePhotoPairIds(
   pairs: ReadonlyArray<{
     id: number;
-    matchType: string;
     photoAId: number;
     photoBId: number;
   }>,
   sequenceByPhoto: ReadonlyMap<number, number>
 ): number[] {
   return pairs
-    .filter((pair) =>
-      isSameSequenceVisualPair(
-        pair.photoAId,
-        pair.photoBId,
-        pair.matchType,
-        sequenceByPhoto
-      )
+    .filter(
+      (pair) =>
+        sequenceByPhoto.has(pair.photoAId) || sequenceByPhoto.has(pair.photoBId)
     )
     .map((pair) => pair.id);
 }
@@ -1301,10 +1292,7 @@ export const findDuplicates = os
       getScannedSequenceRevision() === scanSequenceRevision
     ) {
       const existing = db.select().from(duplicatePairs).all();
-      const stalePairIds = getStaleSequenceVisualPairIds(
-        existing,
-        sequenceByPhoto
-      );
+      const stalePairIds = getSequencePhotoPairIds(existing, sequenceByPhoto);
       if (stalePairIds.length > 0) {
         db.delete(duplicatePairs)
           .where(inArray(duplicatePairs.id, stalePairIds))
@@ -1343,7 +1331,9 @@ export const findDuplicates = os
       })
       .from(photos)
       .where(isNull(photos.deletedAt))
-      .all();
+      // Burst/timelapse photos are managed by the sequence workflow, not duplicate cleanup.
+      .all()
+      .filter((photo) => !sequenceByPhoto.has(photo.id));
 
     if (allPhotos.length === 0) {
       if (getPhotoSequenceRevision() === scanSequenceRevision) {
@@ -1484,9 +1474,6 @@ export const findDuplicates = os
         const bId = Math.max(p.id, n.photoId);
         const hashA = exactHashByPhotoId.get(aId);
         if (hashA !== undefined && hashA === exactHashByPhotoId.get(bId)) {
-          continue;
-        }
-        if (isSameSequenceVisualPair(aId, bId, "phash", sequenceByPhoto)) {
           continue;
         }
         const key = `${aId}_${bId}`;
@@ -1646,7 +1633,7 @@ export const dismissDuplicates = os
     const db = getDatabase();
     const group = hydrateDuplicateGroups(
       db,
-      db.select().from(duplicatePairs).all()
+      loadNonSequenceDuplicatePairs(db)
     ).find((candidate) => candidate.groupKey === input.groupKey);
     if (!group) {
       throw new Error("Duplicate group is stale; rescan before ignoring");

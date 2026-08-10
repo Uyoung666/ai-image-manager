@@ -24,6 +24,7 @@ import {
   duplicatePairs,
   exifData,
   folders,
+  photoSequenceMembers,
   photos,
   photoTags,
 } from "@/db/schema";
@@ -72,12 +73,25 @@ function loadPersistedDuplicateGroups(db: ReturnType<typeof getDatabase>) {
     .where(isNull(photos.deletedAt))
     .all();
   const photoMap = new Map(photoRows.map((photo) => [photo.id, photo]));
+  const sequencePhotoIds = new Set(
+    db
+      .select({ photoId: photoSequenceMembers.photoId })
+      .from(photoSequenceMembers)
+      .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
+      .where(isNull(photos.deletedAt))
+      .all()
+      .map((member) => member.photoId)
+  );
   const pairs = db.select().from(duplicatePairs).all();
   const records: DuplicatePairRecord[] = [];
   for (const pair of pairs) {
     const photoA = photoMap.get(pair.photoAId);
     const photoB = photoMap.get(pair.photoBId);
-    if (!(photoA && photoB)) {
+    if (
+      !(photoA && photoB) ||
+      sequencePhotoIds.has(pair.photoAId) ||
+      sequencePhotoIds.has(pair.photoBId)
+    ) {
       continue;
     }
     records.push({

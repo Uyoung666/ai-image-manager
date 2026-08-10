@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { duplicateActions } from "@/actions/duplicates";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
+import { type LightboxPhoto, PhotoLightbox } from "@/components/PhotoLightbox";
 import {
   Tooltip as AppTooltip,
   TooltipContent as AppTooltipContent,
@@ -67,6 +68,19 @@ function formatResolution(photo: DuplicatePhoto): string {
   return photo.width && photo.height ? `${photo.width}×${photo.height}` : "—";
 }
 
+function toLightboxPhoto(photo: DuplicatePhoto): LightboxPhoto {
+  return {
+    fileDate: photo.fileDate,
+    filename: photo.filename,
+    fileSize: photo.fileSize ?? 0,
+    height: photo.height ?? 0,
+    id: photo.id,
+    path: photo.path,
+    thumbnailPath: photo.thumbnailPath,
+    width: photo.width ?? 0,
+  };
+}
+
 function estimateReclaimBytes(
   group: DuplicateGroupSummary,
   photos: DuplicatePhoto[],
@@ -93,10 +107,12 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
   pendingDelete,
   photo,
   onKeep,
+  onPreview,
   t,
 }: {
   isKeeper: boolean;
   onKeep: () => void;
+  onPreview: () => void;
   pendingDelete: boolean;
   photo: DuplicatePhoto;
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -117,49 +133,71 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
     badgeText = t("pendingDelete");
   }
   return (
-    <button
-      className={`group relative min-w-0 overflow-hidden rounded-[8px] border text-left transition-colors ${tileClass}`}
-      onClick={onKeep}
-      type="button"
+    <div
+      className={`group relative min-w-0 overflow-hidden rounded-[8px] border transition-colors ${tileClass}`}
     >
-      <div className="relative flex h-36 items-center justify-center bg-muted/30 p-2">
-        {failed ? (
-          <Images className="h-8 w-8 text-muted-foreground/30" />
-        ) : (
-          // biome-ignore lint/a11y/noNoninteractiveElementInteractions: onError only swaps in a visual fallback
-          <img
-            alt={photo.filename}
-            className={`h-full w-full object-contain transition-opacity ${pendingDelete ? "opacity-60" : "opacity-100"}`}
-            decoding="async"
-            height={144}
-            loading="lazy"
-            onError={() => setFailed(true)}
-            src={toLocalMediaUrl(src)}
-            width={240}
-          />
-        )}
-        <span
-          className={`absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-[10px] ${badgeClass}`}
-        >
-          {isKeeper ? <Check className="h-3 w-3" /> : null}
-          {badgeText}
-        </span>
-      </div>
-      <div className="border-border border-t p-2.5">
-        <AppTooltip>
-          <AppTooltipTrigger asChild>
-            <p className="truncate text-[11px] text-foreground">
-              {photo.filename}
-            </p>
-          </AppTooltipTrigger>
-          <AppTooltipContent>{photo.filename}</AppTooltipContent>
-        </AppTooltip>
-        <p className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
-          <span>{formatFileSize(photo.fileSize ?? 0)}</span>
-          <span>{formatResolution(photo)}</span>
-        </p>
-      </div>
-    </button>
+      <button
+        className="block h-full w-full text-left"
+        draggable={false}
+        onClick={onKeep}
+        type="button"
+      >
+        <div className="relative flex h-36 items-center justify-center bg-muted/30 p-2">
+          {failed ? (
+            <Images className="h-8 w-8 text-muted-foreground/30" />
+          ) : (
+            // biome-ignore lint/a11y/noNoninteractiveElementInteractions: onError only swaps in a visual fallback
+            <img
+              alt={photo.filename}
+              className={`h-full w-full object-contain transition-opacity ${pendingDelete ? "opacity-60" : "opacity-100"}`}
+              decoding="async"
+              draggable={false}
+              height={144}
+              loading="lazy"
+              onError={() => setFailed(true)}
+              src={toLocalMediaUrl(src)}
+              width={240}
+            />
+          )}
+          <span
+            className={`absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-[10px] ${badgeClass}`}
+          >
+            {isKeeper ? <Check className="h-3 w-3" /> : null}
+            {badgeText}
+          </span>
+        </div>
+        <div className="border-border border-t p-2.5">
+          <AppTooltip>
+            <AppTooltipTrigger asChild>
+              <p className="truncate text-[11px] text-foreground">
+                {photo.filename}
+              </p>
+            </AppTooltipTrigger>
+            <AppTooltipContent>{photo.filename}</AppTooltipContent>
+          </AppTooltip>
+          <p className="mt-1 flex gap-3 text-[10px] text-muted-foreground">
+            <span>{formatFileSize(photo.fileSize ?? 0)}</span>
+            <span>{formatResolution(photo)}</span>
+          </p>
+        </div>
+      </button>
+      <AppTooltip>
+        <AppTooltipTrigger asChild>
+          <button
+            aria-label={t("duplicatePreviewPhoto")}
+            className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPreview();
+            }}
+            type="button"
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </button>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{t("duplicatePreviewPhoto")}</AppTooltipContent>
+      </AppTooltip>
+    </div>
   );
 });
 
@@ -171,6 +209,7 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
   loading,
   onLoadMore,
   onKeeperChange,
+  onPreview,
   photos,
   t,
 }: {
@@ -181,6 +220,7 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
   loading: boolean;
   onKeeperChange: (photoId: number) => void;
   onLoadMore: () => void;
+  onPreview: (photoId: number) => void;
   photos: DuplicatePhoto[];
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
@@ -246,6 +286,7 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
             isKeeper={photo.id === keeperId}
             key={photo.id}
             onKeep={() => onKeeperChange(photo.id)}
+            onPreview={() => onPreview(photo.id)}
             pendingDelete={enabled && photo.id !== keeperId}
             photo={photo}
             t={t}
@@ -305,6 +346,7 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
                   isKeeper={photo.id === keeperId}
                   key={photo.id}
                   onKeep={() => onKeeperChange(photo.id)}
+                  onPreview={() => onPreview(photo.id)}
                   pendingDelete={enabled && photo.id !== keeperId}
                   photo={photo}
                   t={t}
@@ -328,6 +370,7 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
   onDismiss,
   onLoadMore,
   onKeeperChange,
+  onPreview,
   onToggleEnabled,
   photos,
   t,
@@ -340,6 +383,7 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
   onDismiss: () => void;
   onLoadMore: () => void;
   onKeeperChange: (photoId: number) => void;
+  onPreview: (photoId: number) => void;
   onToggleEnabled: () => void;
   photos: DuplicatePhoto[];
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -441,6 +485,7 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
         loading={loadingPhotos}
         onKeeperChange={onKeeperChange}
         onLoadMore={onLoadMore}
+        onPreview={onPreview}
         photos={photos}
         t={t}
       />
@@ -461,6 +506,10 @@ export function DuplicatesPage() {
   );
   const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
   const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [previewState, setPreviewState] = useState<{
+    groupKey: string;
+    photoId: number;
+  } | null>(null);
   const [isToolbarScrolled, setIsToolbarScrolled] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [photosByGroup, setPhotosByGroup] = useState<
@@ -502,6 +551,15 @@ export function DuplicatesPage() {
   });
   const groups = data?.groups ?? EMPTY_GROUPS;
   const activeGroups = groups.filter((group) => group.status === "active");
+  const previewPhotos = useMemo(() => {
+    if (!previewState) {
+      return [];
+    }
+    return (photosByGroup[previewState.groupKey] ?? []).map(toLightboxPhoto);
+  }, [photosByGroup, previewState]);
+  const previewIndex = previewState
+    ? previewPhotos.findIndex((photo) => photo.id === previewState.photoId)
+    : -1;
 
   useEffect(() => {
     const validKeys = new Set(groups.map((group) => group.groupKey));
@@ -916,6 +974,12 @@ export function DuplicatesPage() {
                         }))
                       }
                       onLoadMore={() => loadGroupPhotos(group.groupKey)}
+                      onPreview={(photoId) =>
+                        setPreviewState({
+                          groupKey: group.groupKey,
+                          photoId,
+                        })
+                      }
                       onToggleEnabled={() =>
                         setEnabledGroups((previous) => {
                           const next = new Set(previous);
@@ -956,6 +1020,16 @@ export function DuplicatesPage() {
           show={showBackToTop}
         />
       </div>
+
+      {previewState && previewIndex >= 0 ? (
+        <PhotoLightbox
+          initialIndex={previewIndex}
+          onClose={() => setPreviewState(null)}
+          open
+          photos={previewPhotos}
+          showThumbnailsInitially
+        />
+      ) : null}
 
       <ConfirmDialog
         confirmText={
