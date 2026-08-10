@@ -439,8 +439,9 @@ function PeoplePage() {
   const [resettingFaceData, setResettingFaceData] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
 
-  const loadIdentities = useCallback(() => {
+  const loadFaceReviewData = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
+    queryClient.invalidateQueries({ queryKey: ["faces", "review-queue"] });
   }, [queryClient]);
 
   // Listen for the face-detection completion event and surface a summary toast.
@@ -481,7 +482,7 @@ function PeoplePage() {
                 failed: progress.failedPhotos ?? 0,
               })
             );
-            loadIdentities();
+            loadFaceReviewData();
           }
         })
         .catch(() => {
@@ -490,7 +491,7 @@ function PeoplePage() {
     }
     window.addEventListener("message", handleFaceDetectionDone);
     return () => window.removeEventListener("message", handleFaceDetectionDone);
-  }, [loadIdentities, t]);
+  }, [loadFaceReviewData, t]);
 
   async function handleStartDetection(rescan = false) {
     try {
@@ -1182,7 +1183,7 @@ function PeoplePage() {
           try {
             await faceActions.reset();
             toast.success(t("modelResetComplete"));
-            loadIdentities();
+            loadFaceReviewData();
             await handleStartDetection(false);
           } catch {
             toast.error(t("modelResetFailed"));

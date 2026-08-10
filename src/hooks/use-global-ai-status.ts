@@ -500,6 +500,10 @@ function useGlobalAiStatusState(): GlobalAiProgress {
           setFace(null);
           setFaceRunning(false);
           faceActiveRef.current = false;
+          queryClient.invalidateQueries({ queryKey: ["faces", "identities"] });
+          queryClient.invalidateQueries({
+            queryKey: ["faces", "review-queue"],
+          });
           break;
         case "import-queue-status":
           handleQueueStatus(e.data as QueueStatusPayload);

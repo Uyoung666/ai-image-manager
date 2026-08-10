@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getContainFrame,
+  getFaceReviewOverlayPixelStyle,
   getFaceReviewOverlayStyle,
 } from "@/components/face-candidate-dialog";
 import { getFaceOverlayStyle } from "@/components/PhotoCard";
@@ -35,6 +36,22 @@ describe("face review media layout", () => {
     expect(Number.parseFloat(style.top)).toBeCloseTo(50, 2);
     expect(Number.parseFloat(style.width)).toBeCloseTo(10, 2);
     expect(Number.parseFloat(style.height)).toBeCloseTo(10, 2);
+  });
+
+  it("maps face boxes to the measured image rectangle", () => {
+    const style = getFaceReviewOverlayPixelStyle(
+      { bboxHeight: 100, bboxWidth: 200, bboxX: 300, bboxY: 400 },
+      1000,
+      800,
+      { height: 400, left: 80, top: 20, width: 800 }
+    );
+
+    expect(style).toEqual({
+      height: "50px",
+      left: "320px",
+      top: "220px",
+      width: "160px",
+    });
   });
 
   it("clips invalid face boxes to the photo bounds", () => {

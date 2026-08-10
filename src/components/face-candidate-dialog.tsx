@@ -35,6 +35,13 @@ export interface FaceReviewBox {
   bboxY: number;
 }
 
+export interface FaceReviewImageRect {
+  height: number;
+  left: number;
+  top: number;
+  width: number;
+}
+
 export function getContainFrame(width: number, height: number) {
   const imageAspect = width / Math.max(height, 1);
   if (imageAspect > STAGE_ASPECT) {
@@ -114,5 +121,27 @@ export function getFaceReviewOverlayStyle(
     left: `${left * 100}%`,
     top: `${top * 100}%`,
     width: `${Math.max(0, right - left) * 100}%`,
+  };
+}
+
+/** Map a face box to the actual rendered image rectangle in stage pixels. */
+export function getFaceReviewOverlayPixelStyle(
+  face: FaceReviewBox,
+  photoWidth: number,
+  photoHeight: number,
+  imageRect: FaceReviewImageRect
+) {
+  const width = finitePositive(photoWidth, 1);
+  const height = finitePositive(photoHeight, 1);
+  const left = clampUnit(face.bboxX / width);
+  const top = clampUnit(face.bboxY / height);
+  const right = clampUnit((face.bboxX + face.bboxWidth) / width);
+  const bottom = clampUnit((face.bboxY + face.bboxHeight) / height);
+
+  return {
+    height: `${Math.max(0, bottom - top) * imageRect.height}px`,
+    left: `${imageRect.left + left * imageRect.width}px`,
+    top: `${imageRect.top + top * imageRect.height}px`,
+    width: `${Math.max(0, right - left) * imageRect.width}px`,
   };
 }

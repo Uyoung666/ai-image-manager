@@ -10,14 +10,14 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { faceActions } from "@/actions/faces";
 import {
   type FaceCandidate,
-  getContainFrame,
-  getFaceReviewOverlayStyle,
+  type FaceReviewImageRect,
+  getFaceReviewOverlayPixelStyle,
 } from "@/components/face-candidate-dialog";
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
@@ -153,48 +153,126 @@ function ReviewPreview({
   reviewableFaceIds: Set<number>;
 }) {
   const { t } = useTranslation();
-  const width = candidate.photoWidth || 1;
-  const height = candidate.photoHeight || 1;
-  const frame = getContainFrame(width, height);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const loadedImageKeyRef = useRef<string | null>(null);
+  const photoKey = `${candidate.photoId}:${candidate.photoPath}`;
+  const [loadedImageSize, setLoadedImageSize] = useState<{
+    height: number;
+    key: string;
+    width: number;
+  } | null>(null);
+  const [imageRect, setImageRect] = useState<
+    (FaceReviewImageRect & { key: string }) | null
+  >(null);
+
+  const syncImageGeometry = useCallback(() => {
+    const stage = stageRef.current;
+    const image = imageRef.current;
+    if (
+      !(stage && image) ||
+      loadedImageKeyRef.current !== photoKey ||
+      image.naturalWidth <= 0 ||
+      image.naturalHeight <= 0
+    ) {
+      return;
+    }
+    const stageBounds = stage.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+    if (imageBounds.width <= 0 || imageBounds.height <= 0) {
+      return;
+    }
+    setImageRect({
+      height: imageBounds.height,
+      key: photoKey,
+      left: imageBounds.left - stageBounds.left,
+      top: imageBounds.top - stageBounds.top,
+      width: imageBounds.width,
+    });
+  }, [photoKey]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) {
+      return;
+    }
+    syncImageGeometry();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(syncImageGeometry);
+    observer.observe(stage);
+    if (imageRef.current) {
+      observer.observe(imageRef.current);
+    }
+    return () => observer.disconnect();
+  }, [syncImageGeometry]);
+
+  const loadedForCandidate =
+    loadedImageSize?.key === photoKey ? loadedImageSize : null;
+  const imageRectForCandidate = imageRect?.key === photoKey ? imageRect : null;
+  const width = loadedForCandidate?.width || candidate.photoWidth || 1;
+  const height = loadedForCandidate?.height || candidate.photoHeight || 1;
   return (
     <div className="flex min-h-[220px] min-w-0 flex-1 items-center justify-center overflow-hidden rounded-[12px] border border-border bg-black/90 p-2 shadow-sm sm:min-h-[300px] sm:p-3 xl:min-h-0">
-      <div className="relative aspect-[4/3] max-h-full w-full max-w-[min(1200px,calc((100dvh-14rem)*4/3))] overflow-hidden rounded-[8px] bg-black">
-        <div className="absolute" style={frame}>
-          <div className="relative h-full w-full">
-            <img
-              alt={candidateFilename(candidate)}
-              className="h-full w-full object-contain"
-              height={height}
-              src={toLocalMediaUrl(candidate.photoPath)}
-              width={width}
-            />
-            {faces.map((face) => {
-              const active = face.id === candidate.id;
-              const actionable = reviewableFaceIds.has(face.id);
-              return (
-                <button
-                  aria-label={t("faceReviewFace", {
-                    index: face.faceIndex + 1,
-                  })}
-                  className={`absolute rounded-[4px] border-2 transition-all ${photoFaceBoxClass(face, active)} ${actionable ? "cursor-pointer" : "cursor-default"}`}
-                  disabled={!actionable}
-                  key={face.id}
-                  onClick={() => onSelectFace(face)}
-                  style={getFaceReviewOverlayStyle(face, width, height)}
-                  type="button"
-                >
-                  <span
-                    className={`absolute -top-6 left-0 rounded px-1.5 py-0.5 text-[10px] text-white shadow ${
-                      active ? "bg-primary" : "bg-black/70"
-                    }`}
-                  >
-                    {face.faceIndex + 1}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      <div
+        className="relative aspect-[4/3] max-h-full w-full max-w-[min(1200px,calc((100dvh-14rem)*4/3))] overflow-hidden rounded-[8px] bg-black"
+        ref={stageRef}
+      >
+        <div className="absolute inset-0 flex items-center justify-center">
+          {/* biome-ignore lint/a11y/noNoninteractiveElementInteractions: image load state drives overlay geometry */}
+          <img
+            alt={candidateFilename(candidate)}
+            className="block h-auto max-h-full w-auto max-w-full object-contain"
+            height={height}
+            onLoad={(event) => {
+              const { naturalHeight, naturalWidth } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0) {
+                loadedImageKeyRef.current = photoKey;
+                setLoadedImageSize({
+                  height: naturalHeight,
+                  key: photoKey,
+                  width: naturalWidth,
+                });
+                syncImageGeometry();
+              }
+            }}
+            ref={imageRef}
+            src={toLocalMediaUrl(candidate.photoPath)}
+            width={width}
+          />
         </div>
+        {imageRectForCandidate &&
+          faces.map((face) => {
+            const active = face.id === candidate.id;
+            const actionable = reviewableFaceIds.has(face.id);
+            return (
+              <button
+                aria-label={t("faceReviewFace", {
+                  index: face.faceIndex + 1,
+                })}
+                className={`absolute rounded-[4px] border-2 transition-all ${photoFaceBoxClass(face, active)} ${actionable ? "cursor-pointer" : "cursor-default"}`}
+                disabled={!actionable}
+                key={face.id}
+                onClick={() => onSelectFace(face)}
+                style={getFaceReviewOverlayPixelStyle(
+                  face,
+                  width,
+                  height,
+                  imageRectForCandidate
+                )}
+                type="button"
+              >
+                <span
+                  className={`absolute -top-6 left-0 rounded px-1.5 py-0.5 text-[10px] text-white shadow ${
+                    active ? "bg-primary" : "bg-black/70"
+                  }`}
+                >
+                  {face.faceIndex + 1}
+                </span>
+              </button>
+            );
+          })}
       </div>
     </div>
   );
