@@ -115,6 +115,12 @@ export function parseDashboardReturnTarget(
   };
 }
 
+export function shouldResetHomeAfterDashboardReturn(
+  target: DashboardReturnTarget | null
+): boolean {
+  return target !== null;
+}
+
 export interface DailyStat {
   count: number;
   date: string;

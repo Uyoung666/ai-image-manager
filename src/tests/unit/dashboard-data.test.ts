@@ -15,6 +15,7 @@ import {
   getTopItems,
   mergeDashboardDrillParams,
   parseDashboardReturnTarget,
+  shouldResetHomeAfterDashboardReturn,
 } from "@/utils/dashboard-data";
 
 describe("dashboard chart data", () => {
@@ -279,5 +280,12 @@ describe("dashboard chart data", () => {
     });
     expect(parseDashboardReturnTarget("https://example.com")).toBeNull();
     expect(parseDashboardReturnTarget("/dashboard?tab=unknown")).toBeNull();
+  });
+
+  it("resets home after returning from a dashboard drill-down", () => {
+    expect(
+      shouldResetHomeAfterDashboardReturn({ tab: "places", range: "all" })
+    ).toBe(true);
+    expect(shouldResetHomeAfterDashboardReturn(null)).toBe(false);
   });
 });

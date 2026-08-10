@@ -44,6 +44,7 @@ import {
   TooltipTrigger as AppTooltipTrigger,
   TOOLTIP_CONTENT_CLASS_NAME,
 } from "@/components/ui/tooltip";
+import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
@@ -65,6 +66,7 @@ import {
   getTopItems,
   mergeDashboardDrillParams,
   type ShootingGuidanceKind,
+  shouldResetHomeAfterDashboardReturn,
 } from "@/utils/dashboard-data";
 
 type DashboardTab =
@@ -232,6 +234,7 @@ const axisTick = { fill: "var(--muted-foreground)", fontSize: 11 };
 function DashboardPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const { getSession: getBrowseSession } = useBrowseSession();
   const queryClient = useQueryClient();
   const search = Route.useSearch();
   const tab = search.tab ?? "overview";
@@ -609,7 +612,16 @@ function DashboardPage() {
             <button
               aria-label={t("backToHome")}
               className="rounded-[5px] p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              onClick={() => navigate({ to: "/" })}
+              onClick={() =>
+                navigate({
+                  to: "/",
+                  search: shouldResetHomeAfterDashboardReturn(
+                    getBrowseSession("home-search").dashboardReturn
+                  )
+                    ? { reset: true }
+                    : {},
+                })
+              }
               type="button"
             >
               <ArrowLeft className="h-5 w-5" />
