@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 import sharp from "sharp";
 
 const IMAGE_EXT_RE = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i;
-const DEFAULT_TEST_DIR = "D:/8806/ai-image-manager测试用例";
+const DEFAULT_TEST_DIR = "test-fixtures/photos";
 const inputPath = process.argv[2] || DEFAULT_TEST_DIR;
 
 function pickSample(targetPath) {

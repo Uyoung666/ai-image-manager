@@ -18,9 +18,7 @@ import {
 } from "@xenova/transformers";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const testDataDir = path.resolve(
-  process.argv[2] || "D:\\8806\\ai-image-manager测试用例"
-);
+const testDataDir = path.resolve(process.argv[2] || "test-fixtures/photos");
 const modelRoot = path.resolve(
   process.argv[3] || path.join(repoRoot, "models")
 );

@@ -2,8 +2,8 @@
  * Real-dataset performance acceptance test.
  *
  * Run only when both paths are supplied:
- *   AIM_REAL_PERF_DATASET_DIR=D:\\8806\\10000
- *   AIM_REAL_PERF_DATA_DIR=D:\\8806\\perf-v2.0.0-10000
+ *   AIM_REAL_PERF_DATASET_DIR=D:\\path\\to\\photos
+ *   AIM_REAL_PERF_DATA_DIR=D:\\path\\to\\isolated-data
  *   npx vitest run src/tests/integration/performance-real-dataset.test.ts
  *
  * The data directory is deliberately supplied by the caller so the test

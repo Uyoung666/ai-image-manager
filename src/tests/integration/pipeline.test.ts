@@ -170,7 +170,9 @@ class MetricsCollector {
 const metrics = new MetricsCollector();
 
 describe("Pipeline Integration Test (500 images)", () => {
-  const TEST_IMAGES_DIR = "D:\\8806\\ai-image-manager测试用例";
+  const TEST_IMAGES_DIR = path.resolve(
+    process.env.AIM_PIPELINE_TEST_IMAGES_DIR ?? "test-fixtures/photos"
+  );
 
   beforeAll(async () => {
     cleanupTestDirs();

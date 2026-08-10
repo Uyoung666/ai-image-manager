@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 
-const TEST_IMAGES_DIR = process.argv[2] || "D:/8806/ai-image-manager测试用例";
+const TEST_IMAGES_DIR = process.argv[2] || "test-fixtures/photos";
 const DECODE_DIR = path.join(os.tmpdir(), "ai-image-manager-decoded");
 const JPEG_FILE_PATTERN = /\.jpe?g$/i;
 

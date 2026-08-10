@@ -8,7 +8,7 @@ type RunExiftool = NonNullable<Parameters<typeof extractRawPreview>[1]>;
 
 describe("RAW preview worker helper", () => {
   it("passes non-ASCII filenames through a UTF-8 ExifTool argfile", () => {
-    const filePath = "D:/8806/7.20无云满霞/DSC01907.ARW";
+    const filePath = "test-fixtures/7.20无云满霞/DSC01907.ARW";
     const preview = Buffer.from("jpeg-preview");
     const runExiftool = vi.fn<RunExiftool>(() => preview);
 
@@ -30,11 +30,11 @@ describe("RAW preview worker helper", () => {
       })
       .mockReturnValueOnce(Buffer.from("preview"));
 
-    expect(extractRawPreview("D:/照片.ARW", runExiftool)).toEqual(
+    expect(extractRawPreview("test-fixtures/照片.ARW", runExiftool)).toEqual(
       Buffer.from("preview")
     );
     expect(runExiftool.mock.calls[1][2].input.toString("utf8")).toBe(
-      "-b\n-PreviewImage\nD:/照片.ARW\n"
+      "-b\n-PreviewImage\ntest-fixtures/照片.ARW\n"
     );
   });
 });

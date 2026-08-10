@@ -2,7 +2,7 @@ import fs from "node:fs";
 import https from "node:https";
 import path from "node:path";
 
-const TARGET_DIR = "D:/8806/ai-image-manager测试用例";
+const TARGET_DIR = path.resolve("test-fixtures/photos");
 const TOTAL = 500;
 const CONCURRENCY = 15;
 

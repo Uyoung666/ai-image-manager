@@ -10,7 +10,7 @@ import lancedb from "@lancedb/lancedb";
 import { AutoTokenizer, env, SiglipTextModel } from "@xenova/transformers";
 import Database from "better-sqlite3";
 
-const dataRoot = path.resolve(process.argv[2] || "D:\\8806\\数据");
+const dataRoot = path.resolve(process.argv[2] || "data");
 const query = process.argv[3] || "bicycle";
 const intent = process.argv[4] || "object";
 const modelId = "Xenova/siglip-base-patch16-224";

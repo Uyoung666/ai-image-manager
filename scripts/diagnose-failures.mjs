@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 
-const TEST_DIR = "D:/8806/ai-image-manager测试用例";
+const TEST_DIR = process.argv[2] || "test-fixtures/photos";
 const JPEG_FILE_PATTERN = /\.jpe?g$/i;
 const files = fs.readdirSync(TEST_DIR).filter((f) => JPEG_FILE_PATTERN.test(f));
 

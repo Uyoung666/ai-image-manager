@@ -8,9 +8,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const testDataDir = path.resolve(
-  process.argv[3] || "D:\\8806\\ai-image-manager测试用例"
-);
+const testDataDir = path.resolve(process.argv[3] || "test-fixtures/photos");
 const modelRoot = path.resolve(
   process.argv[3] || path.join(repoRoot, "models-lab")
 );
