@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateFromStoredColors,
   computeColorDistribution,
+  hexFromHue,
   invalidateColorCache,
+  rgbFromHue,
 } from "@/services/color-extractor";
 
 describe("color extraction failure handling", () => {
@@ -21,5 +24,35 @@ describe("color extraction failure handling", () => {
         totalPhotos: photos.length,
       })
     );
+  });
+
+  it("counts a secondary palette color for hue drill-downs", () => {
+    const primary = rgbFromHue(15);
+    const secondary = rgbFromHue(195);
+    const result = aggregateFromStoredColors([
+      [
+        {
+          ...primary,
+          hex: hexFromHue(15),
+          hue: 15,
+          lightness: 0.5,
+          saturation: 0.7,
+          weight: 0.6,
+        },
+        {
+          ...secondary,
+          hex: hexFromHue(195),
+          hue: 195,
+          lightness: 0.5,
+          saturation: 0.7,
+          weight: 0.4,
+        },
+      ],
+    ]);
+
+    expect(
+      result.hueDistribution.find((bucket) => bucket.hex === hexFromHue(195))
+        ?.count
+    ).toBe(1);
   });
 });

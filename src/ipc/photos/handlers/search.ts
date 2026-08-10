@@ -132,29 +132,6 @@ const SEARCH_PIPELINE_VERSION =
 const searchSessions = new SearchSessionStore();
 const _SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 busy_timeout=5000）
 
-// ── Hue bucket helper ──────────────────────────────────────────────────
-// RGB → HSL hue → 36-bucket index (0-35), used for color-search pre-filter.
-function rgbToHueBucket(r: number, g: number, b: number): number {
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-  if (delta === 0) {
-    return 0; // achromatic → bucket 0
-  }
-  let hue: number;
-  if (max === rn) {
-    hue = ((gn - bn) / delta + (gn < bn ? 6 : 0)) * 60;
-  } else if (max === gn) {
-    hue = ((bn - rn) / delta + 2) * 60;
-  } else {
-    hue = ((rn - gn) / delta + 4) * 60;
-  }
-  return Math.floor(hue / 10) % 36;
-}
-
 // EXIF filter cache: cache key -> { result, timestamp }
 export interface CachedSearchResult {
   results: unknown[];
@@ -608,17 +585,6 @@ export const searchCompound = os
         // LanceDB 颜色表可能稀疏（仅部分照片已索引），不能替代 SQLite。
         // 双路并行执行，合并结果去重，避免稀疏表导致的"全色块同一结果"。
 
-        // Pre-filter: map target RGB to hue bucket (0-35) to shrink scan range
-        const hueBucket = rgbToHueBucket(rgb.r, rgb.g, rgb.b);
-        // Generate 3 candidate buckets (target ± 1, modulo 36)
-        const candidateBuckets = [
-          (hueBucket + 35) % 36,
-          hueBucket,
-          (hueBucket + 1) % 36,
-        ];
-        // Remove duplicates (when 36 wraps around)
-        const buckets = [...new Set(candidateBuckets)].sort();
-
         const exifActive =
           dateFrom ||
           dateTo ||
@@ -638,8 +604,11 @@ export const searchCompound = os
         const conditions: SQL[] = [
           sql`p.deleted_at IS NULL`,
           sql`p.dominant_colors IS NOT NULL`,
-          sql`(p.color_bucket IS NULL OR p.color_bucket IN (${sql.raw(buckets.join(","))}))`,
         ];
+        // color_bucket stores only the first dominant color. Dashboard hue
+        // counts match every stored color, so using color_bucket here would
+        // discard photos whose matching color is secondary in the palette.
+        // Let closest_color_dist perform the authoritative match instead.
         if (creatorIds) {
           conditions.push(
             sql`p.id IN (${sql.join(
