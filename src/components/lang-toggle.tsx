@@ -17,6 +17,7 @@ export default function LangToggle() {
           position: relative;
           display: flex;
           flex-wrap: wrap;
+          height: 32px;
           border-radius: 0.5rem;
           background-color: var(--muted);
           box-sizing: border-box;
@@ -24,7 +25,7 @@ export default function LangToggle() {
           padding: 0.25rem;
           width: min(200px, 100%);
           max-width: 100%;
-          font-size: 14px;
+          font-size: 12px;
         }
         .lang-radio-group .lang-radio {
           min-width: 0;
@@ -50,7 +51,8 @@ export default function LangToggle() {
           border-radius: 0.5rem;
           border: none;
           overflow-wrap: anywhere;
-          padding: 0.5rem 0.25rem;
+          height: 24px;
+          padding: 0 0.25rem;
           color: var(--muted-foreground);
           transition: all 0.15s ease-in-out;
           user-select: none;

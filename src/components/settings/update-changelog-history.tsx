@@ -1,5 +1,4 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { changelogEntries, getLocalizedText } from "@/content/changelogs";
 
@@ -23,7 +22,7 @@ export function UpdateChangelogHistory() {
   const navigate = useNavigate();
 
   return (
-    <section className="update-changelog-history mt-6 min-w-0 space-y-3">
+    <section className="update-changelog-history min-w-0 space-y-3">
       <div>
         <h2 className="font-semibold text-[14px] text-foreground">
           {t("updateChangelogTitle")}
@@ -32,41 +31,57 @@ export function UpdateChangelogHistory() {
           {t("updateChangelogDescription")}
         </p>
       </div>
-      <div className="update-changelog-list overflow-hidden rounded-[12px] border border-border bg-secondary">
+      <div className="update-changelog-list overflow-hidden rounded-[8px] border border-border bg-secondary p-2 min-[480px]:p-3">
         {changelogEntries.length === 0 ? (
           <p className="p-4 text-[12px] text-muted-foreground">
             {t("updateChangelogEmpty")}
           </p>
         ) : (
           changelogEntries.map((entry) => (
-            <button
-              className="update-changelog-item flex w-full min-w-0 flex-wrap items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 min-[900px]:flex-nowrap min-[480px]:px-4"
+            <article
+              className="update-changelog-item flex min-w-0 items-center gap-3 px-2 py-2.5 min-[480px]:px-3"
               key={entry.version}
-              onClick={() =>
-                navigate({
-                  to: "/whats-new",
-                  search: { version: entry.version },
-                })
-              }
-              type="button"
             >
-              <span className="update-changelog-item-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium text-[13px] text-foreground [overflow-wrap:anywhere]">
-                  {getLocalizedText(entry.title, i18n.language)}
-                </span>
-                <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                  v{entry.version} ·{" "}
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <h3 className="min-w-0 max-w-full truncate font-medium text-[13px] text-foreground">
+                    {getLocalizedText(entry.title, i18n.language)}
+                  </h3>
+                  <span className="shrink-0 text-[11px] text-muted-foreground/70">
+                    v{entry.version}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
                   {formatReleaseDate(entry.date, i18n.language)}
+                </p>
+              </div>
+              <button
+                aria-label={`${getLocalizedText(entry.title, i18n.language)} · ${t("updateChangelogView")}`}
+                className="cta shrink-0"
+                onClick={() =>
+                  navigate({
+                    to: "/whats-new",
+                    search: { version: entry.version },
+                  })
+                }
+                type="button"
+              >
+                <span className="hover-underline-animation">
+                  {t("updateChangelogView")}
                 </span>
-              </span>
-              <span className="ml-11 flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground min-[900px]:ml-0">
-                {t("updateChangelogView")}
-                <ChevronRight className="h-3.5 w-3.5" />
-              </span>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  height="10"
+                  viewBox="0 0 46 16"
+                  width="30"
+                >
+                  <path
+                    d="M8,0,6.545,1.455l5.506,5.506H-30V9.039H12.052L6.545,14.545,8,16l8-8Z"
+                    transform="translate(30)"
+                  />
+                </svg>
+              </button>
+            </article>
           ))
         )}
       </div>

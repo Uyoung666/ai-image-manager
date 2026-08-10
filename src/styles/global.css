@@ -1035,7 +1035,7 @@ html.transitioning [data-theme-sensitive] {
 }
 
 .update-changelog-item {
-  min-height: 66px;
+  min-height: 52px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1043,8 +1043,74 @@ html.transitioning [data-theme-sensitive] {
   border-bottom: 0;
 }
 
-.update-changelog-item-icon {
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+.cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0;
+  color: var(--foreground);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.cta span {
+  padding-right: 8px;
+  padding-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.cta svg {
+  flex-shrink: 0;
+  fill: currentColor;
+  transform: translateX(-6px);
+  transition: all 0.3s ease;
+}
+
+.cta:hover {
+  color: var(--primary);
+}
+
+.cta:hover svg {
+  transform: translateX(0);
+}
+
+.cta:active svg {
+  transform: scale(0.9);
+}
+
+.hover-underline-animation {
+  position: relative;
+  padding-bottom: 4px;
+  color: inherit;
+}
+
+.hover-underline-animation::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  content: "";
+  background-color: var(--primary);
+  transform: scaleX(0);
+  transform-origin: bottom right;
+  transition: transform 0.25s ease-out;
+}
+
+.cta:hover .hover-underline-animation::after {
+  transform: scaleX(1);
+  transform-origin: bottom left;
+}
+
+.cta:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 /* User-controlled reduced motion. The inline bootstrap in index.html sets the
@@ -2440,13 +2506,13 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 /* ── 自定义开关组件 ──────────────────────────────── */
 .custom-switch {
-  --cs-width: 46px;
-  --cs-height: 24px;
+  --cs-width: 40px;
+  --cs-height: 22px;
   --cs-bg: var(--muted);
   --cs-checked-bg: var(--primary);
   --cs-offset: calc((var(--cs-height) - var(--cs-circle-diameter)) / 2);
   --cs-transition: all 0.2s cubic-bezier(0.27, 0.2, 0.25, 1.51);
-  --cs-circle-diameter: 18px;
+  --cs-circle-diameter: 16px;
   --cs-circle-bg: #fff;
   --cs-circle-shadow: 1px 1px 2px rgba(146, 146, 146, 0.45);
   --cs-circle-checked-shadow: -1px 1px 2px rgba(163, 163, 163, 0.45);
@@ -3276,23 +3342,4 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   .whats-new-continue {
     transition: none;
   }
-}
-
-.update-changelog-list {
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: 0 14px 30px -28px
-    color-mix(in srgb, var(--foreground) 48%, transparent);
-}
-
-.update-changelog-item {
-  min-height: 66px;
-  border-bottom: 1px solid var(--border);
-}
-
-.update-changelog-item:last-child {
-  border-bottom: 0;
-}
-
-.update-changelog-item-icon {
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
 }

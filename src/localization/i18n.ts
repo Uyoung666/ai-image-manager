@@ -532,7 +532,7 @@ i18n.use(initReactI18next).init({
         settingsGroupPhotos: "照片体验",
         settingsGroupData: "数据与性能",
         settingsGroupOutput: "输出与同步",
-        settingsGroupUpdates: "更新与关于",
+        settingsGroupUpdates: "更新与日志",
         settingsGroupHelp: "帮助与支持",
         settingsAppearance: "外观",
         settingsAppearanceDescription: "调整主题、界面显示和搜索匹配体验。",
@@ -855,6 +855,7 @@ i18n.use(initReactI18next).init({
         settingsLicense: "许可证",
         settingsAuthor: "作者",
         settingsUpdate: "软件更新",
+        settingsUpdateDescription: "检查新版本，配置更新行为和更新代理。",
         settingsAutoUpdate: "自动更新",
         settingsAutoUpdateHint: "发现新版本后自动下载并准备更新",
         settingsUpdateReminder: "更新提醒",
@@ -876,7 +877,8 @@ i18n.use(initReactI18next).init({
         updateDownloadManually: "手动下载",
         updateReleaseNotes: "更新内容",
         updateProxyLabel: "更新代理",
-        updateProxyHint: "如 127.0.0.1:7890，保存后立即生效",
+        updateProxyHint:
+          "用于接收自动更新的网络代理，例如 127.0.0.1:7890，保存后立即生效。",
         updateProxyTest: "测试",
         updateProxyTesting: "测试中...",
         updateProxyTestOk: "连接成功 ({{latency}}ms)",
@@ -887,7 +889,7 @@ i18n.use(initReactI18next).init({
         updateErrorNotFound: "未找到更新文件",
         updateChangelogTitle: "更新日志",
         updateChangelogDescription: "回顾每个版本带来的新体验。",
-        updateChangelogView: "查看",
+        updateChangelogView: "进入",
         updateChangelogEmpty: "暂时还没有可查看的更新日志。",
         whatsNewEyebrow: "AI Image Manager · What's New",
         whatsNewHighlights: "本次更新亮点",
@@ -2507,7 +2509,7 @@ i18n.use(initReactI18next).init({
         settingsGroupPhotos: "Photo experience",
         settingsGroupData: "Data & performance",
         settingsGroupOutput: "Output & sync",
-        settingsGroupUpdates: "Updates & about",
+        settingsGroupUpdates: "Updates & release notes",
         settingsGroupHelp: "Help & support",
         settingsAppearance: "Appearance",
         settingsAppearanceDescription:
@@ -2856,6 +2858,8 @@ i18n.use(initReactI18next).init({
         settingsLicense: "License",
         settingsAuthor: "Author",
         settingsUpdate: "Software Update",
+        settingsUpdateDescription:
+          "Check for new versions and configure update behavior and proxy settings.",
         settingsAutoUpdate: "Automatic updates",
         settingsAutoUpdateHint:
           "Automatically download and prepare new versions when available",
@@ -2881,7 +2885,7 @@ i18n.use(initReactI18next).init({
         updateReleaseNotes: "Release Notes",
         updateProxyLabel: "Update Proxy",
         updateProxyHint:
-          "e.g. 127.0.0.1:7890, takes effect immediately after saving",
+          "The network proxy used to receive automatic updates, e.g. 127.0.0.1:7890. It takes effect immediately after saving.",
         updateProxyTest: "Test",
         updateProxyTesting: "Testing...",
         updateProxyTestOk: "Connected ({{latency}}ms)",
@@ -2893,7 +2897,7 @@ i18n.use(initReactI18next).init({
         updateChangelogTitle: "Release Notes",
         updateChangelogDescription:
           "Revisit the new experiences from each release.",
-        updateChangelogView: "View",
+        updateChangelogView: "Open",
         updateChangelogEmpty: "There are no release notes to show yet.",
         whatsNewEyebrow: "AI Image Manager · What's New",
         whatsNewHighlights: "Highlights from this release",

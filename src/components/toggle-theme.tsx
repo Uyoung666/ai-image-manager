@@ -24,6 +24,7 @@ export default function ToggleTheme({ onChange }: ToggleThemeProps) {
     const next = resolved === "dark" ? "light" : "dark";
     await setTheme(next);
     setMode(next);
+    setIsDark(next === "dark");
     onChange?.(next);
   }, [onChange]);
 

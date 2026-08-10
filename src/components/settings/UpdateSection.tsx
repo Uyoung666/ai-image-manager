@@ -303,21 +303,54 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
 
   return (
     <section className="min-w-0 space-y-3">
-      <h2 className="font-semibold text-[14px] text-foreground">
-        {t("settingsUpdate")}
-      </h2>
-      <div className="min-w-0 space-y-3 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
-        {/* Current version */}
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <span className="text-[13px] text-muted-foreground">
-            {t("settingsVersion")}
-          </span>
-          <span className="text-[13px] text-foreground">
-            {appVersion || "..."}
-          </span>
+      <div>
+        <h2 className="font-semibold text-[14px] text-foreground">
+          {t("settingsUpdate")}
+        </h2>
+        <p className="mt-1 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+          {t("settingsUpdateDescription")}
+        </p>
+      </div>
+      <div className="min-w-0 overflow-hidden rounded-[8px] border border-border bg-secondary">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 p-3 min-[480px]:p-4">
+          <div className="min-w-0">
+            <span className="text-[11px] text-muted-foreground">
+              {t("settingsVersion")}
+            </span>
+            <p className="mt-1 font-semibold text-[16px] text-foreground">
+              {appVersion || "..."}
+            </p>
+          </div>
+          {phase === "downloaded" ? (
+            <button
+              className="inline-flex min-h-8 max-w-full shrink-0 items-center justify-center rounded-[6px] bg-primary px-4 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+              onClick={handleRestart}
+              type="button"
+            >
+              {t("updateRestartNow")}
+            </button>
+          ) : (
+            <button
+              className="inline-flex min-h-8 max-w-full shrink-0 items-center justify-center rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={phase === "checking" || phase === "downloading"}
+              onClick={handleCheck}
+              type="button"
+            >
+              {phase === "checking" || phase === "downloading" ? (
+                <span className="flex items-center justify-center gap-1.5">
+                  <LoadingSpinner size="sm" variant="inherit" />
+                  {t("updateChecking")}
+                </span>
+              ) : phase === "error" ? (
+                t("updateRetry")
+              ) : (
+                t("updateCheckBtn")
+              )}
+            </button>
+          )}
         </div>
 
-        <div className="border-border border-t pt-3">
+        <div className="border-border border-t p-3 min-[480px]:p-4">
           <SettingRow
             action={
               <Switch
@@ -366,167 +399,138 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         </div>
 
         {/* Status area */}
-        <div className="border-border border-t pt-3">
-          {/* Checking */}
-          {phase === "checking" && (
-            <div className="flex items-center gap-2">
-              <LoadingSpinner size="sm" variant="secondary" />
-              <span className="text-[13px] text-muted-foreground">
-                {t("updateChecking")}
-              </span>
-            </div>
-          )}
-
-          {/* Up to date */}
-          {phase === "up-to-date" && (
-            <div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                <span className="text-[13px] text-muted-foreground">
-                  {t("updateUpToDate")}
-                </span>
-              </div>
-              {lastCheckTime && (
-                <p className="mt-1 text-[11px] text-muted-foreground/60">
-                  {t("updateLastCheck", { time: lastCheckTime })}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Downloading — indeterminate shimmer bar */}
-          {phase === "downloading" && (
-            <div>
-              <p className="text-[13px] text-muted-foreground">
-                {updateVersion
-                  ? t("updateFound", { version: updateVersion })
-                  : t("updateDownloading")}
-              </p>
-              <div
-                className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-                data-reduced-motion-keep="progress-bar"
-              >
-                <div
-                  className={`absolute inset-y-0 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent ${percent == null ? "w-2/5 animate-indeterminate-bar" : ""}`}
-                  data-reduced-motion-keep="progress-bar"
-                  style={percent == null ? undefined : { width: `${percent}%` }}
-                />
-              </div>
-              <p className="mt-1 text-[11px] text-muted-foreground/60">
-                {elapsedSeconds > 0
-                  ? `${t("updateElapsed", { seconds: elapsedSeconds })}${bytesPerSecond ? ` · ${formatSpeed(bytesPerSecond)}` : ""}`
-                  : t("updateDownloading")}
-              </p>
-            </div>
-          )}
-
-          {/* Downloaded */}
-          {phase === "downloaded" && (
-            <div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                <span className="text-[13px] text-muted-foreground">
-                  {t("updateDownloadedStatus", { version: updateVersion })}
-                </span>
-              </div>
-              {releaseNotes && (
-                <div className="mt-2 max-h-32 overflow-y-auto rounded-[6px] border border-border bg-background p-2">
-                  <p className="whitespace-pre-wrap text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-                    {releaseNotes}
-                  </p>
-                </div>
-              )}
-              <button
-                className="mt-2 w-full rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-                onClick={handleRestart}
-                type="button"
-              >
-                {t("updateRestartNow")}
-              </button>
-            </div>
-          )}
-
-          {/* Idle (no check done yet) */}
-          {phase === "idle" && (
-            <p className="text-[13px] text-muted-foreground/70">
-              {appVersion
-                ? t("updateStatusIdle", { version: appVersion })
-                : "..."}
-            </p>
-          )}
-
-          {/* Error */}
-          {phase === "error" && (
-            <div>
-              <div className="flex min-w-0 items-start gap-2">
-                <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                <span className="min-w-0 text-[13px] text-destructive [overflow-wrap:anywhere]">
-                  {errorMsg || t("updateError")}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Manual download link (always show when downloaded or error) */}
-          {(phase === "downloaded" || phase === "error") && (
-            <button
-              className="mt-2 w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
-              onClick={handleOpenManual}
-              type="button"
-            >
-              {t("updateDownloadManually")}
-            </button>
-          )}
-        </div>
-
-        {/* Action button */}
-        <div className="border-border border-t pt-3">
-          {phase === "downloaded" ? null : (
-            <button
-              className="w-full rounded-[6px] border border-input px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={phase === "checking" || phase === "downloading"}
-              onClick={handleCheck}
-              type="button"
-            >
-              {phase === "checking" || phase === "downloading" ? (
-                <span className="flex items-center justify-center gap-1.5">
-                  <LoadingSpinner size="sm" variant="inherit" />
+        {phase !== "idle" && (
+          <div className="border-border border-t bg-background/20 p-3 min-[480px]:p-4">
+            {/* Checking */}
+            {phase === "checking" && (
+              <div className="flex items-center gap-2 rounded-[6px] bg-background/40 px-3 py-2.5">
+                <LoadingSpinner size="sm" variant="secondary" />
+                <span className="text-[12px] text-muted-foreground">
                   {t("updateChecking")}
                 </span>
-              ) : phase === "error" ? (
-                t("updateRetry")
-              ) : (
-                t("updateCheckBtn")
-              )}
-            </button>
-          )}
-        </div>
+              </div>
+            )}
 
-        {/* Proxy setting */}
-        <div className="border-border border-t pt-3">
-          <label
-            className="text-[11px] text-muted-foreground"
-            htmlFor="update-proxy"
-          >
+            {/* Up to date */}
+            {phase === "up-to-date" && (
+              <div className="rounded-[6px] border border-green-500/20 bg-green-500/5 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                  <span className="text-[12px] text-muted-foreground">
+                    {t("updateUpToDate")}
+                  </span>
+                </div>
+                {lastCheckTime && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/60">
+                    {t("updateLastCheck", { time: lastCheckTime })}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Downloading — indeterminate shimmer bar */}
+            {phase === "downloading" && (
+              <div className="rounded-[6px] bg-background/40 px-3 py-2.5">
+                <p className="text-[12px] text-muted-foreground">
+                  {updateVersion
+                    ? t("updateFound", { version: updateVersion })
+                    : t("updateDownloading")}
+                </p>
+                <div
+                  className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                  data-reduced-motion-keep="progress-bar"
+                >
+                  <div
+                    className={`absolute inset-y-0 rounded-full bg-gradient-to-r from-transparent via-primary to-transparent ${percent == null ? "w-2/5 animate-indeterminate-bar" : ""}`}
+                    data-reduced-motion-keep="progress-bar"
+                    style={
+                      percent == null ? undefined : { width: `${percent}%` }
+                    }
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground/60">
+                  {elapsedSeconds > 0
+                    ? `${t("updateElapsed", { seconds: elapsedSeconds })}${bytesPerSecond ? ` · ${formatSpeed(bytesPerSecond)}` : ""}`
+                    : t("updateDownloading")}
+                </p>
+              </div>
+            )}
+
+            {/* Downloaded */}
+            {phase === "downloaded" && (
+              <div className="rounded-[6px] border border-green-500/20 bg-green-500/5 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                  <span className="text-[12px] text-muted-foreground">
+                    {t("updateDownloadedStatus", { version: updateVersion })}
+                  </span>
+                </div>
+                {releaseNotes && (
+                  <div className="mt-2 max-h-32 overflow-y-auto rounded-[6px] border border-border bg-background p-2">
+                    <p className="whitespace-pre-wrap text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+                      {releaseNotes}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Error */}
+            {phase === "error" && (
+              <div className="rounded-[6px] border border-destructive/25 bg-destructive/5 px-3 py-2.5">
+                <div className="flex min-w-0 items-start gap-2">
+                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                  <span className="min-w-0 text-[12px] text-destructive [overflow-wrap:anywhere]">
+                    {errorMsg || t("updateError")}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Manual download link (always show when downloaded or error) */}
+            {(phase === "downloaded" || phase === "error") && (
+              <button
+                className="mt-2 inline-flex min-h-8 max-w-full items-center justify-center rounded-[6px] border border-input px-4 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+                onClick={handleOpenManual}
+                type="button"
+              >
+                {t("updateDownloadManually")}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <section className="min-w-0 space-y-3">
+        <div>
+          <h3 className="font-semibold text-[14px] text-foreground">
+            {t("updateProxyLabel")}
+          </h3>
+          <p className="mt-1 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+            {t("updateProxyHint")}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+          <label className="sr-only" htmlFor="update-proxy">
             {t("updateProxyLabel")}
           </label>
           <div className="mt-1 flex min-w-0 flex-wrap gap-2">
             <input
-              className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40"
+              className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
               id="update-proxy"
               onChange={(e) => setProxy(e.target.value)}
               placeholder="127.0.0.1:7890"
               value={proxy}
             />
             <button
-              className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground"
+              className="min-h-8 shrink-0 rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground focus-visible:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
               onClick={handleSaveProxy}
               type="button"
             >
               {proxySaved ? t("updateSaved") : t("updateSave")}
             </button>
             <button
-              className="shrink-0 rounded-[6px] border border-input px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-8 shrink-0 rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground focus-visible:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={proxyTesting}
               onClick={handleTestProxy}
               type="button"
@@ -536,18 +540,15 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           </div>
           {proxyResult && (
             <p
-              className={`mt-1 text-[11px] [overflow-wrap:anywhere] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
+              className={`mt-2 text-[11px] [overflow-wrap:anywhere] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
             >
               {proxyResult.ok
                 ? `${t("updateProxyTestOk", { latency: proxyResult.latency ?? "?" })} · ${formatSpeed(proxyResult.bytesPerSecond)}`
                 : `${t("updateProxyTestFail")}${proxyResult.error ? `: ${proxyResult.error}` : ""}`}
             </p>
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground/50 [overflow-wrap:anywhere]">
-            {t("updateProxyHint")}
-          </p>
         </div>
-      </div>
+      </section>
     </section>
   );
 }

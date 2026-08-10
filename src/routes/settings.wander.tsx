@@ -44,18 +44,20 @@ function WanderSettingsPage() {
   return (
     <SettingsPageShell
       description={t("wander.startHint")}
+      headerAction={
+        <button
+          className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-2 font-medium text-[13px] text-primary-foreground [overflow-wrap:anywhere] hover:bg-primary/90 disabled:opacity-50"
+          disabled={wanderActive || wanderLoading}
+          onClick={() => startWander()}
+          type="button"
+        >
+          <Compass className="h-4 w-4" />
+          {t("wander.startNow")}
+        </button>
+      }
       scrollRef={scrollRef}
       title={t("settingsWander")}
     >
-      <button
-        className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-2 font-medium text-[13px] text-primary-foreground [overflow-wrap:anywhere] hover:bg-primary/90 disabled:opacity-50"
-        disabled={wanderActive || wanderLoading}
-        onClick={() => startWander()}
-        type="button"
-      >
-        <Compass className="h-4 w-4" />
-        {t("wander.startNow")}
-      </button>
       {startError && (
         <p
           aria-live="polite"

@@ -4,6 +4,7 @@ import { cn } from "@/utils/tailwind";
 interface SettingsPageShellProps {
   children: ReactNode;
   description?: ReactNode;
+  headerAction?: ReactNode;
   maxWidth?: "default" | "wide";
   scrollRef?: Ref<HTMLDivElement>;
   title: ReactNode;
@@ -19,6 +20,7 @@ interface SettingsSectionProps {
 export function SettingsPageShell({
   children,
   description,
+  headerAction,
   maxWidth = "default",
   scrollRef,
   title,
@@ -34,13 +36,23 @@ export function SettingsPageShell({
           maxWidth === "wide" ? "max-w-[1040px]" : "max-w-[820px]"
         )}
       >
-        <header>
-          <h2 className="font-semibold text-[14px] text-foreground">{title}</h2>
-          {description && (
-            <p className="mt-1 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
-              {description}
-            </p>
+        <header
+          className={cn(
+            headerAction &&
+              "flex min-w-0 flex-col gap-3 min-[600px]:flex-row min-[600px]:items-start min-[600px]:justify-between"
           )}
+        >
+          <div className="min-w-0">
+            <h2 className="font-semibold text-[14px] text-foreground">
+              {title}
+            </h2>
+            {description && (
+              <p className="mt-1 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
+                {description}
+              </p>
+            )}
+          </div>
+          {headerAction && <div className="shrink-0">{headerAction}</div>}
         </header>
         {children}
       </section>

@@ -16,7 +16,7 @@ const translations: Record<string, string> = {
   settingsGroupData: "数据与性能",
   settingsGroupOutput: "输出与同步",
   settingsGroupPhotos: "照片体验",
-  settingsGroupUpdates: "更新与关于",
+  settingsGroupUpdates: "更新与日志",
   settingsGroupHelp: "帮助与支持",
   settingsDiagnostics: "帮助与诊断",
   settingsStorage: "存储",

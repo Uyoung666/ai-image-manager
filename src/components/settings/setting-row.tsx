@@ -26,7 +26,7 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-col gap-3 border-border border-t pt-3 first:border-t-0 first:pt-0 min-[900px]:flex-row min-[900px]:items-start min-[900px]:justify-between",
+        "flex min-w-0 flex-col gap-3 border-border border-t pt-3 first:border-t-0 first:pt-0 min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between",
         tone === "warning" &&
           "rounded-[6px] border border-amber-500/30 bg-amber-500/10 p-3 first:border-t first:pt-3",
         tone === "destructive" &&
@@ -51,7 +51,7 @@ export function SettingRow({
         {children && <div className="mt-2">{children}</div>}
       </div>
       {action && (
-        <div className="min-w-0 max-w-full min-[900px]:shrink-0 min-[900px]:pt-0.5">
+        <div className="flex min-h-8 min-w-0 max-w-full items-center min-[900px]:shrink-0">
           {action}
         </div>
       )}
