@@ -10,7 +10,7 @@ import {
 describe("app preference defaults and validation", () => {
   it("keeps the product defaults stable", () => {
     expect(APP_PREFERENCE_DEFAULTS).toEqual({
-      accentColor: "blue",
+      accentColor: "default",
       closeBehavior: "tray",
       reduceMotion: false,
       rememberBounds: false,
@@ -34,7 +34,8 @@ describe("app preference defaults and validation", () => {
     expect(parseBooleanPreference("no", false)).toBe(false);
     expect(parseCloseBehavior("minimize")).toBe("tray");
     expect(parseCloseBehavior(null)).toBe("tray");
-    expect(parseAccentColor("indigo")).toBe("blue");
-    expect(parseAccentColor(null)).toBe("blue");
+    expect(parseAccentColor("indigo")).toBe("default");
+    expect(parseAccentColor("purple")).toBe("default");
+    expect(parseAccentColor(null)).toBe("default");
   });
 });

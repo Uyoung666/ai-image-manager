@@ -1,6 +1,6 @@
 export const ACCENT_COLOR_OPTIONS = [
   {
-    color: "#B4B4B4",
+    color: "#8952EE",
     labelKey: "accentColorDefault",
     value: "default",
   },
@@ -30,9 +30,9 @@ export const ACCENT_COLOR_OPTIONS = [
     value: "orange",
   },
   {
-    color: "#8952EE",
-    labelKey: "accentColorPurple",
-    value: "purple",
+    color: "#B4B4B4",
+    labelKey: "accentColorGray",
+    value: "gray",
   },
   {
     color: "#000000",
@@ -45,7 +45,7 @@ export type AccentColor = (typeof ACCENT_COLOR_OPTIONS)[number]["value"];
 export type AccentTheme = "dark" | "light";
 
 export const ACCENT_COLOR_KEY = "ui.accentColor";
-export const DEFAULT_ACCENT_COLOR: AccentColor = "blue";
+export const DEFAULT_ACCENT_COLOR: AccentColor = "default";
 
 const ACCENT_COLOR_VALUES = new Set<string>(
   ACCENT_COLOR_OPTIONS.map((option) => option.value)
@@ -55,7 +55,7 @@ export function isAccentColorAvailable(
   value: AccentColor,
   theme: AccentTheme
 ): boolean {
-  if (value === "default") {
+  if (value === "gray") {
     return theme === "dark";
   }
   if (value === "black") {

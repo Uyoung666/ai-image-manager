@@ -618,6 +618,7 @@ i18n.use(initReactI18next).init({
         accentColorPink: "粉色",
         accentColorOrange: "橙色",
         accentColorPurple: "紫色",
+        accentColorGray: "灰色",
         accentColorBlack: "黑色",
         settingsUiScale: "界面缩放",
         settingsUiScaleHint:
@@ -2599,6 +2600,7 @@ i18n.use(initReactI18next).init({
         accentColorPink: "Pink",
         accentColorOrange: "Orange",
         accentColorPurple: "Purple",
+        accentColorGray: "Gray",
         accentColorBlack: "Black",
         settingsUiScale: "UI scale",
         settingsUiScaleHint:

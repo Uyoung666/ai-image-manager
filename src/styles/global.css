@@ -30,7 +30,7 @@
   --foreground-tertiary: #85858f;
 
   /* 强调色 */
-  --primary: #5e6ad2;
+  --primary: #8952ee;
   --primary-foreground: #ffffff;
   --primary-hover: color-mix(in srgb, var(--primary) 82%, white);
 
@@ -135,7 +135,7 @@
   --foreground-secondary: #3f3f46;
   --foreground-tertiary: #5f5f69;
 
-  --primary: #5e6ad2;
+  --primary: #8952ee;
   --primary-foreground: #ffffff;
   --primary-hover: color-mix(in srgb, var(--primary) 82%, black);
 
@@ -205,16 +205,10 @@
   color-scheme: light;
 }
 
-/* User-selectable accent presets. The blue preset is the first-use default. */
-:root.dark[data-accent-color="default"] {
-  --primary: #b4b4b4;
-  --primary-foreground: #000000;
-}
-
-:root.light[data-accent-color="default"],
-:root.dark[data-accent-color="black"] {
-  --primary: #3a83f7;
-  --primary-foreground: #000000;
+/* User-selectable accent presets. The purple preset is the first-use default. */
+:root[data-accent-color="default"] {
+  --primary: #8952ee;
+  --primary-foreground: #ffffff;
 }
 
 :root[data-accent-color="blue"] {
@@ -242,9 +236,9 @@
   --primary-foreground: #000000;
 }
 
-:root[data-accent-color="purple"] {
-  --primary: #8952ee;
-  --primary-foreground: #ffffff;
+:root.dark[data-accent-color="gray"] {
+  --primary: #b4b4b4;
+  --primary-foreground: #000000;
 }
 
 :root.light[data-accent-color="black"] {
