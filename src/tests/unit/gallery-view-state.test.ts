@@ -6,6 +6,7 @@ import {
   getStableSearchAppendIds,
   isGalleryRevealPending,
   isSequenceSourceReady,
+  shouldUseImmediateGalleryPhotos,
 } from "@/utils/gallery-view-state";
 
 describe("gallery view state", () => {
@@ -18,6 +19,36 @@ describe("gallery view state", () => {
     expect(canPaginateGalleryPhotos("photos", true)).toBe(true);
     expect(canPaginateGalleryPhotos("photos", false)).toBe(false);
     expect(canPaginateGalleryPhotos("sequences", true)).toBe(false);
+  });
+
+  it("does not render deferred search photos after clearing search", () => {
+    const searchPhotos = [{ id: 1 }];
+    const galleryPhotos = [{ id: 2 }];
+
+    expect(
+      shouldUseImmediateGalleryPhotos({
+        deferredPhotos: searchPhotos,
+        isSearching: false,
+        lastSearchPhotos: searchPhotos,
+        rawPhotos: galleryPhotos,
+      })
+    ).toBe(true);
+    expect(
+      shouldUseImmediateGalleryPhotos({
+        deferredPhotos: searchPhotos,
+        isSearching: false,
+        lastSearchPhotos: null,
+        rawPhotos: galleryPhotos,
+      })
+    ).toBe(false);
+    expect(
+      shouldUseImmediateGalleryPhotos({
+        deferredPhotos: galleryPhotos,
+        isSearching: true,
+        lastSearchPhotos: searchPhotos,
+        rawPhotos: galleryPhotos,
+      })
+    ).toBe(true);
   });
 
   it("keeps the gallery hidden until delayed sequence structure is ready", () => {

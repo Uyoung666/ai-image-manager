@@ -54,6 +54,7 @@ function CullListPage() {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<CullSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newMode, setNewMode] = useState<"duel" | "curate">("duel");
@@ -78,21 +79,32 @@ function CullListPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "cull-list" });
 
-  const loadSessions = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await ipc.client.cull.listSessions({});
-      setSessions(result as CullSession[]);
-    } catch (err) {
-      console.error("[loadSessions] failed:", err);
-      toast.error(t("cullActionFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const loadSessions = useCallback(
+    async (showInitialLoading = false) => {
+      if (showInitialLoading) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      try {
+        const result = await ipc.client.cull.listSessions({});
+        setSessions(result as CullSession[]);
+      } catch (err) {
+        console.error("[loadSessions] failed:", err);
+        toast.error(t("cullActionFailed"));
+      } finally {
+        if (showInitialLoading) {
+          setLoading(false);
+        } else {
+          setRefreshing(false);
+        }
+      }
+    },
+    [t]
+  );
 
   useEffect(() => {
-    loadSessions();
+    loadSessions(true);
   }, [loadSessions]);
 
   const loadFolders = useCallback(async () => {
@@ -249,9 +261,15 @@ function CullListPage() {
       </div>
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-6"
+        aria-busy={refreshing}
+        className="relative min-h-0 flex-1 overflow-y-auto p-3 sm:p-6"
         ref={scrollRef}
       >
+        {refreshing && (
+          <div className="pointer-events-none absolute top-4 right-4 z-10 rounded-full bg-background/80 p-2 shadow-sm">
+            <LoadingSpinner size="sm" />
+          </div>
+        )}
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="max-w-[320px] text-center">

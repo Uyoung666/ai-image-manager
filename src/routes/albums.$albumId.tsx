@@ -80,6 +80,10 @@ function AlbumDetailPage() {
   const [loading, setLoading] = useState(true);
   const { markRouteDirty } = useScrollPosition();
   const routeKey = `album-${albumId}`;
+  const albumNumber = Number(albumId);
+  const activeAlbum = album?.id === albumNumber ? album : null;
+  const pageLoading = loading || !activeAlbum;
+  const canEditAlbum = Boolean(activeAlbum && !activeAlbum.isSmart);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [editingName, setEditingName] = useState(false);
@@ -134,6 +138,9 @@ function AlbumDetailPage() {
 
   useEffect(() => {
     cancelledRef.current = false;
+    setAlbum(null);
+    setConfirmDelete(false);
+    setEditingName(false);
     setLoading(true);
     loadAlbum();
     return () => {
@@ -142,7 +149,7 @@ function AlbumDetailPage() {
   }, [loadAlbum]);
 
   const photos = useMemo(() => {
-    const raw = album?.photos || [];
+    const raw = activeAlbum?.photos || [];
     const sorted = [...raw];
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -157,7 +164,7 @@ function AlbumDetailPage() {
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [album?.photos, sortField, sortOrder]);
+  }, [activeAlbum?.photos, sortField, sortOrder]);
 
   const photosRef = useRef(photos);
   photosRef.current = photos;
@@ -800,38 +807,38 @@ function AlbumDetailPage() {
                   <button
                     className="min-w-0 max-w-full truncate text-left hover:text-primary"
                     onClick={() => {
-                      setNameInput(album?.name || "");
+                      setNameInput(activeAlbum?.name || "");
                       setEditingName(true);
                     }}
                     type="button"
                   >
-                    {album?.name || t("loading")}
+                    {activeAlbum?.name || t("loading")}
                   </button>
                 </h1>
               )}
-              {album?.isSmart && (
+              {activeAlbum?.isSmart && (
                 <span className="flex items-center gap-1 rounded-[4px] bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
                   <Zap className="h-2.5 w-2.5" />
                   {t("smartAlbumShort")}
                 </span>
               )}
             </div>
-            {album?.description && (
+            {activeAlbum?.description && (
               <p className="mt-0.5 truncate text-[12px] text-muted-foreground/70">
-                {album.description}
+                {activeAlbum.description}
               </p>
             )}
             <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-              {album?.isSmart
+              {activeAlbum?.isSmart
                 ? t("smartMatchedPhotos", {
-                    count: album?.matchCount ?? photos.length,
+                    count: activeAlbum?.matchCount ?? photos.length,
                   })
                 : t("photosCount", { count: photos.length })}
             </p>
           </div>
         </div>
         <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
-          {selectedIds.size > 0 && !album?.isSmart && (
+          {activeAlbum && selectedIds.size > 0 && !activeAlbum.isSmart && (
             <button
               className="rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
               onClick={handleRemoveSelected}
@@ -840,7 +847,7 @@ function AlbumDetailPage() {
               {t("removePhotosCount", { count: selectedIds.size })}
             </button>
           )}
-          {album && !confirmDelete && (
+          {activeAlbum && !confirmDelete && (
             <button
               className="flex items-center gap-1.5 rounded-[6px] border border-destructive/30 px-3 py-1.5 text-[12px] text-destructive transition-colors hover:border-destructive hover:bg-destructive/5"
               onClick={() => setConfirmDelete(true)}
@@ -884,9 +891,9 @@ function AlbumDetailPage() {
             expandedSequence={sequenceView.expandedSequence}
             expandedSequenceComplete={sequenceView.expandedSequenceComplete}
             expandingSequenceId={sequenceView.expandingSequenceId}
-            isPlaceholderData={loading}
+            isPlaceholderData={pageLoading}
             loading={
-              loading ||
+              pageLoading ||
               (sequenceView.mode === "sequences" &&
                 sequenceView.sequencesLoading)
             }
@@ -1120,7 +1127,7 @@ function AlbumDetailPage() {
         onBatchDelete={handleDeleteSelected}
         onBatchExport={handleExportSelected}
         onBatchRemoveFromAlbum={
-          album?.isSmart ? undefined : () => handleRemoveSelected()
+          canEditAlbum ? () => handleRemoveSelected() : undefined
         }
         onBatchShare={handleShareSelected}
         onBatchToggleFavorite={() => {
@@ -1168,8 +1175,8 @@ function AlbumDetailPage() {
         }}
         onExport={handleExportPhoto}
         onOpenExplorer={handleOpenExplorer}
-        onRemoveFromAlbum={album?.isSmart ? undefined : handleRemoveFromAlbum}
-        onSetAsAlbumCover={album?.isSmart ? undefined : handleSetAsAlbumCover}
+        onRemoveFromAlbum={canEditAlbum ? handleRemoveFromAlbum : undefined}
+        onSetAsAlbumCover={canEditAlbum ? handleSetAsAlbumCover : undefined}
         onShare={handleShare}
         onToggleFavorite={handleToggleFavorite}
         onUploadToCloud={handleUploadToCloud}

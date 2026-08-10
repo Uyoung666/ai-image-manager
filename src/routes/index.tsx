@@ -82,6 +82,7 @@ import {
   getStableSearchAppendIds,
   isGalleryRevealPending,
   isSequenceSourceReady,
+  shouldUseImmediateGalleryPhotos,
 } from "@/utils/gallery-view-state";
 import { shouldRestoreSavedSearch } from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
@@ -751,8 +752,22 @@ function HomePage() {
     () => (isSearching ? rawPhotos.map((photo) => photo.id) : NO_PHOTO_IDS),
     [isSearching, rawPhotos]
   );
+  const lastSearchPhotosRef = useRef<Photo[] | null>(null);
+  if (isSearching) {
+    lastSearchPhotosRef.current = rawPhotos;
+  }
   const deferredPhotos = useDeferredValue(rawPhotos);
-  const photos = isSearching ? rawPhotos : deferredPhotos;
+  // Do not briefly render the previous search result when clearing search.
+  // Browse updates can still stay deferred, but the deferred value may be the
+  // last committed search array for one or more renders after the source
+  // switches back to the paginated gallery.
+  const useImmediateGalleryPhotos = shouldUseImmediateGalleryPhotos({
+    deferredPhotos,
+    isSearching,
+    lastSearchPhotos: lastSearchPhotosRef.current,
+    rawPhotos,
+  });
+  const photos = useImmediateGalleryPhotos ? rawPhotos : deferredPhotos;
   // Only show stale overlay when the data *source* changes (search↔browse),
   // not during pagination or in-place refreshes.
   const prevIsSearching = useRef(isSearching);

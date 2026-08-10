@@ -159,6 +159,9 @@ function PersonDetailPage() {
   const [loading, setLoading] = useState(true);
   const { markRouteDirty } = useScrollPosition();
   const routeKey = `person-${identityId}`;
+  const identityNumber = Number(identityId);
+  const activeIdentity = identity?.id === identityNumber ? identity : null;
+  const pageLoading = loading || !activeIdentity;
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const composingRef = useRef(false);
@@ -223,6 +226,9 @@ function PersonDetailPage() {
   }, [identityId]);
 
   useEffect(() => {
+    setIdentity(null);
+    setEditingName(false);
+    setFaceNameTarget(null);
     setLoading(true);
     loadIdentity();
     return () => {
@@ -231,7 +237,7 @@ function PersonDetailPage() {
   }, [loadIdentity]);
 
   const photos = useMemo(() => {
-    const raw = identity?.photos || [];
+    const raw = activeIdentity?.photos || [];
     const sorted = [...raw];
     sorted.sort((a, b) => {
       let cmp = 0;
@@ -246,7 +252,7 @@ function PersonDetailPage() {
       return sortOrder === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [identity?.photos, sortField, sortOrder]);
+  }, [activeIdentity?.photos, sortField, sortOrder]);
 
   const photosRef = useRef(photos);
   photosRef.current = photos;
@@ -265,7 +271,7 @@ function PersonDetailPage() {
   >(() => {
     const photoMap = new Map(photos.map((photo) => [photo.id, photo]));
     const overlays = new Map<number, FaceOverlay[]>();
-    for (const face of identity?.faces ?? []) {
+    for (const face of activeIdentity?.faces ?? []) {
       const photo = photoMap.get(face.photoId);
       if (!(photo && photo.width > 0 && photo.height > 0)) {
         continue;
@@ -276,16 +282,16 @@ function PersonDetailPage() {
         y: face.bboxY / photo.height,
         width: face.bboxWidth / photo.width,
         height: face.bboxHeight / photo.height,
-        label: identity?.name || t("unnamedPerson"),
+        label: activeIdentity?.name || t("unnamedPerson"),
       });
       overlays.set(face.photoId, current);
     }
     return overlays;
-  }, [identity?.faces, identity?.name, photos, t]);
+  }, [activeIdentity?.faces, activeIdentity?.name, photos, t]);
 
   const faceIdByPhotoId = useMemo(() => {
     const facesByPhoto = new Map<number, number[]>();
-    for (const face of identity?.faces ?? []) {
+    for (const face of activeIdentity?.faces ?? []) {
       const ids = facesByPhoto.get(face.photoId) ?? [];
       ids.push(face.id);
       facesByPhoto.set(face.photoId, ids);
@@ -295,7 +301,7 @@ function PersonDetailPage() {
         ids.length === 1 ? [[photoId, ids[0]] as const] : []
       )
     );
-  }, [identity?.faces]);
+  }, [activeIdentity?.faces]);
 
   // 共享 Hooks：选中状态、详情面板
   const {
@@ -989,7 +995,7 @@ function PersonDetailPage() {
           </button>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted sm:h-12 sm:w-12">
             <span className="font-semibold text-[18px] text-muted-foreground">
-              {(identity?.name || "?")[0]}
+              {(activeIdentity?.name || "?")[0]}
             </span>
           </div>
           <div className="min-w-0">
@@ -1034,7 +1040,7 @@ function PersonDetailPage() {
                   onClick={() => setEditingName(true)}
                   type="button"
                 >
-                  {identity?.name || t("unnamedPerson")}
+                  {activeIdentity?.name || t("unnamedPerson")}
                 </button>
               </h1>
             )}
@@ -1093,9 +1099,9 @@ function PersonDetailPage() {
             expandingSequenceId={sequenceView.expandingSequenceId}
             faceOverlayByPhotoId={faceOverlayByPhotoId}
             faceOverlaysVisible={showFaceBoxes}
-            isPlaceholderData={loading}
+            isPlaceholderData={pageLoading}
             loading={
-              loading ||
+              pageLoading ||
               (sequenceView.mode === "sequences" &&
                 sequenceView.sequencesLoading)
             }
@@ -1402,7 +1408,7 @@ function PersonDetailPage() {
 
       {faceNameTarget && (
         <FaceReassignDialog
-          currentIdentityId={identity?.id ?? Number(identityId)}
+          currentIdentityId={activeIdentity?.id ?? identityNumber}
           identities={knownIdentities}
           onAssign={handleAssignFace}
           onCreate={handleCreateFaceIdentity}

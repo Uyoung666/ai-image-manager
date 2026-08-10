@@ -21,6 +21,23 @@ export function canPaginateGalleryPhotos(
   return mode !== "sequences" && hasNextPage;
 }
 
+export function shouldUseImmediateGalleryPhotos<T>({
+  deferredPhotos,
+  isSearching,
+  lastSearchPhotos,
+  rawPhotos,
+}: {
+  deferredPhotos: T[];
+  isSearching: boolean;
+  lastSearchPhotos: T[] | null;
+  rawPhotos: T[];
+}): boolean {
+  return (
+    isSearching ||
+    (deferredPhotos === lastSearchPhotos && deferredPhotos !== rawPhotos)
+  );
+}
+
 export function getStableSearchAppendIds({
   currentIds,
   currentSearchKey,
