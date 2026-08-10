@@ -185,7 +185,7 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
         <AppTooltipTrigger asChild>
           <button
             aria-label={t("duplicatePreviewPhoto")}
-            className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,color,background-color] hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-hover:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
               onPreview();

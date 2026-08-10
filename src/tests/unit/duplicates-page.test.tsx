@@ -224,6 +224,10 @@ describe("DuplicatesPage", () => {
     const previewButtons = screen.getAllByRole("button", {
       name: "duplicatePreviewPhoto",
     });
+    expect(previewButtons[1]).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100"
+    );
     fireEvent.click(previewButtons[1]);
 
     expect(
