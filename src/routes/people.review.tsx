@@ -17,6 +17,7 @@ import { faceActions } from "@/actions/faces";
 import {
   type FaceCandidate,
   getContainFrame,
+  getFaceReviewOverlayStyle,
 } from "@/components/face-candidate-dialog";
 import { RouteError } from "@/components/RouteError";
 import { Button } from "@/components/ui/button";
@@ -159,41 +160,40 @@ function ReviewPreview({
     <div className="flex min-h-[220px] min-w-0 flex-1 items-center justify-center overflow-hidden rounded-[12px] border border-border bg-black/90 p-2 shadow-sm sm:min-h-[300px] sm:p-3 xl:min-h-0">
       <div className="relative aspect-[4/3] max-h-full w-full max-w-[min(1200px,calc((100dvh-14rem)*4/3))] overflow-hidden rounded-[8px] bg-black">
         <div className="absolute" style={frame}>
-          <img
-            alt={candidateFilename(candidate)}
-            className="h-full w-full object-contain"
-            height={height}
-            src={toLocalMediaUrl(candidate.photoPath)}
-            width={width}
-          />
-          {faces.map((face) => {
-            const active = face.id === candidate.id;
-            const actionable = reviewableFaceIds.has(face.id);
-            return (
-              <button
-                aria-label={t("faceReviewFace", { index: face.faceIndex + 1 })}
-                className={`absolute rounded-[4px] border-2 transition-all ${photoFaceBoxClass(face, active)} ${actionable ? "cursor-pointer" : "cursor-default"}`}
-                disabled={!actionable}
-                key={face.id}
-                onClick={() => onSelectFace(face)}
-                style={{
-                  height: `${(face.bboxHeight / height) * 100}%`,
-                  left: `${(face.bboxX / width) * 100}%`,
-                  top: `${(face.bboxY / height) * 100}%`,
-                  width: `${(face.bboxWidth / width) * 100}%`,
-                }}
-                type="button"
-              >
-                <span
-                  className={`absolute -top-6 left-0 rounded px-1.5 py-0.5 text-[10px] text-white shadow ${
-                    active ? "bg-primary" : "bg-black/70"
-                  }`}
+          <div className="relative h-full w-full">
+            <img
+              alt={candidateFilename(candidate)}
+              className="h-full w-full object-contain"
+              height={height}
+              src={toLocalMediaUrl(candidate.photoPath)}
+              width={width}
+            />
+            {faces.map((face) => {
+              const active = face.id === candidate.id;
+              const actionable = reviewableFaceIds.has(face.id);
+              return (
+                <button
+                  aria-label={t("faceReviewFace", {
+                    index: face.faceIndex + 1,
+                  })}
+                  className={`absolute rounded-[4px] border-2 transition-all ${photoFaceBoxClass(face, active)} ${actionable ? "cursor-pointer" : "cursor-default"}`}
+                  disabled={!actionable}
+                  key={face.id}
+                  onClick={() => onSelectFace(face)}
+                  style={getFaceReviewOverlayStyle(face, width, height)}
+                  type="button"
                 >
-                  {face.faceIndex + 1}
-                </span>
-              </button>
-            );
-          })}
+                  <span
+                    className={`absolute -top-6 left-0 rounded px-1.5 py-0.5 text-[10px] text-white shadow ${
+                      active ? "bg-primary" : "bg-black/70"
+                    }`}
+                  >
+                    {face.faceIndex + 1}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -253,6 +253,7 @@ function FaceReviewPage() {
     visibleCandidates.findIndex((candidate) => candidate.id === activeId)
   );
   const activeCandidate = visibleCandidates[activeIndex] ?? null;
+  const activeCandidateId = activeCandidate?.id;
   const photoGroups = useMemo(() => {
     const groups = new Map<number, FaceCandidate[]>();
     for (const candidate of visibleCandidates) {
@@ -314,14 +315,16 @@ function FaceReviewPage() {
   }, [activeCandidate]);
 
   useEffect(() => {
-    setSelectedIdentity(
-      activeCandidate?.bestIdentityId
-        ? String(activeCandidate.bestIdentityId)
-        : ""
-    );
+    if (activeCandidateId === undefined) {
+      setSelectedIdentity("");
+      setNewName("");
+      setIdentityQuery("");
+      return;
+    }
+    setSelectedIdentity("");
     setNewName("");
     setIdentityQuery("");
-  }, [activeCandidate]);
+  }, [activeCandidateId]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -779,7 +782,12 @@ function FaceReviewPage() {
                   </div>
                   <Button
                     className="mt-2 w-full"
-                    disabled={busy || !selectedIdentity}
+                    disabled={
+                      busy ||
+                      !identityOptions.some(
+                        (identity) => String(identity.id) === selectedIdentity
+                      )
+                    }
                     onClick={() =>
                       runAction(
                         () =>

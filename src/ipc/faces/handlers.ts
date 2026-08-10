@@ -22,6 +22,8 @@ import {
   refreshFaceIdentityMetadata,
   resetFaceDataForModelSwitch,
 } from "@/services/face-detector";
+import { selectFaceRepresentative } from "@/services/face-identity-representative";
+import { classifyFaceForReview } from "@/services/face-review-policy";
 import {
   getFaceScanScope,
   resolveFaceScanFolderIds,
@@ -30,14 +32,18 @@ import {
 
 const IdSchema = z.object({ id: z.number() });
 
-function parseNumericVector(value: string | null): number[] | null {
+function parseNumericVector(
+  value: string | null,
+  expectedDimensions?: number
+): number[] | null {
   if (!value) {
     return null;
   }
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) &&
-      parsed.every((item) => typeof item === "number")
+      parsed.every((item) => typeof item === "number") &&
+      (expectedDimensions === undefined || parsed.length === expectedDimensions)
       ? parsed
       : null;
   } catch {
@@ -317,12 +323,87 @@ export const listFaceIdentities = os.handler(() => {
     return [];
   }
 
-  // 2. Batch-fetch cover photos (single IN query)
+  // 2. Batch-fetch active members and keep representative photo/bbox pairs
+  // bound to the same face vector. This also repairs legacy rows in memory
+  // when representativeVectorId was not populated.
+
+  // 3. Batch-fetch face bbox per identity + unique photo count
+  // JOIN photos to exclude soft-deleted photos from face count & bbox
+  // Include vectorId so we can look up the exact bbox for representative_vector_id
+  const vectorBboxMap = new Map<
+    number,
+    { x: number; y: number; width: number; height: number }
+  >();
+  const uniquePhotoCountMap = new Map<number, Set<number>>();
+  const membersByIdentity = new Map<
+    number,
+    Array<{
+      confidence: number | null;
+      photoId: number;
+      vectorId: number;
+    }>
+  >();
+  const allMembers = db
+    .select({
+      confidence: faceVectors.confidence,
+      identityId: faceIdentityMembers.identityId,
+      photoId: faceVectors.photoId,
+      vectorId: faceVectors.id,
+      bboxX: faceVectors.bboxX,
+      bboxY: faceVectors.bboxY,
+      bboxWidth: faceVectors.bboxWidth,
+      bboxHeight: faceVectors.bboxHeight,
+    })
+    .from(faceIdentityMembers)
+    .innerJoin(
+      faceVectors,
+      eq(faceVectors.id, faceIdentityMembers.faceVectorId)
+    )
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+    .where(isNull(photos.deletedAt))
+    .all();
+  for (const member of allMembers) {
+    const members = membersByIdentity.get(member.identityId) ?? [];
+    members.push({
+      confidence: member.confidence,
+      photoId: member.photoId,
+      vectorId: member.vectorId,
+    });
+    membersByIdentity.set(member.identityId, members);
+    vectorBboxMap.set(member.vectorId, {
+      x: member.bboxX,
+      y: member.bboxY,
+      width: member.bboxWidth,
+      height: member.bboxHeight,
+    });
+    const photoIds = uniquePhotoCountMap.get(member.identityId) ?? new Set();
+    photoIds.add(member.photoId);
+    uniquePhotoCountMap.set(member.identityId, photoIds);
+  }
+
+  const representativeByIdentity = new Map<
+    number,
+    { photoId: number; vectorId: number }
+  >();
+  for (const identity of identities) {
+    const representative = selectFaceRepresentative(
+      membersByIdentity.get(identity.id) ?? [],
+      {
+        photoId: identity.representativePhotoId,
+        vectorId: identity.representativeVectorId,
+      }
+    );
+    if (representative) {
+      representativeByIdentity.set(identity.id, representative);
+    }
+  }
+
+  // 4. Batch-fetch only the exact representative photos.
   const photoIds = [
     ...new Set(
-      identities
-        .map((i) => i.representativePhotoId)
-        .filter((id): id is number => id != null)
+      [...representativeByIdentity.values()].map(
+        (representative) => representative.photoId
+      )
     ),
   ];
   const photoMap = new Map<
@@ -346,89 +427,32 @@ export const listFaceIdentities = os.handler(() => {
       .from(photos)
       .where(inArray(photos.id, photoIds))
       .all();
-    for (const p of photoRows) {
-      photoMap.set(p.id, p);
+    for (const photo of photoRows) {
+      photoMap.set(photo.id, photo);
     }
   }
 
-  // 3. Batch-fetch face bbox per identity + unique photo count
-  // JOIN photos to exclude soft-deleted photos from face count & bbox
-  // Include vectorId so we can look up the exact bbox for representative_vector_id
-  const bboxMap = new Map<
-    number,
-    { x: number; y: number; width: number; height: number }
-  >();
-  const vectorBboxMap = new Map<
-    number,
-    { x: number; y: number; width: number; height: number }
-  >();
-  const uniquePhotoCountMap = new Map<number, Set<number>>();
-  const allMembers = db
-    .select({
-      identityId: faceIdentityMembers.identityId,
-      photoId: faceVectors.photoId,
-      vectorId: faceVectors.id,
-      bboxX: faceVectors.bboxX,
-      bboxY: faceVectors.bboxY,
-      bboxWidth: faceVectors.bboxWidth,
-      bboxHeight: faceVectors.bboxHeight,
-    })
-    .from(faceIdentityMembers)
-    .innerJoin(
-      faceVectors,
-      eq(faceVectors.id, faceIdentityMembers.faceVectorId)
-    )
-    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
-    .where(isNull(photos.deletedAt))
-    .all();
-  for (const m of allMembers) {
-    if (!bboxMap.has(m.identityId)) {
-      bboxMap.set(m.identityId, {
-        x: m.bboxX,
-        y: m.bboxY,
-        width: m.bboxWidth,
-        height: m.bboxHeight,
-      });
-    }
-    // Build per-vector-id bbox map for representative_vector_id override
-    vectorBboxMap.set(m.vectorId, {
-      x: m.bboxX,
-      y: m.bboxY,
-      width: m.bboxWidth,
-      height: m.bboxHeight,
-    });
-    if (!uniquePhotoCountMap.has(m.identityId)) {
-      uniquePhotoCountMap.set(m.identityId, new Set());
-    }
-    uniquePhotoCountMap.get(m.identityId)?.add(m.photoId);
-  }
-
-  // 4. Assemble results (pure in-memory)
-  // Override faceCount with unique photo count per identity
+  // 5. Assemble results with exact representative metadata.
   return identities.map((identity) => {
-    const photo = identity.representativePhotoId
-      ? photoMap.get(identity.representativePhotoId)
+    const representative = representativeByIdentity.get(identity.id);
+    const photo = representative
+      ? photoMap.get(representative.photoId)
       : undefined;
     const uniquePhotos = uniquePhotoCountMap.get(identity.id);
-    // Use the exact face vector's bbox when representative_vector_id is set
-    let coverBbox = bboxMap.get(identity.id) ?? null;
-    if (identity.representativeVectorId != null) {
-      const repId = Number(identity.representativeVectorId);
-      if (!Number.isNaN(repId)) {
-        const specificBbox = vectorBboxMap.get(repId);
-        if (specificBbox) {
-          coverBbox = specificBbox;
-        }
-      }
-    }
     return {
       ...identity,
+      representativePhotoId: representative?.photoId ?? null,
+      representativeVectorId: representative
+        ? String(representative.vectorId)
+        : null,
       faceCount: uniquePhotos?.size ?? 0,
       coverThumbnailPath: photo?.thumbnailPath || photo?.path || null,
       coverPhotoPath: photo?.path ?? null,
       coverPhotoWidth: photo?.width ?? null,
       coverPhotoHeight: photo?.height ?? null,
-      coverBbox,
+      coverBbox: representative
+        ? (vectorBboxMap.get(representative.vectorId) ?? null)
+        : null,
     };
   });
 });
@@ -614,6 +638,7 @@ export const updateFaceIdentity = os
   .handler(({ input }) => {
     const db = getDatabase();
     const setData: Record<string, unknown> = {};
+    let refreshRepresentative = false;
     if (input.name !== undefined) {
       setData.name = input.name;
       setData.isConfirmed = true;
@@ -622,6 +647,7 @@ export const updateFaceIdentity = os
       setData.representativePhotoId = input.representativePhotoId;
       if (input.representativePhotoId === null) {
         setData.representativeVectorId = null;
+        refreshRepresentative = true;
       } else {
         // Find the face_vector in the chosen photo that belongs to this identity
         const memberFace = db
@@ -634,23 +660,30 @@ export const updateFaceIdentity = os
             faceVectors,
             eq(faceVectors.id, faceIdentityMembers.faceVectorId)
           )
+          .innerJoin(photos, eq(photos.id, faceVectors.photoId))
           .where(
             and(
               eq(faceIdentityMembers.identityId, input.id),
-              eq(faceVectors.photoId, input.representativePhotoId)
+              eq(faceVectors.photoId, input.representativePhotoId),
+              isNull(photos.deletedAt)
             )
           )
           .orderBy(desc(faceVectors.confidence))
           .limit(1)
           .get();
-        setData.representativeVectorId =
-          memberFace?.vectorId == null ? null : String(memberFace.vectorId);
+        if (!memberFace) {
+          throw new Error("Representative photo must belong to this identity");
+        }
+        setData.representativeVectorId = String(memberFace.vectorId);
       }
     }
     db.update(faceIdentities)
       .set(setData)
       .where(eq(faceIdentities.id, input.id))
       .run();
+    if (refreshRepresentative) {
+      refreshFaceIdentityMetadata(input.id);
+    }
     return db
       .select()
       .from(faceIdentities)
@@ -978,42 +1011,32 @@ function queryFaceReviewQueue(input: {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Candidate construction keeps review filtering and ranking together.
   function buildCandidate(row: (typeof rows)[number]) {
     const decision = decisionByKey.get(`${row.photoId}:${row.faceIndex}`);
-    const isIgnored = row.isRejected || decision?.decision === "rejected";
-    const statusMatches =
-      input.status === "ignored" ? !isIgnored : Boolean(isIgnored);
-    if (!statusMatches) {
-      return [];
-    }
-    if (input.status === "pending" && !row.embedding) {
-      return [];
-    }
     const memberIdentityId = memberByFace.get(row.id) ?? null;
-    if (input.status === "pending" && memberIdentityId !== null) {
-      return [];
-    }
-    const confidence = row.detectionConfidence;
+    const embedding = parseNumericVector(
+      row.embedding,
+      model.recognition.vectorDimensions
+    );
+    const classification = classifyFaceForReview({
+      confidence: row.detectionConfidence,
+      confidenceFilter: model.clustering.confidenceFilter,
+      decision: decision?.decision as
+        | "rejected"
+        | "removed_from_identity"
+        | undefined,
+      embedding,
+      hasMember: memberIdentityId !== null,
+      isRejected: row.isRejected,
+    });
     if (
-      input.status === "pending" &&
-      confidence !== null &&
-      confidence < model.clustering.reviewConfidenceFloor
+      classification.status !== input.status ||
+      classification.reason === undefined
     ) {
       return [];
     }
-    let reason: ReviewCategory = "unmatched";
-    if (isIgnored) {
-      reason = "ignored";
-    } else if (decision?.decision === "removed_from_identity") {
-      reason = "removed_from_identity";
-    } else if (
-      confidence !== null &&
-      confidence < model.clustering.confidenceFilter
-    ) {
-      reason = "low_confidence";
-    }
+    const reason: ReviewCategory = classification.reason;
     if (input.category !== "all" && input.category !== reason) {
       return [];
     }
-    const embedding = parseNumericVector(row.embedding);
     const excludedIdentityId = decision?.sourceIdentityId ?? null;
     let bestIdentityId: number | null = null;
     let bestIdentityName: string | null = null;
@@ -1123,18 +1146,16 @@ export const listPhotoFaces = os
       .orderBy(faceVectors.faceIndex)
       .all()
       .map((face) => {
-        let status: "assigned" | "ignored" | "pending" | "skipped" = "pending";
-        if (face.isRejected) {
-          status = "ignored";
-        } else if (face.identityId !== null) {
-          status = "assigned";
-        } else if (
-          !face.embedding ||
-          (face.detectionConfidence !== null &&
-            face.detectionConfidence < model.clustering.reviewConfidenceFloor)
-        ) {
-          status = "skipped";
-        }
+        const status = classifyFaceForReview({
+          confidence: face.detectionConfidence,
+          confidenceFilter: model.clustering.confidenceFilter,
+          embedding: parseNumericVector(
+            face.embedding,
+            model.recognition.vectorDimensions
+          ),
+          hasMember: face.identityId !== null,
+          isRejected: face.isRejected,
+        }).status;
         const { embedding: _embedding, ...publicFace } = face;
         return { ...publicFace, status };
       });

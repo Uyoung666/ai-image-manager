@@ -37,6 +37,7 @@ describe("face embedding batch validation", () => {
   it("never replaces stored faces for failed or partially invalid photos", () => {
     const original = [
       {
+        height: 768,
         id: 1,
         faces: [
           {
@@ -46,6 +47,7 @@ describe("face embedding batch validation", () => {
             faceIndex: 0,
           },
         ],
+        width: 1024,
       },
       {
         id: 2,
@@ -71,5 +73,11 @@ describe("face embedding batch validation", () => {
         (result) => result.id
       )
     ).toEqual([1]);
+    expect(
+      selectReplaceableFaceResults(original, filtered.results)[0]
+    ).toMatchObject({
+      height: 768,
+      width: 1024,
+    });
   });
 });

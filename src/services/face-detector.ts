@@ -13,6 +13,7 @@ import {
   photos,
 } from "@/db/schema";
 import { getActiveFaceModel } from "@/services/ai/face-model-config";
+import { selectFaceRepresentative } from "@/services/face-identity-representative";
 import {
   abortAllFaceWorkers,
   detectFacesWithPool,
@@ -374,7 +375,9 @@ interface FaceResult {
 export interface FaceDetectionResult {
   error?: string;
   faces: FaceResult[];
+  height?: number;
   id: number;
+  width?: number;
 }
 
 export interface DetectionProgress {
@@ -726,6 +729,24 @@ export async function detectFaces(
       // result. Confirmed memberships remain stable while retries cannot leave
       // stale faces behind when a previous worker run failed halfway through.
       for (const photo of successfulResults) {
+        const detectedWidth = photo.width;
+        const detectedHeight = photo.height;
+        if (
+          typeof detectedWidth === "number" &&
+          Number.isFinite(detectedWidth) &&
+          detectedWidth > 0 &&
+          typeof detectedHeight === "number" &&
+          Number.isFinite(detectedHeight) &&
+          detectedHeight > 0
+        ) {
+          db.update(photos)
+            .set({
+              height: detectedHeight,
+              width: detectedWidth,
+            })
+            .where(eq(photos.id, photo.id))
+            .run();
+        }
         const confirmedVectorIds = db
           .select({ id: faceVectors.id })
           .from(faceVectors)
@@ -869,8 +890,9 @@ function clusterUnassignedFaces(): void {
       and(
         isNull(faceIdentityMembers.id),
         eq(faceVectors.isRejected, false),
-        // Filter out low-confidence detections, but keep null (legacy data)
-        sql`(${faceVectors.confidence} IS NULL OR ${faceVectors.confidence} >= ${getActiveFaceModel().clustering.confidenceFilter})`
+        // Automatic grouping is quality-first: legacy faces without a
+        // confidence value remain available for manual review.
+        sql`${faceVectors.confidence} IS NOT NULL AND ${faceVectors.confidence} >= ${getActiveFaceModel().clustering.confidenceFilter}`
       )
     )
     .all();
@@ -904,6 +926,7 @@ function clusterUnassignedFaces(): void {
     reviewByFace.set(`${review.photoId}:${review.faceIndex}`, review);
   }
 
+  const affectedIdentityIds = new Set<number>();
   for (const face of unassignedFaces) {
     const review = reviewByFace.get(`${face.photoId}:${face.faceIndex}`);
     if (
@@ -940,26 +963,7 @@ function clusterUnassignedFaces(): void {
         .values({ identityId: match.identityId, faceVectorId: face.id })
         .onConflictDoNothing()
         .run();
-
-      // If the identity's representative photo was deleted (e.g. folder removed),
-      // restore it with this newly matched face's photo.
-      const cur = db
-        .select({ representativePhotoId: faceIdentities.representativePhotoId })
-        .from(faceIdentities)
-        .where(eq(faceIdentities.id, match.identityId))
-        .get();
-
-      db.update(faceIdentities)
-        .set({
-          faceCount: sql`(SELECT COUNT(DISTINCT fv.photo_id) FROM face_identity_members fim JOIN face_vectors fv ON fv.id = fim.face_vector_id WHERE fim.identity_id = ${match.identityId})`,
-          ...(cur?.representativePhotoId
-            ? {}
-            : { representativePhotoId: face.photoId }),
-        })
-        .where(eq(faceIdentities.id, match.identityId))
-        .run();
-
-      updateIdentityCentroid(match.identityId);
+      affectedIdentityIds.add(match.identityId);
     } else {
       // Create new identity
       const result = db
@@ -980,8 +984,13 @@ function clusterUnassignedFaces(): void {
           .run();
 
         identityCentroids.push({ id: result.insertedId, centroid: embedding });
+        affectedIdentityIds.add(result.insertedId);
       }
     }
+  }
+
+  for (const identityId of affectedIdentityIds) {
+    refreshFaceIdentityMetadata(identityId);
   }
 }
 
@@ -995,7 +1004,13 @@ function updateIdentityCentroid(identityId: number): void {
       faceVectors,
       eq(faceIdentityMembers.faceVectorId, faceVectors.id)
     )
-    .where(eq(faceIdentityMembers.identityId, identityId))
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+    .where(
+      and(
+        eq(faceIdentityMembers.identityId, identityId),
+        isNull(photos.deletedAt)
+      )
+    )
     .all();
 
   const embeddings: number[][] = [];
@@ -1027,7 +1042,11 @@ function updateIdentityCentroid(identityId: number): void {
 export function refreshFaceIdentityMetadata(identityId: number): void {
   const db = getDatabase();
   const identity = db
-    .select({ id: faceIdentities.id })
+    .select({
+      id: faceIdentities.id,
+      representativePhotoId: faceIdentities.representativePhotoId,
+      representativeVectorId: faceIdentities.representativeVectorId,
+    })
     .from(faceIdentities)
     .where(eq(faceIdentities.id, identityId))
     .get();
@@ -1046,7 +1065,13 @@ export function refreshFaceIdentityMetadata(identityId: number): void {
       faceVectors,
       eq(faceIdentityMembers.faceVectorId, faceVectors.id)
     )
-    .where(eq(faceIdentityMembers.identityId, identityId))
+    .innerJoin(photos, eq(photos.id, faceVectors.photoId))
+    .where(
+      and(
+        eq(faceIdentityMembers.identityId, identityId),
+        isNull(photos.deletedAt)
+      )
+    )
     .all();
 
   if (members.length === 0) {
@@ -1062,9 +1087,13 @@ export function refreshFaceIdentityMetadata(identityId: number): void {
     return;
   }
 
-  const representative = [...members].sort(
-    (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)
-  )[0];
+  const representative = selectFaceRepresentative(members, {
+    photoId: identity.representativePhotoId,
+    vectorId: identity.representativeVectorId,
+  });
+  if (!representative) {
+    return;
+  }
   db.update(faceIdentities)
     .set({
       faceCount: new Set(members.map((member) => member.photoId)).size,

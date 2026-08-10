@@ -50,6 +50,7 @@ import {
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useFolders } from "@/hooks/useFolders";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
+import { getFaceFocusedCoverStyle } from "@/utils/face-cover-style";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 interface FaceIdentity {
@@ -125,19 +126,7 @@ const PersonCoverImage = memo(function PersonCoverImage({
     );
   }
 
-  const imgStyle: React.CSSProperties = {
-    objectFit: "cover" as const,
-  };
-
-  if (bbox && pw && ph) {
-    const cx = ((bbox.x + bbox.width / 2) / pw) * 100;
-    const cy = ((bbox.y + bbox.height / 2) / ph) * 100;
-    const faceRatio = Math.max(bbox.width / pw, bbox.height / ph);
-    const zoom = Math.min(Math.max(1 / (faceRatio * 2.2), 1.2), 4);
-    imgStyle.objectPosition = `${cx}% ${cy}%`;
-    imgStyle.transform = `scale(${zoom})`;
-    imgStyle.transformOrigin = `${cx}% ${cy}%`;
-  }
+  const imgStyle = getFaceFocusedCoverStyle(bbox, pw, ph);
 
   return (
     <div className="h-full w-full bg-muted" ref={imgRef}>

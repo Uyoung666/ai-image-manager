@@ -380,7 +380,12 @@ async function processPhoto(photo) {
   const normalizedImage = await normalizeImageInput(imageInput, photo.path);
   const faces = await detectFacesYunet(normalizedImage);
   if (faces.length === 0) {
-    return { id: photo.id, faces: [] };
+    return {
+      id: photo.id,
+      width: normalizedImage.width,
+      height: normalizedImage.height,
+      faces: [],
+    };
   }
 
   // Decode the full image once so all faces can be alignment-warped
@@ -410,7 +415,12 @@ async function processPhoto(photo) {
     });
   }
 
-  return { id: photo.id, faces: results };
+  return {
+    id: photo.id,
+    width: imgW,
+    height: imgH,
+    faces: results,
+  };
 }
 
 // --- Persistent IPC handler ---

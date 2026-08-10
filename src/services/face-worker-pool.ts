@@ -16,7 +16,9 @@ export interface FaceDetectionResult {
     confidence: number;
     embedding?: number[] | null;
   }>;
+  height?: number;
   id: number;
+  width?: number;
 }
 
 type WorkerStatus = "initializing" | "idle" | "busy" | "dead";

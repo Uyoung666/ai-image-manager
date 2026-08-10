@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getContainFrame } from "@/components/face-candidate-dialog";
+import {
+  getContainFrame,
+  getFaceReviewOverlayStyle,
+} from "@/components/face-candidate-dialog";
 import { getFaceOverlayStyle } from "@/components/PhotoCard";
 import { createPhotoGridItemStateVersion } from "@/components/PhotoGrid";
 
@@ -19,6 +22,50 @@ describe("face review media layout", () => {
     expect(frame.top).toBe("0%");
     expect(Number.parseFloat(frame.width)).toBeCloseTo(42.19, 2);
     expect(Number.parseFloat(frame.left)).toBeCloseTo(28.91, 2);
+  });
+
+  it("maps face boxes inside the image wrapper", () => {
+    const style = getFaceReviewOverlayStyle(
+      { bboxHeight: 160, bboxWidth: 90, bboxX: 450, bboxY: 800 },
+      900,
+      1600
+    );
+
+    expect(Number.parseFloat(style.left)).toBeCloseTo(50, 2);
+    expect(Number.parseFloat(style.top)).toBeCloseTo(50, 2);
+    expect(Number.parseFloat(style.width)).toBeCloseTo(10, 2);
+    expect(Number.parseFloat(style.height)).toBeCloseTo(10, 2);
+  });
+
+  it("clips invalid face boxes to the photo bounds", () => {
+    const style = getFaceReviewOverlayStyle(
+      { bboxHeight: 300, bboxWidth: 300, bboxX: -100, bboxY: -50 },
+      1000,
+      1000
+    );
+
+    expect(style.left).toBe("0%");
+    expect(style.top).toBe("0%");
+    expect(Number.parseFloat(style.width)).toBeCloseTo(20, 2);
+    expect(Number.parseFloat(style.height)).toBeCloseTo(25, 2);
+  });
+
+  it("falls back safely when a face box contains non-finite values", () => {
+    const style = getFaceReviewOverlayStyle(
+      {
+        bboxHeight: Number.NaN,
+        bboxWidth: Number.POSITIVE_INFINITY,
+        bboxX: Number.NaN,
+        bboxY: 20,
+      },
+      1000,
+      1000
+    );
+
+    expect(style.left).toBe("0%");
+    expect(style.top).toBe("2%");
+    expect(style.width).toBe("0%");
+    expect(style.height).toBe("0%");
   });
 
   it("maps face boxes to the visible object-cover area", () => {
