@@ -84,6 +84,20 @@ const inFlightDuelPreviews = new Map<
   string,
   Promise<DuelPreviewResult | null>
 >();
+let cacheClearPromise: Promise<void> | null = null;
+
+async function waitForCacheClear(): Promise<void> {
+  if (cacheClearPromise) {
+    await cacheClearPromise;
+  }
+}
+
+async function waitForActiveGenerations(): Promise<void> {
+  await Promise.allSettled([
+    ...inFlightThumbnails.values(),
+    ...inFlightDuelPreviews.values(),
+  ]);
+}
 
 // ── 生成并发控制 ────────────────────────────────────────────────────────
 // 防止大量导入时 sharp 实例爆炸，限制同时执行的生成任务数。
@@ -279,6 +293,7 @@ export function getDuelPreviewStrategy(
 export async function generateDuelPreview(
   imagePath: string
 ): Promise<DuelPreviewResult | null> {
+  await waitForCacheClear();
   const cacheKey = `${imagePath}_duel`;
   const previewPath = getDuelPreviewPath(imagePath);
 
@@ -496,6 +511,7 @@ export async function generateThumbnail(
   size: ThumbSize = "md",
   options: ThumbnailOptions = {}
 ): Promise<ThumbnailResult> {
+  await waitForCacheClear();
   const cacheKey = `${imagePath}_${size}`;
 
   // L1: memory
@@ -712,35 +728,53 @@ export async function clearThumbnailDiskCache(): Promise<{
   fileCount: number;
   freedMB: number;
 }> {
-  let fileCount = 0;
-  let totalBytes = 0;
-
-  if (thumbnailDir) {
-    try {
-      await fs.promises.access(thumbnailDir);
-      const entries = await fs.promises.readdir(thumbnailDir);
-      for (const entry of entries) {
-        const entryPath = path.join(thumbnailDir, entry);
-        try {
-          const stat = await fs.promises.stat(entryPath);
-          totalBytes += stat.size;
-          await fs.promises.unlink(entryPath);
-          fileCount++;
-        } catch {
-          /* skip locked / inaccessible files */
-        }
-      }
-    } catch {
-      /* directory inaccessible */
-    }
+  while (cacheClearPromise) {
+    await cacheClearPromise;
   }
 
-  memoryCache?.clear();
+  const clearPromise = (async () => {
+    await waitForActiveGenerations();
 
-  return {
-    fileCount,
-    freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
-  };
+    let fileCount = 0;
+    let totalBytes = 0;
+
+    if (thumbnailDir) {
+      try {
+        await fs.promises.access(thumbnailDir);
+        const entries = await fs.promises.readdir(thumbnailDir);
+        for (const entry of entries) {
+          const entryPath = path.join(thumbnailDir, entry);
+          try {
+            const stat = await fs.promises.stat(entryPath);
+            totalBytes += stat.size;
+            await fs.promises.unlink(entryPath);
+            fileCount++;
+          } catch {
+            /* skip locked / inaccessible files */
+          }
+        }
+      } catch {
+        /* directory inaccessible */
+      }
+    }
+
+    memoryCache?.clear();
+
+    return {
+      fileCount,
+      freedMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
+    };
+  })();
+
+  const barrier = clearPromise.then(() => undefined);
+  cacheClearPromise = barrier;
+  try {
+    return await clearPromise;
+  } finally {
+    if (cacheClearPromise === barrier) {
+      cacheClearPromise = null;
+    }
+  }
 }
 
 /** Build the set of expected thumbnail filenames from DB photo records. */

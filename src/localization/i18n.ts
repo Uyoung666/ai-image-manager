@@ -671,7 +671,7 @@ i18n.use(initReactI18next).init({
         settingsIndexing: "索引",
         settingsThumbnailCache: "缩略图缓存",
         settingsThumbnailCacheHint:
-          "用于快速显示照片预览；同一照片可能因不同尺寸或对比预览占用多个文件。",
+          "用于快速显示照片预览；同一照片可能因不同尺寸或对比预览占用多个文件。清除后浏览照片时会按需重新生成。",
         settingsThumbnailCacheLocation: "缓存位置",
         settingsThumbnailCacheSize: "占用大小",
         settingsIndexDbLocation: "数据库位置",
@@ -2651,7 +2651,7 @@ i18n.use(initReactI18next).init({
         settingsIndexing: "Indexing",
         settingsThumbnailCache: "Thumbnail Cache",
         settingsThumbnailCacheHint:
-          "Used for fast photo previews; one photo may have multiple files for different sizes or comparison previews.",
+          "Used for fast photo previews; one photo may have multiple files for different sizes or comparison previews. Cleared files are regenerated on demand when photos are viewed.",
         settingsThumbnailCacheLocation: "Cache Location",
         settingsThumbnailCacheSize: "Size",
         settingsIndexDbLocation: "Database Location",

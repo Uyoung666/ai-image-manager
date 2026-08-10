@@ -116,7 +116,10 @@ function StorageSettingsPage() {
         orphanSizeBytes: number;
         totalFiles: number;
       }>,
-    staleTime: 300_000,
+    // This is a live disk scan. Do not reuse a cached result when the route is
+    // mounted again after a cleanup or an external file change.
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
 
@@ -137,7 +140,8 @@ function StorageSettingsPage() {
         setClearCacheStatus(message);
         toast.success(message);
       }
-      queryClient.invalidateQueries({ queryKey: ["indexStats"] });
+      await queryClient.invalidateQueries({ queryKey: ["indexStats"] });
+      await queryClient.invalidateQueries({ queryKey: ["orphanThumbnails"] });
     } catch {
       setClearCacheStatus(t("clearCacheFailed"));
       toast.error(t("clearCacheFailed"));
@@ -165,8 +169,11 @@ function StorageSettingsPage() {
           size: result.freedMB,
         })
       );
-      refetchOrphans();
-      queryClient.invalidateQueries({ queryKey: ["indexStats"] });
+      const refreshed = await refetchOrphans();
+      if (refreshed.data) {
+        queryClient.setQueryData(["orphanThumbnails"], refreshed.data);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["indexStats"] });
     } catch {
       setOrphanCleanStatus(t("clearCacheFailed"));
       toast.error(t("clearCacheFailed"));
