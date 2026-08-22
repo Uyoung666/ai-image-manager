@@ -18,6 +18,18 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version=3.14.0 --yes --no-progress
+          "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify WiX Toolset
+        shell: pwsh
+        run: |
+          Get-Command candle.exe -ErrorAction Stop
+          Get-Command light.exe -ErrorAction Stop
+
       - name: Install and build
         run: npm ci
 
@@ -28,3 +40,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run publish
+
+      - name: Verify Windows update payload
+        shell: pwsh
+        run: |
+          $squirrelDirectory = Join-Path $PWD "out\make\squirrel.windows\x64"
+          $manifest = Join-Path $squirrelDirectory "RELEASES"
+          $fullPackage = Get-ChildItem -LiteralPath $squirrelDirectory -File -Filter "*-full.nupkg"
+          $setup = Get-ChildItem -LiteralPath $squirrelDirectory -File -Filter "*Setup.exe"
+
+          if (-not (Test-Path -LiteralPath $manifest)) {
+            throw "Missing Squirrel RELEASES manifest; GitHub auto-update would not work."
+          }
+          if (-not $fullPackage) {
+            throw "Missing Squirrel full NUPKG; GitHub auto-update would not work."
+          }
+          if (-not $setup) {
+            throw "Missing Squirrel Setup.exe; the GitHub update release is incomplete."
+          }
+
+          Write-Host "Verified RELEASES, full NUPKG, and Setup.exe for GitHub updates."

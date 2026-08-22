@@ -54,7 +54,7 @@ The one-day 10,000-photo observation included import, thumbnail/EXIF/hash prepar
 ## 使用与兼容性说明 / Usage and Compatibility Notes
 
 - 支持 Windows 10 / 11 64 位 / Windows 10 or 11, 64-bit.
-- 安装版适合长期使用，便携版可解压运行 / Installer and portable builds are available.
+- 一键安装版 `Setup.exe`、可选目录 `.msi` 与便携版 `.zip` 并行提供；不要同时安装 Setup 和 MSI / One-click `Setup.exe`, custom-location `.msi`, and portable `.zip` builds are available; do not install both Setup and MSI.
 - 发布包包含当前版本所需 AI 模型 / Required AI model assets are included in the release package.
 - DirectML GPU 加速为可选能力，失败时自动回退 CPU / DirectML GPU acceleration is optional, with CPU fallback on failure.
 - RAW 预览主要依赖文件内嵌 JPEG / RAW previews primarily depend on embedded JPEG previews.

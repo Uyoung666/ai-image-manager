@@ -4,6 +4,7 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
+import { MakerWix } from "@electron-forge/maker-wix";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { VitePlugin } from "@electron-forge/plugin-vite";
@@ -304,6 +305,50 @@ const config: ForgeConfig = {
 
   makers: [
     new MakerSquirrel({ name: "ai-image-manager" }),
+    new MakerWix({
+      appUserModelId: "com.aiimagemanager.app",
+      beforeCreate: (creator) => {
+        creator.wixTemplate = creator.wixTemplate
+          .replace(
+            'Name = "{{ApplicationName}} (Machine - MSI)"',
+            'Name="{{ApplicationName}} 安装程序"'
+          )
+          .replace(
+            'Description="The complete package."',
+            'Description="安装 AI Image Manager 及所选功能。"'
+          )
+          .replace('Title="Main Application"', 'Title="主程序"')
+          .replace(
+            'Description="The main components to run the applications."',
+            'Description="运行 AI Image Manager 所需的核心文件。"'
+          );
+        creator.updaterTemplate = creator.updaterTemplate
+          .replace('Title="Auto Update"', 'Title="自动更新"')
+          .replace(
+            'Description="Installs an auto-updater component and sets necesssary file system permissions."',
+            'Description="安装自动更新组件，并设置所需的文件夹权限。"'
+          );
+      },
+      cultures: "zh-cn",
+      defaultInstallMode: "perUser",
+      exe: "ai-image-manager.exe",
+      features: { autoLaunch: false, autoUpdate: true },
+      icon: "assets/icon.ico",
+      installLevel: 3,
+      language: 2052,
+      manufacturer: "Uyoung",
+      programFilesFolderName: "AI Image Manager",
+      shortName: "AIImageManager",
+      shortcutName: "AI Image Manager",
+      ui: {
+        chooseDirectory: true,
+        images: {
+          background: path.resolve("assets/installers/wix-dialog.jpg"),
+          banner: path.resolve("assets/installers/wix-banner.jpg"),
+        },
+      },
+      upgradeCode: "57daa2e0-55c6-4398-b52b-4eb0b052ad8c",
+    }),
     new MakerZIP({}),
     new MakerRpm({}),
     new MakerDeb({}),

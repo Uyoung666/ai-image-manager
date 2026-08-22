@@ -7,6 +7,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "assets:wix": "node scripts/generate-wix-branding.mjs",
     "start": "electron-forge start",
     "dev": "chcp 65001 > nul & electron-forge start",
     "package": "electron-forge package",
@@ -98,6 +99,7 @@
     "@electron-forge/maker-deb": "^7.11.1",
     "@electron-forge/maker-rpm": "^7.11.2",
     "@electron-forge/maker-squirrel": "^7.11.1",
+    "@electron-forge/maker-wix": "^7.11.2",
     "@electron-forge/maker-zip": "^7.11.1",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
     "@electron-forge/plugin-fuses": "^7.11.1",

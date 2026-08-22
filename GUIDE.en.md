@@ -65,6 +65,18 @@ RAW thumbnails, previews, and AI analysis primarily use embedded JPEG previews r
 
 ## Quick start
 
+### 0. Choose an installation method
+
+- Download `Setup.exe` for a one-click per-user installation with in-app updates. This is the recommended option for most users.
+- Download the `.msi` when the program itself must be installed on another drive. Its auto-update component is installed by default. Choose a directory writable by the current user; protected locations such as Program Files may still require administrator access.
+- Do not install both packages. Existing `Setup.exe` users should keep using in-app updates and do not need to migrate to MSI.
+
+The program installation directory contains the app itself. The data directory selected during first-run onboarding contains the database, thumbnails, vector indexes, logs, and models. Changing one does not automatically change the other.
+
+Clients installed from either MSI or Setup check GitHub for updates at startup and periodically while running. Only a formally published, higher-version GitHub Release that is not a draft or prerelease is eligible; pushing code or a tag alone does not update clients. Before publishing, confirm that the Release contains `RELEASES`, a full `.nupkg`, and `Setup.exe`.
+
+If the Auto Update feature showed a red X in an earlier MSI, install the corrected MSI over that copy once before relying on automatic updates.
+
 ### 1. First-run onboarding
 
 The first-run flow covers:

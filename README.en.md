@@ -39,8 +39,15 @@ The v2.0.0 documentation, performance data, and privacy statements describe the 
 
 Download v2.0.0 from [GitHub Releases](https://github.com/Uyoung666/ai-image-manager/releases/latest):
 
-- **Installer**: recommended for long-term use, with Windows installation, shortcuts, and update support.
-- **Portable build**: extract and run without installing into the system installation directory.
+- **One-click installer (`Setup.exe`)**: recommended for most users. It installs for the current Windows user without a wizard and supports in-app updates.
+- **Custom-location installer (`.msi`)**: provides a wizard and lets you choose a writable location on another drive. It installs per user with in-app auto-updates enabled by default and does not require administrator access for user-writable folders.
+- **Portable build (`.zip`)**: extract and run without installing into the system installation directory.
+
+`Setup.exe` and `.msi` are alternative installation methods; do not install both on the same computer. Existing `Setup.exe` users should keep using in-app updates and do not need to migrate to MSI. The program installation directory contains the application itself, while the application data directory selected on first launch stores the database, thumbnails, vector index, and local models.
+
+Both installation methods receive new GitHub versions through in-app updates. Clients only see a formally published GitHub Release with a valid SemVer tag that is neither a draft nor a prerelease; an ordinary code push or a Release that remains in Draft does not trigger an update. Every Windows Release must include `RELEASES`, `*-full.nupkg`, and `*Setup.exe`, and the publishing workflow validates that payload automatically.
+
+If an earlier MSI was installed while its Auto Update feature showed a red X, install the corrected MSI over it once. From that installation onward, the app can detect, download, and apply future versions automatically.
 
 On first launch, the setup flow helps you:
 

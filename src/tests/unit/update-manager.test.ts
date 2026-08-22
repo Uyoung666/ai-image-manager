@@ -11,10 +11,12 @@ import {
 const mocks = vi.hoisted(() => {
   const listeners = new Map<string, (...args: unknown[]) => void>();
   return {
+    checkForUpdates: vi.fn(),
     emit(event: string, ...args: unknown[]) {
       listeners.get(event)?.(...args);
     },
     listeners,
+    setFeedURL: vi.fn(),
     setUpdateState: vi.fn(),
   };
 });
@@ -25,12 +27,12 @@ vi.mock("electron", () => ({
     isPackaged: true,
   },
   autoUpdater: {
-    checkForUpdates: vi.fn(),
+    checkForUpdates: mocks.checkForUpdates,
     on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
       mocks.listeners.set(event, listener);
     }),
     quitAndInstall: vi.fn(),
-    setFeedURL: vi.fn(),
+    setFeedURL: mocks.setFeedURL,
   },
   BrowserWindow: {
     getAllWindows: () => [],
@@ -67,6 +69,13 @@ afterEach(() => {
 });
 
 describe("update manager autoUpdater event payloads", () => {
+  it("uses the public GitHub update feed and checks immediately", () => {
+    expect(mocks.setFeedURL).toHaveBeenCalledWith({
+      url: "https://update.electronjs.org/Uyoung666/ai-image-manager/win32-x64/2.0.0",
+    });
+    expect(mocks.checkForUpdates).toHaveBeenCalledOnce();
+  });
+
   it("does not invent metadata for update-available", () => {
     mocks.emit("update-available", { type: "event" });
 
