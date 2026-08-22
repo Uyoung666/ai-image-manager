@@ -1,0 +1,580 @@
+:root[data-nebula-glass="active"] {
+  --nebula-backdrop-blur: 0px;
+  --nebula-backdrop-brightness: 1;
+  --nebula-glass-blur: 20px;
+  --nebula-depth: 0.25;
+  --nebula-fill-dark: 7%;
+  --nebula-fill-light: 5.88%;
+  --nebula-frost: 0.14;
+  --nebula-hue: 177deg;
+  --background: #0c121b;
+  --background-secondary: #111a27;
+  --surface: #162130;
+  --surface-hover: #1c2a3d;
+  --surface-elevated: #263a52;
+  --foreground: #eaf2fc;
+  --foreground-secondary: #afc3dc;
+  --foreground-tertiary: #8399b5;
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-hover);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--background-secondary);
+  --secondary-foreground: var(--foreground);
+  --muted: #152235;
+  --muted-foreground: var(--foreground-secondary);
+  --border-subtle: rgb(148 180 220 / 0.14);
+  --border-default: rgb(148 180 220 / 0.22);
+  --border-strong: rgb(148 180 220 / 0.32);
+  --border: var(--border-subtle);
+  --input: var(--border-default);
+  --ring: var(--primary);
+  --sidebar: transparent;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: rgb(148 180 220 / 0.1);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border-subtle);
+  --workspace-background: transparent;
+  --gallery-canvas: transparent;
+  --gallery-canvas-border: rgb(148 180 220 / 0.32);
+  --gallery-canvas-highlight: rgb(255 255 255 / 0.07);
+  color-scheme: dark;
+}
+
+:root.light[data-nebula-glass="active"] {
+  --background: #f4f8fd;
+  --background-secondary: #ecf2fa;
+  --surface: #ffffff;
+  --surface-hover: #ecf2fa;
+  --surface-elevated: #e2ebf7;
+  --foreground: #13243e;
+  --foreground-secondary: #40597a;
+  --foreground-tertiary: #5d7696;
+  --card: var(--surface);
+  --popover: #ffffff;
+  --secondary: var(--background-secondary);
+  --muted: #e9f1fa;
+  --border-subtle: rgb(19 45 83 / 0.13);
+  --border-default: rgb(19 45 83 / 0.2);
+  --border-strong: rgb(19 45 83 / 0.26);
+  --sidebar-accent: rgb(19 45 83 / 0.08);
+  --gallery-canvas-border: rgb(19 45 83 / 0.26);
+  --gallery-canvas-highlight: rgb(255 255 255 / 0.5);
+  color-scheme: light;
+}
+
+:root[data-nebula-glass="active"] body,
+:root[data-nebula-glass="active"] #app,
+:root[data-nebula-glass="active"] .home-workspace,
+:root[data-nebula-glass="active"] .settings-page,
+:root[data-nebula-glass="active"] [data-surface="app"],
+:root[data-nebula-glass="active"] [data-surface="content"],
+:root[data-nebula-glass="active"] [data-surface="settings"],
+:root[data-nebula-glass="active"] [data-surface="page"] {
+  background: transparent !important;
+}
+
+:root[data-nebula-glass="active"] #app,
+:root[data-plugin-active] #app {
+  position: relative;
+  z-index: 1;
+}
+
+/* Backdrop */
+.nebula-glass-backdrop,
+.plugin-declarative-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--background);
+  isolation: isolate;
+}
+
+.nebula-glass-aurora,
+.nebula-glass-fluid-canvas,
+.nebula-glass-wallpaper,
+.plugin-declarative-backdrop-asset,
+.plugin-declarative-backdrop-aurora {
+  position: absolute;
+  inset: -2%;
+  width: 104%;
+  height: 104%;
+}
+
+.nebula-glass-aurora {
+  background:
+    radial-gradient(
+      ellipse 46% 70% at 18% 34%,
+      hsl(var(--nebula-hue) 78% 42%),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 56% 72% at 76% 20%,
+      hsl(calc(var(--nebula-hue) + 16deg) 68% 28%),
+      transparent 70%
+    ),
+    linear-gradient(140deg, #001d23, #03151b 56%, #020e14);
+  filter: blur(var(--nebula-backdrop-blur))
+    brightness(var(--nebula-backdrop-brightness));
+}
+
+:root.light[data-nebula-glass="active"] .nebula-glass-aurora {
+  background:
+    radial-gradient(
+      ellipse 56% 74% at 14% 36%,
+      hsl(var(--nebula-hue) 62% 58%),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 62% 74% at 74% 18%,
+      hsl(calc(var(--nebula-hue) + 12deg) 70% 78%),
+      transparent 72%
+    ),
+    linear-gradient(140deg, #26aab0, #b5e9eb 58%, #f8ffff);
+}
+
+.nebula-glass-fluid-canvas {
+  object-fit: cover;
+  filter: blur(var(--nebula-backdrop-blur))
+    brightness(var(--nebula-backdrop-brightness));
+  transform: translateZ(0);
+}
+
+.nebula-glass-wallpaper {
+  object-fit: cover;
+  filter: blur(var(--nebula-backdrop-blur))
+    brightness(var(--nebula-backdrop-brightness)) saturate(1.06);
+  transform: translateZ(0);
+}
+
+.plugin-declarative-backdrop-asset {
+  object-fit: cover;
+  opacity: 0.7;
+  filter: blur(18px) saturate(1.12);
+}
+
+.plugin-declarative-backdrop-aurora {
+  background:
+    radial-gradient(circle at 18% 18%, rgb(0 153 162 / 0.27), transparent 42%),
+    radial-gradient(circle at 76% 26%, rgb(10 85 101 / 0.24), transparent 44%),
+    radial-gradient(circle at 52% 82%, rgb(44 178 179 / 0.18), transparent 48%);
+  filter: blur(32px);
+}
+
+.nebula-glass-grain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.nebula-glass-grain {
+  background-image: radial-gradient(
+    rgb(255 255 255 / 0.28) 0.45px,
+    transparent 0.55px
+  );
+  background-size: 5px 5px;
+  mix-blend-mode: soft-light;
+  opacity: 0.014;
+}
+
+/* Surface recipe: one owner paints each pane; descendants stay clear. */
+:root[data-nebula-glass="active"] {
+  --nebula-mica-fill: color-mix(
+    in srgb,
+    rgb(34 38 47) var(--nebula-fill-dark),
+    transparent
+  );
+  --nebula-mica-border: rgb(148 180 220 / 0.32);
+  --nebula-mica-highlight: rgb(255 255 255 / 0.07);
+  --nebula-mica-shadow: 0 10px 36px rgb(0 0 0 / 0.5);
+  --nebula-control-fill: rgb(148 180 220 / 0.08);
+  --nebula-card-fill: rgb(17 26 39 / 0.38);
+  --nebula-overlay-fill: rgb(17 26 39 / 0.78);
+}
+
+:root.light[data-nebula-glass="active"] {
+  --nebula-mica-fill: color-mix(
+    in srgb,
+    white var(--nebula-fill-light),
+    transparent
+  );
+  --nebula-mica-border: rgb(19 45 83 / 0.26);
+  --nebula-mica-highlight: rgb(255 255 255 / 0.5);
+  --nebula-mica-shadow: 0 10px 36px rgb(19 45 83 / 0.16);
+  --nebula-control-fill: rgb(255 255 255 / 0.24);
+  --nebula-card-fill: rgb(255 255 255 / 0.3);
+  --nebula-overlay-fill: rgb(244 248 253 / 0.8);
+}
+
+:root[data-nebula-glass="active"] [data-surface="sidebar"],
+:root[data-nebula-glass="active"] [data-surface="gallery"],
+:root[data-nebula-glass="active"] [data-surface="card"],
+:root[data-nebula-glass="active"] [data-surface="inspector"],
+:root[data-nebula-glass="active"] [data-surface="panel"] {
+  background: var(--nebula-mica-fill) !important;
+  border-color: var(--nebula-mica-border) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nebula-mica-highlight),
+    var(--nebula-mica-shadow);
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.16);
+  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.16);
+}
+
+:root[data-nebula-glass="active"] [data-surface="sidebar-shell"],
+:root[data-nebula-glass="active"] [data-surface="sidebar-rail"],
+:root[data-nebula-glass="active"] [data-surface="sidebar-resources"],
+:root[data-nebula-glass="active"] [data-surface="resource-tree"],
+:root[data-nebula-glass="active"] [data-surface="toolbar-content"],
+:root[data-nebula-glass="active"]
+  [data-surface="sidebar"]
+  > [data-surface="sidebar"],
+:root[data-nebula-glass="active"] [data-surface="card"] [data-surface="card"] {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-nebula-glass="active"] .surface-elevated::before,
+:root[data-nebula-glass="active"] [data-surface="overlay"]::before {
+  display: none;
+}
+
+/* Home floating pane geometry */
+:root[data-nebula-glass="active"][data-nebula-mode="mica"]
+  .home-workspace-content {
+  gap: 12px;
+}
+
+:root[data-nebula-glass="active"][data-nebula-mode="mica"]
+  .home-workspace-content
+  > [data-surface="sidebar"] {
+  margin: 12px 0 12px 12px;
+  overflow: hidden;
+  border: 1px solid var(--nebula-mica-border);
+  border-radius: 20px;
+}
+
+:root[data-nebula-glass="active"][data-nebula-mode="mica"]
+  .home-gallery-canvas {
+  margin: 12px 12px 12px 0;
+  overflow: hidden;
+  border: 1px solid var(--nebula-mica-border);
+  border-radius: 20px;
+}
+
+:root[data-nebula-glass="active"] .sidebar-bg,
+:root[data-nebula-glass="active"] .sidebar-rail,
+:root[data-nebula-glass="active"] .home-gallery-toolbar-layer,
+:root[data-nebula-glass="active"] .home-gallery-toolbar-layer.is-scrolled,
+:root[data-nebula-glass="active"] .home-gallery-body {
+  background: transparent !important;
+}
+
+:root[data-nebula-glass="active"] .sidebar-rail {
+  border-right-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 54%,
+    transparent
+  ) !important;
+}
+
+:root[data-nebula-glass="active"] .sidebar-resize-handle::after {
+  opacity: 0.35;
+}
+
+:root[data-nebula-glass="active"] .home-gallery-toolbar-layer,
+:root[data-nebula-glass="active"] .home-gallery-toolbar-layer.is-scrolled {
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
+}
+
+:root[data-nebula-glass="active"] .home-unified-toolbar {
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 52%,
+    transparent
+  ) !important;
+  box-shadow: none;
+}
+
+:root[data-nebula-glass="active"] [data-surface="control"],
+:root[data-nebula-glass="active"] .home-search-input,
+:root[data-nebula-glass="active"] .home-search-input.is-active,
+:root[data-nebula-glass="active"] [data-surface="segmented-control"] {
+  background: var(--nebula-control-fill) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 65%,
+    transparent
+  ) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.08);
+}
+
+:root[data-nebula-glass="active"] [data-surface="segmented-control"] .bg-card {
+  background: color-mix(
+    in srgb,
+    var(--nebula-control-fill) 72%,
+    var(--foreground) 8%
+  ) !important;
+}
+
+:root[data-nebula-glass="active"] [data-surface="statusbar"] {
+  background: color-mix(
+    in srgb,
+    var(--nebula-mica-fill) 76%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 50%,
+    transparent
+  ) !important;
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur));
+  backdrop-filter: blur(var(--nebula-glass-blur));
+}
+
+:root[data-nebula-glass="active"] .glass-surface,
+:root[data-nebula-glass="active"] .glass-surface-heavy {
+  background: var(--nebula-card-fill) !important;
+  border-color: var(--nebula-mica-border) !important;
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.14);
+  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.14);
+}
+
+:root[data-nebula-glass="active"] .home-detail-panel-container {
+  background: transparent !important;
+  border-left-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-nebula-glass="active"] [data-surface="media-well"] {
+  background: rgb(5 11 18 / 0.82) !important;
+  border-color: rgb(148 180 220 / 0.14) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-nebula-glass="active"] [data-surface="settings"] .bg-background {
+  background-color: color-mix(
+    in srgb,
+    var(--nebula-card-fill) 62%,
+    transparent
+  ) !important;
+}
+
+/* Ordinary pages and cards. Immersive media surfaces are excluded. */
+:root[data-nebula-glass="active"] [data-surface="page"].bg-background,
+:root[data-nebula-glass="active"]
+  main[data-surface="content"]
+  > .bg-background {
+  background: transparent !important;
+}
+
+/* Cull is a color-critical immersive workspace. Keep the whole session on
+   one neutral material instead of mixing the animated backdrop with black. */
+:root[data-nebula-glass="active"]
+  [data-surface="immersive"][data-immersive-kind="cull"] {
+  --background: #000000;
+  --background-secondary: #07090c;
+  --surface: #0b0e12;
+  --surface-hover: #12161c;
+  --surface-elevated: #181d24;
+  --foreground: #f1f4f8;
+  --foreground-secondary: #aab2bd;
+  --foreground-tertiary: #7b8490;
+  --card: #0b0e12;
+  --card-foreground: var(--foreground);
+  --popover: #12161c;
+  --popover-foreground: var(--foreground);
+  --secondary: #0b0e12;
+  --secondary-foreground: var(--foreground);
+  --muted: #11151a;
+  --muted-foreground: #9ca5b1;
+  --border-subtle: rgb(255 255 255 / 0.08);
+  --border-default: rgb(255 255 255 / 0.12);
+  --border-strong: rgb(255 255 255 / 0.18);
+  --border: var(--border-subtle);
+  --input: var(--border-default);
+  color-scheme: dark;
+  background: #000 !important;
+}
+
+:root[data-nebula-glass="active"]
+  [data-surface="immersive"][data-immersive-kind="cull"]
+  [data-surface="immersive-chrome"] {
+  background: rgb(7 9 12 / 0.98) !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-nebula-glass="active"]
+  [data-surface="immersive"][data-immersive-kind="cull"]
+  [data-surface="immersive-content"] {
+  background: #000 !important;
+}
+
+:root[data-nebula-glass="active"] [data-surface="page"] .page-toolbar,
+:root[data-nebula-glass="active"]
+  [data-surface="page"]
+  [data-surface="toolbar"] {
+  background: color-mix(
+    in srgb,
+    var(--nebula-card-fill) 70%,
+    transparent
+  ) !important;
+  border-color: var(--nebula-mica-border) !important;
+  box-shadow: inset 0 1px 0 var(--nebula-mica-highlight);
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.12);
+  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.12);
+}
+
+:root[data-nebula-glass="active"] [data-surface="page"] .bg-card,
+:root[data-nebula-glass="active"] [data-surface="page"] .bg-secondary,
+:root[data-nebula-glass="active"] [data-surface="settings"] .bg-card,
+:root[data-nebula-glass="active"] [data-surface="settings"] .bg-secondary {
+  background-color: var(--nebula-card-fill) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 72%,
+    transparent
+  ) !important;
+}
+
+/* Popovers, menus, dialogs and toast: one outline, no stacked rings. */
+:root[data-nebula-glass="active"] [data-surface="overlay"] {
+  outline: none !important;
+  background: var(--nebula-overlay-fill) !important;
+  border-color: transparent !important;
+  box-shadow:
+    inset 0 0 0 1px var(--nebula-mica-border),
+    inset 0 1px 0 var(--nebula-mica-highlight),
+    0 18px 54px -18px rgb(0 0 0 / 0.56) !important;
+  -webkit-backdrop-filter: blur(max(22px, var(--nebula-glass-blur)))
+    saturate(1.18);
+  backdrop-filter: blur(max(22px, var(--nebula-glass-blur))) saturate(1.18);
+}
+
+:root.light[data-nebula-glass="active"] [data-surface="overlay"] {
+  box-shadow:
+    inset 0 0 0 1px var(--nebula-mica-border),
+    inset 0 1px 0 var(--nebula-mica-highlight),
+    0 18px 54px -22px rgb(19 45 83 / 0.38) !important;
+}
+
+:root[data-nebula-glass="active"] [data-overlay-kind="tooltip"] {
+  background: color-mix(
+    in srgb,
+    var(--nebula-overlay-fill) 94%,
+    var(--foreground) 6%
+  ) !important;
+  box-shadow:
+    inset 0 0 0 1px var(--nebula-mica-border),
+    0 8px 24px -14px rgb(0 0 0 / 0.62) !important;
+}
+
+:root[data-nebula-glass="active"] [data-surface="overlay-backdrop"] {
+  background: rgb(3 8 16 / 0.32) !important;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+:root[data-nebula-glass="active"] [data-sonner-toast] {
+  background: var(--nebula-overlay-fill) !important;
+  border-color: transparent !important;
+  box-shadow:
+    inset 0 0 0 1px var(--nebula-mica-border),
+    0 14px 44px -18px rgb(0 0 0 / 0.58) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.16);
+  backdrop-filter: blur(24px) saturate(1.16);
+}
+
+/* Compatibility mode keeps the original layout dimensions. */
+:root[data-nebula-glass="active"][data-nebula-mode="compatibility"] {
+  --nebula-mica-fill: rgb(17 26 39 / 0.55);
+  --nebula-card-fill: rgb(22 33 48 / 0.55);
+  --nebula-control-fill: rgb(28 42 61 / 0.5);
+}
+
+:root.light[data-nebula-glass="active"][data-nebula-mode="compatibility"] {
+  --nebula-mica-fill: rgb(255 255 255 / 0.55);
+  --nebula-card-fill: rgb(236 242 250 / 0.5);
+  --nebula-control-fill: rgb(226 235 247 / 0.45);
+}
+
+:root[data-nebula-glass="active"][data-nebula-mode="compatibility"]
+  .home-workspace-content {
+  gap: 0;
+}
+
+:root[data-nebula-glass="active"][data-nebula-mode="compatibility"]
+  .home-workspace-content
+  > [data-surface="sidebar"],
+:root[data-nebula-glass="active"][data-nebula-mode="compatibility"]
+  .home-gallery-canvas {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 var(--nebula-mica-highlight);
+}
+
+.nebula-glass-settings-grid {
+  display: grid;
+  gap: 0;
+}
+
+.nebula-glass-setting {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 48px;
+  padding: 9px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.nebula-glass-setting > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nebula-glass-setting > input,
+.nebula-glass-setting > button,
+.nebula-glass-setting > label {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.nebula-glass-setting:first-child {
+  border-top: 0;
+}
+
+@media (max-width: 760px) {
+  :root[data-nebula-glass="active"][data-nebula-mode="mica"]
+    .home-workspace-content {
+    gap: 6px;
+  }
+
+  :root[data-nebula-glass="active"][data-nebula-mode="mica"]
+    .home-workspace-content
+    > [data-surface="sidebar"] {
+    margin: 6px 0 6px 6px;
+    border-radius: 14px;
+  }
+
+  :root[data-nebula-glass="active"][data-nebula-mode="mica"]
+    .home-gallery-canvas {
+    margin: 6px 6px 6px 0;
+    border-radius: 14px;
+  }
+}

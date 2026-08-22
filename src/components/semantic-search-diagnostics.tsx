@@ -94,6 +94,8 @@ export function SemanticSearchDiagnostics({
         align="end"
         className="max-h-[min(20rem,var(--radix-popover-content-available-height))] w-[min(360px,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-md border border-border bg-popover p-3 text-[11px] text-muted-foreground shadow-lg"
         collisionPadding={8}
+        data-overlay-kind="diagnostics"
+        data-surface="overlay"
         sideOffset={4}
       >
         <div className="mb-2 font-medium text-foreground">

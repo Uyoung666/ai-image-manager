@@ -36,7 +36,9 @@ function DialogOverlay({
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
+      data-overlay-kind="dialog"
       data-slot="dialog-overlay"
+      data-surface="overlay-backdrop"
       className={cn(
         "fixed inset-0 z-50 bg-black/60 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
@@ -69,8 +71,10 @@ function DialogContent({
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
+        data-overlay-kind="dialog"
         data-slot="dialog-content"
         data-size={size}
+        data-surface="overlay"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] min-w-0 -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-5 ring-1 ring-foreground/5 surface-elevated duration-100 outline-none max-[480px]:max-h-[calc(100dvh-1rem)] max-[480px]:w-[calc(100%-1rem)] max-[480px]:gap-3 max-[480px]:p-4 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           sizeClass,

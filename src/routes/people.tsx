@@ -738,7 +738,10 @@ function PeoplePage() {
   const showContent = !(isLoading || isError);
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div
+      className="flex h-full min-w-0 flex-col bg-background"
+      data-surface="page"
+    >
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
         <div className="flex min-w-0 items-center gap-3">

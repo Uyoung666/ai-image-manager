@@ -5,6 +5,7 @@ import { cull } from "./cull";
 import { diagnostics } from "./diagnostics";
 import { faces } from "./faces";
 import { photos } from "./photos";
+import { plugins } from "./plugins";
 import { settings } from "./settings";
 import { shell } from "./shell";
 import { theme } from "./theme";
@@ -24,4 +25,5 @@ export const router = {
   cull,
   diagnostics,
   wander,
+  plugins,
 };

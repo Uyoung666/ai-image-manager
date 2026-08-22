@@ -90,6 +90,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
     "update-electron-app": "^3.2.0",
+    "yauzl": "^2.10.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -119,6 +120,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "^25.5.2",
+    "@types/yauzl": "^2.10.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",

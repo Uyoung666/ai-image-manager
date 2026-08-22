@@ -3,6 +3,10 @@
 <html>
   <head>
     <meta charset="UTF-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' data: blob:; img-src 'self' data: blob: local-media: aim-plugin: aim-plugin-user: http://127.0.0.1:* http://localhost:*; media-src 'self' data: blob: local-media: aim-plugin: aim-plugin-user: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; font-src 'self' data:;"
+    >
     <title>AI Image Manager</title>
     <!-- 在 CSS 加载前同步设置主题 class，避免暗色/浅色闪烁 -->
     <script>
@@ -40,6 +44,13 @@
         }
         document.documentElement.dataset.reducedMotion =
           localStorage.getItem("ui.reduceMotion") === "true" ? "true" : "false";
+        const activePlugin = localStorage.getItem("plugins.active");
+        if (activePlugin) {
+          document.documentElement.dataset.activePlugin = activePlugin;
+          if (activePlugin === "com.uyoung.theme.nebula-glass") {
+            document.documentElement.dataset.nebulaGlass = "active";
+          }
+        }
       } catch {
         document.documentElement.dataset.accentColor = "blue";
         document.documentElement.dataset.reducedMotion = "false";

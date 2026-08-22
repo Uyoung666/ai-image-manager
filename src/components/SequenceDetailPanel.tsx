@@ -189,7 +189,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
         className="photo-detail-panel-shell h-full shrink-0 overflow-hidden"
         style={{ width: displayWidth }}
       >
-        <div className="glass-surface-heavy relative flex h-full items-center justify-center border-border border-l">
+        <div
+          className="glass-surface-heavy relative flex h-full items-center justify-center border-border border-l"
+          data-surface="inspector"
+        >
           {onWidthChange && (
             <div
               className={`absolute top-0 -left-0.5 z-10 h-full w-1 cursor-col-resize transition-colors ${
@@ -221,7 +224,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
       className="photo-detail-panel-shell h-full shrink-0 overflow-hidden"
       style={{ width: displayWidth }}
     >
-      <div className="glass-surface-heavy relative flex h-full flex-col border-border border-l">
+      <div
+        className="glass-surface-heavy relative flex h-full flex-col border-border border-l"
+        data-surface="inspector"
+      >
         {/* Resize handle — drag left edge to resize */}
         {onWidthChange && (
           <div
@@ -255,7 +261,10 @@ export const SequenceDetailPanel = memo(function SequenceDetailPanel({
             <X className="h-4 w-4" />
           </button>
         </header>
-        <div className="border-border border-b bg-background p-4">
+        <div
+          className="border-border border-b bg-background p-4"
+          data-surface="media-well"
+        >
           {representative?.thumbnailPath && (
             <img
               alt={representative.filename}

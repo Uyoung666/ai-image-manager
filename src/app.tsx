@@ -14,6 +14,7 @@ import { installDownloadedUpdate } from "./actions/update";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UiPreferencesProvider } from "./contexts/ui-preferences-context";
 import { ipc } from "./ipc/manager";
+import { PluginBackdropHost, PluginHostProvider } from "./plugins/runtime";
 import { QueryProvider } from "./providers/QueryProvider";
 import { router } from "./utils/routes";
 import "./localization/i18n";
@@ -78,19 +79,22 @@ export default function App() {
   return (
     <ErrorBoundary>
       <UiPreferencesProvider>
-        <QueryProvider>
-          <RouterProvider router={router} />
-          <Toaster
-            position="bottom-right"
-            toastOptions={{
-              style: {
-                background: "var(--popover)",
-                color: "var(--foreground)",
-                border: "1px solid var(--border)",
-              },
-            }}
-          />
-        </QueryProvider>
+        <PluginHostProvider>
+          <PluginBackdropHost />
+          <QueryProvider>
+            <RouterProvider router={router} />
+            <Toaster
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: "var(--popover)",
+                  color: "var(--foreground)",
+                  border: "1px solid var(--border)",
+                },
+              }}
+            />
+          </QueryProvider>
+        </PluginHostProvider>
       </UiPreferencesProvider>
     </ErrorBoundary>
   );

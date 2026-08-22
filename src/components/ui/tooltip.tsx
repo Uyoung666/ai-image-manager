@@ -95,7 +95,9 @@ function TooltipContent({
           TOOLTIP_CONTENT_CLASS_NAME,
           className
         )}
+        data-overlay-kind="tooltip"
         data-slot="tooltip-content"
+        data-surface="overlay"
         side={side}
         sideOffset={sideOffset}
         {...props}

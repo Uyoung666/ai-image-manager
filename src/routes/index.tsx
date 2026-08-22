@@ -2725,6 +2725,7 @@ function HomePage() {
       <div className="relative flex h-full min-w-0 flex-col">
         <div
           className={`home-gallery-toolbar-layer ${galleryScrolled ? "is-scrolled" : ""}`}
+          data-surface="toolbar"
           inert={compactDetailOverlay && detailOverlayOpen}
           ref={galleryToolbarRef}
           style={{
@@ -3065,6 +3066,7 @@ function HomePage() {
                 <aside
                   aria-label={t("photoDetail")}
                   className="home-detail-panel-container relative shrink-0 overflow-hidden"
+                  data-surface="inspector"
                   ref={detailOverlayRef}
                   role={compactDetailOverlay ? "dialog" : "complementary"}
                   style={{ width: detailPanelWidth }}

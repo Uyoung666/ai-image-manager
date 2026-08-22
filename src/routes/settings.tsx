@@ -20,9 +20,15 @@ function SettingsLayout() {
   const location = useLocation();
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
+    <div
+      className="flex h-full min-w-0 flex-col overflow-hidden bg-background"
+      data-surface="settings"
+    >
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-3 border-border border-b px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-4 min-[480px]:px-4 min-[480px]:py-3">
+      <div
+        className="flex shrink-0 items-center gap-3 border-border border-b px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-4 min-[480px]:px-4 min-[480px]:py-3"
+        data-surface="toolbar"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <button

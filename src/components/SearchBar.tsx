@@ -796,6 +796,7 @@ export const SearchBar = memo(
         <search
           aria-label={t("searchPlaceholder")}
           className="home-unified-toolbar relative min-w-0 border-border border-b transition-colors"
+          data-surface="toolbar-content"
           ref={(node) => {
             toolbarRef.current = node;
             if (typeof ref === "function") {
@@ -825,6 +826,7 @@ export const SearchBar = memo(
                           filename: imageSearchFileName,
                         })}
                         className="home-image-search-reference home-search-input is-active flex h-9 w-full min-w-0 items-center gap-2 rounded-[6px] border border-border pr-10 pl-1.5 text-left text-[14px] text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-ring"
+                        data-surface="control"
                         onClick={() => fileInputRef.current?.click()}
                         type="button"
                       >
@@ -885,6 +887,7 @@ export const SearchBar = memo(
                       aria-controls="search-suggestions-listbox"
                       aria-expanded={showSuggestionPanel}
                       className={`home-search-input h-9 w-full rounded-[6px] border border-border pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring ${inputFocused || showSuggestionPanel || showFilters || query.trim() ? "is-active" : ""}`}
+                      data-surface="control"
                       onBlur={handleInputBlur}
                       onChange={(e) => {
                         setQuery(e.target.value);
@@ -1244,6 +1247,8 @@ export const SearchBar = memo(
             {showFilters && (
               <div
                 className="absolute top-full right-4 z-[70] mt-2 w-[min(900px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover p-4 shadow-2xl ring-1 ring-foreground/5"
+                data-overlay-kind="search-filter"
+                data-surface="overlay"
                 onKeyDown={handleFilterKeyDown}
                 style={{ maxHeight: floatingPanelMaxHeight }}
               >
@@ -1860,6 +1865,8 @@ export const SearchBar = memo(
           {showSuggestionPanel && (
             <div
               className="absolute top-full left-4 z-[60] mt-1 w-[min(960px,calc(100%-32px))] overflow-y-auto overscroll-contain rounded-[10px] border border-border bg-popover shadow-xl outline-none ring-1 ring-foreground/5"
+              data-overlay-kind="search-suggestions"
+              data-surface="overlay"
               id="search-suggestions-listbox"
               onBlur={(e) => {
                 // 焦点离开建议列表且没有回到 input 时关闭

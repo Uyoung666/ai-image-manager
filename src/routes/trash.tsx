@@ -1051,7 +1051,10 @@ function TrashPage() {
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div
+      className="flex h-full min-w-0 flex-col bg-background"
+      data-surface="page"
+    >
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-border border-b px-4 py-3 sm:px-6 sm:py-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -1120,7 +1123,11 @@ function TrashPage() {
               <summary className="cursor-pointer list-none rounded-[6px] px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-foreground/5">
                 {t("moreActions")}
               </summary>
-              <div className="absolute top-full right-0 z-40 mt-1 min-w-48 rounded-[8px] border border-border bg-popover p-1 shadow-lg">
+              <div
+                className="absolute top-full right-0 z-40 mt-1 min-w-48 rounded-[8px] border border-border bg-popover p-1 shadow-lg"
+                data-overlay-kind="menu"
+                data-surface="overlay"
+              >
                 <button
                   className="w-full rounded-[6px] px-3 py-1.5 text-left text-[13px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
                   disabled={operationRunning}
@@ -1346,6 +1353,8 @@ function TrashPage() {
       {ctxMenu.open && (
         <div
           className="fixed z-50 max-h-[calc(100dvh-1rem)] min-w-[180px] max-w-[calc(100dvw-1rem)] overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5"
+          data-overlay-kind="context-menu"
+          data-surface="overlay"
           id="trash-context-menu"
           role="menu"
           style={{

@@ -65,7 +65,10 @@ export default function DragWindowRegion({ title }: DragWindowRegionProps) {
   const isMacOS = platform === "darwin";
 
   return (
-    <div className="flex w-full min-w-0 items-stretch justify-between">
+    <div
+      className="flex w-full min-w-0 items-stretch justify-between"
+      data-surface="toolbar"
+    >
       <button
         aria-label={t("windowMaximize")}
         className="draglayer min-w-0 flex-1 border-0 bg-transparent p-0 text-left"

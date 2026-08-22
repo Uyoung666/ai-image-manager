@@ -45,6 +45,7 @@ export function StatusBar({
   return (
     <div
       className={`glass-surface flex h-7 min-w-0 items-center justify-between gap-3 overflow-hidden border-border-subtle border-t px-3 text-[11px] sm:px-4 ${className ?? ""}`}
+      data-surface="statusbar"
     >
       <div className="min-w-0 text-muted-foreground">
         <span className="block truncate">

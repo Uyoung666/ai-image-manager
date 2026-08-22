@@ -24,7 +24,9 @@ function PopoverContent({
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
+        data-overlay-kind="popover"
         data-slot="popover-content"
+        data-surface="overlay"
         align={align}
         sideOffset={sideOffset}
         className={cn(

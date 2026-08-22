@@ -80,7 +80,10 @@ export function SettingsSection({
           )}
         </div>
       )}
-      <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
+      <div
+        className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4"
+        data-surface="card"
+      >
         {children}
       </div>
     </section>

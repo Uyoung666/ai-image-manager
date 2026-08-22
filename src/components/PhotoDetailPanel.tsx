@@ -606,6 +606,7 @@ export function PhotoDetailPanel({
         className={`glass-surface-heavy relative flex h-full flex-col border-border border-l transition-all duration-300 ${
           visible ? "translate-x-0 opacity-100" : "translate-x-12 opacity-0"
         }`}
+        data-surface="inspector"
         ref={panelRef}
         style={{
           width: panelWidth,
@@ -681,7 +682,10 @@ export function PhotoDetailPanel({
         </div>
 
         {/* Preview image */}
-        <div className="border-border border-b bg-background p-4">
+        <div
+          className="border-border border-b bg-background p-4"
+          data-surface="media-well"
+        >
           <div className="photo-detail-preview flex h-[200px] items-center justify-center overflow-hidden rounded-[6px] bg-muted">
             <img
               alt={displayPhoto.filename}

@@ -494,6 +494,7 @@ export function FolderTree({
       className="resource-tree-scroll min-h-0 flex-1 overflow-y-auto"
       data-bottom-fade={hasMoreBelow}
       data-resource-tree-scroll="true"
+      data-surface="resource-tree"
       data-virtualized={shouldVirtualize}
       onScroll={updateBottomFade}
       ref={scrollRef}

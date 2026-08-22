@@ -790,7 +790,10 @@ export function DuplicatesPage() {
   ];
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-background">
+    <div
+      className="flex h-full min-w-0 flex-col bg-background"
+      data-surface="page"
+    >
       <header className="border-border border-b px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4">
           <div className="flex min-w-0 flex-1 items-center gap-3 lg:flex-initial">

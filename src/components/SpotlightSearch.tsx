@@ -330,6 +330,8 @@ export function SpotlightSearch() {
       <button
         aria-label={t("close")}
         className="absolute inset-0 border-0 bg-black/50 p-0 backdrop-blur-sm"
+        data-overlay-kind="command-search"
+        data-surface="overlay-backdrop"
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             setOpen(false);
@@ -346,6 +348,8 @@ export function SpotlightSearch() {
       <div className="absolute inset-x-0 top-2 mx-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-[560px] px-3 sm:top-[10dvh] sm:max-h-[calc(90dvh-0.5rem)] sm:px-4">
         <Command
           className="surface-elevated flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-[12px] border border-border bg-popover shadow-2xl"
+          data-overlay-kind="command-search"
+          data-surface="overlay"
           loop
           shouldFilter={!query.trim()}
         >

@@ -217,6 +217,8 @@ function AutocompleteInput({
           align="start"
           className="z-[60] max-h-[min(10rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overscroll-contain rounded-[4px] border border-input bg-card p-0 shadow-lg"
           collisionPadding={8}
+          data-overlay-kind="select"
+          data-surface="overlay"
           onCloseAutoFocus={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => event.preventDefault()}
           sideOffset={2}

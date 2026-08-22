@@ -103,6 +103,8 @@ export function PreviewContextMenu({
   return createPortal(
     <div
       className="fixed max-h-[calc(100dvh-1rem)] w-[min(210px,calc(100dvw-1rem))] min-w-0 animate-context-menu-enter overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 [&_button]:min-w-0 [&_button]:whitespace-normal [&_button]:break-words"
+      data-overlay-kind="context-menu"
+      data-surface="overlay"
       ref={ref}
       style={{ ...position, zIndex: 99_999 }}
     >

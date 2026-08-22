@@ -258,7 +258,11 @@ function CullSessionPage() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div
+        className="flex h-full items-center justify-center bg-black"
+        data-immersive-kind="cull"
+        data-surface="immersive"
+      >
         <LoadingSpinner size="xl" />
       </div>
     );
@@ -266,7 +270,11 @@ function CullSessionPage() {
 
   if (sessionQuery.isError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 bg-black"
+        data-immersive-kind="cull"
+        data-surface="immersive"
+      >
         <p className="text-[13px] text-destructive">{t("cullActionFailed")}</p>
         <button
           className="rounded-[6px] bg-primary px-3 py-1.5 text-[12px] text-primary-foreground"
@@ -282,7 +290,11 @@ function CullSessionPage() {
   // Not-found
   if (!session) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div
+        className="flex h-full items-center justify-center bg-black"
+        data-immersive-kind="cull"
+        data-surface="immersive"
+      >
         <p className="text-muted-foreground">{t("cullSessionNotFound")}</p>
       </div>
     );
@@ -295,9 +307,16 @@ function CullSessionPage() {
   const pendingCount = session.pendingCount;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-black"
+      data-immersive-kind="cull"
+      data-surface="immersive"
+    >
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-border border-b px-3 py-2 sm:px-6 sm:py-3">
+      <div
+        className="flex shrink-0 items-center justify-between border-border border-b px-3 py-2 sm:px-6 sm:py-3"
+        data-surface="immersive-chrome"
+      >
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4">
           <button
             className="shrink-0 text-muted-foreground hover:text-foreground"
@@ -330,7 +349,10 @@ function CullSessionPage() {
       </div>
 
       {/* Toggle bar */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-border border-b px-3 py-1.5 sm:px-6 sm:py-2">
+      <div
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-border border-b px-3 py-1.5 sm:px-6 sm:py-2"
+        data-surface="immersive-chrome"
+      >
         {isDuel ? (
           <button
             className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-3 py-1.5 text-[12px] transition-colors ${
@@ -401,7 +423,10 @@ function CullSessionPage() {
       </div>
 
       {/* Content */}
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div
+        className="min-h-0 min-w-0 flex-1 overflow-hidden"
+        data-surface="immersive-content"
+      >
         <CullSessionContent
           isDuel={isDuel}
           onMutationSuccess={onMutationSuccess}

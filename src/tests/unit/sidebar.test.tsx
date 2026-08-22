@@ -392,7 +392,11 @@ describe("Sidebar", () => {
     fireEvent.contextMenu(
       screen.getByText("Photos").closest("button") as Element
     );
-    fireEvent.click(screen.getByRole("button", { name: "置顶文件夹" }));
+    const pinButton = screen.getByRole("button", { name: "置顶文件夹" });
+    expect(
+      pinButton.closest('[data-overlay-kind="context-menu"]')?.parentElement
+    ).toBe(document.body);
+    fireEvent.click(pinButton);
     expect(localStorage.getItem("sidebar-pinned-folder-ids")).toBe("[1]");
 
     fireEvent.contextMenu(

@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getUpdateStatus } from "@/actions/update";
@@ -1161,12 +1162,14 @@ export function Sidebar({
     <>
       <div
         className="sidebar-bg relative flex h-full flex-row overflow-hidden"
+        data-surface="sidebar-shell"
         onDragOver={handleSidebarDragOver}
         style={{ width: collapsed ? 48 : 48 + resourcePanelWidth }}
       >
         <nav
           aria-label={t("appName")}
           className="sidebar-rail flex h-full w-12 flex-shrink-0 flex-col items-center border-foreground/8 border-r py-2"
+          data-surface="sidebar-rail"
         >
           <SidebarTooltip
             content={collapsed ? t("expandSidebar") : t("collapseSidebar")}
@@ -1382,6 +1385,7 @@ export function Sidebar({
         {!collapsed && (
           <div
             className="flex h-full select-none flex-col"
+            data-surface="sidebar-resources"
             style={{ width: resourcePanelWidth }}
           >
             {/* Content area — dual flex-1 sections */}
@@ -1423,7 +1427,10 @@ export function Sidebar({
 
               <div className="my-2 border-border border-t" />
 
-              <div className="mb-2 grid grid-cols-2 rounded-[6px] bg-foreground/5 p-0.5">
+              <div
+                className="mb-2 grid grid-cols-2 rounded-[6px] bg-foreground/5 p-0.5"
+                data-surface="segmented-control"
+              >
                 <button
                   aria-pressed={resourceView === "folders"}
                   className={`rounded-[5px] px-2 py-1 text-[11px] transition-colors ${
@@ -1460,6 +1467,7 @@ export function Sidebar({
                     <input
                       aria-label={t("folderSearchPlaceholder")}
                       className="w-full rounded-[4px] bg-card py-1 pr-6 pl-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:ring-1 focus:ring-primary/50"
+                      data-surface="control"
                       onChange={(event) => setFolderSearch(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
@@ -1618,6 +1626,7 @@ export function Sidebar({
                             <input
                               aria-label={t("tagSearchPlaceholder")}
                               className="w-full rounded-[4px] bg-card py-1 pr-6 pl-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                              data-surface="control"
                               onChange={(e) => setTagSearch(e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === "Escape") {
@@ -1655,6 +1664,7 @@ export function Sidebar({
                           className="resource-tree-scroll flex-1 overflow-y-auto"
                           data-bottom-fade={tagTreeHasMoreBelow}
                           data-resource-tree-scroll="true"
+                          data-surface="resource-tree"
                           onFocus={(e) => {
                             const container = e.currentTarget;
                             const currentFocus = document.activeElement;
@@ -1862,61 +1872,65 @@ export function Sidebar({
       />
 
       {/* Folder context menu */}
-      {folderCtx && (
-        <div
-          className="fixed z-[200] max-h-[calc(100dvh-1rem)] min-w-[140px] max-w-[calc(100dvw-1rem)] animate-context-menu-enter overflow-y-auto overflow-x-hidden overscroll-contain rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
-          ref={ctxRef}
-          style={{
-            left: Math.min(folderCtx.x, window.innerWidth - 160),
-            top: Math.min(folderCtx.y, window.innerHeight - 180),
-          }}
-        >
-          <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-            {folderCtx.displayName}
-          </div>
-          <div className="mx-2 my-1 border-border border-t" />
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
-            onClick={() => {
-              if (togglePinnedFolder(folderCtx.folderId)) {
+      {folderCtx &&
+        createPortal(
+          <div
+            className="fixed z-[200] max-h-[calc(100dvh-1rem)] min-w-[140px] max-w-[calc(100dvw-1rem)] animate-context-menu-enter overflow-y-auto overflow-x-hidden overscroll-contain rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+            data-overlay-kind="context-menu"
+            data-surface="overlay"
+            ref={ctxRef}
+            style={{
+              left: Math.min(folderCtx.x, window.innerWidth - 160),
+              top: Math.min(folderCtx.y, window.innerHeight - 180),
+            }}
+          >
+            <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+              {folderCtx.displayName}
+            </div>
+            <div className="mx-2 my-1 border-border border-t" />
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+              onClick={() => {
+                if (togglePinnedFolder(folderCtx.folderId)) {
+                  closeCtx();
+                }
+              }}
+              type="button"
+            >
+              {pinnedFolderIds.includes(folderCtx.folderId) ? (
+                <PinOff className="h-3.5 w-3.5" />
+              ) : (
+                <Pin className="h-3.5 w-3.5" />
+              )}
+              {pinnedFolderIds.includes(folderCtx.folderId)
+                ? t("unpinFolder")
+                : t("pinFolder")}
+            </button>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+              onClick={() => {
+                setAppearanceFolderId(folderCtx.folderId);
                 closeCtx();
-              }
-            }}
-            type="button"
-          >
-            {pinnedFolderIds.includes(folderCtx.folderId) ? (
-              <PinOff className="h-3.5 w-3.5" />
-            ) : (
-              <Pin className="h-3.5 w-3.5" />
-            )}
-            {pinnedFolderIds.includes(folderCtx.folderId)
-              ? t("unpinFolder")
-              : t("pinFolder")}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
-            onClick={() => {
-              setAppearanceFolderId(folderCtx.folderId);
-              closeCtx();
-            }}
-            type="button"
-          >
-            <Paintbrush className="h-3.5 w-3.5" />
-            {t("customizeFolderAppearance")}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-            onClick={() => {
-              onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
-              closeCtx();
-            }}
-            type="button"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t("removeFromIndex")}
-          </button>
-        </div>
-      )}
+              }}
+              type="button"
+            >
+              <Paintbrush className="h-3.5 w-3.5" />
+              {t("customizeFolderAppearance")}
+            </button>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+              onClick={() => {
+                onDeleteFolder(folderCtx.folderId, folderCtx.displayName);
+                closeCtx();
+              }}
+              type="button"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t("removeFromIndex")}
+            </button>
+          </div>,
+          document.body
+        )}
 
       <FolderAppearanceDialog
         folder={appearanceFolder}
@@ -1946,46 +1960,50 @@ export function Sidebar({
       />
 
       {/* Tag context menu */}
-      {tagCtx && (
-        <div
-          className="fixed z-[200] min-w-[140px] animate-context-menu-enter overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
-          ref={ctxRef}
-          style={{
-            left: Math.min(tagCtx.x, window.innerWidth - 160),
-            top: Math.min(tagCtx.y, window.innerHeight - 140),
-          }}
-        >
-          <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
-            {tagCtx.tagName}
-          </div>
-          <div className="mx-2 my-1 border-border border-t" />
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
-            onClick={() => {
-              setChildTagParent({
-                parentId: tagCtx.tagId,
-                parentName: tagCtx.tagName,
-              });
-              setTagCtx(null);
+      {tagCtx &&
+        createPortal(
+          <div
+            className="fixed z-[200] min-w-[140px] animate-context-menu-enter overflow-hidden rounded-[8px] border border-border bg-popover py-1 ring-1 ring-foreground/5"
+            data-overlay-kind="context-menu"
+            data-surface="overlay"
+            ref={ctxRef}
+            style={{
+              left: Math.min(tagCtx.x, window.innerWidth - 160),
+              top: Math.min(tagCtx.y, window.innerHeight - 140),
             }}
-            type="button"
           >
-            <Plus className="h-3.5 w-3.5" />
-            {t("tagCreateChild")}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
-            onClick={() => {
-              setDeleteTagTarget({ id: tagCtx.tagId, name: tagCtx.tagName });
-              setTagCtx(null);
-            }}
-            type="button"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t("tagDeleteTitle")}
-          </button>
-        </div>
-      )}
+            <div className="truncate px-3 py-1 font-medium text-[10px] text-muted-foreground/70 uppercase tracking-wider">
+              {tagCtx.tagName}
+            </div>
+            <div className="mx-2 my-1 border-border border-t" />
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-foreground/5"
+              onClick={() => {
+                setChildTagParent({
+                  parentId: tagCtx.tagId,
+                  parentName: tagCtx.tagName,
+                });
+                setTagCtx(null);
+              }}
+              type="button"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("tagCreateChild")}
+            </button>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-destructive transition-colors hover:bg-destructive/10"
+              onClick={() => {
+                setDeleteTagTarget({ id: tagCtx.tagId, name: tagCtx.tagName });
+                setTagCtx(null);
+              }}
+              type="button"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t("tagDeleteTitle")}
+            </button>
+          </div>,
+          document.body
+        )}
 
       {/* Create child tag dialog */}
       <Dialog

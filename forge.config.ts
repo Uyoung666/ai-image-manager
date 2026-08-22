@@ -191,6 +191,7 @@ const config: ForgeConfig = {
       "models-release",
       "drizzle",
       "assets/icon.png",
+      "THIRD_PARTY_NOTICES.md",
       "THIRD_PARTY_MODEL_NOTICES.md",
       "licenses",
     ],

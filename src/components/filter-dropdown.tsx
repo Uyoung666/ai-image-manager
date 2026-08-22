@@ -315,6 +315,8 @@ export function FilterDropdown({
           align="start"
           className="z-[60] max-h-[min(12rem,var(--radix-popover-content-available-height))] min-w-[8rem] max-w-[calc(100vw-1rem)] gap-0 overflow-y-auto overflow-x-hidden overscroll-contain rounded-[6px] border border-border bg-popover p-0 shadow-lg ring-1 ring-foreground/5"
           collisionPadding={8}
+          data-overlay-kind="select"
+          data-surface="overlay"
           id={listboxId}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onInteractOutside={(event) => {

@@ -9,6 +9,7 @@ const translations: Record<string, string> = {
   cloudSync: "云同步",
   settingsAbout: "关于",
   settingsAppearance: "外观",
+  settingsPlugins: "插件",
   settingsBehavior: "应用行为",
   settingsCloseBehavior: "关闭行为",
   settingsGroupAppearance: "外观与交互",
@@ -44,6 +45,23 @@ describe("settings navigation", () => {
           groupKey: "settingsGroupBehavior",
           to: "/settings/behavior",
         }),
+      ])
+    );
+  });
+
+  it("includes the declarative plugin page under appearance", () => {
+    expect(SETTINGS_NAV_ITEMS).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupKey: "settingsGroupAppearance",
+          labelKey: "settingsPlugins",
+          to: "/settings/plugins",
+        }),
+      ])
+    );
+    expect(filterSettingsNavigationItems("插件", translate)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: "/settings/plugins" }),
       ])
     );
   });

@@ -32,7 +32,9 @@ function AlertDialogOverlay({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
   return (
     <AlertDialogPrimitive.Overlay
+      data-overlay-kind="alert-dialog"
       data-slot="alert-dialog-overlay"
+      data-surface="overlay-backdrop"
       className={cn(
         "fixed inset-0 z-50 bg-black/80 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
@@ -53,8 +55,10 @@ function AlertDialogContent({
     <AlertDialogPortal>
       <AlertDialogOverlay />
       <AlertDialogPrimitive.Content
+        data-overlay-kind="alert-dialog"
         data-slot="alert-dialog-content"
         data-size={size}
+        data-surface="overlay"
         className={cn(
           "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] min-w-0 -translate-x-1/2 -translate-y-1/2 gap-3 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 surface-elevated duration-100 outline-none max-[480px]:max-h-[calc(100dvh-1rem)] max-[480px]:w-[calc(100%-1rem)] data-[size=default]:max-w-xs data-[size=sm]:max-w-sm data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className

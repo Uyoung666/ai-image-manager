@@ -201,6 +201,7 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
                     ? `home-workspace ${zones.dragKind ? "home-import-dragging" : ""}`
                     : ""
                 }`}
+                data-surface="app"
                 onDragEnter={isHomePage ? zones.handleRootDragEnter : undefined}
                 onDragLeave={isHomePage ? zones.handleRootDragLeave : undefined}
                 onDragOver={isHomePage ? zones.handleRootDragOver : undefined}
@@ -214,11 +215,17 @@ function BaseLayoutContent({ children }: { children: ReactNode }) {
                     isHomePage ? "home-workspace-content" : ""
                   }`}
                 >
-                  <SidebarSlot />
+                  <div
+                    className="min-h-0 min-w-0 shrink-0"
+                    data-surface="sidebar"
+                  >
+                    <SidebarSlot />
+                  </div>
                   <main
                     className={`min-w-0 flex-1 overflow-hidden ${
                       isHomePage ? "home-gallery-canvas relative" : ""
                     }`}
+                    data-surface={isHomePage ? "gallery" : "content"}
                   >
                     {children}
                     {isHomePage && (

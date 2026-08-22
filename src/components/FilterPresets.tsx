@@ -125,6 +125,8 @@ export function FilterPresets({
               align="start"
               className="max-h-[min(12rem,var(--radix-popover-content-available-height))] w-[min(20rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-2 shadow-lg ring-1 ring-foreground/5"
               collisionPadding={8}
+              data-overlay-kind="filter-presets"
+              data-surface="overlay"
               side="top"
               sideOffset={4}
             >
@@ -177,6 +179,8 @@ export function FilterPresets({
               align="end"
               className="max-h-[min(16rem,var(--radix-popover-content-available-height))] w-[min(18rem,calc(100vw-1rem))] gap-0 overflow-y-auto overscroll-contain rounded-[6px] border border-border bg-popover p-1.5 shadow-lg ring-1 ring-foreground/5"
               collisionPadding={8}
+              data-overlay-kind="filter-presets"
+              data-surface="overlay"
               side="top"
               sideOffset={4}
             >

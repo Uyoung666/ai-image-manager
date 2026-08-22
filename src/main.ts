@@ -52,6 +52,10 @@ import {
   startHttpServerEarly,
 } from "@/services/http-server";
 import { MODEL_MANIFEST, verifyModelFile } from "@/services/model-downloader";
+import {
+  configurePluginManager,
+  registerPluginProtocols,
+} from "@/services/plugin-manager";
 import { extractRawPreview, isRawFile } from "@/services/raw-preview";
 import { registry, ServiceLevel } from "@/services/registry";
 import {
@@ -78,9 +82,12 @@ import {
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
+import { NEBULA_GLASS_MANIFEST } from "./plugins/builtins/nebula-glass-manifest";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
 import { resolveSafePath } from "./utils/path-security.js";
+
+configurePluginManager([NEBULA_GLASS_MANIFEST]);
 
 const log = createLogger("main");
 installConsoleDiagnostics();
@@ -1398,6 +1405,24 @@ protocol.registerSchemesAsPrivileged([
       stream: true,
     },
   },
+  {
+    scheme: "aim-plugin",
+    privileges: {
+      secure: true,
+      standard: true,
+      stream: true,
+      supportFetchAPI: true,
+    },
+  },
+  {
+    scheme: "aim-plugin-user",
+    privileges: {
+      secure: true,
+      standard: true,
+      stream: true,
+      supportFetchAPI: true,
+    },
+  },
 ]);
 
 fs.writeFileSync(path.join(logDir, "startup.log"), "BEFORE_WHENREADY\n", {
@@ -1546,6 +1571,7 @@ app.whenReady().then(async () => {
     // Must be set up before createWindow() since the window loads
     // local-media:// URLs immediately.
     protocol.handle("local-media", handleLocalMediaRequest);
+    registerPluginProtocols();
 
     // ── Step 2: Start HTTP server (must be ready before window loads) ──
     const httpPort = await startHttpServerEarly();
