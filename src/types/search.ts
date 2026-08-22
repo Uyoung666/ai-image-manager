@@ -37,6 +37,7 @@ export type SearchMode = "text" | "image" | "exif" | "color";
 export interface SearchCriteria {
   colorHex?: string;
   filters: ExifFilters;
+  imagePath?: string;
   mode: SearchMode;
   query: string;
 }

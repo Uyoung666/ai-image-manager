@@ -69,6 +69,25 @@ describe("SidebarFilterContext", () => {
     });
   });
 
+  it("keeps the reference path in applied image-search criteria", () => {
+    const searched = browseCriteriaReducer(initialBrowseCriteriaState, {
+      type: "applySearch",
+      criteria: {
+        filters: {},
+        imagePath: "D:\\references\\source.jpg",
+        mode: "image",
+        query: "",
+      },
+    });
+
+    expect(searched.appliedSearch).toMatchObject({
+      imagePath: "D:\\references\\source.jpg",
+      mode: "image",
+      query: "",
+    });
+    expect(searched.searchDraft.query).toBe("");
+  });
+
   it("selects a folder while clearing the previously applied search", () => {
     const searched = browseCriteriaReducer(initialBrowseCriteriaState, {
       type: "applySearch",

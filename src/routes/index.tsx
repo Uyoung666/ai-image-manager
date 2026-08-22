@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { imageSearchActions } from "@/actions/image-search";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -265,6 +266,7 @@ function HomePage() {
     useBrowseSession();
   const searchQuery = filter.appliedSearch?.query ?? "";
   const searchMode = filter.appliedSearch?.mode ?? null;
+  const imageSearchPath = filter.appliedSearch?.imagePath ?? null;
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
   const [searchResultSourceKey, setSearchResultSourceKey] = useState<
@@ -413,6 +415,9 @@ function HomePage() {
     useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
   const [searchLoading, setSearchLoading] = useState(false);
+  const [imageSearchPreviewDataUrl, setImageSearchPreviewDataUrl] = useState<
+    string | null
+  >(null);
   const [sortField, setSortField] = useState<SortField>(loadSortField);
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [gridColumnWidth, setGridColumnWidth] = useState(loadGridColumnWidth);
@@ -463,12 +468,14 @@ function HomePage() {
     setSearchResultGeneration(0);
     setSearchSemantic(null);
     setSearchLoading(false);
+    setImageSearchPreviewDataUrl(null);
     setParsedTimeFilter(null);
     setShowDrillBanner(false);
     setDrillDownFilters(undefined);
     clearDashboardReturnTarget();
     saveBrowseSession("home-search", {
       colorHex: null,
+      imageSearchPath: null,
       searchMode: null,
       searchQuery: "",
     });
@@ -1288,14 +1295,25 @@ function HomePage() {
   }, [rawPhotos]);
 
   // 持久化搜索状态 + 挂载时自动重新搜索
-  const searchStateRef = useRef({ searchQuery, searchMode, colorHex });
-  searchStateRef.current = { searchQuery, searchMode, colorHex };
+  const searchStateRef = useRef({
+    colorHex,
+    imageSearchPath,
+    searchMode,
+    searchQuery,
+  });
+  searchStateRef.current = {
+    colorHex,
+    imageSearchPath,
+    searchMode,
+    searchQuery,
+  };
   useEffect(() => {
     return () => {
       saveBrowseSession("home-search", {
         searchQuery: searchStateRef.current.searchQuery,
         searchMode: searchStateRef.current.searchMode,
         colorHex: searchStateRef.current.colorHex,
+        imageSearchPath: searchStateRef.current.imageSearchPath,
       });
     };
   }, [saveBrowseSession]);
@@ -1320,6 +1338,25 @@ function HomePage() {
       return;
     }
     const saved = getBrowseSession("home-search");
+    if (saved.searchMode === "image") {
+      restoredSearchRef.current = true;
+      if (!saved.imageSearchPath) {
+        resetHomeSearchState();
+        return;
+      }
+      const restoredImagePath = saved.imageSearchPath;
+      let attempts = 0;
+      const tryImageSearch = () => {
+        attempts++;
+        if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
+          imageSearchRef.current(restoredImagePath);
+        } else {
+          setTimeout(tryImageSearch, 100);
+        }
+      };
+      setTimeout(tryImageSearch, 300);
+      return;
+    }
     if (saved.searchQuery || saved.searchMode === "color" || saved.colorHex) {
       restoredSearchRef.current = true;
       const q = saved.searchQuery;
@@ -1349,7 +1386,13 @@ function HomePage() {
       };
       setTimeout(trySearch, 300);
     }
-  }, [getBrowseSession, handleSearch, drillParams, filter.applySearch]); // 仅首次挂载
+  }, [
+    getBrowseSession,
+    handleSearch,
+    drillParams,
+    filter.applySearch,
+    resetHomeSearchState,
+  ]); // 仅首次挂载
 
   // 动态 routeKey：区分搜索/筛选/排序状态
   // ⚠️ 所有 filter 字段必须做 ?? fallback，防止卸载期 SidebarFilterContext
@@ -2339,18 +2382,44 @@ function HomePage() {
 
   async function handleImageSearch(imagePath: string) {
     const gen = ++searchGenerationRef.current;
-    const imageSearchQuery = t("imageSearchToken");
-    filter.applySearch({ filters: {}, mode: "image", query: imageSearchQuery });
+    filter.applySearch({
+      filters: {},
+      imagePath,
+      mode: "image",
+      query: "",
+    });
+    saveBrowseSession("home-search", {
+      colorHex: null,
+      imageSearchPath: imagePath,
+      searchMode: "image",
+      searchQuery: "",
+    });
+    setImageSearchPreviewDataUrl(null);
     setSearchLoading(true);
     setSearchHasMore(false);
     const startTime = performance.now();
     try {
-      const result = await ipc.client.photos.searchByImage({
-        imagePath,
-        limit: 500,
-      });
+      const previewPromise = imageSearchActions
+        .getPreview(imagePath)
+        .then((preview) => {
+          if (gen === searchGenerationRef.current && preview.exists) {
+            setImageSearchPreviewDataUrl(preview.dataUrl);
+          }
+          return preview;
+        })
+        .catch(() => ({ dataUrl: null, exists: true }));
+      const [result, preview] = await Promise.all([
+        imageSearchActions.search(imagePath, 500),
+        previewPromise,
+      ]);
       // 竞态保护：丢弃过时响应
       if (gen !== searchGenerationRef.current) {
+        return;
+      }
+      if (!preview.exists || result.errorCode === "SOURCE_NOT_FOUND") {
+        filter.clearSearch();
+        setImageSearchPreviewDataUrl(null);
+        toast.error(t("toastImageSearchSourceMissing"));
         return;
       }
       if (result.error) {
@@ -2672,6 +2741,14 @@ function HomePage() {
             drillDownFilters={drillDownFilters}
             filters={filter.searchDraft.filters}
             imageSearchActive={searchMode === "image"}
+            imageSearchReference={
+              searchMode === "image" && imageSearchPath
+                ? {
+                    imagePath: imageSearchPath,
+                    previewDataUrl: imageSearchPreviewDataUrl,
+                  }
+                : undefined
+            }
             leadingContent={
               <div className="flex w-full min-w-0 max-w-[220px] items-center gap-2 pr-1">
                 <div className="min-w-0">
@@ -2693,7 +2770,7 @@ function HomePage() {
             onTagSelect={handleTagSuggestionSelect}
             query={filter.searchDraft.query}
             resetVersion={filter.searchResetVersion}
-            resultCount={searchQuery ? photos.length : undefined}
+            resultCount={searchMode ? photos.length : undefined}
             searchMode={searchMode}
             searchTime={searchTime}
             semanticDiagnostics={

@@ -256,11 +256,77 @@ describe("SearchBar", () => {
 
   it("does not open the text starter panel in image search mode", async () => {
     const user = userEvent.setup();
-    render(<ControlledSearchBar {...baseProps} imageSearchActive />);
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        imageSearchActive
+        imageSearchReference={{
+          imagePath: "C:\\photos\\reference.jpg",
+          previewDataUrl: "data:image/jpeg;base64,cHJldmlldw==",
+        }}
+      />
+    );
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(
+      screen.getByRole("button", {
+        name: "参考图片：reference.jpg，点击更换",
+      })
+    );
 
     expect(screen.queryByText("试试这样搜索")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("[以图搜图]")).not.toBeInTheDocument();
+  });
+
+  it("shows the image-search thumbnail and filename with a shared tooltip", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ControlledSearchBar
+        {...baseProps}
+        imageSearchActive
+        imageSearchReference={{
+          imagePath: "D:\\references\\seaside sunset.jpg",
+          previewDataUrl: "data:image/jpeg;base64,cHJldmlldw==",
+        }}
+      />
+    );
+
+    const reference = screen.getByRole("button", {
+      name: "参考图片：seaside sunset.jpg，点击更换",
+    });
+    expect(screen.getByText("seaside sunset.jpg")).toBeInTheDocument();
+    expect(
+      container.querySelector(".home-image-search-reference img")
+    ).toHaveAttribute("src", "data:image/jpeg;base64,cHJldmlldw==");
+
+    await user.hover(reference);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "参考图片：seaside sunset.jpg，点击更换"
+    );
+  });
+
+  it("falls back to the image icon when the reference preview cannot load", () => {
+    const { container } = render(
+      <ControlledSearchBar
+        {...baseProps}
+        imageSearchActive
+        imageSearchReference={{
+          imagePath: "D:\\references\\unsupported.raw",
+          previewDataUrl: "data:image/jpeg;base64,broken",
+        }}
+      />
+    );
+
+    const image = container.querySelector(".home-image-search-reference img");
+    expect(image).not.toBeNull();
+    if (image) {
+      fireEvent.error(image);
+    }
+
+    expect(
+      container.querySelector(".home-image-search-reference img")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("unsupported.raw")).toBeInTheDocument();
   });
 
   it("shows a labeled image search action and opens the file input", async () => {

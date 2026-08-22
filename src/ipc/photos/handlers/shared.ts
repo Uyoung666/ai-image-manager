@@ -14,6 +14,9 @@ export const ImageSearchSchema = z.object({
   imagePath: z.string().min(1),
   limit: z.number().optional().default(20),
 });
+export const ImageSearchPreviewSchema = ImageSearchSchema.pick({
+  imagePath: true,
+});
 export const ListSchema = z.object({
   folderId: z.number().optional(),
   tagId: z.number().optional(),

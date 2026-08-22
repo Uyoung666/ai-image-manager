@@ -119,6 +119,26 @@ describe("BrowseSessionContext", () => {
       );
     });
 
+    it("preserves the image-search source for the current browse session", () => {
+      const first = renderHook(() => useBrowseSession(), { wrapper });
+
+      act(() => {
+        first.result.current.saveSession("home-search", {
+          imageSearchPath: "D:\\references\\source.jpg",
+          searchMode: "image",
+          searchQuery: "",
+        });
+      });
+      first.unmount();
+
+      const second = renderHook(() => useBrowseSession(), { wrapper });
+      expect(second.result.current.getSession("home-search")).toMatchObject({
+        imageSearchPath: "D:\\references\\source.jpg",
+        searchMode: "image",
+        searchQuery: "",
+      });
+    });
+
     it("should delete session from storage when all fields are default", () => {
       const { result } = renderHook(() => useBrowseSession(), { wrapper });
 

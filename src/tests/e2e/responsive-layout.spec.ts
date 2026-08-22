@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -51,6 +52,14 @@ const userDataDir = path.join(
   os.tmpdir(),
   `ai-image-manager-e2e-responsive-${process.pid}-${Date.now()}`
 );
+const referenceImagePath = path.join(
+  os.tmpdir(),
+  `ai-image-manager-e2e-reference-${process.pid}.png`
+);
+const REFERENCE_IMAGE_ARIA_PATTERN =
+  /Reference image: ai-image-manager-e2e-reference-/;
+const REFERENCE_IMAGE_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DAwMDAxMDAwMAAAAwBAQDJ/pLvAAAAAElFTkSuQmCC";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
@@ -211,7 +220,37 @@ async function expectHomeToolbarToShrinkSearchBeforeWrapping(): Promise<void> {
   expect(measurement.rowHeight).toBeLessThanOrEqual(48);
 }
 
+async function expectImageSearchReferenceInsideToolbar(
+  width: number
+): Promise<void> {
+  const currentPage = requirePage();
+  await navigateTo("/");
+  await currentPage
+    .locator('input[type="file"][accept="image/*"]')
+    .setInputFiles(referenceImagePath);
+
+  const reference = currentPage.locator(".home-image-search-reference");
+  await expect(reference).toBeVisible();
+  await expect(reference).toHaveAttribute(
+    "aria-label",
+    REFERENCE_IMAGE_ARIA_PATTERN
+  );
+
+  const fileNameDisplay = await reference
+    .locator(".home-image-search-reference-name")
+    .evaluate((element) => getComputedStyle(element).display);
+  expect(fileNameDisplay === "none").toBe(width <= 760);
+  expect(await measureHorizontalOverflow()).toEqual([]);
+
+  await currentPage.getByRole("button", { name: "Clear search" }).click();
+  await expect(reference).not.toBeVisible();
+}
+
 test.beforeAll(async () => {
+  await fs.promises.writeFile(
+    referenceImagePath,
+    Buffer.from(REFERENCE_IMAGE_BASE64, "base64")
+  );
   process.env.CI = "e2e";
   electronApp = await electron.launch({
     args: [
@@ -241,6 +280,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await electronApp?.close();
+  await fs.promises.rm(referenceImagePath, { force: true });
 });
 
 for (const { width, height } of WINDOW_SIZES) {
@@ -269,5 +309,9 @@ for (const { width, height } of WINDOW_SIZES) {
         await expectHomeToolbarToShrinkSearchBeforeWrapping();
       });
     }
+
+    await test.step("image-search reference stays responsive", async () => {
+      await expectImageSearchReferenceInsideToolbar(width);
+    });
   });
 }

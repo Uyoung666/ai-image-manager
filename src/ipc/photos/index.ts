@@ -55,6 +55,7 @@ import {
   toggleFavorite,
 } from "./handlers/mutations";
 import {
+  getImageSearchPreview,
   searchByImage,
   searchByText,
   searchCompound,
@@ -139,6 +140,7 @@ export const photos = {
   getFolders,
   getGeoLocations,
   getImportQueueStatus: getImportQueueStatus_h,
+  getImageSearchPreview,
   getIndexStats,
   getPhotoDetail,
   getPhotoExif,

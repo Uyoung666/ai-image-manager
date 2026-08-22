@@ -68,6 +68,8 @@ const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
   "provenanceStatus",
 ];
 
+const PATH_SEPARATOR_PATTERN = /[\\/]/;
+
 interface PersonOption {
   coverPhotoPath: string | null;
   coverThumbnailPath: string | null;
@@ -80,6 +82,17 @@ interface FaceIdentityRecord {
   coverThumbnailPath?: string | null;
   id: number;
   name: string;
+}
+
+interface ImageSearchReference {
+  imagePath: string;
+  previewDataUrl: string | null;
+}
+
+function getFileName(filePath: string): string {
+  return (
+    filePath.split(PATH_SEPARATOR_PATTERN).filter(Boolean).at(-1) ?? filePath
+  );
 }
 
 interface ExifCandidateResult {
@@ -107,6 +120,7 @@ interface SearchBarProps {
   drillDownFilters?: ExifFilters;
   filters: ExifFilters;
   imageSearchActive?: boolean;
+  imageSearchReference?: ImageSearchReference;
   leadingContent?: ReactNode;
   onClear: () => void;
   onFiltersChange: Dispatch<SetStateAction<ExifFilters>>;
@@ -134,6 +148,7 @@ export const SearchBar = memo(
         drillDownFilters,
         filters,
         imageSearchActive,
+        imageSearchReference,
         leadingContent,
         onFiltersChange: setFilters,
         onQueryChange: setQuery,
@@ -346,12 +361,6 @@ export const SearchBar = memo(
         !showFilters &&
         (!query.trim() || suggestions.length > 0);
 
-      useEffect(() => {
-        if (imageSearchActive) {
-          setQuery(t("imageSearchToken"));
-          setShowSuggestions(false);
-        }
-      }, [imageSearchActive, setQuery, t]);
       const inputRef = useRef<HTMLInputElement>(null);
       const fileInputRef = useRef<HTMLInputElement>(null);
       const dropdownRef = useRef<HTMLDivElement>(null);
@@ -360,6 +369,12 @@ export const SearchBar = memo(
       const [_locallyDragging, _setLocallyDragging] = useState(false);
       const [suggestionIndex, setSuggestionIndex] = useState(-1);
       const [floatingPanelMaxHeight, setFloatingPanelMaxHeight] = useState(440);
+      const [failedImagePreviewUrl, setFailedImagePreviewUrl] = useState<
+        string | null
+      >(null);
+      const imageSearchFileName = imageSearchReference
+        ? getFileName(imageSearchReference.imagePath)
+        : "";
 
       useEffect(() => {
         if (!(showFilters || showSuggestionPanel)) {
@@ -616,7 +631,7 @@ export const SearchBar = memo(
       function handleClear() {
         setQuery("");
         onClear();
-        inputRef.current?.focus();
+        requestAnimationFrame(() => inputRef.current?.focus());
       }
 
       function handleSuggestionClick(suggestion: SearchSuggestion) {
@@ -802,45 +817,96 @@ export const SearchBar = memo(
                 className="home-search-form relative xl:max-w-[720px]"
                 onSubmit={handleSubmit}
               >
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-y-0 left-0 z-[100] flex w-9 items-center justify-center"
-                  style={{ color: "var(--muted-foreground)", zIndex: 100 }}
-                >
-                  <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
-                </span>
-                <input
-                  aria-activedescendant={
-                    suggestionIndex >= 0
-                      ? `search-suggestion-${suggestionIndex}`
-                      : undefined
-                  }
-                  aria-autocomplete="list"
-                  aria-controls="search-suggestions-listbox"
-                  aria-expanded={showSuggestionPanel}
-                  className={`home-search-input h-9 w-full rounded-[6px] border border-border pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring ${inputFocused || showSuggestionPanel || showFilters || query.trim() ? "is-active" : ""}`}
-                  onBlur={handleInputBlur}
-                  onChange={(e) => {
-                    setQuery(e.target.value);
-                    setShowSuggestions(true);
-                    setSuggestionIndex(-1); // 输入变化时重置高亮
-                  }}
-                  onFocus={() => {
-                    setInputFocused(true);
-                    if (showFilters) {
-                      setShowFilters(false);
-                    }
-                    if (!imageSearchActive) {
-                      setShowSuggestions(true);
-                    }
-                  }}
-                  onKeyDown={handleInputKeyDown}
-                  placeholder={getPlaceholder()}
-                  ref={inputRef}
-                  role="combobox"
-                  type="text"
-                  value={query}
-                />
+                {imageSearchActive && imageSearchReference ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={t("imageSearchReferenceHint", {
+                          filename: imageSearchFileName,
+                        })}
+                        className="home-image-search-reference home-search-input is-active flex h-9 w-full min-w-0 items-center gap-2 rounded-[6px] border border-border pr-10 pl-1.5 text-left text-[14px] text-foreground outline-none transition-colors focus:border-primary focus:ring-1 focus:ring-ring"
+                        onClick={() => fileInputRef.current?.click()}
+                        type="button"
+                      >
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-[4px] bg-foreground/5 text-muted-foreground">
+                          {imageSearchReference.previewDataUrl &&
+                          failedImagePreviewUrl !==
+                            imageSearchReference.previewDataUrl ? (
+                            <img
+                              alt=""
+                              aria-hidden="true"
+                              className="h-full w-full object-cover"
+                              height={28}
+                              onError={() =>
+                                setFailedImagePreviewUrl(
+                                  imageSearchReference.previewDataUrl
+                                )
+                              }
+                              src={imageSearchReference.previewDataUrl}
+                              width={28}
+                            />
+                          ) : (
+                            <ImageUp aria-hidden="true" className="h-4 w-4" />
+                          )}
+                        </span>
+                        <span className="home-image-search-reference-label text-[11px] text-muted-foreground">
+                          {t("searchModeImage")}
+                        </span>
+                        <span className="home-image-search-reference-name min-w-0 truncate font-medium">
+                          {imageSearchFileName}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t("imageSearchReferenceHint", {
+                        filename: imageSearchFileName,
+                      })}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 left-0 z-[100] flex w-9 items-center justify-center"
+                      style={{
+                        color: "var(--muted-foreground)",
+                        zIndex: 100,
+                      }}
+                    >
+                      <Search className="h-4 w-4 shrink-0" strokeWidth={2} />
+                    </span>
+                    <input
+                      aria-activedescendant={
+                        suggestionIndex >= 0
+                          ? `search-suggestion-${suggestionIndex}`
+                          : undefined
+                      }
+                      aria-autocomplete="list"
+                      aria-controls="search-suggestions-listbox"
+                      aria-expanded={showSuggestionPanel}
+                      className={`home-search-input h-9 w-full rounded-[6px] border border-border pr-8 pl-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-ring ${inputFocused || showSuggestionPanel || showFilters || query.trim() ? "is-active" : ""}`}
+                      onBlur={handleInputBlur}
+                      onChange={(e) => {
+                        setQuery(e.target.value);
+                        setShowSuggestions(true);
+                        setSuggestionIndex(-1); // 输入变化时重置高亮
+                      }}
+                      onFocus={() => {
+                        setInputFocused(true);
+                        if (showFilters) {
+                          setShowFilters(false);
+                        }
+                        setShowSuggestions(true);
+                      }}
+                      onKeyDown={handleInputKeyDown}
+                      placeholder={getPlaceholder()}
+                      ref={inputRef}
+                      role="combobox"
+                      type="text"
+                      value={query}
+                    />
+                  </>
+                )}
                 {(query || imageSearchActive) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2032,6 +2098,14 @@ export const SearchBar = memo(
       return false;
     }
     if (prevProps.imageSearchActive !== nextProps.imageSearchActive) {
+      return false;
+    }
+    if (
+      prevProps.imageSearchReference?.imagePath !==
+        nextProps.imageSearchReference?.imagePath ||
+      prevProps.imageSearchReference?.previewDataUrl !==
+        nextProps.imageSearchReference?.previewDataUrl
+    ) {
       return false;
     }
     if (prevProps.onTagRemove !== nextProps.onTagRemove) {

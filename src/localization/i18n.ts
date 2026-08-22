@@ -1218,9 +1218,12 @@ i18n.use(initReactI18next).init({
         dropUnsupportedItems:
           "不支持此内容：瀑布流仅收单张图片，文件树仅收文件夹",
         toastImageDropFailed: "图片拖入失败",
+        toastImageSearchSourceMissing:
+          "参考图片已被移动或删除，已清除本次以图搜图",
         toastFolderDropFailed: "未读取到可导入的文件夹",
         toastImportAlreadyQueued: "{{count}} 个文件夹已在导入队列中",
         imageSearchTitle: "以图搜图 — 选择参考图片寻找相似照片",
+        imageSearchReferenceHint: "参考图片：{{filename}}，点击更换",
         exifFilterTitle: "EXIF 筛选",
         searchModeSemantic: "语义搜索",
         searchModeImage: "以图搜图",
@@ -3251,11 +3254,15 @@ i18n.use(initReactI18next).init({
         dropUnsupportedItems:
           "Unsupported: the gallery accepts one image; the file tree accepts folders only",
         toastImageDropFailed: "Failed to read the dropped image",
+        toastImageSearchSourceMissing:
+          "The reference image was moved or deleted. Image search was cleared.",
         toastFolderDropFailed: "No importable folder was found",
         toastImportAlreadyQueued:
           "{{count}} folders are already in the import queue",
         imageSearchTitle:
           "Image search — choose a reference image to find similar photos",
+        imageSearchReferenceHint:
+          "Reference image: {{filename}}. Click to replace it.",
         exifFilterTitle: "EXIF Filters",
         searchModeSemantic: "Semantic Search",
         searchModeImage: "Image Search",

@@ -24,6 +24,8 @@ interface BrowseSessionData {
   dashboardReturn: DashboardReturnTarget | null;
   /** 详情面板是否被用户手动关闭 */
   detailDismissed: boolean;
+  /** 当前会话的以图搜图参考图片路径 */
+  imageSearchPath: string | null;
   /** 最后一次点击的索引（用于 Shift-多选） */
   lastClickedIdx: number;
   /** 搜索模式 (null = 非搜索) */
@@ -39,6 +41,7 @@ interface BrowseSessionData {
 const DEFAULT_SESSION: BrowseSessionData = {
   colorHex: null,
   dashboardReturn: null,
+  imageSearchPath: null,
   lastClickedIdx: -1,
   detailDismissed: false,
   searchMode: null,
@@ -103,6 +106,10 @@ function readStoredSession(routeKey: string): CachedSession | null {
       data: {
         ...DEFAULT_SESSION,
         ...parsed,
+        imageSearchPath:
+          typeof parsed.imageSearchPath === "string"
+            ? parsed.imageSearchPath
+            : null,
         sequenceMode: normalizeSequenceMode(parsed.sequenceMode),
       },
       lastAccess: Date.now(),
@@ -157,6 +164,7 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
         updated.dashboardReturn === null &&
         updated.searchQuery === "" &&
         updated.searchMode === null &&
+        updated.imageSearchPath === null &&
         updated.colorHex === null &&
         updated.sequenceMode === "photos" &&
         updated.lastClickedIdx === -1 &&

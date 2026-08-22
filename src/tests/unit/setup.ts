@@ -72,6 +72,7 @@ vi.mock("react-i18next", () => ({
         searchMatchExactTag: "标签命中",
         searchMatchExactFilename: "文件名命中",
         imageSearchTitle: "以图搜图 — 选择参考图片寻找相似照片",
+        imageSearchReferenceHint: "参考图片：{{filename}}，点击更换",
         imageSearchToken: "[以图搜图]",
         searchSuggestions: "搜索建议",
         recentSearches: "最近搜索",
@@ -169,6 +170,8 @@ vi.mock("react-i18next", () => ({
         toastConvertedCount: "已转换 {{count}} 张照片",
         toastConvertFailed: "格式转换失败",
         toastImageSearchFailed: "以图搜图失败",
+        toastImageSearchSourceMissing:
+          "参考图片已被移动或删除，已清除本次以图搜图",
         toastAddToAlbumSuccess: "已添加 {{count}} 张照片到「{{album}}」",
         toastAddFailed: "添加失败",
         emptySearchTitle: "未找到匹配的照片",

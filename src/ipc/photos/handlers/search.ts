@@ -39,6 +39,7 @@ import {
   searchByTextWithPlan as aiSearchByTextWithPlan,
   isAiSearchReady,
 } from "@/services/ai-embedder";
+import { createImageSearchPreview } from "@/services/image-search-preview";
 import type { RewrittenQuery } from "@/services/query-rewrite";
 import { rewriteQuery, timeFilterToDateRange } from "@/services/query-rewrite";
 import {
@@ -63,9 +64,14 @@ import {
   applyTimeDecay,
   CompoundSearchSchema,
   deferSearchBranch,
+  ImageSearchPreviewSchema,
   ImageSearchSchema,
   SearchSchema,
 } from "./shared";
+
+export const getImageSearchPreview = os
+  .input(ImageSearchPreviewSchema)
+  .handler(async ({ input }) => createImageSearchPreview(input.imagePath));
 
 // ── Lightweight field selection for search results ───────────────────
 // Excludes heavy columns (phash, contentHash, vectorId, duelPreviewPath)
@@ -236,7 +242,11 @@ export const searchByImage = os
     const db = getDatabase();
     // Verify the image file exists before attempting AI search
     if (!fs.existsSync(input.imagePath)) {
-      return { results: [], error: "图片文件不存在" };
+      return {
+        results: [],
+        error: "图片文件不存在",
+        errorCode: "SOURCE_NOT_FOUND" as const,
+      };
     }
 
     let results: Array<{ photoId: number; similarity: number }> = [];
@@ -248,6 +258,7 @@ export const searchByImage = os
       return {
         results: [],
         error: `AI 搜索失败: ${message || "未知错误"}`,
+        errorCode: "AI_SEARCH_FAILED" as const,
       };
     }
 
@@ -256,6 +267,7 @@ export const searchByImage = os
       return {
         results: [],
         error: "未找到相似图片（请确认 AI 模型已就绪且图片已索引）",
+        errorCode: "NO_MATCHES" as const,
       };
     }
 

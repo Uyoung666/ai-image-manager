@@ -837,6 +837,10 @@
   min-width: min(180px, 100%);
 }
 
+.home-image-search-reference {
+  background: color-mix(in srgb, var(--card) 98%, transparent);
+}
+
 .home-toolbar-actions {
   flex-shrink: 0;
 }
@@ -945,6 +949,13 @@
   }
 
   .home-filter-summary {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-image-search-reference-label,
+  .home-image-search-reference-name {
     display: none;
   }
 }
