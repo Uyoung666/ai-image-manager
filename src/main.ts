@@ -22,6 +22,7 @@ import {
 import { ipcMain } from "electron/main";
 import started from "electron-squirrel-startup";
 import Store from "electron-store";
+import { exiftool } from "exiftool-vendored";
 import sharp from "sharp";
 import { getDatabase } from "@/db";
 import { appSettings, exifData, folders, photos, photoTags } from "@/db/schema";
@@ -46,6 +47,8 @@ import {
   DiagnosticSanitizer,
   sanitizeRendererRoute,
 } from "@/services/diagnostics/sanitizer";
+import { cancelFaceDetection } from "@/services/face-detector";
+import { shutdownFacePool } from "@/services/face-worker-pool";
 import {
   getHttpServerAuthToken,
   getHttpServerPort,
@@ -65,6 +68,11 @@ import {
 import { getSetting } from "@/services/settings-manager";
 import { generateThumbnail, getThumbnailDir } from "@/services/thumbnailer";
 import {
+  getTrackedChildProcessCount,
+  terminateTrackedChildProcesses,
+  terminateTrackedChildProcessesSync,
+} from "@/services/tracked-child-processes";
+import {
   installUpdate,
   startUpdateManager,
   stopAutomaticChecks,
@@ -73,6 +81,11 @@ import {
   createWanderLifecycleBridge,
   type WanderLifecycleBridge,
 } from "@/services/wander-lifecycle";
+import {
+  createBeforeQuitHandler,
+  destroyTraySafely,
+  showOrCreateWindow,
+} from "@/services/window-tray-lifecycle";
 import {
   APP_PREFERENCE_DEFAULTS,
   APP_PREFERENCE_KEYS,
@@ -91,6 +104,7 @@ configurePluginManager([NEBULA_GLASS_MANIFEST]);
 
 const log = createLogger("main");
 installConsoleDiagnostics();
+const QUIT_CLEANUP_TIMEOUT_MS = 8000;
 
 // ── Squirrel startup event handling ──────────────────────────────────
 if (started) {
@@ -339,15 +353,18 @@ function isBoundsVisible(bounds: {
 }
 
 function showMainWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    mainWindow = null;
-    return;
+  try {
+    showOrCreateWindow({
+      createWindow: () => {
+        mainWindow = null;
+        createWindow(getHttpServerPort() ?? 0, getHttpServerAuthToken());
+      },
+      isQuitting,
+      window: mainWindow,
+    });
+  } catch (error) {
+    log.error({ err: error }, "Failed to show or recreate main window");
   }
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
-  }
-  mainWindow.show();
-  mainWindow.focus();
 }
 
 // ── Tray language store ────────────────────────────────────────────
@@ -462,11 +479,29 @@ function createTray() {
   });
 }
 
+function destroyTray() {
+  const currentTray = tray;
+  tray = null;
+  if (!currentTray) {
+    return;
+  }
+
+  const destroyed = destroyTraySafely(currentTray, (error) => {
+    log.warn({ err: error }, "Failed to destroy tray during quit");
+  });
+  if (destroyed) {
+    log.info("Tray destroyed during quit");
+  }
+}
+
 // ── Global shortcuts ─────────────────────────────────────────────────
 function registerGlobalShortcuts() {
   const searchRegistered = globalShortcut.register("Ctrl+Shift+F", () => {
-    if (mainWindow) {
-      showMainWindow();
+    if (!mainWindow || isQuitting) {
+      return;
+    }
+    showMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("global-shortcut:search");
     }
   });
@@ -1198,10 +1233,10 @@ ipcMain.on("shell:open-external", (event, url: string) => {
     }
     try {
       Promise.resolve(shell.openExternal(url)).catch((err) => {
-        log.error("Failed to open external URL:", err);
+        log.error({ err }, "Failed to open external URL");
       });
     } catch (err) {
-      log.error("Failed to open external URL:", err);
+      log.error({ err }, "Failed to open external URL");
     }
   }
 });
@@ -1431,7 +1466,10 @@ fs.writeFileSync(path.join(logDir, "startup.log"), "BEFORE_WHENREADY\n", {
 
 // Windows AUMID — 没有它 dev 模式下 Notification 会被系统静默丢弃
 if (process.platform === "win32") {
-  app.setAppUserModelId("com.aiimagemanager.app");
+  // Squirrel creates shortcuts with this identity.  Keeping the packaged
+  // process and both installer shortcut identities identical lets Windows
+  // associate the taskbar icon and pin state with the real app executable.
+  app.setAppUserModelId("com.squirrel.ai-image-manager.ai-image-manager");
 }
 
 const BROWSER_COMPATIBLE_EXTENSIONS = new Set([
@@ -1591,9 +1629,17 @@ app.whenReady().then(async () => {
     // GPU detection is now handled on-demand by the Onboarding overlay
     // (step 2) and the Settings page's GpuSettingsCard — no automatic
     // startup popup needed.
-    startBackgroundServices().catch((err) =>
+    const backgroundStartup = startBackgroundServices().catch((err) =>
       log.warn({ err }, "Non-critical services degraded")
     );
+    if (
+      process.env.CI === "e2e" &&
+      process.argv.includes("--e2e-quit-after-ready")
+    ) {
+      backgroundStartup.finally(() => {
+        setTimeout(() => app.quit(), 100);
+      });
+    }
 
     // ── Background color data backfill (non-blocking, deferred 5s) ─────
     setTimeout(async () => {
@@ -1670,29 +1716,45 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    showMainWindow();
-  } else {
-    mainWindow = null;
-    createWindow(getHttpServerPort() ?? 0, getHttpServerAuthToken());
-  }
+  showMainWindow();
 });
 
 // ── Cleanup on quit ──────────────────────────────────────────────────
-app.on("before-quit", () => {
-  // Flip the flag so the close handler stops intercepting and lets the
-  // window actually close. Required for app.quit() / app.relaunch() to work.
-  isQuitting = true;
-});
+async function waitForQuitCleanup(
+  operation: Promise<unknown>,
+  label: string,
+  timeoutMs: number
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    log.warn({ err: error }, `Quit cleanup step failed: ${label}`);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
 
-app.on("will-quit", async () => {
+async function cleanupApplicationBeforeQuit(): Promise<void> {
+  log.info("quit cleanup: started");
   stopAutomaticChecks();
   try {
-    fs.writeFileSync(
-      path.join(logDir, "migrate.log"),
-      `${new Date().toISOString()} will-quit: START\n`,
-      { flag: "a" }
-    );
+    if (logDir) {
+      fs.writeFileSync(
+        path.join(logDir, "migrate.log"),
+        `${new Date().toISOString()} quit-cleanup: START\n`,
+        { flag: "a" }
+      );
+    }
   } catch {
     /* best-effort */
   }
@@ -1701,21 +1763,89 @@ app.on("will-quit", async () => {
     clearInterval(trashCleanupTimer);
     trashCleanupTimer = null;
   }
-  globalShortcut.unregisterAll();
-  wanderLifecycleBridge?.dispose();
-  wanderLifecycleBridge = null;
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
-  await registry.stop();
   try {
-    fs.writeFileSync(
-      path.join(logDir, "migrate.log"),
-      `${new Date().toISOString()} will-quit: DONE\n`,
-      { flag: "a" }
-    );
+    globalShortcut.unregisterAll();
+  } catch (error) {
+    log.warn({ err: error }, "Failed to unregister global shortcuts");
+  }
+  try {
+    wanderLifecycleBridge?.dispose();
+  } catch (error) {
+    log.warn({ err: error }, "Failed to dispose wander lifecycle bridge");
+  }
+  wanderLifecycleBridge = null;
+
+  // Face detection is not a registry-owned service and may have its own
+  // Electron worker pool. Invalidate the run before terminating its children
+  // so rejected worker promises cannot persist late results during shutdown.
+  cancelFaceDetection();
+  shutdownFacePool();
+
+  // Kill forked ELECTRON_RUN_AS_NODE workers first. This both unlocks the
+  // installed executable for MSI and causes pending service operations to
+  // unwind instead of making registry.stop() wait indefinitely.
+  const trackedWorkerCount = getTrackedChildProcessCount();
+  try {
+    if (logDir) {
+      fs.writeFileSync(
+        path.join(logDir, "migrate.log"),
+        `${new Date().toISOString()} quit-cleanup: TRACKED_WORKERS=${trackedWorkerCount}\n`,
+        { flag: "a" }
+      );
+    }
   } catch {
     /* best-effort */
   }
+  await waitForQuitCleanup(
+    terminateTrackedChildProcesses(),
+    "worker termination",
+    2000
+  );
+  await waitForQuitCleanup(exiftool.end(false), "ExifTool termination", 2000);
+  await waitForQuitCleanup(
+    registry.stop(),
+    "service registry",
+    QUIT_CLEANUP_TIMEOUT_MS
+  );
+  try {
+    if (logDir) {
+      fs.writeFileSync(
+        path.join(logDir, "migrate.log"),
+        `${new Date().toISOString()} quit-cleanup: DONE\n`,
+        { flag: "a" }
+      );
+    }
+  } catch {
+    /* best-effort */
+  }
+  log.info("quit cleanup: finished");
+}
+
+const handleBeforeQuit = createBeforeQuitHandler({
+  cleanup: cleanupApplicationBeforeQuit,
+  destroyTray,
+  markQuitting: () => {
+    isQuitting = true;
+  },
+  onCleanupError: (error) => {
+    log.error({ err: error }, "Unexpected failure during quit cleanup");
+  },
+  requestQuit: () => {
+    app.quit();
+  },
 });
+
+app.on("before-quit", (event) => {
+  log.info("before-quit: application shutdown requested");
+  handleBeforeQuit(event);
+});
+
+app.on("will-quit", () => {
+  // Synchronous final guard for process-exit paths and workers that appeared
+  // during the bounded cleanup window.
+  destroyTray();
+  terminateTrackedChildProcessesSync();
+  log.info("will-quit: final shutdown permitted");
+});
+
+process.once("exit", terminateTrackedChildProcessesSync);

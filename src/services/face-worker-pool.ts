@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { createLogger } from "@/utils/logger";
 
 const _log = createLogger("face-worker-pool");
@@ -108,10 +109,12 @@ function findWorkerScript(): string {
 
 function spawnWorker(index: number, generation = poolGeneration): WorkerSlot {
   const workerScript = findWorkerScript();
-  const child = fork(workerScript, [], {
-    stdio: ["ignore", "pipe", "pipe", "ipc"],
-    timeout: WORKER_TIMEOUT,
-  });
+  const child = trackChildProcess(
+    fork(workerScript, [], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      timeout: WORKER_TIMEOUT,
+    })
+  );
   captureWorkerOutput(child, `face-worker-${index}`);
 
   const slot: WorkerSlot = {

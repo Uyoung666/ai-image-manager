@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { ensureLocalModel } from "./model-loader";
 
 export type TranslationState = "ready" | "loading" | "degraded" | "error";
@@ -133,9 +134,11 @@ export function initTranslationWorker(modelsRoot: string): Promise<void> {
   translationState = "loading";
   initPromise = new Promise<void>((resolve, reject) => {
     let settled = false;
-    const worker = fork(findWorkerScript(), [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-    });
+    const worker = trackChildProcess(
+      fork(findWorkerScript(), [], {
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+      })
+    );
     captureWorkerOutput(worker, "translation-worker");
     child = worker;
 

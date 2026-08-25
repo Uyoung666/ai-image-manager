@@ -7,6 +7,7 @@ import type { SerializedWorkerAdapter } from "@/services/ai/model-adapter";
 import { getActiveEmbeddingWorkerAdapter } from "@/services/ai/model-config";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { probeEmbeddingGpuCapability } from "@/services/gpu-detector";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 
 interface EmbedResult {
   error?: string;
@@ -227,9 +228,11 @@ function isCurrentSlot(slot: WorkerSlot): boolean {
 
 function spawnWorker(index: number, generation: number): WorkerSlot {
   const workerScript = findWorkerScript();
-  const child = fork(workerScript, [], {
-    stdio: ["ignore", "pipe", "pipe", "ipc"],
-  });
+  const child = trackChildProcess(
+    fork(workerScript, [], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    })
+  );
   captureWorkerOutput(child, `embed-worker-${index}`);
 
   const slot: WorkerSlot = {

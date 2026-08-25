@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { WORKER_TIMEOUT } from "./constants";
 import type { SerializedWorkerAdapter } from "./model-adapter";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
@@ -146,9 +147,11 @@ export function initTextWorker(
   workerKey = key;
   workerReady = false;
   activeWorkerAdapter = adapter;
-  const child = fork(findTextWorkerScript(), [], {
-    stdio: ["ignore", "pipe", "pipe", "ipc"],
-  });
+  const child = trackChildProcess(
+    fork(findTextWorkerScript(), [], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    })
+  );
   captureWorkerOutput(child, "text-worker");
   worker = child;
 

@@ -9,6 +9,7 @@ import {
   resolveEmbeddingExecutionProvider,
 } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { WORKER_TIMEOUT } from "./constants";
 import {
   getActiveEmbeddingModel,
@@ -117,10 +118,12 @@ function embedImageInWorkerWithProvider(
     const adapter = getActiveEmbeddingWorkerAdapter(modelPath);
     const workerScript = findWorkerScript();
     console.log(`[AI] Starting one-shot image worker provider=${provider}`);
-    const child = fork(workerScript, [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-      timeout: WORKER_TIMEOUT,
-    });
+    const child = trackChildProcess(
+      fork(workerScript, [], {
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        timeout: WORKER_TIMEOUT,
+      })
+    );
     captureWorkerOutput(child, "search-worker");
 
     let stderr = "";
@@ -145,6 +148,7 @@ function embedImageInWorkerWithProvider(
       }
       const msg = rawMessage as {
         adapterId?: string;
+        error?: string;
         fingerprint?: string;
         results?: Array<{ error?: string; vector?: number[] }>;
         provider?: EmbeddingExecutionProvider;

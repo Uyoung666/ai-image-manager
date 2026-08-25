@@ -41,13 +41,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run publish
 
-      - name: Verify Windows update payload
+      - name: Verify Windows release payload
         shell: pwsh
         run: |
           $squirrelDirectory = Join-Path $PWD "out\make\squirrel.windows\x64"
+          $wixDirectory = Join-Path $PWD "out\make\wix\x64"
           $manifest = Join-Path $squirrelDirectory "RELEASES"
           $fullPackage = Get-ChildItem -LiteralPath $squirrelDirectory -File -Filter "*-full.nupkg"
           $setup = Get-ChildItem -LiteralPath $squirrelDirectory -File -Filter "*Setup.exe"
+          $msi = Get-ChildItem -LiteralPath $wixDirectory -File -Filter "*.msi"
+          $wixSource = Get-ChildItem -LiteralPath $wixDirectory -File -Filter "*.wxs"
 
           if (-not (Test-Path -LiteralPath $manifest)) {
             throw "Missing Squirrel RELEASES manifest; GitHub auto-update would not work."
@@ -58,5 +61,24 @@ jobs:
           if (-not $setup) {
             throw "Missing Squirrel Setup.exe; the GitHub update release is incomplete."
           }
+          if (-not $msi) {
+            throw "Missing WiX MSI; the custom-directory installer was not created."
+          }
+          if (-not $wixSource) {
+            throw "Missing generated WiX source; uninstall safeguards cannot be verified."
+          }
 
-          Write-Host "Verified RELEASES, full NUPKG, and Setup.exe for GitHub updates."
+          $perMachineScope = Select-String -LiteralPath $wixSource.FullName -SimpleMatch 'InstallScope="perMachine"'
+          if (-not $perMachineScope) {
+            throw "WiX MSI must run per-machine so custom-volume rollback files can be secured."
+          }
+          $rollbackDisabled = Select-String -LiteralPath $wixSource.FullName -Pattern 'DISABLEROLLBACK|<DisableRollback'
+          if ($rollbackDisabled) {
+            throw "WiX MSI must preserve transactional rollback; disabling it causes MSI 2502/2503 failures."
+          }
+          $shortcutIcon = Select-String -LiteralPath $wixSource.FullName -SimpleMatch 'Icon="ApplicationIcon" IconIndex="0"'
+          if (-not $shortcutIcon) {
+            throw "WiX shortcuts are missing their cached application icon."
+          }
+
+          Write-Host "Verified Squirrel payload, elevated MSI rollback, and shortcut icon."

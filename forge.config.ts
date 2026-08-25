@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
@@ -13,6 +14,35 @@ import { MODEL_MANIFEST } from "./src/services/model-downloader";
 
 const packageTempSuffix = process.env.AIM_PACKAGE_TEMP_SUFFIX;
 const RELEASE_MODELS_DIR = path.resolve("models-release");
+const SQUIRREL_SETUP_ICON_PATH = path.resolve("assets/icon.ico");
+const SQUIRREL_RCEDIT_PATH = path.resolve(
+  "node_modules/electron-winstaller/vendor/rcedit.exe"
+);
+const SQUIRREL_SETUP_ARTIFACT_PATTERN = /Setup\.exe$/i;
+const WIX_PACKAGE_ELEMENT_PATTERN = /<Package InstallerVersion="405"/;
+const WIX_PRODUCT_LANGUAGE_PATTERN = /Language="\{\{Language\}\}">/;
+const WIX_START_MENU_WORKING_DIRECTORY_PATTERN =
+  /WorkingDirectory="APPLICATIONROOTDIRECTORY">\r?\n(<!-- \{\{ShortcutProperties\}\} -->)/;
+const WIX_DESKTOP_WORKING_DIRECTORY_PATTERN =
+  /WorkingDirectory="APPLICATIONROOTDIRECTORY"\/>/;
+const LOCAL_WIX_DIRECTORY = process.env.LOCALAPPDATA
+  ? path.join(
+      process.env.LOCALAPPDATA,
+      "AIImageManagerBuildTools",
+      "wix-3.14.0"
+    )
+  : null;
+
+if (
+  process.platform === "win32" &&
+  LOCAL_WIX_DIRECTORY &&
+  fs.existsSync(path.join(LOCAL_WIX_DIRECTORY, "candle.exe")) &&
+  fs.existsSync(path.join(LOCAL_WIX_DIRECTORY, "light.exe"))
+) {
+  process.env.PATH = [LOCAL_WIX_DIRECTORY, process.env.PATH]
+    .filter(Boolean)
+    .join(path.delimiter);
+}
 
 /**
  * Build the exact model payload that is allowed into a release.  The source
@@ -307,9 +337,17 @@ const config: ForgeConfig = {
   makers: [
     new MakerSquirrel({ name: "ai-image-manager" }),
     new MakerWix({
-      appUserModelId: "com.aiimagemanager.app",
+      appUserModelId: "com.squirrel.ai-image-manager.ai-image-manager",
       beforeCreate: (creator) => {
         creator.wixTemplate = creator.wixTemplate
+          .replace(
+            WIX_PRODUCT_LANGUAGE_PATTERN,
+            'Language="{{Language}}" Codepage="936">'
+          )
+          .replace(
+            WIX_PACKAGE_ELEMENT_PATTERN,
+            '<Package InstallerVersion="405" SummaryCodepage="936"'
+          )
           .replace(
             'Name = "{{ApplicationName}} (Machine - MSI)"',
             'Name="{{ApplicationName}} 安装程序"'
@@ -322,6 +360,21 @@ const config: ForgeConfig = {
           .replace(
             'Description="The main components to run the applications."',
             'Description="运行 AI Image Manager 所需的核心文件。"'
+          )
+          .replace(
+            "<!-- {{Icon}}-->",
+            `<Icon Id="ApplicationIcon" SourceFile="${path.resolve(
+              "assets/icon.ico"
+            )}" />
+    <Property Id="ARPPRODUCTICON" Value="ApplicationIcon" />`
+          )
+          .replace(
+            WIX_START_MENU_WORKING_DIRECTORY_PATTERN,
+            'WorkingDirectory="APPLICATIONROOTDIRECTORY" Icon="ApplicationIcon" IconIndex="0">\n$1'
+          )
+          .replace(
+            WIX_DESKTOP_WORKING_DIRECTORY_PATTERN,
+            'WorkingDirectory="APPLICATIONROOTDIRECTORY" Icon="ApplicationIcon" IconIndex="0"/>'
           );
         creator.updaterTemplate = creator.updaterTemplate
           .replace('Title="Auto Update"', 'Title="自动更新"')
@@ -331,7 +384,11 @@ const config: ForgeConfig = {
           );
       },
       cultures: "zh-cn",
-      defaultInstallMode: "perUser",
+      // A custom directory can live on any fixed volume. Run the transaction
+      // elevated so Windows Installer can create and secure that volume's
+      // Config.Msi rollback store during install, upgrade, and uninstall.
+      // Disabling rollback is not safe and causes MSI 2502/2503 failures.
+      defaultInstallMode: "perMachine",
       exe: "ai-image-manager.exe",
       features: { autoLaunch: false, autoUpdate: true },
       icon: "assets/icon.ico",
@@ -405,6 +462,38 @@ const config: ForgeConfig = {
           path.join(outputPath, "resources", "app.asar.unpacked")
         );
         cleanBuildNodeModules(path.join(outputPath, "resources", "app"));
+      }
+      return Promise.resolve();
+    },
+    postMake: (_forgeConfig, makeResults) => {
+      if (
+        process.platform !== "win32" ||
+        !fs.existsSync(SQUIRREL_SETUP_ICON_PATH) ||
+        !fs.existsSync(SQUIRREL_RCEDIT_PATH)
+      ) {
+        return Promise.resolve();
+      }
+
+      for (const artifact of makeResults.flatMap(
+        (result) => result.artifacts
+      )) {
+        if (!SQUIRREL_SETUP_ARTIFACT_PATTERN.test(artifact)) {
+          continue;
+        }
+
+        const result = spawnSync(
+          SQUIRREL_RCEDIT_PATH,
+          [artifact, "--set-icon", SQUIRREL_SETUP_ICON_PATH],
+          { stdio: "pipe", windowsHide: true }
+        );
+        if (result.error || result.status !== 0) {
+          const details = result.error?.message ?? result.stderr?.toString();
+          throw new Error(
+            `Unable to apply the application icon to Squirrel Setup.exe${
+              details ? `: ${details}` : ""
+            }`
+          );
+        }
       }
       return Promise.resolve();
     },

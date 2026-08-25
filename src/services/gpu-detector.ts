@@ -13,6 +13,7 @@ import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import { getSetting, setSetting } from "@/services/settings-manager";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { createLogger } from "@/utils/logger";
 import { getActiveEmbeddingAdapter } from "./ai/model-adapter";
 
@@ -95,10 +96,12 @@ function probeFaceGpuCapability(modelsDir: string): Promise<GpuProbeResult> {
   return new Promise((resolve) => {
     let resolved = false;
 
-    const child = fork(scriptPath, [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-      timeout: PROBE_TIMEOUT_MS,
-    });
+    const child = trackChildProcess(
+      fork(scriptPath, [], {
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        timeout: PROBE_TIMEOUT_MS,
+      })
+    );
     captureWorkerOutput(child, "gpu-probe-worker");
 
     const timeout = setTimeout(() => {
@@ -189,10 +192,12 @@ export function probeEmbeddingGpuCapability(
 
   return new Promise((resolve) => {
     let resolved = false;
-    const child = fork(scriptPath, [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-      timeout: EMBEDDING_PROBE_TIMEOUT_MS,
-    });
+    const child = trackChildProcess(
+      fork(scriptPath, [], {
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        timeout: EMBEDDING_PROBE_TIMEOUT_MS,
+      })
+    );
     captureWorkerOutput(child, "embedding-gpu-probe-worker");
 
     const timeout = setTimeout(() => {

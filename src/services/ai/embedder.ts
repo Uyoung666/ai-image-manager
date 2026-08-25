@@ -11,6 +11,7 @@ import {
   shutdownPool,
 } from "@/services/embed-worker-pool";
 import { getSetting } from "@/services/settings-manager";
+import { trackChildProcess } from "@/services/tracked-child-processes";
 import { BATCH_SIZE, WORKER_TIMEOUT } from "./constants";
 import { getActiveEmbeddingWorkerAdapter } from "./model-config";
 import { shouldPublishVectorFingerprint } from "./model-fingerprint";
@@ -182,10 +183,12 @@ function runEmbedBatch(
       `[AI] Forking worker for ${batchPhotos.length} photos: ${workerScript}`
     );
 
-    const child = fork(workerScript, [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-      timeout: WORKER_TIMEOUT,
-    });
+    const child = trackChildProcess(
+      fork(workerScript, [], {
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        timeout: WORKER_TIMEOUT,
+      })
+    );
     captureWorkerOutput(child, "embedder-worker");
 
     let stderr = "";
