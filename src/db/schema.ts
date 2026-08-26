@@ -2,6 +2,7 @@ import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -451,6 +452,68 @@ export const appSettings = sqliteTable("app_settings", {
     .notNull()
     .$defaultFn(() => Date.now()),
 });
+
+/** Installed plugin package metadata, keyed by plugin id and version. */
+export const pluginInstallations = sqliteTable(
+  "plugin_installations",
+  {
+    pluginId: text("plugin_id").notNull(),
+    version: text("version").notNull(),
+    origin: text("origin").notNull(),
+    relativeLocation: text("relative_location"),
+    sourceLocation: text("source_location"),
+    checksum: text("checksum"),
+    manifestJson: text("manifest_json").notNull(),
+    installedAt: integer("installed_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    status: text("status").notNull().default("installed"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorDetail: text("last_error_detail"),
+  },
+  (table) => ({
+    pluginInstallationsPk: primaryKey({
+      columns: [table.pluginId, table.version],
+      name: "plugin_installations_plugin_id_version_pk",
+    }),
+  })
+);
+
+/** User-selected plugin version and settings, intentionally independent from installations. */
+export const pluginPreferences = sqliteTable("plugin_preferences", {
+  pluginId: text("plugin_id").primaryKey(),
+  selectedVersion: text("selected_version"),
+  lastKnownGoodVersion: text("last_known_good_version"),
+  settingsJson: text("settings_json").notNull().default("{}"),
+  settingsSchemaVersion: integer("settings_schema_version")
+    .notNull()
+    .default(1),
+  updatedAt: integer("updated_at")
+    .notNull()
+    .$defaultFn(() => Date.now()),
+});
+
+/** User-managed plugin assets, retained independently when an installation is removed. */
+export const pluginAssets = sqliteTable(
+  "plugin_assets",
+  {
+    pluginId: text("plugin_id").notNull(),
+    settingId: text("setting_id").notNull(),
+    managedPath: text("managed_path").notNull(),
+    revision: text("revision").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    pluginAssetsPk: primaryKey({
+      columns: [table.pluginId, table.settingId],
+      name: "plugin_assets_plugin_id_setting_id_pk",
+    }),
+  })
+);
 
 export const faceVectors = sqliteTable(
   "face_vectors",

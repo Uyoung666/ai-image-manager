@@ -1,0 +1,136 @@
+{
+  "manifestVersion": 2,
+  "apiVersion": 2,
+  "id": "com.aiimagemanager.layered-aurora",
+  "version": "1.0.0",
+  "name": {
+    "en": "Layered Aurora",
+    "zh": "分层极光"
+  },
+  "description": {
+    "en": "A declarative four-layer aurora theme showing groups, conditional settings, and typed bindings.",
+    "zh": "一个展示分组、条件设置和强类型绑定的声明式四层极光主题。"
+  },
+  "author": {
+    "name": "AI Image Manager examples",
+    "url": "https://example.com/ai-image-manager"
+  },
+  "engine": {
+    "minAppVersion": "2.0.0"
+  },
+  "capabilities": ["theme"],
+  "themeFile": "theme.json",
+  "icon": "assets/sample.png",
+  "settingGroups": [
+    {
+      "id": "appearance",
+      "label": {
+        "en": "Appearance",
+        "zh": "外观"
+      }
+    },
+    {
+      "id": "effects",
+      "label": {
+        "en": "Effects",
+        "zh": "效果"
+      }
+    },
+    {
+      "id": "media",
+      "label": {
+        "en": "Media",
+        "zh": "媒体"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "id": "accentColor",
+      "type": "color",
+      "label": {
+        "en": "Accent color",
+        "zh": "强调色"
+      },
+      "defaultValue": "#67e8f9",
+      "group": "appearance"
+    },
+    {
+      "id": "showAurora",
+      "type": "boolean",
+      "label": {
+        "en": "Show aurora",
+        "zh": "显示极光"
+      },
+      "defaultValue": true,
+      "group": "effects"
+    },
+    {
+      "id": "backdropMode",
+      "type": "select",
+      "label": {
+        "en": "Backdrop mode",
+        "zh": "背景模式"
+      },
+      "defaultValue": "aurora",
+      "options": [
+        {
+          "label": {
+            "en": "Aurora",
+            "zh": "极光"
+          },
+          "value": "aurora"
+        },
+        {
+          "label": {
+            "en": "Deep blue",
+            "zh": "深蓝"
+          },
+          "value": "deep-blue"
+        }
+      ],
+      "group": "appearance"
+    },
+    {
+      "id": "auroraIntensity",
+      "type": "number",
+      "label": {
+        "en": "Aurora intensity",
+        "zh": "极光强度"
+      },
+      "description": {
+        "en": "Controls the opacity of the animated aurora layer.",
+        "zh": "控制动态极光层的不透明度。"
+      },
+      "defaultValue": 0.7,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "group": "effects",
+      "visibleWhen": {
+        "setting": "showAurora",
+        "equals": true
+      }
+    },
+    {
+      "id": "wallpaper",
+      "type": "image",
+      "label": {
+        "en": "Optional wallpaper",
+        "zh": "可选壁纸"
+      },
+      "defaultValue": null,
+      "group": "media"
+    },
+    {
+      "id": "wallpaperVideo",
+      "type": "video",
+      "label": {
+        "en": "Optional motion wallpaper",
+        "zh": "可选动态壁纸"
+      },
+      "defaultValue": null,
+      "group": "media"
+    }
+  ]
+}

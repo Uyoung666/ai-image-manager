@@ -1,138 +1,162 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, PackageOpen, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingRow } from "@/components/settings/setting-row";
+import { toast } from "sonner";
 import {
-  SettingsPageShell,
-  SettingsSection,
-} from "@/components/settings/settings-page-shell";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { getLocalizedText } from "@/plugins/manifest";
+  type PluginManagerInstallPreview,
+  type PluginManagerPlugin,
+  PluginManagerView,
+} from "@/components/plugins/plugin-manager-view";
 import { PluginSettingsSlot, usePluginHost } from "@/plugins/runtime";
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string" && error) {
+    return error;
+  }
+  return fallback;
+}
+
 function PluginsSettingsPage() {
-  const { i18n, t } = useTranslation();
+  const { t } = useTranslation();
   const {
     activePlugin,
+    clearError,
+    commitInstall,
+    developerMode,
+    discardInstall,
     disable,
     enable,
-    install,
+    error,
+    exitPreview,
+    inspectInstall,
     loading,
+    loadDeveloperDirectory,
     plugins,
+    previewId,
+    previewPlugin,
+    refresh,
+    reloadDeveloperPlugin,
+    removeDeveloperPlugin,
+    selectedId,
+    selectPlugin,
+    setDeveloperMode,
     uninstall,
   } = usePluginHost();
-  const activePluginName = activePlugin
-    ? getLocalizedText(activePlugin.manifest.name, i18n.language)
-    : "";
-  return (
-    <SettingsPageShell
-      description={t("settingsPluginsDescription")}
-      headerAction={
-        <Button
-          disabled={loading}
-          onClick={() => {
-            install().catch(() => undefined);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Download />
-          {t("settingsPluginsInstall")}
-        </Button>
+  const [installPreview, setInstallPreview] =
+    useState<PluginManagerInstallPreview | null>(null);
+  const installPreviewRef = useRef<PluginManagerInstallPreview | null>(null);
+  installPreviewRef.current = installPreview;
+
+  const showError = useCallback(
+    (reason: unknown) => {
+      toast.error(errorMessage(reason, t("pluginManagerError")));
+    },
+    [t]
+  );
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    showError(error);
+    clearError();
+  }, [clearError, error, showError]);
+
+  useEffect(
+    () => () => {
+      exitPreview();
+      const token = installPreviewRef.current?.token;
+      if (token) {
+        discardInstall(token).catch(() => undefined);
       }
-      title={t("settingsPlugins")}
-    >
-      <SettingsSection
-        description={t("settingsPluginsSafety")}
-        title={t("settingsPluginsInstalled")}
-      >
-        {plugins.length === 0 ? (
-          <div className="flex min-h-20 flex-col items-center justify-center gap-2 text-center text-[12px] text-muted-foreground">
-            <PackageOpen className="h-5 w-5 opacity-60" />
-            {t("settingsPluginsEmpty")}
-          </div>
-        ) : (
-          plugins.map((plugin) => {
-            const title = getLocalizedText(plugin.manifest.name, i18n.language);
-            const description = getLocalizedText(
-              plugin.manifest.description,
-              i18n.language
-            );
-            const canToggle =
-              plugin.status !== "incompatible" && plugin.status !== "invalid";
-            let statusLabel = "";
-            if (plugin.status === "failed") {
-              statusLabel = t("settingsPluginsFailed");
-            } else if (plugin.status === "incompatible") {
-              statusLabel = t("settingsPluginsIncompatible");
-            } else if (plugin.status === "invalid") {
-              statusLabel = t("settingsPluginsInvalid");
-            }
-            const sourceLabel =
-              plugin.source === "builtin"
-                ? t("settingsPluginsBuiltin")
-                : t("settingsPluginsLocal");
-            return (
-              <SettingRow
-                action={
-                  <div className="flex max-w-full items-center gap-2">
-                    <Switch
-                      ariaLabel={`${t("settingsPluginsEnable")} ${title}`}
-                      checked={plugin.enabled}
-                      disabled={!canToggle}
-                      onCheckedChange={(checked) => {
-                        (checked
-                          ? enable(plugin.manifest.id)
-                          : disable(plugin.manifest.id)
-                        ).catch(() => undefined);
-                      }}
-                    />
-                    {plugin.source === "local" && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            aria-label={t("settingsPluginsUninstall")}
-                            onClick={() => {
-                              uninstall(plugin.manifest.id).catch(
-                                () => undefined
-                              );
-                            }}
-                            size="icon-xs"
-                            variant="ghost"
-                          >
-                            <Trash2 />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {t("settingsPluginsUninstall")}
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                  </div>
-                }
-                description={`${description} · ${sourceLabel} · v${plugin.manifest.version}${statusLabel ? ` · ${statusLabel}` : ""}`}
-                key={plugin.manifest.id}
-                title={title}
-              />
-            );
-          })
-        )}
-      </SettingsSection>
-      {activePlugin ? (
-        <SettingsSection
-          description={t("settingsPluginsConfigurationHint")}
-          title={`${activePluginName} · ${t("settingsPluginsConfiguration")}`}
-        >
-          <PluginSettingsSlot slot="plugin.settings" />
-        </SettingsSection>
-      ) : null}
-    </SettingsPageShell>
+    },
+    [discardInstall, exitPreview]
+  );
+
+  const managerPlugins = useMemo(
+    () => plugins as unknown as PluginManagerPlugin[],
+    [plugins]
+  );
+
+  const run = (operation: () => Promise<void>) => {
+    operation().catch(showError);
+  };
+
+  const beginInstall = () => {
+    run(async () => {
+      const result = await inspectInstall();
+      if (!result) {
+        return;
+      }
+      setInstallPreview(result);
+    });
+  };
+
+  const cancelInstall = () => {
+    const token = installPreview?.token;
+    setInstallPreview(null);
+    if (token) {
+      run(() => discardInstall(token));
+    }
+  };
+
+  const confirmInstall = (preview: PluginManagerInstallPreview) => {
+    const token = preview.token;
+    if (!token) {
+      showError(t("pluginManagerInstallBlocked"));
+      return;
+    }
+    run(async () => {
+      await commitInstall(token);
+      setInstallPreview(null);
+    });
+  };
+
+  const settingsPanel = (
+    <PluginSettingsSlot onError={showError} slot="plugin.settings" />
+  );
+
+  return (
+    <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-[480px]:p-4">
+      <div className="mx-auto w-full min-w-0 max-w-[1120px]">
+        <PluginManagerView
+          activeId={activePlugin?.manifest.id ?? null}
+          developerMode={developerMode}
+          installPreview={installPreview}
+          loading={loading}
+          onCancelInstall={cancelInstall}
+          onConfirmInstall={confirmInstall}
+          onDeveloperModeChange={(enabled) =>
+            run(() => setDeveloperMode(enabled))
+          }
+          onExitPreview={exitPreview}
+          onInstallPlugin={beginInstall}
+          onLoadDeveloperDirectory={() => run(loadDeveloperDirectory)}
+          onPreviewPlugin={previewPlugin}
+          onRefresh={() => run(refresh)}
+          onReloadDeveloperPlugin={(pluginId) =>
+            run(() => reloadDeveloperPlugin(pluginId))
+          }
+          onRemoveDeveloperPlugin={(pluginId) =>
+            run(() => removeDeveloperPlugin(pluginId))
+          }
+          onSelectPlugin={selectPlugin}
+          onTogglePlugin={(pluginId, enabled) =>
+            run(() => (enabled ? enable(pluginId) : disable(pluginId)))
+          }
+          onUninstallPlugin={(pluginId, removeData) =>
+            run(() => uninstall(pluginId, removeData))
+          }
+          plugins={managerPlugins}
+          previewId={previewId}
+          selectedId={selectedId}
+          settingsPanel={settingsPanel}
+        />
+      </div>
+    </div>
   );
 }
 

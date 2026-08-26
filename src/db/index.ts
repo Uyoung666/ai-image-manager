@@ -30,6 +30,9 @@ import {
   photos,
   photoTags,
   photoViewStats,
+  pluginAssets,
+  pluginInstallations,
+  pluginPreferences,
   tags,
 } from "./schema";
 
@@ -57,6 +60,9 @@ const schema = {
   photos,
   photoTags,
   photoViewStats,
+  pluginAssets,
+  pluginInstallations,
+  pluginPreferences,
   tags,
 };
 

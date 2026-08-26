@@ -1,23 +1,42 @@
+import type { ReactNode } from "react";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { FilterDropdown } from "@/components/filter-dropdown";
-import { Switch } from "@/components/ui/switch";
-import { ipc } from "@/ipc/manager";
 import {
-  NebulaGlassPlugin,
-  NebulaGlassSettings,
-} from "./builtins/nebula-glass";
+  commitPluginInstall,
+  discardPluginInspection,
+  inspectPluginFromDialog,
+  listPlugins,
+  loadDevDirectoryFromDialog,
+  reloadDevPlugin,
+  removeDevPlugin,
+  removePluginAsset,
+  reportPluginActivationResult,
+  resetPluginSettings,
+  selectPluginAsset,
+  setPluginDeveloperMode,
+  setPluginEnabled,
+  setPluginSettings,
+  uninstallPlugin,
+} from "@/actions/plugins";
+import { PluginSettingsEditor } from "@/components/plugins/plugin-settings-editor";
+import { NebulaGlassPlugin } from "./builtins/nebula-glass";
 import {
   migrateNebulaGlassSettings,
   NEBULA_GLASS_MANIFEST,
 } from "./builtins/nebula-glass-manifest";
+import {
+  DeclarativeThemeBackdrop,
+  type DeclarativeThemeRecord,
+} from "./declarative-theme";
 import {
   getLocalizedText,
   THEME_TOKEN_MAP,
@@ -25,34 +44,63 @@ import {
 } from "./manifest";
 import type {
   BuiltinPlugin,
+  BuiltinPluginContext,
+  NormalizedPluginManifest,
+  NormalizedPluginManifestV2,
+  PluginManifestV1,
   PluginRecord,
-  PluginSettingDefinition,
+  PluginSettingValue,
   PluginSnapshot,
 } from "./types";
 
 const BUILTIN_PLUGINS: Record<string, BuiltinPlugin> = {
   [NebulaGlassPlugin.id]: NebulaGlassPlugin,
 };
-const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+
+type AnyPluginRecord = PluginRecord<NormalizedPluginManifest>;
+type AnyPluginSnapshot = PluginSnapshot<NormalizedPluginManifest>;
+type PluginInspection = Awaited<ReturnType<typeof inspectPluginFromDialog>>;
+type PluginSettingsPatch = Record<string, PluginSettingValue>;
 
 interface PluginHostValue {
-  activePlugin?: PluginRecord;
+  activePlugin?: AnyPluginRecord;
+  applySnapshotResult: (next: unknown) => void;
+  clearError: () => void;
+  commitInstall: (token: string) => Promise<void>;
+  developerMode: boolean;
   disable: (pluginId: string) => Promise<void>;
+  discardInstall: (token: string) => Promise<void>;
   enable: (pluginId: string) => Promise<void>;
-  install: () => Promise<void>;
+  error?: unknown;
+  exitPreview: () => void;
+  inspectInstall: () => Promise<PluginInspection>;
+  loadDeveloperDirectory: () => Promise<void>;
   loading: boolean;
-  plugins: PluginRecord[];
+  plugins: AnyPluginRecord[];
+  previewId: string | null;
+  previewPlugin: (pluginId: string) => void;
+  previewRecord?: AnyPluginRecord;
+  refresh: () => Promise<void>;
+  reloadDeveloperPlugin: (pluginId: string) => Promise<void>;
+  removeAsset: (pluginId: string, settingId: string) => Promise<void>;
+  removeDeveloperPlugin: (pluginId: string) => Promise<void>;
+  reportError: (error: unknown) => void;
+  resetSettings: (pluginId: string, settingIds?: string[]) => Promise<void>;
   selectAsset: (pluginId: string, settingId: string) => Promise<void>;
+  selectedId: string | null;
+  selectedPlugin?: AnyPluginRecord;
+  selectPlugin: (pluginId: string) => void;
+  setDeveloperMode: (enabled: boolean) => Promise<void>;
   setSettings: (
     pluginId: string,
-    settings: Record<string, boolean | number | string>
+    settings: PluginSettingsPatch
   ) => Promise<void>;
-  uninstall: (pluginId: string) => Promise<void>;
+  uninstall: (pluginId: string, removeData?: boolean) => Promise<void>;
 }
 
 const PluginHostContext = createContext<PluginHostValue | null>(null);
 
-function readStartupSnapshot(): PluginSnapshot {
+function readStartupSnapshot(): AnyPluginSnapshot {
   try {
     if (localStorage.getItem("plugins.active") !== NebulaGlassPlugin.id) {
       return { plugins: [] };
@@ -83,33 +131,108 @@ function readStartupSnapshot(): PluginSnapshot {
 }
 
 function usePluginSnapshot() {
-  const [snapshot, setSnapshot] = useState<PluginSnapshot>(readStartupSnapshot);
+  const [snapshot, setSnapshot] =
+    useState<AnyPluginSnapshot>(readStartupSnapshot);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>();
 
   useEffect(() => {
-    ipc.client.plugins
-      .list({})
-      .then(setSnapshot)
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+    let mounted = true;
+    listPlugins()
+      .then((next) => {
+        if (mounted) {
+          setSnapshot(next as AnyPluginSnapshot);
+          setError(undefined);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (mounted) {
+          setError(reason);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  return { loading, setSnapshot, snapshot };
+  return { error, loading, setError, setSnapshot, snapshot };
 }
 
-export function PluginHostProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { loading, setSnapshot, snapshot } = usePluginSnapshot();
+function createBuiltinContext(record: AnyPluginRecord): BuiltinPluginContext {
+  return {
+    getSetting: (id) => {
+      const value = record.settings[id];
+      return typeof value === "boolean" ||
+        typeof value === "number" ||
+        typeof value === "string"
+        ? value
+        : undefined;
+    },
+    onSettingsChanged: () => () => undefined,
+    root: document.documentElement,
+    setRootAttribute: (name, value) => {
+      if (value === null) {
+        document.documentElement.removeAttribute(name);
+      } else {
+        document.documentElement.setAttribute(name, value);
+      }
+    },
+  };
+}
+
+export function PluginHostProvider({ children }: { children: ReactNode }) {
+  const {
+    error,
+    loading: snapshotLoading,
+    setError,
+    setSnapshot,
+    snapshot,
+  } = usePluginSnapshot();
+  const [busy, setBusy] = useState(false);
+  const busyCountRef = useRef(0);
+  const settingsQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [developerMode, setDeveloperModeState] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const activePlugin = snapshot.plugins.find(
     (plugin) => plugin.status === "active"
   );
+  const selectedPlugin = snapshot.plugins.find(
+    (plugin) => plugin.manifest.id === selectedId
+  );
+  const previewRecord = snapshot.plugins.find(
+    (plugin) => plugin.manifest.id === previewId
+  );
+  const effectiveRecord = previewRecord ?? activePlugin;
+
+  useEffect(() => {
+    setSelectedId((current) => {
+      if (
+        current &&
+        snapshot.plugins.some((plugin) => plugin.manifest.id === current)
+      ) {
+        return current;
+      }
+      return (
+        activePlugin?.manifest.id ?? snapshot.plugins[0]?.manifest.id ?? null
+      );
+    });
+  }, [activePlugin?.manifest.id, snapshot.plugins]);
+
+  useEffect(() => {
+    if (previewId && !previewRecord) {
+      setPreviewId(null);
+    }
+  }, [previewId, previewRecord]);
 
   useEffect(() => {
     const root = document.documentElement;
-    if (!activePlugin && loading) {
+    if (!activePlugin && snapshotLoading) {
       return;
     }
     root.toggleAttribute("data-plugin-active", Boolean(activePlugin));
@@ -117,10 +240,12 @@ export function PluginHostProvider({
       root.dataset.activePlugin = activePlugin.manifest.id;
       if (activePlugin.manifest.id !== NebulaGlassPlugin.id) {
         root.removeAttribute("data-nebula-glass");
+        root.removeAttribute("data-nebula-mode");
       }
     } else {
       root.removeAttribute("data-active-plugin");
       root.removeAttribute("data-nebula-glass");
+      root.removeAttribute("data-nebula-mode");
     }
     try {
       if (activePlugin) {
@@ -136,86 +261,309 @@ export function PluginHostProvider({
     } catch {
       // Startup cache is an optimization; SQLite remains authoritative.
     }
-  }, [activePlugin, loading]);
+  }, [activePlugin, snapshotLoading]);
 
-  const value = useMemo<PluginHostValue>(() => {
-    const apply = (next: PluginSnapshot) => setSnapshot(next);
-    return {
-      activePlugin,
-      disable: async (pluginId) =>
-        apply(
-          await ipc.client.plugins.setEnabled({ enabled: false, pluginId })
-        ),
-      enable: async (pluginId) =>
-        apply(await ipc.client.plugins.setEnabled({ enabled: true, pluginId })),
-      install: async () =>
-        apply(await ipc.client.plugins.installFromDialog({})),
-      loading,
-      plugins: snapshot.plugins,
-      selectAsset: async (pluginId, settingId) =>
-        apply(await ipc.client.plugins.selectAsset({ pluginId, settingId })),
-      setSettings: async (pluginId, settings) =>
-        apply(await ipc.client.plugins.setSettings({ pluginId, settings })),
-      uninstall: async (pluginId) =>
-        apply(await ipc.client.plugins.uninstall({ pluginId })),
-    };
-  }, [activePlugin, loading, setSnapshot, snapshot.plugins]);
+  const applySnapshot = useCallback(
+    async <T,>(operation: () => Promise<T>) => {
+      busyCountRef.current += 1;
+      setBusy(true);
+      try {
+        const next = await operation();
+        if (next && typeof next === "object" && "plugins" in next) {
+          setSnapshot(next as AnyPluginSnapshot);
+        }
+        return next;
+      } finally {
+        busyCountRef.current = Math.max(0, busyCountRef.current - 1);
+        if (busyCountRef.current === 0) {
+          setBusy(false);
+        }
+      }
+    },
+    [setSnapshot]
+  );
+
+  const applySnapshotOnly = useCallback(
+    async (operation: () => Promise<unknown>) => {
+      await applySnapshot(operation);
+    },
+    [applySnapshot]
+  );
+
+  const selectPlugin = useCallback((pluginId: string) => {
+    setSelectedId(pluginId);
+  }, []);
+
+  const previewPlugin = useCallback(
+    (pluginId: string) => {
+      const plugin = snapshot.plugins.find(
+        (candidate) => candidate.manifest.id === pluginId
+      );
+      if (
+        !plugin ||
+        plugin.status === "incompatible" ||
+        plugin.status === "invalid"
+      ) {
+        return;
+      }
+      setSelectedId(pluginId);
+      setPreviewId(pluginId);
+    },
+    [snapshot.plugins]
+  );
+
+  const exitPreview = useCallback(() => {
+    setPreviewId(null);
+  }, []);
+
+  const enable = useCallback(
+    async (pluginId: string) => {
+      await applySnapshotOnly(() => setPluginEnabled(pluginId, true));
+      setPreviewId((current) => (current === pluginId ? null : current));
+    },
+    [applySnapshotOnly]
+  );
+
+  const disable = useCallback(
+    async (pluginId: string) => {
+      await applySnapshotOnly(() => setPluginEnabled(pluginId, false));
+    },
+    [applySnapshotOnly]
+  );
+
+  const inspectInstall = useCallback(
+    () => applySnapshot(inspectPluginFromDialog),
+    [applySnapshot]
+  );
+
+  const commitInstall = useCallback(
+    async (token: string) => {
+      await applySnapshotOnly(() => commitPluginInstall(token));
+    },
+    [applySnapshotOnly]
+  );
+
+  const discardInstall = useCallback(
+    async (token: string) => {
+      await applySnapshot(discardPluginInspection.bind(null, token));
+    },
+    [applySnapshot]
+  );
+
+  const refresh = useCallback(
+    () => applySnapshotOnly(listPlugins),
+    [applySnapshotOnly]
+  );
+
+  const setSettings = useCallback(
+    async (pluginId: string, settings: PluginSettingsPatch) => {
+      const task = settingsQueueRef.current
+        .catch(() => undefined)
+        .then(() =>
+          applySnapshotOnly(() => setPluginSettings(pluginId, settings))
+        );
+      settingsQueueRef.current = task;
+      await task;
+    },
+    [applySnapshotOnly]
+  );
+
+  const selectAsset = useCallback(
+    async (pluginId: string, settingId: string) => {
+      await applySnapshotOnly(() => selectPluginAsset(pluginId, settingId));
+    },
+    [applySnapshotOnly]
+  );
+
+  const removeAsset = useCallback(
+    async (pluginId: string, settingId: string) => {
+      await applySnapshotOnly(() => removePluginAsset(pluginId, settingId));
+    },
+    [applySnapshotOnly]
+  );
+
+  const resetSettings = useCallback(
+    async (pluginId: string, settingIds?: string[]) => {
+      await applySnapshotOnly(() => resetPluginSettings(pluginId, settingIds));
+    },
+    [applySnapshotOnly]
+  );
+
+  const uninstall = useCallback(
+    async (pluginId: string, removeData = true) => {
+      await applySnapshotOnly(() => uninstallPlugin(pluginId, removeData));
+      setPreviewId((current) => (current === pluginId ? null : current));
+    },
+    [applySnapshotOnly]
+  );
+
+  const setDeveloperMode = useCallback(
+    async (enabled: boolean) => {
+      await applySnapshotOnly(() => setPluginDeveloperMode(enabled));
+      setDeveloperModeState(enabled);
+    },
+    [applySnapshotOnly]
+  );
+
+  const loadDeveloperDirectory = useCallback(
+    () => applySnapshotOnly(loadDevDirectoryFromDialog),
+    [applySnapshotOnly]
+  );
+
+  const reloadDeveloperPlugin = useCallback(
+    (pluginId: string) => applySnapshotOnly(() => reloadDevPlugin(pluginId)),
+    [applySnapshotOnly]
+  );
+
+  const removeDeveloperPlugin = useCallback(
+    (pluginId: string) => applySnapshotOnly(() => removeDevPlugin(pluginId)),
+    [applySnapshotOnly]
+  );
+
+  const clearError = useCallback(() => setError(undefined), [setError]);
+  const applySnapshotResult = useCallback(
+    (next: unknown) => {
+      if (next && typeof next === "object" && "plugins" in next) {
+        setSnapshot(next as AnyPluginSnapshot);
+      }
+    },
+    [setSnapshot]
+  );
+  const reportError = useCallback(
+    (reason: unknown) => setError(reason),
+    [setError]
+  );
 
   useEffect(() => {
-    if (!activePlugin) {
+    const record = effectiveRecord;
+    if (!record) {
       return;
     }
-    const builtin = BUILTIN_PLUGINS[activePlugin.manifest.id];
-    if (!builtin) {
-      return;
-    }
-    const context = {
-      getSetting: (id: string) => activePlugin.settings[id],
-      onSettingsChanged: () => () => undefined,
-      root: document.documentElement,
-      setRootAttribute: (name: string, value: string | null) => {
-        if (value === null) {
-          document.documentElement.removeAttribute(name);
-        } else {
-          document.documentElement.setAttribute(name, value);
-        }
-      },
-    };
+    const builtin = BUILTIN_PLUGINS[record.manifest.id];
     let dispose: (() => void) | undefined;
     try {
-      const activated = builtin.activate(context);
-      dispose = typeof activated === "function" ? activated : undefined;
-    } catch (error) {
+      if (builtin) {
+        const activated = builtin.activate(createBuiltinContext(record));
+        dispose = typeof activated === "function" ? activated : undefined;
+      }
+    } catch (reason) {
       console.error(
-        `[plugin] ${getLocalizedText(activePlugin.manifest.name, navigator.language)} failed to activate`,
-        error
+        `[plugin] ${getLocalizedText(record.manifest.name, navigator.language)} failed to activate`,
+        reason
       );
-      ipc.client.plugins
-        .setEnabled({ enabled: false, pluginId: activePlugin.manifest.id })
-        .then(setSnapshot)
-        .catch(() => undefined);
-      return;
+      if (record.source === "local" || record.source === "dev") {
+        reportPluginActivationResult(
+          record.manifest.id,
+          record.manifest.version,
+          false,
+          "activation-failed",
+          reason instanceof Error ? reason.message : String(reason)
+        )
+          .then(applySnapshotResult)
+          .catch((reportErrorReason) => setError(reportErrorReason));
+      } else if (record.status === "active") {
+        setPluginEnabled(record.manifest.id, false)
+          .then(applySnapshotResult)
+          .catch((activationError) => setError(activationError));
+      }
     }
     return () => {
-      if (typeof dispose === "function") {
-        dispose();
-      }
+      dispose?.();
     };
-  }, [activePlugin, setSnapshot]);
+  }, [applySnapshotResult, effectiveRecord, setError]);
 
-  useEffect(() => {
-    const active = activePlugin;
-    if (!active || active.source !== "local") {
-      return;
-    }
-    const builtin = BUILTIN_PLUGINS[active.manifest.id];
-    if (builtin) {
+  const value = useMemo<PluginHostValue>(
+    () => ({
+      activePlugin,
+      applySnapshotResult,
+      clearError,
+      commitInstall,
+      developerMode,
+      discardInstall,
+      disable,
+      enable,
+      error,
+      exitPreview,
+      inspectInstall,
+      loading: snapshotLoading || busy,
+      loadDeveloperDirectory,
+      plugins: snapshot.plugins,
+      previewId,
+      previewPlugin,
+      previewRecord,
+      refresh,
+      reportError,
+      reloadDeveloperPlugin,
+      removeAsset,
+      removeDeveloperPlugin,
+      resetSettings,
+      selectAsset,
+      selectedId,
+      selectedPlugin,
+      selectPlugin,
+      setDeveloperMode,
+      setSettings,
+      uninstall,
+    }),
+    [
+      activePlugin,
+      applySnapshotResult,
+      busy,
+      clearError,
+      commitInstall,
+      developerMode,
+      discardInstall,
+      disable,
+      enable,
+      error,
+      exitPreview,
+      inspectInstall,
+      loadDeveloperDirectory,
+      previewId,
+      previewPlugin,
+      previewRecord,
+      refresh,
+      reportError,
+      reloadDeveloperPlugin,
+      removeAsset,
+      removeDeveloperPlugin,
+      resetSettings,
+      selectAsset,
+      selectedId,
+      selectedPlugin,
+      selectPlugin,
+      setDeveloperMode,
+      setSettings,
+      snapshot.plugins,
+      snapshotLoading,
+      uninstall,
+    ]
+  );
+
+  return (
+    <PluginHostContext.Provider value={value}>
+      {children}
+    </PluginHostContext.Provider>
+  );
+}
+
+export function usePluginHost(): PluginHostValue {
+  const context = useContext(PluginHostContext);
+  if (!context) {
+    throw new Error("usePluginHost must be used inside PluginHostProvider");
+  }
+  return context;
+}
+
+function LegacyThemeHost({ record }: { record: AnyPluginRecord }) {
+  useLayoutEffect(() => {
+    if (record.manifest.manifestVersion !== 1) {
       return;
     }
     const root = document.documentElement;
     const previous = new Map<string, string>();
     for (const [key, value] of Object.entries(
-      active.manifest.theme.tokens ?? {}
+      record.manifest.theme.tokens ?? {}
     )) {
       const cssVariable = THEME_TOKEN_MAP[key];
       if (!cssVariable) {
@@ -233,218 +581,73 @@ export function PluginHostProvider({
         }
       }
     };
-  }, [activePlugin]);
-
-  return (
-    <PluginHostContext.Provider value={value}>
-      {children}
-    </PluginHostContext.Provider>
-  );
-}
-
-export function usePluginHost(): PluginHostValue {
-  const context = useContext(PluginHostContext);
-  if (!context) {
-    throw new Error("usePluginHost must be used inside PluginHostProvider");
-  }
-  return context;
-}
-
-export function PluginBackdropHost() {
-  const { activePlugin } = usePluginHost();
-  if (!activePlugin) {
-    return null;
-  }
-  const builtin = BUILTIN_PLUGINS[activePlugin.manifest.id];
-  return builtin ? (
-    builtin.renderBackdrop({ record: activePlugin })
-  ) : (
-    <DeclarativePluginBackdrop record={activePlugin} />
-  );
-}
-
-export function PluginSettingsSlot({ slot }: { slot: "plugin.settings" }) {
-  const { activePlugin, selectAsset, setSettings } = usePluginHost();
-  if (!activePlugin || slot !== "plugin.settings") {
-    return null;
-  }
-  const builtin = BUILTIN_PLUGINS[activePlugin.manifest.id];
-  let settingsContent: React.ReactNode;
-  if (activePlugin.manifest.id === NebulaGlassPlugin.id) {
-    settingsContent = (
-      <NebulaGlassPluginSettings
-        onAssetSelect={selectAsset}
-        onChange={setSettings}
-        record={activePlugin}
-      />
-    );
-  } else if (builtin) {
-    settingsContent = builtin.renderSettings({ record: activePlugin });
-  } else {
-    settingsContent = (
-      <DeclarativePluginSettings
-        onAssetSelect={(settingId) => {
-          selectAsset(activePlugin.manifest.id, settingId).catch(
-            () => undefined
-          );
-        }}
-        onChange={(settings) => {
-          setSettings(activePlugin.manifest.id, settings).catch(
-            () => undefined
-          );
-        }}
-        record={activePlugin}
-      />
-    );
-  }
-  // The plugin page owns the surrounding settings surface. Keeping another
-  // card here would create coincident rounded borders in Mica mode.
-  return <div className="min-w-0 px-0.5 py-1 sm:px-1">{settingsContent}</div>;
-}
-
-function DeclarativeControl({
-  definition,
-  language,
-  label,
-  onAssetSelect,
-  onChange,
-  record,
-  value,
-}: {
-  definition: PluginSettingDefinition;
-  language: string;
-  label: string;
-  onAssetSelect: (settingId: string) => void;
-  onChange: (value: boolean | number | string) => void;
-  record: PluginRecord;
-  value: boolean | number | string;
-}) {
-  const { t } = useTranslation();
-  if (definition.type === "boolean") {
-    return (
-      <Switch
-        ariaLabel={label}
-        checked={value === true}
-        onCheckedChange={onChange}
-      />
-    );
-  }
-  if (definition.type === "select") {
-    return (
-      <FilterDropdown
-        ariaLabel={label}
-        className="w-[150px] max-w-full"
-        onChange={onChange}
-        options={(definition.options ?? []).map((option) => ({
-          label: getLocalizedText(option.label, language),
-          value: option.value,
-        }))}
-        placeholder={label}
-        value={String(value)}
-      />
-    );
-  }
-  if (definition.type === "number") {
-    return (
-      <input
-        aria-label={label}
-        className="w-[150px] accent-primary"
-        max={definition.max}
-        min={definition.min}
-        onChange={(event) => onChange(Number(event.target.value))}
-        step={definition.step}
-        type="range"
-        value={Number(value)}
-      />
-    );
-  }
-  if (definition.type === "color") {
-    return (
-      <input
-        aria-label={label}
-        onChange={(event) => onChange(event.target.value)}
-        type="color"
-        value={
-          typeof value === "string" && HEX_COLOR_PATTERN.test(value)
-            ? value
-            : "#6d7cff"
-        }
-      />
-    );
-  }
-  if (definition.type === "image" || definition.type === "video") {
-    let buttonLabel = t("settingsPluginsChooseVideo");
-    if (record.assetUrls[definition.id]) {
-      buttonLabel = t("settingsPluginsReplaceFile");
-    } else if (definition.type === "image") {
-      buttonLabel = t("settingsPluginsChooseImage");
-    }
-    return (
-      <button
-        className="rounded-[6px] border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
-        onClick={() => onAssetSelect(definition.id)}
-        type="button"
-      >
-        {buttonLabel}
-      </button>
-    );
-  }
+  }, [record]);
   return null;
 }
 
-function DeclarativePluginSettings({
-  onAssetSelect,
-  onChange,
-  record,
-}: {
-  onAssetSelect: (settingId: string) => void;
-  onChange: (settings: Record<string, boolean | number | string>) => void;
-  record: PluginRecord;
-}) {
-  const { i18n } = useTranslation();
-  const localized = (value: { en: string; zh: string }) =>
-    getLocalizedText(value, i18n.language);
-  const update = (
-    definition: PluginSettingDefinition,
-    value: boolean | number | string
-  ) => onChange({ ...record.settings, [definition.id]: value });
-
+export function PluginBackdropHost() {
+  const { activePlugin, previewRecord } = usePluginHost();
+  const record = previewRecord ?? activePlugin;
+  if (!record) {
+    return null;
+  }
+  const builtin = BUILTIN_PLUGINS[record.manifest.id];
+  if (builtin) {
+    return (
+      <>
+        {builtin.renderBackdrop({
+          record: record as unknown as PluginRecord,
+        })}
+      </>
+    );
+  }
+  if (record.manifest.manifestVersion === 2) {
+    return (
+      <>
+        <DeclarativeActivationReport record={record} />
+        <DeclarativeThemeBackdrop
+          record={record as unknown as DeclarativeThemeRecord}
+        />
+      </>
+    );
+  }
   return (
-    <div className="nebula-glass-settings-grid">
-      {record.manifest.settings.map((definition) => {
-        const value = record.settings[definition.id] ?? definition.defaultValue;
-        const label = localized(definition.label);
-        const control = (
-          <DeclarativeControl
-            definition={definition}
-            label={label}
-            language={i18n.language}
-            onAssetSelect={onAssetSelect}
-            onChange={(value) => update(definition, value)}
-            record={record}
-            value={value}
-          />
-        );
-        return (
-          <div className="nebula-glass-setting" key={definition.id}>
-            <div>
-              <div className="text-[12px] text-foreground">{label}</div>
-              {definition.description ? (
-                <div className="text-[11px] text-muted-foreground">
-                  {localized(definition.description)}
-                </div>
-              ) : null}
-            </div>
-            {control}
-          </div>
-        );
-      })}
-    </div>
+    <>
+      <LegacyThemeHost record={record} />
+      <DeclarativeActivationReport record={record} />
+      <DeclarativePluginBackdrop record={record} />
+    </>
   );
 }
 
-function DeclarativePluginBackdrop({ record }: { record: PluginRecord }) {
-  const effect = record.manifest.theme.backdrop?.effect;
+function DeclarativeActivationReport({ record }: { record: AnyPluginRecord }) {
+  const { applySnapshotResult, reportError } = usePluginHost();
+  const reported = useRef(new Set<string>());
+  useEffect(() => {
+    if (record.source !== "local" && record.source !== "dev") {
+      return;
+    }
+    const key = `${record.manifest.id}@${record.manifest.version}`;
+    if (reported.current.has(key)) {
+      return;
+    }
+    reported.current.add(key);
+    reportPluginActivationResult(
+      record.manifest.id,
+      record.manifest.version,
+      true
+    )
+      .then(applySnapshotResult)
+      .catch(reportError);
+  }, [applySnapshotResult, record, reportError]);
+  return null;
+}
+
+function DeclarativePluginBackdrop({ record }: { record: AnyPluginRecord }) {
+  const effect =
+    record.manifest.manifestVersion === 1
+      ? record.manifest.theme.backdrop?.effect
+      : undefined;
   const asset = record.assetUrls.backdrop;
   const videoRef = useRef<HTMLVideoElement>(null);
   const reduceMotion =
@@ -455,11 +658,6 @@ function DeclarativePluginBackdrop({ record }: { record: PluginRecord }) {
     if (!(video && effect === "video" && asset)) {
       return;
     }
-    if (reduceMotion || document.visibilityState !== "visible") {
-      video.pause();
-    } else {
-      video.play().catch(() => undefined);
-    }
     const sync = () => {
       if (reduceMotion || document.visibilityState !== "visible") {
         video.pause();
@@ -468,6 +666,7 @@ function DeclarativePluginBackdrop({ record }: { record: PluginRecord }) {
       }
     };
     document.addEventListener("visibilitychange", sync);
+    sync();
     return () => {
       document.removeEventListener("visibilitychange", sync);
       video.pause();
@@ -506,27 +705,71 @@ function DeclarativePluginBackdrop({ record }: { record: PluginRecord }) {
   );
 }
 
-function NebulaGlassPluginSettings({
-  onAssetSelect,
-  onChange,
-  record,
+export function PluginSettingsSlot({
+  onError,
+  slot,
 }: {
-  onAssetSelect: (pluginId: string, settingId: string) => Promise<void>;
-  onChange: (
-    pluginId: string,
-    settings: Record<string, boolean | number | string>
-  ) => Promise<void>;
-  record: PluginRecord;
+  onError?: (error: unknown) => void;
+  slot: "plugin.settings";
 }) {
+  const {
+    removeAsset,
+    resetSettings,
+    selectAsset,
+    selectedPlugin,
+    setSettings,
+  } = usePluginHost();
+  const { i18n, t } = useTranslation();
+  if (!selectedPlugin || slot !== "plugin.settings") {
+    return null;
+  }
+  const pluginId = selectedPlugin.manifest.id;
+  const reset = async (scope: "all" | "group" | "setting", id?: string) => {
+    try {
+      if (scope === "all") {
+        await resetSettings(pluginId);
+        return;
+      }
+      if (scope === "setting" && id) {
+        await resetSettings(pluginId, [id]);
+        return;
+      }
+      if (scope === "group" && id) {
+        const settingIds = selectedPlugin.manifest.settings
+          .filter((setting) => setting.group === id)
+          .map((setting) => setting.id);
+        await resetSettings(pluginId, settingIds);
+      }
+    } catch (reason) {
+      onError?.(reason);
+    }
+  };
   return (
-    <NebulaGlassSettings
-      onAssetSelect={(settingId) => {
-        onAssetSelect(record.manifest.id, settingId).catch(() => undefined);
-      }}
-      onChange={(settings) => {
-        onChange(record.manifest.id, settings).catch(() => undefined);
-      }}
-      record={record}
-    />
+    <div className="min-w-0 px-0.5 py-1 sm:px-1">
+      <PluginSettingsEditor
+        labels={{
+          chooseImage: t("settingsPluginsChooseImage"),
+          chooseVideo: t("settingsPluginsChooseVideo"),
+          removeAsset: t("pluginSettingsRemoveAsset"),
+          replaceAsset: t("settingsPluginsReplaceFile"),
+          resetAll: t("pluginSettingsResetAll"),
+          resetGroup: t("pluginSettingsResetGroup"),
+          resetSetting: t("pluginSettingsResetSetting"),
+        }}
+        language={i18n.language}
+        onError={onError}
+        onPatch={(patch) => setSettings(pluginId, patch)}
+        onRemoveAsset={(settingId) => removeAsset(pluginId, settingId)}
+        onReset={reset}
+        onSelectAsset={(settingId) => selectAsset(pluginId, settingId)}
+        record={
+          selectedPlugin as unknown as {
+            assetUrls: Record<string, string>;
+            manifest: PluginManifestV1 | NormalizedPluginManifestV2;
+            settings: Record<string, PluginSettingValue>;
+          }
+        }
+      />
+    </div>
   );
 }

@@ -92,7 +92,7 @@ test("Nebula Glass applies one continuous responsive glass system", async () => 
   const currentPage = requirePage();
   await navigateTo("/settings/plugins");
   await currentPage
-    .getByRole("checkbox", { name: "Enable plugin Nebula Glass" })
+    .getByRole("checkbox", { name: "Toggle plugin: Nebula Glass" })
     .locator("..")
     .click();
   await expect(currentPage.locator("html")).toHaveAttribute(

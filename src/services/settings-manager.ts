@@ -23,6 +23,17 @@ export function setSetting(key: string, value: string): void {
     .run();
 }
 
+export function deleteSetting(key: string): void {
+  getDatabase().delete(appSettings).where(eq(appSettings.key, key)).run();
+}
+
+export function deleteSettingsByPrefix(prefix: string): void {
+  getDatabase()
+    .delete(appSettings)
+    .where(sql`${appSettings.key} LIKE ${`${prefix}%`}`)
+    .run();
+}
+
 export function getAllSettings(
   prefix?: string
 ): Array<{ key: string; value: string }> {

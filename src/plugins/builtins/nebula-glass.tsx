@@ -1,23 +1,11 @@
-import {
-  type CSSProperties,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { useTranslation } from "react-i18next";
-import { FilterDropdown } from "@/components/filter-dropdown";
-import { getLocalizedText } from "../manifest";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type {
   BuiltinPlugin,
   BuiltinPluginContext,
   PluginRecord,
 } from "../types";
 import { type AquaFluidHandle, attachAquaFluid } from "./aqua-fluid";
-import {
-  NEBULA_GLASS_MANIFEST,
-  NEBULA_GLASS_PLUGIN_ID,
-} from "./nebula-glass-manifest";
+import { NEBULA_GLASS_PLUGIN_ID } from "./nebula-glass-manifest";
 import "./nebula-glass.css";
 
 type NebulaSettings = Record<string, boolean | number | string>;
@@ -191,119 +179,6 @@ function NebulaBackdrop({ record }: { record: PluginRecord }) {
   );
 }
 
-export function NebulaGlassSettings({
-  onAssetSelect,
-  onChange,
-  record,
-}: {
-  onAssetSelect: (settingId: string) => void;
-  onChange: (settings: Record<string, boolean | number | string>) => void;
-  record: PluginRecord;
-}) {
-  const { i18n, t } = useTranslation();
-  const settings = record.settings;
-  const setting = (id: string) =>
-    NEBULA_GLASS_MANIFEST.settings.find((item) => item.id === id);
-  const update = (id: string, value: boolean | number | string) =>
-    onChange({ ...settings, [id]: value });
-  const labels = useMemo(
-    () =>
-      new Map(NEBULA_GLASS_MANIFEST.settings.map((item) => [item.id, item])),
-    []
-  );
-  const localized = (value: { en: string; zh: string }) =>
-    getLocalizedText(value, i18n.language);
-  const control = (id: string) => {
-    const definition = labels.get(id);
-    if (!definition) {
-      return null;
-    }
-    const value = settings[id] ?? definition.defaultValue;
-    if (definition.type === "select") {
-      return (
-        <FilterDropdown
-          ariaLabel={localized(definition.label)}
-          className="w-[150px] max-w-full"
-          onChange={(nextValue) => update(id, nextValue)}
-          options={(definition.options ?? []).map((option) => ({
-            label: localized(option.label),
-            value: option.value,
-          }))}
-          placeholder={localized(definition.label)}
-          value={String(value)}
-        />
-      );
-    }
-    if (definition.type === "number") {
-      return (
-        <input
-          aria-label={localized(definition.label)}
-          className="w-[150px] accent-primary"
-          max={definition.max}
-          min={definition.min}
-          onChange={(event) => update(id, Number(event.target.value))}
-          step={definition.step}
-          type="range"
-          value={Number(value)}
-        />
-      );
-    }
-    if (definition.type === "image" || definition.type === "video") {
-      const fileLabel =
-        definition.type === "image"
-          ? t("settingsPluginsChooseImage")
-          : t("settingsPluginsChooseVideo");
-      return (
-        <button
-          className="rounded-[6px] border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
-          onClick={() => onAssetSelect(id)}
-          type="button"
-        >
-          {record.assetUrls[id] ? t("settingsPluginsReplaceFile") : fileLabel}
-        </button>
-      );
-    }
-    return null;
-  };
-
-  return (
-    <div className="nebula-glass-settings-grid">
-      {[
-        "mode",
-        "backdrop",
-        "blur",
-        "frost",
-        "brightness",
-        "backdropBlur",
-        "fluidHue",
-        "fluidDepth",
-        ...(settings.backdrop === "image" ? ["wallpaper"] : []),
-        ...(settings.backdrop === "video" ? ["wallpaperVideo"] : []),
-      ].map((id) => {
-        const definition = setting(id);
-        if (!definition) {
-          return null;
-        }
-        return (
-          <div className="nebula-glass-setting" key={id}>
-            <div>
-              <div className="text-[12px] text-foreground">
-                {localized(definition.label)}
-              </div>
-              {definition.description && (
-                <div className="text-[11px] text-muted-foreground">
-                  {localized(definition.description)}
-                </div>
-              )}
-            </div>
-            {control(id)}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export const NebulaGlassPlugin: BuiltinPlugin = {
   activate(context: BuiltinPluginContext) {
     context.setRootAttribute("data-nebula-glass", "active");
@@ -318,11 +193,4 @@ export const NebulaGlassPlugin: BuiltinPlugin = {
   },
   id: NEBULA_GLASS_PLUGIN_ID,
   renderBackdrop: ({ record }) => <NebulaBackdrop record={record} />,
-  renderSettings: ({ record }) => (
-    <NebulaGlassSettings
-      onAssetSelect={() => undefined}
-      onChange={() => undefined}
-      record={record}
-    />
-  ),
 };

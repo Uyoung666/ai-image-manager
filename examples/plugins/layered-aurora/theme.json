@@ -1,0 +1,60 @@
+{
+  "layers": [
+    {
+      "id": "base",
+      "type": "solid",
+      "color": "#07111f"
+    },
+    {
+      "id": "sunset-gradient",
+      "type": "linearGradient",
+      "angle": 132,
+      "opacity": 0.82,
+      "stops": [
+        {
+          "color": {
+            "setting": "accentColor"
+          },
+          "offset": 0
+        },
+        {
+          "color": "#312e81",
+          "offset": 1
+        }
+      ]
+    },
+    {
+      "id": "aurora-glow",
+      "type": "aurora",
+      "colors": [
+        "#22d3ee",
+        {
+          "setting": "accentColor"
+        },
+        "#a78bfa"
+      ],
+      "intensity": {
+        "setting": "auroraIntensity"
+      }
+    },
+    {
+      "id": "moonlight",
+      "type": "radialGradient",
+      "center": {
+        "x": 0.28,
+        "y": 0.2
+      },
+      "stops": [
+        {
+          "color": "#f0abfc",
+          "offset": 0
+        },
+        {
+          "color": "#07111f",
+          "offset": 1
+        }
+      ],
+      "opacity": 0.28
+    }
+  ]
+}

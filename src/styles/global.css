@@ -6,6 +6,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@keyframes plugin-theme-aurora-drift {
+  from {
+    transform: scale(1.08) translate3d(-2%, -1%, 0) rotate(-2deg);
+  }
+  to {
+    transform: scale(1.14) translate3d(2%, 1.5%, 0) rotate(2deg);
+  }
+}
+
+.plugin-theme-aurora-layer {
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plugin-theme-aurora-layer {
+    animation: none !important;
+  }
+}
+
 /* Keep the native date-picker icon visible in both application themes. */
 .dashboard-date-input {
   color-scheme: dark;

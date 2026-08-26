@@ -8,6 +8,8 @@
   "private": true,
   "scripts": {
     "assets:wix": "node scripts/generate-wix-branding.mjs",
+    "plugin:validate": "node scripts/plugin-cli.mjs validate",
+    "plugin:pack": "node scripts/plugin-cli.mjs pack",
     "start": "electron-forge start",
     "dev": "chcp 65001 > nul & electron-forge start",
     "package": "electron-forge package",

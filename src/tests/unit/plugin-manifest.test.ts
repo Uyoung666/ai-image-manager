@@ -28,6 +28,7 @@ describe("plugin manifest boundary", () => {
         background: "hsl(220 20% 10%)",
         foreground: "url(https://example.com/steal.css)",
         unknown: "red",
+        toString: "red",
       },
     });
 

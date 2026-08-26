@@ -127,6 +127,10 @@ CLAUDE.md
 
 # Docs (internal dev notes)
 docs/
+!docs/
+docs/*
+!docs/plugin-development.md
+!docs/plugin-development.en.md
 
 # Scripts (test utilities / one-off tools)
 convert-formats.mjs
