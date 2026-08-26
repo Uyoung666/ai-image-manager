@@ -8,6 +8,7 @@ import {
   createErrorFingerprint,
   createIncidentId,
   dismissStoredIncident,
+  getDiagnosticsOverview,
   listStoredIncidents,
   recordDiagnosticIncident,
 } from "@/services/diagnostics/incidents";
@@ -132,6 +133,28 @@ describe("diagnostic incident identity", () => {
         "utf8"
       )
     ).not.toContain('"id":"AIM-OLD"');
+  });
+
+  it("hides legacy ResizeObserver delivery warnings from pending incidents", () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-incidents-benign-renderer-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+
+    recordDiagnosticIncident({
+      message: "ResizeObserver loop completed with undelivered notifications.",
+      source: "renderer-error",
+    });
+    recordDiagnosticIncident({
+      message: "Renderer failed to start",
+      source: "renderer-error",
+    });
+
+    const overview = getDiagnosticsOverview(0);
+    expect(overview.pendingIncidents).toHaveLength(1);
+    expect(overview.pendingIncidents[0]?.summary).toBe(
+      "Renderer failed to start"
+    );
   });
 
   it("redacts incidents before persistence and retains only 20 recent items", () => {

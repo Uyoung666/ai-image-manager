@@ -27,6 +27,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
 import { SidebarFilterProvider } from "@/contexts/SidebarFilterContext";
 import BaseLayout from "@/layouts/base-layout";
+import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
 import {
   STARTUP_HOME_READY_EVENT,
   STARTUP_ONBOARDING_STATE_EVENT,
@@ -81,6 +82,9 @@ function Root() {
       }
     };
     const handleError = (event: ErrorEvent) => {
+      if (isBenignRendererErrorMessage(event.message)) {
+        return;
+      }
       record(
         "window-error",
         event.message || "Unhandled renderer error",

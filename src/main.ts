@@ -94,6 +94,7 @@ import {
 } from "@/types/app-preferences";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
+import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
 import { cleanupBrokenLegacyStartMenuShortcut } from "@/utils/windows-shortcut-cleanup";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { NEBULA_GLASS_MANIFEST } from "./plugins/builtins/nebula-glass-manifest";
@@ -983,9 +984,12 @@ function createWindow(httpPort: number, httpAuthToken: string) {
     if (details.level !== "warning" && details.level !== "error") {
       return;
     }
+    const isBenignRendererError = isBenignRendererErrorMessage(details.message);
+    const level =
+      details.level === "error" && !isBenignRendererError ? "error" : "warn";
     appendDiagnosticLog({
-      action: details.level === "error" ? "console-error" : "console-warning",
-      level: details.level === "error" ? "error" : "warn",
+      action: level === "error" ? "console-error" : "console-warning",
+      level,
       message: details.message,
       module: "renderer-console",
       process: "renderer",

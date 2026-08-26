@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { flushSync } from "react-dom";
 import { isReducedMotionEnabled } from "@/actions/ui-preferences";
 import { routeTree } from "@/routeTree.gen";
+import { startNavigationViewTransition } from "@/utils/view-transition-navigation";
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -32,7 +32,7 @@ const _orig = router.navigate;
 router.navigate = ((opts: any) => {
   if (
     typeof document !== "undefined" &&
-    document.startViewTransition &&
+    typeof document.startViewTransition === "function" &&
     !window.electronAPI?.isE2E &&
     !isReducedMotionEnabled()
   ) {
@@ -52,9 +52,7 @@ router.navigate = ((opts: any) => {
     ) {
       return _orig.call(router, opts);
     }
-    return document.startViewTransition(() => {
-      flushSync(() => _orig.call(router, opts));
-    });
+    return startNavigationViewTransition(() => _orig.call(router, opts));
   }
   return _orig.call(router, opts);
 }) as typeof router.navigate;

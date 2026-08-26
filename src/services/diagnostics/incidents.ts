@@ -7,6 +7,7 @@ import type {
   DiagnosticIncidentSummary,
   DiagnosticsOverview,
 } from "@/types/diagnostics";
+import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
 import { DiagnosticSanitizer, sanitizeRendererRoute } from "./sanitizer";
 
 const MAX_INCIDENTS = 20;
@@ -150,7 +151,9 @@ export function getDiagnosticsOverview(
   logSizeBytes: number
 ): DiagnosticsOverview {
   const incidents = listStoredIncidents().filter(
-    (incident) => !incident.dismissedAt
+    (incident) =>
+      !incident.dismissedAt &&
+      !isBenignRendererErrorMessage(incident.message)
   );
   const pendingIncidents = incidents.map(toIncidentSummary);
   return {
