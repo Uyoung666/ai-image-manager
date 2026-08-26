@@ -678,6 +678,35 @@ If a source file was moved or deleted outside the app, restoration to its origin
 - Close behavior: quit, minimize to tray, or ask
 - Remember window position and size
 
+### Plugins
+
+Use **Settings → Plugins** to install and manage theme plugins. Plugins are currently imported from local `.aim-plugin` files; there is no online plugin marketplace yet.
+
+#### Install, preview, and enable
+
+1. Click **Install Plugin** and choose a plugin package.
+2. Review its name, author, version, compatibility, and requested capabilities before confirming.
+3. A newly installed plugin is not enabled automatically and does not replace the current theme.
+4. Select a plugin and click **Preview** to try it temporarily; enable it only after you are satisfied.
+
+The settings panel is generated from the plugin's declared controls, such as switches, sliders, colors, select options, and image/video resources. Changes are saved automatically, and you can reset one setting, one group, or all settings.
+
+#### Developer mode
+
+If you are building a plugin, enable **Developer mode** and use **Load Plugin Directory** to load a local source directory. After editing files, click reload manually; the current release does not provide hot reload. Use **Remove Developer Plugin** to remove a directory plugin instead of treating it as a regular package installation.
+
+#### Updates and uninstall
+
+When a plugin is updated, the app preserves its settings, enabled state, and user-selected media resources. If the new version fails to activate, the app rolls back to the last known-good version.
+
+When uninstalling, the confirmation defaults to deleting the plugin settings and app-managed image/video resources as well. Clear the data option to remove only the package and keep the data for a future reinstall.
+
+#### Security
+
+Public plugins provide only approved declarative themes and local media resources. They cannot execute third-party code, read your library, or initiate network access. Images and videos selected by the user are managed by the app; plugins do not receive the original file paths.
+
+If you want to create a plugin, read the [Plugin development guide](docs/plugin-development.en.md) for the directory layout, manifest, resource limits, CLI validation, and packaging rules.
+
 ### Storage and indexing
 
 - View and change the data directory
@@ -872,5 +901,6 @@ Use **Settings → Help & Diagnostics**, inspect the redacted bundle, and submit
 - [Project](https://github.com/Uyoung666/ai-image-manager)
 - [Releases and downloads](https://github.com/Uyoung666/ai-image-manager/releases)
 - [中文使用指南](GUIDE.md)
+- [Plugin development guide](docs/plugin-development.en.md)
 - [Third-party model notices](THIRD_PARTY_MODEL_NOTICES.md)
 - [License](LICENSE)
