@@ -13,6 +13,7 @@ interface FolderDialogResult {
 }
 
 interface DataPathResult {
+  adopted?: boolean;
   cleaned?: number;
   cleanupErrors?: string[];
   copied?: number;
@@ -126,7 +127,11 @@ export function DataDirSection() {
     const data = setResult as DataPathResult;
     setMigrating(false);
     if (data.ok) {
-      const parts = [t("dataMigratedTo", { path: newPath })];
+      const parts = [
+        data.adopted
+          ? t("existingDataLoadedFrom", { path: newPath })
+          : t("dataMigratedTo", { path: newPath }),
+      ];
       if ((data.copied ?? 0) > 0) {
         parts.push(t("dataMigratedDirs", { count: data.copied }));
       }

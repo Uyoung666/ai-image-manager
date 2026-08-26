@@ -94,6 +94,7 @@ import {
 } from "@/types/app-preferences";
 import { getDataPath, initDataPath } from "@/utils/data-path";
 import { getFolderPaths } from "@/utils/folder-paths";
+import { cleanupBrokenLegacyStartMenuShortcut } from "@/utils/windows-shortcut-cleanup";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { NEBULA_GLASS_MANIFEST } from "./plugins/builtins/nebula-glass-manifest";
 import { createLogger } from "./utils/logger.js";
@@ -1591,6 +1592,19 @@ app.whenReady().then(async () => {
   // and partial copies cause "AI embedding failure" on next launch.
   if (started) {
     return;
+  }
+
+  if (app.isPackaged && process.platform === "win32") {
+    const shortcutCleanup = cleanupBrokenLegacyStartMenuShortcut({
+      appDataPath: app.getPath("appData"),
+      executablePath: process.execPath,
+      readShortcutLink: (shortcutPath) => shell.readShortcutLink(shortcutPath),
+    });
+    if (shortcutCleanup === "shortcut-removed") {
+      logMain("[startup] Removed broken legacy Start Menu shortcut");
+    } else if (shortcutCleanup === "cleanup-failed") {
+      logMain("[startup] Failed to inspect legacy Start Menu shortcut");
+    }
   }
 
   fs.writeFileSync(

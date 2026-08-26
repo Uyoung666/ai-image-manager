@@ -313,6 +313,11 @@ export function OnboardingOverlay() {
       if (!migration.ok) {
         throw new Error(migration.error || t("dataPathSetFailed"));
       }
+      // The home surface may have briefly queried the fresh, empty database
+      // before onboarding hid it. All cached server data belongs to the old
+      // data root, so discard it before Step 3 mounts and prefetches the
+      // selected library.
+      queryClient.clear();
       setDataPath(newPath);
     } catch (err) {
       setMigrationError(

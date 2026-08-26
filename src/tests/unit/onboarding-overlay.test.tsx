@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingOverlay } from "@/components/onboarding/OnboardingOverlay";
 import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
@@ -28,6 +29,7 @@ vi.mock("@/ipc/manager", () => ({
 
 vi.mock("@/providers/QueryProvider", () => ({
   queryClient: {
+    clear: vi.fn(),
     prefetchInfiniteQuery: vi.fn(),
     prefetchQuery: vi.fn(),
   },
@@ -107,6 +109,29 @@ describe("OnboardingOverlay", () => {
       await screen.findByText("onboardingErrorMigration")
     ).toBeInTheDocument();
     expect(screen.queryByText("D:\\NewData")).not.toBeInTheDocument();
+    expect(queryClient.clear).not.toHaveBeenCalled();
+  });
+
+  it("accepts a previously created library path", async () => {
+    vi.mocked(ipc.client.settings.setDataPath).mockResolvedValue({
+      adopted: true,
+      cleaned: 0,
+      cleanupErrors: undefined,
+      copied: 0,
+      errors: undefined,
+      ok: true,
+    });
+
+    render(<OnboardingOverlay />);
+
+    await screen.findByText("C:\\OldData");
+    fireEvent.click(screen.getByText("onboardingStep1Change"));
+
+    expect(await screen.findByText("D:\\NewData")).toBeInTheDocument();
+    expect(queryClient.clear).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByText("onboardingErrorMigration")
+    ).not.toBeInTheDocument();
   });
 
   it("saves the selected GPU state before advancing to the final step", async () => {

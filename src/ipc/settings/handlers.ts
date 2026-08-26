@@ -23,6 +23,10 @@ import {
   isDefaultDataPath,
   setCustomDataPath,
 } from "@/utils/data-path";
+import {
+  DATA_PATH_SUBDIRECTORIES,
+  inspectDataPathDestination,
+} from "@/utils/data-path-destination";
 
 const diagLog = (msg: string) => {
   try {
@@ -234,21 +238,32 @@ export const setDataPath = os
       return { ok: true, copied: 0 };
     }
 
-    // Pre-check: refuse migration into a directory that already contains
-    // data subdirectories, to avoid silently skipping files.
-    const subDirs = ["data", "models", "thumbnails", "vectors"];
-    for (const dir of subDirs) {
-      const existing = path.join(newPath, dir);
-      if (fs.existsSync(existing)) {
-        diagLog(`setDataPath: ABORT — dst subdir exists: ${dir}`);
-        return {
-          ok: false,
-          error: `目标目录下已有 "${dir}" 子目录，请选择一个空目录以避免数据覆盖`,
-        };
-      }
+    // An existing library must be connected in place instead of treated as a
+    // migration target. Other managed subdirectories are still rejected so
+    // unrelated data is never merged or overwritten.
+    const destination = inspectDataPathDestination(newPath);
+    if (destination.kind === "conflict") {
+      const dir = destination.conflictingDirectory;
+      diagLog(
+        `setDataPath: ABORT — dst subdir exists without database: ${dir}`
+      );
+      return {
+        ok: false,
+        error: `目标目录下已有 ${dir} 子目录，但未发现有效的图库数据库。请选择已有图库的根目录，或选择一个空目录`,
+      };
     }
+    const usesExistingLibrary = destination.kind === "existing-library";
+    const subDirs = DATA_PATH_SUBDIRECTORIES;
+    diagLog(
+      usesExistingLibrary
+        ? `setDataPath: existing library detected at ${destination.databasePath}`
+        : "setDataPath: empty migration destination detected"
+    );
 
-    sendMigrateProgress({ phase: "start", total: subDirs.length });
+    sendMigrateProgress({
+      phase: "start",
+      total: usesExistingLibrary ? 0 : subDirs.length,
+    });
 
     // Gracefully close all services to release file locks (DB, vector DB, etc.)
     diagLog("setDataPath: calling registry.stop()");
@@ -276,7 +291,7 @@ export const setDataPath = os
     const copiedDirs = new Set<string>();
     const destinationDirs = new Set<string>();
     let canCleanupOldPath = false;
-    for (let i = 0; i < subDirs.length; i++) {
+    for (let i = 0; !usesExistingLibrary && i < subDirs.length; i++) {
       const dir = subDirs[i];
       const index = i + 1;
       const total = subDirs.length;
@@ -363,7 +378,7 @@ export const setDataPath = os
     setCustomDataPath(newPath);
     diagLog("setDataPath: DONE");
     console.log(
-      `[Settings] Data path changed: ${oldPath} → ${newPath} (copied ${copied} dirs)`
+      `[Settings] Data path changed: ${oldPath} → ${newPath} (${usesExistingLibrary ? "connected existing library" : `copied ${copied} dirs`})`
     );
 
     // Clean up the old directory's subdirs to avoid disk bloat across repeated
@@ -435,7 +450,9 @@ export const setDataPath = os
       });
       return {
         ok: false,
-        error: `数据已迁移到新路径，但服务重启失败：${msg}。请手动重启应用。`,
+        error: usesExistingLibrary
+          ? `无法打开已有图库：${msg}。已恢复原数据目录`
+          : `数据已迁移到新路径，但服务重启失败：${msg}。请手动重启应用。`,
       };
     }
 
@@ -456,6 +473,7 @@ export const setDataPath = os
     sendMigrateProgress({ phase: "done", copied, errors });
     return {
       ok: true,
+      adopted: usesExistingLibrary,
       copied,
       cleaned: cleanedAfterStart,
       errors: errors.length > 0 ? errors : undefined,
