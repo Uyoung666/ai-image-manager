@@ -1,7 +1,8 @@
-import { os } from "@orpc/server";
+import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
 import {
   getPluginManager,
+  PluginManagerError,
   validatePluginAssetInput,
   validatePluginPatch,
 } from "@/services/plugin-manager";
@@ -15,19 +16,41 @@ const settingsSchema = z.record(
   z.union([z.boolean(), z.number(), z.string(), z.null()])
 );
 
-export const listPlugins = os.handler(() => {
-  return getPluginManager().list();
-});
+function rethrowPluginError(error: unknown): never {
+  if (error instanceof PluginManagerError) {
+    throw new ORPCError("BAD_REQUEST", {
+      data: { pluginCode: error.code },
+      message: error.message,
+    });
+  }
+  throw error;
+}
 
-export const installFromDialog = os.handler(() => {
-  return getPluginManager().installFromDialog();
-});
+async function runPluginOperation<T>(
+  operation: () => T | PromiseLike<T>
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    rethrowPluginError(error);
+  }
+}
+
+export const listPlugins = os.handler(() =>
+  runPluginOperation(() => getPluginManager().list())
+);
+
+export const installFromDialog = os.handler(() =>
+  runPluginOperation(() => getPluginManager().installFromDialog())
+);
 
 export const setPluginEnabled = os
   .input(z.object({ enabled: z.boolean(), pluginId: pluginIdSchema }).strict())
-  .handler(({ input }) => {
-    return getPluginManager().setEnabled(input.pluginId, input.enabled);
-  });
+  .handler(({ input }) =>
+    runPluginOperation(() =>
+      getPluginManager().setEnabled(input.pluginId, input.enabled)
+    )
+  );
 
 export const setPluginSettings = os
   .input(
@@ -38,19 +61,23 @@ export const setPluginSettings = os
       })
       .strict()
   )
-  .handler(({ input }) => {
-    const parsed = validatePluginPatch(input);
-    return getPluginManager().setSettings(parsed.pluginId, parsed.settings);
-  });
+  .handler(({ input }) =>
+    runPluginOperation(() => {
+      const parsed = validatePluginPatch(input);
+      return getPluginManager().setSettings(parsed.pluginId, parsed.settings);
+    })
+  );
 
 export const selectPluginAsset = os
   .input(
     z.object({ pluginId: pluginIdSchema, settingId: settingIdSchema }).strict()
   )
-  .handler(({ input }) => {
-    const parsed = validatePluginAssetInput(input);
-    return getPluginManager().selectAsset(parsed.pluginId, parsed.settingId);
-  });
+  .handler(({ input }) =>
+    runPluginOperation(() => {
+      const parsed = validatePluginAssetInput(input);
+      return getPluginManager().selectAsset(parsed.pluginId, parsed.settingId);
+    })
+  );
 
 export const uninstallPlugin = os
   .input(
@@ -58,24 +85,27 @@ export const uninstallPlugin = os
       .object({ pluginId: pluginIdSchema, removeData: z.boolean().optional() })
       .strict()
   )
-  .handler(({ input }) => {
-    return getPluginManager().uninstall(
-      input.pluginId,
-      input.removeData ?? true
-    );
-  });
+  .handler(({ input }) =>
+    runPluginOperation(() =>
+      getPluginManager().uninstall(input.pluginId, input.removeData ?? true)
+    )
+  );
 
 export const inspectFromDialog = os.handler(() =>
-  getPluginManager().inspectFromDialog()
+  runPluginOperation(() => getPluginManager().inspectFromDialog())
 );
 
 export const commitInstall = os
   .input(z.object({ token: tokenSchema }).strict())
-  .handler(({ input }) => getPluginManager().commitInstall(input.token));
+  .handler(({ input }) =>
+    runPluginOperation(() => getPluginManager().commitInstall(input.token))
+  );
 
 export const discardInspection = os
   .input(z.object({ token: tokenSchema }).strict())
-  .handler(({ input }) => getPluginManager().discardInspection(input.token));
+  .handler(({ input }) =>
+    runPluginOperation(() => getPluginManager().discardInspection(input.token))
+  );
 
 export const reportPluginActivationResult = os
   .input(
@@ -90,12 +120,14 @@ export const reportPluginActivationResult = os
       .strict()
   )
   .handler(({ input }) =>
-    getPluginManager().reportActivationResult(
-      input.pluginId,
-      input.version,
-      input.success,
-      input.errorCode,
-      input.errorDetail
+    runPluginOperation(() =>
+      getPluginManager().reportActivationResult(
+        input.pluginId,
+        input.version,
+        input.success,
+        input.errorCode,
+        input.errorDetail
+      )
     )
   );
 
@@ -104,7 +136,9 @@ export const removePluginAsset = os
     z.object({ pluginId: pluginIdSchema, settingId: settingIdSchema }).strict()
   )
   .handler(({ input }) =>
-    getPluginManager().removeAsset(input.pluginId, input.settingId)
+    runPluginOperation(() =>
+      getPluginManager().removeAsset(input.pluginId, input.settingId)
+    )
   );
 
 export const resetPluginSettings = os
@@ -117,21 +151,29 @@ export const resetPluginSettings = os
       .strict()
   )
   .handler(({ input }) =>
-    getPluginManager().resetSettings(input.pluginId, input.settingIds)
+    runPluginOperation(() =>
+      getPluginManager().resetSettings(input.pluginId, input.settingIds)
+    )
   );
 
 export const setPluginDeveloperMode = os
   .input(z.object({ enabled: z.boolean() }).strict())
-  .handler(({ input }) => getPluginManager().setDeveloperMode(input.enabled));
+  .handler(({ input }) =>
+    runPluginOperation(() => getPluginManager().setDeveloperMode(input.enabled))
+  );
 
 export const loadDevDirectoryFromDialog = os.handler(() =>
-  getPluginManager().loadDevDirectoryFromDialog()
+  runPluginOperation(() => getPluginManager().loadDevDirectoryFromDialog())
 );
 
 export const reloadDevPlugin = os
   .input(z.object({ pluginId: pluginIdSchema }).strict())
-  .handler(({ input }) => getPluginManager().reloadDevPlugin(input.pluginId));
+  .handler(({ input }) =>
+    runPluginOperation(() => getPluginManager().reloadDevPlugin(input.pluginId))
+  );
 
 export const removeDevPlugin = os
   .input(z.object({ pluginId: pluginIdSchema }).strict())
-  .handler(({ input }) => getPluginManager().removeDevPlugin(input.pluginId));
+  .handler(({ input }) =>
+    runPluginOperation(() => getPluginManager().removeDevPlugin(input.pluginId))
+  );
