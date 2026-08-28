@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { revalidateAppLocale } from "@/actions/localization";
 import {
   commitPluginInstall,
   discardPluginInspection,
@@ -45,25 +46,36 @@ import {
 import type {
   BuiltinPlugin,
   BuiltinPluginContext,
-  NormalizedPluginManifest,
   NormalizedPluginManifestV2,
+  NormalizedPluginManifestV3Locale,
   PluginManifestV1,
   PluginRecord,
   PluginSettingValue,
-  PluginSnapshot,
 } from "./types";
 
 const BUILTIN_PLUGINS: Record<string, BuiltinPlugin> = {
   [NebulaGlassPlugin.id]: NebulaGlassPlugin,
 };
 
-type AnyPluginRecord = PluginRecord<NormalizedPluginManifest>;
-type AnyPluginSnapshot = PluginSnapshot<NormalizedPluginManifest>;
+type ThemePluginManifest = PluginManifestV1 | NormalizedPluginManifestV2;
+type ThemePluginRecord = PluginRecord<ThemePluginManifest>;
+type AnyPluginRecord =
+  | ThemePluginRecord
+  | PluginRecord<NormalizedPluginManifestV3Locale>;
+interface AnyPluginSnapshot {
+  plugins: AnyPluginRecord[];
+}
 type PluginInspection = Awaited<ReturnType<typeof inspectPluginFromDialog>>;
 type PluginSettingsPatch = Record<string, PluginSettingValue>;
 
+function isThemePluginRecord(
+  record: AnyPluginRecord
+): record is ThemePluginRecord {
+  return record.manifest.manifestVersion !== 3;
+}
+
 interface PluginHostValue {
-  activePlugin?: AnyPluginRecord;
+  activePlugin?: ThemePluginRecord;
   applySnapshotResult: (next: unknown) => void;
   clearError: () => void;
   commitInstall: (token: string) => Promise<void>;
@@ -79,7 +91,7 @@ interface PluginHostValue {
   plugins: AnyPluginRecord[];
   previewId: string | null;
   previewPlugin: (pluginId: string) => void;
-  previewRecord?: AnyPluginRecord;
+  previewRecord?: ThemePluginRecord;
   refresh: () => Promise<void>;
   reloadDeveloperPlugin: (pluginId: string) => Promise<void>;
   removeAsset: (pluginId: string, settingId: string) => Promise<void>;
@@ -163,7 +175,7 @@ function usePluginSnapshot() {
   return { error, loading, setError, setSnapshot, snapshot };
 }
 
-function createBuiltinContext(record: AnyPluginRecord): BuiltinPluginContext {
+function createBuiltinContext(record: ThemePluginRecord): BuiltinPluginContext {
   return {
     getSetting: (id) => {
       const value = record.settings[id];
@@ -186,6 +198,7 @@ function createBuiltinContext(record: AnyPluginRecord): BuiltinPluginContext {
 }
 
 export function PluginHostProvider({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation();
   const {
     error,
     loading: snapshotLoading,
@@ -200,13 +213,15 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const activePlugin = snapshot.plugins.find(
-    (plugin) => plugin.status === "active"
+    (plugin): plugin is ThemePluginRecord =>
+      plugin.status === "active" && isThemePluginRecord(plugin)
   );
   const selectedPlugin = snapshot.plugins.find(
     (plugin) => plugin.manifest.id === selectedId
   );
   const previewRecord = snapshot.plugins.find(
-    (plugin) => plugin.manifest.id === previewId
+    (plugin): plugin is ThemePluginRecord =>
+      plugin.manifest.id === previewId && isThemePluginRecord(plugin)
   );
   const effectiveRecord = previewRecord ?? activePlugin;
 
@@ -290,6 +305,14 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
     [applySnapshot]
   );
 
+  const applyLocaleAwareSnapshot = useCallback(
+    async (operation: () => Promise<unknown>) => {
+      await applySnapshotOnly(operation);
+      await revalidateAppLocale(i18n);
+    },
+    [applySnapshotOnly, i18n]
+  );
+
   const selectPlugin = useCallback((pluginId: string) => {
     setSelectedId(pluginId);
   }, []);
@@ -299,11 +322,10 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
       const plugin = snapshot.plugins.find(
         (candidate) => candidate.manifest.id === pluginId
       );
-      if (
-        !plugin ||
-        plugin.status === "incompatible" ||
-        plugin.status === "invalid"
-      ) {
+      if (!(plugin && isThemePluginRecord(plugin))) {
+        return;
+      }
+      if (plugin.status === "incompatible" || plugin.status === "invalid") {
         return;
       }
       setSelectedId(pluginId);
@@ -318,17 +340,29 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
 
   const enable = useCallback(
     async (pluginId: string) => {
+      const plugin = snapshot.plugins.find(
+        (candidate) => candidate.manifest.id === pluginId
+      );
+      if (!(plugin && isThemePluginRecord(plugin))) {
+        return;
+      }
       await applySnapshotOnly(() => setPluginEnabled(pluginId, true));
       setPreviewId((current) => (current === pluginId ? null : current));
     },
-    [applySnapshotOnly]
+    [applySnapshotOnly, snapshot.plugins]
   );
 
   const disable = useCallback(
     async (pluginId: string) => {
+      const plugin = snapshot.plugins.find(
+        (candidate) => candidate.manifest.id === pluginId
+      );
+      if (!(plugin && isThemePluginRecord(plugin))) {
+        return;
+      }
       await applySnapshotOnly(() => setPluginEnabled(pluginId, false));
     },
-    [applySnapshotOnly]
+    [applySnapshotOnly, snapshot.plugins]
   );
 
   const inspectInstall = useCallback(
@@ -338,9 +372,9 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
 
   const commitInstall = useCallback(
     async (token: string) => {
-      await applySnapshotOnly(() => commitPluginInstall(token));
+      await applyLocaleAwareSnapshot(() => commitPluginInstall(token));
     },
-    [applySnapshotOnly]
+    [applyLocaleAwareSnapshot]
   );
 
   const discardInstall = useCallback(
@@ -351,8 +385,8 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(
-    () => applySnapshotOnly(listPlugins),
-    [applySnapshotOnly]
+    () => applyLocaleAwareSnapshot(listPlugins),
+    [applyLocaleAwareSnapshot]
   );
 
   const setSettings = useCallback(
@@ -391,33 +425,37 @@ export function PluginHostProvider({ children }: { children: ReactNode }) {
 
   const uninstall = useCallback(
     async (pluginId: string, removeData = true) => {
-      await applySnapshotOnly(() => uninstallPlugin(pluginId, removeData));
+      await applyLocaleAwareSnapshot(() =>
+        uninstallPlugin(pluginId, removeData)
+      );
       setPreviewId((current) => (current === pluginId ? null : current));
     },
-    [applySnapshotOnly]
+    [applyLocaleAwareSnapshot]
   );
 
   const setDeveloperMode = useCallback(
     async (enabled: boolean) => {
-      await applySnapshotOnly(() => setPluginDeveloperMode(enabled));
+      await applyLocaleAwareSnapshot(() => setPluginDeveloperMode(enabled));
       setDeveloperModeState(enabled);
     },
-    [applySnapshotOnly]
+    [applyLocaleAwareSnapshot]
   );
 
   const loadDeveloperDirectory = useCallback(
-    () => applySnapshotOnly(loadDevDirectoryFromDialog),
-    [applySnapshotOnly]
+    () => applyLocaleAwareSnapshot(loadDevDirectoryFromDialog),
+    [applyLocaleAwareSnapshot]
   );
 
   const reloadDeveloperPlugin = useCallback(
-    (pluginId: string) => applySnapshotOnly(() => reloadDevPlugin(pluginId)),
-    [applySnapshotOnly]
+    (pluginId: string) =>
+      applyLocaleAwareSnapshot(() => reloadDevPlugin(pluginId)),
+    [applyLocaleAwareSnapshot]
   );
 
   const removeDeveloperPlugin = useCallback(
-    (pluginId: string) => applySnapshotOnly(() => removeDevPlugin(pluginId)),
-    [applySnapshotOnly]
+    (pluginId: string) =>
+      applyLocaleAwareSnapshot(() => removeDevPlugin(pluginId)),
+    [applyLocaleAwareSnapshot]
   );
 
   const clearError = useCallback(() => setError(undefined), [setError]);
@@ -620,7 +658,11 @@ export function PluginBackdropHost() {
   );
 }
 
-function DeclarativeActivationReport({ record }: { record: AnyPluginRecord }) {
+function DeclarativeActivationReport({
+  record,
+}: {
+  record: ThemePluginRecord;
+}) {
   const { applySnapshotResult, reportError } = usePluginHost();
   const reported = useRef(new Set<string>());
   useEffect(() => {
@@ -643,7 +685,7 @@ function DeclarativeActivationReport({ record }: { record: AnyPluginRecord }) {
   return null;
 }
 
-function DeclarativePluginBackdrop({ record }: { record: AnyPluginRecord }) {
+function DeclarativePluginBackdrop({ record }: { record: ThemePluginRecord }) {
   const effect =
     record.manifest.manifestVersion === 1
       ? record.manifest.theme.backdrop?.effect
@@ -720,7 +762,11 @@ export function PluginSettingsSlot({
     setSettings,
   } = usePluginHost();
   const { i18n, t } = useTranslation();
-  if (!selectedPlugin || slot !== "plugin.settings") {
+  if (
+    !selectedPlugin ||
+    slot !== "plugin.settings" ||
+    !isThemePluginRecord(selectedPlugin)
+  ) {
     return null;
   }
   const pluginId = selectedPlugin.manifest.id;
@@ -762,13 +808,7 @@ export function PluginSettingsSlot({
         onRemoveAsset={(settingId) => removeAsset(pluginId, settingId)}
         onReset={reset}
         onSelectAsset={(settingId) => selectAsset(pluginId, settingId)}
-        record={
-          selectedPlugin as unknown as {
-            assetUrls: Record<string, string>;
-            manifest: PluginManifestV1 | NormalizedPluginManifestV2;
-            settings: Record<string, PluginSettingValue>;
-          }
-        }
+        record={selectedPlugin}
       />
     </div>
   );

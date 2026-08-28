@@ -23,7 +23,9 @@ function detectInitialLang(): string {
 }
 
 i18n.use(initReactI18next).init({
-  fallbackLng: "zh",
+  // Plugin catalogs may be partial. Keep a deterministic target → English →
+  // Chinese fallback chain for every renderer key.
+  fallbackLng: ["en", "zh"],
   lng: detectInitialLang(),
   resources: {
     zh: {
@@ -585,6 +587,16 @@ i18n.use(initReactI18next).init({
         pluginManagerStatusFailed: "失败",
         pluginManagerCapabilities: "能力",
         pluginManagerCapabilityTheme: "主题",
+        pluginManagerCapabilityLocale: "语言包",
+        pluginManagerLocaleCoverageValue: "{{value}}% 覆盖",
+        pluginManagerTrustOfficial: "官方签名",
+        pluginManagerTrustUnverified: "未验证",
+        pluginManagerLocaleTarget: "目标语言",
+        pluginManagerLocaleCoverage: "翻译覆盖率",
+        pluginManagerLocaleSigner: "签名密钥",
+        pluginManagerLocaleTrust: "语言包信任",
+        pluginManagerUseLocale: "使用此语言",
+        pluginManagerLocaleUnavailable: "语言包不可用",
         pluginManagerCompatibility: "兼容性",
         pluginManagerEngineCompatibility: "引擎要求",
         pluginManagerConfiguration: "配置",
@@ -2664,6 +2676,16 @@ i18n.use(initReactI18next).init({
         pluginManagerStatusFailed: "Failed",
         pluginManagerCapabilities: "Capabilities",
         pluginManagerCapabilityTheme: "Theme",
+        pluginManagerCapabilityLocale: "Language pack",
+        pluginManagerLocaleCoverageValue: "{{value}}% coverage",
+        pluginManagerTrustOfficial: "Official signature",
+        pluginManagerTrustUnverified: "Unverified",
+        pluginManagerLocaleTarget: "Target locale",
+        pluginManagerLocaleCoverage: "Translation coverage",
+        pluginManagerLocaleSigner: "Signing key",
+        pluginManagerLocaleTrust: "Locale trust",
+        pluginManagerUseLocale: "Use this language",
+        pluginManagerLocaleUnavailable: "Locale package unavailable",
         pluginManagerCompatibility: "Compatibility",
         pluginManagerEngineCompatibility: "Engine requirement",
         pluginManagerConfiguration: "Configuration",

@@ -290,7 +290,11 @@ function AppearanceSettingsPage() {
           description={t("settingsUiScaleHint")}
           title={t("settingsUiScale")}
         />
-        <SettingRow action={<LangToggle />} title={t("settingsLanguage")} />
+        <SettingRow
+          action={<LangToggle className="w-[160px]" />}
+          className="gap-2 min-[900px]:gap-6"
+          title={t("settingsLanguage")}
+        />
         <SettingRow
           action={
             <SensitivityControl

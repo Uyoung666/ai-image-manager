@@ -1,17 +1,28 @@
 export interface PluginCliManifestResult {
   assets: string[];
   id: string;
+  locale?: {
+    catalogVersion: string;
+    mainFile: string;
+    nativeName: string;
+    rendererFile: string;
+    tag: string;
+  };
+  signed?: boolean;
   version: string;
 }
 
 export interface PluginCliPackageResult extends PluginCliManifestResult {
   files: Map<string, Buffer>;
   manifest: Record<string, unknown>;
-  theme: Record<string, unknown>;
+  theme?: Record<string, unknown>;
 }
 
 export interface PluginCliPackOptions {
+  keyId?: string;
   out?: string;
+  signingKeyPath?: string;
+  signKey?: string;
 }
 
 export interface PluginCliPackedResult extends PluginCliPackageResult {
@@ -25,7 +36,7 @@ export class PluginCliError extends Error {
 
 export function validateManifest(
   manifest: unknown,
-  theme: unknown,
+  theme?: unknown,
   assets?: ReadonlySet<string>
 ): PluginCliManifestResult;
 

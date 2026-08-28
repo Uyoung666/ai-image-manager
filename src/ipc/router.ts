@@ -4,6 +4,7 @@ import { cloud } from "./cloud";
 import { cull } from "./cull";
 import { diagnostics } from "./diagnostics";
 import { faces } from "./faces";
+import { localization } from "./localization";
 import { photos } from "./photos";
 import { plugins } from "./plugins";
 import { settings } from "./settings";
@@ -26,4 +27,5 @@ export const router = {
   diagnostics,
   wander,
   plugins,
+  localization,
 };

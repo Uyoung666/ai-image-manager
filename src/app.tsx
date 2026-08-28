@@ -8,25 +8,24 @@ import {
   cacheAccentColor,
   setAccentColorPreference,
 } from "./actions/accent-color";
-import { updateAppLanguage } from "./actions/language";
+import { initializeAppLanguage } from "./actions/language";
 import { listenSystemThemeChanges, syncWithLocalTheme } from "./actions/theme";
 import { installDownloadedUpdate } from "./actions/update";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { UiPreferencesProvider } from "./contexts/ui-preferences-context";
 import { ipc } from "./ipc/manager";
+import i18n from "./localization/i18n";
 import { PluginBackdropHost, PluginHostProvider } from "./plugins/runtime";
 import { QueryProvider } from "./providers/QueryProvider";
 import { router } from "./utils/routes";
-import "./localization/i18n";
 
 export default function App() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [updateReminder, setUpdateReminder] = useState(true);
 
   useEffect(() => {
     syncWithLocalTheme();
-    updateAppLanguage(i18n);
-  }, [i18n]);
+  }, []);
 
   useEffect(() => {
     ipc.client.settings
@@ -112,8 +111,23 @@ if ("scrollRestoration" in window.history) {
 }
 
 const root = createRoot(container);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+
+// Load the selected signed locale before mounting React. This prevents the
+// first frame from rendering built-in Chinese/English and then visibly
+// switching to a plugin catalog after the IPC handshake completes.
+async function bootstrapRenderer() {
+  try {
+    await initializeAppLanguage(i18n);
+  } catch {
+    // The action already has a built-in fallback, but a renderer must still
+    // mount if an unexpected adapter/document error escapes that boundary.
+  } finally {
+    root.render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+  }
+}
+
+bootstrapRenderer().catch(() => undefined);

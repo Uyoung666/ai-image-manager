@@ -16,6 +16,9 @@ describe("plugin manifest boundary", () => {
     const { theme, ...withoutTheme } = NEBULA_GLASS_MANIFEST;
     const parsed = parsePluginManifest(withoutTheme);
 
+    if (parsed.manifestVersion !== 1) {
+      throw new Error("expected a v1 theme manifest");
+    }
     expect(parsed.theme).toEqual({});
     expect(parsed.id).toBe(NEBULA_GLASS_PLUGIN_ID);
     expect(theme).toBeDefined();

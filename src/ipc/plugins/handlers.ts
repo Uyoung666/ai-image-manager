@@ -1,5 +1,6 @@
 import { ORPCError, os } from "@orpc/server";
 import { z } from "zod";
+import { revalidateMainLocalization } from "@/localization/main-runtime";
 import {
   getPluginManager,
   PluginManagerError,
@@ -36,12 +37,27 @@ async function runPluginOperation<T>(
   }
 }
 
+/**
+ * Plugin mutations can remove or replace the currently selected locale
+ * provider. Revalidation is deliberately best-effort so a settings/runtime
+ * failure never changes the original plugin operation's result or error.
+ */
+async function runPluginMutation<T>(
+  operation: () => T | PromiseLike<T>
+): Promise<T> {
+  const result = await operation();
+  await revalidateMainLocalization().catch(() => undefined);
+  return result;
+}
+
 export const listPlugins = os.handler(() =>
   runPluginOperation(() => getPluginManager().list())
 );
 
 export const installFromDialog = os.handler(() =>
-  runPluginOperation(() => getPluginManager().installFromDialog())
+  runPluginOperation(() =>
+    runPluginMutation(() => getPluginManager().installFromDialog())
+  )
 );
 
 export const setPluginEnabled = os
@@ -87,7 +103,9 @@ export const uninstallPlugin = os
   )
   .handler(({ input }) =>
     runPluginOperation(() =>
-      getPluginManager().uninstall(input.pluginId, input.removeData ?? true)
+      runPluginMutation(() =>
+        getPluginManager().uninstall(input.pluginId, input.removeData ?? true)
+      )
     )
   );
 
@@ -98,7 +116,9 @@ export const inspectFromDialog = os.handler(() =>
 export const commitInstall = os
   .input(z.object({ token: tokenSchema }).strict())
   .handler(({ input }) =>
-    runPluginOperation(() => getPluginManager().commitInstall(input.token))
+    runPluginOperation(() =>
+      runPluginMutation(() => getPluginManager().commitInstall(input.token))
+    )
   );
 
 export const discardInspection = os
@@ -159,21 +179,35 @@ export const resetPluginSettings = os
 export const setPluginDeveloperMode = os
   .input(z.object({ enabled: z.boolean() }).strict())
   .handler(({ input }) =>
-    runPluginOperation(() => getPluginManager().setDeveloperMode(input.enabled))
+    runPluginOperation(() =>
+      runPluginMutation(() =>
+        getPluginManager().setDeveloperMode(input.enabled)
+      )
+    )
   );
 
 export const loadDevDirectoryFromDialog = os.handler(() =>
-  runPluginOperation(() => getPluginManager().loadDevDirectoryFromDialog())
+  runPluginOperation(() =>
+    runPluginMutation(() => getPluginManager().loadDevDirectoryFromDialog())
+  )
 );
 
 export const reloadDevPlugin = os
   .input(z.object({ pluginId: pluginIdSchema }).strict())
   .handler(({ input }) =>
-    runPluginOperation(() => getPluginManager().reloadDevPlugin(input.pluginId))
+    runPluginOperation(() =>
+      runPluginMutation(() =>
+        getPluginManager().reloadDevPlugin(input.pluginId)
+      )
+    )
   );
 
 export const removeDevPlugin = os
   .input(z.object({ pluginId: pluginIdSchema }).strict())
   .handler(({ input }) =>
-    runPluginOperation(() => getPluginManager().removeDevPlugin(input.pluginId))
+    runPluginOperation(() =>
+      runPluginMutation(() =>
+        getPluginManager().removeDevPlugin(input.pluginId)
+      )
+    )
   );

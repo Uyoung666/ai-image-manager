@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Developer tooling for public AI Image Manager v2 plugins.
+ * Developer tooling for public AI Image Manager v2 theme and v3 locale plugins.
  *
  * The runtime is deliberately not imported here.  Keeping this boundary
  * dependency-free (apart from the repository's existing ZIP packages) makes
@@ -9,6 +9,7 @@
  * plugin author from accidentally depending on renderer-only code.
  */
 
+import { createHash, createPrivateKey, sign } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -18,8 +19,10 @@ import yauzl from "yauzl";
 
 const MANIFEST_FILE = "plugin.json";
 const THEME_FILE = "theme.json";
+const SIGNATURE_FILE = "signature.json";
 const MAX_ASSET_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_LOCALE_BUNDLE_BYTES = 1024 * 1024;
 const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 256;
@@ -95,6 +98,35 @@ const LAYER_BLEND_MODES = new Set([
   "soft-light",
   "hard-light",
 ]);
+const LOCALE_TAG_PATTERN =
+  /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*(?:-[A-Za-z0-9]{1,8})?$/;
+const LOCALE_FILE_PATTERN = /^locales\/([^/]+)\/(renderer|main)\.json$/;
+const LOCALE_DIRECTORY_PATTERN = /^locales(?:\/[^/]+)?$/;
+const LOCALE_CATALOG_VERSION_PATTERN = /^[A-Za-z0-9._-]+$/;
+const SIGNATURE_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const BASE64_SIGNATURE_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const LOCALE_DANGEROUS_TEXT_PATTERN =
+  /(?:<\/?[a-z][^>]*>|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html)/i;
+const LOCALE_STRING_LIMIT = 16_384;
+const LOCALE_ARRAY_LIMIT = 2048;
+const LOCALE_OBJECT_LIMIT = 2048;
+const LOCALE_DEPTH_LIMIT = 32;
+const LOCALE_LEAF_LIMIT = 50_000;
+
+function hasLocaleControl(value) {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSafeLocaleKey(value) {
+  return value.length >= 1 && value.length <= 256 && !hasLocaleControl(value);
+}
 
 function compareNames(left, right) {
   if (left < right) {
@@ -155,6 +187,134 @@ function assertLocalized(value, context) {
   assertKeys(value, new Set(["en", "zh"]), context);
   assertString(value.en, `${context}.en`, { max: 160 });
   assertString(value.zh, `${context}.zh`, { max: 160 });
+}
+
+function assertLocaleTag(value, context) {
+  assertString(value, context, { min: 2, max: 64 });
+  if (!LOCALE_TAG_PATTERN.test(value)) {
+    fail(`${context} must be a BCP 47 locale tag`);
+  }
+  try {
+    if (new Intl.Locale(value).toString() !== value) {
+      fail(`${context} must be canonical BCP 47`);
+    }
+  } catch {
+    fail(`${context} must be a valid BCP 47 locale tag`);
+  }
+}
+
+function assertLocaleMetadataText(value, context, max) {
+  assertString(value, context, { max });
+  if (value.trim() !== value) {
+    fail(`${context} must not have leading or trailing whitespace`);
+  }
+  if (hasLocaleControl(value)) {
+    fail(`${context} contains a control character`);
+  }
+  if (LOCALE_DANGEROUS_TEXT_PATTERN.test(value)) {
+    fail(`${context} contains HTML or a script URL`);
+  }
+}
+
+function assertLocaleTextMap(value, context, requiredTag) {
+  assertPlainObject(value, context);
+  if (Object.keys(value).length > 32) {
+    fail(`${context} contains too many locales`);
+  }
+  for (const [tag, text] of Object.entries(value)) {
+    assertLocaleTag(tag, `${context}.${tag}`);
+    assertLocaleMetadataText(text, `${context}.${tag}`, 160);
+  }
+  for (const tag of new Set(["en", requiredTag])) {
+    if (!Object.hasOwn(value, tag)) {
+      fail(`${context} must include ${tag}`);
+    }
+  }
+}
+
+function assertLocaleBundle(
+  value,
+  context = "locale bundle",
+  state = { leaves: 0 },
+  depth = 0
+) {
+  if (typeof value === "string") {
+    if (value.length > LOCALE_STRING_LIMIT) {
+      fail(`${context} exceeds the string size limit`);
+    }
+    if (hasLocaleControl(value)) {
+      fail(`${context} contains a control character`);
+    }
+    if (LOCALE_DANGEROUS_TEXT_PATTERN.test(value)) {
+      fail(`${context} contains HTML or a script URL`);
+    }
+    state.leaves += 1;
+    if (state.leaves > LOCALE_LEAF_LIMIT) {
+      fail(`${context} contains too many leaf values`);
+    }
+    return;
+  }
+  if (depth > LOCALE_DEPTH_LIMIT) {
+    fail(`${context} is nested too deeply`);
+  }
+  if (Array.isArray(value)) {
+    if (value.length > LOCALE_ARRAY_LIMIT) {
+      fail(`${context} contains too many array entries`);
+    }
+    value.forEach((item, index) => {
+      assertLocaleBundle(item, `${context}[${index}]`, state, depth + 1);
+    });
+    return;
+  }
+  if (!isPlainObject(value)) {
+    fail(`${context} must contain only objects, arrays, or strings`);
+  }
+  const entries = Object.entries(value);
+  if (entries.length > LOCALE_OBJECT_LIMIT) {
+    fail(`${context} contains too many object properties`);
+  }
+  for (const [key, item] of entries) {
+    if (
+      !isSafeLocaleKey(key) ||
+      ["__proto__", "prototype", "constructor"].includes(key)
+    ) {
+      fail(`${context}.${key} has an unsafe key`);
+    }
+    assertLocaleBundle(item, `${context}.${key}`, state, depth + 1);
+  }
+}
+
+function assertLocaleFilePath(value, context, tag, suffix) {
+  const expected = `locales/${tag}/${suffix}.json`;
+  assertString(value, context, { max: 160 });
+  if (value !== expected) {
+    fail(`${context} must be "${expected}"`);
+  }
+}
+
+function assertSignature(value, context = SIGNATURE_FILE) {
+  assertPlainObject(value, context);
+  assertKeys(value, new Set(["algorithm", "keyId", "signature"]), context);
+  if (value.algorithm !== "ed25519") {
+    fail(`${context}.algorithm must be ed25519`);
+  }
+  assertString(value.keyId, `${context}.keyId`, { max: 80 });
+  if (!SIGNATURE_KEY_ID_PATTERN.test(value.keyId)) {
+    fail(`${context}.keyId is invalid`);
+  }
+  assertString(value.signature, `${context}.signature`, { max: 256 });
+  if (!BASE64_SIGNATURE_PATTERN.test(value.signature)) {
+    fail(`${context}.signature must be base64`);
+  }
+  let signatureBytes;
+  try {
+    signatureBytes = Buffer.from(value.signature, "base64");
+  } catch {
+    fail(`${context}.signature must be base64`);
+  }
+  if (signatureBytes.length !== 64) {
+    fail(`${context}.signature must contain a 64-byte Ed25519 signature`);
+  }
 }
 
 function assertSemver(value, context) {
@@ -819,8 +979,149 @@ function validateThemeMaterial(material, settingTypes, assets) {
   }
 }
 
+function validateLocaleManifest(manifest) {
+  assertPlainObject(manifest, MANIFEST_FILE);
+  assertKeys(
+    manifest,
+    new Set([
+      "manifestVersion",
+      "apiVersion",
+      "id",
+      "version",
+      "name",
+      "description",
+      "author",
+      "engine",
+      "capabilities",
+      "locale",
+      "homepage",
+      "license",
+    ]),
+    MANIFEST_FILE
+  );
+  if (manifest.manifestVersion !== 3 || manifest.apiVersion !== 3) {
+    fail(`${MANIFEST_FILE} manifestVersion and apiVersion must both be 3`);
+  }
+  assertString(manifest.id, `${MANIFEST_FILE}.id`, { max: 120 });
+  if (!ID_PATTERN.test(manifest.id)) {
+    fail(`${MANIFEST_FILE}.id must be a reverse-domain id`);
+  }
+  assertSemver(manifest.version, `${MANIFEST_FILE}.version`);
+  assertPlainObject(manifest.locale, `${MANIFEST_FILE}.locale`);
+  assertKeys(
+    manifest.locale,
+    new Set([
+      "tag",
+      "nativeName",
+      "fallback",
+      "direction",
+      "catalogVersion",
+      "rendererFile",
+      "mainFile",
+    ]),
+    `${MANIFEST_FILE}.locale`
+  );
+  assertLocaleTag(manifest.locale.tag, `${MANIFEST_FILE}.locale.tag`);
+  assertLocaleMetadataText(
+    manifest.locale.nativeName,
+    `${MANIFEST_FILE}.locale.nativeName`,
+    120
+  );
+  if (manifest.locale.fallback !== "en") {
+    fail(`${MANIFEST_FILE}.locale.fallback must be "en"`);
+  }
+  if (manifest.locale.direction !== "ltr") {
+    fail(`${MANIFEST_FILE}.locale.direction must be "ltr"`);
+  }
+  assertString(
+    manifest.locale.catalogVersion,
+    `${MANIFEST_FILE}.locale.catalogVersion`,
+    { max: 80 }
+  );
+  if (!LOCALE_CATALOG_VERSION_PATTERN.test(manifest.locale.catalogVersion)) {
+    fail(
+      `${MANIFEST_FILE}.locale.catalogVersion contains unsupported characters`
+    );
+  }
+  assertLocaleFilePath(
+    manifest.locale.rendererFile,
+    `${MANIFEST_FILE}.locale.rendererFile`,
+    manifest.locale.tag,
+    "renderer"
+  );
+  assertLocaleFilePath(
+    manifest.locale.mainFile,
+    `${MANIFEST_FILE}.locale.mainFile`,
+    manifest.locale.tag,
+    "main"
+  );
+  assertLocaleTextMap(
+    manifest.name,
+    `${MANIFEST_FILE}.name`,
+    manifest.locale.tag
+  );
+  assertLocaleTextMap(
+    manifest.description,
+    `${MANIFEST_FILE}.description`,
+    manifest.locale.tag
+  );
+  assertPlainObject(manifest.author, `${MANIFEST_FILE}.author`);
+  assertKeys(
+    manifest.author,
+    new Set(["name", "url"]),
+    `${MANIFEST_FILE}.author`
+  );
+  assertString(manifest.author.name, `${MANIFEST_FILE}.author.name`, {
+    max: 120,
+  });
+  if (Object.hasOwn(manifest.author, "url")) {
+    assertHttpUrl(manifest.author.url, `${MANIFEST_FILE}.author.url`);
+  }
+  assertPlainObject(manifest.engine, `${MANIFEST_FILE}.engine`);
+  assertKeys(
+    manifest.engine,
+    new Set(["minAppVersion"]),
+    `${MANIFEST_FILE}.engine`
+  );
+  assertSemver(
+    manifest.engine.minAppVersion,
+    `${MANIFEST_FILE}.engine.minAppVersion`
+  );
+  if (
+    !Array.isArray(manifest.capabilities) ||
+    manifest.capabilities.length !== 1 ||
+    manifest.capabilities[0] !== "locale"
+  ) {
+    fail(`${MANIFEST_FILE}.capabilities must be exactly ["locale"]`);
+  }
+  if (Object.hasOwn(manifest, "homepage")) {
+    assertHttpUrl(manifest.homepage, `${MANIFEST_FILE}.homepage`);
+  }
+  if (Object.hasOwn(manifest, "license")) {
+    assertString(manifest.license, `${MANIFEST_FILE}.license`, { max: 80 });
+  }
+  return {
+    assets: [],
+    id: manifest.id,
+    locale: {
+      catalogVersion: manifest.locale.catalogVersion,
+      mainFile: manifest.locale.mainFile,
+      nativeName: manifest.locale.nativeName,
+      rendererFile: manifest.locale.rendererFile,
+      tag: manifest.locale.tag,
+    },
+    version: manifest.version,
+  };
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: manifest and theme validation form one security boundary
 export function validateManifest(manifest, theme, assets = new Set()) {
+  if (
+    isPlainObject(manifest) &&
+    (manifest.manifestVersion === 3 || manifest.apiVersion === 3)
+  ) {
+    return validateLocaleManifest(manifest);
+  }
   assertPlainObject(manifest, MANIFEST_FILE);
   assertKeys(
     manifest,
@@ -998,12 +1299,21 @@ function normalizeArchiveEntryName(rawName) {
 
 function assertAllowedEntry(name, directory) {
   if (directory) {
-    if (name !== "assets" && !name.startsWith("assets/")) {
+    if (
+      name !== "assets" &&
+      !name.startsWith("assets/") &&
+      !LOCALE_DIRECTORY_PATTERN.test(name)
+    ) {
       fail(`archive contains an unsupported directory "${name}"`);
     }
     return;
   }
-  if (name === MANIFEST_FILE || name === THEME_FILE) {
+  if (
+    name === MANIFEST_FILE ||
+    name === THEME_FILE ||
+    name === SIGNATURE_FILE ||
+    LOCALE_FILE_PATTERN.test(name)
+  ) {
     return;
   }
   if (!name.startsWith("assets/")) {
@@ -1137,8 +1447,10 @@ async function readArchiveEntries(archivePath) {
             }
             const maxBytes =
               normalized.name === MANIFEST_FILE ||
-              normalized.name === THEME_FILE
-                ? MAX_JSON_BYTES
+              normalized.name === THEME_FILE ||
+              normalized.name === SIGNATURE_FILE ||
+              LOCALE_FILE_PATTERN.test(normalized.name)
+                ? MAX_LOCALE_BUNDLE_BYTES
                 : MAX_ASSET_BYTES;
             if (
               entry.uncompressedSize > maxBytes ||
@@ -1192,6 +1504,66 @@ function parseJsonBuffer(buffer, context) {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: package layout validation is a deliberate security boundary
+function validatePackageFileLayout(
+  files,
+  manifest,
+  { requireSignature = false } = {}
+) {
+  const isLocale = manifest.manifestVersion === 3;
+  const expectedLocaleFiles = isLocale
+    ? new Set([manifest.locale.rendererFile, manifest.locale.mainFile])
+    : new Set();
+  for (const [name, data] of files) {
+    if (isLocale) {
+      if (name === MANIFEST_FILE) {
+        continue;
+      }
+      if (name === SIGNATURE_FILE) {
+        assertSignature(parseJsonBuffer(data, SIGNATURE_FILE));
+        continue;
+      }
+      if (!expectedLocaleFiles.has(name)) {
+        fail(`locale package contains an unsupported file "${name}"`);
+      }
+      assertLocaleBundle(parseJsonBuffer(data, name), name);
+      continue;
+    }
+    if (name === MANIFEST_FILE || name === THEME_FILE) {
+      continue;
+    }
+    if (name === SIGNATURE_FILE || name.startsWith("locales/")) {
+      fail(`theme package contains an unsupported file "${name}"`);
+    }
+    if (
+      !(
+        name.startsWith("assets/") &&
+        ASSET_EXTENSIONS.has(path.posix.extname(name).toLowerCase())
+      )
+    ) {
+      fail(`plugin package contains an unsupported file "${name}"`);
+    }
+  }
+  if (!files.has(MANIFEST_FILE)) {
+    fail("plugin package must contain plugin.json");
+  }
+  if (isLocale) {
+    for (const name of expectedLocaleFiles) {
+      if (!files.has(name)) {
+        fail(`locale package must contain ${name}`);
+      }
+    }
+    if (requireSignature && !files.has(SIGNATURE_FILE)) {
+      fail("locale package must contain signature.json");
+    }
+  } else if (!files.has(THEME_FILE)) {
+    fail("theme package must contain theme.json");
+  }
+  return {
+    signed: isLocale && files.has(SIGNATURE_FILE),
+  };
+}
+
 function validateEntrySet(entries) {
   const files = new Map(
     entries
@@ -1201,15 +1573,18 @@ function validateEntrySet(entries) {
   const assets = new Set(
     [...files.keys()].filter((name) => name.startsWith("assets/"))
   );
-  if (!(files.has(MANIFEST_FILE) && files.has(THEME_FILE))) {
-    fail("plugin package must contain plugin.json and theme.json");
-  }
   const manifest = parseJsonBuffer(files.get(MANIFEST_FILE), MANIFEST_FILE);
-  const theme = parseJsonBuffer(files.get(THEME_FILE), THEME_FILE);
+  const isLocale =
+    isPlainObject(manifest) &&
+    (manifest.manifestVersion === 3 || manifest.apiVersion === 3);
+  const theme = isLocale
+    ? undefined
+    : parseJsonBuffer(files.get(THEME_FILE), THEME_FILE);
   const result = validateManifest(manifest, theme, assets);
+  const layout = validatePackageFileLayout(files, manifest);
   // Directories are not needed in a deterministic package.  They are allowed
   // when validating third-party archives, but never become extra files.
-  return { ...result, manifest, theme, files };
+  return { ...result, ...layout, manifest, theme, files };
 }
 
 async function readDirectoryEntries(directory) {
@@ -1233,7 +1608,11 @@ async function readDirectoryEntries(directory) {
         fail(`plugin source cannot contain symlinks: ${normalized}`);
       }
       if (stat.isDirectory()) {
-        if (normalized !== "assets" && !normalized.startsWith("assets/")) {
+        if (
+          normalized !== "assets" &&
+          !normalized.startsWith("assets/") &&
+          !LOCALE_DIRECTORY_PATTERN.test(normalized)
+        ) {
           fail(
             `plugin source contains an unsupported directory: ${normalized}`
           );
@@ -1246,8 +1625,11 @@ async function readDirectoryEntries(directory) {
       }
       assertAllowedEntry(normalized, false);
       const maxBytes =
-        normalized === MANIFEST_FILE || normalized === THEME_FILE
-          ? MAX_JSON_BYTES
+        normalized === MANIFEST_FILE ||
+        normalized === THEME_FILE ||
+        normalized === SIGNATURE_FILE ||
+        LOCALE_FILE_PATTERN.test(normalized)
+          ? MAX_LOCALE_BUNDLE_BYTES
           : MAX_ASSET_BYTES;
       if (stat.size > maxBytes) {
         fail(`${normalized} exceeds the size limit`);
@@ -1267,24 +1649,21 @@ async function readDirectoryEntries(directory) {
   const ordered = [...files.values()].sort((left, right) =>
     compareNames(left.name, right.name)
   );
-  if (
-    !(
-      ordered.some((entry) => entry.name === MANIFEST_FILE) &&
-      ordered.some((entry) => entry.name === THEME_FILE)
-    )
-  ) {
-    fail("plugin source must contain plugin.json and theme.json");
-  }
   const fileMap = new Map(ordered.map((entry) => [entry.name, entry.data]));
-  const result = validateManifest(
-    parseJsonBuffer(fileMap.get(MANIFEST_FILE), MANIFEST_FILE),
-    parseJsonBuffer(fileMap.get(THEME_FILE), THEME_FILE),
-    assets
-  );
+  const manifest = parseJsonBuffer(fileMap.get(MANIFEST_FILE), MANIFEST_FILE);
+  const isLocale =
+    isPlainObject(manifest) &&
+    (manifest.manifestVersion === 3 || manifest.apiVersion === 3);
+  const theme = isLocale
+    ? undefined
+    : parseJsonBuffer(fileMap.get(THEME_FILE), THEME_FILE);
+  const result = validateManifest(manifest, theme, assets);
+  const layout = validatePackageFileLayout(fileMap, manifest);
   return {
     ...result,
-    manifest: parseJsonBuffer(fileMap.get(MANIFEST_FILE), MANIFEST_FILE),
-    theme: parseJsonBuffer(fileMap.get(THEME_FILE), THEME_FILE),
+    ...layout,
+    manifest,
+    theme,
     files: new Map(ordered.map((entry) => [entry.name, entry.data])),
   };
 }
@@ -1334,6 +1713,82 @@ function appendArchiveEntry(archive, data, name) {
   });
 }
 
+function canonicalSignatureEntries(entries) {
+  return JSON.stringify(
+    [...entries]
+      .filter((entry) => entry.name !== SIGNATURE_FILE)
+      .map((entry) => ({
+        path: entry.name.replaceAll("\\", "/"),
+        size: entry.data.length,
+        sha256: createHash("sha256").update(entry.data).digest("hex"),
+      }))
+      .sort((left, right) => compareNames(left.path, right.path))
+  );
+}
+
+async function signingKeyFor(options) {
+  const keyPath =
+    options.signKey ??
+    options.signingKeyPath ??
+    process.env.AIM_PLUGIN_SIGNING_KEY_PATH ??
+    process.env.AIM_PLUGIN_SIGNING_KEY;
+  if (!keyPath) {
+    return null;
+  }
+  const resolved = path.resolve(keyPath);
+  const stat = await fsp.lstat(resolved);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    fail("signing key path must be a regular file");
+  }
+  let key;
+  try {
+    key = createPrivateKey(await fsp.readFile(resolved));
+  } catch {
+    fail("cannot read signing key");
+  }
+  if (key.asymmetricKeyType !== "ed25519") {
+    fail("signing key must be an Ed25519 private key");
+  }
+  const keyId = options.keyId ?? process.env.AIM_PLUGIN_SIGNING_KEY_ID;
+  if (typeof keyId !== "string" || !SIGNATURE_KEY_ID_PATTERN.test(keyId)) {
+    fail("--key-id or AIM_PLUGIN_SIGNING_KEY_ID is required for signing");
+  }
+  return { key, keyId };
+}
+
+async function signedEntries(entries, manifest, options) {
+  if (manifest.manifestVersion !== 3) {
+    return { entries, signed: false };
+  }
+  const signing = await signingKeyFor(options);
+  if (!signing) {
+    return {
+      entries,
+      signed: entries.some((entry) => entry.name === SIGNATURE_FILE),
+    };
+  }
+  const payload = Buffer.from(canonicalSignatureEntries(entries), "utf8");
+  const signature = sign(null, payload, signing.key).toString("base64");
+  const signatureEntry = {
+    name: SIGNATURE_FILE,
+    data: Buffer.from(
+      JSON.stringify({
+        algorithm: "ed25519",
+        keyId: signing.keyId,
+        signature,
+      }),
+      "utf8"
+    ),
+  };
+  return {
+    entries: [
+      signatureEntry,
+      ...entries.filter((entry) => entry.name !== SIGNATURE_FILE),
+    ],
+    signed: true,
+  };
+}
+
 async function writeDeterministicZip(entries, outputPath) {
   await fsp.mkdir(path.dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.tmp-${process.pid}-${Date.now()}`;
@@ -1378,6 +1833,7 @@ async function writeDeterministicZip(entries, outputPath) {
 export async function packPlugin(directory, options = {}) {
   const result = await validatePluginDirectory(directory);
   const orderedNames = [MANIFEST_FILE, THEME_FILE, ...result.files.keys()]
+    .filter((name) => result.files.has(name))
     .filter((name, index, names) => names.indexOf(name) === index)
     .sort((left, right) => {
       const rank = (name) => {
@@ -1395,24 +1851,50 @@ export async function packPlugin(directory, options = {}) {
     name,
     data: result.files.get(name),
   }));
+  const signed = await signedEntries(entries, result.manifest, options);
+  const deterministicEntries = signed.entries.sort((left, right) => {
+    const rank = (name) => {
+      if (name === MANIFEST_FILE) {
+        return 0;
+      }
+      if (name === SIGNATURE_FILE) {
+        return 1;
+      }
+      if (name === THEME_FILE) {
+        return 2;
+      }
+      return 3;
+    };
+    return (
+      rank(left.name) - rank(right.name) || compareNames(left.name, right.name)
+    );
+  });
   const outputPath = outputPathFor(options.out, result.id, result.version);
-  await writeDeterministicZip(entries, outputPath);
-  return { ...result, outputPath, entries: orderedNames };
+  await writeDeterministicZip(deterministicEntries, outputPath);
+  return {
+    ...result,
+    entries: deterministicEntries.map((entry) => entry.name),
+    signed: signed.signed,
+    outputPath,
+  };
 }
 
 function usage() {
   return [
     "Usage:",
     "  node scripts/plugin-cli.mjs validate <directory|plugin.aim-plugin>",
-    "  node scripts/plugin-cli.mjs pack <directory> [--out <directory|plugin.aim-plugin>]",
+    "  node scripts/plugin-cli.mjs pack <directory> [--out <directory|plugin.aim-plugin>] [--sign-key <private-key-path> --key-id <id>]",
   ].join("\n");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: CLI parsing keeps explicit diagnostics for each supported option
 function parsePackArguments(args) {
   if (!args[0] || args[0].startsWith("--")) {
     fail(usage());
   }
   let out;
+  let signKey;
+  let keyId;
   for (let index = 1; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--out") {
@@ -1426,11 +1908,33 @@ function parsePackArguments(args) {
       if (!out) {
         fail("--out requires a path");
       }
+    } else if (argument === "--sign-key") {
+      signKey = args[index + 1];
+      if (!signKey) {
+        fail("--sign-key requires a path");
+      }
+      index += 1;
+    } else if (argument.startsWith("--sign-key=")) {
+      signKey = argument.slice("--sign-key=".length);
+      if (!signKey) {
+        fail("--sign-key requires a path");
+      }
+    } else if (argument === "--key-id") {
+      keyId = args[index + 1];
+      if (!keyId) {
+        fail("--key-id requires an id");
+      }
+      index += 1;
+    } else if (argument.startsWith("--key-id=")) {
+      keyId = argument.slice("--key-id=".length);
+      if (!keyId) {
+        fail("--key-id requires an id");
+      }
     } else {
       fail(`unknown option "${argument}"`);
     }
   }
-  return { directory: args[0], out };
+  return { directory: args[0], keyId, out, signKey };
 }
 
 export async function runCli(args = process.argv.slice(2)) {
@@ -1448,8 +1952,8 @@ export async function runCli(args = process.argv.slice(2)) {
     return 0;
   }
   if (command === "pack") {
-    const { directory, out } = parsePackArguments(rest);
-    const result = await packPlugin(directory, { out });
+    const { directory, keyId, out, signKey } = parsePackArguments(rest);
+    const result = await packPlugin(directory, { keyId, out, signKey });
     console.log(`packed ${result.outputPath}`);
     return 0;
   }

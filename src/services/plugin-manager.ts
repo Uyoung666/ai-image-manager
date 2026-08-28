@@ -1,4 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  type KeyObject,
+  randomUUID,
+  verify as verifySignature,
+} from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -12,20 +18,30 @@ import {
   NEBULA_GLASS_RECIPE_VERSION,
 } from "@/plugins/builtins/nebula-glass-manifest";
 import {
+  analyzeLocaleCoverage,
+  canonicalizePluginSignatureEntries,
   compareSemVer,
   getLocalizedText,
   isValidSemVer,
   normalizePluginManifest,
   parsePluginManifestV1,
+  parsePluginManifestV3Locale,
+  parsePluginSignature,
   parsePluginTheme,
+  validateLocaleBundle,
   validatePluginSettings,
 } from "@/plugins/manifest";
 import type {
+  LocaleBundleValue,
+  LocaleCoverage,
   NormalizedPluginManifest,
   NormalizedPluginManifestV2,
+  NormalizedPluginManifestV3Locale,
   PluginManifestV1,
   PluginRecord,
+  PluginRecordLocaleMetadata,
   PluginSettingDefinition,
+  PluginSignature,
   PluginSnapshot,
 } from "@/plugins/types";
 import { createLogger } from "@/utils/logger";
@@ -49,6 +65,7 @@ const MAX_ENTRY_COUNT = 256;
 const MAX_EXTRACTED_BYTES = 256 * 1024 * 1024;
 const MAX_ASSET_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_LOCALE_BUNDLE_BYTES = 1024 * 1024;
 const PLUGIN_ROOT = "plugins";
 const PLUGIN_STAGING_ROOT = ".staging";
 const PLUGIN_DATA_ROOT = "plugins-data";
@@ -78,6 +95,20 @@ const IMAGE_ASSET_EXTENSIONS = new Set([
   ".webp",
 ]);
 const VIDEO_ASSET_EXTENSIONS = new Set([".mp4", ".webm"]);
+const LOCALE_FILE_PATTERN = /^locales\/([^/]+)\/(renderer|main)\.json$/;
+const LOCALE_DIRECTORY_PATTERN = /^locales(?:\/[^/]+)?$/;
+const SIGNATURE_FILE = "signature.json";
+const SIGNATURE_ALGORITHM = "ed25519" as const;
+const SIGNATURE_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+
+/**
+ * Release builds must inject the independently managed official keyring. Keep
+ * the source default empty so an unconfigured build never trusts a guessed or
+ * development-only public key.
+ */
+export type PluginTrustedKeyring = Readonly<Record<string, string | KeyObject>>;
+export const PLUGIN_TRUSTED_KEYS: PluginTrustedKeyring = Object.freeze({});
+export const PLUGIN_TRUSTED_PUBLIC_KEYS = PLUGIN_TRUSTED_KEYS;
 
 const mimeTypes: Record<string, string> = {
   ".avif": "image/avif",
@@ -218,12 +249,50 @@ export interface PluginInstallPreview {
   compatible: boolean;
   currentVersion: string | null;
   kind: "install" | "update";
+  locale?: PluginLocalePreview;
   manifest: NormalizedPluginManifest;
   packageBytes: number;
   pluginId: string;
+  signed: boolean;
+  signerKeyId?: string;
   source: "dialog";
   token: string;
-  trust: "user-selected";
+  trust: PluginPackageTrust;
+  version: string;
+}
+
+export type PluginPackageTrust = "developer" | "trusted" | "user-selected";
+
+export interface PluginLocalePreview {
+  catalogVersion: string;
+  coverage: LocaleCoverage;
+  mainFile: string;
+  nativeName: string;
+  rendererFile: string;
+  signed: boolean;
+  signerKeyId?: string;
+  tag: string;
+  trust: "developer" | "trusted";
+}
+
+export interface PluginLocaleCatalog {
+  main?: LocaleBundleValue;
+  renderer?: LocaleBundleValue;
+}
+
+export type LocaleCatalog = PluginLocaleCatalog;
+
+export interface PluginLocaleProvider {
+  catalogVersion: string;
+  coverage: LocaleCoverage;
+  main: LocaleBundleValue;
+  nativeName: string;
+  pluginId: string;
+  renderer: LocaleBundleValue;
+  signed: boolean;
+  signerKeyId: string | null;
+  tag: string;
+  trust: "developer" | "trusted";
   version: string;
 }
 
@@ -240,6 +309,12 @@ interface InstalledManifestEntry {
   installation?: PluginInstallationRecord;
   manifest: NormalizedPluginManifest;
   origin?: "builtin" | "dev" | "local";
+}
+
+interface LocaleVerification {
+  signed: boolean;
+  signerKeyId?: string;
+  trust: "developer" | "trusted";
 }
 
 type AnyPluginRecord = PluginRecord<NormalizedPluginManifest>;
@@ -268,6 +343,26 @@ function isSafeRelativePath(value: string): boolean {
     !normalized
       .split("/")
       .some((part) => part === "." || part === ".." || part.length === 0)
+  );
+}
+
+function compareNames(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function compareManifestEntries(
+  left: InstalledManifestEntry,
+  right: InstalledManifestEntry
+): number {
+  return (
+    compareNames(left.manifest.id, right.manifest.id) ||
+    compareVersions(right.manifest.version, left.manifest.version)
   );
 }
 
@@ -357,6 +452,170 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function parseLocaleBundleFile(filePath: string): LocaleBundleValue {
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size > MAX_LOCALE_BUNDLE_BYTES) {
+    throw new PluginManagerError("invalid-manifest", "语言包资源文件无效");
+  }
+  let value: unknown;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(
+      fs.readFileSync(filePath)
+    );
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw new PluginManagerError("invalid-manifest", "语言包资源 JSON 无效");
+  }
+  try {
+    return validateLocaleBundle(value);
+  } catch (error) {
+    throw new PluginManagerError(
+      "invalid-manifest",
+      sanitizePluginError(error)
+    );
+  }
+}
+
+function trustedKeyObject(value: string | KeyObject): KeyObject {
+  let key: KeyObject;
+  if (typeof value === "string") {
+    key = value.includes("BEGIN PUBLIC KEY")
+      ? createPublicKey(value)
+      : createPublicKey({
+          format: "der",
+          key: Buffer.from(value, "base64"),
+          type: "spki",
+        });
+  } else {
+    key = value;
+  }
+  if (key.type !== "public" || key.asymmetricKeyType !== "ed25519") {
+    throw new Error("trusted key must be an Ed25519 public key");
+  }
+  return key;
+}
+
+/**
+ * Normalize a build-injected keyring once at startup. The function accepts
+ * only public Ed25519 keys and returns a frozen, prototype-less map so a
+ * signature key ID can never resolve through Object.prototype.
+ */
+export function createPluginTrustedKeyring(
+  keys: Readonly<Record<string, string | KeyObject>>
+): PluginTrustedKeyring {
+  const normalized = Object.create(null) as Record<string, KeyObject>;
+  for (const [keyId, value] of Object.entries(keys)) {
+    if (!SIGNATURE_KEY_ID_PATTERN.test(keyId)) {
+      throw new Error(`invalid trusted plugin key ID: ${keyId}`);
+    }
+    normalized[keyId] = trustedKeyObject(value);
+  }
+  return Object.freeze(normalized);
+}
+
+async function signatureFileEntries(
+  directory: string
+): Promise<Array<{ path: string; size: number; sha256: string }>> {
+  const entries: Array<{ path: string; size: number; sha256: string }> = [];
+  async function visit(current: string, relative = ""): Promise<void> {
+    const children = await fsp.readdir(current, { withFileTypes: true });
+    children.sort((left, right) => compareNames(left.name, right.name));
+    for (const child of children) {
+      const childRelative = relative ? `${relative}/${child.name}` : child.name;
+      const normalized = childRelative.replaceAll("\\", "/");
+      if (!isSafeRelativePath(normalized)) {
+        throw new PluginManagerError("invalid-package", "插件包路径无效");
+      }
+      const childPath = path.join(current, child.name);
+      const stat = await fsp.lstat(childPath);
+      if (stat.isSymbolicLink()) {
+        throw new PluginManagerError("invalid-package", "插件包不允许符号链接");
+      }
+      if (stat.isDirectory()) {
+        await visit(childPath, normalized);
+        continue;
+      }
+      if (!stat.isFile()) {
+        throw new PluginManagerError("invalid-package", "插件包包含非普通文件");
+      }
+      if (normalized === SIGNATURE_FILE) {
+        continue;
+      }
+      entries.push({
+        path: normalized,
+        sha256: await sha256File(childPath),
+        size: stat.size,
+      });
+    }
+  }
+  await visit(directory);
+  entries.sort((left, right) => compareNames(left.path, right.path));
+  return entries;
+}
+
+async function verifyLocaleSignature(
+  directory: string,
+  trustedKeys: Readonly<Record<string, string | KeyObject>>,
+  allowUnsigned: boolean
+): Promise<LocaleVerification> {
+  const signaturePath = path.join(directory, SIGNATURE_FILE);
+  if (!fs.existsSync(signaturePath)) {
+    if (allowUnsigned) {
+      return { signed: false, trust: "developer" };
+    }
+    throw new PluginManagerError("invalid-package", "语言包缺少官方签名");
+  }
+  let signature: PluginSignature;
+  try {
+    signature = parsePluginSignature(readJson(signaturePath));
+  } catch (error) {
+    throw new PluginManagerError(
+      "invalid-package",
+      `语言包签名无效：${sanitizePluginError(error)}`
+    );
+  }
+  if (signature.algorithm !== SIGNATURE_ALGORITHM) {
+    throw new PluginManagerError("invalid-package", "语言包签名算法不受支持");
+  }
+  const keyValue = Object.hasOwn(trustedKeys, signature.keyId)
+    ? trustedKeys[signature.keyId]
+    : undefined;
+  if (!keyValue) {
+    throw new PluginManagerError(
+      "invalid-package",
+      "语言包签名者不在官方信任列表中"
+    );
+  }
+  let key: KeyObject;
+  let signatureBytes: Buffer;
+  try {
+    key = trustedKeyObject(keyValue);
+    signatureBytes = Buffer.from(signature.signature, "base64");
+  } catch {
+    throw new PluginManagerError("invalid-package", "语言包签名密钥无效");
+  }
+  if (signatureBytes.length !== 64) {
+    throw new PluginManagerError("invalid-package", "语言包签名长度无效");
+  }
+  const entries = await signatureFileEntries(directory);
+  const canonical = canonicalizePluginSignatureEntries(entries);
+  let valid = false;
+  try {
+    valid = verifySignature(
+      null,
+      Buffer.from(canonical, "utf8"),
+      key,
+      signatureBytes
+    );
+  } catch {
+    valid = false;
+  }
+  if (!valid) {
+    throw new PluginManagerError("invalid-package", "语言包签名验证失败");
+  }
+  return { signed: true, signerKeyId: signature.keyId, trust: "trusted" };
+}
+
 function normalizePluginSettings(
   manifest: PluginManifestV1,
   source: "builtin" | "local",
@@ -393,6 +652,9 @@ function validateAnyPluginSettings(
   if (manifest.manifestVersion === 1) {
     return validatePluginSettings(manifest as PluginManifestV1, values);
   }
+  if (manifest.manifestVersion === 3) {
+    return {};
+  }
   return validatePluginSettings(manifest as NormalizedPluginManifestV2, values);
 }
 
@@ -401,7 +663,14 @@ function readJson(filePath: string): unknown {
   if (!stat.isFile() || stat.size > MAX_JSON_BYTES) {
     throw new PluginManagerError("invalid-manifest", "插件 JSON 文件无效");
   }
-  return JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(
+      fs.readFileSync(filePath)
+    );
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new PluginManagerError("invalid-manifest", "插件 JSON 文件无效");
+  }
 }
 
 function safeErrorMessage(error: unknown): string {
@@ -432,6 +701,9 @@ function settingFor(
   manifest: NormalizedPluginManifest,
   id: string
 ): (PluginSettingDefinition & { defaultValue?: unknown }) | undefined {
+  if (manifest.manifestVersion === 3) {
+    return undefined;
+  }
   return manifest.settings.find((setting) => setting.id === id) as
     | (PluginSettingDefinition & { defaultValue?: unknown })
     | undefined;
@@ -456,6 +728,9 @@ function manifestAssetReferences(manifest: NormalizedPluginManifest): Array<{
           },
         ]
       : [];
+  }
+  if (manifest.manifestVersion !== 2) {
+    return [];
   }
   const references: Array<{
     expectedType?: "image" | "video";
@@ -588,7 +863,11 @@ async function extractArchive(
             return;
           }
           if (isDirectory) {
-            if (entryName !== "assets" && !entryName.startsWith("assets/")) {
+            if (
+              entryName !== "assets" &&
+              !entryName.startsWith("assets/") &&
+              !LOCALE_DIRECTORY_PATTERN.test(entryName)
+            ) {
               fail(new Error("插件包包含不允许的目录"));
               return;
             }
@@ -596,12 +875,16 @@ async function extractArchive(
             return;
           }
           const isManifest =
-            entryName === "plugin.json" || entryName === "theme.json";
+            entryName === "plugin.json" ||
+            entryName === "theme.json" ||
+            entryName === SIGNATURE_FILE;
+          const isLocaleBundle = LOCALE_FILE_PATTERN.test(entryName);
           const extension = path.extname(entryName).toLowerCase();
           const isAsset = entryName.startsWith("assets/");
           if (
             !(
               isManifest ||
+              isLocaleBundle ||
               (isAsset && ALLOWED_ASSET_EXTENSIONS.has(extension))
             )
           ) {
@@ -610,7 +893,8 @@ async function extractArchive(
           }
           if (
             entry.uncompressedSize > MAX_EXTRACTED_BYTES ||
-            (isManifest && entry.uncompressedSize > MAX_JSON_BYTES) ||
+            ((isManifest || isLocaleBundle) &&
+              entry.uncompressedSize > MAX_LOCALE_BUNDLE_BYTES) ||
             extracted + entry.uncompressedSize > MAX_EXTRACTED_BYTES
           ) {
             fail(new Error("插件包解压后超过大小限制"));
@@ -638,9 +922,10 @@ async function extractArchive(
                 }
                 const output = fs.createWriteStream(target, { flags: "wx" });
                 let bytes = 0;
-                const maxEntryBytes = isManifest
-                  ? MAX_JSON_BYTES
-                  : MAX_ASSET_BYTES;
+                const maxEntryBytes =
+                  isManifest || isLocaleBundle
+                    ? MAX_LOCALE_BUNDLE_BYTES
+                    : MAX_ASSET_BYTES;
                 stream.on("data", (chunk: Buffer) => {
                   bytes += chunk.length;
                   extracted += chunk.length;
@@ -679,6 +964,147 @@ async function extractArchive(
   });
 }
 
+/** Validate the complete on-disk package layout after extraction. */
+async function validatePackageLayout(
+  directory: string,
+  manifest: NormalizedPluginManifest,
+  allowUnsignedLocale: boolean
+): Promise<void> {
+  const files = new Set<string>();
+  const fileKeys = new Set<string>();
+  const isLocale = manifest.manifestVersion === 3;
+  const localeManifest = isLocale
+    ? (manifest as NormalizedPluginManifestV3Locale)
+    : undefined;
+  const localeTag = localeManifest?.locale.tag;
+  const expectedLocaleFiles = localeManifest
+    ? new Set([
+        localeManifest.locale.rendererFile,
+        localeManifest.locale.mainFile,
+      ])
+    : new Set<string>();
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: package layout validation is a deliberate security boundary.
+  async function visit(current: string, relative = ""): Promise<void> {
+    const children = await fsp.readdir(current, { withFileTypes: true });
+    children.sort((left, right) => compareNames(left.name, right.name));
+    for (const child of children) {
+      const childRelative = relative ? `${relative}/${child.name}` : child.name;
+      const normalized = childRelative.replaceAll("\\", "/");
+      if (!isSafeRelativePath(normalized)) {
+        throw new PluginManagerError("invalid-package", "插件包路径无效");
+      }
+      const childPath = path.join(current, child.name);
+      const stat = await fsp.lstat(childPath);
+      if (stat.isSymbolicLink()) {
+        throw new PluginManagerError("invalid-package", "插件包不允许符号链接");
+      }
+      if (stat.isDirectory()) {
+        const directoryAllowed = isLocale
+          ? normalized === "locales" || normalized === `locales/${localeTag}`
+          : normalized === "assets" || normalized.startsWith("assets/");
+        if (!directoryAllowed) {
+          throw new PluginManagerError(
+            "invalid-package",
+            `插件包包含不允许的目录：${normalized}`
+          );
+        }
+        await visit(childPath, normalized);
+        continue;
+      }
+      if (!stat.isFile()) {
+        throw new PluginManagerError(
+          "invalid-package",
+          `插件包包含非普通文件：${normalized}`
+        );
+      }
+      const fileKey = normalized.toLowerCase();
+      if (fileKeys.has(fileKey)) {
+        throw new PluginManagerError(
+          "invalid-package",
+          `插件包包含重复文件：${normalized}`
+        );
+      }
+      fileKeys.add(fileKey);
+      files.add(normalized);
+      if (isLocale) {
+        if (normalized === "plugin.json" || normalized === SIGNATURE_FILE) {
+          if (normalized === SIGNATURE_FILE && stat.size > MAX_JSON_BYTES) {
+            throw new PluginManagerError(
+              "invalid-package",
+              "签名文件超过大小限制"
+            );
+          }
+          continue;
+        }
+        if (!expectedLocaleFiles.has(normalized)) {
+          throw new PluginManagerError(
+            "invalid-package",
+            `语言包包含不允许的文件：${normalized}`
+          );
+        }
+        if (stat.size > MAX_LOCALE_BUNDLE_BYTES) {
+          throw new PluginManagerError(
+            "invalid-package",
+            "语言包资源超过大小限制"
+          );
+        }
+        parseLocaleBundleFile(childPath);
+        continue;
+      }
+      const isThemeFile = normalized === "theme.json";
+      const isAsset = normalized.startsWith("assets/");
+      if (
+        normalized !== "plugin.json" &&
+        !isThemeFile &&
+        !(
+          isAsset &&
+          ALLOWED_ASSET_EXTENSIONS.has(path.extname(normalized).toLowerCase())
+        )
+      ) {
+        throw new PluginManagerError(
+          "invalid-package",
+          `插件包包含不允许的文件：${normalized}`
+        );
+      }
+      if (isThemeFile && stat.size > MAX_JSON_BYTES) {
+        throw new PluginManagerError("invalid-package", "主题文件超过大小限制");
+      }
+      if (isAsset) {
+        try {
+          await detectAssetKind(
+            childPath,
+            path.extname(normalized).toLowerCase()
+          );
+        } catch (error) {
+          throw new PluginManagerError(
+            "invalid-package",
+            `插件资源无效：${sanitizePluginError(error)}`
+          );
+        }
+      }
+    }
+  }
+
+  await visit(directory);
+  if (!files.has("plugin.json")) {
+    throw new PluginManagerError("invalid-package", "插件包缺少 plugin.json");
+  }
+  if (isLocale) {
+    for (const expected of expectedLocaleFiles) {
+      if (!files.has(expected)) {
+        throw new PluginManagerError(
+          "invalid-package",
+          `语言包缺少资源文件：${expected}`
+        );
+      }
+    }
+    if (!(files.has(SIGNATURE_FILE) || allowUnsignedLocale)) {
+      throw new PluginManagerError("invalid-package", "语言包缺少官方签名");
+    }
+  }
+}
+
 function appCompatible(manifest: NormalizedPluginManifest): boolean {
   return compareVersions(app.getVersion(), manifest.engine.minAppVersion) >= 0;
 }
@@ -692,7 +1118,14 @@ function readInstalledManifest(directory: string): NormalizedPluginManifest {
   ) {
     throw new PluginManagerError("invalid-manifest", "插件清单无效");
   }
-  const raw = rawManifest as { manifestVersion?: unknown; themeFile?: unknown };
+  const raw = rawManifest as {
+    apiVersion?: unknown;
+    manifestVersion?: unknown;
+    themeFile?: unknown;
+  };
+  if (raw.manifestVersion === 3 || raw.apiVersion === 3) {
+    return parsePluginManifestV3Locale(rawManifest);
+  }
   if (raw.manifestVersion === 2) {
     const themeFile = raw.themeFile;
     if (themeFile !== "theme.json") {
@@ -761,17 +1194,114 @@ async function validateManifestResources(
   }
 }
 
+function combineLocaleCoverage(
+  renderer: LocaleCoverage,
+  main: LocaleCoverage
+): LocaleCoverage {
+  const available = renderer.available || main.available;
+  const total = renderer.total + main.total;
+  const translated = renderer.translated + main.translated;
+  let percentage: number | null = null;
+  if (available) {
+    percentage = total > 0 ? (translated / total) * 100 : 100;
+  }
+  return {
+    available,
+    extra: [
+      ...renderer.extra.map((key) => `renderer.${key}`),
+      ...main.extra.map((key) => `main.${key}`),
+    ],
+    missing: [
+      ...renderer.missing.map((key) => `renderer.${key}`),
+      ...main.missing.map((key) => `main.${key}`),
+    ],
+    placeholderMismatches: [
+      ...renderer.placeholderMismatches.map((key) => `renderer.${key}`),
+      ...main.placeholderMismatches.map((key) => `main.${key}`),
+    ],
+    percentage,
+    total,
+    translated,
+  };
+}
+
+async function loadLocaleProviderFromDirectory(
+  directory: string,
+  manifest: NormalizedPluginManifestV3Locale,
+  verification: LocaleVerification,
+  catalog?: PluginLocaleCatalog
+): Promise<PluginLocaleProvider> {
+  const files = [manifest.locale.rendererFile, manifest.locale.mainFile];
+  const bundles: LocaleBundleValue[] = [];
+  for (const relative of files) {
+    if (
+      !(
+        isSafeRelativePath(relative) &&
+        relative.startsWith(`locales/${manifest.locale.tag}/`)
+      )
+    ) {
+      throw new PluginManagerError("invalid-manifest", "语言包资源路径无效");
+    }
+    const filePath = path.resolve(directory, relative);
+    if (!(isContained(filePath, directory) && fs.existsSync(filePath))) {
+      throw new PluginManagerError("invalid-manifest", "语言包资源文件不存在");
+    }
+    try {
+      const [realDirectory, realFile] = await Promise.all([
+        fsp.realpath(directory),
+        fsp.realpath(filePath),
+      ]);
+      if (!isContained(realFile, realDirectory)) {
+        throw new Error("语言包资源链接越界");
+      }
+    } catch (error) {
+      throw new PluginManagerError(
+        "invalid-manifest",
+        `语言包资源无效：${sanitizePluginError(error)}`
+      );
+    }
+    bundles.push(parseLocaleBundleFile(filePath));
+  }
+  const renderer = bundles[0] as LocaleBundleValue;
+  const main = bundles[1] as LocaleBundleValue;
+  const coverage = combineLocaleCoverage(
+    analyzeLocaleCoverage(renderer, catalog?.renderer),
+    analyzeLocaleCoverage(main, catalog?.main)
+  );
+  return {
+    catalogVersion: manifest.locale.catalogVersion,
+    coverage,
+    main,
+    nativeName: manifest.locale.nativeName,
+    pluginId: manifest.id,
+    renderer,
+    signed: verification.signed,
+    signerKeyId: verification.signerKeyId ?? null,
+    tag: manifest.locale.tag,
+    trust: verification.trust,
+    version: manifest.version,
+  };
+}
+
 export class PluginManager {
   private readonly builtins: NormalizedPluginManifest[];
+  private readonly trustedKeys: PluginTrustedKeyring;
   private store: PluginStore | null | undefined;
   private readonly inspections = new Map<string, InspectionState>();
   private readonly devPlugins = new Map<string, InstalledManifestEntry>();
   private developerMode = false;
   private rootReady: Promise<void> | undefined;
 
-  constructor(builtins: NormalizedPluginManifest[], store?: PluginStore) {
+  constructor(
+    builtins: NormalizedPluginManifest[],
+    store?: PluginStore,
+    trustedKeys: Readonly<
+      Record<string, string | KeyObject>
+    > = PLUGIN_TRUSTED_KEYS
+  ) {
     this.builtins = builtins;
     this.store = store;
+    this.trustedKeys = createPluginTrustedKeyring(trustedKeys);
   }
 
   private optionalStore(): PluginStore | null {
@@ -864,7 +1394,9 @@ export class PluginManager {
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each package entry is independently validated and diagnosed.
-  private async installedManifests(): Promise<InstalledManifestEntry[]> {
+  private async installedManifests(
+    options: { migrate?: boolean } = { migrate: false }
+  ): Promise<InstalledManifestEntry[]> {
     await this.ensureRoot();
     const results: InstalledManifestEntry[] = [];
     for (const idEntry of await fsp.readdir(pluginDirectory(), {
@@ -892,11 +1424,23 @@ export class PluginManager {
         const directory = path.join(idDirectory, versionEntry.name);
         try {
           const manifest = await readInstalledManifest(directory);
-          await validateManifestResources(directory, manifest);
           const installation = this.tryStore(
             (store) => store.getInstallation(manifest.id, manifest.version),
             null
           );
+          const allowUnsignedLocale =
+            manifest.manifestVersion === 3 &&
+            this.developerMode &&
+            installation?.origin === "dev";
+          await validatePackageLayout(directory, manifest, allowUnsignedLocale);
+          await validateManifestResources(directory, manifest);
+          if (manifest.manifestVersion === 3) {
+            await verifyLocaleSignature(
+              directory,
+              this.trustedKeys,
+              allowUnsignedLocale
+            );
+          }
           results.push({
             directory,
             installation: installation ?? undefined,
@@ -926,18 +1470,21 @@ export class PluginManager {
         }
       }
     }
+    if (options.migrate) {
+      await this.migrateLegacySettings(results);
+    }
     return results;
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: record assembly intentionally combines legacy and v2 persistence fallbacks.
-  private recordFor(
+  private async recordFor(
     manifest: NormalizedPluginManifest,
     source: "builtin" | "local" | "dev",
     directory?: string,
     error?: string,
     installation?: PluginInstallationRecord,
     diagnosticError?: string
-  ): AnyPluginRecord {
+  ): Promise<AnyPluginRecord> {
     const store = this.optionalStore();
     const preference = this.tryStore(
       (store) => store.getPreference(manifest.id),
@@ -945,6 +1492,7 @@ export class PluginManager {
     );
     let rawSettings: unknown = preference?.settings;
     if (
+      manifest.manifestVersion !== 3 &&
       !(
         (rawSettings &&
           typeof rawSettings === "object" &&
@@ -970,7 +1518,9 @@ export class PluginManager {
       parsedSettings = rawSettings as Record<string, unknown>;
     }
     let settings: Record<string, boolean | number | string | null>;
-    if (manifest.manifestVersion === 1 && !store) {
+    if (manifest.manifestVersion === 3) {
+      settings = {};
+    } else if (manifest.manifestVersion === 1 && !store) {
       settings = normalizePluginSettings(
         manifest,
         source === "builtin" ? "builtin" : "local",
@@ -983,12 +1533,18 @@ export class PluginManager {
       (store) => store.getActivePluginId(),
       null
     );
-    const enabled = activePluginId
-      ? activePluginId === manifest.id
-      : !store && getSetting(pluginEnabledKey(manifest.id)) === "true";
+    let enabled = false;
+    if (manifest.manifestVersion !== 3) {
+      enabled = activePluginId
+        ? activePluginId === manifest.id
+        : !store && getSetting(pluginEnabledKey(manifest.id)) === "true";
+    }
     const compatible = appCompatible(manifest);
     const assetUrls: Record<string, string> = {};
-    for (const setting of manifest.settings) {
+    for (const setting of manifest.manifestVersion === 2 ||
+    manifest.manifestVersion === 1
+      ? manifest.settings
+      : []) {
       if (setting.type !== "image" && setting.type !== "video") {
         continue;
       }
@@ -1050,6 +1606,39 @@ export class PluginManager {
         }
       }
     }
+    let locale: PluginRecordLocaleMetadata | undefined;
+    let localeValidationError: string | undefined;
+    if (manifest.manifestVersion === 3 && directory) {
+      try {
+        const localeManifest = manifest as NormalizedPluginManifestV3Locale;
+        const allowUnsigned = source === "dev" && this.developerMode;
+        await validatePackageLayout(directory, localeManifest, allowUnsigned);
+        await validateManifestResources(directory, localeManifest);
+        const verification = await verifyLocaleSignature(
+          directory,
+          this.trustedKeys,
+          allowUnsigned
+        );
+        const provider = await loadLocaleProviderFromDirectory(
+          directory,
+          localeManifest,
+          verification
+        );
+        locale = {
+          catalogVersion: provider.catalogVersion,
+          coverage: provider.coverage,
+          nativeName: provider.nativeName,
+          signed: provider.signed,
+          ...(provider.signerKeyId
+            ? { signerKeyId: provider.signerKeyId }
+            : {}),
+          tag: provider.tag,
+          trust: provider.trust,
+        };
+      } catch (validationError) {
+        localeValidationError = sanitizePluginError(validationError);
+      }
+    }
     const hasDirectory = source === "builtin" || Boolean(directory);
     const installationFailed = installation?.status === "failed";
     const recordError =
@@ -1057,9 +1646,10 @@ export class PluginManager {
       diagnosticError ??
       installation?.lastErrorDetail ??
       installation?.lastErrorCode ??
+      localeValidationError ??
       undefined;
     let status: AnyPluginRecord["status"] = "disabled";
-    if (error) {
+    if (error || localeValidationError) {
       status = "invalid";
     } else if (installationFailed) {
       status = "failed";
@@ -1072,6 +1662,7 @@ export class PluginManager {
       assetUrls,
       enabled: enabled && compatible && hasDirectory && !installationFailed,
       error: recordError ? sanitizePluginError(recordError) : undefined,
+      locale,
       manifest,
       settings,
       source,
@@ -1202,8 +1793,7 @@ export class PluginManager {
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: listing merges persisted, legacy, builtin and developer records.
   async list(): Promise<AnyPluginSnapshot> {
-    const installed = await this.installedManifests();
-    await this.migrateLegacySettings(installed);
+    const installed = await this.installedManifests({ migrate: true });
     const allInstalled = [...installed];
     if (this.developerMode) {
       for (const entry of this.devPlugins.values()) {
@@ -1285,14 +1875,148 @@ export class PluginManager {
     return { plugins: records };
   }
 
+  private async localeEntries(
+    allVersions = false
+  ): Promise<InstalledManifestEntry[]> {
+    const installed = (
+      await this.installedManifests({ migrate: false })
+    ).filter(
+      (entry) => entry.manifest.manifestVersion === 3 && entry.directory
+    );
+    const candidates = [...installed];
+    if (this.developerMode) {
+      for (const entry of this.devPlugins.values()) {
+        if (entry.manifest.manifestVersion === 3 && entry.directory) {
+          candidates.push(entry);
+        }
+      }
+    }
+    if (allVersions) {
+      return candidates.sort(compareManifestEntries);
+    }
+    const byId = new Map<string, InstalledManifestEntry>();
+    for (const entry of candidates) {
+      const existing = byId.get(entry.manifest.id);
+      if (
+        !existing ||
+        compareVersions(entry.manifest.version, existing.manifest.version) >
+          0 ||
+        (entry.origin === "dev" &&
+          entry.manifest.version === existing.manifest.version)
+      ) {
+        byId.set(entry.manifest.id, entry);
+      }
+    }
+    return [...byId.values()].sort(compareManifestEntries);
+  }
+
+  /** List safe locale providers without exposing package directories. */
+  async listLocaleProviders(
+    catalog?: PluginLocaleCatalog
+  ): Promise<PluginLocaleProvider[]> {
+    const providers: PluginLocaleProvider[] = [];
+    for (const entry of await this.localeEntries()) {
+      if (!entry.directory) {
+        continue;
+      }
+      try {
+        const manifest = entry.manifest as NormalizedPluginManifestV3Locale;
+        if (!appCompatible(manifest)) {
+          continue;
+        }
+        const allowUnsigned = entry.origin === "dev" && this.developerMode;
+        await validatePackageLayout(entry.directory, manifest, allowUnsigned);
+        await validateManifestResources(entry.directory, manifest);
+        const verification = await verifyLocaleSignature(
+          entry.directory,
+          this.trustedKeys,
+          allowUnsigned
+        );
+        providers.push(
+          await loadLocaleProviderFromDirectory(
+            entry.directory,
+            manifest,
+            verification,
+            catalog
+          )
+        );
+      } catch (error) {
+        log.warn(
+          {
+            error: sanitizePluginError(error),
+            pluginId: entry.manifest.id,
+          },
+          "locale provider validation failed"
+        );
+      }
+    }
+    return providers;
+  }
+
+  /** Load one validated locale provider by ID and optional version. */
+  async loadLocaleProvider(
+    pluginId: string,
+    version?: string,
+    catalog?: PluginLocaleCatalog
+  ): Promise<PluginLocaleProvider> {
+    if (!PLUGIN_ID_PATTERN.test(pluginId)) {
+      throw new PluginManagerError("invalid-input", "语言包 ID 无效");
+    }
+    if (version !== undefined && !isValidSemVer(version)) {
+      throw new PluginManagerError("invalid-input", "语言包版本无效");
+    }
+    const entries = (await this.localeEntries(version !== undefined)).filter(
+      (entry) =>
+        entry.manifest.id === pluginId &&
+        (version === undefined || entry.manifest.version === version)
+    );
+    const entry = entries.sort((left, right) =>
+      compareVersions(right.manifest.version, left.manifest.version)
+    )[0];
+    if (!entry?.directory) {
+      throw new PluginManagerError("plugin-not-found", "语言包不存在");
+    }
+    const manifest = entry.manifest as NormalizedPluginManifestV3Locale;
+    if (!appCompatible(manifest)) {
+      throw new PluginManagerError(
+        "plugin-incompatible",
+        "语言包与当前应用不兼容"
+      );
+    }
+    const allowUnsigned = entry.origin === "dev" && this.developerMode;
+    await validatePackageLayout(entry.directory, manifest, allowUnsigned);
+    await validateManifestResources(entry.directory, manifest);
+    const verification = await verifyLocaleSignature(
+      entry.directory,
+      this.trustedKeys,
+      allowUnsigned
+    );
+    return loadLocaleProviderFromDirectory(
+      entry.directory,
+      manifest,
+      verification,
+      catalog
+    );
+  }
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: staged package inspection is a deliberate security boundary.
   private async inspectStagedPlugin(
     archivePath: string,
     stagePath: string
   ): Promise<PluginInstallPreview> {
     let manifest: NormalizedPluginManifest;
+    let verification: LocaleVerification | undefined;
     try {
       manifest = readInstalledManifest(stagePath);
+      await validatePackageLayout(stagePath, manifest, false);
       await validateManifestResources(stagePath, manifest);
+      if (manifest.manifestVersion === 3) {
+        verification = await verifyLocaleSignature(
+          stagePath,
+          this.trustedKeys,
+          false
+        );
+      }
     } catch (error) {
       if (error instanceof PluginManagerError) {
         throw error;
@@ -1351,18 +2075,47 @@ export class PluginManager {
       throw new PluginManagerError("same-version", "相同版本插件已安装");
     }
     const archiveStat = await fsp.stat(archivePath);
+    const localeManifest =
+      manifest.manifestVersion === 3
+        ? (manifest as NormalizedPluginManifestV3Locale)
+        : undefined;
+    const locale =
+      localeManifest && verification
+        ? await loadLocaleProviderFromDirectory(
+            stagePath,
+            localeManifest,
+            verification
+          )
+        : undefined;
     return {
       capabilities: [...manifest.capabilities],
       checksum: await sha256File(archivePath),
       compatible: appCompatible(manifest),
       currentVersion: currentVersion ?? null,
       kind: currentVersion ? "update" : "install",
+      locale: locale
+        ? {
+            catalogVersion: locale.catalogVersion,
+            coverage: locale.coverage,
+            mainFile: localeManifest?.locale.mainFile ?? "",
+            nativeName: locale.nativeName,
+            rendererFile: localeManifest?.locale.rendererFile ?? "",
+            signed: locale.signed,
+            ...(locale.signerKeyId ? { signerKeyId: locale.signerKeyId } : {}),
+            tag: locale.tag,
+            trust: locale.trust,
+          }
+        : undefined,
       manifest,
       packageBytes: archiveStat.size,
       pluginId: manifest.id,
+      signed: verification?.signed ?? false,
+      ...(verification?.signerKeyId
+        ? { signerKeyId: verification.signerKeyId }
+        : {}),
       source: "dialog",
       token: path.basename(stagePath),
-      trust: "user-selected",
+      trust: verification?.trust ?? "user-selected",
       version: manifest.version,
     };
   }
@@ -1475,6 +2228,7 @@ export class PluginManager {
     }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: installation commit repeats security checks before changing persistent state.
   async commitInstall(token: string): Promise<AnyPluginSnapshot> {
     const inspection = this.inspections.get(token);
     if (!inspection) {
@@ -1522,6 +2276,34 @@ export class PluginManager {
       compareVersions(manifest.version, highestVersion) < 0
     ) {
       throw new PluginManagerError("downgrade", "正式插件包不允许降级");
+    }
+    // The staging directory is user-writable between preflight and confirm;
+    // repeat every security check before making it an installed package.
+    try {
+      const stagedManifest = readInstalledManifest(inspection.stagePath);
+      if (
+        stagedManifest.id !== manifest.id ||
+        stagedManifest.version !== manifest.version
+      ) {
+        throw new PluginManagerError(
+          "invalid-package",
+          "预检插件内容已发生变化"
+        );
+      }
+      await validatePackageLayout(inspection.stagePath, stagedManifest, false);
+      await validateManifestResources(inspection.stagePath, stagedManifest);
+      if (stagedManifest.manifestVersion === 3) {
+        await verifyLocaleSignature(
+          inspection.stagePath,
+          this.trustedKeys,
+          false
+        );
+      }
+    } catch (error) {
+      await this.discardInspection(token);
+      throw error instanceof PluginManagerError
+        ? error
+        : new PluginManagerError("invalid-package", sanitizePluginError(error));
     }
     await fsp.mkdir(path.dirname(target), { recursive: true });
     try {
@@ -1605,6 +2387,9 @@ export class PluginManager {
     if (!target) {
       throw new PluginManagerError("plugin-not-found", "插件不存在");
     }
+    if (target.manifest.manifestVersion === 3) {
+      throw new PluginManagerError("invalid-input", "语言包请通过语言设置启用");
+    }
     if (target.status === "incompatible" || target.status === "invalid") {
       throw new PluginManagerError(
         "plugin-incompatible",
@@ -1617,7 +2402,7 @@ export class PluginManager {
         store.setActivePluginId(pluginId);
       } else {
         for (const plugin of snapshot.plugins) {
-          if (plugin.manifest.capabilities.includes("theme")) {
+          if (plugin.manifest.capabilities[0] === "theme") {
             setSetting(
               pluginEnabledKey(plugin.manifest.id),
               plugin.manifest.id === pluginId ? "true" : "false"
@@ -1726,6 +2511,9 @@ export class PluginManager {
     );
     if (!target) {
       throw new PluginManagerError("plugin-not-found", "插件不存在");
+    }
+    if (target.manifest.manifestVersion === 3) {
+      throw new PluginManagerError("invalid-input", "语言包不支持插件设置");
     }
     const merged = validateAnyPluginSettings(target.manifest, {
       ...target.settings,
@@ -1985,6 +2773,9 @@ export class PluginManager {
     if (!target) {
       throw new PluginManagerError("plugin-not-found", "插件不存在");
     }
+    if (target.manifest.manifestVersion === 3) {
+      throw new PluginManagerError("invalid-input", "语言包不支持插件设置");
+    }
     if (requested.length > 0) {
       const definitions = new Map(
         target.manifest.settings.map((setting) => [setting.id, setting])
@@ -2094,6 +2885,7 @@ export class PluginManager {
     let manifest: NormalizedPluginManifest;
     try {
       manifest = readInstalledManifest(directory);
+      await validatePackageLayout(directory, manifest, true);
       await validateManifestResources(directory, manifest);
     } catch (error) {
       throw new PluginManagerError(
@@ -2101,11 +2893,14 @@ export class PluginManager {
         sanitizePluginError(error)
       );
     }
-    if (manifest.manifestVersion !== 2) {
+    if (manifest.manifestVersion !== 2 && manifest.manifestVersion !== 3) {
       throw new PluginManagerError(
         "invalid-manifest",
-        "开发插件必须使用 v2 声明式清单"
+        "开发插件必须使用 v2 主题或 v3 语言声明式清单"
       );
+    }
+    if (manifest.manifestVersion === 3) {
+      await verifyLocaleSignature(directory, this.trustedKeys, true);
     }
     if (this.builtins.some((builtin) => builtin.id === manifest.id)) {
       throw new PluginManagerError(
@@ -2149,12 +2944,16 @@ export class PluginManager {
       );
     }
     const manifest = readInstalledManifest(entry.directory);
+    await validatePackageLayout(entry.directory, manifest, true);
     await validateManifestResources(entry.directory, manifest);
-    if (manifest.manifestVersion !== 2) {
+    if (manifest.manifestVersion !== 2 && manifest.manifestVersion !== 3) {
       throw new PluginManagerError(
         "invalid-manifest",
-        "开发插件必须使用 v2 声明式清单"
+        "开发插件必须使用 v2 主题或 v3 语言声明式清单"
       );
+    }
+    if (manifest.manifestVersion === 3) {
+      await verifyLocaleSignature(entry.directory, this.trustedKeys, true);
     }
     if (
       manifest.id !== pluginId ||
@@ -2483,9 +3282,10 @@ export class PluginManager {
 let manager: PluginManager | undefined;
 
 export function configurePluginManager(
-  builtins: NormalizedPluginManifest[]
+  builtins: NormalizedPluginManifest[],
+  trustedKeys: PluginTrustedKeyring = PLUGIN_TRUSTED_KEYS
 ): PluginManager {
-  manager ??= new PluginManager(builtins);
+  manager ??= new PluginManager(builtins, undefined, trustedKeys);
   return manager;
 }
 

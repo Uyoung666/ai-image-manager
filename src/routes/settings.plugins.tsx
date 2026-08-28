@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { setAppLocale } from "@/actions/localization";
 import {
   type PluginManagerInstallPreview,
-  type PluginManagerPlugin,
   PluginManagerView,
 } from "@/components/plugins/plugin-manager-view";
 import { PluginSettingsSlot, usePluginHost } from "@/plugins/runtime";
@@ -20,7 +20,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function PluginsSettingsPage() {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const {
     activePlugin,
     clearError,
@@ -76,11 +76,6 @@ function PluginsSettingsPage() {
     [discardInstall, exitPreview]
   );
 
-  const managerPlugins = useMemo(
-    () => plugins as unknown as PluginManagerPlugin[],
-    [plugins]
-  );
-
   const run = (operation: () => Promise<void>) => {
     operation().catch(showError);
   };
@@ -118,7 +113,6 @@ function PluginsSettingsPage() {
   const settingsPanel = (
     <PluginSettingsSlot onError={showError} slot="plugin.settings" />
   );
-
   return (
     <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 min-[480px]:p-4">
       <div className="mx-auto w-full min-w-0 max-w-[1120px]">
@@ -150,7 +144,16 @@ function PluginsSettingsPage() {
           onUninstallPlugin={(pluginId, removeData) =>
             run(() => uninstall(pluginId, removeData))
           }
-          plugins={managerPlugins}
+          onUseLocale={(pluginId, localeTag) => {
+            if (!localeTag) {
+              showError(t("pluginManagerLocaleUnavailable"));
+              return;
+            }
+            run(async () => {
+              await setAppLocale(localeTag, i18n, pluginId);
+            });
+          }}
+          plugins={plugins}
           previewId={previewId}
           selectedId={selectedId}
           settingsPanel={settingsPanel}

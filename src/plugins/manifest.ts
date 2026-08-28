@@ -1,18 +1,22 @@
 import { z } from "zod";
 import type {
+  LocaleBundleValue,
+  LocaleCoverage,
   LocalizedText,
   NormalizedPluginManifest,
   NormalizedPluginManifestV2,
+  NormalizedPluginManifestV3Locale,
   NormalizedPluginSettingDefinitionV2,
   NormalizedPluginSettingGroupV2,
-  PluginManifest,
   PluginManifestV1,
   PluginManifestV2,
+  PluginManifestV3Locale,
   PluginSettingDefinition,
   PluginSettingDefinitionV2,
   PluginSettingGroupV2,
   PluginSettingValue,
   PluginSettingVisibilityV2,
+  PluginSignature,
   PluginThemeDefinition,
   ThemeRecipeV2,
 } from "./types";
@@ -547,6 +551,402 @@ const v2ManifestSchema = z
 export const pluginManifestV2Schema = v2ManifestSchema;
 export const pluginThemeV2Schema = themeRecipeSchema;
 export const themeRecipeV2Schema = themeRecipeSchema;
+
+/* -------------------------------------------------------------------------- */
+/* v3 declarative locale manifests and resource safety                         */
+/* -------------------------------------------------------------------------- */
+
+const LOCALE_TAG_PATTERN =
+  /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*(?:-[A-Za-z0-9]{1,8})?$/;
+const LOCALE_STRING_LIMIT = 16_384;
+const LOCALE_ARRAY_LIMIT = 2048;
+const LOCALE_OBJECT_LIMIT = 2048;
+const LOCALE_DEPTH_LIMIT = 32;
+const LOCALE_LEAF_LIMIT = 50_000;
+const LOCALE_DANGEROUS_TEXT_PATTERN =
+  /(?:<\/?[a-z][^>]*>|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html)/i;
+const SIGNATURE_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const BASE64_SIGNATURE_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function hasLocaleControl(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSafeLocaleKey(value: string): boolean {
+  return value.length >= 1 && value.length <= 256 && !hasLocaleControl(value);
+}
+
+/** Return true only for canonical, structurally valid BCP 47 tags. */
+export function isValidLocaleTag(value: string): boolean {
+  if (
+    typeof value !== "string" ||
+    value.length < 2 ||
+    value.length > 64 ||
+    value.trim() !== value ||
+    !LOCALE_TAG_PATTERN.test(value)
+  ) {
+    return false;
+  }
+  try {
+    const locale = new Intl.Locale(value);
+    return locale.toString() === value;
+  } catch {
+    return false;
+  }
+}
+
+export const isValidBcp47Locale = isValidLocaleTag;
+
+const localeTagSchema = z
+  .string()
+  .min(2)
+  .max(64)
+  .refine(isValidLocaleTag, "must be a canonical BCP 47 locale tag");
+
+const localeFilePathSchema = z.string().min(1).max(160);
+
+const localeTextMapSchema = z
+  .record(
+    localeTagSchema,
+    z
+      .string()
+      .min(1)
+      .max(LOCALIZED_TEXT_LIMIT)
+      .refine(
+        (value) => value.trim() === value,
+        "must not have leading or trailing whitespace"
+      )
+      .refine(
+        (value) => !LOCALE_DANGEROUS_TEXT_PATTERN.test(value),
+        "contains HTML or a script URL"
+      )
+      .refine(
+        (value) => !hasLocaleControl(value),
+        "contains a control character"
+      )
+  )
+  .refine(
+    (value) => Object.keys(value).length <= 32,
+    "contains too many locales"
+  );
+
+const localeDefinitionSchema = z
+  .object({
+    catalogVersion: z
+      .string()
+      .min(1)
+      .max(80)
+      .regex(/^[A-Za-z0-9._-]+$/),
+    direction: z.literal("ltr"),
+    fallback: z.literal("en"),
+    mainFile: localeFilePathSchema,
+    nativeName: z
+      .string()
+      .min(1)
+      .max(120)
+      .refine(
+        (value) => value.trim() === value,
+        "must not have leading or trailing whitespace"
+      )
+      .refine(
+        (value) => !LOCALE_DANGEROUS_TEXT_PATTERN.test(value),
+        "contains HTML or a script URL"
+      )
+      .refine(
+        (value) => !hasLocaleControl(value),
+        "contains a control character"
+      ),
+    rendererFile: localeFilePathSchema,
+    tag: localeTagSchema,
+  })
+  .strict()
+  .superRefine((locale, context) => {
+    const rendererFile = `locales/${locale.tag}/renderer.json`;
+    const mainFile = `locales/${locale.tag}/main.json`;
+    if (locale.rendererFile !== rendererFile) {
+      context.addIssue({
+        code: "custom",
+        message: `rendererFile must be ${rendererFile}`,
+        path: ["rendererFile"],
+      });
+    }
+    if (locale.mainFile !== mainFile) {
+      context.addIssue({
+        code: "custom",
+        message: `mainFile must be ${mainFile}`,
+        path: ["mainFile"],
+      });
+    }
+  });
+
+const v3LocaleManifestSchema = z
+  .object({
+    apiVersion: z.literal(3),
+    author: z
+      .object({
+        name: z.string().trim().min(1).max(120),
+        url: safeUrlSchema.optional(),
+      })
+      .strict(),
+    capabilities: z.tuple([z.literal("locale")]),
+    description: localeTextMapSchema,
+    engine: z.object({ minAppVersion: semverSchema }).strict(),
+    homepage: safeUrlSchema.optional(),
+    id: pluginIdSchema,
+    license: z.string().trim().min(1).max(80).optional(),
+    locale: localeDefinitionSchema,
+    manifestVersion: z.literal(3),
+    name: localeTextMapSchema,
+    version: semverSchema,
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    const requiredKeys = ["en", manifest.locale.tag];
+    for (const field of ["name", "description"] as const) {
+      for (const key of requiredKeys) {
+        if (!Object.hasOwn(manifest[field], key)) {
+          context.addIssue({
+            code: "custom",
+            message: `${field} must include ${key}`,
+            path: [field, key],
+          });
+        }
+      }
+    }
+  });
+
+export const pluginManifestV3LocaleSchema = v3LocaleManifestSchema;
+
+const pluginSignatureSchema = z
+  .object({
+    algorithm: z.literal("ed25519"),
+    keyId: z.string().trim().min(1).max(80).regex(SIGNATURE_KEY_ID_PATTERN),
+    signature: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .regex(BASE64_SIGNATURE_PATTERN),
+  })
+  .strict();
+
+export const pluginSignatureFileSchema = pluginSignatureSchema;
+
+function localeError(path: string, message: string): Error {
+  return new Error(`locale bundle ${path} ${message}`);
+}
+
+function assertLocaleText(value: string, path: string): void {
+  if (value.length > LOCALE_STRING_LIMIT) {
+    throw localeError(path, "exceeds the string size limit");
+  }
+  if (hasLocaleControl(value)) {
+    throw localeError(path, "contains a control character");
+  }
+  if (LOCALE_DANGEROUS_TEXT_PATTERN.test(value)) {
+    throw localeError(path, "contains HTML or a script URL");
+  }
+}
+
+function assertLocaleBundleValue(
+  value: unknown,
+  path: string,
+  depth: number,
+  state: { leaves: number }
+): asserts value is LocaleBundleValue {
+  if (typeof value === "string") {
+    assertLocaleText(value, path);
+    state.leaves += 1;
+    if (state.leaves > LOCALE_LEAF_LIMIT) {
+      throw localeError(path, "contains too many leaf values");
+    }
+    return;
+  }
+  if (depth > LOCALE_DEPTH_LIMIT) {
+    throw localeError(path, "is nested too deeply");
+  }
+  if (Array.isArray(value)) {
+    if (value.length > LOCALE_ARRAY_LIMIT) {
+      throw localeError(path, "contains too many array entries");
+    }
+    for (const [index, item] of value.entries()) {
+      assertLocaleBundleValue(item, `${path}[${index}]`, depth + 1, state);
+    }
+    return;
+  }
+  if (typeof value !== "object" || value === null) {
+    throw localeError(path, "must contain only objects, arrays, or strings");
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw localeError(path, "must be a plain object");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > LOCALE_OBJECT_LIMIT) {
+    throw localeError(path, "contains too many object properties");
+  }
+  for (const [key, item] of entries) {
+    if (
+      !isSafeLocaleKey(key) ||
+      key === "__proto__" ||
+      key === "prototype" ||
+      key === "constructor"
+    ) {
+      throw localeError(`${path}.${key}`, "has an unsafe key");
+    }
+    assertLocaleBundleValue(item, `${path}.${key}`, depth + 1, state);
+  }
+}
+
+/** Validate and return a safe locale resource value. */
+export function validateLocaleBundle(value: unknown): LocaleBundleValue {
+  const state = { leaves: 0 };
+  assertLocaleBundleValue(value, "$", 0, state);
+  return value;
+}
+
+export const parseLocaleBundle = validateLocaleBundle;
+
+function localeLeafMap(
+  value: LocaleBundleValue,
+  prefix = "",
+  result = new Map<string, string>()
+): Map<string, string> {
+  if (typeof value === "string") {
+    result.set(prefix, value);
+    return result;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      localeLeafMap(item, `${prefix}[${index}]`, result);
+    });
+    return result;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    localeLeafMap(item, prefix ? `${prefix}.${key}` : key, result);
+  }
+  return result;
+}
+
+const PLACEHOLDER_PATTERN =
+  /\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}|\{\s*([A-Za-z0-9_.-]+)\s*\}/g;
+
+function placeholders(value: string): string[] {
+  const values = new Set<string>();
+  for (const match of value.matchAll(PLACEHOLDER_PATTERN)) {
+    values.add(match[1] ?? match[2] ?? "");
+  }
+  return [...values].sort();
+}
+
+/** Return source/translation placeholder mismatches keyed by resource path. */
+export function validateLocalePlaceholders(
+  source: LocaleBundleValue,
+  translation: LocaleBundleValue
+): string[] {
+  const sourceLeaves = localeLeafMap(validateLocaleBundle(source));
+  const translationLeaves = localeLeafMap(validateLocaleBundle(translation));
+  const mismatches: string[] = [];
+  for (const [key, expected] of sourceLeaves) {
+    const actual = translationLeaves.get(key);
+    if (actual !== undefined) {
+      const left = JSON.stringify(placeholders(expected));
+      const right = JSON.stringify(placeholders(actual));
+      if (left !== right) {
+        mismatches.push(key);
+      }
+    }
+  }
+  return mismatches;
+}
+
+/** Analyze coverage against an optional host catalog without reading host files. */
+export function analyzeLocaleCoverage(
+  bundle: LocaleBundleValue,
+  catalog?: LocaleBundleValue
+): LocaleCoverage {
+  const parsedBundle = validateLocaleBundle(bundle);
+  if (catalog === undefined) {
+    return {
+      available: false,
+      extra: [],
+      missing: [],
+      placeholderMismatches: [],
+      percentage: null,
+      total: 0,
+      translated: 0,
+    };
+  }
+  const source = localeLeafMap(validateLocaleBundle(catalog));
+  const target = localeLeafMap(parsedBundle);
+  const missing = [...source.keys()].filter((key) => !target.has(key)).sort();
+  const extra = [...target.keys()].filter((key) => !source.has(key)).sort();
+  const placeholderMismatches = validateLocalePlaceholders(
+    validateLocaleBundle(catalog),
+    parsedBundle
+  );
+  const translated = source.size - missing.length;
+  return {
+    available: true,
+    extra,
+    missing,
+    placeholderMismatches,
+    percentage: source.size === 0 ? 100 : (translated / source.size) * 100,
+    total: source.size,
+    translated,
+  };
+}
+
+export function parsePluginSignature(value: unknown): PluginSignature {
+  return pluginSignatureSchema.parse(value) as PluginSignature;
+}
+
+export function parsePluginManifestV3Locale(
+  value: unknown
+): NormalizedPluginManifestV3Locale {
+  return v3LocaleManifestSchema.parse(value) as PluginManifestV3Locale;
+}
+
+export const parsePluginLocaleManifest = parsePluginManifestV3Locale;
+
+export interface PluginSignatureFileEntry {
+  path: string;
+  sha256: string;
+  size: number;
+}
+
+function compareSignaturePaths(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+/** Canonical bytes signed by official locale packages. */
+export function canonicalizePluginSignatureEntries(
+  entries: readonly PluginSignatureFileEntry[]
+): string {
+  const sorted = [...entries]
+    .map((entry) => ({
+      path: entry.path.replaceAll("\\", "/"),
+      size: entry.size,
+      sha256: entry.sha256.toLowerCase(),
+    }))
+    .sort((left, right) => compareSignaturePaths(left.path, right.path));
+  return JSON.stringify(sorted);
+}
+
+export const canonicalizePluginFiles = canonicalizePluginSignatureEntries;
 
 /* -------------------------------------------------------------------------- */
 /* v2 cross-field validation and normalization                                */
@@ -1273,6 +1673,12 @@ export function parsePluginManifestV2(
   return normalizeV2Manifest(parsed, parsedTheme);
 }
 
+export function parsePluginManifestV3(
+  value: unknown
+): NormalizedPluginManifestV3Locale {
+  return parsePluginManifestV3Locale(value);
+}
+
 /** Parse either supported manifest version and return its normalized shape. */
 export function parsePluginManifest(value: unknown): NormalizedPluginManifest {
   if (typeof value === "object" && value !== null) {
@@ -1280,6 +1686,9 @@ export function parsePluginManifest(value: unknown): NormalizedPluginManifest {
       apiVersion?: unknown;
       manifestVersion?: unknown;
     };
+    if (candidate.apiVersion === 3 || candidate.manifestVersion === 3) {
+      return parsePluginManifestV3Locale(value);
+    }
     if (candidate.apiVersion === 2 || candidate.manifestVersion === 2) {
       return parsePluginManifestV2(value);
     }
@@ -1300,6 +1709,18 @@ export function normalizePluginManifest(
       apiVersion?: unknown;
       manifestVersion?: unknown;
     };
+    if (candidate.apiVersion === 3 || candidate.manifestVersion === 3) {
+      if (theme !== undefined) {
+        throw new z.ZodError([
+          {
+            code: "custom",
+            message: "v3 locale manifests do not accept a theme recipe",
+            path: ["theme"],
+          },
+        ]);
+      }
+      return parsePluginManifestV3Locale(value);
+    }
     if (candidate.apiVersion === 2 || candidate.manifestVersion === 2) {
       return parsePluginManifestV2(value, theme);
     }
@@ -1435,13 +1856,23 @@ export function validatePluginSettings(
   values: Record<string, unknown>
 ): Record<string, boolean | number | string>;
 export function validatePluginSettings(
-  manifest: PluginManifestV2 | NormalizedPluginManifestV2,
+  manifest:
+    | PluginManifestV2
+    | NormalizedPluginManifestV2
+    | PluginManifestV3Locale,
   values: Record<string, unknown>
 ): Record<string, PluginSettingValue>;
 export function validatePluginSettings(
-  manifest: PluginManifest | NormalizedPluginManifestV2,
+  manifest:
+    | PluginManifestV1
+    | PluginManifestV2
+    | PluginManifestV3Locale
+    | NormalizedPluginManifestV2,
   values: Record<string, unknown>
 ): Record<string, PluginSettingValue> {
+  if (manifest.manifestVersion === 3) {
+    return {};
+  }
   return manifest.manifestVersion === 2
     ? normalizePluginSettingsV2(manifest, values)
     : normalizePluginSettingsV1(manifest, values);

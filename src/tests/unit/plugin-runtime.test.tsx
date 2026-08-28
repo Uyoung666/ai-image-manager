@@ -17,6 +17,8 @@ import type { NormalizedPluginManifestV2 } from "@/plugins/types";
 
 const mocks = vi.hoisted(() => ({
   listPlugins: vi.fn(),
+  reloadDevPlugin: vi.fn(),
+  revalidateAppLocale: vi.fn().mockResolvedValue(null),
   reportPluginActivationResult: vi.fn().mockResolvedValue(undefined),
   setPluginEnabled: vi.fn(),
 }));
@@ -29,7 +31,7 @@ vi.mock("@/actions/plugins", () => ({
   installPluginFromDialog: vi.fn(),
   listPlugins: mocks.listPlugins,
   loadDevDirectoryFromDialog: vi.fn(),
-  reloadDevPlugin: vi.fn(),
+  reloadDevPlugin: mocks.reloadDevPlugin,
   reportPluginActivationResult: mocks.reportPluginActivationResult,
   removeDevPlugin: vi.fn(),
   removePluginAsset: vi.fn(),
@@ -39,6 +41,10 @@ vi.mock("@/actions/plugins", () => ({
   setPluginEnabled: mocks.setPluginEnabled,
   setPluginSettings: vi.fn(),
   uninstallPlugin: vi.fn(),
+}));
+
+vi.mock("@/actions/localization", () => ({
+  revalidateAppLocale: mocks.revalidateAppLocale,
 }));
 
 const activeManifest: NormalizedPluginManifestV2 = {
@@ -98,6 +104,12 @@ function Controls() {
       </button>
       <button onClick={() => host.enable("com.example.preview")} type="button">
         enable
+      </button>
+      <button
+        onClick={() => host.reloadDeveloperPlugin("com.example.active")}
+        type="button"
+      >
+        reload locale
       </button>
       <output data-testid="active">
         {host.activePlugin?.manifest.id ?? ""}
@@ -229,6 +241,29 @@ describe("plugin runtime preview host", () => {
     expect(
       document.querySelector('[data-plugin-theme-layer="active-layer"]')
     ).toBeInTheDocument();
+  });
+
+  it("reapplies the renderer locale after a locale-affecting plugin mutation", async () => {
+    const active = record(activeManifest, "active");
+    const snapshot = { plugins: [active] };
+    listPlugins.mockResolvedValue(snapshot);
+    mocks.reloadDevPlugin.mockResolvedValue(snapshot);
+
+    render(
+      <PluginHostProvider>
+        <Controls />
+      </PluginHostProvider>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("active")).toHaveTextContent(activeManifest.id)
+    );
+    fireEvent.click(screen.getByRole("button", { name: "reload locale" }));
+
+    await waitFor(() => {
+      expect(mocks.reloadDevPlugin).toHaveBeenCalledWith(activeManifest.id);
+      expect(mocks.revalidateAppLocale).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("reports local activation failures and applies the returned snapshot", async () => {

@@ -9,7 +9,7 @@ export type PluginStatus =
   | "invalid"
   | "failed";
 
-export type PluginCapability = "theme";
+export type PluginCapability = "locale" | "theme";
 
 export type PluginSettingType =
   | "boolean"
@@ -243,6 +243,86 @@ export interface PluginManifestV2 {
   version: string;
 }
 
+/** A JSON value accepted by the declarative locale package boundary. */
+export type LocaleBundleValue =
+  | string
+  | LocaleBundleObject
+  | LocaleBundleValue[];
+
+export interface LocaleBundleObject {
+  [key: string]: LocaleBundleValue;
+}
+
+export interface LocaleCoverage {
+  available: boolean;
+  extra: string[];
+  missing: string[];
+  percentage: number | null;
+  placeholderMismatches: string[];
+  total: number;
+  translated: number;
+}
+
+/**
+ * Host-verified metadata exposed on a locale plugin record.
+ *
+ * This intentionally contains no package or filesystem paths. The locale
+ * definition remains on the manifest; this field only reports the result of
+ * the host validation boundary to renderer consumers.
+ */
+export interface PluginRecordLocaleMetadata {
+  catalogVersion?: string;
+  coverage: LocaleCoverage;
+  nativeName?: string;
+  signed: boolean;
+  signerKeyId?: string;
+  tag?: string;
+  trust: "developer" | "trusted";
+}
+
+export interface PluginLocaleDefinition {
+  catalogVersion: string;
+  direction: "ltr";
+  fallback: "en";
+  mainFile: string;
+  nativeName: string;
+  rendererFile: string;
+  tag: string;
+}
+
+/** Locale-specific metadata text. Keys are canonical BCP 47 tags. */
+export type LocaleTextMap = Record<string, string>;
+export type LocalizedTextV3 = LocaleTextMap;
+
+/** The raw v3 manifest shape for a declarative locale package. */
+export interface PluginManifestV3Locale {
+  apiVersion: 3;
+  author: PluginAuthorV2;
+  capabilities: ["locale"];
+  description: LocaleTextMap;
+  engine: {
+    minAppVersion: string;
+  };
+  homepage?: string;
+  id: string;
+  license?: string;
+  locale: PluginLocaleDefinition;
+  manifestVersion: 3;
+  name: LocaleTextMap;
+  version: string;
+}
+
+/** Locale manifests do not expose theme/settings fields. */
+export type NormalizedPluginManifestV3Locale = PluginManifestV3Locale;
+
+export type PluginSignatureAlgorithm = "ed25519";
+
+export interface PluginSignature {
+  algorithm: PluginSignatureAlgorithm;
+  keyId: string;
+  signature: string;
+}
+
 export interface NormalizedPluginManifestV2
   extends Omit<PluginManifestV2, "settings" | "settingGroups" | "theme"> {
   settingGroups: NormalizedPluginSettingGroupV2[];
@@ -250,20 +330,26 @@ export interface NormalizedPluginManifestV2
   theme?: ThemeRecipeV2;
 }
 
-export type PluginManifest = PluginManifestV1 | PluginManifestV2;
+export type PluginManifest =
+  | PluginManifestV1
+  | PluginManifestV2
+  | PluginManifestV3Locale;
 export type NormalizedPluginManifest =
   | PluginManifestV1
-  | NormalizedPluginManifestV2;
+  | NormalizedPluginManifestV2
+  | NormalizedPluginManifestV3Locale;
 
 export type PluginRecordSettings<M extends NormalizedPluginManifest> =
   M extends NormalizedPluginManifestV2
     ? Record<string, PluginSettingValue>
-    : Record<string, boolean | number | string>;
+    : M extends NormalizedPluginManifestV3Locale
+      ? Record<string, PluginSettingValue>
+      : Record<string, boolean | number | string>;
 
 export interface PluginManifestV1 {
   apiVersion: 1;
   author: LocalizedText;
-  capabilities: PluginCapability[];
+  capabilities: ["theme"];
   description: LocalizedText;
   engine: {
     minAppVersion: string;
@@ -284,6 +370,7 @@ export interface PluginRecord<
   assetUrls: Record<string, string>;
   enabled: boolean;
   error?: string;
+  locale?: PluginRecordLocaleMetadata;
   manifest: M;
   settings: PluginRecordSettings<M>;
   source: PluginSource;

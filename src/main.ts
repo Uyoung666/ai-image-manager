@@ -31,6 +31,12 @@ import {
   cleanupExpiredTrash,
   getOrphanPhotoIds,
 } from "@/ipc/photos/handlers/mutations";
+import {
+  getMainLocaleText,
+  initializeMainLocalization,
+  onMainLocaleChanged,
+  syncLegacyRendererLocale,
+} from "@/localization/main-runtime";
 import { getActiveFaceModel } from "@/services/ai/face-model-config";
 import {
   getEmbeddingModelFile,
@@ -369,57 +375,18 @@ function showMainWindow() {
   }
 }
 
-// ── Tray language store ────────────────────────────────────────────
-type TrayLang = "zh" | "en";
+// ── Main-process localization ──────────────────────────────────────
+type TrayLabelKey =
+  | "closeWindowQuestion"
+  | "closeWindowTitle"
+  | "launchAtStartup"
+  | "minimizeToTray"
+  | "quit"
+  | "showWindow"
+  | "tooltip";
 
-const trayLabels: Record<
-  TrayLang,
-  {
-    closeWindowQuestion: string;
-    closeWindowTitle: string;
-    launchAtStartup: string;
-    minimizeToTray: string;
-    quit: string;
-    showWindow: string;
-    tooltip: string;
-  }
-> = {
-  zh: {
-    closeWindowQuestion: "关闭窗口时要如何处理？",
-    closeWindowTitle: "关闭窗口",
-    showWindow: "显示窗口",
-    launchAtStartup: "开机自启",
-    minimizeToTray: "最小化到托盘",
-    quit: "退出",
-    tooltip: "AI 图片管理器",
-  },
-  en: {
-    closeWindowQuestion: "What should happen when the window is closed?",
-    closeWindowTitle: "Close window",
-    showWindow: "Show Window",
-    launchAtStartup: "Launch at Startup",
-    minimizeToTray: "Minimize to tray",
-    quit: "Quit",
-    tooltip: "AI Image Manager",
-  },
-};
-
-function getTrayLangStore(): Store<{ language: string }> {
-  if (!trayLangStore) {
-    trayLangStore = new Store<{ language: string }>({
-      name: "tray-lang",
-      defaults: { language: "zh" },
-    });
-  }
-  return trayLangStore;
-}
-
-let trayLangStore: Store<{ language: string }> | null = null;
-
-function tTray(key: keyof (typeof trayLabels)["zh"]): string {
-  const lang = (getTrayLangStore().get("language") as string) || "zh";
-  const safe = (trayLabels as Record<string, Record<string, string>>)[lang];
-  return safe?.[key] ?? trayLabels.zh[key];
+function tTray(key: TrayLabelKey): string {
+  return getMainLocaleText(key);
 }
 
 // ── Tray icon ────────────────────────────────────────────────────────
@@ -463,6 +430,10 @@ function rebuildTrayMenu() {
     tray.setToolTip(tTray("tooltip"));
   }
 }
+
+// The runtime owns the active main catalog; this listener keeps an already
+// created tray synchronized after an atomic language commit or preview.
+onMainLocaleChanged(rebuildTrayMenu);
 
 function createTray() {
   const iconPath = getIconPath();
@@ -1217,10 +1188,7 @@ ipcMain.on("app:language-changed", (event, lang: string) => {
   if (!ipcContext.isTrustedSender(event)) {
     return;
   }
-  if (lang && (lang === "zh" || lang === "en")) {
-    getTrayLangStore().set("language", lang);
-    rebuildTrayMenu();
-  }
+  syncLegacyRendererLocale(lang);
 });
 
 ipcMain.on("shell:open-external", (event, url: string) => {
@@ -1622,6 +1590,8 @@ app.whenReady().then(async () => {
     // ── Step 1: Fast synchronous setup (no blocking I/O) ─────────────
     initDataPath();
     log.info({ dataPath: getDataPath() }, "Data path initialized");
+    await initializeMainLocalization();
+    log.info("Main-process localization initialized");
 
     // Register custom protocol handler for local file access.
     // Must be set up before createWindow() since the window loads

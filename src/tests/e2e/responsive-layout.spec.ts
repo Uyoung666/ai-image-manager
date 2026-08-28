@@ -18,6 +18,7 @@ const ROUTES = [
   "/dashboard",
   "/cull",
   "/settings/appearance",
+  "/settings/plugins",
   "/settings/storage",
   "/settings/watermark",
   "/whats-new",
@@ -246,6 +247,39 @@ async function expectImageSearchReferenceInsideToolbar(
   await expect(reference).not.toBeVisible();
 }
 
+async function expectLanguageDropdownInsideViewport(): Promise<void> {
+  const currentPage = requirePage();
+  await navigateTo("/settings/appearance");
+  const dropdown = currentPage.getByRole("combobox", { name: "Language" });
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown).not.toBeDisabled();
+  await dropdown.click();
+
+  const popover = currentPage.locator('[data-overlay-kind="select"]').last();
+  await expect(popover).toBeVisible();
+  const bounds = await popover.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+  expect(bounds.top).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+  expect(bounds.right).toBeLessThanOrEqual(
+    bounds.viewportWidth + OVERFLOW_TOLERANCE_PX
+  );
+  expect(bounds.bottom).toBeLessThanOrEqual(
+    bounds.viewportHeight + OVERFLOW_TOLERANCE_PX
+  );
+  await currentPage.keyboard.press("Escape");
+  await expect(popover).not.toBeVisible();
+}
+
 test.beforeAll(async () => {
   await fs.promises.writeFile(
     referenceImagePath,
@@ -312,6 +346,10 @@ for (const { width, height } of WINDOW_SIZES) {
 
     await test.step("image-search reference stays responsive", async () => {
       await expectImageSearchReferenceInsideToolbar(width);
+    });
+
+    await test.step("language dropdown stays inside the viewport", async () => {
+      await expectLanguageDropdownInsideViewport();
     });
   });
 }

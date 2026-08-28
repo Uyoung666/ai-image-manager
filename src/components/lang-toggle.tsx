@@ -1,147 +1,163 @@
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { setAppLanguage } from "@/actions/language";
-import langs from "@/localization/langs";
+import { getAvailableLocales, setAppLocale } from "@/actions/localization";
+import { FilterDropdown } from "@/components/filter-dropdown";
+import {
+  BUILTIN_LOCALE_OPTIONS,
+  type LocaleOption,
+} from "@/localization/catalog";
+import { cn } from "@/utils/tailwind";
 
-export default function LangToggle() {
-  const { i18n } = useTranslation();
-  const currentLang = i18n.language;
+export type LanguageOption = LocaleOption;
 
-  function onValueChange(value: string) {
-    setAppLanguage(value, i18n);
+export interface LangToggleProps {
+  className?: string;
+  disabled?: boolean;
+  languages?: readonly LanguageOption[];
+  onError?: (error: unknown) => void;
+  onLanguageChange?: (
+    locale: string,
+    providerPluginId: string | null
+  ) => void | Promise<void>;
+  value?: string;
+}
+
+interface SelectableLanguageOption extends LanguageOption {
+  value: string;
+}
+
+function optionValue(option: LanguageOption): string {
+  return `${option.pluginId}:${option.locale}`;
+}
+
+function optionLabel(option: LanguageOption): string {
+  return `${option.nativeName} (${option.locale})`;
+}
+
+function mergeOptions(
+  options: readonly LanguageOption[]
+): SelectableLanguageOption[] {
+  const merged = new Map<string, LanguageOption>();
+  for (const option of [...BUILTIN_LOCALE_OPTIONS, ...options]) {
+    merged.set(optionValue(option), option);
+  }
+  return [...merged.values()].map((option) => ({
+    ...option,
+    value: optionValue(option),
+  }));
+}
+
+function selectedOptionValue(
+  options: readonly SelectableLanguageOption[],
+  currentLanguage: string
+): string {
+  const exact = options.find(
+    (option) => option.locale === currentLanguage && option.builtIn
+  );
+  return (
+    exact?.value ??
+    options.find((option) => option.locale === currentLanguage)?.value ??
+    currentLanguage
+  );
+}
+
+export default function LangToggle({
+  className,
+  disabled = false,
+  languages,
+  onError,
+  onLanguageChange,
+  value,
+}: LangToggleProps) {
+  const { i18n, t } = useTranslation();
+  const [loadedLanguages, setLoadedLanguages] = useState<
+    readonly LanguageOption[]
+  >([]);
+  const [selectedOverride, setSelectedOverride] = useState<string>();
+  const [loading, setLoading] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const availableLanguages = useMemo(
+    () => mergeOptions(languages ?? loadedLanguages),
+    [languages, loadedLanguages]
+  );
+  const options = useMemo(
+    () =>
+      availableLanguages.map((option) => ({
+        label: optionLabel(option),
+        value: option.value,
+      })),
+    [availableLanguages]
+  );
+  const selectedValue =
+    value ??
+    selectedOverride ??
+    selectedOptionValue(availableLanguages, i18n.language);
+
+  useEffect(() => {
+    if (languages) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    getAvailableLocales()
+      .then((nextLanguages) => {
+        if (!cancelled) {
+          setLoadedLanguages(nextLanguages);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          onError?.(error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [languages, onError]);
+
+  async function handleChange(nextValue: string) {
+    const option = availableLanguages.find((item) => item.value === nextValue);
+    if (!option || nextValue === selectedValue) {
+      return;
+    }
+    const previousValue = selectedValue;
+    setSelectedOverride(nextValue);
+    setChanging(true);
+    const providerPluginId = option.builtIn ? null : option.pluginId;
+    try {
+      if (onLanguageChange) {
+        await onLanguageChange(option.locale, providerPluginId);
+      } else {
+        // A null result is a successful built-in fallback when the main
+        // process is unavailable. Only a rejected action should roll back the
+        // optimistic selection below.
+        await setAppLocale(option.locale, i18n, providerPluginId);
+      }
+    } catch (error) {
+      setSelectedOverride(previousValue);
+      onError?.(error);
+    } finally {
+      setChanging(false);
+    }
   }
 
   return (
-    <>
-      <style>{`
-        .lang-radio-group {
-          position: relative;
-          display: flex;
-          flex-wrap: wrap;
-          height: 32px;
-          border-radius: 0.5rem;
-          background-color: var(--muted);
-          box-sizing: border-box;
-          box-shadow: 0 0 0px 1px rgba(0, 0, 0, 0.06);
-          padding: 0.25rem;
-          width: min(200px, 100%);
-          max-width: 100%;
-          font-size: 12px;
-        }
-        .lang-radio-group .lang-radio {
-          min-width: 0;
-          flex: 1 1 auto;
-          text-align: center;
-        }
-        .lang-radio-group .lang-radio input {
-          position: absolute;
-          width: 1px;
-          height: 1px;
-          padding: 0;
-          margin: -1px;
-          overflow: hidden;
-          clip: rect(0, 0, 0, 0);
-          white-space: nowrap;
-          border: 0;
-        }
-        .lang-radio-group .lang-radio .lang-name {
-          display: flex;
-          cursor: pointer;
-          align-items: center;
-          justify-content: center;
-          border-radius: 0.5rem;
-          border: none;
-          overflow-wrap: anywhere;
-          height: 24px;
-          padding: 0 0.25rem;
-          color: var(--muted-foreground);
-          transition: all 0.15s ease-in-out;
-          user-select: none;
-        }
-        .lang-radio-group .lang-radio:hover .lang-name {
-          background-color: color-mix(in srgb, var(--surface) 50%, transparent);
-        }
-        .lang-radio-group .lang-radio input:checked + .lang-name {
-          background-color: var(--surface);
-          color: var(--foreground);
-          font-weight: 600;
-          position: relative;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-          animation: lang-select 0.3s ease;
-        }
-        .lang-radio-group .lang-radio input:focus-visible + .lang-name {
-          outline: 2px solid var(--ring);
-          outline-offset: 2px;
-        }
-        @keyframes lang-select {
-          0% {
-            transform: scale(0.95);
-          }
-          50% {
-            transform: scale(1.05);
-          }
-          100% {
-            transform: scale(1);
-          }
-        }
-        .lang-radio-group .lang-radio input:checked + .lang-name::before,
-        .lang-radio-group .lang-radio input:checked + .lang-name::after {
-          content: "";
-          position: absolute;
-          width: 4px;
-          height: 4px;
-          border-radius: 50%;
-          background: var(--primary);
-          opacity: 0;
-          animation: lang-particles 0.5s ease forwards;
-        }
-        .lang-radio-group .lang-radio input:checked + .lang-name::before {
-          top: -8px;
-          left: 50%;
-          transform: translateX(-50%);
-          --direction: -10px;
-        }
-        .lang-radio-group .lang-radio input:checked + .lang-name::after {
-          bottom: -8px;
-          left: 50%;
-          transform: translateX(-50%);
-          --direction: 10px;
-        }
-        @keyframes lang-particles {
-          0% {
-            opacity: 0;
-            transform: translateX(-50%) translateY(0);
-          }
-          50% {
-            opacity: 1;
-          }
-          100% {
-            opacity: 0;
-            transform: translateX(-50%) translateY(var(--direction));
-          }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .lang-radio-group .lang-radio .lang-name,
-          .lang-radio-group .lang-radio input:checked + .lang-name,
-          .lang-radio-group .lang-radio input:checked + .lang-name::before,
-          .lang-radio-group .lang-radio input:checked + .lang-name::after {
-            animation: none;
-            transition: none;
-          }
-        }
-      `}</style>
-      <div className="lang-radio-group">
-        {langs.map((lang) => (
-          <label className="lang-radio" key={lang.key}>
-            <input
-              checked={currentLang === lang.key}
-              name="language"
-              onChange={() => onValueChange(lang.key)}
-              type="radio"
-            />
-            <span className="lang-name">{lang.prefix}</span>
-          </label>
-        ))}
-      </div>
-    </>
+    <FilterDropdown
+      ariaLabel={t("settingsLanguage")}
+      className={cn("w-[200px] max-w-full", className)}
+      disabled={disabled || loading || changing}
+      onChange={(nextValue) => {
+        handleChange(nextValue).catch(() => undefined);
+      }}
+      options={options}
+      placeholder={t("settingsLanguage")}
+      showSelectedCheck
+      value={selectedValue}
+    />
   );
 }

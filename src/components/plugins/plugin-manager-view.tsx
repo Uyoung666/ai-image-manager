@@ -7,6 +7,7 @@ import {
   Eye,
   FolderOpen,
   Info,
+  Languages,
   LogOut,
   PackageCheck,
   PackageOpen,
@@ -47,9 +48,12 @@ import {
 } from "@/components/ui/tooltip";
 import type {
   LocalizedText,
+  LocalizedTextV3,
   NormalizedPluginManifest,
+  PluginCapability,
   PluginManifest,
   PluginRecord,
+  PluginRecordLocaleMetadata,
   PluginSettingValue,
   PluginSource,
   PluginStatus,
@@ -64,11 +68,17 @@ export interface PluginManagerPlugin {
   assetUrls?: Record<string, string>;
   enabled: boolean;
   error?: string;
+  /** Optional host-enriched coverage and signature metadata for locale plugins. */
+  locale?: PluginRecordLocaleMetadata;
   manifest: PluginManifest;
   settings?: Record<string, PluginSettingValue>;
   source: PluginSource | "dev";
   status: PluginStatus;
 }
+
+/** Backwards-compatible view alias for the formal plugin record metadata. */
+export type PluginManagerLocaleMetadata = PluginRecordLocaleMetadata;
+export type PluginManagerLocalePreview = PluginRecordLocaleMetadata;
 
 /**
  * The host may add package metadata while inspecting an archive. All metadata
@@ -90,12 +100,14 @@ export interface PluginManagerInstallPreview {
   currentVersion?: string | null;
   existingVersion?: string;
   kind?: "install" | "update";
+  locale?: PluginManagerLocalePreview;
   manifest: PluginManifest;
   packageBytes?: number;
   packageSize?: number;
   pluginId?: string;
   relation?: string;
   signed?: boolean;
+  signerKeyId?: string;
   source?: PluginSource | "dev" | "dialog";
   token?: string;
   trust?: string;
@@ -120,6 +132,7 @@ export interface PluginManagerViewProps {
   onSelectPlugin?: (pluginId: string) => void;
   onTogglePlugin?: (pluginId: string, enabled: boolean) => void;
   onUninstallPlugin?: (pluginId: string, removeData: boolean) => void;
+  onUseLocale?: (pluginId: string, localeValue?: string) => void;
   plugins: readonly PluginManagerPlugin[];
   previewId: string | null;
   selectedId: string | null;
@@ -129,7 +142,7 @@ export interface PluginManagerViewProps {
 type Translation = (key: string, options?: Record<string, unknown>) => string;
 
 function localizedText(
-  value: LocalizedText | string | undefined,
+  value: LocalizedText | LocalizedTextV3 | string | undefined,
   language: string,
   fallback = ""
 ): string {
@@ -139,10 +152,22 @@ function localizedText(
   if (!value) {
     return fallback;
   }
-  const preferred = language.toLowerCase().startsWith("zh")
-    ? value.zh
-    : value.en;
-  return preferred || value.en || value.zh || fallback;
+  const values = value as LocalizedTextV3;
+  const entries = Object.entries(values);
+  const languageKey = language.trim().toLowerCase();
+  const languageBase = languageKey.split("-")[0] ?? "";
+  const preferred =
+    entries.find(([key]) => key.toLowerCase() === languageKey)?.[1] ??
+    entries.find(([key]) => key.toLowerCase() === languageBase)?.[1];
+  if (preferred) {
+    return preferred;
+  }
+  return (
+    entries.find(([key]) => key.toLowerCase() === "en")?.[1] ??
+    entries.find(([key]) => key.toLowerCase() === "zh")?.[1] ??
+    entries[0]?.[1] ??
+    fallback
+  );
 }
 
 function manifestName(
@@ -218,7 +243,88 @@ function capabilityLabel(capability: string, t: Translation): string {
   if (capability === "theme") {
     return t("pluginManagerCapabilityTheme");
   }
+  if (capability === "locale") {
+    return t("pluginManagerCapabilityLocale");
+  }
   return capability;
+}
+
+function hasCapability(
+  plugin: PluginManagerPlugin,
+  capability: PluginCapability
+): boolean {
+  return plugin.manifest.capabilities.some((item) => item === capability);
+}
+
+function localeDefinition(plugin: PluginManagerPlugin) {
+  return plugin.manifest.manifestVersion === 3
+    ? plugin.manifest.locale
+    : undefined;
+}
+
+function localeTargetLabel(
+  definition: ReturnType<typeof localeDefinition>,
+  t: Translation
+): string {
+  if (!definition) {
+    return t("pluginManagerNotAvailable");
+  }
+  return `${definition.nativeName} (${definition.tag})`;
+}
+
+function localeCoverageLabel(
+  metadata: PluginRecordLocaleMetadata | undefined,
+  t: Translation
+): string {
+  const percentage = metadata?.coverage?.percentage;
+  if (percentage === undefined || percentage === null) {
+    return t("pluginManagerNotAvailable");
+  }
+  return t("pluginManagerLocaleCoverageValue", {
+    value: Math.round(percentage),
+  });
+}
+
+function localeTrustLabel(
+  plugin: PluginManagerPlugin,
+  metadata: PluginManagerLocaleMetadata | undefined,
+  t: Translation
+): string {
+  if (metadata?.trust === "trusted") {
+    return t("pluginManagerTrustOfficial");
+  }
+  if (metadata?.trust === "developer") {
+    return t("pluginManagerTrustUnverified");
+  }
+  if (metadata?.signed === true) {
+    return t("pluginManagerTrustOfficial");
+  }
+  if (metadata?.signed === false) {
+    return t("pluginManagerTrustUnverified");
+  }
+  if (plugin.source === "builtin") {
+    return t("pluginManagerTrustOfficial");
+  }
+  return trustLabel(plugin, t);
+}
+
+function localePreviewTrustLabel(
+  metadata: PluginManagerLocalePreview,
+  t: Translation
+): string {
+  if (metadata.trust === "trusted") {
+    return t("pluginManagerTrustOfficial");
+  }
+  if (metadata.trust === "developer") {
+    return t("pluginManagerTrustUnverified");
+  }
+  if (metadata.signed === true) {
+    return t("pluginManagerTrustOfficial");
+  }
+  if (metadata.signed === false) {
+    return t("pluginManagerTrustUnverified");
+  }
+  return t("pluginManagerNotAvailable");
 }
 
 function formatBytes(value: number | undefined, t: Translation): string {
@@ -364,7 +470,12 @@ function PluginCard({
   const title = manifestName(plugin.manifest, language, plugin.manifest.id);
   const description = manifestDescription(plugin.manifest, language, "");
   const Icon = statusIcon(plugin.status);
-  const canToggle = plugin.status === "active" || plugin.status === "disabled";
+  const isLocalePlugin = hasCapability(plugin, "locale");
+  const canToggle =
+    !isLocalePlugin &&
+    (plugin.status === "active" || plugin.status === "disabled");
+  const locale = localeDefinition(plugin);
+  const localeMetadata = plugin.locale;
   return (
     <div
       className={cn(
@@ -409,8 +520,19 @@ function PluginCard({
                 {sourceLabel(plugin.source, t)}
               </span>
               <span className="rounded-full bg-muted px-1.5 py-0.5">
-                {trustLabel(plugin, t)}
+                {isLocalePlugin
+                  ? localeTrustLabel(plugin, localeMetadata, t)
+                  : trustLabel(plugin, t)}
               </span>
+              {isLocalePlugin ? (
+                <span className="max-w-full rounded-full bg-primary/10 px-1.5 py-0.5 text-primary [overflow-wrap:anywhere]">
+                  {localeTargetLabel(locale, t)}
+                  {localeMetadata?.coverage?.percentage !== undefined &&
+                  localeMetadata.coverage.percentage !== null
+                    ? ` · ${localeCoverageLabel(localeMetadata, t)}`
+                    : ""}
+                </span>
+              ) : null}
               {plugin.source === "dev" ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-warning">
                   <Code2 aria-hidden="true" className="size-3" />
@@ -433,14 +555,16 @@ function PluginCard({
             </TooltipTrigger>
             <TooltipContent>{statusLabel(plugin.status, t)}</TooltipContent>
           </Tooltip>
-          <Switch
-            ariaLabel={`${t("pluginManagerToggle")}: ${title}`}
-            checked={plugin.enabled}
-            disabled={loading || !canToggle}
-            onCheckedChange={(enabled) =>
-              onToggle?.(plugin.manifest.id, enabled)
-            }
-          />
+          {isLocalePlugin ? null : (
+            <Switch
+              ariaLabel={`${t("pluginManagerToggle")}: ${title}`}
+              checked={plugin.enabled}
+              disabled={loading || !canToggle}
+              onCheckedChange={(enabled) =>
+                onToggle?.(plugin.manifest.id, enabled)
+              }
+            />
+          )}
         </div>
       </div>
     </div>
@@ -453,6 +577,7 @@ function DetailView({
   onPreview,
   onReloadDeveloperPlugin,
   onRemoveDeveloperPlugin,
+  onUseLocale,
   onUninstall,
   plugin,
   previewId,
@@ -465,6 +590,7 @@ function DetailView({
   onReloadDeveloperPlugin?: (pluginId: string) => void;
   onRemoveDeveloperPlugin?: (pluginId: string) => void;
   onUninstall?: (pluginId: string, removeData: boolean) => void;
+  onUseLocale?: (pluginId: string, localeValue?: string) => void;
   plugin: PluginManagerPlugin;
   previewId: string | null;
   settingsPanel?: ReactNode;
@@ -478,6 +604,9 @@ function DetailView({
     capabilityLabel(capability, t)
   );
   const minAppVersion = plugin.manifest.engine.minAppVersion;
+  const isLocalePlugin = hasCapability(plugin, "locale");
+  const locale = localeDefinition(plugin);
+  const localeMetadata = plugin.locale;
 
   const closeUninstall = () => {
     setUninstallOpen(false);
@@ -505,7 +634,7 @@ function DetailView({
             </div>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
-            {isPreviewing ? null : (
+            {isLocalePlugin || isPreviewing ? null : (
               <Button
                 aria-label={`${t("pluginManagerPreview")}: ${title}`}
                 disabled={
@@ -521,6 +650,22 @@ function DetailView({
                 {t("pluginManagerPreview")}
               </Button>
             )}
+            {isLocalePlugin && onUseLocale ? (
+              <Button
+                aria-label={`${t("pluginManagerUseLocale")}: ${title}`}
+                disabled={
+                  loading ||
+                  plugin.status === "incompatible" ||
+                  plugin.status === "invalid"
+                }
+                onClick={() => onUseLocale(plugin.manifest.id, locale?.tag)}
+                size="sm"
+                variant="outline"
+              >
+                <Languages aria-hidden="true" />
+                {t("pluginManagerUseLocale")}
+              </Button>
+            ) : null}
             {plugin.source === "dev" ? (
               <>
                 <Tooltip>
@@ -616,6 +761,28 @@ function DetailView({
                 : t("pluginManagerNotAvailable")
             }
           />
+          {isLocalePlugin ? (
+            <>
+              <MetadataRow
+                label={t("pluginManagerLocaleTarget")}
+                value={localeTargetLabel(locale, t)}
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleCoverage")}
+                value={localeCoverageLabel(localeMetadata, t)}
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleSigner")}
+                value={
+                  localeMetadata?.signerKeyId ?? t("pluginManagerNotAvailable")
+                }
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleTrust")}
+                value={localeTrustLabel(plugin, localeMetadata, t)}
+              />
+            </>
+          ) : null}
         </dl>
       </section>
 
@@ -744,6 +911,7 @@ function InstallPreviewDialog({
   const packageSize =
     preview.packageBytes ?? preview.packageSize ?? preview.archiveSize;
   const version = preview.version ?? preview.manifest.version;
+  const locale = preview.locale;
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -793,6 +961,30 @@ function InstallPreviewDialog({
             label={t("pluginManagerInstallRelation")}
             value={installationRelation(preview, t)}
           />
+          {locale ? (
+            <>
+              <MetadataRow
+                label={t("pluginManagerLocaleTarget")}
+                value={`${locale.nativeName} (${locale.tag})`}
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleCoverage")}
+                value={localeCoverageLabel(locale, t)}
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleSigner")}
+                value={
+                  locale.signerKeyId ??
+                  preview.signerKeyId ??
+                  t("pluginManagerNotAvailable")
+                }
+              />
+              <MetadataRow
+                label={t("pluginManagerLocaleTrust")}
+                value={localePreviewTrustLabel(locale, t)}
+              />
+            </>
+          ) : null}
         </dl>
         {compatibility.compatible === false ? (
           <div className="flex min-w-0 gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-destructive text-xs">
@@ -851,6 +1043,7 @@ export function PluginManagerView({
   onTogglePlugin,
   onUninstallPlugin,
   onInstallPlugin,
+  onUseLocale,
   plugins,
   previewId,
   selectedId,
@@ -964,7 +1157,9 @@ export function PluginManagerView({
             </p>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
-            {previewPlugin && activeId !== previewId ? (
+            {previewPlugin &&
+            activeId !== previewId &&
+            !hasCapability(previewPlugin, "locale") ? (
               <Button
                 disabled={
                   loading ||
@@ -1040,9 +1235,14 @@ export function PluginManagerView({
               onReloadDeveloperPlugin={onReloadDeveloperPlugin}
               onRemoveDeveloperPlugin={onRemoveDeveloperPlugin}
               onUninstall={onUninstallPlugin}
+              onUseLocale={onUseLocale}
               plugin={selectedPlugin}
               previewId={previewId}
-              settingsPanel={settingsPanel}
+              settingsPanel={
+                selectedPlugin.manifest.manifestVersion === 3
+                  ? undefined
+                  : settingsPanel
+              }
               t={t}
             />
           ) : (

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PluginManagerView } from "@/components/plugins/plugin-manager-view";
-import type { PluginManifestV2 } from "@/plugins/types";
+import type { PluginManifestV2, PluginManifestV3Locale } from "@/plugins/types";
 
 const manifest: PluginManifestV2 = {
   apiVersion: 2,
@@ -30,6 +30,50 @@ const plugin = {
 const developerPlugin = {
   ...plugin,
   source: "dev" as const,
+};
+
+const localeManifest: PluginManifestV3Locale = {
+  apiVersion: 3,
+  author: { name: "Locale author" },
+  capabilities: ["locale"],
+  description: { en: "Japanese language pack", zh: "日语语言包" },
+  engine: { minAppVersion: "2.0.0" },
+  id: "com.example.japanese",
+  locale: {
+    catalogVersion: "1",
+    direction: "ltr",
+    fallback: "en",
+    mainFile: "locales/ja-JP/main.json",
+    nativeName: "日本語",
+    rendererFile: "locales/ja-JP/renderer.json",
+    tag: "ja-JP",
+  },
+  manifestVersion: 3,
+  name: { en: "Japanese", zh: "日语" },
+  version: "1.0.0",
+};
+
+const localePlugin = {
+  ...plugin,
+  enabled: false,
+  locale: {
+    catalogVersion: "1",
+    coverage: {
+      available: true,
+      extra: [],
+      missing: [],
+      percentage: 92.4,
+      placeholderMismatches: [],
+      total: 100,
+      translated: 92,
+    },
+    signerKeyId: "official-key-1",
+    trust: "trusted" as const,
+    nativeName: "日本語",
+    signed: true,
+    tag: "ja-JP",
+  },
+  manifest: localeManifest,
 };
 
 function renderView(
@@ -219,6 +263,73 @@ describe("PluginManagerView", () => {
         name: "pluginManagerUninstall: 测试主题",
       })
     ).not.toBeInTheDocument();
+  });
+
+  it("shows locale metadata and invokes the use-language action", () => {
+    const onUseLocale = vi.fn();
+    renderView({
+      onUseLocale,
+      plugins: [localePlugin],
+      selectedId: localeManifest.id,
+    });
+
+    expect(screen.getAllByText("日本語 (ja-JP)").length).toBeGreaterThan(0);
+    expect(screen.getByText("pluginManagerLocaleTarget")).toBeInTheDocument();
+    expect(screen.getByText("pluginManagerLocaleCoverage")).toBeInTheDocument();
+    expect(screen.getByText("official-key-1")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("pluginManagerTrustOfficial").length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("settings panel")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "pluginManagerPreview: 日语",
+      })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "pluginManagerToggle: 日语",
+      })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "pluginManagerUseLocale: 日语" })
+    );
+    expect(onUseLocale).toHaveBeenCalledWith(localeManifest.id, "ja-JP");
+  });
+
+  it("shows locale preflight coverage and signer metadata", () => {
+    renderView({
+      installPreview: {
+        locale: {
+          catalogVersion: "1",
+          coverage: {
+            available: true,
+            extra: [],
+            missing: [],
+            percentage: 98,
+            placeholderMismatches: [],
+            total: 100,
+            translated: 98,
+          },
+          nativeName: "日本語",
+          signed: true,
+          signerKeyId: "official-key-2",
+          tag: "ja-JP",
+          trust: "trusted",
+        },
+        manifest: localeManifest,
+        signed: true,
+        source: "dialog",
+        trust: "trusted",
+      },
+    });
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("日本語 (ja-JP)");
+    expect(dialog).toHaveTextContent("official-key-2");
+    expect(dialog).toHaveTextContent("pluginManagerLocaleCoverageValue");
+    expect(dialog).toHaveTextContent("pluginManagerTrustOfficial");
   });
 
   it("exposes developer controls and responsive layout semantics", () => {
