@@ -79,6 +79,7 @@ interface TagInfo {
   isConfirmed: boolean | null;
   name: string;
   parentId?: number | null;
+  photoCount?: number;
 }
 
 interface PhotoDetailPanelProps {
@@ -145,6 +146,7 @@ export function PhotoDetailPanel({
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
   const [showTagInput, setShowTagInput] = useState(false);
   const [newTagName, setNewTagName] = useState("");
+  const [showAllTags, setShowAllTags] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Array<{
     tag: string;
     confidence: number;
@@ -193,6 +195,7 @@ export function PhotoDetailPanel({
     setAiLoading(false);
     setNewTagName("");
     setShowTagInput(false);
+    setShowAllTags(false);
   }, [photo?.id, photo]);
 
   // Keyboard navigation (↑/↓) when panel is visible
@@ -463,6 +466,7 @@ export function PhotoDetailPanel({
       });
       setNewTagName("");
       setShowTagInput(false);
+      setShowAllTags(false);
       loadTags();
       window.dispatchEvent(new CustomEvent("tags-changed"));
     } catch {
@@ -564,15 +568,74 @@ export function PhotoDetailPanel({
       e.preventDefault();
       handleCreateTag();
     } else if (e.key === "Escape") {
+      e.preventDefault();
       setShowTagInput(false);
       setNewTagName("");
+      setShowAllTags(false);
     }
   }
 
-  const unassignedTags = allTags.filter(
-    (t) => !photoTags.some((pt) => pt.id === t.id)
+  const sortedTags = [...allTags].sort(
+    (a, b) =>
+      (b.photoCount ?? 0) - (a.photoCount ?? 0) || a.name.localeCompare(b.name)
   );
   const photoTagIds = new Set(photoTags.map((t) => t.id));
+  const unassignedTags = sortedTags.filter((tag) => !photoTagIds.has(tag.id));
+  const parentTagIds = new Set(
+    allTags.flatMap((tag) => (tag.parentId == null ? [] : [tag.parentId]))
+  );
+  const unassignedLeafTags = unassignedTags.filter(
+    (tag) => !parentTagIds.has(tag.id)
+  );
+  const normalizedTagQuery = newTagName.trim().toLocaleLowerCase();
+  const matchingTags = normalizedTagQuery
+    ? sortedTags
+        .filter((tag) => {
+          const rawName = tag.name.toLocaleLowerCase();
+          const displayName = getTagDisplayName(
+            tag.name,
+            i18n.language
+          ).toLocaleLowerCase();
+          return (
+            rawName.includes(normalizedTagQuery) ||
+            displayName.includes(normalizedTagQuery)
+          );
+        })
+        .sort((a, b) => {
+          const getMatchRank = (tag: TagInfo) => {
+            const names = [
+              tag.name.toLocaleLowerCase(),
+              getTagDisplayName(tag.name, i18n.language).toLocaleLowerCase(),
+            ];
+            if (names.some((name) => name === normalizedTagQuery)) {
+              return 0;
+            }
+            if (names.some((name) => name.startsWith(normalizedTagQuery))) {
+              return 1;
+            }
+            return 2;
+          };
+          return (
+            getMatchRank(a) - getMatchRank(b) ||
+            (b.photoCount ?? 0) - (a.photoCount ?? 0) ||
+            a.name.localeCompare(b.name)
+          );
+        })
+    : [];
+  const tagCandidates = normalizedTagQuery
+    ? matchingTags
+    : showAllTags
+      ? unassignedTags
+      : unassignedLeafTags;
+  const visibleTagCandidates = showAllTags
+    ? tagCandidates
+    : tagCandidates.slice(0, 8);
+  const canExpandTags = normalizedTagQuery
+    ? matchingTags.length > 8
+    : unassignedTags.length > Math.min(unassignedLeafTags.length, 8);
+  const expandedTagCount = normalizedTagQuery
+    ? matchingTags.length
+    : unassignedTags.length;
   let aiTagTaskLabel = t("tagAnalysisIndexing");
   if (aiTagTaskState === "tagging") {
     aiTagTaskLabel = t("tagAnalysisRunning");
@@ -813,7 +876,10 @@ export function PhotoDetailPanel({
               })}
               <button
                 className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground/70 hover:border-muted-foreground hover:text-muted-foreground"
-                onClick={() => setShowTagInput(true)}
+                onClick={() => {
+                  setShowTagInput(true);
+                  setShowAllTags(false);
+                }}
                 type="button"
               >
                 + {t("addTag")}
@@ -823,38 +889,84 @@ export function PhotoDetailPanel({
             {/* Tag suggestions / create new */}
             {showTagInput && (
               <div className="mt-2">
-                {unassignedTags.length > 0 && (
+                {normalizedTagQuery && (
+                  <p
+                    aria-live="polite"
+                    className="mb-1.5 text-[10px] text-muted-foreground/70"
+                  >
+                    {matchingTags.length > 0
+                      ? t("tagPickerMatches", {
+                          count: matchingTags.length,
+                        })
+                      : t("tagPickerNoMatches")}
+                  </p>
+                )}
+                {visibleTagCandidates.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1">
-                    {unassignedTags.map((tag) => (
+                    {visibleTagCandidates.map((tag) => {
+                      const isAlreadyAdded = photoTagIds.has(tag.id);
+                      return (
+                        <button
+                          aria-disabled={isAlreadyAdded}
+                          className={`rounded-[4px] px-1.5 py-0.5 text-[10px] text-white/70 ${
+                            isAlreadyAdded
+                              ? "cursor-default opacity-50"
+                              : "hover:opacity-90"
+                          }`}
+                          key={tag.id}
+                          onClick={() => {
+                            if (isAlreadyAdded) {
+                              return;
+                            }
+                            handleAddTag(tag.id);
+                            setShowTagInput(false);
+                            setShowAllTags(false);
+                          }}
+                          style={{
+                            background: tag.color
+                              ? `${tag.color}66`
+                              : "rgba(94,106,210,0.4)",
+                          }}
+                          type="button"
+                        >
+                          {getTagDisplayName(tag.name, i18n.language)}
+                          {normalizedTagQuery && isAlreadyAdded && (
+                            <span className="ml-1 opacity-80">
+                              · {t("tagPickerAlreadyAdded")}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {canExpandTags && (
                       <button
-                        className="rounded-[4px] px-1.5 py-0.5 text-[10px] text-white/70 hover:opacity-90"
-                        key={tag.id}
-                        onClick={() => {
-                          handleAddTag(tag.id);
-                          setShowTagInput(false);
-                        }}
-                        style={{
-                          background: tag.color
-                            ? `${tag.color}66`
-                            : "rgba(94,106,210,0.4)",
-                        }}
+                        className="rounded-[4px] border border-input border-dashed px-1.5 py-0.5 text-[10px] text-muted-foreground/70 hover:border-muted-foreground hover:text-muted-foreground"
+                        onClick={() => setShowAllTags((previous) => !previous)}
                         type="button"
                       >
-                        {getTagDisplayName(tag.name, i18n.language)}
+                        {showAllTags
+                          ? t("tagPickerCollapse")
+                          : t("tagPickerViewAll", {
+                              count: expandedTagCount,
+                            })}
                       </button>
-                    ))}
+                    )}
                   </div>
                 )}
                 <div className="flex items-center gap-1">
                   <input
                     className="h-7 flex-1 rounded-[4px] border border-input bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
-                    onChange={(e) => setNewTagName(e.target.value)}
+                    onChange={(e) => {
+                      setNewTagName(e.target.value);
+                      setShowAllTags(false);
+                    }}
                     onKeyDown={handleTagInputKeyDown}
                     placeholder={t("newTagPlaceholder")}
                     ref={tagInputRef}
                     value={newTagName}
                   />
                   <button
+                    aria-label={t("addTag")}
                     className="flex h-7 w-7 items-center justify-center rounded-[4px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground disabled:opacity-30"
                     disabled={!newTagName.trim()}
                     onClick={handleCreateTag}
