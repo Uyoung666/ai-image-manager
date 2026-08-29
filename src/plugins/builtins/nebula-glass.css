@@ -191,7 +191,17 @@
   --nebula-mica-highlight: rgb(255 255 255 / 0.07);
   --nebula-mica-shadow: 0 10px 36px rgb(0 0 0 / 0.5);
   --nebula-control-fill: rgb(148 180 220 / 0.08);
-  --nebula-card-fill: rgb(17 26 39 / 0.38);
+  --nebula-card-fill: rgb(17 26 39 / 0.68);
+  --nebula-dashboard-panel-fill: color-mix(
+    in srgb,
+    var(--surface) 88%,
+    transparent
+  );
+  --nebula-dashboard-metric-fill: color-mix(
+    in srgb,
+    var(--surface) 76%,
+    transparent
+  );
   --nebula-overlay-fill: rgb(17 26 39 / 0.78);
 }
 
@@ -205,7 +215,17 @@
   --nebula-mica-highlight: rgb(255 255 255 / 0.5);
   --nebula-mica-shadow: 0 10px 36px rgb(19 45 83 / 0.16);
   --nebula-control-fill: rgb(255 255 255 / 0.24);
-  --nebula-card-fill: rgb(255 255 255 / 0.3);
+  --nebula-card-fill: rgb(255 255 255 / 0.78);
+  --nebula-dashboard-panel-fill: color-mix(
+    in srgb,
+    var(--surface) 90%,
+    transparent
+  );
+  --nebula-dashboard-metric-fill: color-mix(
+    in srgb,
+    var(--surface) 78%,
+    transparent
+  );
   --nebula-overlay-fill: rgb(244 248 253 / 0.8);
 }
 
@@ -451,6 +471,35 @@
   ) !important;
 }
 
+/* Dashboard overview needs a calmer inner pane than the translucent defaults.
+   The animated backdrop remains visible around the cards, while their content
+   and metrics keep a stable contrast surface. */
+:root[data-nebula-glass="active"]
+  [data-surface="page"]
+  .dashboard-overview-panel {
+  background: var(--nebula-dashboard-panel-fill) !important;
+  border-color: var(--nebula-mica-border) !important;
+  box-shadow:
+    inset 0 1px 0 var(--nebula-mica-highlight),
+    0 10px 36px rgb(0 0 0 / 0.12);
+  -webkit-backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
+  backdrop-filter: blur(var(--nebula-glass-blur)) saturate(1.08);
+}
+
+:root[data-nebula-glass="active"]
+  [data-surface="page"]
+  .dashboard-overview-metric,
+:root[data-nebula-glass="active"]
+  [data-surface="page"]
+  .dashboard-overview-guidance-card {
+  background: var(--nebula-dashboard-metric-fill) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--nebula-mica-border) 82%,
+    transparent
+  ) !important;
+}
+
 /* Popovers, menus, dialogs and toast: one outline, no stacked rings. */
 :root[data-nebula-glass="active"] [data-surface="overlay"] {
   outline: none !important;
@@ -502,13 +551,13 @@
 /* Compatibility mode keeps the original layout dimensions. */
 :root[data-nebula-glass="active"][data-nebula-mode="compatibility"] {
   --nebula-mica-fill: rgb(17 26 39 / 0.55);
-  --nebula-card-fill: rgb(22 33 48 / 0.55);
+  --nebula-card-fill: rgb(22 33 48 / 0.68);
   --nebula-control-fill: rgb(28 42 61 / 0.5);
 }
 
 :root.light[data-nebula-glass="active"][data-nebula-mode="compatibility"] {
   --nebula-mica-fill: rgb(255 255 255 / 0.55);
-  --nebula-card-fill: rgb(236 242 250 / 0.5);
+  --nebula-card-fill: rgb(236 242 250 / 0.74);
   --nebula-control-fill: rgb(226 235 247 / 0.45);
 }
 

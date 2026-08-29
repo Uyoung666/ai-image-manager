@@ -809,7 +809,7 @@ function DashboardPage() {
                   />
                 </div>
               </section>
-              <section className="order-3 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 xl:col-span-3">
+              <section className="dashboard-overview-panel order-3 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 xl:col-span-3">
                 <h2 className="font-semibold text-[15px] text-foreground">
                   {t("dashboardLibraryHealth")}
                 </h2>
@@ -845,7 +845,7 @@ function DashboardPage() {
               </section>
               <div className="contents">
                 <section
-                  className={`order-4 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
+                  className={`dashboard-overview-panel order-4 min-w-0 rounded-[10px] border border-border bg-secondary p-4 sm:p-5 ${shootingGuidance.length > 0 ? "xl:col-span-2" : "xl:col-span-3"}`}
                 >
                   <h2 className="font-semibold text-[15px] text-foreground">
                     {t("dashboardPhotographyProfile")}
@@ -928,7 +928,7 @@ function DashboardPage() {
                     />
                   </div>
                 </section>
-                <section className="order-2 min-w-0 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-4 shadow-sm sm:p-5">
+                <section className="dashboard-overview-panel order-2 min-w-0 rounded-[12px] border border-primary/25 bg-primary/[0.05] p-4 shadow-sm sm:p-5">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-4 w-4 text-primary" />
                     <h2 className="font-semibold text-[15px] text-foreground">
@@ -980,7 +980,7 @@ function DashboardPage() {
                 </section>
               </div>
               {shootingGuidance.length > 0 && (
-                <section className="order-5 min-w-0 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-4 sm:p-5">
+                <section className="dashboard-overview-panel order-5 min-w-0 rounded-[10px] border border-primary/20 bg-primary/[0.04] p-4 sm:p-5">
                   <div className="flex items-start gap-3">
                     <div className="rounded-full bg-primary/10 p-2 text-primary">
                       <Lightbulb className="h-4 w-4" />
@@ -1263,7 +1263,7 @@ function GuidanceCard({
 }) {
   const { t } = useTranslation();
   return (
-    <article className="min-w-0 rounded-[8px] border border-border/80 bg-background/70 p-4">
+    <article className="dashboard-overview-guidance-card min-w-0 rounded-[8px] border border-border/80 bg-background/70 p-4">
       <h3 className="font-medium text-[12px] text-foreground">
         {t(`dashboardGuidance_${kind}Title`)}
       </h3>
@@ -1750,7 +1750,7 @@ function HealthMetric({
   percentage: number;
 }) {
   return (
-    <div className="min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0">
+    <div className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/30 p-4 xl:border-b-0">
       <div className="flex items-center gap-1.5">
         <AppTooltip>
           <AppTooltipTrigger asChild>
@@ -1859,7 +1859,7 @@ function Insight({
   value: string;
 }) {
   return (
-    <div className="min-w-0 border-border/70 border-r border-b bg-background/20 p-4">
+    <div className="dashboard-overview-metric min-w-0 border-border/70 border-r border-b bg-background/20 p-4">
       <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
       <AppTooltip>
         <AppTooltipTrigger asChild>
