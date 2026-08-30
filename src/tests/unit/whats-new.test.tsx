@@ -1,12 +1,18 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLatestChangelog, getLocalizedText } from "@/content/changelogs";
+import {
+  changelogEntries,
+  getChangelog,
+  getLatestChangelog,
+  getLocalizedText,
+  hasChangelog,
+} from "@/content/changelogs";
 
 const mocks = vi.hoisted(() => ({
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
-  version: "2.0.0" as string | undefined,
+  version: "2.1.0" as string | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -41,7 +47,16 @@ describe("WhatsNewPage", () => {
     mocks.language = "zh";
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
-    mocks.version = "2.0.0";
+    mocks.version = "2.1.0";
+  });
+
+  it("registers the current release before previous versions", () => {
+    expect(changelogEntries.map((entry) => entry.version)).toEqual([
+      "2.1.0",
+      "2.0.0",
+    ]);
+    expect(getChangelog("2.1.0")).toBe(getLatestChangelog());
+    expect(hasChangelog("2.1.0")).toBe(true);
   });
 
   it("renders localized highlights and continues to the gallery", () => {
