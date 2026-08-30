@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Developer tooling for public AI Image Manager v2 theme and v3 locale plugins.
  *

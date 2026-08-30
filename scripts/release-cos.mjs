@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Release gate and Tencent COS promotion CLI.
  *
