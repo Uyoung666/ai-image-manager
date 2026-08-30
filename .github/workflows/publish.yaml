@@ -79,6 +79,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache release models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-models-all-${{ hashFiles('src/services/model-downloader.ts') }}
+
+      - name: Prepare release models
+        run: node --loader ts-node/esm scripts/prepare-models.mjs
+
       - name: Install and verify WiX Toolset
         shell: pwsh
         run: |
