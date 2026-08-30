@@ -131,7 +131,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "cos-nodejs-sdk-v5": "3.0.0",
     "drizzle-kit": "^0.31.0",
-    "electron": "^41.1.1",
+    "electron": "^44.0.0",
     "electron-devtools-installer": "^4.0.0",
     "electron-playwright-helpers": "^2.1.0",
     "globals": "^17.5.0",
