@@ -60,6 +60,10 @@ jobs:
       COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
     timeout-minutes: 90
     steps:
+      - name: Preserve repository line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       - name: Checkout release tag
         uses: actions/checkout@v6
         with:
