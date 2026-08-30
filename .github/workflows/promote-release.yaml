@@ -1,0 +1,412 @@
+name: Promote release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "候选版本号（例如 2.1.0，不带 v）"
+        required: true
+        type: string
+      confirmation:
+        description: "输入 PROMOTE <版本号>，例如 PROMOTE 2.1.0"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: release-promote-v${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  AIM_FIRST_OFFICIAL_MSI_VERSION: "2.1.0"
+  COS_RELEASE_PREFIX: ${{ vars.COS_RELEASE_PREFIX || 'ai-image-manager' }}
+  COS_BUCKET: ${{ vars.COS_BUCKET || 'ai-image-manager-1392398678' }}
+  COS_REGION: ${{ vars.COS_REGION || 'ap-hongkong' }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  promote:
+    name: Verify candidate and promote stable
+    runs-on: windows-latest
+    # Configure this environment with a separate required-reviewer set. This
+    # is the second human gate, after candidate bytes and attestations pass.
+    environment: release-stable
+    env:
+      # Use different release-stable environment secrets. This CAM identity
+      # may read candidates/downloads and write only stable/build-base.
+      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ format('v{0}', inputs.version) }}
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies for release verifier
+        run: npm ci
+
+      - name: Locate draft and successful candidate run
+        id: release
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          $version = ($env:VERSION_INPUT.Trim() -replace '^v', '')
+          if ($version -notmatch '^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$') {
+            throw "Promotion requires a stable SemVer MAJOR.MINOR.PATCH version: $version"
+          }
+          $tag = "v$version"
+          if ($env:CONFIRMATION.Trim() -ne "PROMOTE $version") {
+            throw "Confirmation must be exactly: PROMOTE $version"
+          }
+          git fetch --tags --force
+          $tagCommit = (git rev-list -n 1 $tag).Trim()
+          if (-not $tagCommit) {
+            throw "Release tag was not found: $tag"
+          }
+          $checkoutCommit = (git rev-parse HEAD).Trim()
+          if ($checkoutCommit -ne $tagCommit) {
+            throw "Checkout commit $checkoutCommit does not match release tag $tag at $tagCommit"
+          }
+
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          if ($release.tag_name -ne $tag) {
+            throw "GitHub Release tag mismatch: expected $tag, received $($release.tag_name)"
+          }
+          if ($release.prerelease) {
+            throw "A prerelease cannot be promoted to stable: $tag"
+          }
+          $assetNames = @($release.assets | ForEach-Object name)
+          if ($assetNames -notcontains "SHA256SUMS.txt") {
+            throw "GitHub Draft is missing SHA256SUMS.txt"
+          }
+          if ($assetNames -notcontains "provenance.json") {
+            throw "GitHub Draft is missing provenance.json"
+          }
+          if ([string]::IsNullOrWhiteSpace($release.body)) {
+            throw "GitHub Draft has no release notes; publish.yaml must attach release-body.md"
+          }
+          $expectedReleaseBody = (Get-Content -LiteralPath "release-body.md" -Raw).Replace("`r`n", "`n").Trim()
+          $actualReleaseBody = $release.body.Replace("`r`n", "`n").Trim()
+          if ($actualReleaseBody -ne $expectedReleaseBody) {
+            throw "GitHub Draft notes do not exactly match release-body.md from $tag"
+          }
+          if ($release.draft) {
+            Write-Host "Validated GitHub Draft $tag."
+          } else {
+            # A retry after the GitHub publish step is safe; the COS operation
+            # below remains the idempotent final promotion step.
+            Write-Host "GitHub Release $tag is already published; continuing idempotent retry."
+          }
+
+          $runs = @(gh run list --workflow publish.yaml --limit 100 --json databaseId,headSha,status,conclusion,event)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to list candidate workflow runs"
+          }
+          $runRecords = $runs | ConvertFrom-Json
+          $candidateRun = @($runRecords | Where-Object {
+            $_.headSha -eq $tagCommit -and
+            $_.status -eq "completed" -and
+            $_.conclusion -eq "success"
+          } | Select-Object -First 1)
+          if ($candidateRun.Count -ne 1) {
+            throw "No successful publish.yaml candidate run was found for $tag at commit $tagCommit"
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "run-id=$($candidateRun[0].databaseId)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "draft=$($release.draft.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Download candidate build and evidence
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          CANDIDATE_RUN_ID: ${{ steps.release.outputs.run-id }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "ai-image-manager-promote-$env:RELEASE_VERSION"
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "candidate") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "evidence") | Out-Null
+          gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "release-candidate-$env:RELEASE_VERSION" --dir (Join-Path $root "candidate")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Candidate artifact was not found for run $env:CANDIDATE_RUN_ID"
+          }
+          gh run download $env:CANDIDATE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "release-evidence-$env:RELEASE_VERSION" --dir (Join-Path $root "evidence")
+          if ($LASTEXITCODE -ne 0) {
+            throw "Candidate evidence artifact was not found for run $env:CANDIDATE_RUN_ID"
+          }
+          "root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        id: downloads
+
+      - name: Verify candidate commit, smoke markers, and SHA256 manifest
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $evidenceRoot = Join-Path $env:DOWNLOAD_ROOT "evidence"
+          $candidateRoot = Join-Path $env:DOWNLOAD_ROOT "candidate"
+          $metadataPath = Join-Path $evidenceRoot "candidate-metadata.txt"
+          $smokePath = Join-Path $evidenceRoot "smoke-status.json"
+          $sumsPath = Join-Path $evidenceRoot "SHA256SUMS.txt"
+          $downloadSumsPath = Join-Path $evidenceRoot "download-SHA256SUMS.txt"
+          $downloadProvenancePath = Join-Path $evidenceRoot "download-provenance.json"
+          $candidateSumsPath = Join-Path $evidenceRoot "candidate-SHA256SUMS.txt"
+          $candidateProvenancePath = Join-Path $evidenceRoot "candidate-provenance.json"
+          $candidateReleasesPath = Join-Path $evidenceRoot "candidate-RELEASES"
+          foreach ($required in @($metadataPath, $smokePath, $sumsPath, $downloadSumsPath, $downloadProvenancePath, $candidateSumsPath, $candidateProvenancePath, $candidateReleasesPath)) {
+            if (-not (Test-Path -LiteralPath $required)) {
+              throw "Candidate evidence is missing: $required"
+            }
+          }
+
+          $metadata = @{}
+          Get-Content -LiteralPath $metadataPath | ForEach-Object {
+            $parts = $_ -split '=', 2
+            if ($parts.Count -eq 2) { $metadata[$parts[0]] = $parts[1] }
+          }
+          if ($metadata.version -ne $env:RELEASE_VERSION -or $metadata.commit -ne $env:RELEASE_COMMIT) {
+            throw "Candidate metadata does not match tag $env:RELEASE_TAG at commit $env:RELEASE_COMMIT"
+          }
+
+          $smoke = Get-Content -LiteralPath $smokePath -Raw | ConvertFrom-Json
+          if ($smoke.schemaVersion -ne 2) {
+            throw "Unsupported installer smoke evidence schema"
+          }
+          if ($smoke.version -ne $env:RELEASE_VERSION -or $smoke.tag -ne $env:RELEASE_TAG -or $smoke.commit -ne $env:RELEASE_COMMIT) {
+            throw "Installer smoke evidence does not match the requested tag and commit"
+          }
+          if ($smoke.setupSmoke -ne "passed" -or $smoke.msiSmoke -ne "passed") {
+            throw "Both Setup and MSI smoke checks must be passed"
+          }
+          $allowedMsiMode =
+            $smoke.msiSmokeMode -eq "upgrade" -or
+            (
+              $env:RELEASE_VERSION -eq $env:AIM_FIRST_OFFICIAL_MSI_VERSION -and
+              $smoke.msiSmokeMode -eq "fresh-bootstrap"
+            )
+          if (-not $allowedMsiMode) {
+            throw "MSI smoke mode is not allowed for v$env:RELEASE_VERSION: $($smoke.msiSmokeMode)"
+          }
+
+          $listed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          Get-Content -LiteralPath $sumsPath | ForEach-Object {
+            $match = $_ -match '^([a-fA-F0-9]{64})\s+(.+)$'
+            if (-not $match) { throw "Invalid SHA256SUMS line: $_" }
+            $expected = $Matches[1].ToLowerInvariant()
+            $relative = $Matches[2].Trim().Replace('/', '\')
+            if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains('..')) {
+              throw "Unsafe relative path in SHA256SUMS: $relative"
+            }
+            $file = Join-Path $candidateRoot $relative
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "SHA256SUMS file is missing from candidate artifact: $relative"
+            }
+            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "SHA-256 mismatch for $relative: expected $expected, received $actual"
+            }
+            [void]$listed.Add($relative)
+          }
+          $actualFiles = Get-ChildItem -LiteralPath $candidateRoot -Recurse -File
+          foreach ($file in $actualFiles) {
+            $relative = [IO.Path]::GetRelativePath($candidateRoot, $file.FullName)
+            if (-not $listed.Contains($relative)) {
+              throw "Candidate file is absent from SHA256SUMS.txt: $relative"
+            }
+          }
+          Write-Host "Verified candidate commit, both upgrade smoke markers, and $($listed.Count) SHA-256 entries."
+
+      - name: Verify versioned COS downloads and GitHub Draft bytes
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $candidateRoot = Join-Path $env:DOWNLOAD_ROOT "candidate"
+          $evidenceRoot = Join-Path $env:DOWNLOAD_ROOT "evidence"
+          $flatRoot = Join-Path $env:DOWNLOAD_ROOT "flat-download"
+          New-Item -ItemType Directory -Force -Path $flatRoot | Out-Null
+          $downloadSums = Join-Path $evidenceRoot "download-SHA256SUMS.txt"
+          $downloadProvenance = Join-Path $evidenceRoot "download-provenance.json"
+          Copy-Item -LiteralPath $downloadSums -Destination (Join-Path $flatRoot "SHA256SUMS.txt")
+          Copy-Item -LiteralPath $downloadProvenance -Destination (Join-Path $flatRoot "provenance.json")
+
+          $candidateFiles = @(Get-ChildItem -LiteralPath $candidateRoot -Recurse -File)
+          Get-Content -LiteralPath $downloadSums | ForEach-Object {
+            if ($_ -notmatch '^([a-fA-F0-9]{64})\s+([^/\\]+)$') {
+              throw "Invalid flat download SHA256SUMS line: $_"
+            }
+            $expectedHash = $Matches[1].ToLowerInvariant()
+            $name = $Matches[2].Trim()
+            if ($name -eq "provenance.json") {
+              $source = $downloadProvenance
+            } else {
+              $matches = @($candidateFiles | Where-Object { $_.Name -ceq $name })
+              if ($matches.Count -ne 1) {
+                throw "Expected exactly one candidate source for flat asset $name, found $($matches.Count)"
+              }
+              $source = $matches[0].FullName
+            }
+            $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+              throw "Flat download source hash mismatch for $name"
+            }
+            if ($name -ne "provenance.json") {
+              Copy-Item -LiteralPath $source -Destination (Join-Path $flatRoot $name)
+            }
+          }
+
+          node scripts/release-cos.mjs verify `
+            --dir $flatRoot `
+            --version $env:RELEASE_VERSION `
+            --kind versioned `
+            --compare-bytes `
+            --json
+
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          $githubExpected = @(Get-ChildItem -LiteralPath $flatRoot -File)
+          $squirrelReleases = @($candidateFiles | Where-Object { $_.Name -ceq "RELEASES" })
+          if ($squirrelReleases.Count -ne 1) {
+            throw "Expected exactly one Squirrel RELEASES in candidate artifact"
+          }
+          $githubExpected += $squirrelReleases[0]
+          $headers = @{
+            Accept = "application/octet-stream"
+            Authorization = "Bearer $env:GH_TOKEN"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $assetDownloadRoot = Join-Path $env:DOWNLOAD_ROOT "github-draft-assets"
+          New-Item -ItemType Directory -Force -Path $assetDownloadRoot | Out-Null
+          foreach ($expected in $githubExpected) {
+            $matchingAssets = @($release.assets | Where-Object { $_.name -ceq $expected.Name })
+            if ($matchingAssets.Count -ne 1) {
+              throw "GitHub Draft must contain exactly one $($expected.Name), found $($matchingAssets.Count)"
+            }
+            $downloaded = Join-Path $assetDownloadRoot $expected.Name
+            Invoke-WebRequest -Uri $matchingAssets[0].url -Headers $headers -OutFile $downloaded -UseBasicParsing
+            $expectedLength = (Get-Item -LiteralPath $expected.FullName).Length
+            $actualLength = (Get-Item -LiteralPath $downloaded).Length
+            $expectedHash = (Get-FileHash -LiteralPath $expected.FullName -Algorithm SHA256).Hash
+            $actualHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
+            if ($actualLength -ne $expectedLength -or $actualHash -ne $expectedHash) {
+              throw "GitHub Draft asset differs from candidate bytes: $($expected.Name)"
+            }
+          }
+          Write-Host "Verified versioned COS bytes and $($githubExpected.Count) GitHub Draft assets."
+
+      - name: Verify COS candidate objects before publishing the draft
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $source = Join-Path $env:DOWNLOAD_ROOT "candidate\squirrel.windows\x64"
+          if (-not (Test-Path -LiteralPath (Join-Path $source "RELEASES"))) {
+            throw "Downloaded candidate does not contain squirrel.windows/x64/RELEASES"
+          }
+          $evidenceRoot = Join-Path $env:DOWNLOAD_ROOT "evidence"
+          $verifyRoot = Join-Path $env:DOWNLOAD_ROOT "cos-verify-squirrel"
+          New-Item -ItemType Directory -Force -Path $verifyRoot | Out-Null
+          Copy-Item -LiteralPath (Join-Path $evidenceRoot "candidate-SHA256SUMS.txt") -Destination (Join-Path $verifyRoot "SHA256SUMS.txt")
+          Copy-Item -LiteralPath (Join-Path $evidenceRoot "candidate-provenance.json") -Destination (Join-Path $verifyRoot "provenance.json")
+          Get-Content -LiteralPath (Join-Path $verifyRoot "SHA256SUMS.txt") | ForEach-Object {
+            if ($_ -notmatch '^([a-fA-F0-9]{64})\s+([^/\\]+)$') {
+              throw "Invalid candidate SHA256SUMS line: $_"
+            }
+            $name = $Matches[2].Trim()
+            if ($name -eq "provenance.json") {
+              $candidateFile = Join-Path $evidenceRoot "candidate-provenance.json"
+            } elseif ($name -eq "RELEASES") {
+              $candidateFile = Join-Path $evidenceRoot "candidate-RELEASES"
+            } else {
+              $candidateFile = Join-Path $source $name
+            }
+            if (-not (Test-Path -LiteralPath $candidateFile -PathType Leaf)) {
+              throw "Candidate source file is missing: $name"
+            }
+            Copy-Item -LiteralPath $candidateFile -Destination (Join-Path $verifyRoot $name)
+          }
+          # verify reads every RELEASES package, validates COS SHA-256 metadata,
+          # and compares object bytes before GitHub is made public.
+          node scripts/release-cos.mjs verify `
+            --dir $verifyRoot `
+            --version $env:RELEASE_VERSION `
+            --kind candidate `
+            --compare-bytes `
+            --json
+
+      - name: Verify GitHub attestation for candidate binaries
+        shell: pwsh
+        env:
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $candidateRoot = Join-Path $env:DOWNLOAD_ROOT "candidate"
+          $subjects = @(Get-ChildItem -LiteralPath $candidateRoot -Recurse -File | Where-Object {
+            $_.Extension -in @(".exe", ".msi", ".nupkg", ".zip")
+          })
+          if ($subjects.Count -eq 0) {
+            throw "No executable, MSI, NUPKG, or ZIP subjects were found for attestation verification"
+          }
+          foreach ($subject in $subjects) {
+            gh attestation verify $subject.FullName --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub attestation verification failed: $($subject.FullName)"
+            }
+          }
+
+      - name: Publish validated GitHub Draft
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($release.draft) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease=false
+            if ($LASTEXITCODE -ne 0) {
+              throw "Unable to publish the validated GitHub Draft"
+            }
+          } else {
+            Write-Host "GitHub Release is already published; retry is idempotent."
+          }
+
+      - name: Promote COS stable and stable build-base (idempotent retry)
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "COS stable promotion attempt $attempt/$maxAttempts"
+            node scripts/release-cos.mjs promote `
+              --version $env:RELEASE_VERSION `
+              --json
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt $maxAttempts) {
+              Start-Sleep -Seconds (2 * $attempt)
+            }
+          }
+          throw "COS stable promotion failed after $maxAttempts attempts"

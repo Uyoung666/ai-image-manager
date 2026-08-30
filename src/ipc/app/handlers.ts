@@ -48,8 +48,7 @@ export const getUpdateStatus = os.handler(() => {
 });
 
 export const installDownloadedUpdate = os.handler(() => {
-  installUpdate();
-  return { ok: true };
+  return installUpdate();
 });
 
 export const consumeUpdateWelcome = os.handler(() => {

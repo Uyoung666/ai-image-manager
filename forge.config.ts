@@ -13,6 +13,11 @@ import type { ForgeConfig } from "@electron-forge/shared-types";
 import { MODEL_MANIFEST } from "./src/services/model-downloader";
 
 const packageTempSuffix = process.env.AIM_PACKAGE_TEMP_SUFFIX;
+// Squirrel always emits the full package.  A stable RELEASES feed is optional
+// and is only used while publishing to derive a delta package from that
+// baseline.  Keeping the value out of normal local builds also prevents a
+// developer build from accidentally contacting the release bucket.
+const squirrelRemoteReleases = process.env.AIM_SQUIRREL_REMOTE_RELEASES?.trim();
 const RELEASE_MODELS_DIR = path.resolve("models-release");
 const SQUIRREL_SETUP_ICON_PATH = path.resolve("assets/icon.ico");
 const SQUIRREL_RCEDIT_PATH = path.resolve(
@@ -335,7 +340,19 @@ const config: ForgeConfig = {
   rebuildConfig: {},
 
   makers: [
-    new MakerSquirrel({ name: "ai-image-manager" }),
+    new MakerSquirrel({
+      name: "ai-image-manager",
+      // Authenticode is intentionally not configured yet. The release
+      // pipeline records hashes/provenance and documents the SmartScreen risk;
+      // if signing is added later, sign only after all icon edits are done.
+      // `noDelta: false` documents the intended default explicitly: the full
+      // package is always produced, and a delta is added only when the remote
+      // stable baseline above is available.
+      noDelta: false,
+      ...(squirrelRemoteReleases
+        ? { remoteReleases: squirrelRemoteReleases }
+        : {}),
+    }),
     new MakerWix({
       appUserModelId: "com.squirrel.ai-image-manager.ai-image-manager",
       beforeCreate: (creator) => {

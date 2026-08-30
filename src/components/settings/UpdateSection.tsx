@@ -60,6 +60,9 @@ function mapUpdateErrorMessage(
   if (message === "UPDATE_NOT_FOUND") {
     return translate("updateErrorNotFound");
   }
+  if (message === "UPDATE_INSTALLER_UNSUPPORTED") {
+    return translate("updateDownloadManually");
+  }
   return message;
 }
 
