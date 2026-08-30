@@ -129,7 +129,7 @@ https://ai-image-manager-1392398678.cos.ap-hongkong.myqcloud.com/ai-image-manage
   "statement": [
     {
       "effect": "allow",
-      "action": ["name/cos:HeadObject"],
+      "action": ["name/cos:GetObject", "name/cos:HeadObject"],
       "resource": [
         "qcs::cos:ap-hongkong:uid/1392398678:ai-image-manager-1392398678/ai-image-manager/downloads/*",
         "qcs::cos:ap-hongkong:uid/1392398678:ai-image-manager-1392398678/ai-image-manager/updates/win32/x64/candidates/*",

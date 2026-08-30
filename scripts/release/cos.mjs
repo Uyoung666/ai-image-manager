@@ -79,7 +79,7 @@ export class CosStore {
     this.retryDelayMs = normalizeRetryDelay(retryDelayMs);
   }
 
-  async head(key) {
+  async head(key, { allowForbidden = false } = {}) {
     try {
       return await invokeCos(
         this.client,
@@ -94,6 +94,9 @@ export class CosStore {
       );
     } catch (error) {
       if (isNotFound(error)) {
+        return null;
+      }
+      if (allowForbidden && isForbidden(error)) {
         return null;
       }
       throw wrapCosError("HEAD", key, error);
@@ -120,7 +123,12 @@ export class CosStore {
       "LOCAL_SIZE_MISMATCH"
     );
     const expectedSha256 = sha256 ?? (await sha256File(filePath));
-    const existing = await this.head(normalizedKey);
+    // A write-only candidate identity may be unable to preflight with HEAD.
+    // Immutable PUT still cannot overwrite because the request carries
+    // x-cos-forbid-overwrite; conflict resolution below remains strict.
+    const existing = await this.head(normalizedKey, {
+      allowForbidden: immutable,
+    });
     if (existing && immutable) {
       const result = await this.verifyImmutableExisting(
         normalizedKey,
@@ -211,7 +219,9 @@ export class CosStore {
     const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
     const expectedSha256 =
       sha256 ?? createHash("sha256").update(body).digest("hex");
-    const existing = await this.head(normalizedKey);
+    const existing = await this.head(normalizedKey, {
+      allowForbidden: immutable,
+    });
     if (existing && immutable) {
       const result = await this.verifyImmutableExisting(
         normalizedKey,
@@ -605,6 +615,19 @@ export function isNotFound(error) {
       value === "NotFound" ||
       value === "NoSuchObject"
   );
+}
+
+function isForbidden(error) {
+  const statusCode = Number(
+    error?.statusCode ?? error?.status ?? error?.error?.statusCode
+  );
+  if (statusCode === 403) {
+    return true;
+  }
+  const code = String(
+    error?.code ?? error?.Code ?? error?.error?.code ?? error?.error?.Code ?? ""
+  ).toLowerCase();
+  return code === "accessdenied" || code === "forbidden";
 }
 
 /** Build the URL form required by cos-nodejs-sdk-v5 putObjectCopy. */

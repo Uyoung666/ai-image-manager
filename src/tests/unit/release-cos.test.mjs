@@ -137,10 +137,15 @@ class FakeCosSdk {
     this.objects = new Map();
     this.calls = [];
     this.failPutCount = 0;
+    this.denyHead = false;
   }
 
   headObject(params, callback) {
     this.calls.push({ method: "headObject", params });
+    if (this.denyHead) {
+      callback(Object.assign(new Error("forbidden"), { statusCode: 403 }));
+      return;
+    }
     const object = this.objects.get(params.Key);
     if (!object) {
       callback(Object.assign(new Error("missing"), { statusCode: 404 }));
@@ -173,6 +178,13 @@ class FakeCosSdk {
     if (this.failPutCount > 0) {
       this.failPutCount -= 1;
       callback(Object.assign(new Error("temporary"), { statusCode: 503 }));
+      return;
+    }
+    if (
+      this.objects.has(params.Key) &&
+      params.Headers["x-cos-forbid-overwrite"] === "true"
+    ) {
+      callback(Object.assign(new Error("conflict"), { statusCode: 409 }));
       return;
     }
     const chunks = [];
@@ -404,6 +416,30 @@ describe("CosStore SDK v3 boundary", () => {
       .filter((call) => call.method === "putObject")
       .at(-1);
     expect(mutablePut.params.Headers["x-cos-forbid-overwrite"]).toBeUndefined();
+  });
+
+  it("allows a fresh immutable upload with write-only COS permissions", async () => {
+    const sdk = new FakeCosSdk();
+    sdk.denyHead = true;
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryDelayMs: 0,
+    });
+    const payload = Buffer.from("write-only payload");
+
+    await expect(
+      store.putBytes("write-only.bin", payload)
+    ).resolves.toMatchObject({ status: "uploaded" });
+    const putCall = sdk.calls.find((call) => call.method === "putObject");
+    expect(putCall.params.Headers["x-cos-forbid-overwrite"]).toBe("true");
+    expect(sdk.objects.get("write-only.bin").data.equals(payload)).toBe(true);
+
+    await expect(store.putBytes("write-only.bin", payload)).rejects.toThrow(
+      /forbidden/i
+    );
+    expect(sdk.objects.get("write-only.bin").data.equals(payload)).toBe(true);
   });
 
   it("streams the putObject fallback instead of reading a whole file", async () => {
