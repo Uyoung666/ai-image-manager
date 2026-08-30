@@ -15,6 +15,9 @@ const DIAGNOSTICS_NAME = /^(帮助与诊断|Help & Diagnostics)$/;
 const GENERATE_NAME = /^(生成诊断包并前往反馈|Generate bundle and report)$/;
 const READY_NAME = /^(诊断包已准备好|Diagnostic bundle is ready)$/;
 const DIAGNOSTIC_ZIP_PATTERN = /AI-Image-Manager-Diagnostics-AIM-.*\.zip$/;
+const { version: APP_VERSION } = JSON.parse(
+  fs.readFileSync(path.resolve("package.json"), "utf8")
+) as { version: string };
 
 let electronApp: ElectronApplication | undefined;
 let page: Page | undefined;
@@ -141,7 +144,9 @@ test("exports within the target time and hands off a prefilled issue", async () 
 
   const issueUrl = new URL(handoff?.issueUrl ?? "");
   expect(issueUrl.hostname).toBe("github.com");
-  expect(issueUrl.searchParams.get("title")).toContain("[Bug][v2.0.0]");
+  expect(issueUrl.searchParams.get("title")).toContain(
+    `[Bug][v${APP_VERSION}]`
+  );
   expect(issueUrl.searchParams.get("body")).toContain("Clicked AI indexing");
   expect(issueUrl.searchParams.get("body")).toContain(
     "Drag the ZIP highlighted by the app here."
