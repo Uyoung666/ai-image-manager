@@ -47,7 +47,7 @@ env:
 jobs:
   candidate:
     name: Build, test, and stage candidate
-    runs-on: windows-latest
+    runs-on: windows-2022
     # Configure this environment with required reviewers. This is the first
     # human gate: approval authorizes publishing the tested run to candidate
     # and creating the GitHub Draft.

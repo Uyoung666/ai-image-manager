@@ -34,7 +34,7 @@ env:
 jobs:
   promote:
     name: Verify candidate and promote stable
-    runs-on: windows-latest
+    runs-on: windows-2022
     # Configure this environment with a separate required-reviewer set. This
     # is the second human gate, after candidate bytes and attestations pass.
     environment: release-stable

@@ -8,7 +8,7 @@ on:
 jobs:
   tests-unit:
     timeout-minutes: 20
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -28,20 +28,7 @@ jobs:
           AIM_MODEL_SCOPE: face,Xenova/siglip-base-patch16-224
         run: node --loader ts-node/esm scripts/prepare-models.mjs
       - name: Run unit tests
-        run: >-
-          npm run test:unit -- run
-          --exclude src/tests/unit/face-data-migration.test.mjs
-          --exclude src/tests/unit/plugin-cli.test.ts
-          --exclude src/tests/unit/plugin-cli-locale.test.ts
-          --exclude src/tests/unit/release-cos.test.mjs
-          --exclude src/tests/unit/sequence-card.test.tsx
-      - name: Run isolated CLI and timer-sensitive tests
-        run: >-
-          npm run test:unit -- run
-          src/tests/unit/plugin-cli.test.ts
-          src/tests/unit/plugin-cli-locale.test.ts
-          src/tests/unit/release-cos.test.mjs
-          src/tests/unit/sequence-card.test.tsx
+        run: npm run test:unit -- run --exclude src/tests/unit/face-data-migration.test.mjs
       - name: Run AI integration tests
         run: npm run test:ai-integration
       - name: Run worker tests
@@ -49,7 +36,7 @@ jobs:
 
   test-face-migration:
     timeout-minutes: 20
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -75,7 +62,7 @@ jobs:
 
   test-e2e:
     timeout-minutes: 20
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
