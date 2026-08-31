@@ -466,10 +466,9 @@ function inspectPackagedReadiness(
   previousReadiness,
   appLogPath,
   previousAppLog,
-  label,
-  allowExited = false
+  label
 ) {
-  if (childHasExited(child) && !allowExited) {
+  if (childHasExited(child)) {
     return {
       error: new Error(
         `${label} exited before startup confirmation (${describeChildExit(child)})`
@@ -568,28 +567,6 @@ function waitForPackagedReady(
       fail(new Error(`${label} failed to start: ${error.message}`));
     };
     const onExit = (code, signal) => {
-      if (code === 0) {
-        const observation = inspectPackagedReadiness(
-          child,
-          executablePath,
-          readinessLogPath,
-          previousReadiness,
-          appLogPath,
-          previousAppLog,
-          label,
-          true
-        );
-        if (observation.error) {
-          fail(observation.error);
-          return;
-        }
-        if (observation.ready) {
-          settled = true;
-          cleanup();
-          resolve(observation.state);
-          return;
-        }
-      }
       fail(
         new Error(
           `${label} exited before startup confirmation (${describeChildExit(child, code, signal)})`
@@ -851,19 +828,15 @@ async function runPackagedE2E(
 
   console.log(`[installer-smoke] ${label}`);
   try {
-    child = spawnProcess(
-      executableInfo.path,
-      ["--e2e", "--e2e-quit-after-ready"],
-      {
-        env: {
-          ...process.env,
-          AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
-          CI: "e2e",
-        },
-        stdio: "ignore",
-        windowsHide: true,
-      }
-    );
+    child = spawnProcess(executableInfo.path, ["--e2e"], {
+      env: {
+        ...process.env,
+        AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
+        CI: "e2e",
+      },
+      stdio: "ignore",
+      windowsHide: true,
+    });
     await waitForPackagedReady(
       child,
       executableInfo.path,
