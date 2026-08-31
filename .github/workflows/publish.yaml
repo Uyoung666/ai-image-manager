@@ -77,8 +77,9 @@ jobs:
           WORKFLOW_SHA: ${{ github.sha }}
         run: |
           # Keep application sources pinned to the immutable tag while allowing
-          # reviewed release-automation fixes to recover a failed candidate.
-          git checkout $env:WORKFLOW_SHA -- scripts/release scripts/release-cos.mjs
+          # reviewed release-automation fixes and their focused tests to recover
+          # a failed candidate without mixing tool and test revisions.
+          git checkout $env:WORKFLOW_SHA -- scripts/release scripts/release-cos.mjs src/tests/unit/release-cos.test.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to restore release tooling from $env:WORKFLOW_SHA"
           }
