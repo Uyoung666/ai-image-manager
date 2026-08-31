@@ -35,8 +35,7 @@ const PACKAGED_EXECUTABLE_PATTERN = /(?:^|[\\/])ai-image-manager\.exe$/iu;
 const SQUIRREL_APP_VERSION_PATH_PATTERN =
   /[\\/]app-(\d+\.\d+\.\d+)(?:[\\/]|$)/iu;
 const READY_MARKER_PATTERN = /^WHENREADY\s/imu;
-const APP_READY_MARKER_PATTERN =
-  /Window ready — starting background services\.\.\./u;
+const MAIN_READY_MARKER_PATTERN = /\[bg\] startLevel\(Critical\) begin/u;
 const STARTUP_FAILURE_MARKER_PATTERN = /^CATCH\s/imu;
 const ALLOWED_MSI_EXIT_CODES = new Set([0, 1641, 3010]);
 const SQUIRREL_EXIT_CODES = new Set([0]);
@@ -464,11 +463,12 @@ function inspectPackagedReadiness(
   executablePath,
   readinessLogPath,
   previousReadiness,
-  appLogPath,
-  previousAppLog,
-  label
+  mainLogPath,
+  previousMainLog,
+  label,
+  allowExited = false
 ) {
-  if (childHasExited(child)) {
+  if (childHasExited(child) && !allowExited) {
     return {
       error: new Error(
         `${label} exited before startup confirmation (${describeChildExit(child)})`
@@ -508,12 +508,16 @@ function inspectPackagedReadiness(
     return { ready: false };
   }
 
-  const currentMainLog = readReadinessState(appLogPath);
+  const currentMainLog = readReadinessState(mainLogPath);
   if (currentMainLog.error) {
     return { ready: false };
   }
   if (
-    !hasFreshLogMarker(previousAppLog, currentMainLog, APP_READY_MARKER_PATTERN)
+    !hasFreshLogMarker(
+      previousMainLog,
+      currentMainLog,
+      MAIN_READY_MARKER_PATTERN
+    )
   ) {
     return { ready: false };
   }
@@ -524,8 +528,8 @@ function waitForPackagedReady(
   executablePath,
   readinessLogPath,
   previousReadiness,
-  appLogPath,
-  previousAppLog,
+  mainLogPath,
+  previousMainLog,
   label,
   {
     startupTimeoutMs = PACKAGED_E2E_STARTUP_TIMEOUT_MS,
@@ -567,6 +571,28 @@ function waitForPackagedReady(
       fail(new Error(`${label} failed to start: ${error.message}`));
     };
     const onExit = (code, signal) => {
+      if (code === 0) {
+        const observation = inspectPackagedReadiness(
+          child,
+          executablePath,
+          readinessLogPath,
+          previousReadiness,
+          mainLogPath,
+          previousMainLog,
+          label,
+          true
+        );
+        if (observation.error) {
+          fail(observation.error);
+          return;
+        }
+        if (observation.ready) {
+          settled = true;
+          cleanup();
+          resolve(observation.state);
+          return;
+        }
+      }
       fail(
         new Error(
           `${label} exited before startup confirmation (${describeChildExit(child, code, signal)})`
@@ -586,8 +612,8 @@ function waitForPackagedReady(
         executablePath,
         readinessLogPath,
         previousReadiness,
-        appLogPath,
-        previousAppLog,
+        mainLogPath,
+        previousMainLog,
         label
       );
       if (observation.error) {
@@ -616,7 +642,7 @@ function waitForPackagedReady(
     timer = setTimeout(() => {
       fail(
         new Error(
-          `${label} timed out waiting for fresh WHENREADY startup marker and fresh app.log startup marker after ${startupTimeoutMs}ms`
+          `${label} timed out waiting for fresh WHENREADY startup marker and fresh main.log startup marker after ${startupTimeoutMs}ms`
         )
       );
     }, startupTimeoutMs);
@@ -722,6 +748,9 @@ function tryTerminatePackagedChild(child) {
 }
 
 async function tryTerminatePackagedTree(child, spawnProcess, forceKill) {
+  if (childHasExited(child)) {
+    return undefined;
+  }
   if (process.platform === "win32") {
     try {
       await forceKill(child.pid, spawnProcess);
@@ -777,6 +806,9 @@ async function terminatePackagedProcess(
   if (!(child && hasValidProcessId(child))) {
     return;
   }
+  if (childHasExited(child)) {
+    return;
+  }
 
   const initialKillError = tryTerminatePackagedChild(child);
   const treeKillError = await tryTerminatePackagedTree(
@@ -821,29 +853,33 @@ async function runPackagedE2E(
     "whenReady.log"
   );
   const previousReadiness = readReadinessState(readinessLogPath);
-  const appLogPath = path.join(userDataDirectory, "logs", "app.log");
-  const previousAppLog = readReadinessState(appLogPath);
+  const mainLogPath = path.join(userDataDirectory, "logs", "main.log");
+  const previousMainLog = readReadinessState(mainLogPath);
   let child;
   let failure;
 
   console.log(`[installer-smoke] ${label}`);
   try {
-    child = spawnProcess(executableInfo.path, ["--e2e"], {
-      env: {
-        ...process.env,
-        AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
-        CI: "e2e",
-      },
-      stdio: "ignore",
-      windowsHide: true,
-    });
+    child = spawnProcess(
+      executableInfo.path,
+      ["--e2e", "--e2e-quit-after-ready"],
+      {
+        env: {
+          ...process.env,
+          AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
+          CI: "e2e",
+        },
+        stdio: "ignore",
+        windowsHide: true,
+      }
+    );
     await waitForPackagedReady(
       child,
       executableInfo.path,
       readinessLogPath,
       previousReadiness,
-      appLogPath,
-      previousAppLog,
+      mainLogPath,
+      previousMainLog,
       label,
       { startupTimeoutMs, pollIntervalMs, readyStabilityMs }
     );
