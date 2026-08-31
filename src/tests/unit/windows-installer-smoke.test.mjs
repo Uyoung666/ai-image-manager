@@ -156,6 +156,128 @@ describe("windows installer packaged E2E launcher", () => {
     expect(child.kills).toBe(0);
   });
 
+  it("accepts a clean exit after complete fresh readiness logs", async () => {
+    const executable = createExecutable();
+    const userDataDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ai-image-manager-e2e-user-data-")
+    );
+    fixtureRoots.add(userDataDirectory);
+    let child;
+
+    const result = await runPackagedE2E(
+      executable,
+      "clean-exit packaged test app",
+      userDataDirectory,
+      "2.1.0",
+      {
+        spawnProcess: (file) => {
+          child = createChild(file);
+          queueMicrotask(() => {
+            child.emit("spawn");
+            fs.mkdirSync(path.dirname(readinessLog(userDataDirectory)), {
+              recursive: true,
+            });
+            fs.writeFileSync(
+              readinessLog(userDataDirectory),
+              `WHENREADY ${new Date().toISOString()}\n`
+            );
+            fs.writeFileSync(
+              appLog(userDataDirectory),
+              `app ${new Date().toISOString()} Window ready — starting background services...\n`
+            );
+            child.exitCode = 0;
+            child.emit("exit", 0, null);
+          });
+          return child;
+        },
+        pollIntervalMs: 5,
+        readyStabilityMs: 1000,
+        startupTimeoutMs: 250,
+        terminationTimeoutMs: 100,
+        forceKill: noOpForceKill,
+      }
+    );
+
+    expect(result).toBe(userDataDirectory);
+    expect(child.kills).toBe(0);
+  });
+
+  it("rejects a clean exit without fresh readiness logs", async () => {
+    const executable = createExecutable();
+    const userDataDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ai-image-manager-e2e-user-data-")
+    );
+    fixtureRoots.add(userDataDirectory);
+    let child;
+
+    await expect(
+      runPackagedE2E(
+        executable,
+        "unconfirmed clean-exit packaged test app",
+        userDataDirectory,
+        "2.1.0",
+        {
+          spawnProcess: (file) => {
+            child = createChild(file);
+            queueMicrotask(() => {
+              child.emit("spawn");
+              child.exitCode = 0;
+              child.emit("exit", 0, null);
+            });
+            return child;
+          },
+          pollIntervalMs: 5,
+          readyStabilityMs: 1000,
+          startupTimeoutMs: 250,
+          terminationTimeoutMs: 100,
+          forceKill: noOpForceKill,
+        }
+      )
+    ).rejects.toThrow(IMMEDIATE_EXIT_ERROR_PATTERN);
+    expect(child.kills).toBe(0);
+  });
+
+  it("rejects a clean exit with a fresh CATCH marker", async () => {
+    const executable = createExecutable();
+    const userDataDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "ai-image-manager-e2e-user-data-")
+    );
+    fixtureRoots.add(userDataDirectory);
+    let child;
+
+    await expect(
+      runPackagedE2E(
+        executable,
+        "failed clean-exit packaged test app",
+        userDataDirectory,
+        "2.1.0",
+        {
+          spawnProcess: (file) => {
+            child = createChild(file);
+            queueMicrotask(() => {
+              child.emit("spawn");
+              fs.mkdirSync(path.dirname(readinessLog(userDataDirectory)), {
+                recursive: true,
+              });
+              fs.writeFileSync(
+                readinessLog(userDataDirectory),
+                "CATCH clean exit startup failure\n"
+              );
+              child.exitCode = 0;
+              child.emit("exit", 0, null);
+            });
+            return child;
+          },
+          pollIntervalMs: 5,
+          readyStabilityMs: 1000,
+          startupTimeoutMs: 250,
+          terminationTimeoutMs: 100,
+          forceKill: noOpForceKill,
+        }
+      )
+    ).rejects.toThrow(STARTUP_FAILURE_ERROR_PATTERN);
+    expect(child.kills).toBe(0);
+  });
   it("does not accept a stale readiness marker", async () => {
     const executable = createExecutable();
     const userDataDirectory = fs.mkdtempSync(

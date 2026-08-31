@@ -466,9 +466,10 @@ function inspectPackagedReadiness(
   previousReadiness,
   appLogPath,
   previousAppLog,
-  label
+  label,
+  allowExited = false
 ) {
-  if (childHasExited(child)) {
+  if (childHasExited(child) && !allowExited) {
     return {
       error: new Error(
         `${label} exited before startup confirmation (${describeChildExit(child)})`
@@ -567,6 +568,28 @@ function waitForPackagedReady(
       fail(new Error(`${label} failed to start: ${error.message}`));
     };
     const onExit = (code, signal) => {
+      if (code === 0) {
+        const observation = inspectPackagedReadiness(
+          child,
+          executablePath,
+          readinessLogPath,
+          previousReadiness,
+          appLogPath,
+          previousAppLog,
+          label,
+          true
+        );
+        if (observation.error) {
+          fail(observation.error);
+          return;
+        }
+        if (observation.ready) {
+          settled = true;
+          cleanup();
+          resolve(observation.state);
+          return;
+        }
+      }
       fail(
         new Error(
           `${label} exited before startup confirmation (${describeChildExit(child, code, signal)})`

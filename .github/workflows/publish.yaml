@@ -79,7 +79,7 @@ jobs:
           # Keep application sources pinned to the immutable tag while allowing
           # reviewed release-automation fixes and their focused tests to recover
           # a failed candidate without mixing tool and test revisions.
-          git checkout $env:WORKFLOW_SHA -- scripts/release scripts/release-cos.mjs scripts/windows-installer-smoke.mjs src/tests/unit/release-cos.test.mjs
+          git checkout $env:WORKFLOW_SHA -- scripts/release scripts/release-cos.mjs scripts/windows-installer-smoke.mjs src/tests/unit/release-cos.test.mjs src/tests/unit/windows-installer-smoke.test.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to restore release tooling from $env:WORKFLOW_SHA"
           }
