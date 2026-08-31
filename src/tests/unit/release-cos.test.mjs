@@ -357,10 +357,11 @@ describe("CosStore SDK v3 boundary", () => {
       Key: "dir/space file.bin",
       Headers: {},
     });
-    const uploadCall = sdk.calls.find((call) => call.method === "uploadFile");
-    expect(uploadCall.params.FilePath).toBe(filePath);
-    expect(uploadCall.params.Body).toBeUndefined();
+    const uploadCall = sdk.calls.find((call) => call.method === "putObject");
+    expect(Buffer.isBuffer(uploadCall.params.Body)).toBe(false);
+    expect(uploadCall.params.ContentLength).toBe(payload.byteLength);
     expect(uploadCall.params.Headers["x-cos-forbid-overwrite"]).toBe("true");
+    expect(sdk.calls.some((call) => call.method === "uploadFile")).toBe(false);
 
     const sourceKey = "dir/space file+%?#.bin";
     sdk.objects.set(sourceKey, { data: payload, sha256: sha256(payload) });

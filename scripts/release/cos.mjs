@@ -151,39 +151,24 @@ export class CosStore {
     });
     let data;
     try {
-      if (typeof this.client.uploadFile === "function") {
-        data = await invokeCos(
-          this.client,
-          "uploadFile",
-          {
-            Bucket: this.bucket,
-            Region: this.region,
-            Key: normalizedKey,
-            FilePath: filePath,
-            SliceSize: this.sliceSize,
-            Headers: headers,
-            ContentLength: expectedSize,
-          },
-          this.requestOptions()
-        );
-      } else {
-        // Keep the fallback streaming as well.  The SDK's uploadFile path is
-        // preferred because it transparently switches to multipart upload for
-        // large files; a simple putObject must never force a 500MB readFile().
-        data = await invokeCos(
-          this.client,
-          "putObject",
-          {
-            Bucket: this.bucket,
-            Region: this.region,
-            Key: normalizedKey,
-            Body: createReadStream(filePath),
-            ContentLength: expectedSize,
-            Headers: headers,
-          },
-          { retryCount: 0 }
-        );
-      }
+      // The SDK's multipart helper drops x-cos-forbid-overwrite when it sends
+      // CompleteMultipartUpload. That makes a CAM policy which requires this
+      // header reject the final request. Release artifacts stay below COS's
+      // 5 GB PutObject limit, so stream them through one signed request and
+      // preserve the immutable-upload header end to end.
+      data = await invokeCos(
+        this.client,
+        "putObject",
+        {
+          Bucket: this.bucket,
+          Region: this.region,
+          Key: normalizedKey,
+          Body: createReadStream(filePath),
+          ContentLength: expectedSize,
+          Headers: headers,
+        },
+        { retryCount: 0 }
+      );
     } catch (error) {
       const idempotent = await this.resolveImmutableRace(
         normalizedKey,
