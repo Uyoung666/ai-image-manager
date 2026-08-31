@@ -70,6 +70,19 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
+      - name: Restore current release tooling for manual retry
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          # Keep application sources pinned to the immutable tag while allowing
+          # reviewed release-automation fixes to recover a failed candidate.
+          git checkout $env:WORKFLOW_SHA -- scripts/release scripts/release-cos.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to restore release tooling from $env:WORKFLOW_SHA"
+          }
+
       - name: Set up Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v6
         with:

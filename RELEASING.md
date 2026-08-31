@@ -22,7 +22,7 @@ v2.1.0
 
 ### 2. 运行候选构建
 
-推送 `v2.1.0` 自动触发 `.github/workflows/publish.yaml`。如果在 immutable `testing/runs/<run-id>`、`candidates/<版本>` 或 `downloads/<版本>` 尚未写入前失败，可以在 Actions 页面用同一个版本（不带 `v`）重跑；这不会创建新 tag。若任一 immutable 对象已经写入，只有新构建字节完全相同才会被 COS 幂等接受；如果重建产生不同字节，必须递增 patch 版本并创建新 tag，不能覆盖原对象。
+推送 `v2.1.0` 自动触发 `.github/workflows/publish.yaml`。如果在 immutable `testing/runs/<run-id>`、`candidates/<版本>` 或 `downloads/<版本>` 尚未写入前失败，可以在 Actions 页面用同一个版本（不带 `v`）重跑；这不会创建新 tag。手动重跑仍从不可变 tag 构建应用，只会从触发它的 `main` 提交恢复 `scripts/release/` 和 `scripts/release-cos.mjs`，以便发布自动化本身的修复生效。若任一 immutable 对象已经写入，只有新构建字节完全相同才会被 COS 幂等接受；如果重建产生不同字节，必须递增 patch 版本并创建新 tag，不能覆盖原对象。
 
 候选工作流依次执行（第一个 environment 审核在 job 开始前发生）：
 
