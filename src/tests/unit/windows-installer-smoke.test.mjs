@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPackagedExecutable,
+  findInstalledExecutable,
   forceKillProcessTree,
   runPackagedE2E,
   terminatePackagedProcess,
@@ -56,6 +57,24 @@ function readinessLog(userDataDirectory) {
 
 function mainLog(userDataDirectory) {
   return path.join(userDataDirectory, "logs", "main.log");
+}
+
+function createMsiInstallRoot() {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ai-image-manager-msi-layout-test-")
+  );
+  fixtureRoots.add(root);
+  fs.writeFileSync(path.join(root, "ai-image-manager.exe"), "root stub");
+  for (const version of ["2.0.0", "2.1.0"]) {
+    const executable = path.join(
+      root,
+      `app-${version}`,
+      "ai-image-manager.exe"
+    );
+    fs.mkdirSync(path.dirname(executable), { recursive: true });
+    fs.writeFileSync(executable, `real ${version}`);
+  }
+  return root;
 }
 
 afterEach(() => {
@@ -491,6 +510,24 @@ describe("windows installer packaged E2E launcher", () => {
 
     expect(killedPids).toEqual([]);
     expect(child.kills).toBe(0);
+  });
+
+  it("selects the requested MSI versioned executable instead of the root stub", () => {
+    const installRoot = createMsiInstallRoot();
+    expect(findInstalledExecutable(installRoot, "v2.1.0")).toBe(
+      path.join(installRoot, "app-2.1.0", "ai-image-manager.exe")
+    );
+    expect(findInstalledExecutable(installRoot, "2.0.0")).toBe(
+      path.join(installRoot, "app-2.0.0", "ai-image-manager.exe")
+    );
+    expect(findInstalledExecutable(installRoot, "2.2.0")).toBeUndefined();
+  });
+
+  it("selects the requested executable under a custom MSI root", () => {
+    const customRoot = createMsiInstallRoot();
+    expect(findInstalledExecutable(customRoot, "2.1.0")).toBe(
+      path.join(customRoot, "app-2.1.0", "ai-image-manager.exe")
+    );
   });
 
   it("handles taskkill spawn errors and exit events without listener races", async () => {

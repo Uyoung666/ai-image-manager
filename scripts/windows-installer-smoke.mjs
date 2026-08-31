@@ -1151,43 +1151,25 @@ function registryProducts() {
     .filter((product) => APPLICATION_NAME_PATTERN.test(product.DisplayName));
 }
 
-function findInstalledExecutable(installLocation) {
+function findInstalledExecutable(installLocation, expectedVersion) {
   const resolvedRoot = path.resolve(installLocation);
-  const directCandidates = [
-    path.join(resolvedRoot, "ai-image-manager.exe"),
-    path.join(resolvedRoot, "current", "ai-image-manager.exe"),
-  ];
-  const direct = directCandidates.find((candidate) => fs.existsSync(candidate));
-  if (direct) {
-    return direct;
+  const version = normalizeStableVersion(
+    expectedVersion,
+    "installed MSI app version"
+  );
+  const candidate = path.join(
+    resolvedRoot,
+    `app-${version}`,
+    "ai-image-manager.exe"
+  );
+  if (!fs.existsSync(candidate)) {
+    return undefined;
   }
-
-  const queue = [{ directory: resolvedRoot, depth: 0 }];
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) {
-      break;
-    }
-    let entries;
-    try {
-      entries = fs.readdirSync(current.directory, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const candidate = path.join(current.directory, entry.name);
-      if (
-        entry.isFile() &&
-        entry.name.toLowerCase() === "ai-image-manager.exe"
-      ) {
-        return candidate;
-      }
-      if (entry.isDirectory() && current.depth < 3) {
-        queue.push({ directory: candidate, depth: current.depth + 1 });
-      }
-    }
+  try {
+    return fs.statSync(candidate).isFile() ? candidate : undefined;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 async function waitForNoMsiProduct(timeoutMs = 2 * 60 * 1000) {
@@ -1281,7 +1263,8 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
     const defaultProduct = assertMsiInstalled(version);
     assertMsiAutoUpdater(defaultProduct);
     const defaultExecutable = findInstalledExecutable(
-      defaultProduct.InstallLocation
+      defaultProduct.InstallLocation,
+      version
     );
     if (!defaultExecutable) {
       throw new Error(
@@ -1327,7 +1310,8 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
     const customProduct = assertMsiInstalled(version, customDirectory);
     assertMsiAutoUpdater(customProduct);
     const customExecutable = findInstalledExecutable(
-      customProduct.InstallLocation
+      customProduct.InstallLocation,
+      version
     );
     if (!customExecutable) {
       throw new Error(
@@ -1429,7 +1413,10 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       `preserve-${normalizedOldVersion}\n`,
       "utf8"
     );
-    const oldExecutable = findInstalledExecutable(oldProduct.InstallLocation);
+    const oldExecutable = findInstalledExecutable(
+      oldProduct.InstallLocation,
+      normalizedOldVersion
+    );
     if (!oldExecutable) {
       throw new Error(
         `Previous MSI executable was not found under ${oldProduct.InstallLocation}`
@@ -1466,7 +1453,8 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       );
     }
     const upgradedExecutable = findInstalledExecutable(
-      upgradedProduct.InstallLocation
+      upgradedProduct.InstallLocation,
+      version
     );
     if (!upgradedExecutable) {
       throw new Error(
@@ -1515,7 +1503,8 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
     const customProduct = assertMsiInstalled(version, customDirectory);
     assertMsiAutoUpdater(customProduct);
     const customExecutable = findInstalledExecutable(
-      customProduct.InstallLocation
+      customProduct.InstallLocation,
+      version
     );
     if (!customExecutable) {
       throw new Error(
@@ -1610,6 +1599,7 @@ async function main() {
 
 export {
   assertPackagedExecutable,
+  findInstalledExecutable,
   forceKillProcessTree,
   readReadinessState,
   runPackagedE2E,
