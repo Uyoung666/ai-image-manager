@@ -67,6 +67,7 @@ jobs:
         env:
           VERSION_INPUT: ${{ inputs.version }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          PROMOTION_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           $version = ($env:VERSION_INPUT.Trim() -replace '^v', '')
           if ($version -notmatch '^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$') {
@@ -116,15 +117,30 @@ jobs:
             Write-Host "GitHub Release $tag is already published; continuing idempotent retry."
           }
 
-          $runs = @(gh run list --workflow publish.yaml --limit 100 --json databaseId,headSha,status,conclusion,event)
+          $trustedWorkflowSha = $env:PROMOTION_WORKFLOW_SHA.Trim()
+          if ($trustedWorkflowSha -notmatch '^[0-9a-fA-F]{40}$') {
+            throw "Promotion workflow SHA is invalid: $trustedWorkflowSha"
+          }
+          $runs = @(gh run list --workflow publish.yaml --limit 100 --json databaseId,headSha,status,conclusion,event,headBranch)
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to list candidate workflow runs"
           }
           $runRecords = $runs | ConvertFrom-Json
           $candidateRun = @($runRecords | Where-Object {
-            $_.headSha -eq $tagCommit -and
             $_.status -eq "completed" -and
-            $_.conclusion -eq "success"
+            $_.conclusion -eq "success" -and
+            (
+              (
+                $_.event -eq "push" -and
+                $_.headBranch -eq $tag -and
+                $_.headSha -eq $tagCommit
+              ) -or
+              (
+                $_.event -eq "workflow_dispatch" -and
+                $_.headBranch -eq "main" -and
+                $_.headSha -eq $trustedWorkflowSha
+              )
+            )
           } | Select-Object -First 1)
           if ($candidateRun.Count -ne 1) {
             throw "No successful publish.yaml candidate run was found for $tag at commit $tagCommit"
@@ -206,7 +222,7 @@ jobs:
               $smoke.msiSmokeMode -eq "fresh-bootstrap"
             )
           if (-not $allowedMsiMode) {
-            throw "MSI smoke mode is not allowed for v$env:RELEASE_VERSION: $($smoke.msiSmokeMode)"
+            throw "MSI smoke mode is not allowed for v$($env:RELEASE_VERSION): $($smoke.msiSmokeMode)"
           }
 
           $listed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -224,7 +240,7 @@ jobs:
             }
             $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $expected) {
-              throw "SHA-256 mismatch for $relative: expected $expected, received $actual"
+              throw "SHA-256 mismatch for $($relative): expected $expected, received $actual"
             }
             [void]$listed.Add($relative)
           }

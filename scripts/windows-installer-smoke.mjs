@@ -10,7 +10,7 @@
  * baseline. Both installer paths also exercise the candidate installer.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,6 +18,7 @@ import path from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 
 const WINDOWS_EXE_PATTERN = /\.exe$/iu;
 const WINDOWS_MSI_PATTERN = /\.msi$/iu;
@@ -30,8 +31,19 @@ const WINDOWS_TRAILING_SLASH_PATTERN = /[\\/]+$/u;
 const REGISTRY_LINE_PATTERN = /^\s{4}([^\s]+)\s+REG_\w+\s+(.*)$/u;
 const REGISTRY_LINE_SPLIT_PATTERN = /\r?\n/gu;
 const APPLICATION_NAME_PATTERN = /AI Image Manager/iu;
+const PACKAGED_EXECUTABLE_PATTERN = /(?:^|[\\/])ai-image-manager\.exe$/iu;
+const SQUIRREL_APP_VERSION_PATH_PATTERN =
+  /[\\/]app-(\d+\.\d+\.\d+)(?:[\\/]|$)/iu;
+const READY_MARKER_PATTERN = /^WHENREADY\s/imu;
+const APP_READY_MARKER_PATTERN =
+  /Window ready — starting background services\.\.\./u;
+const STARTUP_FAILURE_MARKER_PATTERN = /^CATCH\s/imu;
 const ALLOWED_MSI_EXIT_CODES = new Set([0, 1641, 3010]);
 const SQUIRREL_EXIT_CODES = new Set([0]);
+const PACKAGED_E2E_STARTUP_TIMEOUT_MS = 2 * 60 * 1000;
+const PACKAGED_E2E_READY_STABILITY_MS = 1000;
+const PACKAGED_E2E_POLL_INTERVAL_MS = 250;
+const PACKAGED_E2E_TERMINATION_TIMEOUT_MS = 15 * 1000;
 
 function usage() {
   console.error(`Usage:
@@ -305,25 +317,569 @@ async function waitForSquirrelRoot(version, timeoutMs = 5 * 60 * 1000) {
   );
 }
 
-function runPackagedE2E(
+function childHasExited(child) {
+  return (
+    (child.exitCode !== null && child.exitCode !== undefined) ||
+    (child.signalCode !== null && child.signalCode !== undefined)
+  );
+}
+
+function describeChildExit(
+  child,
+  code = child.exitCode,
+  signal = child.signalCode
+) {
+  if (signal) {
+    return `signal ${signal}`;
+  }
+  if (code !== null && code !== undefined) {
+    return `exit code ${code}`;
+  }
+  return "unknown exit status";
+}
+
+function readReadinessState(readinessLogPath) {
+  try {
+    const stat = fs.statSync(readinessLogPath);
+    return {
+      exists: true,
+      mtimeMs: stat.mtimeMs,
+      content: fs.readFileSync(readinessLogPath, "utf8"),
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { exists: false, mtimeMs: 0, content: "" };
+    }
+    return {
+      exists: false,
+      mtimeMs: 0,
+      content: "",
+      error,
+    };
+  }
+}
+
+function isFreshReadinessState(previous, current) {
+  if (!current.exists || current.error) {
+    return false;
+  }
+  return (
+    !previous.exists ||
+    current.mtimeMs > previous.mtimeMs ||
+    current.content !== previous.content
+  );
+}
+
+function hasFreshLogMarker(previous, current, pattern) {
+  if (!isFreshReadinessState(previous, current)) {
+    return false;
+  }
+  const appendedContent =
+    previous.exists && current.content.startsWith(previous.content)
+      ? current.content.slice(previous.content.length)
+      : current.content;
+  return pattern.test(appendedContent);
+}
+
+function sameResolvedPath(left, right) {
+  return (
+    path
+      .resolve(left)
+      .replace(WINDOWS_TRAILING_SLASH_PATTERN, "")
+      .toLowerCase() ===
+    path
+      .resolve(right)
+      .replace(WINDOWS_TRAILING_SLASH_PATTERN, "")
+      .toLowerCase()
+  );
+}
+
+function assertPackagedExecutable(executable, expectedVersion = undefined) {
+  const executablePath = path.resolve(executable);
+  if (!fs.existsSync(executablePath)) {
+    throw new Error(`Packaged executable does not exist: ${executablePath}`);
+  }
+  if (!fs.statSync(executablePath).isFile()) {
+    throw new Error(`Packaged executable is not a file: ${executablePath}`);
+  }
+  if (!PACKAGED_EXECUTABLE_PATTERN.test(executablePath)) {
+    throw new Error(
+      `Packaged executable has an unexpected name: ${executablePath}`
+    );
+  }
+
+  const normalizedExpectedVersion = expectedVersion
+    ? normalizeStableVersion(expectedVersion, "packaged app version")
+    : undefined;
+  const pathVersion = executablePath.match(
+    SQUIRREL_APP_VERSION_PATH_PATTERN
+  )?.[1];
+  if (
+    normalizedExpectedVersion &&
+    pathVersion !== undefined &&
+    pathVersion !== normalizedExpectedVersion
+  ) {
+    throw new Error(
+      `Packaged executable version mismatch: expected ${normalizedExpectedVersion}, received ${pathVersion} from ${executablePath}`
+    );
+  }
+
+  return {
+    path: executablePath,
+    pathVersion,
+  };
+}
+
+function assertPackagedProcessIdentity(child, executablePath) {
+  if (!Number.isInteger(child.pid) || child.pid <= 0) {
+    throw new Error(
+      `Packaged executable did not provide a valid process id: ${executablePath}`
+    );
+  }
+  let processExecutable;
+  if (typeof child.spawnfile === "string") {
+    processExecutable = child.spawnfile;
+  } else if (
+    Array.isArray(child.spawnargs) &&
+    typeof child.spawnargs[0] === "string"
+  ) {
+    processExecutable = child.spawnargs[0];
+  }
+  if (
+    processExecutable &&
+    !sameResolvedPath(processExecutable, executablePath)
+  ) {
+    throw new Error(
+      `Packaged process executable mismatch: expected ${executablePath}, received ${processExecutable}`
+    );
+  }
+}
+
+function hasValidProcessId(child) {
+  return Number.isInteger(child.pid) && child.pid > 0;
+}
+
+function inspectPackagedReadiness(
+  child,
+  executablePath,
+  readinessLogPath,
+  previousReadiness,
+  appLogPath,
+  previousAppLog,
+  label
+) {
+  if (childHasExited(child)) {
+    return {
+      error: new Error(
+        `${label} exited before startup confirmation (${describeChildExit(child)})`
+      ),
+    };
+  }
+  try {
+    assertPackagedProcessIdentity(child, executablePath);
+  } catch (error) {
+    return { error };
+  }
+
+  const currentReadiness = readReadinessState(readinessLogPath);
+  if (currentReadiness.error) {
+    return { ready: false };
+  }
+  if (
+    hasFreshLogMarker(
+      previousReadiness,
+      currentReadiness,
+      STARTUP_FAILURE_MARKER_PATTERN
+    )
+  ) {
+    return {
+      error: new Error(
+        `${label} reported startup failure: ${currentReadiness.content.trim()}`
+      ),
+    };
+  }
+  if (
+    !hasFreshLogMarker(
+      previousReadiness,
+      currentReadiness,
+      READY_MARKER_PATTERN
+    )
+  ) {
+    return { ready: false };
+  }
+
+  const currentMainLog = readReadinessState(appLogPath);
+  if (currentMainLog.error) {
+    return { ready: false };
+  }
+  if (
+    !hasFreshLogMarker(previousAppLog, currentMainLog, APP_READY_MARKER_PATTERN)
+  ) {
+    return { ready: false };
+  }
+  return { ready: true, state: currentReadiness };
+}
+function waitForPackagedReady(
+  child,
+  executablePath,
+  readinessLogPath,
+  previousReadiness,
+  appLogPath,
+  previousAppLog,
+  label,
+  {
+    startupTimeoutMs = PACKAGED_E2E_STARTUP_TIMEOUT_MS,
+    pollIntervalMs = PACKAGED_E2E_POLL_INTERVAL_MS,
+    readyStabilityMs = PACKAGED_E2E_READY_STABILITY_MS,
+  } = {}
+) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let spawned = false;
+    let readySince;
+    let timer;
+    let interval;
+
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (interval) {
+        clearInterval(interval);
+      }
+      child.removeListener("spawn", onSpawn);
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+    };
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const onSpawn = () => {
+      spawned = true;
+      inspect();
+    };
+    const onError = (error) => {
+      fail(new Error(`${label} failed to start: ${error.message}`));
+    };
+    const onExit = (code, signal) => {
+      fail(
+        new Error(
+          `${label} exited before startup confirmation (${describeChildExit(child, code, signal)})`
+        )
+      );
+    };
+    const inspect = () => {
+      if (settled) {
+        return;
+      }
+      if (!(spawned || hasValidProcessId(child))) {
+        return;
+      }
+      spawned = true;
+      const observation = inspectPackagedReadiness(
+        child,
+        executablePath,
+        readinessLogPath,
+        previousReadiness,
+        appLogPath,
+        previousAppLog,
+        label
+      );
+      if (observation.error) {
+        fail(observation.error);
+        return;
+      }
+      if (!observation.ready) {
+        readySince = undefined;
+        return;
+      }
+      if (readySince === undefined) {
+        readySince = Date.now();
+        return;
+      }
+      if (Date.now() - readySince < readyStabilityMs) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(observation.state);
+    };
+
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+    child.once("exit", onExit);
+    timer = setTimeout(() => {
+      fail(
+        new Error(
+          `${label} timed out waiting for fresh WHENREADY startup marker and fresh app.log startup marker after ${startupTimeoutMs}ms`
+        )
+      );
+    }, startupTimeoutMs);
+    interval = setInterval(inspect, pollIntervalMs);
+    inspect();
+  });
+}
+function waitForChildExit(child, timeoutMs) {
+  if (childHasExited(child)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+      reject(new Error(`process did not exit within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const done = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+      resolve();
+    };
+    const onExit = () => done();
+    const onError = () => done();
+    child.once("exit", onExit);
+    child.once("error", onError);
+  });
+}
+
+function forceKillProcessTree(pid, spawnProcess = spawn) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    let killer;
+    const finish = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      killer?.removeListener("error", onError);
+      killer?.removeListener("exit", onExit);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const onError = (error) => finish(error);
+    const onExit = (code) => {
+      if (code === 0 || code === 128) {
+        finish();
+      } else {
+        finish(new Error(`taskkill.exe failed with exit code ${code ?? 1}`));
+      }
+    };
+
+    try {
+      killer = spawnProcess("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("error", onError);
+      killer.once("exit", onExit);
+    } catch (error) {
+      finish(error);
+      return;
+    }
+    if (childHasExited(killer)) {
+      onExit(killer.exitCode);
+      return;
+    }
+    timer = setTimeout(
+      () => finish(new Error("taskkill.exe timed out")),
+      PACKAGED_E2E_TERMINATION_TIMEOUT_MS
+    );
+  });
+}
+function tryTerminatePackagedChild(child) {
+  if (childHasExited(child)) {
+    return undefined;
+  }
+  try {
+    if (!child.kill()) {
+      return new Error("child.kill() returned false");
+    }
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+async function tryTerminatePackagedTree(child, spawnProcess, forceKill) {
+  if (process.platform === "win32") {
+    try {
+      await forceKill(child.pid, spawnProcess);
+      return undefined;
+    } catch (error) {
+      return childHasExited(child) ? undefined : error;
+    }
+  }
+  if (!childHasExited(child)) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* best-effort final termination */
+    }
+  }
+  return undefined;
+}
+
+function describeCleanupError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function waitForPackagedProcessExit(
+  child,
+  label,
+  timeoutMs,
+  initialKillError,
+  treeKillError
+) {
+  if (childHasExited(child)) {
+    return;
+  }
+  try {
+    await waitForChildExit(child, timeoutMs);
+  } catch (waitError) {
+    const reasons = [initialKillError, treeKillError, waitError]
+      .filter(Boolean)
+      .map(describeCleanupError)
+      .join("; ");
+    throw new Error(`${label} cleanup failed after ${reasons}`);
+  }
+}
+
+async function terminatePackagedProcess(
+  child,
+  label,
+  {
+    terminationTimeoutMs = PACKAGED_E2E_TERMINATION_TIMEOUT_MS,
+    spawnProcess = spawn,
+    forceKill = forceKillProcessTree,
+  } = {}
+) {
+  if (!(child && hasValidProcessId(child))) {
+    return;
+  }
+
+  const initialKillError = tryTerminatePackagedChild(child);
+  const treeKillError = await tryTerminatePackagedTree(
+    child,
+    spawnProcess,
+    forceKill
+  );
+  await waitForPackagedProcessExit(
+    child,
+    label,
+    terminationTimeoutMs,
+    initialKillError,
+    treeKillError
+  );
+  if (treeKillError) {
+    throw new Error(
+      `${label} process-tree cleanup failed: ${describeCleanupError(treeKillError)}`
+    );
+  }
+}
+async function runPackagedE2E(
   executable,
   label,
-  existingUserDataDirectory = undefined
+  existingUserDataDirectory = undefined,
+  expectedVersion = undefined,
+  {
+    spawnProcess = spawn,
+    startupTimeoutMs = PACKAGED_E2E_STARTUP_TIMEOUT_MS,
+    pollIntervalMs = PACKAGED_E2E_POLL_INTERVAL_MS,
+    readyStabilityMs = PACKAGED_E2E_READY_STABILITY_MS,
+    terminationTimeoutMs = PACKAGED_E2E_TERMINATION_TIMEOUT_MS,
+    forceKill = forceKillProcessTree,
+  } = {}
 ) {
+  const executableInfo = assertPackagedExecutable(executable, expectedVersion);
   const userDataDirectory =
     existingUserDataDirectory ??
     fs.mkdtempSync(path.join(os.tmpdir(), "ai-image-manager-installer-e2e-"));
-  run(
-    executable,
-    ["--e2e", "--e2e-quit-after-ready"],
-    label,
-    SQUIRREL_EXIT_CODES,
-    {
-      ...process.env,
-      AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
-      CI: "e2e",
-    }
+  const readinessLogPath = path.join(
+    userDataDirectory,
+    "logs",
+    "whenReady.log"
   );
+  const previousReadiness = readReadinessState(readinessLogPath);
+  const appLogPath = path.join(userDataDirectory, "logs", "app.log");
+  const previousAppLog = readReadinessState(appLogPath);
+  let child;
+  let failure;
+
+  console.log(`[installer-smoke] ${label}`);
+  try {
+    child = spawnProcess(
+      executableInfo.path,
+      ["--e2e", "--e2e-quit-after-ready"],
+      {
+        env: {
+          ...process.env,
+          AI_IMAGE_MANAGER_E2E_USER_DATA_DIR: userDataDirectory,
+          CI: "e2e",
+        },
+        stdio: "ignore",
+        windowsHide: true,
+      }
+    );
+    await waitForPackagedReady(
+      child,
+      executableInfo.path,
+      readinessLogPath,
+      previousReadiness,
+      appLogPath,
+      previousAppLog,
+      label,
+      { startupTimeoutMs, pollIntervalMs, readyStabilityMs }
+    );
+  } catch (error) {
+    failure = error instanceof Error ? error : new Error(String(error));
+  }
+
+  if (child) {
+    try {
+      await terminatePackagedProcess(child, label, {
+        terminationTimeoutMs,
+        spawnProcess,
+        forceKill,
+      });
+    } catch (cleanupError) {
+      if (failure) {
+        console.error(
+          `[installer-smoke] cleanup warning: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+        );
+      } else {
+        failure =
+          cleanupError instanceof Error
+            ? cleanupError
+            : new Error(String(cleanupError));
+      }
+    }
+  }
+
+  if (failure) {
+    throw failure;
+  }
+  console.log(`[installer-smoke] ${label} ready and process stopped`);
   return userDataDirectory;
 }
 
@@ -401,10 +957,11 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
   const sharedUserData = fs.mkdtempSync(
     path.join(os.tmpdir(), "ai-image-manager-squirrel-user-data-")
   );
-  runPackagedE2E(
+  await runPackagedE2E(
     oldExecutable,
     `launch old Squirrel app-${normalizedOldVersion}`,
-    sharedUserData
+    sharedUserData,
+    normalizedOldVersion
   );
   const retentionMarker = path.join(
     sharedUserData,
@@ -432,10 +989,11 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
       "Squirrel upgrade did not preserve the shared user-data marker"
     );
   }
-  runPackagedE2E(
+  await runPackagedE2E(
     upgradedExecutable,
     `launch upgraded Squirrel app-${version}`,
-    sharedUserData
+    sharedUserData,
+    version
   );
 
   // Keep the runner clean and make uninstallation part of the gate. Do not
@@ -467,9 +1025,11 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
       "ai-image-manager.exe"
     );
     await waitForPath(freshExecutable);
-    runPackagedE2E(
+    await runPackagedE2E(
       freshExecutable,
-      `launch fresh candidate Setup app-${version}`
+      `launch fresh candidate Setup app-${version}`,
+      undefined,
+      version
     );
     const freshUpdateExecutable = path.join(freshRoot, "Update.exe");
     if (!fs.existsSync(freshUpdateExecutable)) {
@@ -696,7 +1256,12 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
         `Fresh MSI executable was not found under ${defaultProduct.InstallLocation}`
       );
     }
-    runPackagedE2E(defaultExecutable, `launch fresh MSI ${version}`);
+    await runPackagedE2E(
+      defaultExecutable,
+      `launch fresh MSI ${version}`,
+      undefined,
+      version
+    );
     runMsi(
       [
         "/x",
@@ -737,7 +1302,12 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
         `Custom-directory MSI executable was not found under ${customProduct.InstallLocation}`
       );
     }
-    runPackagedE2E(customExecutable, `launch custom-directory MSI ${version}`);
+    await runPackagedE2E(
+      customExecutable,
+      `launch custom-directory MSI ${version}`,
+      undefined,
+      version
+    );
     runMsi(
       [
         "/x",
@@ -833,10 +1403,11 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         `Previous MSI executable was not found under ${oldProduct.InstallLocation}`
       );
     }
-    runPackagedE2E(
+    await runPackagedE2E(
       oldExecutable,
       `launch old MSI ${normalizedOldVersion}`,
-      sharedUserData
+      sharedUserData,
+      normalizedOldVersion
     );
 
     run(
@@ -870,10 +1441,11 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         `Upgraded MSI executable was not found under ${upgradedProduct.InstallLocation}`
       );
     }
-    runPackagedE2E(
+    await runPackagedE2E(
       upgradedExecutable,
       `launch upgraded MSI ${version}`,
-      sharedUserData
+      sharedUserData,
+      version
     );
 
     runMsi(
@@ -918,7 +1490,12 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         `Custom-directory MSI executable was not found under ${customProduct.InstallLocation}`
       );
     }
-    runPackagedE2E(customExecutable, `launch custom-directory MSI ${version}`);
+    await runPackagedE2E(
+      customExecutable,
+      `launch custom-directory MSI ${version}`,
+      undefined,
+      version
+    );
     runMsi(
       [
         "/x",
@@ -999,9 +1576,24 @@ async function main() {
   throw new Error(`Unknown operation: ${operation}`);
 }
 
-main().catch((error) => {
-  console.error(
-    `[installer-smoke] ${error instanceof Error ? error.message : String(error)}`
-  );
-  process.exitCode = 1;
-});
+export {
+  assertPackagedExecutable,
+  forceKillProcessTree,
+  readReadinessState,
+  runPackagedE2E,
+  terminatePackagedProcess,
+  waitForPackagedReady,
+};
+
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(
+      `[installer-smoke] ${error instanceof Error ? error.message : String(error)}`
+    );
+    process.exitCode = 1;
+  });
+}
