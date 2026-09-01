@@ -323,26 +323,46 @@ jobs:
             }
           }
 
-          node scripts/release-cos.mjs verify `
-            --dir $flatRoot `
-            --version $env:RELEASE_VERSION `
-            --kind versioned `
-            --compare-bytes `
-            --json
+          # The release-stable CAM identity intentionally cannot read the
+          # immutable downloads namespace. Verify the actual public delivery
+          # bytes instead, which is also the path end users consume.
+          $publicDownloadRoot = Join-Path $env:DOWNLOAD_ROOT "public-downloads"
+          New-Item -ItemType Directory -Force -Path $publicDownloadRoot | Out-Null
+          $downloadBaseUrl = "https://$($env:COS_BUCKET).cos.$($env:COS_REGION).myqcloud.com/$($env:COS_RELEASE_PREFIX)/downloads/$env:RELEASE_VERSION"
+          $downloadExpected = @(Get-ChildItem -LiteralPath $flatRoot -File)
+          foreach ($expected in $downloadExpected) {
+            $encodedName = [Uri]::EscapeDataString($expected.Name)
+            $downloaded = Join-Path $publicDownloadRoot $expected.Name
+            Invoke-WebRequest `
+              -Uri "$downloadBaseUrl/$encodedName" `
+              -OutFile $downloaded `
+              -UseBasicParsing
+            $expectedLength = (Get-Item -LiteralPath $expected.FullName).Length
+            $actualLength = (Get-Item -LiteralPath $downloaded).Length
+            $expectedHash = (Get-FileHash -LiteralPath $expected.FullName -Algorithm SHA256).Hash
+            $actualHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
+            if ($actualLength -ne $expectedLength -or $actualHash -ne $expectedHash) {
+              throw "Public COS download differs from candidate bytes: $($expected.Name)"
+            }
+          }
 
           $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
-          $githubExpected = @(Get-ChildItem -LiteralPath $flatRoot -File)
-          $squirrelReleases = @($candidateFiles | Where-Object { $_.Name -ceq "RELEASES" })
-          if ($squirrelReleases.Count -ne 1) {
-            throw "Expected exactly one Squirrel RELEASES in candidate artifact"
+          $githubExpected = @($downloadExpected)
+          $githubReleaseFeedRoot = Join-Path $env:DOWNLOAD_ROOT "github-release-feed"
+          New-Item -ItemType Directory -Force -Path $githubReleaseFeedRoot | Out-Null
+          $githubReleaseFeed = Join-Path $githubReleaseFeedRoot "RELEASES"
+          $candidateReleaseFeed = Join-Path $evidenceRoot "candidate-RELEASES"
+          if (-not (Test-Path -LiteralPath $candidateReleaseFeed -PathType Leaf)) {
+            throw "Candidate evidence is missing candidate-RELEASES"
           }
-          $githubExpected += $squirrelReleases[0]
+          Copy-Item -LiteralPath $candidateReleaseFeed -Destination $githubReleaseFeed
+          $githubExpected += Get-Item -LiteralPath $githubReleaseFeed
           $headers = @{
             Accept = "application/octet-stream"
             Authorization = "Bearer $env:GH_TOKEN"
             "X-GitHub-Api-Version" = "2022-11-28"
           }
-          $assetDownloadRoot = Join-Path $env:DOWNLOAD_ROOT "github-draft-assets"
+          $assetDownloadRoot = Join-Path $env:DOWNLOAD_ROOT "github-release-assets"
           New-Item -ItemType Directory -Force -Path $assetDownloadRoot | Out-Null
           foreach ($expected in $githubExpected) {
             # GitHub release uploads normalize spaces in asset names to dots
