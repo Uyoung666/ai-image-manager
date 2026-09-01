@@ -628,23 +628,13 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish GitHub Draft from Forge dry-run
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-forge publish --from-dry-run --target github
-
-      - name: Attach SHA256SUMS and generated release notes to GitHub Draft
+      - name: Create GitHub Draft from the staged candidate payload
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
         run: |
-          gh release upload $env:RELEASE_TAG release-download\SHA256SUMS.txt release-download\provenance.json --repo $env:GITHUB_REPOSITORY --clobber
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to attach SHA256SUMS.txt to GitHub Draft"
-          }
           $generatedNotesJson = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:RELEASE_TAG" -f "target_commitish=$env:RELEASE_COMMIT"
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to generate GitHub release notes"
@@ -653,7 +643,24 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($generatedNotes.body)) {
             throw "GitHub generated empty release notes"
           }
-          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes $generatedNotes.body
+          $releaseTitle = "AI Image Manager $($env:RELEASE_TAG)"
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>$null
+          $releaseLookupExitCode = $LASTEXITCODE
+          if ($releaseLookupExitCode -eq 0) {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.draft) {
+              throw "Refusing to replace assets on an already published release: $env:RELEASE_TAG"
+            }
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $releaseTitle --notes $generatedNotes.body
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --verify-tag --target $env:RELEASE_COMMIT --title $releaseTitle --notes $generatedNotes.body
+          }
           if ($LASTEXITCODE -ne 0) {
-            throw "Unable to attach generated notes to GitHub Draft"
+            throw "Unable to create or update GitHub Draft $env:RELEASE_TAG"
+          }
+          $releaseAssets = @(Get-ChildItem -LiteralPath "release-download" -File | ForEach-Object FullName)
+          $releaseAssets += (Resolve-Path -LiteralPath "release-feed\RELEASES").Path
+          & gh release upload $env:RELEASE_TAG @releaseAssets --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to attach the staged candidate payload to GitHub Draft"
           }
