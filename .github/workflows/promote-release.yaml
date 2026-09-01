@@ -14,7 +14,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   id-token: write
   attestations: write
   artifact-metadata: write
@@ -61,7 +61,7 @@ jobs:
       - name: Install dependencies for release verifier
         run: npm ci
 
-      - name: Locate draft and successful candidate run
+      - name: Locate candidate release and successful candidate run
         id: release
         shell: pwsh
         env:
@@ -91,25 +91,23 @@ jobs:
           if ($release.tag_name -ne $tag) {
             throw "GitHub Release tag mismatch: expected $tag, received $($release.tag_name)"
           }
-          if ($release.prerelease) {
-            throw "A prerelease cannot be promoted to stable: $tag"
+          if ($release.draft) {
+            throw "GitHub candidate release must be published as a prerelease so Actions can verify its bytes"
           }
           $assetNames = @($release.assets | ForEach-Object name)
           if ($assetNames -notcontains "SHA256SUMS.txt") {
-            throw "GitHub Draft is missing SHA256SUMS.txt"
+            throw "GitHub candidate release is missing SHA256SUMS.txt"
           }
           if ($assetNames -notcontains "provenance.json") {
-            throw "GitHub Draft is missing provenance.json"
+            throw "GitHub candidate release is missing provenance.json"
           }
           if ([string]::IsNullOrWhiteSpace($release.body)) {
-            throw "GitHub Draft has no generated release notes"
+            throw "GitHub candidate release has no generated release notes"
           }
-          if ($release.draft) {
-            Write-Host "Validated GitHub Draft $tag."
+          if ($release.prerelease) {
+            Write-Host "Validated GitHub prerelease candidate $tag."
           } else {
-            # A retry after the GitHub publish step is safe; the COS operation
-            # below remains the idempotent final promotion step.
-            Write-Host "GitHub Release $tag is already published; continuing idempotent retry."
+            Write-Host "GitHub Release $tag is already stable; continuing idempotent COS retry."
           }
 
           $trustedWorkflowSha = $env:PROMOTION_WORKFLOW_SHA.Trim()
@@ -149,7 +147,6 @@ jobs:
           "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "run-id=$($candidateRun[0].databaseId)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "workflow_name=$($candidateRun[0].workflowName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "draft=$($release.draft.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Download candidate build and evidence
         shell: pwsh
@@ -285,7 +282,7 @@ jobs:
           }
           Write-Host "Verified candidate commit, both upgrade smoke markers, and $($listed.Count) SHA-256 entries."
 
-      - name: Verify versioned COS downloads and GitHub Draft bytes
+      - name: Verify versioned COS downloads and GitHub candidate release bytes
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -350,7 +347,7 @@ jobs:
           foreach ($expected in $githubExpected) {
             $matchingAssets = @($release.assets | Where-Object { $_.name -ceq $expected.Name })
             if ($matchingAssets.Count -ne 1) {
-              throw "GitHub Draft must contain exactly one $($expected.Name), found $($matchingAssets.Count)"
+              throw "GitHub candidate release must contain exactly one $($expected.Name), found $($matchingAssets.Count)"
             }
             $downloaded = Join-Path $assetDownloadRoot $expected.Name
             Invoke-WebRequest -Uri $matchingAssets[0].url -Headers $headers -OutFile $downloaded -UseBasicParsing
@@ -359,12 +356,12 @@ jobs:
             $expectedHash = (Get-FileHash -LiteralPath $expected.FullName -Algorithm SHA256).Hash
             $actualHash = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash
             if ($actualLength -ne $expectedLength -or $actualHash -ne $expectedHash) {
-              throw "GitHub Draft asset differs from candidate bytes: $($expected.Name)"
+              throw "GitHub candidate release asset differs from candidate bytes: $($expected.Name)"
             }
           }
-          Write-Host "Verified versioned COS bytes and $($githubExpected.Count) GitHub Draft assets."
+          Write-Host "Verified versioned COS bytes and $($githubExpected.Count) GitHub candidate release assets."
 
-      - name: Verify COS candidate objects before publishing the draft
+      - name: Verify COS candidate objects before stable promotion
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -430,8 +427,8 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
-          if ($release.draft) {
-            Write-Host "Validated GitHub Draft remains unpublished until COS stable promotion succeeds."
+          if ($release.prerelease) {
+            Write-Host "Validated GitHub prerelease remains a candidate until COS stable promotion succeeds."
           } else {
             Write-Host "GitHub Release is already published; retry is idempotent."
           }

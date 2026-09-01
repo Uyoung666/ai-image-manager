@@ -628,7 +628,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Report GitHub Draft handoff
+      - name: Report GitHub prerelease handoff
         shell: pwsh
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -636,10 +636,10 @@ jobs:
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>$null
           if ($LASTEXITCODE -eq 0) {
             $release = $releaseJson | ConvertFrom-Json
-            if (-not $release.draft) {
+            if (-not $release.prerelease) {
               throw "Release $env:RELEASE_TAG is already published before COS stable promotion"
             }
-            Write-Host "Maintainer-created GitHub Draft already exists; stable promotion will verify every asset byte."
+            Write-Host "Maintainer-created GitHub prerelease candidate exists; stable promotion will verify every asset byte."
           } else {
-            Write-Host "Candidate completed. Create the GitHub Draft with maintainer credentials from release-download plus release-feed/RELEASES before stable promotion."
+            Write-Host "Candidate completed. Upload release-download plus release-feed/RELEASES with maintainer credentials and publish them as a prerelease before stable promotion."
           }
