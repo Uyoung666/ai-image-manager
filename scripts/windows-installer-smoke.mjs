@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Windows installer upgrade gates used by the release pipeline.
  *
