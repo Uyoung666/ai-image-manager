@@ -461,6 +461,7 @@ jobs:
           DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
         run: |
           $promotionScript = @'
+          import { createReadStream } from "node:fs";
           import fsp from "node:fs/promises";
           import path from "node:path";
           import {
@@ -470,13 +471,14 @@ jobs:
           import {
             createCosStoreFromEnv,
             IMMUTABLE_CACHE_CONTROL,
+            invokeCos,
+            metadataHeaders,
             NO_CACHE_CONTROL,
           } from "./scripts/release/cos.mjs";
           import {
             prefixForKind,
             prepareReleaseArtifacts,
           } from "./scripts/release/operations.mjs";
-          import { assertImmutableObject } from "./scripts/release/semver.mjs";
           import {
             formatReleases,
             parseReleases,
@@ -534,23 +536,68 @@ jobs:
           const store = createCosStoreFromEnv(process.env);
           const stablePrefix = prefixForKind("stable", { releasePrefix });
           const buildBasePrefix = prefixForKind("build-base", { releasePrefix });
+          const publicUrl = (key) =>
+            `https://${store.bucket}.cos.${store.region}.myqcloud.com/${key
+              .split("/")
+              .map(encodeURIComponent)
+              .join("/")}`;
+          const verifyPublicHead = async (key, { sha256, size }) => {
+            const response = await fetch(publicUrl(key), {
+              method: "HEAD",
+              cache: "no-store",
+            });
+            if (response.status === 404) {
+              return false;
+            }
+            if (!response.ok) {
+              throw new Error(`Public COS HEAD failed (${response.status}): ${key}`);
+            }
+            const remoteSha256 = (
+              response.headers.get("x-cos-meta-sha256") ?? ""
+            ).toLowerCase();
+            const remoteSize = Number(response.headers.get("content-length"));
+            if (remoteSha256 !== sha256.toLowerCase() || remoteSize !== size) {
+              throw new Error(`Existing public COS object differs: ${key}`);
+            }
+            return true;
+          };
           const uploadPackage = async (prefix, entry) => {
             const record = packages.get(entry.filename);
             const key = `${prefix}/${entry.filename}`;
-            await store.putFile(key, record.sourcePath, {
-              sha256: record.sha256,
-              size: record.size,
-              cacheControl: IMMUTABLE_CACHE_CONTROL,
-              contentType: "application/octet-stream",
-            });
-            const head = await store.head(key);
-            if (!head) {
-              throw new Error(`Promoted package disappeared: ${key}`);
+            if (
+              await verifyPublicHead(key, {
+                sha256: record.sha256,
+                size: record.size,
+              })
+            ) {
+              return;
             }
-            assertImmutableObject(head, {
-              sha256: record.sha256,
-              size: record.size,
-            });
+            await invokeCos(
+              store.client,
+              "putObject",
+              {
+                Bucket: store.bucket,
+                Region: store.region,
+                Key: key,
+                Body: createReadStream(record.sourcePath),
+                ContentLength: record.size,
+                Headers: metadataHeaders({
+                  sha256: record.sha256,
+                  cacheControl: IMMUTABLE_CACHE_CONTROL,
+                  contentType: "application/octet-stream",
+                  forbidOverwrite: true,
+                }),
+              },
+              { retryCount: 0 }
+            );
+            if (
+              !(await verifyPublicHead(key, {
+                sha256: record.sha256,
+                size: record.size,
+              }))
+            ) {
+              throw new Error(`Promoted package is not publicly readable: ${key}`);
+            }
           };
 
           for (const entry of entries) {
@@ -560,17 +607,29 @@ jobs:
 
           const writeFeed = async (key, data) => {
             const sha256 = sha256Bytes(data);
-            await store.putMutableBytes(key, data, {
-              sha256,
-              size: data.byteLength,
-              cacheControl: NO_CACHE_CONTROL,
-              contentType: "text/plain; charset=utf-8",
+            await invokeCos(store.client, "putObject", {
+              Bucket: store.bucket,
+              Region: store.region,
+              Key: key,
+              Body: data,
+              ContentLength: data.byteLength,
+              Headers: metadataHeaders({
+                sha256,
+                cacheControl: NO_CACHE_CONTROL,
+                contentType: "text/plain; charset=utf-8",
+              }),
             });
-            const head = await store.head(key);
-            if (!head) {
-              throw new Error(`Promoted feed disappeared: ${key}`);
+            const response = await fetch(publicUrl(key), { cache: "no-store" });
+            if (!response.ok) {
+              throw new Error(`Promoted feed is not publicly readable: ${key}`);
             }
-            assertImmutableObject(head, { sha256, size: data.byteLength });
+            const remote = Buffer.from(await response.arrayBuffer());
+            if (
+              remote.byteLength !== data.byteLength ||
+              sha256Bytes(remote) !== sha256
+            ) {
+              throw new Error(`Promoted feed bytes differ: ${key}`);
+            }
           };
 
           const buildBaseReleases = Buffer.from(
