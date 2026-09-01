@@ -1,0 +1,344 @@
+name: Recover release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "候选版本号（例如 2.1.0，不带 v）"
+        required: true
+        type: string
+      source_run_id:
+        description: "已完成候选上传和烟测、仅在 Draft 步骤失败的 publish.yaml run ID"
+        required: true
+        type: string
+      confirmation:
+        description: "输入 RECOVER <版本号>，例如 RECOVER 2.1.0"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-candidate-v${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  recover:
+    name: Verify staged candidate and recover GitHub Draft
+    runs-on: windows-2022
+    environment: release-candidate
+    timeout-minutes: 90
+    steps:
+      - name: Checkout current release verifier
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate failed source run and completed release gates
+        id: release
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          $version = ($env:VERSION_INPUT.Trim() -replace '^v', '')
+          if ($version -notmatch '^(?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)$') {
+            throw "Recovery requires a stable SemVer MAJOR.MINOR.PATCH version: $version"
+          }
+          if ($env:CONFIRMATION.Trim() -ne "RECOVER $version") {
+            throw "Confirmation must be exactly: RECOVER $version"
+          }
+          if ($env:SOURCE_RUN_ID -notmatch '^[1-9][0-9]*$') {
+            throw "Source run ID must be a positive integer"
+          }
+
+          $tag = "v$version"
+          git fetch --tags --force
+          $tagCommit = (git rev-list -n 1 $tag).Trim()
+          if (-not $tagCommit) {
+            throw "Release tag was not found: $tag"
+          }
+
+          $sourceRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
+          if (
+            $sourceRun.path -ne ".github/workflows/publish.yaml" -or
+            $sourceRun.status -ne "completed" -or
+            $sourceRun.conclusion -ne "failure"
+          ) {
+            throw "Source run must be a completed failed publish.yaml run"
+          }
+
+          $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID/jobs?per_page=100" | ConvertFrom-Json
+          $steps = @($jobs.jobs | ForEach-Object { $_.steps })
+          $requiredPassedSteps = @(
+            "Gate - static check",
+            "Gate - unit tests",
+            "Upload candidate to COS testing",
+            "Run Squirrel Setup.exe upgrade smoke",
+            "Run MSI install or auto-update smoke",
+            "Write candidate smoke evidence",
+            "Upload Squirrel candidate to COS candidate prefix",
+            "Upload immutable versioned download payload to COS",
+            "Upload candidate build for promotion",
+            "Generate SHA256 release manifest",
+            "Attest candidate artifacts",
+            "Attest flat download and checksum artifacts",
+            "Upload candidate evidence"
+          )
+          foreach ($requiredStep in $requiredPassedSteps) {
+            $matches = @($steps | Where-Object { $_.name -ceq $requiredStep -and $_.conclusion -eq "success" })
+            if ($matches.Count -ne 1) {
+              throw "Source run did not pass required step exactly once: $requiredStep"
+            }
+          }
+          $failedSteps = @($steps | Where-Object { $_.conclusion -eq "failure" })
+          $allowedDraftFailures = @(
+            "Publish GitHub Draft from Forge dry-run",
+            "Create GitHub Draft from the staged candidate payload"
+          )
+          if ($failedSteps.Count -ne 1 -or $allowedDraftFailures -notcontains $failedSteps[0].name) {
+            throw "Recovery is allowed only when the sole failed step is GitHub Draft publication"
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "source_run_id=$env:SOURCE_RUN_ID" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Source run $env:SOURCE_RUN_ID passed every build, COS, delta, data-retention, MSI, artifact, and attestation gate before its sole Draft failure."
+
+      - name: Download exact candidate build and evidence
+        id: downloads
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          SOURCE_RUN_ID: ${{ steps.release.outputs.source_run_id }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "ai-image-manager-recovery-$env:RELEASE_VERSION"
+          $candidateRoot = Join-Path $root "candidate"
+          $evidenceRoot = Join-Path $root "evidence"
+          New-Item -ItemType Directory -Force -Path $candidateRoot | Out-Null
+          New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "release-candidate-$env:RELEASE_VERSION" --dir $candidateRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Candidate artifact was not found for source run $env:SOURCE_RUN_ID"
+          }
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name "release-evidence-$env:RELEASE_VERSION" --dir $evidenceRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "Candidate evidence was not found for source run $env:SOURCE_RUN_ID"
+          }
+          "root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Verify candidate hashes and installer smoke evidence
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $candidateRoot = Join-Path $env:DOWNLOAD_ROOT "candidate"
+          $evidenceRoot = Join-Path $env:DOWNLOAD_ROOT "evidence"
+          $metadataPath = Join-Path $evidenceRoot "candidate-metadata.txt"
+          $smokePath = Join-Path $evidenceRoot "smoke-status.json"
+          $sumsPath = Join-Path $evidenceRoot "SHA256SUMS.txt"
+          foreach ($required in @(
+            $metadataPath,
+            $smokePath,
+            $sumsPath,
+            (Join-Path $evidenceRoot "download-SHA256SUMS.txt"),
+            (Join-Path $evidenceRoot "download-provenance.json"),
+            (Join-Path $evidenceRoot "candidate-SHA256SUMS.txt"),
+            (Join-Path $evidenceRoot "candidate-provenance.json"),
+            (Join-Path $evidenceRoot "candidate-RELEASES")
+          )) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Candidate evidence is missing: $required"
+            }
+          }
+
+          $metadata = @{}
+          Get-Content -LiteralPath $metadataPath | ForEach-Object {
+            $parts = $_ -split '=', 2
+            if ($parts.Count -eq 2) { $metadata[$parts[0]] = $parts[1] }
+          }
+          if ($metadata.version -ne $env:RELEASE_VERSION -or $metadata.commit -ne $env:RELEASE_COMMIT) {
+            throw "Candidate metadata does not match $env:RELEASE_TAG at $env:RELEASE_COMMIT"
+          }
+
+          $smoke = Get-Content -LiteralPath $smokePath -Raw | ConvertFrom-Json
+          if (
+            $smoke.schemaVersion -ne 2 -or
+            $smoke.version -ne $env:RELEASE_VERSION -or
+            $smoke.tag -ne $env:RELEASE_TAG -or
+            $smoke.commit -ne $env:RELEASE_COMMIT -or
+            $smoke.setupSmoke -ne "passed" -or
+            $smoke.squirrelDeltaSmoke -ne "passed" -or
+            $smoke.msiSmoke -ne "passed"
+          ) {
+            throw "Candidate installer smoke evidence is incomplete or does not match the release tag"
+          }
+
+          $listed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+          Get-Content -LiteralPath $sumsPath | ForEach-Object {
+            if ($_ -notmatch '^([a-fA-F0-9]{64})[ ]+(.+)$') {
+              throw "Invalid SHA256SUMS line: $_"
+            }
+            $expected = $Matches[1].ToLowerInvariant()
+            $relative = $Matches[2].Trim()
+            if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains('..')) {
+              throw "Unsafe relative path in SHA256SUMS: $relative"
+            }
+            $file = Join-Path $candidateRoot $relative
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Candidate file listed by SHA256SUMS is missing: $relative"
+            }
+            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "Candidate SHA-256 mismatch: $relative"
+            }
+            [void]$listed.Add($relative.Replace('/', [IO.Path]::DirectorySeparatorChar))
+          }
+          foreach ($file in @(Get-ChildItem -LiteralPath $candidateRoot -Recurse -File)) {
+            $relative = [IO.Path]::GetRelativePath($candidateRoot, $file.FullName)
+            if (-not $listed.Contains($relative)) {
+              throw "Candidate file is absent from SHA256SUMS.txt: $relative"
+            }
+          }
+          Write-Host "Verified exact candidate artifact and v2 upgrade/delta/data-retention/MSI smoke evidence."
+
+      - name: Stage exact GitHub Draft assets from candidate
+        id: assets
+        shell: pwsh
+        env:
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
+        run: |
+          $candidateRoot = Join-Path $env:DOWNLOAD_ROOT "candidate"
+          $evidenceRoot = Join-Path $env:DOWNLOAD_ROOT "evidence"
+          $downloadRoot = Join-Path $env:DOWNLOAD_ROOT "release-download"
+          New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+
+          $downloadSums = Join-Path $evidenceRoot "download-SHA256SUMS.txt"
+          $downloadProvenance = Join-Path $evidenceRoot "download-provenance.json"
+          Copy-Item -LiteralPath $downloadSums -Destination (Join-Path $downloadRoot "SHA256SUMS.txt")
+          Copy-Item -LiteralPath $downloadProvenance -Destination (Join-Path $downloadRoot "provenance.json")
+          $candidateFiles = @(Get-ChildItem -LiteralPath $candidateRoot -Recurse -File)
+          Get-Content -LiteralPath $downloadSums | ForEach-Object {
+            if ($_ -notmatch '^([a-fA-F0-9]{64})[ ]+([^/]+)$') {
+              throw "Invalid flat download SHA256SUMS line: $_"
+            }
+            $expected = $Matches[1].ToLowerInvariant()
+            $name = $Matches[2].Trim()
+            if ($name -eq "provenance.json") {
+              $source = $downloadProvenance
+            } else {
+              $matches = @($candidateFiles | Where-Object { $_.Name -ceq $name })
+              if ($matches.Count -ne 1) {
+                throw "Expected one candidate source for $name, found $($matches.Count)"
+              }
+              $source = $matches[0].FullName
+              Copy-Item -LiteralPath $source -Destination (Join-Path $downloadRoot $name)
+            }
+            $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "Flat download source hash mismatch: $name"
+            }
+          }
+
+          $candidateSums = Join-Path $evidenceRoot "candidate-SHA256SUMS.txt"
+          $candidateReleases = Join-Path $evidenceRoot "candidate-RELEASES"
+          $candidateProvenance = Join-Path $evidenceRoot "candidate-provenance.json"
+          Get-Content -LiteralPath $candidateSums | ForEach-Object {
+            if ($_ -notmatch '^([a-fA-F0-9]{64})[ ]+([^/]+)$') {
+              throw "Invalid candidate SHA256SUMS line: $_"
+            }
+            $expected = $Matches[1].ToLowerInvariant()
+            $name = $Matches[2].Trim()
+            if ($name -eq "RELEASES") {
+              $source = $candidateReleases
+            } elseif ($name -eq "provenance.json") {
+              $source = $candidateProvenance
+            } else {
+              $matches = @($candidateFiles | Where-Object { $_.Name -ceq $name })
+              if ($matches.Count -ne 1) {
+                throw "Expected one candidate feed source for $name, found $($matches.Count)"
+              }
+              $source = $matches[0].FullName
+            }
+            $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "Candidate feed source hash mismatch: $name"
+            }
+          }
+
+          "download_root=$downloadRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "releases=$candidateReleases" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create GitHub Draft from recovered candidate bytes
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          DOWNLOAD_ROOT: ${{ steps.assets.outputs.download_root }}
+          CANDIDATE_RELEASES: ${{ steps.assets.outputs.releases }}
+        run: |
+          $generatedNotesJson = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:RELEASE_TAG" -f "target_commitish=$env:RELEASE_COMMIT"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to generate GitHub release notes"
+          }
+          $generatedNotes = $generatedNotesJson | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace($generatedNotes.body)) {
+            throw "GitHub generated empty release notes"
+          }
+
+          $releaseTitle = "AI Image Manager $($env:RELEASE_TAG)"
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $releaseJson | ConvertFrom-Json
+            if (-not $release.draft) {
+              throw "Refusing to replace assets on an already published release: $env:RELEASE_TAG"
+            }
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $releaseTitle --notes $generatedNotes.body
+          } else {
+            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --verify-tag --target $env:RELEASE_COMMIT --title $releaseTitle --notes $generatedNotes.body
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to create or update GitHub Draft $env:RELEASE_TAG"
+          }
+
+          $assets = @(Get-ChildItem -LiteralPath $env:DOWNLOAD_ROOT -File | ForEach-Object FullName)
+          $assets += (Resolve-Path -LiteralPath $env:CANDIDATE_RELEASES).Path
+          & gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to attach recovered candidate bytes to GitHub Draft"
+          }
+
+      - name: Write recovery pointer
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          SOURCE_RUN_ID: ${{ steps.release.outputs.source_run_id }}
+        run: |
+          @{
+            schemaVersion = 1
+            version = $env:RELEASE_VERSION
+            tag = $env:RELEASE_TAG
+            commit = $env:RELEASE_COMMIT
+            sourceRunId = [long]$env:SOURCE_RUN_ID
+            recoveryRunId = [long]$env:GITHUB_RUN_ID
+          } | ConvertTo-Json | Out-File -FilePath recovery.json -Encoding utf8
+
+      - name: Upload recovery pointer
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-recovery-${{ steps.release.outputs.version }}
+          path: recovery.json
+          if-no-files-found: error
+          retention-days: 90
