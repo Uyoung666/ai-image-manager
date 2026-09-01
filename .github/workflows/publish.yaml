@@ -238,13 +238,18 @@ jobs:
               0,
               $oldFullUri.AbsoluteUri.LastIndexOf('/')
             )
-            $bootstrapReleasesURL = "$bootstrapBaseURL/RELEASES"
-            $bootstrapReleases = Invoke-WebRequest -Uri $bootstrapReleasesURL -UseBasicParsing
-            if (
-              $bootstrapReleases.StatusCode -lt 200 -or
-              $bootstrapReleases.StatusCode -ge 400 -or
-              [string]$bootstrapReleases.Content -notmatch [regex]::Escape($expectedOldFullName)
-            ) {
+          $bootstrapReleasesURL = "$bootstrapBaseURL/RELEASES"
+          $bootstrapReleases = Invoke-WebRequest -Uri $bootstrapReleasesURL -UseBasicParsing
+          $bootstrapReleasesContent = if ($bootstrapReleases.Content -is [byte[]]) {
+            [Text.Encoding]::UTF8.GetString($bootstrapReleases.Content)
+          } else {
+            [string]$bootstrapReleases.Content
+          }
+          if (
+            $bootstrapReleases.StatusCode -lt 200 -or
+            $bootstrapReleases.StatusCode -ge 400 -or
+            $bootstrapReleasesContent -notmatch [regex]::Escape($expectedOldFullName)
+          ) {
               throw "The v$oldVersion bootstrap RELEASES file is unavailable or does not reference $expectedOldFullName"
             }
             "AIM_SQUIRREL_REMOTE_RELEASES=$bootstrapBaseURL" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -629,17 +634,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-forge publish --from-dry-run --target github
 
-      - name: Attach SHA256SUMS and release notes to GitHub Draft
+      - name: Attach SHA256SUMS and generated release notes to GitHub Draft
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
         run: |
           gh release upload $env:RELEASE_TAG release-download\SHA256SUMS.txt release-download\provenance.json --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to attach SHA256SUMS.txt to GitHub Draft"
           }
-          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file release-body.md
+          $generatedNotesJson = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:RELEASE_TAG" -f "target_commitish=$env:RELEASE_COMMIT"
           if ($LASTEXITCODE -ne 0) {
-            throw "Unable to set release-body.md on GitHub Draft"
+            throw "Unable to generate GitHub release notes"
+          }
+          $generatedNotes = $generatedNotesJson | ConvertFrom-Json
+          if ([string]::IsNullOrWhiteSpace($generatedNotes.body)) {
+            throw "GitHub generated empty release notes"
+          }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes $generatedNotes.body
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to attach generated notes to GitHub Draft"
           }

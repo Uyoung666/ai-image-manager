@@ -102,12 +102,7 @@ jobs:
             throw "GitHub Draft is missing provenance.json"
           }
           if ([string]::IsNullOrWhiteSpace($release.body)) {
-            throw "GitHub Draft has no release notes; publish.yaml must attach release-body.md"
-          }
-          $expectedReleaseBody = (Get-Content -LiteralPath "release-body.md" -Raw).Replace("`r`n", "`n").Trim()
-          $actualReleaseBody = $release.body.Replace("`r`n", "`n").Trim()
-          if ($actualReleaseBody -ne $expectedReleaseBody) {
-            throw "GitHub Draft notes do not exactly match release-body.md from $tag"
+            throw "GitHub Draft has no generated release notes"
           }
           if ($release.draft) {
             Write-Host "Validated GitHub Draft $tag."
