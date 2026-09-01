@@ -424,17 +424,14 @@ jobs:
             }
           }
 
-      - name: Publish validated GitHub Draft
+      - name: Preserve validated GitHub release state
         shell: pwsh
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
           if ($release.draft) {
-            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease=false
-            if ($LASTEXITCODE -ne 0) {
-              throw "Unable to publish the validated GitHub Draft"
-            }
+            Write-Host "Validated GitHub Draft remains unpublished until COS stable promotion succeeds."
           } else {
             Write-Host "GitHub Release is already published; retry is idempotent."
           }

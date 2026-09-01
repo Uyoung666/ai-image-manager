@@ -16,7 +16,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   id-token: write
   attestations: write
   artifact-metadata: write
@@ -628,39 +628,18 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Create GitHub Draft from the staged candidate payload
+      - name: Report GitHub Draft handoff
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
         run: |
-          $generatedNotesJson = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$env:RELEASE_TAG" -f "target_commitish=$env:RELEASE_COMMIT"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to generate GitHub release notes"
-          }
-          $generatedNotes = $generatedNotesJson | ConvertFrom-Json
-          if ([string]::IsNullOrWhiteSpace($generatedNotes.body)) {
-            throw "GitHub generated empty release notes"
-          }
-          $releaseTitle = "AI Image Manager $($env:RELEASE_TAG)"
           $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" 2>$null
-          $releaseLookupExitCode = $LASTEXITCODE
-          if ($releaseLookupExitCode -eq 0) {
+          if ($LASTEXITCODE -eq 0) {
             $release = $releaseJson | ConvertFrom-Json
             if (-not $release.draft) {
-              throw "Refusing to replace assets on an already published release: $env:RELEASE_TAG"
+              throw "Release $env:RELEASE_TAG is already published before COS stable promotion"
             }
-            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $releaseTitle --notes $generatedNotes.body
+            Write-Host "Maintainer-created GitHub Draft already exists; stable promotion will verify every asset byte."
           } else {
-            gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft --verify-tag --target $env:RELEASE_COMMIT --title $releaseTitle --notes $generatedNotes.body
-          }
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to create or update GitHub Draft $env:RELEASE_TAG"
-          }
-          $releaseAssets = @(Get-ChildItem -LiteralPath "release-download" -File | ForEach-Object FullName)
-          $releaseAssets += (Resolve-Path -LiteralPath "release-feed\RELEASES").Path
-          & gh release upload $env:RELEASE_TAG @releaseAssets --repo $env:GITHUB_REPOSITORY --clobber
-          if ($LASTEXITCODE -ne 0) {
-            throw "Unable to attach the staged candidate payload to GitHub Draft"
+            Write-Host "Candidate completed. Create the GitHub Draft with maintainer credentials from release-download plus release-feed/RELEASES before stable promotion."
           }
