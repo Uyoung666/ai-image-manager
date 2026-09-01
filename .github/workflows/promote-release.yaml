@@ -384,7 +384,7 @@ jobs:
           }
           Write-Host "Verified versioned COS bytes and $($githubExpected.Count) GitHub candidate release assets."
 
-      - name: Verify COS candidate objects before stable promotion
+      - name: Assemble exact local candidate bytes for stable promotion
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -403,6 +403,7 @@ jobs:
             if ($_ -notmatch '^([a-fA-F0-9]{64})\s+([^/\\]+)$') {
               throw "Invalid candidate SHA256SUMS line: $_"
             }
+            $expectedHash = $Matches[1].ToLowerInvariant()
             $name = $Matches[2].Trim()
             if ($name -eq "provenance.json") {
               $candidateFile = Join-Path $evidenceRoot "candidate-provenance.json"
@@ -414,16 +415,13 @@ jobs:
             if (-not (Test-Path -LiteralPath $candidateFile -PathType Leaf)) {
               throw "Candidate source file is missing: $name"
             }
+            $actualHash = (Get-FileHash -LiteralPath $candidateFile -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+              throw "Candidate source hash mismatch for $name"
+            }
             Copy-Item -LiteralPath $candidateFile -Destination (Join-Path $verifyRoot $name)
           }
-          # verify reads every RELEASES package, validates COS SHA-256 metadata,
-          # and compares object bytes before GitHub is made public.
-          node scripts/release-cos.mjs verify `
-            --dir $verifyRoot `
-            --version $env:RELEASE_VERSION `
-            --kind candidate `
-            --compare-bytes `
-            --json
+          Write-Host "Assembled exact candidate bytes from verified build and evidence for local promotion."
 
       - name: Verify GitHub attestation for candidate binaries
         shell: pwsh
@@ -460,13 +458,143 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          DOWNLOAD_ROOT: ${{ steps.downloads.outputs.root }}
         run: |
+          $promotionScript = @'
+          import fsp from "node:fs/promises";
+          import path from "node:path";
+          import {
+            collectFileRecords,
+            sha256Bytes,
+          } from "./scripts/release/checksums.mjs";
+          import {
+            createCosStoreFromEnv,
+            IMMUTABLE_CACHE_CONTROL,
+            NO_CACHE_CONTROL,
+          } from "./scripts/release/cos.mjs";
+          import {
+            prefixForKind,
+            prepareReleaseArtifacts,
+          } from "./scripts/release/operations.mjs";
+          import { assertImmutableObject } from "./scripts/release/semver.mjs";
+          import {
+            formatReleases,
+            parseReleases,
+          } from "./scripts/release/squirrel.mjs";
+
+          const version = process.env.RELEASE_VERSION;
+          const releasePrefix = process.env.COS_RELEASE_PREFIX ?? "";
+          const source = path.join(
+            process.env.DOWNLOAD_ROOT,
+            "cos-verify-squirrel"
+          );
+          const releasesData = await fsp.readFile(path.join(source, "RELEASES"));
+          const prepared = await prepareReleaseArtifacts(source, {
+            version,
+            tag: `v${version}`,
+            includeProvenance: false,
+          });
+          if (!prepared.releaseRecord?.data?.equals(releasesData)) {
+            throw new Error("Local candidate RELEASES changed during package validation");
+          }
+          const entries = parseReleases(releasesData.toString("utf8"));
+          const currentFull = entries.filter(
+            (entry) =>
+              entry.isFull &&
+              entry.filename.toLowerCase().endsWith(
+                `-${version}-full.nupkg`.toLowerCase()
+              )
+          );
+          const currentDelta = entries.filter(
+            (entry) =>
+              !entry.isFull &&
+              entry.filename.toLowerCase().endsWith(
+                `-${version}-delta.nupkg`.toLowerCase()
+              )
+          );
+          if (currentFull.length !== 1 || currentDelta.length !== 1) {
+            throw new Error(
+              `Local candidate must contain one current full and one current delta package (full=${currentFull.length}, delta=${currentDelta.length})`
+            );
+          }
+
+          const records = await collectFileRecords(source);
+          const packages = new Map(
+            records
+              .filter((record) => record.relativePath.toLowerCase().endsWith(".nupkg"))
+              .map((record) => [path.posix.basename(record.relativePath), record])
+          );
+          for (const entry of entries) {
+            const record = packages.get(entry.filename);
+            if (!record || record.size !== entry.size) {
+              throw new Error(`Validated local package is missing or has wrong size: ${entry.filename}`);
+            }
+          }
+
+          const store = createCosStoreFromEnv(process.env);
+          const stablePrefix = prefixForKind("stable", { releasePrefix });
+          const buildBasePrefix = prefixForKind("build-base", { releasePrefix });
+          const uploadPackage = async (prefix, entry) => {
+            const record = packages.get(entry.filename);
+            const key = `${prefix}/${entry.filename}`;
+            await store.putFile(key, record.sourcePath, {
+              sha256: record.sha256,
+              size: record.size,
+              cacheControl: IMMUTABLE_CACHE_CONTROL,
+              contentType: "application/octet-stream",
+            });
+            const head = await store.head(key);
+            if (!head) {
+              throw new Error(`Promoted package disappeared: ${key}`);
+            }
+            assertImmutableObject(head, {
+              sha256: record.sha256,
+              size: record.size,
+            });
+          };
+
+          for (const entry of entries) {
+            await uploadPackage(stablePrefix, entry);
+          }
+          await uploadPackage(buildBasePrefix, currentFull[0]);
+
+          const writeFeed = async (key, data) => {
+            const sha256 = sha256Bytes(data);
+            await store.putMutableBytes(key, data, {
+              sha256,
+              size: data.byteLength,
+              cacheControl: NO_CACHE_CONTROL,
+              contentType: "text/plain; charset=utf-8",
+            });
+            const head = await store.head(key);
+            if (!head) {
+              throw new Error(`Promoted feed disappeared: ${key}`);
+            }
+            assertImmutableObject(head, { sha256, size: data.byteLength });
+          };
+
+          const buildBaseReleases = Buffer.from(
+            formatReleases(currentFull),
+            "utf8"
+          );
+          await writeFeed(`${buildBasePrefix}/RELEASES`, buildBaseReleases);
+          // This is the final pointer switch after every referenced package
+          // and the build-base feed have been written and verified.
+          await writeFeed(`${stablePrefix}/RELEASES`, releasesData);
+          console.log(
+            JSON.stringify({
+              version,
+              stablePrefix,
+              buildBasePrefix,
+              packages: entries.map((entry) => entry.filename),
+              delta: currentDelta[0].filename,
+            })
+          );
+          '@
           $maxAttempts = 3
           for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
             Write-Host "COS stable promotion attempt $attempt/$maxAttempts"
-            node scripts/release-cos.mjs promote `
-              --version $env:RELEASE_VERSION `
-              --json
+            $promotionScript | node --input-type=module -
             if ($LASTEXITCODE -eq 0) {
               exit 0
             }
