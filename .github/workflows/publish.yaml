@@ -128,6 +128,9 @@ jobs:
         shell: pwsh
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
+          AIM_OLD_SETUP_VERSION: ${{ vars.AIM_OLD_SETUP_VERSION }}
+          AIM_OLD_SQUIRREL_FULL_URL: ${{ vars.AIM_OLD_SQUIRREL_FULL_URL }}
+          AIM_OLD_SQUIRREL_FULL_SHA256: ${{ vars.AIM_OLD_SQUIRREL_FULL_SHA256 }}
         run: |
           git fetch --tags --force
           if ($env:GITHUB_EVENT_NAME -eq "push") {
@@ -180,17 +183,19 @@ jobs:
           "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "SOURCE_DATE_EPOCH=$sourceDateEpoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "testing-feed=$testingFeed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          # The stable feed is optional for the first release. When present,
-          # Forge uses it to derive a delta while still writing only testing.
+          # Forge always needs a verified previous full package to derive a
+          # delta. Prefer COS build-base; v2.1.0 may use the public v2.0.0
+          # GitHub Release once to bootstrap the first COS release.
           "AIM_HAS_STABLE_BASELINE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $hasCosBaseline = $false
           $baselineURL = $env:COS_BUILD_BASE_URL.TrimEnd('/') + "/RELEASES"
           try {
             $baselineResponse = Invoke-WebRequest -Uri $baselineURL -Method Head -UseBasicParsing
-            if ($baselineResponse.StatusCode -eq 404) {
-              Write-Host "No build-base RELEASES baseline found; full package only is expected."
-            } elseif ($baselineResponse.StatusCode -ge 200 -and $baselineResponse.StatusCode -lt 400) {
+            if ($baselineResponse.StatusCode -ge 200 -and $baselineResponse.StatusCode -lt 400) {
               "AIM_SQUIRREL_REMOTE_RELEASES=$($env:COS_BUILD_BASE_URL.TrimEnd('/'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
               "AIM_HAS_STABLE_BASELINE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              "AIM_BASELINE_SOURCE=cos-build-base" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              $hasCosBaseline = $true
               Write-Host "Existing build-base RELEASES baseline found; delta generation is enabled."
             } else {
               throw "Unexpected build-base RELEASES response status: $($baselineResponse.StatusCode)"
@@ -201,10 +206,51 @@ jobs:
               $statusCode = [int]$_.Exception.Response.StatusCode.value__
             }
             if ($statusCode -eq 404) {
-              Write-Host "No build-base RELEASES baseline found; full package only is expected."
+              Write-Host "No COS build-base RELEASES baseline found."
             } else {
               throw "Unable to probe build-base RELEASES at $baselineURL (HTTP $($statusCode ?? 'unknown')): $($_.Exception.Message)"
             }
+          }
+          if (-not $hasCosBaseline) {
+            if ($version -ne $env:AIM_FIRST_OFFICIAL_MSI_VERSION) {
+              throw "COS build-base is missing for v$version; refusing to publish a full-only update"
+            }
+            $oldVersion = $env:AIM_OLD_SETUP_VERSION.Trim() -replace '^v', ''
+            if ($oldVersion -ne "2.0.0") {
+              throw "v$version delta bootstrap requires AIM_OLD_SETUP_VERSION=2.0.0"
+            }
+            if ($env:AIM_OLD_SQUIRREL_FULL_SHA256 -notmatch '^[a-fA-F0-9]{64}$') {
+              throw "AIM_OLD_SQUIRREL_FULL_SHA256 must contain the verified v2.0.0 full SHA-256"
+            }
+            try {
+              $oldFullUri = [Uri]$env:AIM_OLD_SQUIRREL_FULL_URL
+            } catch {
+              throw "AIM_OLD_SQUIRREL_FULL_URL must be a valid HTTPS URL"
+            }
+            if ($oldFullUri.Scheme -ne "https") {
+              throw "AIM_OLD_SQUIRREL_FULL_URL must use HTTPS"
+            }
+            $expectedOldFullName = "ai-image-manager-$oldVersion-full.nupkg"
+            if ([IO.Path]::GetFileName($oldFullUri.LocalPath) -cne $expectedOldFullName) {
+              throw "AIM_OLD_SQUIRREL_FULL_URL must end with $expectedOldFullName"
+            }
+            $bootstrapBaseURL = $oldFullUri.AbsoluteUri.Substring(
+              0,
+              $oldFullUri.AbsoluteUri.LastIndexOf('/')
+            )
+            $bootstrapReleasesURL = "$bootstrapBaseURL/RELEASES"
+            $bootstrapReleases = Invoke-WebRequest -Uri $bootstrapReleasesURL -UseBasicParsing
+            if (
+              $bootstrapReleases.StatusCode -lt 200 -or
+              $bootstrapReleases.StatusCode -ge 400 -or
+              [string]$bootstrapReleases.Content -notmatch [regex]::Escape($expectedOldFullName)
+            ) {
+              throw "The v$oldVersion bootstrap RELEASES file is unavailable or does not reference $expectedOldFullName"
+            }
+            "AIM_SQUIRREL_REMOTE_RELEASES=$bootstrapBaseURL" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "AIM_HAS_STABLE_BASELINE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "AIM_BASELINE_SOURCE=github-v$oldVersion-bootstrap" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "Using verified public v$oldVersion Release as the one-time delta baseline for the first COS release."
           }
 
       - name: Gate - release guard (package, lock, tag, and version ordering)
@@ -326,6 +372,9 @@ jobs:
           if ($env:AIM_HAS_STABLE_BASELINE -ne "1" -and $deltaPackage.Count -gt 0) {
             throw "A delta package was produced without an explicitly configured stable baseline"
           }
+          if ($deltaPackage.Count -eq 1 -and $deltaPackage[0].Length -ge $fullPackage[0].Length) {
+            throw "Squirrel delta must be smaller than the current full NUPKG"
+          }
 
           $wixSourcePath = $wixSource[0].FullName
           if (-not (Select-String -LiteralPath $wixSourcePath -SimpleMatch 'InstallScope="perMachine"')) {
@@ -400,6 +449,7 @@ jobs:
       - name: Run MSI install or auto-update smoke
         id: msi_smoke
         shell: pwsh
+        timeout-minutes: 8
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           AIM_OLD_MSI_URL: ${{ vars.AIM_OLD_MSI_URL }}
@@ -428,7 +478,7 @@ jobs:
               --msi "${{ steps.payload.outputs.msi }}" `
               --version $env:RELEASE_VERSION
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $mode = "fresh-bootstrap"
+            $mode = "install-bootstrap"
           } else {
             throw "A verified previous MSI baseline is mandatory after v$env:AIM_FIRST_OFFICIAL_MSI_VERSION"
           }
@@ -449,9 +499,10 @@ jobs:
             tag = $env:RELEASE_TAG
             commit = $env:RELEASE_COMMIT
             setupSmoke = "passed"
+            squirrelDeltaSmoke = "passed"
             msiSmoke = "passed"
             msiSmokeMode = "${{ steps.msi_smoke.outputs.mode }}"
-            note = "Setup always upgrades a verified public baseline. MSI uses a one-time fresh bootstrap only for the first official MSI; later releases require a verified MSI auto-update."
+            note = "Setup upgrades a verified public baseline through COS and proves the delta package was retained without downloading the current full fallback. The first official MSI proves silent install, registration, Update.exe, and the versioned app payload; later releases require a verified MSI auto-update."
           } | ConvertTo-Json | Out-File -FilePath release-evidence\smoke-status.json -Encoding utf8
 
       - name: Upload Squirrel candidate to COS candidate prefix

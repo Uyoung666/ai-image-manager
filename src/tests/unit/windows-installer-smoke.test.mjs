@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPackagedExecutable,
+  assertSquirrelDeltaUsed,
   findInstalledExecutable,
   forceKillProcessTree,
   runPackagedE2E,
@@ -16,6 +17,8 @@ const IMMEDIATE_EXIT_ERROR_PATTERN = /exited before startup confirmation/iu;
 const STALE_MARKER_ERROR_PATTERN = /fresh WHENREADY startup marker/iu;
 const VERSION_MISMATCH_ERROR_PATTERN = /version mismatch/iu;
 const STARTUP_FAILURE_ERROR_PATTERN = /reported startup failure/iu;
+const FULL_FALLBACK_ERROR_PATTERN = /full fallback/iu;
+const MISSING_DELTA_ERROR_PATTERN = /exactly one downloaded/iu;
 const noOpForceKill = () => Promise.resolve();
 
 function createExecutable(version = "2.1.0") {
@@ -75,6 +78,20 @@ function createMsiInstallRoot() {
     fs.writeFileSync(executable, `real ${version}`);
   }
   return root;
+}
+
+function createSquirrelPackagesRoot(version = "2.1.0") {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "ai-image-manager-squirrel-delta-test-")
+  );
+  fixtureRoots.add(root);
+  const packages = path.join(root, "packages");
+  fs.mkdirSync(packages, { recursive: true });
+  fs.writeFileSync(
+    path.join(packages, `ai-image-manager-${version}-delta.nupkg`),
+    "delta bytes"
+  );
+  return { packages, root };
 }
 
 afterEach(() => {
@@ -527,6 +544,32 @@ describe("windows installer packaged E2E launcher", () => {
     const customRoot = createMsiInstallRoot();
     expect(findInstalledExecutable(customRoot, "2.1.0")).toBe(
       path.join(customRoot, "app-2.1.0", "ai-image-manager.exe")
+    );
+  });
+
+  it("proves the requested Squirrel delta was retained without a full fallback", () => {
+    const { root } = createSquirrelPackagesRoot();
+    expect(assertSquirrelDeltaUsed(root, "v2.1.0")).toMatchObject({
+      bytes: 11,
+      filename: "ai-image-manager-2.1.0-delta.nupkg",
+    });
+  });
+
+  it("rejects a Squirrel update that downloaded the current full fallback", () => {
+    const { packages, root } = createSquirrelPackagesRoot();
+    fs.writeFileSync(
+      path.join(packages, "ai-image-manager-2.1.0-full.nupkg"),
+      "full bytes"
+    );
+    expect(() => assertSquirrelDeltaUsed(root, "2.1.0")).toThrow(
+      FULL_FALLBACK_ERROR_PATTERN
+    );
+  });
+
+  it("rejects a Squirrel update without the expected delta package", () => {
+    const { root } = createSquirrelPackagesRoot("2.0.0");
+    expect(() => assertSquirrelDeltaUsed(root, "2.1.0")).toThrow(
+      MISSING_DELTA_ERROR_PATTERN
     );
   });
 

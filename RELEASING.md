@@ -264,7 +264,7 @@ gh attestation verify .\Setup.exe --repo Uyoung666/ai-image-manager
 v2.1.0 是从旧 GitHub 更新 feed 迁移到 COS 的桥接版本：
 
 1. 继续保留 GitHub Draft → 正式 Release 的发布步骤，让仍运行 v2.0.0 的客户端可以先通过旧 feed 获得 v2.1.0。
-2. v2.1.0 本身把 `AIM_UPDATE_BASE_URL` 编译为 COS stable feed。首次迁移没有 `build-base/RELEASES` 时，候选构建只生成 full 包，不配置 `remoteReleases`，不需要先运行 bootstrap；候选→推广成功后会自然建立当前版本的 `build-base/RELEASES`，后续版本才会使用该目录生成 delta。
+2. v2.1.0 本身把 `AIM_UPDATE_BASE_URL` 编译为 COS stable feed。首次迁移没有 `build-base/RELEASES` 时，候选构建把已校验的公开 v2.0.0 GitHub Release 目录作为一次性 `remoteReleases` 基线，必须同时生成 v2.1.0 full 和 delta；两者与 v2.0.0 full 一起上传 COS testing，Setup smoke 必须证明下载并保留 delta 且未下载 v2.1.0 full 回退包。候选→推广成功后会建立 v2.1.0 `build-base/RELEASES`，后续版本只使用 COS build-base 生成 delta。
 3. 仍在运行 v2.0.0 的客户端继续从旧 GitHub feed 获取 v2.1.0；桥接版安装完成后才使用 COS stable feed。`guard --allow-initial` 只表示 GitHub API 没有任何正式 stable Release，不能绕过 smoke、hash、Draft 或候选→推广门禁。
 
 ## 回滚
@@ -293,6 +293,6 @@ AIM_OLD_MSI_SHA256=<v2.1.0 官方 MSI 的 SHA-256>
 AIM_OLD_MSI_VERSION=2.1.0
 ```
 
-仓库现有 v2.0.0 GitHub Release 只有 Setup/full/ZIP/RELEASES，没有 MSI，所以 v2.1.0 被工作流硬编码为“首个官方 MSI”：只有版本恰好为 2.1.0 且三个旧 MSI 变量全部为空，才允许以默认目录和自定义目录的新装、启动、`Update.exe` 存在性与卸载作为首发门禁。这个例外不会延续到后续版本；v2.1.0 发布后必须立即记录其 MSI URL 和真实 SHA-256，v2.2.0 起强制真实旧 MSI 自动升级。
+仓库现有 v2.0.0 GitHub Release 只有 Setup/full/ZIP/RELEASES，没有 MSI，所以 v2.1.0 被工作流硬编码为“首个官方 MSI”：只有版本恰好为 2.1.0 且三个旧 MSI 变量全部为空，才允许以一次默认目录静默安装、产品注册版本、`Update.exe` 和版本化应用入口作为首发门禁。runner 在验证后直接销毁，不执行会长时间占用 Windows Installer 服务的重复安装/卸载；这个例外不会延续到后续版本。v2.1.0 发布后必须立即记录其 MSI URL 和真实 SHA-256，v2.2.0 起强制真实旧 MSI 自动升级。
 
-Setup smoke 会校验旧版 Setup 和 full NUPKG，安装旧版后用同一个 user-data 目录启动旧版并写入 marker，再使用旧版 `Update.exe --update` 指向本次 testing feed；它会确认 `app-<新版本>` 启动且 marker 仍在，最后等待卸载后的文件消失，并对候选 Setup.exe 另做 fresh install、启动和卸载验证。后续版本的 MSI smoke 同样从已验证的旧 MSI 安装开始，通过 MSI 自带的兼容 `Update.exe --update` 走 testing feed，核对产品注册版本、新版启动和 user-data marker，再对候选 MSI 做自定义目录安装/启动与卸载。变量不完整、URL 非 HTTPS、候选版本不高于旧版或 hash 不匹配都会让候选失败。
+Setup smoke 会校验旧版 Setup 和 full NUPKG，安装旧版后用同一个 user-data 目录启动旧版并写入 marker，再使用旧版 `Update.exe --update` 指向本次 COS testing feed；它会确认 packages 目录存在当前 delta、当前 full 回退包不存在、`app-<新版本>` 能启动且 marker 仍在，最后等待卸载后的文件消失，并对候选 Setup.exe 另做 fresh install、启动和卸载验证。后续版本的 MSI smoke 同样从已验证的旧 MSI 安装开始，通过 MSI 自带的兼容 `Update.exe --update` 走 testing feed，核对产品注册版本、新版启动和 user-data marker，再对候选 MSI 做自定义目录安装/启动与卸载。变量不完整、URL 非 HTTPS、候选版本不高于旧版或 hash 不匹配都会让候选失败。

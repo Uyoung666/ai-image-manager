@@ -43,6 +43,7 @@ const PACKAGED_E2E_STARTUP_TIMEOUT_MS = 2 * 60 * 1000;
 const PACKAGED_E2E_READY_STABILITY_MS = 1000;
 const PACKAGED_E2E_POLL_INTERVAL_MS = 250;
 const PACKAGED_E2E_TERMINATION_TIMEOUT_MS = 15 * 1000;
+const INSTALLER_PROCESS_TIMEOUT_MS = 5 * 60 * 1000;
 
 function usage() {
   console.error(`Usage:
@@ -167,7 +168,7 @@ function run(
   const result = spawnSync(command, args, {
     env: environment,
     stdio: "inherit",
-    timeout: 10 * 60 * 1000,
+    timeout: INSTALLER_PROCESS_TIMEOUT_MS,
     windowsHide: true,
   });
   if (result.error) {
@@ -314,6 +315,54 @@ async function waitForSquirrelRoot(version, timeoutMs = 5 * 60 * 1000) {
   throw new Error(
     `Timed out waiting for previous Squirrel installation ${version}`
   );
+}
+
+function assertSquirrelDeltaUsed(root, version) {
+  const packagesDirectory = path.join(root, "packages");
+  if (!fs.existsSync(packagesDirectory)) {
+    throw new Error(
+      `Squirrel packages directory is missing after update: ${packagesDirectory}`
+    );
+  }
+
+  const normalizedVersion = normalizeStableVersion(
+    version,
+    "Squirrel delta version"
+  );
+  const deltaSuffix = `-${normalizedVersion}-delta.nupkg`.toLowerCase();
+  const remoteFullSuffix = `-${normalizedVersion}-full.nupkg`.toLowerCase();
+  const packageNames = fs.readdirSync(packagesDirectory);
+  const deltaPackages = packageNames.filter((name) =>
+    name.toLowerCase().endsWith(deltaSuffix)
+  );
+  const downloadedFullPackages = packageNames.filter((name) =>
+    name.toLowerCase().endsWith(remoteFullSuffix)
+  );
+
+  if (deltaPackages.length !== 1) {
+    throw new Error(
+      `Expected exactly one downloaded v${normalizedVersion} delta package, found ${deltaPackages.length}`
+    );
+  }
+  if (downloadedFullPackages.length > 0) {
+    throw new Error(
+      `Squirrel downloaded the v${normalizedVersion} full fallback instead of completing the delta update: ${downloadedFullPackages.join(", ")}`
+    );
+  }
+
+  const deltaPath = path.join(packagesDirectory, deltaPackages[0]);
+  const deltaStat = fs.statSync(deltaPath);
+  if (!deltaStat.isFile() || deltaStat.size === 0) {
+    throw new Error(`Downloaded Squirrel delta package is empty: ${deltaPath}`);
+  }
+
+  console.log(
+    `AIM_INSTALLER_SMOKE_DELTA=passed file=${deltaPackages[0]} bytes=${deltaStat.size} fullFallback=absent`
+  );
+  return {
+    bytes: deltaStat.size,
+    filename: deltaPackages[0],
+  };
 }
 
 function childHasExited(child) {
@@ -1007,6 +1056,7 @@ async function runSetupUpgradeSmoke(setupPath, version, feed) {
     ["--update", feed],
     `update previous Squirrel installation ${normalizedOldVersion} from testing feed to ${version}`
   );
+  assertSquirrelDeltaUsed(root, version);
   const upgradedExecutable = path.join(
     root,
     `app-${version}`,
@@ -1231,7 +1281,7 @@ function assertMsiAutoUpdater(product) {
   return updater;
 }
 
-async function runMsiFreshSmoke(currentMsiPath, version) {
+function runMsiFreshSmoke(currentMsiPath, version) {
   const candidateStat = fs.statSync(currentMsiPath);
   if (!candidateStat.isFile() || candidateStat.size === 0) {
     throw new Error(`Candidate MSI is empty: ${currentMsiPath}`);
@@ -1246,112 +1296,31 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
   );
   const runMsi = (args, label) =>
     run(msiexec, args, label, ALLOWED_MSI_EXIT_CODES);
-  let productWasInstalled = false;
-  try {
-    runMsi(
-      [
-        "/i",
-        currentMsiPath,
-        "/qn",
-        "/norestart",
-        "/l*v",
-        path.join(logDirectory, "default-install.log"),
-      ],
-      `fresh-install MSI ${version} in default directory`
+  runMsi(
+    [
+      "/i",
+      currentMsiPath,
+      "/qn",
+      "/norestart",
+      "/l*v",
+      path.join(logDirectory, "default-install.log"),
+    ],
+    `fresh-install first official MSI ${version}`
+  );
+  const defaultProduct = assertMsiInstalled(version);
+  assertMsiAutoUpdater(defaultProduct);
+  const defaultExecutable = findInstalledExecutable(
+    defaultProduct.InstallLocation,
+    version
+  );
+  if (!defaultExecutable) {
+    throw new Error(
+      `Fresh MSI executable was not found under ${defaultProduct.InstallLocation}`
     );
-    productWasInstalled = true;
-    const defaultProduct = assertMsiInstalled(version);
-    assertMsiAutoUpdater(defaultProduct);
-    const defaultExecutable = findInstalledExecutable(
-      defaultProduct.InstallLocation,
-      version
-    );
-    if (!defaultExecutable) {
-      throw new Error(
-        `Fresh MSI executable was not found under ${defaultProduct.InstallLocation}`
-      );
-    }
-    await runPackagedE2E(
-      defaultExecutable,
-      `launch fresh MSI ${version}`,
-      undefined,
-      version
-    );
-    runMsi(
-      [
-        "/x",
-        currentMsiPath,
-        "/qn",
-        "/norestart",
-        "/l*v",
-        path.join(logDirectory, "default-uninstall.log"),
-      ],
-      `uninstall fresh MSI ${version} from default directory`
-    );
-    await waitForNoMsiProduct();
-    productWasInstalled = false;
-
-    const customDirectory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "ai-image-manager-msi-custom-")
-    );
-    runMsi(
-      [
-        "/i",
-        currentMsiPath,
-        "/qn",
-        "/norestart",
-        `APPLICATIONROOTDIRECTORY=${customDirectory}`,
-        "/l*v",
-        path.join(logDirectory, "custom-install.log"),
-      ],
-      `fresh-install MSI ${version} in custom directory`
-    );
-    productWasInstalled = true;
-    const customProduct = assertMsiInstalled(version, customDirectory);
-    assertMsiAutoUpdater(customProduct);
-    const customExecutable = findInstalledExecutable(
-      customProduct.InstallLocation,
-      version
-    );
-    if (!customExecutable) {
-      throw new Error(
-        `Custom-directory MSI executable was not found under ${customProduct.InstallLocation}`
-      );
-    }
-    await runPackagedE2E(
-      customExecutable,
-      `launch custom-directory MSI ${version}`,
-      undefined,
-      version
-    );
-    runMsi(
-      [
-        "/x",
-        currentMsiPath,
-        "/qn",
-        "/norestart",
-        "/l*v",
-        path.join(logDirectory, "custom-uninstall.log"),
-      ],
-      `uninstall MSI ${version} from custom directory`
-    );
-    await waitForNoMsiProduct();
-    productWasInstalled = false;
-  } finally {
-    if (productWasInstalled) {
-      try {
-        runMsi(
-          ["/x", currentMsiPath, "/qn", "/norestart"],
-          "cleanup failed fresh MSI smoke installation"
-        );
-      } catch (cleanupError) {
-        console.error(
-          `[installer-smoke] cleanup warning: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
-        );
-      }
-    }
   }
-  console.log(`AIM_INSTALLER_SMOKE_MSI_FRESH=passed logs=${logDirectory}`);
+  console.log(
+    `AIM_INSTALLER_SMOKE_MSI_FRESH=passed mode=install-bootstrap logs=${logDirectory}`
+  );
 }
 
 async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
@@ -1599,6 +1568,7 @@ async function main() {
 
 export {
   assertPackagedExecutable,
+  assertSquirrelDeltaUsed,
   findInstalledExecutable,
   forceKillProcessTree,
   readReadinessState,

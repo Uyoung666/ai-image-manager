@@ -212,14 +212,18 @@ jobs:
           if ($smoke.version -ne $env:RELEASE_VERSION -or $smoke.tag -ne $env:RELEASE_TAG -or $smoke.commit -ne $env:RELEASE_COMMIT) {
             throw "Installer smoke evidence does not match the requested tag and commit"
           }
-          if ($smoke.setupSmoke -ne "passed" -or $smoke.msiSmoke -ne "passed") {
-            throw "Both Setup and MSI smoke checks must be passed"
+          if (
+            $smoke.setupSmoke -ne "passed" -or
+            $smoke.squirrelDeltaSmoke -ne "passed" -or
+            $smoke.msiSmoke -ne "passed"
+          ) {
+            throw "Setup upgrade, Squirrel delta, and MSI smoke checks must all be passed"
           }
           $allowedMsiMode =
             $smoke.msiSmokeMode -eq "upgrade" -or
             (
               $env:RELEASE_VERSION -eq $env:AIM_FIRST_OFFICIAL_MSI_VERSION -and
-              $smoke.msiSmokeMode -eq "fresh-bootstrap"
+              $smoke.msiSmokeMode -eq "install-bootstrap"
             )
           if (-not $allowedMsiMode) {
             throw "MSI smoke mode is not allowed for v$($env:RELEASE_VERSION): $($smoke.msiSmokeMode)"
