@@ -345,9 +345,12 @@ jobs:
           $assetDownloadRoot = Join-Path $env:DOWNLOAD_ROOT "github-draft-assets"
           New-Item -ItemType Directory -Force -Path $assetDownloadRoot | Out-Null
           foreach ($expected in $githubExpected) {
-            $matchingAssets = @($release.assets | Where-Object { $_.name -ceq $expected.Name })
+            # GitHub release uploads normalize spaces in asset names to dots
+            # (the published v2.0.0 assets use the same convention).
+            $githubAssetName = $expected.Name.Replace(' ', '.')
+            $matchingAssets = @($release.assets | Where-Object { $_.name -ceq $githubAssetName })
             if ($matchingAssets.Count -ne 1) {
-              throw "GitHub candidate release must contain exactly one $($expected.Name), found $($matchingAssets.Count)"
+              throw "GitHub candidate release must contain exactly one $githubAssetName, found $($matchingAssets.Count)"
             }
             $downloaded = Join-Path $assetDownloadRoot $expected.Name
             Invoke-WebRequest -Uri $matchingAssets[0].url -Headers $headers -OutFile $downloaded -UseBasicParsing
