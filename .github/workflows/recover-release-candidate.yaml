@@ -279,7 +279,7 @@ jobs:
           "download_root=$downloadRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "releases=$candidateReleases" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Verify maintainer-created GitHub Draft bytes
+      - name: Upload and verify maintainer-created GitHub Draft bytes
         shell: pwsh
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -305,6 +305,13 @@ jobs:
 
           $expected = @(Get-ChildItem -LiteralPath $env:DOWNLOAD_ROOT -File)
           $expected += Get-Item -LiteralPath $env:CANDIDATE_RELEASES
+          $assetPaths = @($expected | ForEach-Object FullName)
+          & gh release upload $env:RELEASE_TAG @assetPaths --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub integration could not upload assets to the maintainer-created Draft"
+          }
+
+          $release = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" | ConvertFrom-Json
           if (@($release.assets).Count -ne $expected.Count) {
             throw "GitHub Draft asset count differs: expected $($expected.Count), found $(@($release.assets).Count)"
           }
