@@ -2821,7 +2821,9 @@ function HomePage() {
                       }}
                       type="button"
                     >
-                      续段建议 {sequenceSuggestions.length}
+                      {t("sequenceSuggestionCount", {
+                        count: sequenceSuggestions.length,
+                      })}
                     </button>
                   )}
                 <SortDropdown
@@ -3151,7 +3153,9 @@ function HomePage() {
                               handleOpenSequenceDetails(sequenceId);
                               setSequenceRefresh((value) => value + 1);
                             })
-                            .catch(() => toast.error("设置代表帧失败"));
+                            .catch(() =>
+                              toast.error(t("sequenceRepresentativeSetFailed"))
+                            );
                         }}
                         onSplit={(sequenceId, position) => {
                           ipc.client.photos
@@ -3159,9 +3163,9 @@ function HomePage() {
                             .then(() => {
                               setSelectedSequence(null);
                               setSequenceRefresh((value) => value + 1);
-                              toast.success("已拆分为两个手动锁定序列");
+                              toast.success(t("sequenceSplitSuccess"));
                             })
-                            .catch(() => toast.error("拆分序列失败"));
+                            .catch(() => toast.error(t("sequenceSplitFailed")));
                         }}
                         onWidthChange={setDetailPanelWidth}
                         sequence={selectedSequence}
@@ -3194,10 +3198,14 @@ function HomePage() {
         )}
       </div>
       <ConfirmDialog
-        confirmText="开始重新识别"
+        confirmText={t("sequenceRebuildAction")}
         description={
           sequenceRebuildPreview
-            ? `将替换 ${sequenceRebuildPreview.existingAutomatic} 个未锁定自动片段，预计生成 ${sequenceRebuildPreview.nextAutomatic} 个片段（其中延时 ${sequenceRebuildPreview.timelapseSegments} 个）。手动或锁定序列不会受到影响。`
+            ? t("sequenceRebuildDescription", {
+                existing: sequenceRebuildPreview.existingAutomatic,
+                next: sequenceRebuildPreview.nextAutomatic,
+                timelapse: sequenceRebuildPreview.timelapseSegments,
+              })
             : undefined
         }
         onCancel={() => setSequenceRebuildPreview(null)}
@@ -3222,11 +3230,11 @@ function HomePage() {
             .finally(() => setRebuildingSequences(false));
         }}
         open={sequenceRebuildPreview !== null}
-        title="确认重新识别序列"
+        title={t("sequenceRebuildConfirmTitle")}
       />
       <ConfirmDialog
-        confirmText="合并为手动序列"
-        description="检测到暂停后恢复同一节奏的两个片段。合并后会锁定，后续自动重建不会覆盖。"
+        confirmText={t("sequenceMergeAction")}
+        description={t("sequenceMergeDescription")}
         onCancel={() => setPendingSequenceMerge(null)}
         onConfirm={() => {
           const suggestion = pendingSequenceMerge;
@@ -3243,23 +3251,23 @@ function HomePage() {
             })
             .then(() => {
               setSequenceRefresh((value) => value + 1);
-              toast.success("已合并为手动锁定序列");
+              toast.success(t("sequenceMergeSuccess"));
             })
-            .catch(() => toast.error("合并序列失败"));
+            .catch(() => toast.error(t("sequenceMergeFailed")));
         }}
         open={pendingSequenceMerge !== null}
-        title="确认合并续段"
+        title={t("sequenceMergeConfirmTitle")}
       />
       <ConfirmDialog
         confirmText={
           pendingSequenceAction?.type === "restore"
-            ? "恢复自动识别"
-            : "解除分组"
+            ? t("sequenceRestoreAutomatic")
+            : t("sequenceUngroupAction")
         }
         description={
           pendingSequenceAction?.type === "restore"
-            ? "将撤销手动编辑、清除成员的排除记录，并按当前规则重新识别所在文件夹。"
-            : "仅解除这条手动分组；照片保持可浏览，但不会立即重新参加自动识别。"
+            ? t("sequenceRestoreDescription")
+            : t("sequenceUngroupDescription")
         }
         destructive={pendingSequenceAction?.type === "ungroup"}
         onCancel={() => setPendingSequenceAction(null)}
@@ -3278,22 +3286,24 @@ function HomePage() {
               setSelectedSequence(null);
               setSequenceRefresh((value) => value + 1);
               toast.success(
-                action.type === "restore" ? "已恢复自动识别" : "已解除手动分组"
+                action.type === "restore"
+                  ? t("sequenceRestoreSuccess")
+                  : t("sequenceUngroupSuccess")
               );
             })
             .catch(() =>
               toast.error(
                 action.type === "restore"
-                  ? "恢复自动识别失败"
-                  : "解除手动分组失败"
+                  ? t("sequenceRestoreFailed")
+                  : t("sequenceUngroupFailed")
               )
             );
         }}
         open={pendingSequenceAction !== null}
         title={
           pendingSequenceAction?.type === "restore"
-            ? "恢复自动识别"
-            : "解除手动分组"
+            ? t("sequenceRestoreAutomatic")
+            : t("sequenceUngroupAction")
         }
       />
       {lightboxIndex >= 0 && (

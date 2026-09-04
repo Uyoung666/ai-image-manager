@@ -1055,9 +1055,11 @@ function AlbumDetailPage() {
                           }
                         : current
                     );
-                    toast.success("已设为手动代表帧");
+                    toast.success(t("sequenceManualRepresentativeSet"));
                   })
-                  .catch(() => toast.error("设置代表帧失败"));
+                  .catch(() =>
+                    toast.error(t("sequenceRepresentativeSetFailed"))
+                  );
               }}
               sequence={sequenceView.selectedSequence}
               width={360}

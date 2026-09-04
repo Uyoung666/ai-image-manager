@@ -151,7 +151,9 @@ export function PhotoContextMenu({
 
   let deleteLabel = t("deletePhoto");
   if (menu.sequenceMemberIds) {
-    deleteLabel = `删除整个序列（${menu.sequenceMemberIds.length}）`;
+    deleteLabel = t("sequenceDeleteWhole", {
+      count: menu.sequenceMemberIds.length,
+    });
   } else if (menu.isBatch) {
     deleteLabel = `${t("deletePhoto")} (${menu.selectionCount})`;
   }

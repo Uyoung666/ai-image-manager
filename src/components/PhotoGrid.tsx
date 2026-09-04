@@ -416,12 +416,12 @@ export function SequenceFocusTray({
         toast.success(successText);
       } catch (error) {
         console.error("[SequenceFocusTray] mutation failed", error);
-        toast.error("序列操作失败");
+        toast.error(t("sequenceActionFailed"));
       } finally {
         setIsMutating(false);
       }
     },
-    [fullMembers, onSelectSequenceMembers, onSequenceMutationComplete]
+    [fullMembers, onSelectSequenceMembers, onSequenceMutationComplete, t]
   );
   const handleMove = useCallback(
     async (direction: -1 | 1) => {
@@ -570,21 +570,23 @@ export function SequenceFocusTray({
           onClick={(event) => {
             event.stopPropagation();
             setConfirmation({
-              confirmText: "移出序列",
-              description: `从序列中移出已选 ${selectedMemberIds.length} 张照片。照片文件不会被删除；少于 2 张时序列会自动解散。`,
+              confirmText: t("sequenceRemoveAction"),
+              description: t("sequenceRemoveDescription", {
+                count: selectedMemberIds.length,
+              }),
               operation: () =>
                 photoSequenceActions.removeMembers(
                   sequence.id,
                   selectedMemberIds
                 ),
-              successText: "已移出序列成员",
-              title: "确认移出序列",
+              successText: t("sequenceRemoveSuccess"),
+              title: t("sequenceRemoveConfirmTitle"),
             });
           }}
           type="button"
         >
           <Unlink className="mr-1 inline size-3.5" />
-          移出
+          {t("sequenceRemoveShort")}
         </button>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -638,18 +640,21 @@ export function SequenceFocusTray({
           onClick={(event) => {
             event.stopPropagation();
             setConfirmation({
-              confirmText: "拆分序列",
-              description: `从已选照片前拆分，生成 ${selectedFullIndex} 张和 ${fullMembers.length - selectedFullIndex} 张两个序列。`,
+              confirmText: t("sequenceSplitAction"),
+              description: t("sequenceSplitDescription", {
+                after: fullMembers.length - selectedFullIndex,
+                before: selectedFullIndex,
+              }),
               operation: () =>
                 photoSequenceActions.split(sequence.id, selectedFullIndex),
-              successText: "已拆分序列",
-              title: "确认拆分序列",
+              successText: t("sequenceSplitTraySuccess"),
+              title: t("sequenceConfirmSplit"),
             });
           }}
           type="button"
         >
           <Scissors className="mr-1 inline size-3.5" />
-          从此拆分
+          {t("sequenceSplitHere")}
         </button>
         <button
           className="h-7 shrink-0 rounded-md border border-destructive/30 bg-background/80 px-2 text-[11px] text-destructive disabled:opacity-40"
@@ -658,14 +663,15 @@ export function SequenceFocusTray({
             event.stopPropagation();
             dissolveExcludeRef.current = false;
             setConfirmation({
-              confirmText: "解散序列",
+              confirmText: t("sequenceDissolveAction"),
               description: (
                 <>
-                  <p className="mb-3">
-                    解散这个 {fullMembers.length}{" "}
-                    张照片的序列。照片文件不会被删除。
-                  </p>
-                  <div className="checkbox-wrapper flex items-center gap-2">
+                  <span className="mb-3 block">
+                    {t("sequenceDissolveDescription", {
+                      count: fullMembers.length,
+                    })}
+                  </span>
+                  <span className="checkbox-wrapper flex items-center gap-2">
                     <input
                       className="check"
                       defaultChecked={false}
@@ -704,23 +710,23 @@ export function SequenceFocusTray({
                           />
                         </g>
                       </svg>
-                      不再将此组照片识别为序列
+                      {t("sequenceDissolveExclude")}
                     </label>
-                  </div>
+                  </span>
                 </>
               ),
               operation: () =>
                 dissolveExcludeRef.current
                   ? photoSequenceActions.dissolveAndExclude(sequence.id)
                   : photoSequenceActions.dissolve(sequence.id),
-              successText: "序列已解散",
-              title: "确认解散序列",
+              successText: t("sequenceDissolveSuccess"),
+              title: t("sequenceDissolveConfirmTitle"),
             });
           }}
           type="button"
         >
           <Unlink className="mr-1 inline size-3.5" />
-          解散
+          {t("sequenceDissolveShort")}
         </button>
       </div>
       <div
@@ -796,7 +802,7 @@ export function SequenceFocusTray({
         </div>
       </div>
       <ConfirmDialog
-        confirmText={confirmation?.confirmText ?? "确认"}
+        confirmText={confirmation?.confirmText ?? t("confirm")}
         description={confirmation?.description}
         destructive
         disabled={isMutating}
@@ -810,7 +816,7 @@ export function SequenceFocusTray({
           finishMutation(pending.operation, pending.successText);
         }}
         open={confirmation !== null}
-        title={confirmation?.title ?? "确认操作"}
+        title={confirmation?.title ?? t("confirm")}
       />
     </section>
   );

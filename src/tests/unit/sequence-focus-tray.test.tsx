@@ -109,7 +109,9 @@ describe("SequenceFocusTray", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "移出" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceRemoveShort" })
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "sequenceMoveUp" })
     ).toBeInTheDocument();
@@ -117,9 +119,62 @@ describe("SequenceFocusTray", () => {
       screen.getByRole("button", { name: "sequenceMoveDown" })
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "从此拆分" })
+      screen.getByRole("button", { name: "sequenceSplitHere" })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "解散" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceDissolveShort" })
+    ).toBeInTheDocument();
+  });
+
+  it("uses localized copy for structural action confirmations", () => {
+    render(
+      <SequenceFocusTray
+        columns={3}
+        completeMembers={sequence.members}
+        containerWidth={900}
+        getDragIds={(id) => [id]}
+        onDoubleClick={vi.fn()}
+        onSelect={vi.fn()}
+        renderImage={false}
+        selectedIds={new Set([3])}
+        sequence={{
+          ...sequence,
+          frameCount: 6,
+          members: sequence.members.slice(0, 6),
+        }}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "sequenceRemoveShort" })
+    );
+    expect(
+      screen.getByRole("heading", { name: "sequenceRemoveConfirmTitle" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceRemoveAction" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "sequenceSplitHere" }));
+    expect(
+      screen.getByRole("heading", { name: "sequenceConfirmSplit" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceSplitAction" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "sequenceDissolveShort" })
+    );
+    expect(
+      screen.getByRole("heading", { name: "sequenceDissolveConfirmTitle" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "sequenceDissolveAction" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("sequenceDissolveExclude")).toBeInTheDocument();
   });
 
   it("keeps long sequences inline and only renders virtual rows", () => {
