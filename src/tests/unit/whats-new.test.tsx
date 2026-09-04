@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   language: "zh",
   navigate: vi.fn(),
   openExternalLink: vi.fn(),
-  version: "2.1.0" as string | undefined,
+  version: "2.1.1" as string | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -47,16 +47,17 @@ describe("WhatsNewPage", () => {
     mocks.language = "zh";
     mocks.navigate.mockReset();
     mocks.openExternalLink.mockReset();
-    mocks.version = "2.1.0";
+    mocks.version = "2.1.1";
   });
 
   it("registers the current release before previous versions", () => {
     expect(changelogEntries.map((entry) => entry.version)).toEqual([
+      "2.1.1",
       "2.1.0",
       "2.0.0",
     ]);
-    expect(getChangelog("2.1.0")).toBe(getLatestChangelog());
-    expect(hasChangelog("2.1.0")).toBe(true);
+    expect(getChangelog("2.1.1")).toBe(getLatestChangelog());
+    expect(hasChangelog("2.1.1")).toBe(true);
   });
 
   it("renders localized highlights and continues to the gallery", () => {

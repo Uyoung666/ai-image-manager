@@ -1,10 +1,11 @@
 import type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
-import previous from "./v2.0.0";
-import current from "./v2.1.0";
+import initial from "./v2.0.0";
+import previous from "./v2.1.0";
+import current from "./v2.1.1";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 
-export const changelogEntries: ChangelogEntry[] = [current, previous];
+export const changelogEntries: ChangelogEntry[] = [current, previous, initial];
 
 export function getChangelog(version?: string): ChangelogEntry | undefined {
   if (!version) {
