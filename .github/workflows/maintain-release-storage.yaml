@@ -1,0 +1,98 @@
+name: Maintain COS release storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "只读盘点，或清理已正式发布版本的临时 testing/candidate 副本"
+        required: true
+        default: inventory
+        type: choice
+        options:
+          - inventory
+          - prune
+      version:
+        description: "prune 时的正式版本号（不带 v）"
+        required: false
+        default: "2.1.0"
+        type: string
+      source_run_id:
+        description: "prune 时删除的 testing 源运行 ID"
+        required: false
+        default: "33458386015"
+        type: string
+      confirmation:
+        description: "prune 时输入 PRUNE <版本号> <源运行 ID>"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cos-release-storage-maintenance
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  COS_RELEASE_PREFIX: ${{ vars.COS_RELEASE_PREFIX || 'ai-image-manager' }}
+  COS_BUCKET: ${{ vars.COS_BUCKET || 'ai-image-manager-1392398678' }}
+  COS_REGION: ${{ vars.COS_REGION || 'ap-hongkong' }}
+
+jobs:
+  maintain:
+    name: Inventory or prune temporary release objects
+    runs-on: ubuntu-latest
+    environment: release-candidate
+    env:
+      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+    steps:
+      - name: Checkout release maintenance tooling
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install release maintenance dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate requested operation
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$ACTION" == "prune" && "$CONFIRMATION" != "PRUNE $VERSION $SOURCE_RUN_ID" ]]; then
+            echo "Cleanup confirmation must equal: PRUNE $VERSION $SOURCE_RUN_ID" >&2
+            exit 1
+          fi
+
+      - name: Inventory COS release storage
+        if: inputs.action == 'inventory'
+        run: node scripts/release-cos-maintenance.mjs inventory --output cos-maintenance-report.json
+
+      - name: Prune exact temporary release prefixes
+        if: inputs.action == 'prune'
+        run: >-
+          node scripts/release-cos-maintenance.mjs prune
+          --version "${{ inputs.version }}"
+          --run-id "${{ inputs.source_run_id }}"
+          --confirmation "${{ inputs.confirmation }}"
+          --output cos-maintenance-report.json
+
+      - name: Upload maintenance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cos-maintenance-${{ inputs.action }}-${{ github.run_id }}
+          path: cos-maintenance-report.json
+          if-no-files-found: error
+          retention-days: 30
