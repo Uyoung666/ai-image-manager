@@ -104,11 +104,12 @@ import { isBenignRendererErrorMessage } from "@/utils/renderer-error-filter";
 import { cleanupBrokenLegacyStartMenuShortcut } from "@/utils/windows-shortcut-cleanup";
 import { IPC_CHANNELS, inDevelopment } from "./constants";
 import { NEBULA_GLASS_MANIFEST } from "./plugins/builtins/nebula-glass-manifest";
+import { OFFICIAL_LOCALE_TRUSTED_KEYS } from "./plugins/trusted-locale-keys";
 import { createLogger } from "./utils/logger.js";
 import { getBasePath } from "./utils/path";
 import { resolveSafePath } from "./utils/path-security.js";
 
-configurePluginManager([NEBULA_GLASS_MANIFEST]);
+configurePluginManager([NEBULA_GLASS_MANIFEST], OFFICIAL_LOCALE_TRUSTED_KEYS);
 
 const log = createLogger("main");
 installConsoleDiagnostics();

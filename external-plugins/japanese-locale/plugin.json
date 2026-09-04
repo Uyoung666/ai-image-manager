@@ -1,0 +1,33 @@
+{
+  "manifestVersion": 3,
+  "apiVersion": 3,
+  "id": "com.aiimagemanager.japanese-locale",
+  "version": "1.0.0",
+  "name": {
+    "en": "Japanese",
+    "ja-JP": "日本語"
+  },
+  "description": {
+    "en": "Japanese UI translation for AI Image Manager.",
+    "ja-JP": "AI Image Manager の日本語 UI 翻訳です。"
+  },
+  "author": {
+    "name": "Uyoung",
+    "url": "https://github.com/Uyoung666/ai-image-manager"
+  },
+  "homepage": "https://github.com/Uyoung666/ai-image-manager",
+  "license": "MIT",
+  "engine": {
+    "minAppVersion": "2.1.1"
+  },
+  "capabilities": ["locale"],
+  "locale": {
+    "tag": "ja-JP",
+    "nativeName": "日本語",
+    "fallback": "en",
+    "direction": "ltr",
+    "catalogVersion": "1.0.0",
+    "rendererFile": "locales/ja-JP/renderer.json",
+    "mainFile": "locales/ja-JP/main.json"
+  }
+}

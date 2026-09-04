@@ -1,0 +1,9 @@
+{
+  "closeWindowQuestion": "ウィンドウを閉じたときの動作を選択してください。",
+  "closeWindowTitle": "ウィンドウを閉じる",
+  "launchAtStartup": "スタートアップ時に起動",
+  "minimizeToTray": "トレイに最小化",
+  "quit": "終了",
+  "showWindow": "ウィンドウを表示",
+  "tooltip": "AI Image Manager"
+}
