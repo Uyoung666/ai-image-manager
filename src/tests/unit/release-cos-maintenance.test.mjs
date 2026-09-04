@@ -6,6 +6,8 @@ import {
   summarizeObjects,
 } from "../../../scripts/release-cos-maintenance.mjs";
 
+const REFUSING_TO_DELETE_PATTERN = /Refusing to delete/;
+
 describe("release COS maintenance safety", () => {
   it("builds inventory roots without broad bucket prefixes", () => {
     expect(buildInventoryPrefixes("ai-image-manager")).toEqual({
@@ -30,8 +32,8 @@ describe("release COS maintenance safety", () => {
     expect(
       assertTemporaryCleanupKey(
         `${targets[0]}ai-image-manager-2.1.0-delta.nupkg`,
-        targets,
-      ),
+        targets
+      )
     ).toContain("testing/runs/33458386015");
   });
 
@@ -48,7 +50,7 @@ describe("release COS maintenance safety", () => {
       "ai-image-manager/updates/win32/x64/testing/runs/other/file",
     ]) {
       expect(() => assertTemporaryCleanupKey(key, targets)).toThrow(
-        /Refusing to delete/,
+        REFUSING_TO_DELETE_PATTERN
       );
     }
   });

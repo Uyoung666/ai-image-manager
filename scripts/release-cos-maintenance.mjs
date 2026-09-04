@@ -7,6 +7,9 @@ import { parseReleases } from "./release/squirrel.mjs";
 
 const SAFE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SAFE_RUN_ID_PATTERN = /^\d+$/;
+const TRAILING_ZERO_RUN_PATTERN = /\/0$/;
+const LEADING_SLASH_PATTERN = /^\//;
+const PROTECTED_RELEASE_PATH_PATTERN = /\/(?:stable|build-base)\//;
 
 function normalizePrefix(value) {
   return String(value ?? "")
@@ -19,15 +22,15 @@ export function buildInventoryPrefixes(releasePrefix = "") {
     testing: `${prefixForKind("testing", {
       runId: "0",
       releasePrefix,
-    }).replace(/\/0$/, "")}/`,
+    }).replace(TRAILING_ZERO_RUN_PATTERN, "")}/`,
     candidates:
       `${normalizePrefix(releasePrefix)}/updates/win32/x64/candidates/`.replace(
-        /^\//,
-        "",
+        LEADING_SLASH_PATTERN,
+        ""
       ),
     downloads: `${normalizePrefix(releasePrefix)}/downloads/`.replace(
-      /^\//,
-      "",
+      LEADING_SLASH_PATTERN,
+      ""
     ),
     stable: `${prefixForKind("stable", { releasePrefix })}/`,
     buildBase: `${prefixForKind("build-base", { releasePrefix })}/`,
@@ -56,11 +59,11 @@ export function assertTemporaryCleanupKey(key, targetPrefixes) {
   const targets = targetPrefixes.map((value) => `${normalizePrefix(value)}/`);
   if (!targets.some((prefix) => `${normalizedKey}/`.startsWith(prefix))) {
     throw new Error(
-      `Refusing to delete object outside temporary targets: ${key}`,
+      `Refusing to delete object outside temporary targets: ${key}`
     );
   }
   if (
-    /\/(?:stable|build-base)\//.test(`/${normalizedKey}/`) ||
+    PROTECTED_RELEASE_PATH_PATTERN.test(`/${normalizedKey}/`) ||
     normalizedKey.includes("/downloads/")
   ) {
     throw new Error(`Refusing to delete protected release object: ${key}`);
@@ -89,13 +92,14 @@ async function listPrefix(store, prefix) {
         Marker: marker,
         MaxKeys: 1000,
       },
-      store.requestOptions(),
+      store.requestOptions()
     );
-    const contents = Array.isArray(page?.Contents)
-      ? page.Contents
-      : page?.Contents
-        ? [page.Contents]
-        : [];
+    let contents = [];
+    if (Array.isArray(page?.Contents)) {
+      contents = page.Contents;
+    } else if (page?.Contents) {
+      contents = [page.Contents];
+    }
     for (const object of contents) {
       objects.push({
         key: object.Key,
@@ -122,7 +126,7 @@ async function verifyStableRelease(store, version, releasePrefix) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
-      `Stable RELEASES is not publicly readable (${response.status})`,
+      `Stable RELEASES is not publicly readable (${response.status})`
     );
   }
   const entries = parseReleases(await response.text());
@@ -135,7 +139,7 @@ async function verifyStableRelease(store, version, releasePrefix) {
 async function inventory(store, releasePrefix) {
   const groups = {};
   for (const [name, prefix] of Object.entries(
-    buildInventoryPrefixes(releasePrefix),
+    buildInventoryPrefixes(releasePrefix)
   )) {
     const objects = await listPrefix(store, prefix);
     groups[name] = {
@@ -216,14 +220,14 @@ async function main() {
     };
   } else {
     throw new Error(
-      "Usage: release-cos-maintenance.mjs <inventory|prune> [options]",
+      "Usage: release-cos-maintenance.mjs <inventory|prune> [options]"
     );
   }
   const outputPath = path.resolve(args.output ?? "cos-maintenance-report.json");
   await fsp.writeFile(
     outputPath,
     `${JSON.stringify(report, null, 2)}\n`,
-    "utf8",
+    "utf8"
   );
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
