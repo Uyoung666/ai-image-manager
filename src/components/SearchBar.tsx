@@ -1116,7 +1116,7 @@ export const SearchBar = memo(
 
             {/* Active filter chips */}
             {hasActiveFilters && (
-              <div className="hidden">
+              <div className="mt-2 flex max-h-24 min-w-0 max-w-full flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
                 {filters.dateFrom && (
                   <FilterChip
                     label={t("filterFrom", { value: filters.dateFrom })}
@@ -1170,11 +1170,18 @@ export const SearchBar = memo(
                   <FilterChip
                     label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedValue}`}
                     onRemove={() => {
-                      setFilters((previous) => ({
-                        ...previous,
-                        advancedField: undefined,
-                        advancedValue: undefined,
-                      }));
+                      setFilters((previous) => {
+                        const next = {
+                          ...previous,
+                          advancedField: undefined,
+                          advancedValue: undefined,
+                        };
+                        const hasAny = Object.values(next).some((v) => v);
+                        queueMicrotask(() =>
+                          onSearch(query.trim(), hasAny ? next : undefined)
+                        );
+                        return next;
+                      });
                     }}
                   />
                 )}
@@ -2196,12 +2203,14 @@ function FilterChip({
   label: string;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
-    <span className="inline-flex items-center gap-1 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
-      {label}
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[4px] bg-primary/10 px-2 py-0.5 font-medium text-[10px] text-primary">
+      <span className="min-w-0 flex-1 break-all">{label}</span>
       <button
-        aria-label="移除筛选条件"
-        className="-mr-1 ml-0.5 flex h-6 w-6 items-center justify-center rounded hover:bg-primary/15 hover:text-foreground"
+        aria-label={t("removeSearchFilter", { label })}
+        className="-mr-1 ml-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-primary/15 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         onClick={onRemove}
         type="button"
       >

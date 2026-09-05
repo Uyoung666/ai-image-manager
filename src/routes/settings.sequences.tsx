@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { SettingRow } from "@/components/settings/setting-row";
 import {
   SettingsPageShell,
@@ -8,6 +9,10 @@ import {
 } from "@/components/settings/settings-page-shell";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
 import { ipc } from "@/ipc/manager";
+import {
+  createOptimisticSaveQueue,
+  type OptimisticSaveQueue,
+} from "@/utils/optimistic-save-queue";
 
 type SequenceDetectionPreset = "strict" | "balanced" | "relaxed" | "custom";
 type BuiltInSequencePreset = Exclude<SequenceDetectionPreset, "custom">;
@@ -146,9 +151,47 @@ function SequencePresetToggle({
 function SequenceSettingsPage() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState(defaultSettings);
+  const settingsRef = useRef(defaultSettings);
   const customValuesRef = useRef<CustomSequenceValues>(defaultCustomValues);
+  const saveQueueRef =
+    useRef<OptimisticSaveQueue<SequenceDetectionSettings> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef);
+
+  if (!saveQueueRef.current) {
+    saveQueueRef.current = createOptimisticSaveQueue({
+      initialValue: defaultSettings,
+      onCommit: (value) => {
+        if (value.preset === "custom") {
+          customValuesRef.current = getCustomValues(value);
+        }
+      },
+      onRollback: (value) => {
+        settingsRef.current = value;
+        setSettings(value);
+        if (value.preset === "custom") {
+          customValuesRef.current = getCustomValues(value);
+        }
+      },
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setAppSetting({
+          key: "sequence.detection.settings",
+          value: JSON.stringify(value),
+        }),
+    });
+  }
+
+  const hydrateSettings = useCallback((value: SequenceDetectionSettings) => {
+    if (!saveQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    if (value.preset === "custom") {
+      customValuesRef.current = getCustomValues(value);
+    }
+    settingsRef.current = value;
+    setSettings(value);
+  }, []);
 
   useEffect(() => {
     ipc.client.settings
@@ -156,6 +199,7 @@ function SequenceSettingsPage() {
       .then((result) => {
         const value = (result as { value?: string | null }).value;
         if (!value) {
+          hydrateSettings(defaultSettings);
           return;
         }
         const parsed = JSON.parse(value) as Partial<SequenceDetectionSettings>;
@@ -171,27 +215,20 @@ function SequenceSettingsPage() {
           ...parsed,
           preset,
         };
-        if (preset === "custom") {
-          customValuesRef.current = getCustomValues(next);
-        }
-        setSettings(next);
+        hydrateSettings(next);
       })
-      .catch(() => undefined);
-  }, []);
+      .catch(() => hydrateSettings(defaultSettings));
+  }, [hydrateSettings]);
 
   function save(next: SequenceDetectionSettings) {
+    settingsRef.current = next;
     setSettings(next);
-    ipc.client.settings
-      .setAppSetting({
-        key: "sequence.detection.settings",
-        value: JSON.stringify(next),
-      })
-      .catch(() => setSettings(settings));
+    saveQueueRef.current?.enqueue(next);
   }
 
   function saveCustom(values: CustomSequenceValues) {
     customValuesRef.current = values;
-    save({ ...settings, ...values, preset: "custom" });
+    save({ ...settingsRef.current, ...values, preset: "custom" });
   }
 
   return (
@@ -208,7 +245,7 @@ function SequenceSettingsPage() {
                 save(
                   preset === "custom"
                     ? {
-                        ...settings,
+                        ...settingsRef.current,
                         ...customValuesRef.current,
                         preset,
                       }
@@ -228,7 +265,7 @@ function SequenceSettingsPage() {
               min={3}
               onChange={(event) =>
                 saveCustom({
-                  ...getCustomValues(settings),
+                  ...getCustomValues(settingsRef.current),
                   timelapseMinFrames: Number(event.target.value) || 6,
                 })
               }
@@ -247,7 +284,7 @@ function SequenceSettingsPage() {
               min={1}
               onChange={(event) =>
                 saveCustom({
-                  ...getCustomValues(settings),
+                  ...getCustomValues(settingsRef.current),
                   rhythmTolerance: Number(event.target.value) / 100 || 0.15,
                 })
               }
@@ -266,7 +303,7 @@ function SequenceSettingsPage() {
               min={1}
               onChange={(event) =>
                 saveCustom({
-                  ...getCustomValues(settings),
+                  ...getCustomValues(settingsRef.current),
                   timelapsePHashDistance: Number(event.target.value) || 16,
                 })
               }

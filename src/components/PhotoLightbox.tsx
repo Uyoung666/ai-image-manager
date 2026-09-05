@@ -809,12 +809,18 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                     icon={<ImageIcon className="h-4 w-4" />}
                     label={t("copyImage")}
                     onClick={async () => {
-                      const ok =
-                        await window.electronAPI?.copyImageToClipboard?.(
-                          photo.path
-                        );
-                      if (ok) {
-                        toast.success(t("imageCopiedToClipboard"));
+                      try {
+                        const ok =
+                          await window.electronAPI?.copyImageToClipboard?.(
+                            photo.path
+                          );
+                        if (ok) {
+                          toast.success(t("imageCopiedToClipboard"));
+                        } else {
+                          toast.error(t("copyFailed"));
+                        }
+                      } catch {
+                        toast.error(t("copyFailed"));
                       }
                       setMoreOpen(false);
                     }}
@@ -822,10 +828,13 @@ export const PhotoLightbox = memo(function PhotoLightbox({
                   <MenuButton
                     icon={<Copy className="h-4 w-4" />}
                     label={t("copyPath")}
-                    onClick={() => {
-                      navigator.clipboard
-                        .writeText(photo.path)
-                        .catch(() => undefined);
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(photo.path);
+                        toast.success(t("pathCopied"));
+                      } catch {
+                        toast.error(t("copyFailed"));
+                      }
                       setMoreOpen(false);
                     }}
                   />

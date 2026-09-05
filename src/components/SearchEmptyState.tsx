@@ -26,8 +26,10 @@ interface SearchEmptyStateProps {
   onClearFilters?: () => void;
   onClearSearch: () => void;
   onGoToAiSettings?: () => void;
+  onRetry?: () => void;
   parsedTimeFilter?: ParsedTimeFilter | null;
   query: string;
+  searchError?: "image" | "search" | null;
   searchMode: SearchMode | null;
   semanticState?: "ready" | "partial" | "unavailable" | "error";
   totalPhotos?: number;
@@ -42,12 +44,39 @@ export function SearchEmptyState({
   onClearSearch,
   onClearFilters,
   onGoToAiSettings,
+  onRetry,
   semanticState,
   indexedPhotos = 0,
   totalPhotos = 0,
+  searchError,
 }: SearchEmptyStateProps) {
   const { t } = useTranslation();
   const aiState = semanticState ?? (hasAiVectors ? "ready" : "unavailable");
+
+  if (searchError) {
+    const isImageSearch = searchError === "image";
+    return (
+      <EmptyStateCard
+        actions={[
+          ...(onRetry
+            ? [{ label: t("retry"), onClick: onRetry, primary: true }]
+            : []),
+          { label: t("emptyBrowseAll"), onClick: onClearSearch },
+        ]}
+        description={t("loadFailedRetry")}
+        icon={
+          isImageSearch ? (
+            <ImageUp className="h-5 w-5" />
+          ) : (
+            <Search className="h-5 w-5" />
+          )
+        }
+        title={t(
+          isImageSearch ? "toastImageSearchFailed" : "toastSearchFailed"
+        )}
+      />
+    );
+  }
 
   if (searchMode === "text" && query.trim() && aiState !== "ready") {
     const isPartial = aiState === "partial";

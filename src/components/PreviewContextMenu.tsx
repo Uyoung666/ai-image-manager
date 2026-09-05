@@ -113,11 +113,17 @@ export function PreviewContextMenu({
         disabled={!menu.photoPath}
         onClick={async () => {
           if (menu.photoPath) {
-            const ok = await window.electronAPI?.copyImageToClipboard?.(
-              menu.photoPath
-            );
-            if (ok) {
-              toast.success(t("imageCopiedToClipboard"));
+            try {
+              const ok = await window.electronAPI?.copyImageToClipboard?.(
+                menu.photoPath
+              );
+              if (ok) {
+                toast.success(t("imageCopiedToClipboard"));
+              } else {
+                toast.error(t("copyFailed"));
+              }
+            } catch {
+              toast.error(t("copyFailed"));
             }
           }
           onClose();
@@ -130,11 +136,14 @@ export function PreviewContextMenu({
       <button
         className="flex w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-1.5 text-[13px] text-foreground hover:bg-foreground/10"
         disabled={!menu.photoPath}
-        onClick={() => {
+        onClick={async () => {
           if (menu.photoPath) {
-            navigator.clipboard.writeText(menu.photoPath).catch(() => {
-              /* ignore clipboard errors */
-            });
+            try {
+              await navigator.clipboard.writeText(menu.photoPath);
+              toast.success(t("pathCopied"));
+            } catch {
+              toast.error(t("copyFailed"));
+            }
           }
           onClose();
         }}

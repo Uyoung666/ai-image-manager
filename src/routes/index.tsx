@@ -1,6 +1,6 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Layers } from "lucide-react";
+import { CircleAlert, Images, Layers } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -87,6 +87,7 @@ import {
 } from "@/utils/gallery-view-state";
 import { shouldRestoreSavedSearch } from "@/utils/search-state";
 import { notifyStartupHomeReady } from "@/utils/startup-readiness";
+import { shouldShowHomeGallery } from "./-home-gallery-state";
 import {
   loadSortField,
   loadSortOrder,
@@ -269,6 +270,9 @@ function HomePage() {
   const imageSearchPath = filter.appliedSearch?.imagePath ?? null;
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
+  const [searchError, setSearchError] = useState<"image" | "search" | null>(
+    null
+  );
   const [searchResultSourceKey, setSearchResultSourceKey] = useState<
     string | null
   >(null);
@@ -292,6 +296,7 @@ function HomePage() {
     filters?: ExifFilters;
     colorHex?: string;
   } | null>(null);
+  const lastImageSearchPathRef = useRef<string | null>(null);
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
@@ -462,8 +467,10 @@ function HomePage() {
     setIsFetchingSearchNextPage(false);
     setSearchHasMore(false);
     lastSearchParamsRef.current = null;
+    lastImageSearchPathRef.current = null;
     setSearchTime(undefined);
     setSearchResults(null);
+    setSearchError(null);
     setSearchResultSourceKey(null);
     setSearchResultGeneration(0);
     setSearchSemantic(null);
@@ -487,6 +494,23 @@ function HomePage() {
     (...args) => searchHandlerRef.current?.(...args) ?? Promise.resolve(),
     []
   );
+
+  const handleSearchRetry = useCallback(() => {
+    const params = lastSearchParamsRef.current;
+    if (!params) {
+      return;
+    }
+    handleSearch(params.query, params.filters, params.colorHex, true).catch(
+      () => undefined
+    );
+  }, [handleSearch]);
+
+  const handleImageSearchRetry = useCallback(() => {
+    const imagePath = lastImageSearchPathRef.current;
+    if (imagePath) {
+      imageSearchRef.current(imagePath).catch(() => undefined);
+    }
+  }, []);
 
   const handledSearchResetVersion = useRef(filter.searchResetVersion);
   useLayoutEffect(() => {
@@ -698,8 +722,11 @@ function HomePage() {
     fetchNextPage,
     hasNextPage,
     isLoading: photosLoading,
+    isFetching: photosFetching,
     isFetchingNextPage,
     isPlaceholderData: photosIsPlaceholder,
+    error: photosError,
+    refetch: refetchPhotos,
   } = usePhotos({
     folderId: filter.activeFolderId,
     tagIds: filter.activeTagIds.length > 0 ? filter.activeTagIds : undefined,
@@ -709,7 +736,14 @@ function HomePage() {
     order: sortOrder,
     enabled: !isSearching,
   });
-  const { data: folders = [], isLoading: foldersLoading } = useFolders();
+  const {
+    data: foldersData,
+    error: foldersError,
+    isFetching: foldersFetching,
+    isLoading: foldersLoading,
+    refetch: refetchFolders,
+  } = useFolders();
+  const folders = foldersData ?? [];
   const globalAiStatus = useGlobalAiStatus();
 
   const { data: aiStatus } = useAiStatus();
@@ -739,6 +773,16 @@ function HomePage() {
     [photosData]
   );
   const totalFromQuery = photosData?.pages[0]?.total ?? 0;
+  const initialHomeQueryError =
+    !isSearching &&
+    Boolean(
+      (photosError && photosData === undefined) ||
+        (foldersError && foldersData === undefined)
+    );
+  const handleHomeDataRetry = useCallback(() => {
+    refetchPhotos().catch(() => undefined);
+    refetchFolders().catch(() => undefined);
+  }, [refetchFolders, refetchPhotos]);
 
   useEffect(() => {
     recordGalleryPerf("galleryPagedPhotoCount", pagedPhotos.length);
@@ -1551,7 +1595,10 @@ function HomePage() {
     [handleOpenSequenceDetails]
   );
   const totalPhotos = isSearching ? photos.length : totalFromQuery;
-  const loading = isSearching ? searchLoading : photosLoading;
+  const loading = isSearching
+    ? searchLoading
+    : photosLoading ||
+      (initialHomeQueryError && (photosFetching || foldersFetching));
   const startupHomeReadyRef = useRef(false);
 
   useEffect(() => {
@@ -1649,11 +1696,31 @@ function HomePage() {
           }}
           onClearSearch={filter.clearSearch}
           onGoToAiSettings={() => navigate({ to: "/settings" })}
+          onRetry={
+            searchError === "image" ? handleImageSearchRetry : handleSearchRetry
+          }
           parsedTimeFilter={parsedTimeFilter}
           query={searchQuery}
+          searchError={searchError}
           searchMode={searchMode}
           semanticState={searchSemantic?.state}
           totalPhotos={searchSemantic?.totalPhotos ?? 0}
+        />
+      );
+    }
+    if (initialHomeQueryError) {
+      return (
+        <EmptyStateCard
+          actions={[
+            {
+              label: t("retry"),
+              onClick: handleHomeDataRetry,
+              primary: true,
+            },
+          ]}
+          description={t("loadFailedRetry")}
+          icon={<CircleAlert aria-hidden="true" className="h-5 w-5" />}
+          title={t("routeErrorTitle")}
         />
       );
     }
@@ -1704,14 +1771,34 @@ function HomePage() {
         />
       );
     }
+    if (filter.activeFolderId !== null || filter.activeTagIds.length > 0) {
+      return (
+        <EmptyStateCard
+          actions={[
+            {
+              label: t("emptyBrowseAll"),
+              onClick: filter.selectAllPhotos,
+              primary: true,
+            },
+          ]}
+          description={t("emptyScopeDescription")}
+          icon={<Images aria-hidden="true" className="h-5 w-5" />}
+          title={t("emptyScopeTitle")}
+        />
+      );
+    }
     return undefined;
   }, [
     displayedSequenceMode,
     isSearching,
     filter.favoriteOnly,
+    filter.activeFolderId,
+    filter.activeTagIds.length,
+    filter.selectAllPhotos,
     t,
     searchMode,
     searchQuery,
+    searchError,
     parsedTimeFilter,
     hasActiveExifFilters,
     aiStatus?.hasVectors,
@@ -1722,6 +1809,10 @@ function HomePage() {
     filter.searchDraft.query,
     filter.setSearchDraftFilters,
     handleSearch,
+    handleSearchRetry,
+    handleImageSearchRetry,
+    initialHomeQueryError,
+    handleHomeDataRetry,
     filter.setFavoriteOnly,
     filter.clearSearch,
     handleSequenceModeChange,
@@ -1982,6 +2073,7 @@ function HomePage() {
     if (!(query.trim() || hasFilters || hasColorHex)) {
       filter.clearSearch();
       pendingSemanticRefreshRef.current = null;
+      setSearchError(null);
       setSearchSemantic(null);
       setSearchTime(undefined);
       setSearchResults(null);
@@ -2002,6 +2094,7 @@ function HomePage() {
       query,
     });
     setSearchLoading(true);
+    setSearchError(null);
     searchLoadingMoreRef.current = false;
     searchNextCursorRef.current = null;
     searchNextOffsetRef.current = 0;
@@ -2134,6 +2227,7 @@ function HomePage() {
       }
 
       setSearchResults(results);
+      setSearchError(null);
       setSearchResultGeneration(gen);
       setSearchResultSourceKey(
         createSearchResultSourceKey(
@@ -2150,6 +2244,7 @@ function HomePage() {
       if (effectiveColorHex) {
         setSearchHasMore(false);
         setSearchResults([]);
+        setSearchError("search");
         setSearchResultGeneration(gen);
         setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
         setSearchTime(Math.round(performance.now() - startTime));
@@ -2167,6 +2262,7 @@ function HomePage() {
           }
           const fallbackResults = (fallback as { items?: Photo[] }).items ?? [];
           setSearchResults(fallbackResults);
+          setSearchError(null);
           setSearchResultGeneration(gen);
           setSearchResultSourceKey(
             createSearchResultSourceKey(
@@ -2183,6 +2279,7 @@ function HomePage() {
           toast.error(t("toastSearchFailed"));
           setSearchHasMore(false);
           setSearchResults([]);
+          setSearchError("search");
           setSearchResultGeneration(gen);
           setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
         }
@@ -2380,8 +2477,10 @@ function HomePage() {
     }
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
   async function handleImageSearch(imagePath: string) {
     const gen = ++searchGenerationRef.current;
+    lastImageSearchPathRef.current = imagePath;
     filter.applySearch({
       filters: {},
       imagePath,
@@ -2396,6 +2495,7 @@ function HomePage() {
     });
     setImageSearchPreviewDataUrl(null);
     setSearchLoading(true);
+    setSearchError(null);
     setSearchHasMore(false);
     const startTime = performance.now();
     try {
@@ -2422,11 +2522,21 @@ function HomePage() {
         toast.error(t("toastImageSearchSourceMissing"));
         return;
       }
+      if (result.errorCode === "AI_SEARCH_FAILED") {
+        console.warn("[ImageSearch]", result.error);
+        setSearchResults([]);
+        setSearchError("image");
+        setSearchResultGeneration(gen);
+        setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
+        setSearchTime(Math.round(performance.now() - startTime));
+        return;
+      }
       if (result.error) {
         console.warn("[ImageSearch]", result.error);
       }
       const results = (result as { results?: Photo[] }).results ?? [];
       setSearchResults(results);
+      setSearchError(null);
       setSearchResultGeneration(gen);
       setSearchResultSourceKey(
         createSearchResultSourceKey(
@@ -2445,6 +2555,7 @@ function HomePage() {
       );
       toast.error(t("toastImageSearchFailed"));
       setSearchResults([]);
+      setSearchError("image");
       setSearchResultGeneration(gen);
       setSearchResultSourceKey(createSearchResultSourceKey(gen, []));
       setSearchTime(Math.round(performance.now() - startTime));
@@ -2709,11 +2820,15 @@ function HomePage() {
     },
   });
 
-  const hasPhotos =
-    photos.length > 0 ||
-    (loading && photos.length === 0) ||
-    isSearching ||
-    filter.favoriteOnly;
+  const hasPhotos = shouldShowHomeGallery({
+    activeFolderId: filter.activeFolderId,
+    activeTagCount: filter.activeTagIds.length,
+    favoriteOnly: filter.favoriteOnly,
+    initialQueryError: initialHomeQueryError,
+    isSearching,
+    loading,
+    photoCount: photos.length,
+  });
   const isImportingFirstFolder =
     folders.length > 0 &&
     photos.length === 0 &&

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import { SettingRow } from "@/components/settings/setting-row";
 import {
@@ -9,6 +10,10 @@ import {
 } from "@/components/settings/settings-page-shell";
 import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
+import {
+  createOptimisticSaveQueue,
+  type OptimisticSaveQueue,
+} from "@/utils/optimistic-save-queue";
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 const CLOSE_BEHAVIOR_OPTIONS = ["tray", "quit", "ask"] as const;
@@ -48,56 +53,141 @@ function BehaviorSettingsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] =
     useState(readSidebarCollapsed);
   const [syncCullFavorites, setSyncCullFavorites] = useState(true);
+  const closeBehaviorQueueRef =
+    useRef<OptimisticSaveQueue<CloseBehavior> | null>(null);
+  const rememberBoundsQueueRef = useRef<OptimisticSaveQueue<boolean> | null>(
+    null
+  );
+  const openAtLoginQueueRef = useRef<OptimisticSaveQueue<boolean> | null>(null);
+  const syncCullFavoritesQueueRef = useRef<OptimisticSaveQueue<boolean> | null>(
+    null
+  );
+
+  if (!closeBehaviorQueueRef.current) {
+    closeBehaviorQueueRef.current = createOptimisticSaveQueue({
+      initialValue: "tray" as CloseBehavior,
+      onRollback: (value) => setCloseBehavior(value),
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setAppPreference({
+          key: "window.closeBehavior",
+          value,
+        }),
+    });
+  }
+
+  if (!rememberBoundsQueueRef.current) {
+    rememberBoundsQueueRef.current = createOptimisticSaveQueue({
+      initialValue: false,
+      onRollback: (value) => setRememberBounds(value),
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setAppPreference({
+          key: "window.rememberBounds",
+          value: String(value),
+        }),
+    });
+  }
+
+  if (!openAtLoginQueueRef.current) {
+    openAtLoginQueueRef.current = createOptimisticSaveQueue({
+      initialValue: false,
+      onRollback: (value) => setOpenAtLogin(value),
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setOpenAtLogin({ openAtLogin: value }),
+    });
+  }
+
+  if (!syncCullFavoritesQueueRef.current) {
+    syncCullFavoritesQueueRef.current = createOptimisticSaveQueue({
+      initialValue: true,
+      onRollback: (value) => setSyncCullFavorites(value),
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setAppSetting({
+          key: "cull.syncKeptWithFavorites",
+          value: String(value),
+        }),
+    });
+  }
+
+  const hydrateCloseBehavior = useCallback((value: CloseBehavior) => {
+    if (!closeBehaviorQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setCloseBehavior(value);
+  }, []);
+
+  const hydrateRememberBounds = useCallback((value: boolean) => {
+    if (!rememberBoundsQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setRememberBounds(value);
+  }, []);
+
+  const hydrateOpenAtLogin = useCallback((value: boolean) => {
+    if (!openAtLoginQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setOpenAtLogin(value);
+  }, []);
+
+  const hydrateSyncCullFavorites = useCallback((value: boolean) => {
+    if (!syncCullFavoritesQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setSyncCullFavorites(value);
+  }, []);
 
   useEffect(() => {
     ipc.client.settings
       .getAppPreferences({})
       .then((preferences) => {
-        setCloseBehavior(preferences.closeBehavior);
-        setRememberBounds(preferences.rememberBounds);
+        hydrateCloseBehavior(preferences.closeBehavior);
+        hydrateRememberBounds(preferences.rememberBounds);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        hydrateCloseBehavior("tray");
+        hydrateRememberBounds(false);
+      });
 
     ipc.client.settings
       .getOpenAtLogin({})
       .then((result) => {
-        setOpenAtLogin(
-          (result as { openAtLogin?: boolean }).openAtLogin ?? false
-        );
+        const value =
+          (result as { openAtLogin?: boolean }).openAtLogin ?? false;
+        hydrateOpenAtLogin(value);
       })
-      .catch(() => undefined);
+      .catch(() => hydrateOpenAtLogin(false));
 
     ipc.client.settings
       .getAppSetting({ key: "cull.syncKeptWithFavorites" })
-      .then((result) => setSyncCullFavorites(getBooleanSetting(result, true)))
-      .catch(() => undefined);
-  }, []);
+      .then((result) => {
+        const value = getBooleanSetting(result, true);
+        hydrateSyncCullFavorites(value);
+      })
+      .catch(() => hydrateSyncCullFavorites(true));
+  }, [
+    hydrateCloseBehavior,
+    hydrateOpenAtLogin,
+    hydrateRememberBounds,
+    hydrateSyncCullFavorites,
+  ]);
 
   function onCloseBehaviorChange(value: CloseBehavior) {
-    const previous = closeBehavior;
     setCloseBehavior(value);
-    ipc.client.settings
-      .setAppPreference({ key: "window.closeBehavior", value })
-      .catch(() => setCloseBehavior(previous));
+    closeBehaviorQueueRef.current?.enqueue(value);
   }
 
   function onRememberBoundsChange(checked: boolean) {
-    const previous = rememberBounds;
     setRememberBounds(checked);
-    ipc.client.settings
-      .setAppPreference({
-        key: "window.rememberBounds",
-        value: String(checked),
-      })
-      .catch(() => setRememberBounds(previous));
+    rememberBoundsQueueRef.current?.enqueue(checked);
   }
 
   function onOpenAtLoginChange(checked: boolean) {
-    const previous = openAtLogin;
     setOpenAtLogin(checked);
-    ipc.client.settings
-      .setOpenAtLogin({ openAtLogin: checked })
-      .catch(() => setOpenAtLogin(previous));
+    openAtLoginQueueRef.current?.enqueue(checked);
   }
 
   function onSidebarCollapsedChange(checked: boolean) {
@@ -107,18 +197,13 @@ function BehaviorSettingsPage() {
       localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(checked));
     } catch {
       setSidebarCollapsed(previous);
+      toast.error(t("saveFailed"));
     }
   }
 
   function onSyncCullFavoritesChange(checked: boolean) {
-    const previous = syncCullFavorites;
     setSyncCullFavorites(checked);
-    ipc.client.settings
-      .setAppSetting({
-        key: "cull.syncKeptWithFavorites",
-        value: String(checked),
-      })
-      .catch(() => setSyncCullFavorites(previous));
+    syncCullFavoritesQueueRef.current?.enqueue(checked);
   }
 
   return (

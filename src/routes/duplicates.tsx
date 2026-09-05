@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   CheckCircle2,
@@ -50,6 +51,20 @@ const DUPLICATES_TOOLBAR_FALLBACK_HEIGHT = 48;
 const DUPLICATES_TOOLBAR_CONTENT_GAP = 16;
 const DUPLICATE_GROUP_PAGE_SIZE = 48;
 const DUPLICATE_GROUP_VIRTUAL_THRESHOLD = 24;
+
+function useDuplicatesQuery() {
+  const query = useQuery({
+    queryKey: ["duplicates"],
+    queryFn: () => duplicateActions.scan(false) as Promise<DuplicatesResult>,
+    staleTime: 30_000,
+  });
+  const initialQueryFailed = query.isError && !query.data;
+  return {
+    ...query,
+    initialQueryFailed,
+    queryReady: !(query.isLoading || initialQueryFailed),
+  };
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
@@ -493,6 +508,41 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
   );
 });
 
+function DuplicateQueryError({
+  onRetry,
+  retrying,
+  visible,
+}: {
+  onRetry: () => void;
+  retrying: boolean;
+  visible: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!visible) {
+    return null;
+  }
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground/70"
+      role="alert"
+    >
+      <AlertTriangle
+        aria-hidden="true"
+        className="h-10 w-10 text-destructive/60"
+      />
+      <p className="text-[13px]">{t("duplicateScanFailed")}</p>
+      <button
+        className="mt-1 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
+        disabled={retrying}
+        onClick={onRetry}
+        type="button"
+      >
+        {retrying ? t("loading") : t("retry")}
+      </button>
+    </div>
+  );
+}
+
 export function DuplicatesPage() {
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
@@ -544,11 +594,14 @@ export function DuplicatesPage() {
     return () => observer.disconnect();
   }, []);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["duplicates"],
-    queryFn: () => duplicateActions.scan(false) as Promise<DuplicatesResult>,
-    staleTime: 30_000,
-  });
+  const {
+    data,
+    initialQueryFailed,
+    isFetching,
+    isLoading,
+    queryReady,
+    refetch,
+  } = useDuplicatesQuery();
   const groups = data?.groups ?? EMPTY_GROUPS;
   const activeGroups = groups.filter((group) => group.status === "active");
   const previewPhotos = useMemo(() => {
@@ -808,17 +861,17 @@ export function DuplicatesPage() {
               <h1 className="font-semibold text-[20px] text-foreground tracking-tight">
                 {t("duplicatesTitle")}
               </h1>
-              {isLoading ? null : (
+              {queryReady ? (
                 <p className="mt-0.5 text-[12px] text-muted-foreground/70">
                   {t("duplicateSummary", {
                     groups: activeGroups.length,
                     photos: involvedPhotos,
                   })}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
-          {!isLoading && activeGroups.length > 0 ? (
+          {queryReady && activeGroups.length > 0 ? (
             <div className="order-3 flex w-full items-center divide-x divide-border overflow-x-auto rounded-[7px] border border-border bg-muted/35 lg:order-none lg:w-auto">
               {[
                 [t("duplicateGroupStat"), activeGroups.length],
@@ -922,7 +975,14 @@ export function DuplicatesPage() {
               ))}
             </div>
           ) : null}
-          {!isLoading && filteredGroups.length === 0 ? (
+          <DuplicateQueryError
+            onRetry={() => {
+              refetch();
+            }}
+            retrying={isFetching}
+            visible={initialQueryFailed}
+          />
+          {queryReady && filteredGroups.length === 0 ? (
             <div className="flex h-full items-center justify-center text-center">
               <div>
                 <CheckCircle2 className="mx-auto h-10 w-10 text-success/60" />
@@ -939,7 +999,7 @@ export function DuplicatesPage() {
               </div>
             </div>
           ) : null}
-          {!isLoading && filteredGroups.length > 0 ? (
+          {queryReady && filteredGroups.length > 0 ? (
             <div
               className="relative w-full"
               style={{ height: `${virtualizer.getTotalSize()}px` }}

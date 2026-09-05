@@ -280,26 +280,69 @@ export function SidebarFilterProvider({ children }: { children: ReactNode }) {
       let folderPath =
         typeof externalPath === "string" ? externalPath : undefined;
       if (!folderPath) {
-        const result = await ipc.client.shell.openFolderDialog({});
-        folderPath = result?.path ?? undefined;
+        try {
+          const result = await ipc.client.shell.openFolderDialog({});
+          folderPath = result?.path ?? undefined;
+        } catch (err: unknown) {
+          console.error("[handleAddFolder select] failed:", err);
+          toast.error(t("toastFolderSelectionFailed"));
+          return;
+        }
       }
       if (!folderPath) {
         return;
       }
 
-      // 入队后台顺序导入 — scanFolder 立即返回，不阻塞 UI
+      let scanQueued = false;
       try {
+        // 入队后台顺序导入 — scanFolder 立即返回，不阻塞 UI
         const enqueued = await ipc.client.photos.scanFolder({
           path: folderPath,
         });
-        if (enqueued.status === "queued") {
+        scanQueued = enqueued.status === "queued";
+      } catch (err: unknown) {
+        console.error("[handleAddFolder scan] failed:", err);
+        toast.error(t("toastScanFolderFailed"));
+        return;
+      }
+
+      async function refreshImportLists() {
+        const refreshResults = await Promise.allSettled([
+          queryClient.invalidateQueries({ queryKey: ["folders"] }),
+          queryClient.invalidateQueries({
+            queryKey: ["photos"],
+            refetchType: "active",
+          }),
+        ]);
+        if (refreshResults.some((result) => result.status === "rejected")) {
+          console.error(
+            "[handleAddFolder refresh] failed:",
+            refreshResults
+              .filter(
+                (result): result is PromiseRejectedResult =>
+                  result.status === "rejected"
+              )
+              .map((result) => result.reason)
+          );
+          toast.error(
+            t(
+              scanQueued ? "toastImportQueuedRefreshFailed" : "loadFailedRetry"
+            ),
+            {
+              action: {
+                label: t("retry"),
+                onClick: refreshImportLists,
+              },
+            }
+          );
+          return;
+        }
+        if (scanQueued) {
           toast.success(t("toastImportQueued"));
         }
-      } catch (err: unknown) {
-        console.error("[scanFolder] failed:", err);
-        const detail = err instanceof Error ? err.message : String(err);
-        toast.error(`${t("toastScanFolderFailed")}: ${detail}`);
       }
+
+      await refreshImportLists();
     },
     [t]
   );

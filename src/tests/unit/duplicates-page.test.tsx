@@ -161,6 +161,30 @@ describe("DuplicatesPage", () => {
     });
   });
 
+  it("shows a retryable error instead of the successful empty state", async () => {
+    mocks.findDuplicates
+      .mockRejectedValueOnce(new Error("scan failed"))
+      .mockResolvedValueOnce({ groups: [] });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <DuplicatesPage />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "duplicateScanFailed"
+    );
+    expect(screen.queryByText("noDuplicatesTitle")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+
+    await waitFor(() => expect(mocks.findDuplicates).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("noDuplicatesTitle")).toBeInTheDocument();
+  });
+
   it("preselects exact copies but requires confirmation for similar groups", async () => {
     const client = new QueryClient({
       defaultOptions: {

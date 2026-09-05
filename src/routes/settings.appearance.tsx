@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   applyAccentColor,
   cacheAccentColor,
@@ -33,6 +34,10 @@ import {
   getAccentColorOptions,
   parseAccentColor,
 } from "@/types/accent-color";
+import {
+  createOptimisticSaveQueue,
+  type OptimisticSaveQueue,
+} from "@/utils/optimistic-save-queue";
 import { cn } from "@/utils/tailwind";
 
 const UI_SCALE_OPTIONS = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
@@ -177,83 +182,154 @@ function AppearanceSettingsPage() {
   );
   const [uiScale, setUiScale] = useState(1);
   const [searchSensitivity, setSearchSensitivity] = useState("standard");
+  const initialAccentColorRef = useRef<AccentColor | null>(null);
+  if (initialAccentColorRef.current === null) {
+    initialAccentColorRef.current = accentColor;
+  }
+  const accentColorRef = useRef(accentColor);
+  const uiScaleQueueRef = useRef<OptimisticSaveQueue<number> | null>(null);
+  const accentColorQueueRef = useRef<OptimisticSaveQueue<AccentColor> | null>(
+    null
+  );
+  const sensitivityQueueRef = useRef<OptimisticSaveQueue<string> | null>(null);
+
+  if (!uiScaleQueueRef.current) {
+    uiScaleQueueRef.current = createOptimisticSaveQueue({
+      initialValue: 1,
+      onRollback: (value) => {
+        setUiScale(value);
+        setZoomFactor(value).catch(() => undefined);
+      },
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: async (value) => {
+        await setZoomFactor(value);
+        await ipc.client.settings.setAppSetting({
+          key: "ui.zoomScale",
+          value: String(value),
+        });
+      },
+    });
+  }
+
+  if (!accentColorQueueRef.current) {
+    accentColorQueueRef.current = createOptimisticSaveQueue({
+      initialValue: accentColor,
+      onRollback: (value) => {
+        accentColorRef.current = value;
+        setAccentColor(value);
+        applyAccentColor(value);
+        cacheAccentColor(value);
+      },
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) => setAccentColorPreference(value),
+    });
+  }
+
+  if (!sensitivityQueueRef.current) {
+    sensitivityQueueRef.current = createOptimisticSaveQueue({
+      initialValue: "standard",
+      onRollback: (value) => setSearchSensitivity(value),
+      onSaveError: () => toast.error(t("saveFailed")),
+      persist: (value) =>
+        ipc.client.settings.setAppSetting({
+          key: "search.sensitivity",
+          value,
+        }),
+    });
+  }
+
+  const hydrateAccentColor = useCallback((value: AccentColor) => {
+    if (!accentColorQueueRef.current?.hydrate(value)) {
+      applyAccentColor(accentColorRef.current);
+      cacheAccentColor(accentColorRef.current);
+      return;
+    }
+    accentColorRef.current = value;
+    setAccentColor(value);
+  }, []);
+
+  const hydrateUiScale = useCallback((value: number) => {
+    if (!uiScaleQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setUiScale(value);
+  }, []);
+
+  const hydrateSensitivity = useCallback((value: string) => {
+    if (!sensitivityQueueRef.current?.hydrate(value)) {
+      return;
+    }
+    setSearchSensitivity(value);
+  }, []);
 
   useEffect(() => {
     getCurrentTheme().then(setThemeMode);
     setAccentTheme(getCurrentAccentTheme());
     getAccentColorPreference()
-      .then(setAccentColor)
-      .catch(() => undefined);
+      .then(hydrateAccentColor)
+      .catch(() =>
+        hydrateAccentColor(initialAccentColorRef.current ?? "default")
+      );
 
     ipc.client.settings
       .getAppSetting({ key: "ui.zoomScale" })
       .then((result) => {
         const parsed = Number.parseFloat(getSettingValue(result) ?? "");
-        if (Number.isFinite(parsed)) {
-          setUiScale(parsed);
-        }
+        hydrateUiScale(Number.isFinite(parsed) ? parsed : 1);
       })
-      .catch(() => undefined);
+      .catch(() => hydrateUiScale(1));
 
     ipc.client.settings
       .getAppSetting({ key: "search.sensitivity" })
       .then((result) => {
         const value = getSettingValue(result);
-        if (
-          value === "relaxed" ||
-          value === "standard" ||
-          value === "precise"
-        ) {
-          setSearchSensitivity(value);
-        }
+        hydrateSensitivity(
+          value === "relaxed" || value === "standard" || value === "precise"
+            ? value
+            : "standard"
+        );
       })
-      .catch(() => undefined);
-  }, []);
+      .catch(() => hydrateSensitivity("standard"));
+  }, [hydrateAccentColor, hydrateSensitivity, hydrateUiScale]);
 
   function onUiScaleChange(scale: number) {
-    const previous = uiScale;
     setUiScale(scale);
-    setZoomFactor(scale);
-    ipc.client.settings
-      .setAppSetting({ key: "ui.zoomScale", value: String(scale) })
-      .catch(() => setUiScale(previous));
+    uiScaleQueueRef.current?.enqueue(scale);
   }
 
   function onAccentColorChange(nextColor: AccentColor) {
-    const previous = accentColor;
+    accentColorRef.current = nextColor;
     setAccentColor(nextColor);
     applyAccentColor(nextColor);
     cacheAccentColor(nextColor);
-    setAccentColorPreference(nextColor).catch(() => {
-      setAccentColor(previous);
-      applyAccentColor(previous);
-      cacheAccentColor(previous);
-    });
+    accentColorQueueRef.current?.enqueue(nextColor);
   }
 
   function onThemeChange(nextTheme: ThemeMode) {
     setThemeMode(nextTheme);
     const nextAccentTheme = getCurrentAccentTheme();
     setAccentTheme(nextAccentTheme);
-    const nextAccentColor = parseAccentColor(accentColor, nextAccentTheme);
-    if (nextAccentColor !== accentColor) {
+    const currentAccentColor = accentColorRef.current;
+    const nextAccentColor = parseAccentColor(
+      currentAccentColor,
+      nextAccentTheme
+    );
+    if (nextAccentColor !== currentAccentColor) {
+      accentColorRef.current = nextAccentColor;
       setAccentColor(nextAccentColor);
       applyAccentColor(nextAccentColor);
       cacheAccentColor(nextAccentColor);
-      setAccentColorPreference(nextAccentColor).catch(() => undefined);
+      accentColorQueueRef.current?.enqueue(nextAccentColor);
     }
   }
 
   function onSensitivityChange(preset: string) {
-    const previous = searchSensitivity;
     setSearchSensitivity(preset);
-    ipc.client.settings
-      .setAppSetting({ key: "search.sensitivity", value: preset })
-      .catch(() => setSearchSensitivity(previous));
+    sensitivityQueueRef.current?.enqueue(preset);
   }
 
   function onReduceMotionChange(checked: boolean) {
-    setReduceMotion(checked).catch(() => undefined);
+    setReduceMotion(checked).catch(() => toast.error(t("saveFailed")));
   }
 
   let themeDescription = t("themeSystem");

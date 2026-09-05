@@ -62,4 +62,46 @@ describe("gallery empty states", () => {
     expect(onClearFilters).toHaveBeenCalledOnce();
     expect(screen.queryByText("清除所有过滤条件")).toBeNull();
   });
+
+  it("shows retry and browse-all actions for a failed search", () => {
+    const onClearSearch = vi.fn();
+    const onRetry = vi.fn();
+    render(
+      <SearchEmptyState
+        hasActiveFilters={false}
+        hasAiVectors={true}
+        onClearSearch={onClearSearch}
+        onRetry={onRetry}
+        query="海边"
+        searchError="search"
+        searchMode="text"
+      />
+    );
+
+    expect(screen.getByText("搜索失败")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "浏览全部照片" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onClearSearch).toHaveBeenCalledOnce();
+  });
+
+  it("uses the image-search failure label for image errors", () => {
+    render(
+      <SearchEmptyState
+        hasActiveFilters={false}
+        hasAiVectors={true}
+        onClearSearch={vi.fn()}
+        onRetry={vi.fn()}
+        query=""
+        searchError="image"
+        searchMode="image"
+      />
+    );
+
+    expect(screen.getByText("以图搜图失败")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "浏览全部照片" })
+    ).toBeInTheDocument();
+  });
 });

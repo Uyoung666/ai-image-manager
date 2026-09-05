@@ -155,6 +155,9 @@ i18n.use(initReactI18next).init({
         emptyImportingTitle: "正在导入照片",
         emptyImportingDescription:
           "正在扫描文件夹并生成缩略图，照片很快会出现在这里。",
+        emptyScopeTitle: "当前范围内没有照片",
+        emptyScopeDescription:
+          "此文件夹或标签组合暂时没有可显示的照片，可以返回浏览全部照片。",
 
         // Folder scanning
         scanningTitle: "正在扫描文件夹",
@@ -1075,6 +1078,7 @@ i18n.use(initReactI18next).init({
         tagFilterMode: "筛选模式",
         tagFilterChip: "标签筛选 · {{name}}",
         removeTagFilter: "移除标签筛选 {{name}}",
+        removeSearchFilter: "移除筛选条件 {{label}}",
         andMore: "等 {{count}} 个",
 
         // Toasts / status
@@ -1085,9 +1089,11 @@ i18n.use(initReactI18next).init({
         toastPhotosIndexed: "已索引 {{count}} 张照片",
         toastPhotosIndexedSkipped:
           "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
-        toastScanFolderFailed: "扫描文件夹失败",
+        toastFolderSelectionFailed: "无法打开文件夹选择器，请重试",
+        toastScanFolderFailed: "扫描文件夹失败，请重试",
         toastImportBusy: "请等待当前导入完成",
         toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
+        toastImportQueuedRefreshFailed: "已加入导入队列但列表刷新失败",
         toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
         toastImportBatchComplete:
           "已导入 {{folders}} 个文件夹、{{photos}} 张新照片，可立即浏览；AI 语义索引正在后台处理。",
@@ -1158,6 +1164,7 @@ i18n.use(initReactI18next).init({
 
         // Albums
         albumAddTitle: "添加到相册",
+        albumAddDescription: "选择现有相册，或创建一个新相册。",
         albumNoAlbumsCreate: "还没有相册，创建一个吧",
         albumNamePlaceholder: "相册名称...",
         albumCreate: "创建",
@@ -2007,6 +2014,7 @@ i18n.use(initReactI18next).init({
         cullSortBySimilarity: "按相似度",
         cullSortBySimilarityDesc: "将相似照片分组展示，方便选出各组最佳",
         cullStart: "开始选片",
+        cullRequiresTwoPhotos: "至少选择 2 张照片才能开始选片",
         cullProgress: "进度: {{done}}/{{total}}",
         cullPhotoCount: "{{count}} 张照片",
         cullPkCount: "{{count}} 次对决",
@@ -2273,6 +2281,9 @@ i18n.use(initReactI18next).init({
         emptyImportingTitle: "Importing photos",
         emptyImportingDescription:
           "Scanning the folder and generating thumbnails. Your photos will appear here shortly.",
+        emptyScopeTitle: "No photos in this view",
+        emptyScopeDescription:
+          "This folder or tag combination has no photos to display. You can return to all photos.",
 
         scanningTitle: "Scanning Folder",
         scanningPath: "Path: {{path}}",
@@ -3247,6 +3258,7 @@ i18n.use(initReactI18next).init({
         tagFilterMode: "Filter Mode",
         tagFilterChip: "Tag filter · {{name}}",
         removeTagFilter: "Remove tag filter {{name}}",
+        removeSearchFilter: "Remove filter {{label}}",
         andMore: "and {{count}} more",
 
         // Toasts / status
@@ -3257,10 +3269,14 @@ i18n.use(initReactI18next).init({
         toastPhotosIndexed: "Indexed {{count}} photos",
         toastPhotosIndexedSkipped:
           "Indexed {{count}} photos, skipped {{skipped}}",
-        toastScanFolderFailed: "Failed to scan folder",
+        toastFolderSelectionFailed:
+          "Unable to open the folder picker. Please try again.",
+        toastScanFolderFailed: "Failed to scan folder. Please try again.",
         toastImportBusy: "Please wait for current import to finish",
         toastImportQueued:
           "Added to background import queue — check the status bar",
+        toastImportQueuedRefreshFailed:
+          "Import queued, but the list failed to refresh",
         toastImportQueuedMultiple:
           "Added {{count}} folders to background queue",
         toastImportBatchComplete:
@@ -3337,6 +3353,7 @@ i18n.use(initReactI18next).init({
 
         // Albums
         albumAddTitle: "Add to Album",
+        albumAddDescription: "Choose an existing album or create a new one.",
         albumNoAlbumsCreate: "No albums yet. Create one now.",
         albumNamePlaceholder: "Album name...",
         albumCreate: "Create",
@@ -4234,6 +4251,7 @@ i18n.use(initReactI18next).init({
         cullSortBySimilarityDesc:
           "Group similar photos together to easily pick the best from each group",
         cullStart: "Start Cull",
+        cullRequiresTwoPhotos: "Select at least 2 photos to start culling",
         cullProgress: "Progress: {{done}}/{{total}}",
         cullPhotoCount: "{{count}} photos",
         cullPkCount: "{{count}} duels",

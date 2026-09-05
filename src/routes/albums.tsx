@@ -5,7 +5,13 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import { ArrowLeft, FolderPlus, Sparkles, Zap } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  FolderPlus,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -129,13 +135,17 @@ function AlbumCard({
 function AlbumsContent({
   albums,
   covers,
+  error,
   loading,
   onCreate,
+  onRetry,
 }: {
   albums: AlbumInfo[];
   covers: Map<number, string>;
+  error: boolean;
   loading: boolean;
   onCreate: () => void;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -148,6 +158,22 @@ function AlbumsContent({
             key={key}
           />
         ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 text-center text-muted-foreground/70">
+        <AlertTriangle aria-hidden="true" className="h-10 w-10 opacity-30" />
+        <p className="text-[13px]">{t("loadFailedRetry")}</p>
+        <button
+          className="mt-1 rounded-[6px] bg-primary px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90"
+          onClick={onRetry}
+          type="button"
+        >
+          {t("retry")}
+        </button>
       </div>
     );
   }
@@ -214,11 +240,12 @@ function AlbumsContent({
   );
 }
 
-function AlbumsPage() {
+export function AlbumsPage() {
   const { t } = useTranslation();
   const [albums, setAlbums] = useState<AlbumInfo[]>([]);
   const [covers, setCovers] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -229,6 +256,8 @@ function AlbumsPage() {
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "albums-list" });
 
   const loadAlbums = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const result = await ipc.client.albums.listAlbums({});
       const list = result as AlbumInfo[];
@@ -243,6 +272,7 @@ function AlbumsPage() {
       setCovers(coverMap);
     } catch (err) {
       console.error("[loadAlbums] failed:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -373,8 +403,10 @@ function AlbumsPage() {
         <AlbumsContent
           albums={albums}
           covers={covers}
+          error={loadError}
           loading={loading}
           onCreate={() => setShowCreate(true)}
+          onRetry={loadAlbums}
         />
       </div>
 

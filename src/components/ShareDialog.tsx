@@ -1,12 +1,20 @@
 // biome-ignore-all lint/style/noNestedTernary: scoped component lint cleanup preserves existing UI behavior
+import { useNavigate } from "@tanstack/react-router";
 import { Cloud, Copy, ExternalLink, Share2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { openExternalLink } from "@/actions/shell";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -37,38 +45,75 @@ const PROVIDER_LABELS: Record<string, string> = {
   s3: "S3",
 };
 
+type ConfigLoadState = "loading" | "error" | "loaded";
+
 export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const [configs, setConfigs] = useState<CloudConfig[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [configLoadState, setConfigLoadState] =
+    useState<ConfigLoadState>("loading");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
     url: string;
     filename: string;
     provider?: string;
   } | null>(null);
+  const configRequestRef = useRef(0);
+  const configLoadInFlightRef = useRef(false);
 
   const loadConfigs = useCallback(async () => {
+    if (configLoadInFlightRef.current) {
+      return;
+    }
+    configLoadInFlightRef.current = true;
+    const requestId = ++configRequestRef.current;
+    setConfigLoadState("loading");
+    setConfigs([]);
+    setSelectedId(null);
     try {
       const list = (await ipc.client.cloud.listCloudConfigs(
         {}
       )) as CloudConfig[];
-      setConfigs(list);
-      if (list.length === 1) {
-        setSelectedId(list[0].id);
+      if (requestId !== configRequestRef.current) {
+        return;
       }
+      setConfigs(list);
+      setSelectedId(list.length === 1 ? list[0].id : null);
+      setConfigLoadState("loaded");
     } catch {
-      /* ignore */
+      if (requestId !== configRequestRef.current) {
+        return;
+      }
+      setConfigs([]);
+      setSelectedId(null);
+      setConfigLoadState("error");
+    } finally {
+      if (requestId === configRequestRef.current) {
+        configLoadInFlightRef.current = false;
+      }
     }
   }, []);
 
   useEffect(() => {
     if (open) {
-      loadConfigs();
+      setConfigLoadState("loading");
+      setConfigs([]);
+      setSelectedId(null);
       setResult(null);
       setLoading(false);
+      loadConfigs();
+    } else {
+      configRequestRef.current += 1;
+      configLoadInFlightRef.current = false;
     }
   }, [open, loadConfigs]);
+
+  const handleOpenCloudSettings = useCallback(() => {
+    onClose();
+    navigate({ to: "/settings/cloud-sync" });
+  }, [navigate, onClose]);
 
   async function handleGenerate() {
     if (!selectedId || loading) {
@@ -111,6 +156,134 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
     }
   }
 
+  let configContent: ReactNode;
+  if (configLoadState === "loading") {
+    configContent = (
+      <div
+        aria-live="polite"
+        className="flex items-center justify-center gap-2 px-3 py-6 text-[13px] text-muted-foreground"
+        role="status"
+      >
+        <LoadingSpinner size="sm" />
+        <span>{t("loading")}</span>
+      </div>
+    );
+  } else if (configLoadState === "error") {
+    configContent = (
+      <div
+        aria-live="polite"
+        className="flex flex-col items-center gap-3 px-3 py-6 text-center text-[13px] text-muted-foreground"
+        role="alert"
+      >
+        <p>{t("cloudLoadFailed")}</p>
+        <p className="text-[11px] opacity-70">{t("loadFailedRetry")}</p>
+        <button
+          className="rounded-[6px] border border-border px-3 py-1.5 text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+          onClick={loadConfigs}
+          type="button"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    );
+  } else if (configs.length === 0) {
+    configContent = (
+      <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
+        <Cloud className="h-10 w-10 opacity-40" />
+        <p className="text-[13px]">{t("noCloudConfig")}</p>
+        <p className="text-center text-[11px] opacity-70">
+          {t("shareNeedsCloud")}
+          <br />
+          {t("shareAddCloudHint")}
+        </p>
+        <button
+          className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
+          onClick={handleOpenCloudSettings}
+          type="button"
+        >
+          {t("cloudSync")}
+        </button>
+      </div>
+    );
+  } else {
+    configContent = (
+      <>
+        <div>
+          <label
+            className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
+            htmlFor="share-provider"
+          >
+            {t("uploadTo")}
+          </label>
+          <div className="max-h-[min(15rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
+            {configs.map((cfg) => (
+              <button
+                aria-pressed={selectedId === cfg.id}
+                className={`flex w-full min-w-0 items-center rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
+                  selectedId === cfg.id
+                    ? "border-primary/50 bg-primary/10 text-primary"
+                    : "border-input text-muted-foreground hover:border-muted-foreground"
+                }`}
+                disabled={loading}
+                id={cfg.id === configs[0]?.id ? "share-provider" : undefined}
+                key={cfg.id}
+                onClick={() => setSelectedId(cfg.id)}
+                type="button"
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {cfg.name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
+                    {cfg.name}
+                  </TooltipContent>
+                </Tooltip>
+                <span className="ml-2 shrink-0 text-[11px] opacity-60">
+                  {PROVIDER_LABELS[cfg.provider] || cfg.provider}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-[11px] text-muted-foreground/70">
+          {t("shareDescription", { count: photoIds.length })}
+        </p>
+
+        <DialogFooter>
+          <button
+            className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+            disabled={loading}
+            onClick={onClose}
+            type="button"
+          >
+            {t("cancel")}
+          </button>
+          <button
+            className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            disabled={!selectedId || loading}
+            onClick={handleGenerate}
+            type="button"
+          >
+            {loading ? (
+              <>
+                <LoadingSpinner size="sm" variant="inherit" />
+                {t("generating")}
+              </>
+            ) : (
+              <>
+                <Share2 className="h-4 w-4" />
+                {t("generateAndPublish")}
+              </>
+            )}
+          </button>
+        </DialogFooter>
+      </>
+    );
+  }
+
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -137,6 +310,9 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
       >
         <DialogHeader>
           <DialogTitle>{t("sharePageTitle")}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("shareDescription", { count: photoIds.length })}
+          </DialogDescription>
         </DialogHeader>
 
         {result ? (
@@ -202,92 +378,8 @@ export function ShareDialog({ open, onClose, photoIds }: ShareDialogProps) {
               </button>
             </DialogFooter>
           </div>
-        ) : configs.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
-            <Cloud className="h-10 w-10 opacity-40" />
-            <p className="text-[13px]">{t("noCloudConfig")}</p>
-            <p className="text-center text-[11px] opacity-70">
-              {t("shareNeedsCloud")}
-              <br />
-              {t("shareAddCloudHint")}
-            </p>
-          </div>
         ) : (
-          <>
-            <div>
-              <label
-                className="mb-1.5 block font-medium text-[11px] text-muted-foreground uppercase tracking-wider"
-                htmlFor="share-provider"
-              >
-                {t("uploadTo")}
-              </label>
-              <div className="max-h-[min(15rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
-                {configs.map((cfg) => (
-                  <button
-                    className={`flex w-full min-w-0 items-center rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
-                      selectedId === cfg.id
-                        ? "border-primary/50 bg-primary/10 text-primary"
-                        : "border-input text-muted-foreground hover:border-muted-foreground"
-                    }`}
-                    disabled={loading}
-                    id={
-                      cfg.id === configs[0]?.id ? "share-provider" : undefined
-                    }
-                    key={cfg.id}
-                    onClick={() => setSelectedId(cfg.id)}
-                    type="button"
-                  >
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="min-w-0 flex-1 truncate text-foreground">
-                          {cfg.name}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-[min(28rem,calc(100vw-1rem))] break-all">
-                        {cfg.name}
-                      </TooltipContent>
-                    </Tooltip>
-                    <span className="ml-2 shrink-0 text-[11px] opacity-60">
-                      {PROVIDER_LABELS[cfg.provider] || cfg.provider}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground/70">
-              {t("shareDescription", { count: photoIds.length })}
-            </p>
-
-            <DialogFooter>
-              <button
-                className="rounded-md border border-border px-4 py-1.5 font-medium text-[13px] text-muted-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-                disabled={loading}
-                onClick={onClose}
-                type="button"
-              >
-                {t("cancel")}
-              </button>
-              <button
-                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-                disabled={!selectedId || loading}
-                onClick={handleGenerate}
-                type="button"
-              >
-                {loading ? (
-                  <>
-                    <LoadingSpinner size="sm" variant="inherit" />
-                    {t("generating")}
-                  </>
-                ) : (
-                  <>
-                    <Share2 className="h-4 w-4" />
-                    {t("generateAndPublish")}
-                  </>
-                )}
-              </button>
-            </DialogFooter>
-          </>
+          configContent
         )}
       </DialogContent>
     </Dialog>

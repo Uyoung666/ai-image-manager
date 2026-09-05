@@ -1,7 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PhotoLightbox } from "@/components/PhotoLightbox";
 import { preloadImage } from "@/utils/local-media-url";
+
+const { toast } = vi.hoisted(() => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
+vi.mock("sonner", () => ({ toast }));
 
 vi.mock("@/actions/wander", () => ({
   wanderActions: {
@@ -67,6 +76,14 @@ const photos = [
 ];
 
 describe("PhotoLightbox", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, "electronAPI", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
   it("traps keyboard focus and restores body state on close", () => {
     const trigger = document.createElement("button");
     document.body.append(trigger);
@@ -192,6 +209,38 @@ describe("PhotoLightbox", () => {
     fireEvent.click(favoriteIcon as SVGElement);
 
     await waitFor(() => expect(onToggleFavorite).toHaveBeenCalledWith(1, true));
+  });
+
+  it("reports copy success and failure from the more menu", async () => {
+    const copyImageToClipboard = vi.fn().mockResolvedValue(true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "electronAPI", {
+      configurable: true,
+      value: { copyImageToClipboard },
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <PhotoLightbox initialIndex={0} onClose={vi.fn()} open photos={photos} />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "more" }));
+    fireEvent.click(screen.getByRole("button", { name: "copyImage" }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("imageCopiedToClipboard")
+    );
+
+    copyImageToClipboard.mockResolvedValueOnce(false);
+    fireEvent.click(screen.getByRole("button", { name: "more" }));
+    fireEvent.click(screen.getByRole("button", { name: "copyImage" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyFailed"));
+
+    writeText.mockRejectedValueOnce(new Error("clipboard unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "more" }));
+    fireEvent.click(screen.getByRole("button", { name: "copyPath" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyFailed"));
   });
 
   it("coalesces wheel input into smooth proportional zoom updates", async () => {

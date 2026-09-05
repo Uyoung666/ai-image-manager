@@ -20,6 +20,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 type ActionHandler = () => void | Promise<void>;
@@ -185,7 +190,10 @@ export function SelectionActionBar({
           >
             {onStartCull && (
               <MoreAction
-                disabled={executing !== null}
+                disabled={executing !== null || selectedCount < 2}
+                disabledReason={
+                  selectedCount < 2 ? t("cullRequiresTwoPhotos") : undefined
+                }
                 executing={executing === "cull"}
                 icon={<Swords size={16} />}
                 label={t("cullStart")}
@@ -322,15 +330,17 @@ function MoreAction({
   label,
   onClick,
   disabled = false,
+  disabledReason,
   executing = false,
 }: {
   disabled?: boolean;
+  disabledReason?: string;
   executing?: boolean;
   icon: ReactNode;
   label: string;
   onClick: () => void;
 }) {
-  return (
+  const action = (
     <button
       className="selection-more-menu-item"
       disabled={disabled}
@@ -342,6 +352,25 @@ function MoreAction({
       </span>
       <span className="min-w-0 truncate">{label}</span>
     </button>
+  );
+
+  if (!disabledReason) {
+    return action;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="block w-full"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: disabled action wrapper must expose its tooltip to keyboard users
+          tabIndex={0}
+        >
+          {action}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{disabledReason}</TooltipContent>
+    </Tooltip>
   );
 }
 

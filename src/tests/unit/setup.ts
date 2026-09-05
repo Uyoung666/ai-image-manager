@@ -100,6 +100,10 @@ vi.mock("react-i18next", () => ({
         emptyImportingTitle: "正在导入照片",
         emptyImportingDescription:
           "正在扫描文件夹并生成缩略图，照片很快会出现在这里。",
+        emptyScopeTitle: "当前范围内没有照片",
+        emptyScopeDescription:
+          "此文件夹或标签组合暂时没有可显示的照片，可以返回浏览全部照片。",
+        cullRequiresTwoPhotos: "至少选择 2 张照片才能开始选片",
         photoDetail: "照片详情",
         photoInfo: "基本信息",
         exifInfo: "EXIF 信息",
@@ -131,6 +135,7 @@ vi.mock("react-i18next", () => ({
         noGeoData: "暂无 GPS 地理数据",
         settingsTitle: "设置",
         sidebarTags: "标签",
+        removeSearchFilter: "移除筛选条件 {{label}}",
         addTag: "添加",
         newTagPlaceholder: "输入新标签名称...",
         tagSearchPlaceholder: "搜索标签...",
@@ -159,13 +164,16 @@ vi.mock("react-i18next", () => ({
         toastPhotosIndexedSkipped:
           "已索引 {{count}} 张照片，跳过 {{skipped}} 张",
         toastImportQueued: "已加入后台导入队列，请留意顶部状态栏",
+        toastFolderSelectionFailed: "无法打开文件夹选择器，请重试",
+        toastImportQueuedRefreshFailed: "已加入导入队列但列表刷新失败",
         toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
         toastImportAlreadyQueued: "{{count}} 个文件夹已在导入队列中",
         semanticSearchPartial:
           "AI 已索引 {{indexed}}/{{total}} 张照片，当前结果可能不完整；索引完成后将自动刷新。",
         semanticSearchUnavailable:
           "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。",
-        toastScanFolderFailed: "扫描文件夹失败",
+        toastScanFolderFailed: "扫描文件夹失败，请重试",
+        loadFailedRetry: "加载失败，请重试",
         toastFolderRemoved: "已移除文件夹",
         toastDeleteFolderFailed: "删除文件夹失败",
         toastSearchFailed: "搜索失败",
@@ -192,6 +200,7 @@ vi.mock("react-i18next", () => ({
         emptyKeepQueryOnly: "仅保留关键字搜索",
         emptyClearAllFilters: "清除所有过滤条件",
         albumAddTitle: "添加到相册",
+        albumAddDescription: "选择现有相册，或创建一个新相册。",
         albumNoAlbumsCreate: "还没有相册，创建一个吧",
         albumNamePlaceholder: "相册名称...",
         albumCreate: "创建",

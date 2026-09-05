@@ -1,9 +1,17 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Cloud, CloudUpload } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -34,42 +42,80 @@ const PROVIDER_LABELS: Record<string, string> = {
   s3: "S3",
 };
 
+type ConfigLoadState = "loading" | "error" | "loaded";
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: config states and upload progress stay localized to this dialog
 export function CloudUploadDialog({
   open,
   onClose,
   photoIds,
 }: CloudUploadDialogProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [configs, setConfigs] = useState<CloudConfig[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [configLoadState, setConfigLoadState] =
+    useState<ConfigLoadState>("loading");
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
   const abortRef = useRef(false);
+  const configRequestRef = useRef(0);
+  const configLoadInFlightRef = useRef(false);
 
   const loadConfigs = useCallback(async () => {
+    if (configLoadInFlightRef.current) {
+      return;
+    }
+    configLoadInFlightRef.current = true;
+    const requestId = ++configRequestRef.current;
+    setConfigLoadState("loading");
+    setConfigs([]);
+    setSelectedId(null);
     try {
       const list = (await ipc.client.cloud.listCloudConfigs(
         {}
       )) as CloudConfig[];
-      setConfigs(list);
-      if (list.length === 1) {
-        setSelectedId(list[0].id);
+      if (requestId !== configRequestRef.current) {
+        return;
       }
+      setConfigs(list);
+      setSelectedId(list.length === 1 ? list[0].id : null);
+      setConfigLoadState("loaded");
     } catch {
-      /* ignore */
+      if (requestId !== configRequestRef.current) {
+        return;
+      }
+      setConfigs([]);
+      setSelectedId(null);
+      setConfigLoadState("error");
+    } finally {
+      if (requestId === configRequestRef.current) {
+        configLoadInFlightRef.current = false;
+      }
     }
   }, []);
 
   useEffect(() => {
     if (open) {
-      loadConfigs();
+      setConfigLoadState("loading");
+      setConfigs([]);
+      setSelectedId(null);
       setProgress(null);
       setUploading(false);
       setDone(false);
       abortRef.current = false;
+      loadConfigs();
+    } else {
+      configRequestRef.current += 1;
+      configLoadInFlightRef.current = false;
     }
   }, [open, loadConfigs]);
+
+  const handleOpenCloudSettings = useCallback(() => {
+    onClose();
+    navigate({ to: "/settings/cloud-sync" });
+  }, [navigate, onClose]);
 
   async function handleUpload() {
     if (!selectedId || uploading) {
@@ -130,6 +176,107 @@ export function CloudUploadDialog({
     }
   }
 
+  let configContent: ReactNode;
+  if (configLoadState === "loading") {
+    configContent = (
+      <div
+        aria-live="polite"
+        className="flex items-center justify-center gap-2 px-3 py-6 text-[13px] text-muted-foreground"
+        role="status"
+      >
+        <LoadingSpinner size="sm" />
+        <span>{t("loading")}</span>
+      </div>
+    );
+  } else if (configLoadState === "error") {
+    configContent = (
+      <div
+        aria-live="polite"
+        className="flex flex-col items-center gap-3 px-3 py-6 text-center text-[13px] text-muted-foreground"
+        role="alert"
+      >
+        <p>{t("cloudLoadFailed")}</p>
+        <p className="text-[11px] opacity-70">{t("loadFailedRetry")}</p>
+        <button
+          className="rounded-[6px] border border-border px-3 py-1.5 text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
+          onClick={loadConfigs}
+          type="button"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    );
+  } else if (configs.length === 0) {
+    configContent = (
+      <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
+        <Cloud className="h-10 w-10 opacity-40" />
+        <p className="text-[13px]">{t("cloudNoConfig")}</p>
+        <p className="text-[11px] opacity-70">{t("cloudNoConfigHint")}</p>
+        <button
+          className="rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity hover:opacity-90"
+          onClick={handleOpenCloudSettings}
+          type="button"
+        >
+          {t("cloudSync")}
+        </button>
+      </div>
+    );
+  } else {
+    configContent = (
+      <>
+        <div>
+          <p className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+            {t("cloudTargetStorage")}
+          </p>
+          <div className="max-h-[min(18rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
+            {configs.map((cfg) => (
+              <button
+                aria-pressed={selectedId === cfg.id}
+                className={`flex w-full min-w-0 items-start gap-2 rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
+                  selectedId === cfg.id
+                    ? "border-primary/50 bg-primary/10 text-primary"
+                    : "border-input text-muted-foreground hover:border-muted-foreground"
+                }`}
+                disabled={uploading}
+                key={cfg.id}
+                onClick={() => setSelectedId(cfg.id)}
+                type="button"
+              >
+                <span className="min-w-0 flex-1 text-foreground [overflow-wrap:anywhere]">
+                  {cfg.name}
+                </span>
+                <span className="shrink-0 text-[11px] opacity-60">
+                  {PROVIDER_LABELS[cfg.provider] || cfg.provider}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {progress && (
+          <div className="space-y-2">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${progressBarClass}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+              {progressLabel}
+            </p>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="flex min-w-0 items-start gap-2 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+            <LoadingSpinner size="xs" />
+            {t("cloudUploadingHint")}
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -156,66 +303,12 @@ export function CloudUploadDialog({
       >
         <DialogHeader>
           <DialogTitle>{t("cloudUploadTitle")}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("cloudUploadAction", { count: photoIds.length })}
+          </DialogDescription>
         </DialogHeader>
 
-        {configs.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
-            <Cloud className="h-10 w-10 opacity-40" />
-            <p className="text-[13px]">{t("cloudNoConfig")}</p>
-            <p className="text-[11px] opacity-70">{t("cloudNoConfigHint")}</p>
-          </div>
-        ) : (
-          <>
-            <div>
-              <p className="mb-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
-                {t("cloudTargetStorage")}
-              </p>
-              <div className="max-h-[min(18rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain pr-1">
-                {configs.map((cfg) => (
-                  <button
-                    className={`flex w-full min-w-0 items-start gap-2 rounded-[6px] border px-3 py-2.5 text-left text-[13px] transition-colors ${
-                      selectedId === cfg.id
-                        ? "border-primary/50 bg-primary/10 text-primary"
-                        : "border-input text-muted-foreground hover:border-muted-foreground"
-                    }`}
-                    disabled={uploading}
-                    key={cfg.id}
-                    onClick={() => setSelectedId(cfg.id)}
-                    type="button"
-                  >
-                    <span className="min-w-0 flex-1 text-foreground [overflow-wrap:anywhere]">
-                      {cfg.name}
-                    </span>
-                    <span className="shrink-0 text-[11px] opacity-60">
-                      {PROVIDER_LABELS[cfg.provider] || cfg.provider}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {progress && (
-              <div className="space-y-2">
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${progressBarClass}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-                  {progressLabel}
-                </p>
-              </div>
-            )}
-
-            {uploading && (
-              <div className="flex min-w-0 items-start gap-2 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-                <LoadingSpinner size="xs" />
-                {t("cloudUploadingHint")}
-              </div>
-            )}
-          </>
-        )}
+        {configContent}
 
         <DialogFooter>
           <button
@@ -226,7 +319,7 @@ export function CloudUploadDialog({
           >
             {done && progress ? t("close") : t("cancel")}
           </button>
-          {configs.length > 0 && !done && (
+          {configLoadState === "loaded" && configs.length > 0 && !done && (
             <button
               className="flex max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity [overflow-wrap:anywhere] hover:opacity-90 disabled:opacity-40"
               disabled={!selectedId || uploading}

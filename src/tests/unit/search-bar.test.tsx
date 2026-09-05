@@ -21,6 +21,8 @@ vi.mock("@/ipc/manager", () => ({
 
 const SEARCH_HISTORY_KEY = "search_history";
 const FILTER_COUNT_PATTERN = /· 1/;
+const REMOVE_FILTER_PATTERN = /移除筛选条件 Example/;
+const REMOVE_ADVANCED_FILTER_PATTERN = /移除筛选条件.*Example Vendor/;
 
 type SearchBarProps = ComponentProps<typeof SearchBar>;
 
@@ -106,6 +108,95 @@ describe("SearchBar", () => {
     expect(screen.queryByText(FILTER_COUNT_PATTERN)).not.toBeInTheDocument();
     expect(onClear).not.toHaveBeenCalled();
     expect(onSearch).not.toHaveBeenCalled();
+  });
+
+  it("shows active EXIF filter details and removes one filter with a localized name", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{
+          cameraModel: "Example Camera",
+          lensModel: "Example Lens",
+        }}
+        onSearch={onSearch}
+      />
+    );
+
+    expect(screen.getByText("Example Camera")).toBeInTheDocument();
+    expect(screen.getByText("Example Lens")).toBeInTheDocument();
+
+    const removeButtons = screen.getAllByRole("button", {
+      name: REMOVE_FILTER_PATTERN,
+    });
+    expect(removeButtons).toHaveLength(2);
+
+    await user.click(removeButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Example Camera")).not.toBeInTheDocument();
+      expect(screen.getByText("Example Lens")).toBeInTheDocument();
+      expect(onSearch).toHaveBeenCalledWith("", {
+        cameraModel: "",
+        lensModel: "Example Lens",
+      });
+    });
+  });
+
+  it("searches with the remaining filters when removing an advanced EXIF chip", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{
+          advancedField: "vendor",
+          advancedValue: "Example Vendor",
+          cameraModel: "Example Camera",
+        }}
+        onSearch={onSearch}
+      />
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: REMOVE_ADVANCED_FILTER_PATTERN,
+      })
+    );
+
+    await waitFor(() => {
+      expect(onSearch).toHaveBeenCalledWith("", {
+        advancedField: undefined,
+        advancedValue: undefined,
+        cameraModel: "Example Camera",
+      });
+    });
+  });
+
+  it("omits filter options when removing the only advanced EXIF chip", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{
+          advancedField: "vendor",
+          advancedValue: "Example Vendor",
+        }}
+        onSearch={onSearch}
+      />
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: REMOVE_ADVANCED_FILTER_PATTERN,
+      })
+    );
+
+    await waitFor(() => {
+      expect(onSearch).toHaveBeenCalledWith("", undefined);
+    });
   });
 
   it("shows starter examples when an empty search input is focused", async () => {
