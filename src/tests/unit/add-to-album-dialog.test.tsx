@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
@@ -87,6 +88,53 @@ describe("AddToAlbumDialog", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "旅行" })).toBeInTheDocument();
     });
+  });
+
+  it("focuses the album filter and narrows the existing album list", async () => {
+    mocks.listAlbums.mockResolvedValue([
+      { description: null, id: 1, name: "Holiday" },
+      { description: null, id: 2, name: "Work" },
+    ]);
+    const user = userEvent.setup();
+    renderDialog();
+
+    const filter = await screen.findByRole("textbox");
+    await waitFor(() => expect(filter).toHaveFocus());
+    await user.type(filter, "Work");
+
+    expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Holiday" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses Escape to clear the filter before allowing dialog close", async () => {
+    const onClose = renderDialog();
+    const filter = await screen.findByRole("textbox");
+
+    fireEvent.change(filter, { target: { value: "Holiday" } });
+    fireEvent.keyDown(filter, { key: "Escape" });
+
+    expect(filter).toHaveValue("");
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(mocks.addPhotosToAlbum).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(filter, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("does not clear or close while the filter input is composing", async () => {
+    const onClose = renderDialog();
+    const filter = await screen.findByRole("textbox");
+
+    fireEvent.change(filter, { target: { value: "旅行" } });
+    fireEvent.compositionStart(filter);
+    fireEvent.keyDown(filter, { key: "Escape", isComposing: true });
+
+    expect(filter).toHaveValue("旅行");
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("ignores a stale album response after the dialog closes and reopens", async () => {

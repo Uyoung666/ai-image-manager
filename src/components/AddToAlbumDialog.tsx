@@ -3,6 +3,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -50,10 +51,13 @@ export function AddToAlbumDialog({
   const [albumsLoadError, setAlbumsLoadError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [albumFilter, setAlbumFilter] = useState("");
   const [adding, setAdding] = useState<Set<number>>(new Set());
   const [creating, setCreating] = useState(false);
+  const filterInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
+  const filterComposingRef = useRef(false);
   const albumsRequestRef = useRef(0);
 
   const loadAlbums = useCallback(async () => {
@@ -80,15 +84,20 @@ export function AddToAlbumDialog({
   }, []);
 
   useEffect(() => {
-    if (open) {
-      loadAlbums();
-      setShowCreate(false);
-      setNewName("");
-      setAdding(new Set());
-      setCreating(false);
-    } else {
+    if (!open) {
       albumsRequestRef.current += 1;
+      return;
     }
+    loadAlbums();
+    setShowCreate(false);
+    setNewName("");
+    setAlbumFilter("");
+    setAdding(new Set());
+    setCreating(false);
+    const focusFrame = requestAnimationFrame(() => {
+      filterInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(focusFrame);
   }, [open, loadAlbums]);
 
   useEffect(() => {
@@ -159,6 +168,15 @@ export function AddToAlbumDialog({
   }
 
   const busy = creating || adding.size > 0;
+  const filteredAlbums = useMemo(() => {
+    const query = albumFilter.trim().toLocaleLowerCase();
+    if (!query) {
+      return albums;
+    }
+    return albums.filter((album) =>
+      album.name.toLocaleLowerCase().includes(query)
+    );
+  }, [albumFilter, albums]);
   let albumListContent: ReactNode;
 
   if (albumsLoading) {
@@ -188,8 +206,14 @@ export function AddToAlbumDialog({
         {t("albumNoAlbumsCreate")}
       </p>
     );
+  } else if (filteredAlbums.length === 0 && albumFilter.trim()) {
+    albumListContent = (
+      <p className="px-3 py-6 text-center text-[13px] text-muted-foreground/70">
+        {t("albumFilterNoMatches")}
+      </p>
+    );
   } else {
-    albumListContent = albums.map((album) => (
+    albumListContent = filteredAlbums.map((album) => (
       <Tooltip key={album.id}>
         <TooltipTrigger asChild>
           <button
@@ -242,6 +266,19 @@ export function AddToAlbumDialog({
         onEscapeKeyDown={(event) => {
           if (busy) {
             event.preventDefault();
+            return;
+          }
+          if (event.target !== filterInputRef.current) {
+            return;
+          }
+          if (filterComposingRef.current || event.isComposing) {
+            event.preventDefault();
+            return;
+          }
+          if (albumFilter.length > 0) {
+            event.preventDefault();
+            setAlbumFilter("");
+            requestAnimationFrame(() => filterInputRef.current?.focus());
           }
         }}
         onPointerDownOutside={(event) => {
@@ -257,6 +294,39 @@ export function AddToAlbumDialog({
           <DialogTitle>{t("albumAddTitle")}</DialogTitle>
           <DialogDescription>{t("albumAddDescription")}</DialogDescription>
         </DialogHeader>
+
+        <div className="min-w-0">
+          <input
+            aria-label={t("albumFilterLabel")}
+            className="h-8 w-full min-w-0 rounded-[6px] border border-input bg-card px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary"
+            onChange={(event) => setAlbumFilter(event.target.value)}
+            onCompositionEnd={(event) => {
+              filterComposingRef.current = false;
+              setAlbumFilter((event.target as HTMLInputElement).value);
+            }}
+            onCompositionStart={() => {
+              filterComposingRef.current = true;
+            }}
+            onKeyDown={(event) => {
+              if (filterComposingRef.current || event.nativeEvent.isComposing) {
+                return;
+              }
+              if (event.key === "Escape" && albumFilter.length > 0) {
+                event.preventDefault();
+                event.stopPropagation();
+                setAlbumFilter("");
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+              }
+            }}
+            placeholder={t("albumFilterPlaceholder")}
+            ref={filterInputRef}
+            type="text"
+            value={albumFilter}
+          />
+        </div>
 
         <div className="-mx-1 max-h-[min(18.75rem,50dvh)] overflow-y-auto overscroll-contain">
           {albumListContent}

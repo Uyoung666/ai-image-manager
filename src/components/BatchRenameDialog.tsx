@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  DEFAULT_BATCH_RENAME_PATTERN,
+  readBatchRenamePattern,
+  saveBatchRenamePattern,
+} from "@/actions/batch-rename-preferences";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -76,7 +81,7 @@ export function BatchRenameDialog({
   samplePhotoId,
 }: BatchRenameDialogProps) {
   const { t } = useTranslation();
-  const [pattern, setPattern] = useState("{yyyy}{mm}{dd}_{index:3}");
+  const [pattern, setPattern] = useState(DEFAULT_BATCH_RENAME_PATTERN);
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<{
     renamed: number;
@@ -88,7 +93,7 @@ export function BatchRenameDialog({
 
   useEffect(() => {
     if (open) {
-      setPattern("{yyyy}{mm}{dd}_{index:3}");
+      setPattern(readBatchRenamePattern());
       setResult(null);
       setServerPreview(null);
     }
@@ -147,6 +152,9 @@ export function BatchRenameDialog({
     setExecuting(true);
     try {
       const res = await onRename(pattern);
+      if (res.renamed > 0 || res.errors === 0) {
+        saveBatchRenamePattern(pattern);
+      }
       setResult(res);
     } finally {
       setExecuting(false);
@@ -174,6 +182,7 @@ export function BatchRenameDialog({
       <DialogContent
         className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
+          e.stopPropagation();
           if (blockClose) {
             e.preventDefault();
           }

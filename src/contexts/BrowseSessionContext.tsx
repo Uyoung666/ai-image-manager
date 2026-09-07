@@ -5,6 +5,7 @@ import {
   useContext,
   useRef,
 } from "react";
+import type { AdvancedExifFilterField, ExifFilters } from "@/types/search";
 import type { DashboardReturnTarget } from "@/utils/dashboard-data";
 
 /**
@@ -24,6 +25,8 @@ interface BrowseSessionData {
   dashboardReturn: DashboardReturnTarget | null;
   /** 详情面板是否被用户手动关闭 */
   detailDismissed: boolean;
+  /** 已应用的 EXIF 搜索条件 */
+  filters: ExifFilters;
   /** 当前会话的以图搜图参考图片路径 */
   imageSearchPath: string | null;
   /** 最后一次点击的索引（用于 Shift-多选） */
@@ -41,6 +44,7 @@ interface BrowseSessionData {
 const DEFAULT_SESSION: BrowseSessionData = {
   colorHex: null,
   dashboardReturn: null,
+  filters: {},
   imageSearchPath: null,
   lastClickedIdx: -1,
   detailDismissed: false,
@@ -79,6 +83,40 @@ const STORAGE_KEY_PREFIX = "browse_session_";
 // 会话过期时间：30 分钟（与 ScrollPositionContext 保持一致）
 const SESSION_EXPIRY_MS = 30 * 60 * 1000;
 
+const ADVANCED_EXIF_FILTER_FIELDS: readonly AdvancedExifFilterField[] = [
+  "vendor",
+  "captureMode",
+  "exposureProgram",
+  "meteringMode",
+  "whiteBalance",
+  "focusMode",
+  "subjectTarget",
+  "driveMode",
+  "stabilizationMode",
+  "computationalMode",
+  "inCameraLook",
+  "provenanceStatus",
+];
+
+const EXIF_STRING_FILTER_KEYS = [
+  "advancedValue",
+  "apertureMax",
+  "apertureMin",
+  "cameraModel",
+  "creator",
+  "dateFrom",
+  "dateHour",
+  "dateMonth",
+  "dateTo",
+  "focalMax",
+  "focalMin",
+  "isoMax",
+  "isoMin",
+  "lensModel",
+  "shutterMax",
+  "shutterMin",
+] as const satisfies readonly Exclude<keyof ExifFilters, "advancedField">[];
+
 // 内存 session 包装，带最后访问时间戳
 interface CachedSession {
   data: BrowseSessionData;
@@ -110,6 +148,7 @@ function readStoredSession(routeKey: string): CachedSession | null {
           typeof parsed.imageSearchPath === "string"
             ? parsed.imageSearchPath
             : null,
+        filters: normalizeExifFilters(parsed.filters),
         sequenceMode: normalizeSequenceMode(parsed.sequenceMode),
       },
       lastAccess: Date.now(),
@@ -122,6 +161,32 @@ function readStoredSession(routeKey: string): CachedSession | null {
 
 function isSessionExpired(cached: CachedSession): boolean {
   return Date.now() - cached.lastAccess > SESSION_EXPIRY_MS;
+}
+
+function normalizeExifFilters(value: unknown): ExifFilters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const source = value as Record<string, unknown>;
+  const normalized: ExifFilters = {};
+  const advancedField = source.advancedField;
+  if (
+    typeof advancedField === "string" &&
+    ADVANCED_EXIF_FILTER_FIELDS.includes(
+      advancedField as AdvancedExifFilterField
+    )
+  ) {
+    normalized.advancedField = advancedField as AdvancedExifFilterField;
+  }
+
+  for (const key of EXIF_STRING_FILTER_KEYS) {
+    const field = source[key];
+    if (typeof field === "string") {
+      normalized[key] = field;
+    }
+  }
+  return normalized;
 }
 
 function normalizeSequenceMode(value: unknown): "photos" | "sequences" {
@@ -156,7 +221,11 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
       const existing = sessionsRef.current.get(routeKey)?.data ?? {
         ...DEFAULT_SESSION,
       };
-      const updated: BrowseSessionData = { ...existing, ...partial };
+      const updated: BrowseSessionData = {
+        ...existing,
+        ...partial,
+        filters: normalizeExifFilters(partial.filters ?? existing.filters),
+      };
 
       // 如果所有字段都是默认值，删除而不是保存
       const isDefault =
@@ -166,6 +235,7 @@ export function BrowseSessionProvider({ children }: { children: ReactNode }) {
         updated.searchMode === null &&
         updated.imageSearchPath === null &&
         updated.colorHex === null &&
+        Object.keys(updated.filters).length === 0 &&
         updated.sequenceMode === "photos" &&
         updated.lastClickedIdx === -1 &&
         updated.detailDismissed === false;

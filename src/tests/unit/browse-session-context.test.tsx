@@ -24,6 +24,7 @@ describe("BrowseSessionContext", () => {
       expect(session.lastClickedIdx).toBe(-1);
       expect(session.detailDismissed).toBe(false);
       expect(session.dashboardReturn).toBeNull();
+      expect(session.filters).toEqual({});
       expect(session.sequenceMode).toBe("photos");
     });
 
@@ -139,6 +140,92 @@ describe("BrowseSessionContext", () => {
       });
     });
 
+    it("preserves applied EXIF filters across remounts", () => {
+      const first = renderHook(() => useBrowseSession(), { wrapper });
+
+      act(() => {
+        first.result.current.saveSession("home-search", {
+          filters: {
+            cameraModel: "Example Camera",
+            isoMin: "800",
+          },
+          searchMode: "exif",
+        });
+      });
+      first.unmount();
+
+      const second = renderHook(() => useBrowseSession(), { wrapper });
+      expect(second.result.current.getSession("home-search")).toMatchObject({
+        filters: {
+          cameraModel: "Example Camera",
+          isoMin: "800",
+        },
+        searchMode: "exif",
+      });
+    });
+
+    it("defaults EXIF filters for legacy sessions", () => {
+      sessionStorage.setItem(
+        "browse_session_legacy",
+        JSON.stringify({
+          selectedIds: [],
+          searchQuery: "sunset",
+          searchMode: "text",
+        })
+      );
+
+      const { result } = renderHook(() => useBrowseSession(), { wrapper });
+
+      expect(result.current.getSession("legacy").filters).toEqual({});
+    });
+    it("filters malformed EXIF fields from legacy sessions", () => {
+      sessionStorage.setItem(
+        "browse_session_corrupt-filters",
+        JSON.stringify({
+          selectedIds: [],
+          searchQuery: "camera",
+          filters: {
+            advancedField: "unsupportedField",
+            advancedValue: 42,
+            cameraModel: "Sony A7",
+            dateFrom: null,
+            isoMin: 800,
+            lensModel: ["bad"],
+            unknownField: "drop-me",
+          },
+          searchMode: "exif",
+        })
+      );
+
+      const { result } = renderHook(() => useBrowseSession(), { wrapper });
+
+      expect(result.current.getSession("corrupt-filters").filters).toEqual({
+        cameraModel: "Sony A7",
+      });
+    });
+
+    it("keeps valid advanced EXIF fields from legacy sessions", () => {
+      sessionStorage.setItem(
+        "browse_session_valid-advanced",
+        JSON.stringify({
+          selectedIds: [],
+          searchQuery: "",
+          filters: {
+            advancedField: "captureMode",
+            advancedValue: "manual",
+            isoMax: "1600",
+          },
+        })
+      );
+
+      const { result } = renderHook(() => useBrowseSession(), { wrapper });
+
+      expect(result.current.getSession("valid-advanced").filters).toEqual({
+        advancedField: "captureMode",
+        advancedValue: "manual",
+        isoMax: "1600",
+      });
+    });
     it("should delete session from storage when all fields are default", () => {
       const { result } = renderHook(() => useBrowseSession(), { wrapper });
 

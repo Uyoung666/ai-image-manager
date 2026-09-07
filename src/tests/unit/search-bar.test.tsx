@@ -1,9 +1,22 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchBar } from "@/components/SearchBar";
 import type { ExifFilters } from "@/types/search";
+
+const presetToast = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({ toast: presetToast }));
 
 vi.mock("@/ipc/manager", () => ({
   ipc: {
@@ -20,11 +33,37 @@ vi.mock("@/ipc/manager", () => ({
 }));
 
 const SEARCH_HISTORY_KEY = "search_history";
+const PRESET_STORAGE_KEY = "exif-filter-presets";
 const FILTER_COUNT_PATTERN = /· 1/;
 const REMOVE_FILTER_PATTERN = /移除筛选条件 Example/;
 const REMOVE_ADVANCED_FILTER_PATTERN = /移除筛选条件.*Example Vendor/;
 
 type SearchBarProps = ComponentProps<typeof SearchBar>;
+
+interface StoredFilterPreset {
+  createdAt: number;
+  filters: ExifFilters;
+  name: string;
+}
+
+function seedFilterPresets(presets: StoredFilterPreset[]) {
+  localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(presets));
+}
+
+function readFilterPresets() {
+  return JSON.parse(
+    localStorage.getItem(PRESET_STORAGE_KEY) ?? "[]"
+  ) as StoredFilterPreset[];
+}
+
+async function openExifFilterPanel() {
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "exifFilterTitle" }));
+  expect(
+    screen.getByRole("button", { name: "exifFilterTitle" })
+  ).toHaveAttribute("aria-expanded", "true");
+}
 
 function ControlledSearchBar(
   props: Omit<
@@ -65,6 +104,130 @@ describe("SearchBar", () => {
     expect(
       screen.getByPlaceholderText("试试搜索“去年秋天的红叶”")
     ).toBeInTheDocument();
+  });
+
+  it("focuses and selects the gallery query with Ctrl+F", () => {
+    render(<ControlledSearchBar {...baseProps} initialQuery="sunset" />);
+    const input = screen.getByRole("combobox") as HTMLInputElement;
+
+    fireEvent.keyDown(document, { ctrlKey: true, key: "f" });
+
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+  });
+
+  it("supports Cmd+F and preserves shifted/global shortcuts", () => {
+    render(<ControlledSearchBar {...baseProps} initialQuery="sunset" />);
+    const input = screen.getByRole("combobox") as HTMLInputElement;
+
+    fireEvent.keyDown(document, { key: "f", metaKey: true });
+    expect(input).toHaveFocus();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+
+    input.blur();
+    fireEvent.keyDown(document, { ctrlKey: true, key: "f", shiftKey: true });
+    expect(input).not.toHaveFocus();
+
+    fireEvent.keyDown(document, { ctrlKey: true, key: "k" });
+    expect(input).not.toHaveFocus();
+  });
+
+  it("does not steal Ctrl+F from other editing or modal surfaces", () => {
+    render(
+      <>
+        <ControlledSearchBar {...baseProps} initialQuery="sunset" />
+        <input aria-label="other editor" />
+        <div data-slot="dialog-content">
+          <button aria-label="modal action" type="button" />
+        </div>
+        <div data-slot="alert-dialog-content" role="alertdialog">
+          <button aria-label="alert action" type="button" />
+        </div>
+      </>
+    );
+    const searchInput = screen.getByRole("combobox");
+    const otherEditor = screen.getByRole("textbox", { name: "other editor" });
+    const modalAction = screen.getByRole("button", { name: "modal action" });
+    const alertAction = screen.getByRole("button", { name: "alert action" });
+
+    otherEditor.focus();
+    fireEvent.keyDown(otherEditor, { ctrlKey: true, key: "f" });
+    expect(otherEditor).toHaveFocus();
+    expect(searchInput).not.toHaveFocus();
+
+    modalAction.focus();
+    fireEvent.keyDown(modalAction, { ctrlKey: true, key: "f" });
+    expect(modalAction).toHaveFocus();
+    expect(searchInput).not.toHaveFocus();
+
+    alertAction.focus();
+    fireEvent.keyDown(alertAction, { ctrlKey: true, key: "f" });
+    expect(alertAction).toHaveFocus();
+    expect(searchInput).not.toHaveFocus();
+  });
+
+  it("focuses the gallery search through a persistent non-modal sidebar", () => {
+    render(
+      <>
+        <ControlledSearchBar {...baseProps} initialQuery="sunset" />
+        <div
+          aria-label="sidebar"
+          className="compact-sidebar-layer relative h-full shrink-0"
+          role="dialog"
+        >
+          <button type="button">sidebar action</button>
+        </div>
+      </>
+    );
+    const searchInput = screen.getByRole("combobox");
+    const sidebarAction = screen.getByRole("button", {
+      name: "sidebar action",
+    });
+
+    sidebarAction.focus();
+    fireEvent.keyDown(sidebarAction, { ctrlKey: true, key: "f" });
+
+    expect(searchInput).toHaveFocus();
+    expect(searchInput).toHaveValue("sunset");
+  });
+
+  it("does not steal Ctrl+F while the compact sidebar is modal", () => {
+    render(
+      <>
+        <ControlledSearchBar {...baseProps} initialQuery="sunset" />
+        <div
+          aria-label="sidebar"
+          aria-modal="true"
+          className="compact-sidebar-layer is-open relative h-full shrink-0"
+          role="dialog"
+        >
+          <button type="button">compact sidebar action</button>
+        </div>
+      </>
+    );
+    const searchInput = screen.getByRole("combobox");
+    const sidebarAction = screen.getByRole("button", {
+      name: "compact sidebar action",
+    });
+
+    sidebarAction.focus();
+    fireEvent.keyDown(sidebarAction, { ctrlKey: true, key: "f" });
+
+    expect(sidebarAction).toHaveFocus();
+    expect(searchInput).not.toHaveFocus();
+  });
+
+  it("does not handle a Ctrl+F event already prevented by another handler", () => {
+    const preventDefault = (event: KeyboardEvent) => event.preventDefault();
+    document.addEventListener("keydown", preventDefault, { once: true });
+    render(<ControlledSearchBar {...baseProps} initialQuery="sunset" />);
+    const input = screen.getByRole("combobox");
+
+    fireEvent.keyDown(document, { ctrlKey: true, key: "f" });
+
+    expect(input).not.toHaveFocus();
   });
 
   it("reflects a controlled query and filter reset without searching", async () => {
@@ -542,6 +705,341 @@ describe("SearchBar", () => {
     await user.click(screen.getByRole("button", { name: "applyFilters" }));
 
     expect(onSearch).toHaveBeenCalledWith("", { creator: "Jane Doe" });
+  });
+
+  it("saves a preset from the nested EXIF panel without closing it", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await user.click(screen.getByRole("button", { name: "filterSavePreset" }));
+    const nameInput = await screen.findByPlaceholderText(
+      "filterPresetNamePlaceholder"
+    );
+    await user.type(nameInput, "Travel");
+
+    const saveButton = screen.getByRole("button", { name: "保存" });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        expect.objectContaining({
+          filters: { creator: "Jane" },
+          name: "Travel",
+        }),
+      ]);
+    });
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: "filterLoadPresets" })
+    ).toBeInTheDocument();
+  });
+
+  it("saves with Enter without applying the nested EXIF filters", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await user.click(screen.getByRole("button", { name: "filterSavePreset" }));
+    const nameInput = await screen.findByPlaceholderText(
+      "filterPresetNamePlaceholder"
+    );
+    await user.type(nameInput, "Travel");
+    const dispatchResult = fireEvent.keyDown(nameInput, {
+      code: "Enter",
+      key: "Enter",
+    });
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        expect.objectContaining({
+          filters: { creator: "Jane" },
+          name: "Travel",
+        }),
+      ]);
+    });
+    expect(dispatchResult).toBe(false);
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.queryByPlaceholderText("filterPresetNamePlaceholder")
+    ).not.toBeInTheDocument();
+  });
+
+  it("deletes a preset through the nested portal and keeps the EXIF panel open", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    seedFilterPresets([
+      { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },
+      { createdAt: 2, filters: { creator: "John" }, name: "Work" },
+    ]);
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "filterLoadPresets" })
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "filterLoadPresets" }));
+    const deleteButton = screen.getAllByRole("button", { name: "delete" })[0];
+    expect(deleteButton).toBeDefined();
+    if (!deleteButton) {
+      return;
+    }
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        { createdAt: 2, filters: { creator: "John" }, name: "Work" },
+      ]);
+    });
+    expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument();
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("undoes a nested preset deletion without closing the EXIF panel", async () => {
+    const user = userEvent.setup();
+    seedFilterPresets([
+      { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },
+    ]);
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+      />
+    );
+
+    await openExifFilterPanel();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "filterLoadPresets" })
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "filterLoadPresets" }));
+    const deleteButton = screen.getByRole("button", { name: "delete" });
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([]);
+    });
+    const toastCall = presetToast.success.mock.calls[0];
+    const toastOptions = toastCall?.[1] as
+      | { action?: { onClick: () => void | Promise<void> } }
+      | undefined;
+    expect(toastOptions?.action?.onClick).toBeDefined();
+
+    await act(async () => {
+      await toastOptions?.action?.onClick();
+    });
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },
+      ]);
+    });
+    expect(screen.getByRole("button", { name: "Travel" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("activates the focused save button without applying nested EXIF filters", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await user.click(screen.getByRole("button", { name: "filterSavePreset" }));
+    const nameInput = await screen.findByPlaceholderText(
+      "filterPresetNamePlaceholder"
+    );
+    await user.type(nameInput, "Travel");
+    await user.tab();
+
+    const saveButton = screen.getByRole("button", { name: "保存" });
+    expect(saveButton).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        expect.objectContaining({
+          filters: { creator: "Jane" },
+          name: "Travel",
+        }),
+      ]);
+    });
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("activates a focused preset item without applying nested EXIF filters", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    seedFilterPresets([
+      { createdAt: 1, filters: { creator: "John" }, name: "Work" },
+    ]);
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "filterLoadPresets" })
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "filterLoadPresets" }));
+    const presetButton = screen.getByRole("button", { name: "Work" });
+    presetButton.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("creatorLabel")).toHaveValue("John");
+    });
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("activates a focused delete button without applying nested EXIF filters", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    seedFilterPresets([
+      { createdAt: 1, filters: { creator: "Jane" }, name: "Travel" },
+      { createdAt: 2, filters: { creator: "John" }, name: "Work" },
+    ]);
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "filterLoadPresets" })
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "filterLoadPresets" }));
+    const deleteButton = screen.getAllByRole("button", { name: "delete" })[0];
+    expect(deleteButton).toBeDefined();
+    if (!deleteButton) {
+      return;
+    }
+    deleteButton.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readFilterPresets()).toEqual([
+        { createdAt: 2, filters: { creator: "John" }, name: "Work" },
+      ]);
+    });
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("does not save an IME composition confirmation as a preset", async () => {
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ creator: "Jane" }}
+        onSearch={onSearch}
+      />
+    );
+
+    await openExifFilterPanel();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "filterSavePreset" }));
+    const nameInput = await screen.findByPlaceholderText(
+      "filterPresetNamePlaceholder"
+    );
+    fireEvent.compositionStart(nameInput);
+    fireEvent.change(nameInput, { target: { value: "旅行" } });
+    const dispatchResult = fireEvent.keyDown(nameInput, {
+      code: "Enter",
+      isComposing: true,
+      key: "Enter",
+      keyCode: 229,
+    });
+    fireEvent.compositionEnd(nameInput);
+
+    expect(dispatchResult).toBe(true);
+    expect(readFilterPresets()).toEqual([]);
+    expect(onSearch).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByPlaceholderText("filterPresetNamePlaceholder")
+    ).toBeInTheDocument();
+  });
+
+  it("still closes the EXIF panel on a pointerdown outside the toolbar", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <ControlledSearchBar
+          {...baseProps}
+          initialFilters={{ creator: "Jane" }}
+        />
+        <button type="button">outside</button>
+      </>
+    );
+
+    await openExifFilterPanel();
+    await user.click(screen.getByRole("button", { name: "outside" }));
+
+    expect(
+      screen.getByRole("button", { name: "exifFilterTitle" })
+    ).toHaveAttribute("aria-expanded", "false");
   });
 
   it("does not search an empty query", () => {

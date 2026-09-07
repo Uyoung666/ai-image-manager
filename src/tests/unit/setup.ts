@@ -201,10 +201,18 @@ vi.mock("react-i18next", () => ({
         emptyClearAllFilters: "清除所有过滤条件",
         albumAddTitle: "添加到相册",
         albumAddDescription: "选择现有相册，或创建一个新相册。",
+        albumFilterLabel: "筛选相册",
+        albumFilterNoMatches: "没有匹配的相册",
+        albumFilterPlaceholder: "按名称筛选相册...",
         albumNoAlbumsCreate: "还没有相册，创建一个吧",
         albumNamePlaceholder: "相册名称...",
         albumCreate: "创建",
         albumNew: "新建相册",
+        filterPresetDeleted: "已删除筛选预设「{{name}}」",
+        filterPresetRestored: "已恢复筛选预设「{{name}}」",
+        filterPresetUndoConflict:
+          "筛选预设「{{name}}」已被重新创建或修改，未恢复",
+        shortcutFocusSearch: "聚焦主图库搜索框并选中文字",
         confirmDeleteTitle: "确认删除",
         confirmDeleteAction: "删除",
         confirmDeleteDescription:

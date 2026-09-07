@@ -96,6 +96,11 @@ const SHORTCUTS: Shortcut[] = [
   },
   {
     sectionKey: "shortcutInterface",
+    keyLabels: ["Ctrl", "F"],
+    labelKey: "shortcutFocusSearch",
+  },
+  {
+    sectionKey: "shortcutInterface",
     keyLabels: ["Ctrl", "K"],
     labelKey: "shortcutGlobalSearch",
   },

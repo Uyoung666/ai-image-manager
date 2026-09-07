@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  DEFAULT_FORMAT_CONVERT_PREFERENCES,
+  type FormatConvertFormat,
+  readFormatConvertPreferences,
+  saveFormatConvertPreferences,
+} from "@/actions/format-convert-preferences";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -32,7 +38,7 @@ interface FormatConvertDialogProps {
 }
 
 const FORMATS: Array<{
-  value: "jpg" | "png" | "webp" | "avif";
+  value: FormatConvertFormat;
   label: string;
   descriptionKey: string;
 }> = [
@@ -49,10 +55,18 @@ export function FormatConvertDialog({
   photoCount,
 }: FormatConvertDialogProps) {
   const { t } = useTranslation();
-  const [format, setFormat] = useState<"jpg" | "png" | "webp" | "avif">("webp");
-  const [quality, setQuality] = useState(85);
-  const [maxWidth, setMaxWidth] = useState("");
-  const [outputDir, setOutputDir] = useState("");
+  const [format, setFormat] = useState<FormatConvertFormat>(
+    DEFAULT_FORMAT_CONVERT_PREFERENCES.format
+  );
+  const [quality, setQuality] = useState(
+    DEFAULT_FORMAT_CONVERT_PREFERENCES.quality
+  );
+  const [maxWidth, setMaxWidth] = useState(
+    DEFAULT_FORMAT_CONVERT_PREFERENCES.maxWidth
+  );
+  const [outputDir, setOutputDir] = useState(
+    DEFAULT_FORMAT_CONVERT_PREFERENCES.outputDir
+  );
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState<ConvertResult | null>(null);
   const [error, setError] = useState("");
@@ -67,10 +81,11 @@ export function FormatConvertDialog({
 
   useEffect(() => {
     if (open) {
-      setFormat("webp");
-      setQuality(85);
-      setMaxWidth("");
-      setOutputDir("");
+      const preferences = readFormatConvertPreferences();
+      setFormat(preferences.format);
+      setQuality(preferences.quality);
+      setMaxWidth(preferences.maxWidth);
+      setOutputDir(preferences.outputDir);
       setResult(null);
       setError("");
     }
@@ -80,12 +95,21 @@ export function FormatConvertDialog({
     setExecuting(true);
     setError("");
     try {
-      const res = await onConvert({
+      const options = {
         format,
         quality,
         maxWidth: Number.parseInt(maxWidth, 10) || 0,
         outputDir,
-      });
+      };
+      const res = await onConvert(options);
+      if (res.converted > 0) {
+        saveFormatConvertPreferences({
+          format: options.format,
+          quality: options.quality,
+          maxWidth,
+          outputDir: options.outputDir,
+        });
+      }
       setResult(res);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -110,6 +134,7 @@ export function FormatConvertDialog({
       <DialogContent
         className="max-h-[calc(100dvh-1rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
         onEscapeKeyDown={(e) => {
+          e.stopPropagation();
           if (blockClose) {
             e.preventDefault();
           }

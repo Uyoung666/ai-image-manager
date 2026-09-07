@@ -47,6 +47,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useGlobalAiStatus } from "@/hooks/use-global-ai-status";
 import { useFolders } from "@/hooks/useFolders";
 import { useRouteScrollRestoration } from "@/hooks/useRouteScrollRestoration";
@@ -81,6 +82,14 @@ interface HiddenIdentity {
 
 const PEOPLE_TOOLBAR_FALLBACK_HEIGHT = 48;
 const PEOPLE_TOOLBAR_CONTENT_GAP = 16;
+
+type PersonFilter = "all" | "hidden" | "named" | "unnamed";
+
+function normalizePersonFilter(value: string | null): PersonFilter {
+  return value === "hidden" || value === "named" || value === "unnamed"
+    ? value
+    : "all";
+}
 
 // Person cover image with intersection-observer lazy loading + fade-in + error fallback
 const PersonCoverImage = memo(function PersonCoverImage({
@@ -356,10 +365,12 @@ function useSkeletonCount(): number {
 
 // PeoplePage
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this page coordinates the existing people interactions
-function PeoplePage() {
+export function PeoplePage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { getSession: getBrowseSession, saveSession: saveBrowseSession } =
+    useBrowseSession();
   const { data: folders = [] } = useFolders();
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "people-list" });
@@ -579,11 +590,30 @@ function PeoplePage() {
   // Inline rename state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [nameInput, setNameInput] = useState("");
-  const [personFilter, setPersonFilter] = useState<
-    "all" | "hidden" | "named" | "unnamed"
-  >("all");
-  const [personQuery, setPersonQuery] = useState("");
+  const [personFilter, setPersonFilter] = useState<PersonFilter>(() =>
+    normalizePersonFilter(getBrowseSession("people-list").searchMode)
+  );
+  const [personQuery, setPersonQuery] = useState(
+    () => getBrowseSession("people-list").searchQuery
+  );
   const composingRef = useRef(false);
+
+  const updatePersonFilter = useCallback(
+    (value: PersonFilter) => {
+      setPersonFilter(value);
+      saveBrowseSession("people-list", {
+        searchMode: value === "all" ? null : value,
+      });
+    },
+    [saveBrowseSession]
+  );
+  const updatePersonQuery = useCallback(
+    (query: string) => {
+      setPersonQuery(query);
+      saveBrowseSession("people-list", { searchQuery: query });
+    },
+    [saveBrowseSession]
+  );
 
   const unnamedCount = useMemo(
     () => identities.filter((identity) => !identity.name?.trim()).length,
@@ -902,7 +932,7 @@ function PeoplePage() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
                 key={value}
-                onClick={() => setPersonFilter(value)}
+                onClick={() => updatePersonFilter(value)}
                 type="button"
               >
                 {label}
@@ -928,7 +958,7 @@ function PeoplePage() {
                   ? "bg-card font-medium text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              onClick={() => setPersonFilter("hidden")}
+              onClick={() => updatePersonFilter("hidden")}
               type="button"
             >
               {t("hiddenPeople")}
@@ -943,7 +973,7 @@ function PeoplePage() {
               <input
                 aria-label={t("peopleSearch")}
                 className="h-8 w-full rounded-[6px] border border-input bg-card pr-8 pl-8 text-[12px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
-                onChange={(event) => setPersonQuery(event.target.value)}
+                onChange={(event) => updatePersonQuery(event.target.value)}
                 placeholder={t("peopleSearch")}
                 type="search"
                 value={personQuery}
@@ -1115,8 +1145,8 @@ function PeoplePage() {
                     <button
                       className="text-[12px] text-primary hover:underline"
                       onClick={() => {
-                        setPersonFilter("all");
-                        setPersonQuery("");
+                        updatePersonFilter("all");
+                        updatePersonQuery("");
                       }}
                       type="button"
                     >

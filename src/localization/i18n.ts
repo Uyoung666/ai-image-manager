@@ -1165,6 +1165,9 @@ i18n.use(initReactI18next).init({
         // Albums
         albumAddTitle: "添加到相册",
         albumAddDescription: "选择现有相册，或创建一个新相册。",
+        albumFilterLabel: "筛选相册",
+        albumFilterNoMatches: "没有匹配的相册",
+        albumFilterPlaceholder: "按名称筛选相册...",
         albumNoAlbumsCreate: "还没有相册，创建一个吧",
         albumNamePlaceholder: "相册名称...",
         albumCreate: "创建",
@@ -1398,6 +1401,10 @@ i18n.use(initReactI18next).init({
         filterDeletePresetTitle: "删除筛选预设",
         filterDeletePresetDesc:
           "确定要删除预设「{{name}}」吗？此操作不可撤销。",
+        filterPresetDeleted: "已删除筛选预设「{{name}}」",
+        filterPresetRestored: "已恢复筛选预设「{{name}}」",
+        filterPresetUndoConflict:
+          "筛选预设「{{name}}」已被重新创建或修改，未恢复",
         drillDownActiveHint: "已从仪表盘钻取，可在下方继续叠加筛选条件",
         backToDashboard: "返回仪表盘",
         backToPlacesAndColors: "返回地点与色彩",
@@ -1560,6 +1567,7 @@ i18n.use(initReactI18next).init({
         shortcutToggleDetail: "显示/隐藏详情面板",
         shortcutContextMenu: "打开右键菜单",
         shortcutToggleSidebar: "折叠/展开侧边栏",
+        shortcutFocusSearch: "聚焦主图库搜索框并选中文字",
         shortcutGlobalSearch: "全局搜索",
         shortcutHelp: "显示/隐藏快捷键面板",
         shortcutLightboxNavigate: "切换照片",
@@ -3354,6 +3362,9 @@ i18n.use(initReactI18next).init({
         // Albums
         albumAddTitle: "Add to Album",
         albumAddDescription: "Choose an existing album or create a new one.",
+        albumFilterLabel: "Filter albums",
+        albumFilterNoMatches: "No matching albums",
+        albumFilterPlaceholder: "Filter albums by name...",
         albumNoAlbumsCreate: "No albums yet. Create one now.",
         albumNamePlaceholder: "Album name...",
         albumCreate: "Create",
@@ -3602,6 +3613,10 @@ i18n.use(initReactI18next).init({
         filterDeletePresetTitle: "Delete Filter Preset",
         filterDeletePresetDesc:
           'Delete preset "{{name}}"? This cannot be undone.',
+        filterPresetDeleted: 'Deleted filter preset "{{name}}"',
+        filterPresetRestored: 'Restored filter preset "{{name}}"',
+        filterPresetUndoConflict:
+          'Filter preset "{{name}}" was recreated or changed, so it was not restored',
         drillDownActiveHint:
           "Drilled down from dashboard. You can add more filters below.",
         backToDashboard: "Back to Dashboard",
@@ -3768,6 +3783,7 @@ i18n.use(initReactI18next).init({
         shortcutToggleDetail: "Show/hide detail panel",
         shortcutContextMenu: "Open context menu",
         shortcutToggleSidebar: "Collapse/expand sidebar",
+        shortcutFocusSearch: "Focus and select text in the gallery search",
         shortcutGlobalSearch: "Global search",
         shortcutHelp: "Show/hide shortcuts panel",
         shortcutLightboxNavigate: "Navigate photos",

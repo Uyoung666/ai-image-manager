@@ -1209,7 +1209,6 @@ function AlbumDetailPage() {
       <BatchRenameDialog
         onClose={() => {
           setRenameDialogOpen(false);
-          clearSelection();
         }}
         onRename={handleRenameSelected}
         open={renameDialogOpen}

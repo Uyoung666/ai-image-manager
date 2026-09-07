@@ -69,6 +69,8 @@ const ADVANCED_EXIF_FILTERS: AdvancedExifFilterField[] = [
 ];
 
 const PATH_SEPARATOR_PATTERN = /[\\/]/;
+const MODAL_SURFACE_SELECTOR =
+  '[aria-modal="true"], [role="alertdialog"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"]';
 
 interface PersonOption {
   coverPhotoPath: string | null;
@@ -495,8 +497,73 @@ export const SearchBar = memo(
       }, []);
 
       useEffect(() => {
+        function handleFocusShortcut(event: KeyboardEvent) {
+          if (event.defaultPrevented) {
+            return;
+          }
+          if (
+            !(event.ctrlKey || event.metaKey) ||
+            event.shiftKey ||
+            event.altKey ||
+            event.key.toLowerCase() !== "f"
+          ) {
+            return;
+          }
+
+          const target = event.target;
+          const targetElement =
+            target instanceof HTMLElement ? target : undefined;
+          const searchInput = inputRef.current;
+
+          // Keep native editing controls and content-editable regions in charge
+          // of their own shortcuts. The gallery search input is the one
+          // editing control intentionally handled here.
+          if (
+            targetElement &&
+            targetElement !== searchInput &&
+            (targetElement.tagName === "INPUT" ||
+              targetElement.tagName === "TEXTAREA" ||
+              targetElement.tagName === "SELECT" ||
+              targetElement.isContentEditable)
+          ) {
+            return;
+          }
+
+          // SearchBar lives in the page shell, so do not pull focus through an
+          // open modal surface. The desktop sidebar also uses role="dialog",
+          // but is non-modal until aria-modal is true.
+          if (
+            targetElement?.closest(MODAL_SURFACE_SELECTOR) ||
+            document.querySelector(MODAL_SURFACE_SELECTOR)
+          ) {
+            return;
+          }
+
+          if (!searchInput) {
+            return;
+          }
+
+          event.preventDefault();
+          searchInput.focus();
+          searchInput.select();
+        }
+
+        document.addEventListener("keydown", handleFocusShortcut);
+        return () => {
+          document.removeEventListener("keydown", handleFocusShortcut);
+        };
+      }, []);
+
+      useEffect(() => {
         function closeMenus(event: PointerEvent) {
-          if (!toolbarRef.current?.contains(event.target as Node)) {
+          const target = event.target;
+          if (
+            target instanceof Element &&
+            target.closest('[data-overlay-kind="filter-presets"]')
+          ) {
+            return;
+          }
+          if (!toolbarRef.current?.contains(target as Node)) {
             setShowSuggestions(false);
             setShowFilters(false);
             setSuggestionIndex(-1);

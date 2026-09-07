@@ -30,6 +30,11 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  type LightboxPanelMode,
+  readLightboxPanelMode,
+  saveLightboxPanelMode,
+} from "@/actions/lightbox-panel-preferences";
 import { wanderActions } from "@/actions/wander";
 import {
   LightboxInfoPanel,
@@ -97,6 +102,24 @@ function getFocusableElements(root: HTMLElement) {
   );
 }
 
+function getInitialPanelMode({
+  autoPlay,
+  sequencePlayback,
+  showThumbnailsInitially,
+}: {
+  autoPlay: boolean;
+  sequencePlayback: boolean;
+  showThumbnailsInitially: boolean;
+}): LightboxPanelMode {
+  if (showThumbnailsInitially) {
+    return "thumbnails";
+  }
+  if (sequencePlayback || autoPlay) {
+    return "off";
+  }
+  return readLightboxPanelMode();
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the viewer intentionally coordinates its mutually constrained review modes in one owner.
 export const PhotoLightbox = memo(function PhotoLightbox({
   photos,
@@ -145,11 +168,6 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   const [infoVisible, setInfoVisible] = useState(false);
   const [thumbnailsVisible, setThumbnailsVisible] = useState(false);
 
-  useEffect(() => {
-    if (open && showThumbnailsInitially) {
-      setThumbnailsVisible(true);
-    }
-  }, [open, showThumbnailsInitially]);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreAnchorRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -306,28 +324,46 @@ export const PhotoLightbox = memo(function PhotoLightbox({
   }, [updateZoom]);
 
   const toggleInfo = useCallback(() => {
-    setInfoVisible((visible) => {
-      if (!visible) {
-        setThumbnailsVisible(false);
-      }
-      return !visible;
-    });
+    const nextVisible = !infoVisible;
+    setInfoVisible(nextVisible);
+    if (nextVisible) {
+      setThumbnailsVisible(false);
+    }
+    if (!(sequencePlayback || autoPlay)) {
+      saveLightboxPanelMode(nextVisible ? "info" : "off");
+    }
     setPlaying(false);
     setMoreOpen(false);
-  }, []);
+  }, [autoPlay, infoVisible, sequencePlayback]);
+
+  const closeInfoPanel = useCallback(() => {
+    setInfoVisible(false);
+    if (!(sequencePlayback || autoPlay)) {
+      saveLightboxPanelMode("off");
+    }
+  }, [autoPlay, sequencePlayback]);
 
   const toggleThumbnails = useCallback(() => {
     if (photos.length <= 1) {
       return;
     }
-    setThumbnailsVisible((visible) => {
-      if (!visible) {
-        setInfoVisible(false);
-      }
-      return !visible;
-    });
+    const nextVisible = !thumbnailsVisible;
+    setThumbnailsVisible(nextVisible);
+    if (nextVisible) {
+      setInfoVisible(false);
+    }
+    if (!(sequencePlayback || autoPlay)) {
+      saveLightboxPanelMode(nextVisible ? "thumbnails" : "off");
+    }
     setMoreOpen(false);
-  }, [photos.length]);
+  }, [autoPlay, photos.length, sequencePlayback, thumbnailsVisible]);
+
+  const closeThumbnails = useCallback(() => {
+    setThumbnailsVisible(false);
+    if (!(sequencePlayback || autoPlay)) {
+      saveLightboxPanelMode("off");
+    }
+  }, [autoPlay, sequencePlayback]);
 
   const toggleFavorite = useCallback(async () => {
     if (!(photo && onToggleFavorite) || favoriteSaving) {
@@ -401,14 +437,32 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     setLoaded(false);
     setImageError(false);
     setControlsVisible(true);
-    setInfoVisible(false);
-    setThumbnailsVisible(false);
+    const initialPanelMode = getInitialPanelMode({
+      autoPlay,
+      sequencePlayback,
+      showThumbnailsInitially,
+    });
+    setInfoVisible(initialPanelMode === "info");
+    setThumbnailsVisible(initialPanelMode === "thumbnails");
     setMoreOpen(false);
     setSlideshowMode(autoPlay);
     setPlaying(autoPlay);
     setProgress(0);
     setFavoriteOverrides({});
-  }, [autoPlay, initialIndex, open, resetView]);
+  }, [
+    autoPlay,
+    initialIndex,
+    open,
+    resetView,
+    sequencePlayback,
+    showThumbnailsInitially,
+  ]);
+
+  useEffect(() => {
+    if (!open || photos.length <= 1) {
+      setThumbnailsVisible(false);
+    }
+  }, [open, photos.length]);
 
   useEffect(() => {
     const id = currentPhotoIdRef.current;
@@ -593,9 +647,9 @@ export const PhotoLightbox = memo(function PhotoLightbox({
         } else if (moreOpen) {
           setMoreOpen(false);
         } else if (infoVisible) {
-          setInfoVisible(false);
+          closeInfoPanel();
         } else if (thumbnailsVisible) {
-          setThumbnailsVisible(false);
+          closeThumbnails();
         } else if (document.fullscreenElement) {
           document.exitFullscreen().catch(() => undefined);
         } else {
@@ -650,6 +704,8 @@ export const PhotoLightbox = memo(function PhotoLightbox({
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
   }, [
+    closeInfoPanel,
+    closeThumbnails,
     infoVisible,
     moreOpen,
     modalOpen,
@@ -1232,7 +1288,7 @@ export const PhotoLightbox = memo(function PhotoLightbox({
 
       {infoVisible && (
         <LightboxInfoPanel
-          onClose={() => setInfoVisible(false)}
+          onClose={closeInfoPanel}
           onOpenExplorer={(path) => {
             ipc.client.shell.openInExplorer({ path }).catch(() => undefined);
           }}

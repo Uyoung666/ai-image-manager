@@ -11,7 +11,14 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -52,6 +59,9 @@ interface PhotoContextMenuProps {
 
 export type { MenuState };
 
+const FOCUSABLE_SELECTOR =
+  "a[href], button:not(:disabled), input:not(:disabled):not([type='hidden']), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
+
 export function PhotoContextMenu({
   menu,
   onAddToAlbum,
@@ -76,7 +86,40 @@ export function PhotoContextMenu({
 }: PhotoContextMenuProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [position, setPosition] = useState({ left: 8, top: 8 });
+
+  const restoreFocus = useCallback(() => {
+    const previousFocus = previousFocusRef.current;
+    previousFocusRef.current = null;
+    if (
+      previousFocus &&
+      previousFocus !== document.body &&
+      previousFocus.isConnected
+    ) {
+      previousFocus.focus();
+    }
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    restoreFocus();
+    onClose();
+  }, [onClose, restoreFocus]);
+
+  useLayoutEffect(() => {
+    if (!menu.open) {
+      return;
+    }
+    const activeElement = document.activeElement;
+    previousFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null;
+    ref.current
+      ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+      ?.focus();
+    return restoreFocus;
+  }, [menu.open, restoreFocus]);
 
   useEffect(() => {
     if (!menu.open) {
@@ -84,26 +127,93 @@ export function PhotoContextMenu({
     }
     const dismiss = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
+        closeMenu();
       }
     };
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", dismiss, true);
       document.addEventListener("contextmenu", dismiss, true);
     }, 0);
-    document.addEventListener("keydown", keyHandler);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("mousedown", dismiss, true);
       document.removeEventListener("contextmenu", dismiss, true);
-      document.removeEventListener("keydown", keyHandler);
     };
-  }, [menu.open, onClose]);
+  }, [closeMenu, menu.open]);
+
+  const handleMenuKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // Context-menu keyboard input belongs to the menu and must not reach
+      // gallery/router shortcut listeners.
+      event.stopPropagation();
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const previousFocus = previousFocusRef.current;
+        const focusableElements = Array.from(
+          document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        ).filter((element) => !ref.current?.contains(element));
+        let destination = previousFocus;
+        if (previousFocus) {
+          const currentIndex = focusableElements.indexOf(previousFocus);
+          if (currentIndex >= 0) {
+            destination =
+              focusableElements[currentIndex + (event.shiftKey ? -1 : 1)] ??
+              previousFocus;
+          }
+        } else if (focusableElements.length > 0) {
+          destination = event.shiftKey
+            ? (focusableElements.at(-1) ?? null)
+            : focusableElements[0];
+        }
+        closeMenu();
+        destination?.focus();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+      if (
+        !["ArrowDown", "ArrowUp", "End", "Enter", "Home"].includes(event.key)
+      ) {
+        return;
+      }
+      event.preventDefault();
+
+      const items = Array.from(
+        ref.current?.querySelectorAll<HTMLButtonElement>(
+          "button:not(:disabled)"
+        ) ?? []
+      );
+      if (items.length === 0) {
+        return;
+      }
+      const currentIndex = items.indexOf(
+        document.activeElement as HTMLButtonElement
+      );
+      if (event.key === "Enter") {
+        if (currentIndex >= 0) {
+          items[currentIndex]?.click();
+        }
+        return;
+      }
+
+      let nextIndex = 0;
+      if (event.key === "ArrowDown") {
+        nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+      } else if (event.key === "ArrowUp") {
+        nextIndex =
+          currentIndex < 0
+            ? items.length - 1
+            : (currentIndex - 1 + items.length) % items.length;
+      } else if (event.key === "End") {
+        nextIndex = items.length - 1;
+      }
+      items[nextIndex]?.focus();
+    },
+    [closeMenu]
+  );
 
   useLayoutEffect(() => {
     if (!(menu.open && ref.current)) {
@@ -163,7 +273,11 @@ export function PhotoContextMenu({
       className="surface-elevated fixed z-50 max-h-[calc(100dvh-1rem)] w-[min(210px,calc(100dvw-1rem))] min-w-0 animate-context-menu-enter overflow-y-auto overscroll-contain rounded-[8px] border border-border bg-popover p-1 ring-1 ring-foreground/5 [&_button]:min-w-0 [&_button]:whitespace-normal [&_button]:break-words"
       data-overlay-kind="context-menu"
       data-surface="overlay"
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+      onKeyDown={handleMenuKeyDown}
       ref={ref}
+      role="menu"
       style={position}
     >
       <button
@@ -173,8 +287,9 @@ export function PhotoContextMenu({
           if (menu.photoPath) {
             onOpenExplorer(menu.photoPath);
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
@@ -192,8 +307,9 @@ export function PhotoContextMenu({
               toast.error(t("copyFailed"));
             }
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <Copy className="h-3.5 w-3.5 flex-shrink-0" />
@@ -217,8 +333,9 @@ export function PhotoContextMenu({
               toast.error(t("copyFailed"));
             }
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <Image className="h-3.5 w-3.5 flex-shrink-0" />
@@ -234,8 +351,9 @@ export function PhotoContextMenu({
             } else if (menu.photoId !== null) {
               onToggleFavorite(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <Star className="h-3.5 w-3.5 flex-shrink-0" />
@@ -259,8 +377,9 @@ export function PhotoContextMenu({
           } else if (menu.photoId !== null) {
             onAddToAlbum(menu.photoId);
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <Album className="h-3.5 w-3.5 flex-shrink-0" />
@@ -278,8 +397,9 @@ export function PhotoContextMenu({
             } else if (menu.photoId !== null) {
               onRemoveFromAlbum(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <MinusCircle className="h-3.5 w-3.5 flex-shrink-0" />
@@ -296,8 +416,9 @@ export function PhotoContextMenu({
             if (menu.photoId !== null) {
               onSetAsAlbumCover(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <Image className="h-3.5 w-3.5 flex-shrink-0" />
@@ -312,8 +433,9 @@ export function PhotoContextMenu({
             if (menu.photoId !== null) {
               onSetAsPersonCover(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <Image className="h-3.5 w-3.5 flex-shrink-0" />
@@ -329,8 +451,9 @@ export function PhotoContextMenu({
           } else if (menu.photoId !== null) {
             onExport(menu.photoId);
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <Download className="h-3.5 w-3.5 flex-shrink-0" />
@@ -353,8 +476,9 @@ export function PhotoContextMenu({
             } else if (menu.photoId !== null) {
               onUploadToCloud(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <CloudUpload className="h-3.5 w-3.5 flex-shrink-0" />
@@ -373,8 +497,9 @@ export function PhotoContextMenu({
             } else if (menu.photoId !== null) {
               onShare(menu.photoId);
             }
-            onClose();
+            closeMenu();
           }}
+          role="menuitem"
           type="button"
         >
           <Share2 className="h-3.5 w-3.5 flex-shrink-0" />
@@ -395,8 +520,9 @@ export function PhotoContextMenu({
           } else if (menu.photoId !== null) {
             onDelete(menu.photoId);
           }
-          onClose();
+          closeMenu();
         }}
+        role="menuitem"
         type="button"
       >
         <Trash2 className="h-3.5 w-3.5 flex-shrink-0" />

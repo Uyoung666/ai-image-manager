@@ -21,6 +21,10 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  readPhotoDetailAdvancedMetadataExpanded,
+  savePhotoDetailAdvancedMetadataExpanded,
+} from "@/actions/photo-detail-panel-preferences";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   Tooltip,
@@ -147,6 +151,9 @@ export function PhotoDetailPanel({
   const [showTagInput, setShowTagInput] = useState(false);
   const [newTagName, setNewTagName] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
+  const [advancedMetadataExpanded, setAdvancedMetadataExpanded] = useState(
+    readPhotoDetailAdvancedMetadataExpanded
+  );
   const [aiSuggestions, setAiSuggestions] = useState<Array<{
     tag: string;
     confidence: number;
@@ -1135,42 +1142,58 @@ export function PhotoDetailPanel({
                 )}
               </div>
               {exif.advanced && (
-                <div className="mt-4 space-y-4 border-border border-t pt-4">
-                  <div className="flex items-center justify-between gap-2">
+                <details
+                  className="mt-4 border-border border-t pt-4"
+                  onToggle={(event) => {
+                    const expanded = event.currentTarget.open;
+                    setAdvancedMetadataExpanded(expanded);
+                    savePhotoDetailAdvancedMetadataExpanded(expanded);
+                  }}
+                  open={advancedMetadataExpanded}
+                >
+                  <summary className="flex cursor-pointer select-none list-none items-center justify-between gap-2">
                     <span className="font-medium text-[11px] text-foreground">
                       {t("advancedMetadata")}
                     </span>
-                    {exif.advanced.vendor && (
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] text-primary">
-                        {exif.advanced.vendor} MakerNote
-                      </span>
-                    )}
+                    <span className="flex items-center gap-2">
+                      {exif.advanced.vendor && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] text-primary">
+                          {exif.advanced.vendor} MakerNote
+                        </span>
+                      )}
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={`h-3.5 w-3.5 transition-transform ${advancedMetadataExpanded ? "rotate-180" : ""}`}
+                      />
+                    </span>
+                  </summary>
+                  <div className="mt-4 space-y-4">
+                    <MetadataGroup
+                      data={{
+                        ...exif.advanced.standard,
+                        ...exif.advanced.capture,
+                      }}
+                      title={t("metadataCapture")}
+                    />
+                    <MetadataGroup
+                      data={exif.advanced.autofocus}
+                      title={t("metadataAutofocus")}
+                    />
+                    <MetadataGroup
+                      data={exif.advanced.processing}
+                      title={t("metadataProcessing")}
+                    />
+                    <MetadataGroup
+                      data={exif.advanced.workflow}
+                      title={t("metadataWorkflow")}
+                    />
+                    <MetadataGroup
+                      data={exif.advanced.provenance}
+                      provenance
+                      title={t("metadataProvenance")}
+                    />
                   </div>
-                  <MetadataGroup
-                    data={{
-                      ...exif.advanced.standard,
-                      ...exif.advanced.capture,
-                    }}
-                    title={t("metadataCapture")}
-                  />
-                  <MetadataGroup
-                    data={exif.advanced.autofocus}
-                    title={t("metadataAutofocus")}
-                  />
-                  <MetadataGroup
-                    data={exif.advanced.processing}
-                    title={t("metadataProcessing")}
-                  />
-                  <MetadataGroup
-                    data={exif.advanced.workflow}
-                    title={t("metadataWorkflow")}
-                  />
-                  <MetadataGroup
-                    data={exif.advanced.provenance}
-                    provenance
-                    title={t("metadataProvenance")}
-                  />
-                </div>
+                </details>
               )}
             </section>
           ) : (

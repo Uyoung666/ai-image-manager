@@ -291,20 +291,18 @@ describe("usePhotoSelection", () => {
       expect(result.current.selectedIds.size).toBe(mockPhotos.length);
     });
 
-    it("should deselect all when all are already selected", () => {
+    it("should remain selected when invoked repeatedly", () => {
       const { result } = renderHook(
         () => usePhotoSelection("test", mockPhotos),
         { wrapper }
       );
 
-      act(() => {
-        result.current.selectAll(); // Select all
-      });
-      act(() => {
-        result.current.selectAll(); // Deselect all
-      });
+      act(() => result.current.selectAll());
+      act(() => result.current.selectAll());
 
-      expect(result.current.selectedIds.size).toBe(0);
+      expect(result.current.selectedIds).toEqual(
+        new Set(mockPhotos.map((photo) => photo.id))
+      );
     });
   });
 });

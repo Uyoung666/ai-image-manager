@@ -1,7 +1,7 @@
 import { Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { toast } from "sonner";
 import {
   Popover,
   PopoverContent,
@@ -18,6 +18,12 @@ interface FilterPreset {
   createdAt: number;
   filters: ExifFilters;
   name: string;
+}
+
+interface DeletedPresetSnapshot {
+  index: number;
+  order: string[];
+  preset: FilterPreset;
 }
 
 interface FilterPresetsProps {
@@ -44,6 +50,75 @@ function savePresets(presets: FilterPreset[]) {
   }
 }
 
+function insertByOrder(
+  current: string[],
+  name: string,
+  order: string[]
+): string[] {
+  if (current.includes(name)) {
+    return [...current];
+  }
+
+  const orderIndex = order.indexOf(name);
+  if (orderIndex < 0) {
+    return [...current, name];
+  }
+
+  for (let index = orderIndex + 1; index < order.length; index++) {
+    const nextIndex = current.indexOf(order[index] ?? "");
+    if (nextIndex >= 0) {
+      const restored = [...current];
+      restored.splice(nextIndex, 0, name);
+      return restored;
+    }
+  }
+
+  for (let index = orderIndex - 1; index >= 0; index--) {
+    const previousIndex = current.indexOf(order[index] ?? "");
+    if (previousIndex >= 0) {
+      const restored = [...current];
+      restored.splice(previousIndex + 1, 0, name);
+      return restored;
+    }
+  }
+
+  const restored = [...current];
+  restored.splice(Math.min(orderIndex, restored.length), 0, name);
+  return restored;
+}
+
+function getDeleteOrder(
+  latest: FilterPreset[],
+  snapshots: Iterable<DeletedPresetSnapshot>
+): string[] {
+  let order = latest.map((preset) => preset.name);
+  for (const snapshot of snapshots) {
+    order = insertByOrder(order, snapshot.preset.name, snapshot.order);
+  }
+  return order;
+}
+
+function restorePreset(
+  current: FilterPreset[],
+  snapshot: DeletedPresetSnapshot
+): FilterPreset[] {
+  const names = insertByOrder(
+    current.map((preset) => preset.name),
+    snapshot.preset.name,
+    snapshot.order
+  );
+  const insertionIndex = names.indexOf(snapshot.preset.name);
+  const restored = [...current];
+  restored.splice(
+    insertionIndex >= 0
+      ? insertionIndex
+      : Math.min(snapshot.index, restored.length),
+    0,
+    snapshot.preset
+  );
+  return restored;
+}
+
 export function FilterPresets({
   currentFilters,
   onLoadPreset,
@@ -53,8 +128,9 @@ export function FilterPresets({
   const [presetName, setPresetName] = useState("");
   const [showSave, setShowSave] = useState(false);
   const [showLoad, setShowLoad] = useState(false);
-  const [deleteConfirmName, setDeleteConfirmName] = useState<string | null>(
-    null
+  const presetNameComposingRef = useRef(false);
+  const deletedSnapshotsRef = useRef<Map<string, DeletedPresetSnapshot>>(
+    new Map()
   );
 
   useEffect(() => {
@@ -81,17 +157,60 @@ export function FilterPresets({
   }
 
   function handleDelete(name: string) {
-    setDeleteConfirmName(name);
-  }
-
-  function confirmDelete() {
-    if (!deleteConfirmName) {
+    const latest = loadPresets();
+    const deletedIndex = latest.findIndex((preset) => preset.name === name);
+    if (deletedIndex < 0) {
+      setPresets(latest);
       return;
     }
-    const updated = presets.filter((p) => p.name !== deleteConfirmName);
+
+    const deleted = latest[deletedIndex];
+    if (!deleted) {
+      setPresets(latest);
+      return;
+    }
+    const order = getDeleteOrder(latest, deletedSnapshotsRef.current.values());
+    const snapshot: DeletedPresetSnapshot = {
+      index: order.indexOf(deleted.name),
+      order,
+      preset: deleted,
+    };
+    deletedSnapshotsRef.current.set(deleted.name, snapshot);
+    const updated = latest.filter((_, index) => index !== deletedIndex);
     setPresets(updated);
     savePresets(updated);
-    setDeleteConfirmName(null);
+
+    let undone = false;
+    toast.success(t("filterPresetDeleted", { name: deleted.name }), {
+      action: {
+        label: t("toastUndo"),
+        onClick: () => {
+          if (undone) {
+            return;
+          }
+          undone = true;
+
+          const current = loadPresets();
+          if (current.some((preset) => preset.name === snapshot.preset.name)) {
+            deletedSnapshotsRef.current.delete(snapshot.preset.name);
+            setPresets(current);
+            toast.error(
+              t("filterPresetUndoConflict", { name: snapshot.preset.name })
+            );
+            return;
+          }
+
+          const restored = restorePreset(current, snapshot);
+          deletedSnapshotsRef.current.delete(snapshot.preset.name);
+          setPresets(restored);
+          savePresets(restored);
+          toast.success(
+            t("filterPresetRestored", { name: snapshot.preset.name })
+          );
+        },
+      },
+      duration: 8000,
+    });
   }
 
   const hasActiveFilters = Object.values(currentFilters).some(
@@ -127,6 +246,11 @@ export function FilterPresets({
               collisionPadding={8}
               data-overlay-kind="filter-presets"
               data-surface="overlay"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.stopPropagation();
+                }
+              }}
               side="top"
               sideOffset={4}
             >
@@ -134,8 +258,23 @@ export function FilterPresets({
                 <input
                   className="h-7 min-w-0 flex-[1_1_9rem] rounded-[4px] border border-border bg-card px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/40"
                   onChange={(e) => setPresetName(e.target.value)}
+                  onCompositionEnd={() => {
+                    presetNameComposingRef.current = false;
+                  }}
+                  onCompositionStart={() => {
+                    presetNameComposingRef.current = true;
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
+                      e.stopPropagation();
+                      if (
+                        e.nativeEvent.isComposing ||
+                        e.nativeEvent.keyCode === 229 ||
+                        presetNameComposingRef.current
+                      ) {
+                        return;
+                      }
+                      e.preventDefault();
                       handleSave();
                     }
                   }}
@@ -181,6 +320,11 @@ export function FilterPresets({
               collisionPadding={8}
               data-overlay-kind="filter-presets"
               data-surface="overlay"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.stopPropagation();
+                }
+              }}
               side="top"
               sideOffset={4}
             >
@@ -225,18 +369,6 @@ export function FilterPresets({
           )}
         </Popover>
       )}
-
-      <ConfirmDialog
-        confirmText={t("delete")}
-        description={t("filterDeletePresetDesc", {
-          name: deleteConfirmName ?? "",
-        })}
-        destructive
-        onCancel={() => setDeleteConfirmName(null)}
-        onConfirm={confirmDelete}
-        open={deleteConfirmName !== null}
-        title={t("filterDeletePresetTitle")}
-      />
     </div>
   );
 }

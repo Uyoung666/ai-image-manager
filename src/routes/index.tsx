@@ -268,6 +268,7 @@ function HomePage() {
   const searchQuery = filter.appliedSearch?.query ?? "";
   const searchMode = filter.appliedSearch?.mode ?? null;
   const imageSearchPath = filter.appliedSearch?.imagePath ?? null;
+  const searchFilters = filter.appliedSearch?.filters ?? {};
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
   const [searchError, setSearchError] = useState<"image" | "search" | null>(
@@ -482,6 +483,7 @@ function HomePage() {
     clearDashboardReturnTarget();
     saveBrowseSession("home-search", {
       colorHex: null,
+      filters: {},
       imageSearchPath: null,
       searchMode: null,
       searchQuery: "",
@@ -1341,12 +1343,14 @@ function HomePage() {
   // 持久化搜索状态 + 挂载时自动重新搜索
   const searchStateRef = useRef({
     colorHex,
+    filters: searchFilters,
     imageSearchPath,
     searchMode,
     searchQuery,
   });
   searchStateRef.current = {
     colorHex,
+    filters: searchFilters,
     imageSearchPath,
     searchMode,
     searchQuery,
@@ -1357,6 +1361,7 @@ function HomePage() {
         searchQuery: searchStateRef.current.searchQuery,
         searchMode: searchStateRef.current.searchMode,
         colorHex: searchStateRef.current.colorHex,
+        filters: searchStateRef.current.filters,
         imageSearchPath: searchStateRef.current.imageSearchPath,
       });
     };
@@ -1401,7 +1406,15 @@ function HomePage() {
       setTimeout(tryImageSearch, 300);
       return;
     }
-    if (saved.searchQuery || saved.searchMode === "color" || saved.colorHex) {
+    const hasSavedFilters = Object.values(saved.filters).some((value) =>
+      Boolean(value)
+    );
+    if (
+      saved.searchQuery ||
+      saved.searchMode === "color" ||
+      saved.colorHex ||
+      hasSavedFilters
+    ) {
       restoredSearchRef.current = true;
       const q = saved.searchQuery;
       const restoredMode = isSearchMode(saved.searchMode)
@@ -1409,7 +1422,7 @@ function HomePage() {
         : resolveSearchMode(q, saved.colorHex);
       filter.applySearch({
         colorHex: saved.colorHex ?? undefined,
-        filters: {},
+        filters: saved.filters,
         mode: restoredMode,
         query: q,
       });
@@ -1420,7 +1433,7 @@ function HomePage() {
         if (aiStatusRef.current?.hasVectors !== undefined || attempts > 100) {
           handleSearch(
             q,
-            undefined,
+            saved.filters,
             saved.colorHex ?? undefined,
             saved.dashboardReturn !== null
           );
@@ -2087,11 +2100,19 @@ function HomePage() {
     const gen = ++searchGenerationRef.current;
     const startTime = performance.now();
     const nextSearchMode = resolveSearchMode(query, effectiveColorHex);
+    const appliedFilters = filters ?? {};
     filter.applySearch({
       colorHex: effectiveColorHex ?? undefined,
-      filters: filters ?? {},
+      filters: appliedFilters,
       mode: nextSearchMode,
       query,
+    });
+    saveBrowseSession("home-search", {
+      colorHex: effectiveColorHex ?? null,
+      filters: appliedFilters,
+      imageSearchPath: null,
+      searchMode: nextSearchMode,
+      searchQuery: query,
     });
     setSearchLoading(true);
     setSearchError(null);
@@ -2489,6 +2510,7 @@ function HomePage() {
     });
     saveBrowseSession("home-search", {
       colorHex: null,
+      filters: {},
       imageSearchPath: imagePath,
       searchMode: "image",
       searchQuery: "",
@@ -3528,7 +3550,6 @@ function HomePage() {
       <BatchRenameDialog
         onClose={() => {
           setRenameDialogOpen(false);
-          clearSelection();
         }}
         onRename={handleRenameSelected}
         open={renameDialogOpen}
@@ -3545,7 +3566,6 @@ function HomePage() {
       <FormatConvertDialog
         onClose={() => {
           setConvertDialogOpen(false);
-          clearSelection();
         }}
         onConvert={handleConvertSelected}
         open={convertDialogOpen}

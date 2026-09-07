@@ -255,16 +255,12 @@ export function usePhotoSelection(
   );
 
   const selectAll = useCallback(() => {
-    if (selectedIdsRef.current.size === photos.length) {
-      clearSelection();
-    } else {
-      const allIds = new Set(photos.map((p) => p.id));
-      setSelectedIds(allIds);
-      saveSession(routeKey, {
-        selectedIds: Array.from(allIds),
-      });
-    }
-  }, [photos, routeKey, saveSession, clearSelection]);
+    const allIds = new Set(photos.map((p) => p.id));
+    setSelectedIds(allIds);
+    saveSession(routeKey, {
+      selectedIds: Array.from(allIds),
+    });
+  }, [photos, routeKey, saveSession]);
 
   return {
     addToSelection,
