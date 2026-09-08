@@ -11,6 +11,7 @@ import type {
 } from "@/types/diagnostics";
 import {
   findStoredIncident,
+  getRecentIncidentDetails,
   recordDiagnosticIncident,
   type StoredDiagnosticIncident,
 } from "./incidents";
@@ -122,32 +123,41 @@ export async function assembleDiagnosticEntries(
 ): Promise<BundleEntries> {
   const sanitizer = new DiagnosticSanitizer();
   const warnings: string[] = [];
-  const manifest = await collectManifest(incident, warnings);
-  let logs = readRecentLogs(sanitizer);
   const forbiddenValues = getForbiddenValues();
+  const manifest = await collectManifest(incident, warnings);
+  let logs = readRecentLogs(sanitizer, forbiddenValues, warnings);
   if (containsPotentialSensitiveData(logs, forbiddenValues)) {
     warnings.push(
       "Recent logs were omitted because the privacy self-check found unsanitized data."
     );
     logs = "Logs omitted: privacy self-check did not pass.\n";
   }
-  let safeManifest = JSON.parse(sanitizer.sanitizeJson(manifest)) as Record<
-    string,
-    unknown
-  >;
-  let report = buildReport(incident, input, warnings, sanitizer);
+  let safeManifest = sanitizer.sanitizeValue(
+    manifest,
+    forbiddenValues
+  ) as Record<string, unknown>;
+  let report = buildReport(
+    incident,
+    input,
+    warnings,
+    sanitizer,
+    forbiddenValues
+  );
   if (
     containsPotentialSensitiveData(
       JSON.stringify(safeManifest),
       forbiddenValues
-    ) ||
-    containsPotentialSensitiveData(report, forbiddenValues)
+    )
   ) {
     warnings.push(
-      "The detailed report was reduced because the final privacy self-check did not pass."
+      "Manifest metadata was reduced by the final privacy self-check; safe logs were retained."
     );
-    logs = "Logs omitted: the bundle was reduced by the privacy self-check.\n";
     safeManifest = createMinimalManifest(incident);
+  }
+  if (containsPotentialSensitiveData(report, forbiddenValues)) {
+    warnings.push(
+      "Report text was reduced by the final privacy self-check; safe logs were retained."
+    );
     report = createMinimalReport(incident);
   }
   return { logs, manifest: safeManifest, report, warnings };
@@ -267,6 +277,45 @@ async function collectManifest(
 ): Promise<Record<string, unknown>> {
   const probes: Record<string, unknown> = {};
   try {
+    const state = await import("../ai/state");
+    const error = new DiagnosticSanitizer().sanitize(
+      state.currentProgress.error ?? ""
+    );
+    // Read existing state only: collecting diagnostics must not load a model,
+    // start workers, or repair the vector database.
+    probes.ai = {
+      status: "ok",
+      controlState: state.aiControlState,
+      phase: state.currentProgress.phase,
+      processed: state.currentProgress.processed,
+      total: state.currentProgress.total,
+      modelLoaded: state.isModelLoaded,
+      vectorDBReady: state.isVectorDBReady,
+      lastError: containsPotentialSensitiveData(error, getForbiddenValues())
+        ? "<REDACTED>"
+        : error || null,
+    };
+  } catch {
+    probes.ai = { status: "unavailable" };
+    warnings.push("AI runtime state unavailable.");
+  }
+  try {
+    const { getSetting } = await import("../settings-manager");
+    probes.aiConfiguration = {
+      status: "ok",
+      gpuEnabled: getSetting("gpu.enabled") === "true",
+    };
+  } catch {
+    probes.aiConfiguration = { status: "unavailable" };
+    warnings.push("AI configuration unavailable.");
+  }
+  let recentIncidents: Record<string, unknown>[] = [];
+  try {
+    recentIncidents = getRecentIncidentDetails().map(exportIncident);
+  } catch {
+    warnings.push("Stored incident details unavailable.");
+  }
+  try {
     probes.database = await withTimeout(
       collectDatabaseSummary(),
       PROBE_TIMEOUT_MS
@@ -295,13 +344,8 @@ async function collectManifest(
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    incident: {
-      id: incident.id,
-      fingerprint: incident.fingerprint,
-      occurredAt: incident.occurredAt,
-      source: incident.source,
-      summary: incident.message.split(LINE_BREAK_PATTERN, 1)[0],
-    },
+    incident: exportIncident(incident),
+    recentIncidents,
     app: {
       name: app.getName(),
       version: app.getVersion(),
@@ -335,6 +379,23 @@ async function collectManifest(
       ],
       nativeDumpIncludedByDefault: false,
     },
+  };
+}
+
+function exportIncident(
+  incident: StoredDiagnosticIncident
+): Record<string, unknown> {
+  return {
+    id: incident.id,
+    fingerprint: incident.fingerprint,
+    occurredAt: incident.occurredAt,
+    source: incident.source,
+    summary: incident.message,
+    action: incident.action,
+    stack: incident.stack,
+    componentStack: incident.componentStack,
+    route: incident.route,
+    context: incident.context,
   };
 }
 
@@ -392,7 +453,8 @@ function buildReport(
   incident: StoredDiagnosticIncident,
   input: DiagnosticBundleInput,
   warnings: string[],
-  sanitizer: DiagnosticSanitizer
+  sanitizer: DiagnosticSanitizer,
+  forbiddenValues: string[]
 ): string {
   return [
     "# AI Image Manager Diagnostic Report",
@@ -403,12 +465,12 @@ function buildReport(
     `- Source: ${incident.source}`,
     "",
     "## Last action",
-    sanitizer.sanitize(input.lastAction.trim()),
+    sanitizer.sanitizeValue(input.lastAction.trim(), forbiddenValues),
     "",
     "## Actual behavior",
     input.actualBehavior?.trim()
-      ? sanitizer.sanitize(input.actualBehavior.trim())
-      : sanitizer.sanitize(incident.message),
+      ? sanitizer.sanitizeValue(input.actualBehavior.trim(), forbiddenValues)
+      : sanitizer.sanitizeValue(incident.message, forbiddenValues),
     "",
     "## Frequency",
     reproducibilityLabel(input.reproducibility),
@@ -419,16 +481,24 @@ function buildReport(
       ? [
           "",
           "## Warnings",
-          ...warnings.map((warning) => `- ${sanitizer.sanitize(warning)}`),
+          ...warnings.map(
+            (warning) =>
+              `- ${sanitizer.sanitizeValue(warning, forbiddenValues)}`
+          ),
         ]
       : []),
     "",
   ].join("\n");
 }
 
-function readRecentLogs(sanitizer: DiagnosticSanitizer): string {
+function readRecentLogs(
+  sanitizer: DiagnosticSanitizer,
+  forbiddenValues: string[],
+  warnings: string[]
+): string {
   const logDirectory = path.join(app.getPath("userData"), "logs");
   if (!fs.existsSync(logDirectory)) {
+    warnings.push("No diagnostic log directory was found.");
     return "No diagnostic logs were found.\n";
   }
   const preferredNames = [
@@ -446,15 +516,23 @@ function readRecentLogs(sanitizer: DiagnosticSanitizer): string {
     "ipc-error.log",
     "migrate.log",
   ];
+  const availableNames = preferredNames.filter((name) =>
+    fs.existsSync(path.join(logDirectory, name))
+  );
   const chunks: string[] = [];
   let remaining = MAX_DIAGNOSTIC_LOG_BYTES;
-  for (const name of preferredNames) {
+  for (const [fileIndex, name] of availableNames.entries()) {
     const file = path.join(logDirectory, name);
     if (!fs.existsSync(file) || remaining <= 0) {
       continue;
     }
     try {
       const stats = fs.statSync(file);
+      // Reserve space for every source, so a busy app.log cannot starve worker
+      // errors or the preceding session's rotated logs.
+      const fileBudget = Math.floor(
+        remaining / (availableNames.length - fileIndex)
+      );
       const bytesToRead = Math.min(stats.size, MAX_DIAGNOSTIC_LOG_BYTES);
       if (bytesToRead <= 0) {
         continue;
@@ -477,14 +555,33 @@ function readRecentLogs(sanitizer: DiagnosticSanitizer): string {
       if (sourceOffset > 0) {
         lines.shift();
       }
-      const selection = selectRecentLogLines(lines, name, sanitizer, remaining);
+      const selection = selectRecentLogLines(
+        lines,
+        name,
+        sanitizer,
+        fileBudget,
+        forbiddenValues
+      );
+      if (selection.omitted > 0) {
+        warnings.push(
+          `${selection.omitted} log records from ${name} were omitted by the privacy self-check; other records were retained.`
+        );
+      }
+      if (sourceOffset > 0 || selection.truncated > 0) {
+        warnings.push(
+          `Recent records from ${name} were truncated to the export size budget.`
+        );
+      }
       chunks.push(selection.chunk);
       remaining -= selection.bytes;
     } catch {
-      // Continue collecting other logs if one file is locked or unreadable.
+      warnings.push(`Log source ${name} could not be read.`);
     }
   }
   const combined = chunks.join("");
+  if (!combined) {
+    warnings.push("No readable diagnostic log records were included.");
+  }
   return combined || "No readable diagnostic logs were found.\n";
 }
 
@@ -492,10 +589,13 @@ function selectRecentLogLines(
   lines: string[],
   sourceName: string,
   sanitizer: DiagnosticSanitizer,
-  budget: number
-): { bytes: number; chunk: string } {
+  budget: number,
+  forbiddenValues: string[]
+): { bytes: number; chunk: string; omitted: number; truncated: number } {
   const selected: string[] = [];
   let bytes = 0;
+  let omitted = 0;
+  let truncated = 0;
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const rawLine = lines[index]?.trim();
     if (!rawLine) {
@@ -504,31 +604,44 @@ function selectRecentLogLines(
     const normalized = normalizeDiagnosticLogLine(
       rawLine,
       sourceName,
-      sanitizer
+      sanitizer,
+      forbiddenValues
     );
+    if (containsPotentialSensitiveData(normalized, forbiddenValues)) {
+      omitted += 1;
+      continue;
+    }
     const serialized = `${normalized}\n`;
     const size = Buffer.byteLength(serialized, "utf8");
     if (size > budget - bytes) {
+      truncated += 1;
       continue;
     }
     selected.push(serialized);
     bytes += size;
   }
-  return { bytes, chunk: selected.reverse().join("") };
+  return { bytes, chunk: selected.reverse().join(""), omitted, truncated };
 }
 
 function normalizeDiagnosticLogLine(
   rawLine: string,
   sourceName: string,
-  sanitizer: DiagnosticSanitizer
+  sanitizer: DiagnosticSanitizer,
+  forbiddenValues: string[]
 ): string {
-  const sanitized = sanitizer.sanitize(rawLine);
   try {
-    return JSON.stringify(JSON.parse(sanitized));
+    const parsed: unknown = JSON.parse(rawLine);
+    const record = sanitizer.sanitizeValue(parsed, forbiddenValues);
+    return JSON.stringify({
+      ...(record && typeof record === "object" && !Array.isArray(record)
+        ? record
+        : { message: record }),
+      logSource: sourceName,
+    });
   } catch {
     return JSON.stringify({
       level: "info",
-      message: sanitized,
+      message: sanitizer.sanitizeValue(rawLine, forbiddenValues),
       module: `legacy-${sourceName}`,
       process: "legacy",
     });

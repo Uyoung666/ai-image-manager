@@ -22,10 +22,14 @@ vi.mock("@/db", () => ({
 }));
 
 vi.mock("@/db/schema", () => ({ photos: {} }));
+vi.mock("@/services/settings-manager", () => ({
+  getSetting: () => "true",
+}));
 
 let testDirectory: string | undefined;
 
 afterEach(() => {
+  vi.resetModules();
   vi.restoreAllMocks();
   if (testDirectory?.startsWith(os.tmpdir())) {
     fs.rmSync(testDirectory, { force: true, recursive: true });
@@ -47,6 +51,134 @@ describe("diagnostic bundle metadata", () => {
     actualBehavior: "The page became blank",
     reproducibility: "sometimes",
   };
+
+  it("redacts only the unsafe field and keeps failure logs and AI state", async () => {
+    testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "aim-privacy-test-"));
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+    vi.spyOn(os, "hostname").mockReturnValue("PRIVATE-MACHINE-34");
+    const directory = path.join(testDirectory, "logs");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, "app.log"),
+      [
+        JSON.stringify({
+          message: "Worker initialization failed",
+          level: "error",
+        }),
+        JSON.stringify({ message: "Running on PRIVATE-MACHINE-34" }),
+        JSON.stringify({ message: "CPU fallback failed", level: "error" }),
+      ].join("\n")
+    );
+    const state = await import("@/services/ai/state");
+    state.setCurrentProgress({
+      phase: "error",
+      processed: 0,
+      total: 6019,
+      currentFile: String.raw`C:\Users\Alice\Pictures\private.jpg`,
+      error: String.raw`Failed to load model at C:\Users\Alice\Models\model.onnx`,
+    });
+    const { assembleDiagnosticEntries } = await import(
+      "@/services/diagnostics/bundle"
+    );
+    const result = await assembleDiagnosticEntries(incident, input);
+    expect(
+      result.logs
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+    ).toHaveLength(3);
+    expect(result.logs).toContain("Worker initialization failed");
+    expect(result.logs).toContain("CPU fallback failed");
+    expect(result.logs).not.toContain("PRIVATE-MACHINE-34");
+    expect(result.logs).toContain("<REDACTED>");
+    expect(result.manifest.probes).toMatchObject({
+      ai: {
+        phase: "error",
+        total: 6019,
+        lastError: expect.stringContaining("Failed to load model"),
+      },
+    });
+    expect(JSON.stringify(result.manifest)).not.toContain("Alice");
+    expect(JSON.stringify(result.manifest)).not.toContain("currentFile");
+  });
+
+  it("exports stored failure stacks after runtime state is lost on restart", async () => {
+    testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "aim-restart-test-"));
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+    const { recordAiFailure } = await import(
+      "@/services/ai-failure-diagnostics"
+    );
+    const error = new Error("DirectML session creation failed");
+    error.stack =
+      "Error: DirectML session creation failed\n at init (C:\\Users\\Alice\\app.asar\\.vite\\build\\main.js:42:8)";
+    recordAiFailure(error, {
+      stage: "embedding",
+      phase: "loading",
+      processed: 0,
+      total: 6019,
+      gpuRequested: true,
+      cpuFallbackAttempted: true,
+    });
+    vi.resetModules();
+    const { assembleDiagnosticEntries } = await import(
+      "@/services/diagnostics/bundle"
+    );
+    const result = await assembleDiagnosticEntries(incident, input);
+    expect(result.manifest.recentIncidents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "ai-error",
+          summary: "DirectML session creation failed",
+          stack: expect.stringContaining(".vite/build/main.js:42:8"),
+          context: expect.objectContaining({
+            total: 6019,
+            gpuRequested: true,
+            cpuFallbackAttempted: true,
+          }),
+        }),
+      ])
+    );
+    expect(result.manifest.probes).toMatchObject({ ai: { phase: "idle" } });
+    expect(JSON.stringify(result.manifest)).not.toContain("Alice");
+  });
+
+  it("retains worker and rotated error logs even when the main log fills the budget", async () => {
+    testDirectory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "aim-log-budget-test-")
+    );
+    vi.spyOn(app, "getPath").mockReturnValue(testDirectory);
+    const directory = path.join(testDirectory, "logs");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, "app.log"),
+      `${JSON.stringify({ message: "x".repeat(4000) })}\n`.repeat(600)
+    );
+    fs.writeFileSync(
+      path.join(directory, "ai-worker.log"),
+      "ORT worker initialization failed\n"
+    );
+    fs.writeFileSync(
+      path.join(directory, "app.1.log"),
+      JSON.stringify({ level: "error", message: "Previous session failure" })
+    );
+    const { assembleDiagnosticEntries } = await import(
+      "@/services/diagnostics/bundle"
+    );
+    const result = await assembleDiagnosticEntries(incident, {
+      ...input,
+      actualBehavior: os.hostname(),
+    });
+    expect(result.logs).toContain("ORT worker initialization failed");
+    expect(result.logs).toContain("Previous session failure");
+    expect(Buffer.byteLength(result.logs)).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(
+      result.warnings.some((warning) => warning.includes("truncated"))
+    ).toBe(true);
+    expect(result.report).toContain("<REDACTED>");
+    expect(result.manifest.incident).toMatchObject({
+      stack: expect.stringContaining("src/services/indexer.ts:42:8"),
+    });
+  });
 
   it("builds a compact issue without stack traces or private paths", async () => {
     const { buildGitHubIssue } = await import("@/services/diagnostics/bundle");
@@ -156,7 +288,10 @@ describe("diagnostic bundle metadata", () => {
     );
 
     const result = await assembleDiagnosticEntries(incident, input);
-    const records = result.logs.trim().split("\n").map(JSON.parse);
+    const records = result.logs
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
 
     expect(records).toHaveLength(2);
     expect(records[0]).toMatchObject({

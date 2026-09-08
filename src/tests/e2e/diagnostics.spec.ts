@@ -9,6 +9,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { open as openZip } from "yauzl";
 
 const SETTINGS_NAME = /^(设置|Settings)$/;
 const DIAGNOSTICS_NAME = /^(帮助与诊断|Help & Diagnostics)$/;
@@ -118,6 +119,25 @@ test("exports within the target time and hands off a prefilled issue", async () 
   ).toBeVisible();
 
   const fields = page.locator("textarea");
+  // Seed only this isolated test profile. Verify the exported content, not
+  // merely that a ZIP exists or that the handoff opened a browser.
+  const logDirectory = path.join(userDataDirectory, "logs");
+  fs.mkdirSync(logDirectory, { recursive: true });
+  fs.appendFileSync(
+    path.join(logDirectory, "app.log"),
+    `${JSON.stringify({
+      level: "error",
+      message: "E2E_MODEL_INIT_FAILED",
+      code: "ORT_INIT_FAILED",
+      stack:
+        "Error: E2E_MODEL_INIT_FAILED\n at initialize (C:\\Users\\PrivateTester\\app.asar\\.vite\\build\\main.js:42:8)",
+      password: 'private"credential',
+    })}\n`
+  );
+  fs.appendFileSync(
+    path.join(logDirectory, "ai-worker.log"),
+    "E2E_WORKER_CPU_FALLBACK_FAILED\n"
+  );
   await fields.nth(0).fill("Clicked AI indexing");
   await fields.nth(1).fill("The page became blank");
   const startedAt = Date.now();
@@ -135,6 +155,19 @@ test("exports within the target time and hands off a prefilled issue", async () 
   expect(path.dirname(handoff?.selectedPath ?? "")).toBe(downloadsDirectory);
   expect(fs.existsSync(handoff?.selectedPath ?? "")).toBe(true);
   selectedBundlePath = handoff?.selectedPath;
+  const entries = await readBundleEntries(selectedBundlePath ?? "");
+  const manifest = JSON.parse(entries["manifest.json"]);
+  expect(manifest.probes.ai.status).toBe("ok");
+  const exportedLogs = entries["logs/app.log"];
+  expect(exportedLogs).toContain("E2E_MODEL_INIT_FAILED");
+  expect(exportedLogs).toContain("ORT_INIT_FAILED");
+  expect(exportedLogs).toContain(".vite/build/main.js:42:8");
+  expect(exportedLogs).toContain("E2E_WORKER_CPU_FALLBACK_FAILED");
+  expect(exportedLogs).not.toContain("PrivateTester");
+  expect(exportedLogs).not.toContain("credential");
+  for (const line of exportedLogs.trim().split("\n")) {
+    expect(() => JSON.parse(line)).not.toThrow();
+  }
 
   if (performSystemHandoff && selectedBundlePath) {
     await expect
@@ -152,6 +185,37 @@ test("exports within the target time and hands off a prefilled issue", async () 
     "Drag the ZIP highlighted by the app here."
   );
 });
+
+function readBundleEntries(filename: string): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    openZip(filename, { lazyEntries: true }, (error, archive) => {
+      if (error || !archive) {
+        reject(error ?? new Error("Archive unavailable"));
+        return;
+      }
+      const entries: Record<string, string> = {};
+      archive.on("error", reject);
+      archive.on("end", () => resolve(entries));
+      archive.on("entry", (entry) => {
+        archive.openReadStream(entry, (streamError, stream) => {
+          if (streamError || !stream) {
+            archive.close();
+            reject(streamError ?? new Error("Entry unavailable"));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          stream.on("error", reject);
+          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          stream.on("end", () => {
+            entries[entry.fileName] = Buffer.concat(chunks).toString("utf8");
+            archive.readEntry();
+          });
+        });
+      });
+      archive.readEntry();
+    });
+  });
+}
 
 function getExplorerSelections(): string[] {
   const output = execFileSync(

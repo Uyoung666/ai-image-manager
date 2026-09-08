@@ -1,5 +1,6 @@
 export type DiagnosticIncidentSource =
   | "manual"
+  | "ai-error"
   | "renderer-error"
   | "renderer-crash"
   | "worker-crash"

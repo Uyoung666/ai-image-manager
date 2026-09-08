@@ -18,6 +18,7 @@ const INCIDENT_KEY_SEPARATOR = "\u0000";
 export interface StoredDiagnosticIncident {
   action?: string;
   componentStack?: string;
+  context?: DiagnosticFailureContext;
   dismissedAt?: string;
   fingerprint: string;
   id: string;
@@ -27,6 +28,18 @@ export interface StoredDiagnosticIncident {
   route?: string;
   source: DiagnosticIncidentSource;
   stack?: string;
+}
+
+export interface DiagnosticFailureContext {
+  adapterId?: string;
+  cpuFallbackAttempted: boolean;
+  gpuRequested: boolean | null;
+  modelId?: string;
+  modelRevision?: string;
+  phase: string;
+  processed: number;
+  stage: string;
+  total: number;
 }
 
 export function getDiagnosticsDir(): string {
@@ -67,6 +80,7 @@ export function createErrorFingerprint(
 }
 
 export function recordDiagnosticIncident(input: {
+  context?: DiagnosticFailureContext;
   action?: string;
   componentStack?: string;
   message: string;
@@ -91,6 +105,9 @@ export function recordDiagnosticIncident(input: {
       : undefined,
     route: input.route ? sanitizeRendererRoute(input.route) : undefined,
     nativeDumpPath: input.nativeDumpPath,
+    context: input.context
+      ? JSON.parse(sanitizer.sanitizeJson(input.context))
+      : undefined,
   };
 
   // A single persistent fault can be reported by several listeners (or by
@@ -102,10 +119,25 @@ export function recordDiagnosticIncident(input: {
     incident.fingerprint
   );
   if (existing) {
+    if (input.context) {
+      const updated = { ...incident, id: existing.id };
+      appendIncident(updated);
+      return updated;
+    }
     return existing;
   }
   appendIncident(incident);
   return incident;
+}
+
+/** Read-only export: do not discover dumps or compact storage while bundling. */
+export function getRecentIncidentDetails(): StoredDiagnosticIncident[] {
+  const cutoff = Date.now() - INCIDENT_RETENTION_MS;
+  return deduplicateIncidents(
+    readStoredIncidents().filter(
+      (item) => Date.parse(item.occurredAt) >= cutoff
+    )
+  ).slice(0, MAX_INCIDENTS);
 }
 
 export function appendIncident(incident: StoredDiagnosticIncident): void {
@@ -152,8 +184,7 @@ export function getDiagnosticsOverview(
 ): DiagnosticsOverview {
   const incidents = listStoredIncidents().filter(
     (incident) =>
-      !incident.dismissedAt &&
-      !isBenignRendererErrorMessage(incident.message)
+      !(incident.dismissedAt || isBenignRendererErrorMessage(incident.message))
   );
   const pendingIncidents = incidents.map(toIncidentSummary);
   return {

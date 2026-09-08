@@ -5,7 +5,7 @@ const MEDIA_FILE_PATTERN =
 const GENERIC_FILE_PATTERN =
   /\b[^\s<>:"/\\|?*]+\.(?:[a-z][a-z0-9._-]{0,11}|7z)\b/gi;
 const WINDOWS_PATH_PATTERN =
-  /[a-zA-Z]:\\(?:[^\r\n<>:"|?*]+\\)*[^\r\n<>:"|?*]*/g;
+  /\b[a-zA-Z]:[\\/](?:[^\r\n<>:"|?*]+[\\/])*[^\r\n<>:"|?*]*/g;
 const UNC_PATH_PATTERN = /\\\\[^\s\\]+\\[^\r\n<>:"|?*]+/g;
 const URL_PATTERN = /\b(?:https?|wss?|s3|webdav):\/\/[^\s"'<>]+/gi;
 const LOCAL_URL_PATTERN = /\b(?:file|local-media):\/\/[^\s"'<>]+/gi;
@@ -13,14 +13,19 @@ const SENSITIVE_VALUE_PATTERN =
   /\b(token|access[_-]?key|secret|password|passwd|cookie|authorization|api[_-]?key|proxy|prompt|query|search(?:ByText|Term|Text|Query)?|keyword|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)\b((?:\s+called)?["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}]+)/gi;
 const TRAILING_STACK_PATH_CHARS_PATTERN = /[\s)]+$/;
 const UNREDACTED_SECRET_PATTERN =
-  /\b(?:password|passwd|authorization|api[_-]?key|access[_-]?key|secret|token|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)["']?\s*[:=]\s*(?!["']?<redacted>)/i;
+  /\b(?:password|passwd|authorization|api[_-]?key|access[_-]?key|secret|token|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)["']?\s*[:=]\s*(?!\s|["']?<redacted>)/i;
 const DYNAMIC_ROUTE_SEGMENT_PATTERN = /^\/(albums|people|cull)\/[^/?#]+/i;
 const UUID_ROUTE_SEGMENT_PATTERN = /\/[0-9a-f]{8}-[0-9a-f-]{27,}(?=\/|$)/gi;
-const SOURCE_CONTEXT_PATTERN = /(?:^|[\s(])(?:src|scripts)\/[a-z0-9_./-]*$/i;
+const SOURCE_CONTEXT_PATTERN =
+  /(?:^|[\s(])(?:src|scripts|\.vite\/build)\/[a-z0-9_./-]*$/i;
 const ROUTE_SUFFIX_PATTERN = /[?#]/;
-const POTENTIAL_WINDOWS_PATH_PATTERN = /[a-zA-Z]:\\[^\r\n]+/;
+const POTENTIAL_WINDOWS_PATH_PATTERN = /\b[a-zA-Z]:[\\/][^\r\n]+/;
 const POTENTIAL_UNC_PATH_PATTERN = /\\\\[^\s\\]+\\[^\r\n]+/;
-const URL_SCAN_PATTERN = /\b(?:https?|wss?|s3|webdav):\/\/[^\s"'<>]+/gi;
+const URL_SCAN_PATTERN =
+  /\b(?:https?|wss?|s3|webdav):\/\/(?:<HOST_\d+>|[^\s"'<>])+/gi;
+const REDACTED_URL_PATTERN = /^(?:https?|wss?|s3|webdav):\/\/<HOST_\d+>$/i;
+const SENSITIVE_KEY_PATTERN =
+  /^(?:token|access[_-]?key|secret|password|passwd|cookie|authorization|api[_-]?key|proxy|prompt|query|search(?:ByText|Term|Text|Query)?|keyword|host(?:name)?|computer[_-]?name|machine[_-]?name|device[_-]?name|user(?:name)?|account[_-]?name)$/i;
 
 function replaceApplicationPath(value: string): string | null {
   const normalized = value.replaceAll("\\", "/");
@@ -32,7 +37,9 @@ function replaceApplicationPath(value: string): string | null {
   }
   const asarIndex = normalized.toLowerCase().lastIndexOf("/app.asar/");
   if (asarIndex >= 0) {
-    return normalized.slice(asarIndex + "/app.asar/".length);
+    return normalized
+      .slice(asarIndex + "/app.asar/".length)
+      .replace(TRAILING_STACK_PATH_CHARS_PATTERN, "");
   }
   return null;
 }
@@ -57,9 +64,16 @@ export class DiagnosticSanitizer {
       }
     );
 
-    sanitized = sanitized.replace(LOCAL_URL_PATTERN, (match) =>
-      this.tokenFor(match, "PATH")
-    );
+    sanitized = sanitized.replace(LOCAL_URL_PATTERN, (match) => {
+      try {
+        return (
+          replaceApplicationPath(decodeURIComponent(match)) ??
+          this.tokenFor(match, "PATH")
+        );
+      } catch {
+        return this.tokenFor(match, "PATH");
+      }
+    });
     sanitized = sanitized.replace(URL_PATTERN, (match) => {
       try {
         const parsed = new URL(match);
@@ -102,10 +116,35 @@ export class DiagnosticSanitizer {
 
   sanitizeJson(value: unknown): string {
     try {
-      return this.sanitize(JSON.stringify(value, null, 2));
+      return JSON.stringify(this.sanitizeValue(value), null, 2);
     } catch {
       return this.sanitize(String(value));
     }
+  }
+
+  // Work on decoded fields so escaped quotes and newlines in JSON cannot
+  // truncate a stack trace or leave half of a credential in the output.
+  sanitizeValue(value: unknown, forbiddenValues: string[] = []): unknown {
+    if (typeof value === "string") {
+      const sanitized = this.sanitize(value);
+      return containsPotentialSensitiveData(sanitized, forbiddenValues)
+        ? "<REDACTED>"
+        : sanitized;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeValue(item, forbiddenValues));
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          this.sanitizeValue(key, forbiddenValues),
+          SENSITIVE_KEY_PATTERN.test(key)
+            ? "<REDACTED>"
+            : this.sanitizeValue(item, forbiddenValues),
+        ])
+      );
+    }
+    return value;
   }
 
   private tokenFor(value: string, kind: "FILE" | "HOST" | "PATH"): string {
@@ -150,7 +189,7 @@ export function containsPotentialSensitiveData(
     return true;
   }
   for (const rawUrl of value.match(URL_SCAN_PATTERN) ?? []) {
-    if (rawUrl.includes("<HOST_")) {
+    if (REDACTED_URL_PATTERN.test(rawUrl)) {
       continue;
     }
     try {

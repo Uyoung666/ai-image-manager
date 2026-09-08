@@ -6,6 +6,38 @@ import {
 } from "@/services/diagnostics/sanitizer";
 
 describe("diagnostic sanitizer", () => {
+  it("sanitizes decoded JSON fields while preserving stack lines and error codes", () => {
+    const sanitizer = new DiagnosticSanitizer();
+    const result = JSON.parse(
+      sanitizer.sanitizeJson({
+        password: 'private"escaped-secret',
+        filename: "C:/Users/Alice/Pictures/private.jpg",
+        code: "ORT_INIT_FAILED",
+        stack:
+          "Error: failed\n at initialize (D:\\repo\\src\\services\\indexer.ts:42:8)\n at retry (D:\\repo\\src\\main.ts:12:4)",
+      })
+    );
+    expect(result.password).toBe("<REDACTED>");
+    expect(result.code).toBe("ORT_INIT_FAILED");
+    expect(result.stack).toContain("src/services/indexer.ts:42:8");
+    expect(result.stack).toContain("src/main.ts:12:4");
+    expect(JSON.stringify(result)).not.toContain("Alice");
+    expect(JSON.stringify(result)).not.toContain("escaped-secret");
+    expect(containsPotentialSensitiveData("C:/Users/Alice/private")).toBe(true);
+  });
+  it("accepts redacted URLs and spaced credentials without hiding real leaks", () => {
+    const sanitizer = new DiagnosticSanitizer();
+    const safe = sanitizer.sanitize(
+      'Download failed https://models.example/model; token = "secret"'
+    );
+    expect(containsPotentialSensitiveData(safe)).toBe(false);
+    expect(containsPotentialSensitiveData('token = "<REDACTED>"')).toBe(false);
+    expect(containsPotentialSensitiveData('token = "secret"')).toBe(true);
+    expect(containsPotentialSensitiveData("https://<HOST_1>/private")).toBe(
+      true
+    );
+  });
+
   it("redacts paths, media filenames, private hosts, queries and credentials", () => {
     const sanitizer = new DiagnosticSanitizer();
     const input = [
@@ -50,6 +82,11 @@ describe("diagnostic sanitizer", () => {
     const tokens = result.match(/<PATH_\d+>/g) ?? [];
     expect(tokens).toHaveLength(2);
     expect(tokens[0]).toBe(tokens[1]);
+    expect(
+      sanitizer.sanitize(
+        "at load (file:///C:/Users/Alice/app.asar/.vite/build/main.js:42:8)"
+      )
+    ).toContain(".vite/build/main.js:42:8");
   });
 
   it("redacts machine identity and keeps structured JSON valid", () => {

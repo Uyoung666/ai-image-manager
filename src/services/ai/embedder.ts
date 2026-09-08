@@ -5,6 +5,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { app } from "electron";
 import { getDatabase } from "@/db";
 import { photos } from "@/db/schema";
+import { recordAiFailure } from "@/services/ai-failure-diagnostics";
 import { captureWorkerOutput } from "@/services/diagnostics/worker-output";
 import {
   isEmbeddingProviderError,
@@ -370,6 +371,11 @@ export async function embedAllPhotos(
   const runId = beginEmbeddingRun();
   const shouldStopRun = () => !isRunWritable(runId) || poolCancelled;
   let didFinishCurrentRun = false;
+  let diagnosticStage = "database";
+  let diagnosticError: unknown;
+  let diagnosticProgress: EmbedProgress | undefined;
+  let gpuRequested: boolean | null = null;
+  let gpuFallbackAttempted = false;
   const finishRun = (nextState: "idle" | "paused") => {
     const finished = finishEmbeddingRun(runId, nextState);
     didFinishCurrentRun = didFinishCurrentRun || finished;
@@ -419,10 +425,12 @@ export async function embedAllPhotos(
     const db = getDatabase();
 
     // Check that the worker script exists before starting
+    diagnosticStage = "worker-script";
     try {
       const workerScript = findWorkerScript();
       console.log(`[AI] Embed worker found: ${workerScript}`);
     } catch (err: unknown) {
+      diagnosticError = err;
       setCurrentProgress({
         processed: 0,
         total: 0,
@@ -450,6 +458,7 @@ export async function embedAllPhotos(
     onProgress?.(currentProgress);
 
     // Ensure model path is resolved (worker needs the local model path)
+    diagnosticStage = "model-resolution";
     const modelPath = _localModelPath ?? (await ensureLocalModel());
     if (!_localModelPath) {
       setLocalModelPath(modelPath);
@@ -458,6 +467,7 @@ export async function embedAllPhotos(
       return await settleStoppedRun(0);
     }
 
+    diagnosticStage = "vector-database";
     await initVectorDB();
     if (shouldStopRun()) {
       return await settleStoppedRun(0);
@@ -720,8 +730,9 @@ export async function embedAllPhotos(
 
     // Use persistent worker pool
     let poolReady = false;
-    let gpuFallbackAttempted = false;
     const useGPU = getSetting("gpu.enabled") === "true";
+    gpuRequested = useGPU;
+    diagnosticStage = "embedding";
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Pool orchestration keeps initialization, progress, cancellation, persistence, and the single CPU fallback together.
     async function runPoolEmbedding(
       attemptUseGPU: boolean
@@ -884,6 +895,7 @@ export async function embedAllPhotos(
         return stoppedResult;
       }
     } catch (poolErr: unknown) {
+      diagnosticError = poolErr;
       if (
         isEmbeddingProviderError(poolErr) &&
         useGPU &&
@@ -907,6 +919,7 @@ export async function embedAllPhotos(
             return stoppedResult;
           }
         } catch (cpuErr: unknown) {
+          diagnosticError = cpuErr;
           console.error(
             `[AI] CPU retry after DirectML failure also failed: ${getErrorMessage(cpuErr)}`
           );
@@ -1053,6 +1066,7 @@ export async function embedAllPhotos(
           }
           return 0;
         } catch (err: unknown) {
+          diagnosticError = err;
           if (batch.length === 1) {
             console.warn(
               `[AI] Skipping photo ${batch[0].id} — worker crash: ${getErrorMessage(err)}`
@@ -1137,6 +1151,7 @@ export async function embedAllPhotos(
     const autoTagIds = drainPendingAutoTagPhotoIds();
     let tagError: string | undefined;
     if (finalProgress.phase !== "error" && autoTagIds.length > 0) {
+      diagnosticStage = "tagging";
       setCurrentProgress({
         processed: 0,
         total: autoTagIds.length,
@@ -1163,6 +1178,7 @@ export async function embedAllPhotos(
           `[AI] Auto-tag complete: ${r.tagged} tagged, ${r.skipped} skipped`
         );
       } catch (err: unknown) {
+        diagnosticError = err;
         tagError = getErrorMessage(err);
         console.error("[AI] Auto-tag failed:", tagError);
       }
@@ -1172,6 +1188,7 @@ export async function embedAllPhotos(
     // has been persisted. A partial, cancelled, or failed build must not make
     // a mixed vector table look complete.
     if (processed > 0 && processed === total && photoTable) {
+      diagnosticStage = "vector-index";
       const indexReady = await ensureVectorIndex(true);
       if (
         shouldPublishVectorFingerprint({
@@ -1210,6 +1227,8 @@ export async function embedAllPhotos(
       return await settleStoppedRun(0);
     }
     const message = getErrorMessage(err);
+    diagnosticError = err;
+    diagnosticProgress = currentProgress;
     setCurrentProgress({
       processed: 0,
       total: 0,
@@ -1222,6 +1241,22 @@ export async function embedAllPhotos(
     finishRun("idle");
     throw err;
   } finally {
+    if (
+      didFinishCurrentRun &&
+      (currentProgress.phase === "error" ||
+        currentProgress.phase === "tag-error")
+    ) {
+      const progress = diagnosticProgress ?? currentProgress;
+      recordAiFailure(diagnosticError ?? currentProgress.error, {
+        stage:
+          currentProgress.phase === "tag-error" ? "tagging" : diagnosticStage,
+        phase: progress.phase,
+        processed: progress.processed,
+        total: progress.total,
+        gpuRequested,
+        cpuFallbackAttempted: gpuFallbackAttempted,
+      });
+    }
     if (isCurrentEmbeddingRun(runId)) {
       setIsEmbedding(false);
     }
