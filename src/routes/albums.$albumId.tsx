@@ -328,6 +328,7 @@ function AlbumDetailPage() {
         queryKey: ["photos"],
         refetchType: "active",
       });
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
     } catch {
       toast.error(t("deleteFailed"));
@@ -360,6 +361,7 @@ function AlbumDetailPage() {
         queryKey: ["photos"],
         refetchType: "active",
       });
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       toast.success(t("toastDeletedCount", { count: ids.length }));
     } catch {
@@ -381,6 +383,7 @@ function AlbumDetailPage() {
         ? { ...prev, photos: prev.photos.filter((p) => !ids.includes(p.id)) }
         : prev
     );
+    queryClient.invalidateQueries({ queryKey: ["albums"] });
     clearSelection();
   }
 
@@ -395,6 +398,7 @@ function AlbumDetailPage() {
     setAlbum((prev) =>
       prev ? { ...prev, photos: prev.photos.filter((p) => p.id !== id) } : prev
     );
+    queryClient.invalidateQueries({ queryKey: ["albums"] });
     removeFromSelection([id]);
     toast.success(t("toastRemovedFromAlbum"));
   }
@@ -409,6 +413,7 @@ function AlbumDetailPage() {
         coverPhotoId: id,
       });
       setAlbum((prev) => (prev ? { ...prev, coverPhotoId: id } : prev));
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(t("setAsAlbumCover"));
     } catch {
       // ignore
@@ -420,6 +425,7 @@ function AlbumDetailPage() {
       return;
     }
     await ipc.client.albums.deleteAlbum({ id: album.id });
+    await queryClient.invalidateQueries({ queryKey: ["albums"] });
     navigate({ to: "/albums" as const });
   }
 
@@ -433,6 +439,7 @@ function AlbumDetailPage() {
         name: nameInput.trim(),
       });
       setAlbum((prev) => (prev ? { ...prev, name: nameInput.trim() } : prev));
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       setEditingName(false);
     } catch {
       toast.error(t("albumRenameFailed"));

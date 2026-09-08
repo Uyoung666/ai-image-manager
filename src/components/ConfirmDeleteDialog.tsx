@@ -10,7 +10,7 @@ interface ConfirmDeleteDialogProps {
 }
 
 /**
- * 删除照片确认对话框 — 软删除（移到回收站）。
+ * 删除照片确认对话框 — 软删除（移到应用内“最近删除”）。
  * 永久删除请使用直接调用 ConfirmDialog。
  */
 export function ConfirmDeleteDialog({

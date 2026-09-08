@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,7 +45,14 @@ describe("AlbumsPage", () => {
       .mockRejectedValueOnce(new Error("load failed"))
       .mockResolvedValueOnce([]);
 
-    render(<AlbumsPage />);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <AlbumsPage />
+      </QueryClientProvider>
+    );
 
     expect(await screen.findByText("加载失败，请重试")).toBeInTheDocument();
     expect(screen.queryByText("noAlbumsTitle")).not.toBeInTheDocument();
@@ -53,5 +61,37 @@ describe("AlbumsPage", () => {
 
     await waitFor(() => expect(mocks.listAlbums).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("noAlbumsTitle")).toBeInTheDocument();
+  });
+
+  it("renders cached albums immediately when revisiting within the stale window", async () => {
+    mocks.listAlbums.mockResolvedValue([
+      {
+        coverPhotoId: null,
+        createdAt: 1,
+        description: null,
+        id: 1,
+        isSmart: false,
+        name: "Cached album",
+      },
+    ]);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <AlbumsPage />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Cached album")).toBeInTheDocument();
+    view.unmount();
+    render(
+      <QueryClientProvider client={client}>
+        <AlbumsPage />
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText("Cached album")).toBeInTheDocument();
+    expect(mocks.listAlbums).toHaveBeenCalledTimes(1);
   });
 });

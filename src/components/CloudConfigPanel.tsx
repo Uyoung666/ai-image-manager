@@ -202,6 +202,9 @@ export function CloudConfigPanel() {
           {t("cloudAddConfig")}
         </button>
       </div>
+      <p className="text-[11px] text-muted-foreground/70 [overflow-wrap:anywhere]">
+        {t("cloudSyncScope")}
+      </p>
 
       <Dialog onOpenChange={setShowAdd} open={showAdd}>
         <DialogContent className="max-h-[calc(100dvh-1rem)]" size="lg">

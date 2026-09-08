@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const PHOTO_FIVE_NAME = /5\.jpg/;
 const PHOTO_TWO_NAME = /2\.jpg/;
+const ALL_FILTER_PATTERN = /duplicateFilterAll/;
 
 class ResizeObserverMock {
   disconnect() {
@@ -222,6 +223,37 @@ describe("DuplicatesPage", () => {
         ],
       });
     });
+  });
+
+  it("warns when global cleanup includes groups outside the active filter", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <DuplicatesPage />
+      </QueryClientProvider>
+    );
+
+    await screen.findByText("1.jpg");
+    const similarFilter = screen
+      .getAllByRole("button")
+      .find((button) => button.textContent?.includes("duplicateSimilarGroup"));
+    expect(similarFilter).toBeDefined();
+    fireEvent.click(similarFilter as HTMLElement);
+
+    expect(
+      screen.getByText("duplicateCleanupOutsideFilter")
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "duplicateViewAllPending" })
+    );
+    expect(
+      screen.getByRole("button", { name: ALL_FILTER_PATTERN })
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens the currently loaded photos in the large preview without selecting a keeper", async () => {

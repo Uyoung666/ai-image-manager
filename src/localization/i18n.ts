@@ -948,7 +948,7 @@ i18n.use(initReactI18next).init({
         watermarkSaved: "已保存",
         watermarkSaveError: "保存失败",
         watermarkLoadError: "水印设置读取失败。",
-        cloudSync: "云同步",
+        cloudSync: "云存储与上传",
         settingsAbout: "关于",
         settingsDiagnostics: "帮助与诊断",
         diagnosticsDescription:
@@ -1068,6 +1068,7 @@ i18n.use(initReactI18next).init({
 
         // Tags
         sidebarTags: "标签",
+        photoTagsLocalOnly: "标签保存在本应用图库中，不写入原照片。",
         tagSearchPlaceholder: "搜索标签...",
         tagBatchGenerate: "批量生成 AI 标签",
         tagWaitingForIndex: "AI 索引完成后将自动生成标签",
@@ -1107,7 +1108,7 @@ i18n.use(initReactI18next).init({
         toastAiIndexFailed: "AI 语义索引失败，可在设置中重试。",
         toastNoNewPhotos: "未发现新照片",
         toastDropFolderOnly: "请拖入文件夹（不支持单个文件）",
-        toastFolderRemoved: "已移除文件夹",
+        toastFolderRemoved: "已从索引移除文件夹，原文件未删除",
         toastDeleteFolderFailed: "删除文件夹失败",
         toastSearchFailed: "搜索失败",
         searchPartialFailed: "部分搜索失败，结果可能不完整",
@@ -1182,9 +1183,9 @@ i18n.use(initReactI18next).init({
         confirmDeleteTitle: "确认删除",
         confirmDeleteAction: "删除",
         confirmDeleteDescription:
-          "将{{target}}移到系统回收站，可从回收站恢复。",
+          "将{{target}}移入本应用的“最近删除”。原文件暂不移动，可在 30 天内从应用中恢复；这不是仅从当前相册移除。其他相册和标签关系不会被改写，照片在最近删除期间会从图库视图隐藏。",
         confirmDeleteSequenceGroupDescription:
-          "将整个序列中的 {{count}} 张照片移到系统回收站，可从回收站恢复。",
+          "将整个序列中的 {{count}} 张照片移入本应用的“最近删除”。原文件暂不移动，可在 30 天内从应用中恢复；这不是仅从当前相册移除。其他相册和标签关系不会被改写，照片在最近删除期间会从图库视图隐藏。",
         confirmDeleteTargetPhoto: "该照片",
         confirmDeleteTargetPhotos: " {{count}} 张照片",
 
@@ -1220,19 +1221,26 @@ i18n.use(initReactI18next).init({
 
         // Cloud
         cloudUploadTitle: "上传到云端",
-        cloudNoConfig: "暂无云同步配置",
+        cloudNoConfig: "暂无云存储与上传配置",
         cloudNoConfigHint: "请先在设置页面添加 WebDAV 或 S3 配置",
         cloudTargetStorage: "目标存储",
         cloudUploadDone: "完成 — 成功上传 {{count}} 张",
         cloudUploadDonePartial: "完成 — {{done}} 成功, {{fail}} 失败",
+        cloudUploadStopped:
+          "已停止 — {{done}} 成功，{{fail}} 失败，{{remaining}} 尚未开始",
         cloudUploadingProgress: "上传中... {{done}}/{{total}}",
-        cloudUploadingHint: "正在上传，请勿关闭窗口",
+        cloudUploadingHint:
+          "正在上传。可随时停止后续项目；当前项目完成后才会停止。",
+        cloudUploadStop: "完成当前项后停止",
+        cloudUploadResume: "继续上传",
+        cloudSyncScope:
+          "仅主动上传你选择的照片，不自动双向同步，也不会修改本地原图。",
         close: "关闭",
         windowMaximize: "最大化",
         windowMinimize: "最小化",
         windowRestore: "还原",
         cloudUploadAction: "上传 {{count}} 张",
-        cloudConfigTitle: "云同步配置",
+        cloudConfigTitle: "云存储与上传配置",
         cloudAddConfig: "添加配置",
         cloudAddConfigHint: "填写连接信息后保存，保存后可在列表中测试连通性。",
         cloudConfigNamePlaceholder: "配置名称",
@@ -1240,12 +1248,12 @@ i18n.use(initReactI18next).init({
         password: "密码",
         save: "保存",
         test: "测试",
-        cloudNoConfigShort: "暂无云同步配置",
-        cloudLoadFailed: "加载云同步配置失败",
-        cloudConfigSaved: "云同步配置已保存",
-        cloudConfigSaveFailed: "保存云同步配置失败",
-        cloudConfigDeleted: "云同步配置已删除",
-        cloudConfigDeleteFailed: "删除云同步配置失败",
+        cloudNoConfigShort: "暂无云存储与上传配置",
+        cloudLoadFailed: "加载云存储配置失败",
+        cloudConfigSaved: "云存储配置已保存",
+        cloudConfigSaveFailed: "保存云存储配置失败",
+        cloudConfigDeleted: "云存储配置已删除",
+        cloudConfigDeleteFailed: "删除云存储配置失败",
         cloudTesting: "测试中...",
         cloudConnectionSuccess: "连接成功 ({{latency}}ms)",
         cloudConnectionFailed: "连接失败: {{error}}",
@@ -1253,7 +1261,7 @@ i18n.use(initReactI18next).init({
         cloudTestException: "测试异常",
         cloudDeleteConfirmTitle: "删除云存储配置",
         cloudDeleteConfirmDesc:
-          "确定要删除云存储配置「{{name}}」吗？此操作不可撤销。",
+          "确定要删除云存储配置「{{name}}」吗？这只会移除本地连接配置，不会删除本地照片或已上传的云端文件。此操作不可撤销。",
 
         // AI progress
         aiInitFailed: "AI 初始化失败",
@@ -1501,7 +1509,7 @@ i18n.use(initReactI18next).init({
         select: "选择",
         click: "点击",
         rightClickDelete: "右键删除",
-        removeFromIndex: "从索引中移除",
+        removeFromIndex: "从索引移除（不删除原文件）",
         parentTag: "父标签: {{name}}",
         tagAddedToPhotos: "已为 {{count}} 张照片添加标签「{{name}}」",
         childTagCreated: "已创建子标签「{{name}}」（父标签: {{parent}}）",
@@ -1706,14 +1714,17 @@ i18n.use(initReactI18next).init({
         duplicateGroupStat: "重复组",
         duplicatePhotoStat: "涉及照片",
         duplicatePendingStat: "待清理",
-        duplicateReclaimStat: "预计释放",
-        duplicateSafetyHint: "每组至少保留一张，清理项进入 30 天回收站",
-        duplicateCleanupButton: "清理 {{count}} 张",
+        duplicateReclaimStat: "待清理大小",
+        duplicateSafetyHint:
+          "每组至少保留一张；清理项先进入应用内最近删除，30 天后移到系统回收站",
+        duplicateCleanupButton: "清理全部待处理 {{count}} 张",
+        duplicateCleanupOutsideFilter: "{{count}} 张不在当前筛选",
+        duplicateViewAllPending: "查看全部待处理",
         duplicateCleanupTitle: "确认清理重复照片",
         duplicateCleanupDescription:
-          "将从 {{groups}} 个重复组中把 {{count}} 张照片移入 30 天回收站，预计释放 {{size}}。每组指定的保留项不会被清理。",
-        duplicateConfirmCleanup: "移入回收站",
-        duplicateCleanupSuccess: "已将 {{count}} 张重复照片移入回收站",
+          "将从 {{groups}} 个重复组中把 {{count}} 张照片移入本应用的“最近删除”（完全相同 {{exactGroups}} 组 / {{exactCount}} 张，视觉相似 {{similarGroups}} 组 / {{similarCount}} 张），待清理大小 {{size}}。每组指定的保留项不会被清理；其他相册和标签关系不会被改写，照片在最近删除期间会从图库视图隐藏。原文件暂不移动，空间要到系统回收站清空后才会释放。",
+        duplicateConfirmCleanup: "移入最近删除",
+        duplicateCleanupSuccess: "已将 {{count}} 张重复照片移入最近删除",
         duplicateScanFailed: "重复照片扫描失败",
         duplicateDetailsLoadFailed: "重复照片详情加载失败",
         duplicateDetailsRetry: "重试加载",
@@ -1955,7 +1966,7 @@ i18n.use(initReactI18next).init({
         shareException: "生成分享页异常",
         sharePublishedCloud: "分享页面已发布到云端",
         shareLink: "分享链接",
-        noCloudConfig: "暂无云同步配置",
+        noCloudConfig: "暂无云存储与上传配置",
         shareNeedsCloud: "分享页面需要上传到云端才能生成链接。",
         shareAddCloudHint: "请先在设置页面添加 WebDAV 或 S3 配置。",
         uploadTo: "上传到",
@@ -3127,7 +3138,7 @@ i18n.use(initReactI18next).init({
         watermarkSaved: "Saved",
         watermarkSaveError: "Save failed",
         watermarkLoadError: "Watermark settings could not be loaded.",
-        cloudSync: "Cloud Sync",
+        cloudSync: "Cloud Storage & Upload",
         settingsAbout: "About",
         settingsDiagnostics: "Help & Diagnostics",
         diagnosticsDescription:
@@ -3258,6 +3269,8 @@ i18n.use(initReactI18next).init({
 
         // Tags
         sidebarTags: "Tags",
+        photoTagsLocalOnly:
+          "Tags are stored in this app’s library and are not written to the original photo.",
         tagSearchPlaceholder: "Search tags...",
         tagBatchGenerate: "Batch Generate AI Tags",
         tagWaitingForIndex: "Tags will be generated after AI indexing",
@@ -3306,7 +3319,8 @@ i18n.use(initReactI18next).init({
         toastNoNewPhotos: "No new photos found",
         toastDropFolderOnly:
           "Please drop a folder (single files are not supported)",
-        toastFolderRemoved: "Folder removed",
+        toastFolderRemoved:
+          "Folder removed from the index; original files were kept",
         toastDeleteFolderFailed: "Failed to delete folder",
         toastSearchFailed: "Search failed",
         searchPartialFailed: "Some search results may be incomplete",
@@ -3384,9 +3398,9 @@ i18n.use(initReactI18next).init({
         confirmDeleteTitle: "Confirm Delete",
         confirmDeleteAction: "Delete",
         confirmDeleteDescription:
-          "Move {{target}} to the system recycle bin. You can restore it there.",
+          "Move {{target}} to this app’s Recently Deleted. The original file is not moved yet; you can restore it in the app for 30 days. This removes it from the library, not just the current album. Other album and tag associations are kept, while the photo is hidden from library views during this period.",
         confirmDeleteSequenceGroupDescription:
-          "Move all {{count}} photos in this sequence to the system recycle bin. You can restore them there.",
+          "Move all {{count}} photos in this sequence to this app’s Recently Deleted. The original files are not moved yet; you can restore them in the app for 30 days. This removes them from the library, not just the current album. Other album and tag associations are kept, while the photos are hidden from library views during this period.",
         confirmDeleteTargetPhoto: "this photo",
         confirmDeleteTargetPhotos: " {{count}} photos",
 
@@ -3422,19 +3436,26 @@ i18n.use(initReactI18next).init({
 
         // Cloud
         cloudUploadTitle: "Upload to Cloud",
-        cloudNoConfig: "No cloud sync configuration",
+        cloudNoConfig: "No cloud storage configuration",
         cloudNoConfigHint: "Add a WebDAV or S3 configuration in Settings first",
         cloudTargetStorage: "Target Storage",
         cloudUploadDone: "Done — {{count}} uploaded",
         cloudUploadDonePartial: "Done — {{done}} succeeded, {{fail}} failed",
+        cloudUploadStopped:
+          "Stopped — {{done}} succeeded, {{fail}} failed, {{remaining}} not started",
         cloudUploadingProgress: "Uploading... {{done}}/{{total}}",
-        cloudUploadingHint: "Uploading. Do not close this window.",
+        cloudUploadingHint:
+          "Uploading. You can stop the remaining items; the current item will finish first.",
+        cloudUploadStop: "Stop after current item",
+        cloudUploadResume: "Continue upload",
+        cloudSyncScope:
+          "Uploads only the photos you choose. There is no automatic two-way sync, and local originals are not modified.",
         close: "Close",
         windowMaximize: "Maximize",
         windowMinimize: "Minimize",
         windowRestore: "Restore",
         cloudUploadAction: "Upload {{count}} photos",
-        cloudConfigTitle: "Cloud Sync Configuration",
+        cloudConfigTitle: "Cloud Storage & Upload Configuration",
         cloudAddConfig: "Add Configuration",
         cloudAddConfigHint:
           "Fill in the connection details, then save. You can test it from the list after saving.",
@@ -3443,12 +3464,12 @@ i18n.use(initReactI18next).init({
         password: "Password",
         save: "Save",
         test: "Test",
-        cloudNoConfigShort: "No cloud sync configuration",
-        cloudLoadFailed: "Failed to load cloud sync configurations",
-        cloudConfigSaved: "Cloud sync configuration saved",
-        cloudConfigSaveFailed: "Failed to save cloud sync configuration",
-        cloudConfigDeleted: "Cloud sync configuration deleted",
-        cloudConfigDeleteFailed: "Failed to delete cloud sync configuration",
+        cloudNoConfigShort: "No cloud storage configuration",
+        cloudLoadFailed: "Failed to load cloud storage configurations",
+        cloudConfigSaved: "Cloud storage configuration saved",
+        cloudConfigSaveFailed: "Failed to save cloud storage configuration",
+        cloudConfigDeleted: "Cloud storage configuration deleted",
+        cloudConfigDeleteFailed: "Failed to delete cloud storage configuration",
         cloudTesting: "Testing...",
         cloudConnectionSuccess: "Connected ({{latency}}ms)",
         cloudConnectionFailed: "Connection failed: {{error}}",
@@ -3456,7 +3477,7 @@ i18n.use(initReactI18next).init({
         cloudTestException: "Test failed",
         cloudDeleteConfirmTitle: "Delete Cloud Configuration",
         cloudDeleteConfirmDesc:
-          'Delete cloud configuration "{{name}}"? This cannot be undone.',
+          'Delete cloud configuration "{{name}}"? This only removes the local connection settings; local photos and already uploaded cloud files are kept. This cannot be undone.',
 
         // AI progress
         aiInitFailed: "AI initialization failed",
@@ -3722,7 +3743,7 @@ i18n.use(initReactI18next).init({
         select: "Select",
         click: "Click",
         rightClickDelete: "Right-click to delete",
-        removeFromIndex: "Remove from Index",
+        removeFromIndex: "Remove from index (keep files)",
         parentTag: "Parent tag: {{name}}",
         tagAddedToPhotos: 'Added tag "{{name}}" to {{count}} photos',
         childTagCreated: 'Created child tag "{{name}}" (parent: {{parent}})',
@@ -3933,16 +3954,18 @@ i18n.use(initReactI18next).init({
         duplicateGroupStat: "Groups",
         duplicatePhotoStat: "Photos involved",
         duplicatePendingStat: "Pending cleanup",
-        duplicateReclaimStat: "Estimated reclaim",
+        duplicateReclaimStat: "Pending file size",
         duplicateSafetyHint:
-          "At least one photo is kept per group; cleanup uses the 30-day trash",
-        duplicateCleanupButton: "Clean {{count}} photos",
+          "At least one photo is kept per group; cleanup first uses this app’s Recently Deleted, then the system recycle bin after 30 days",
+        duplicateCleanupButton: "Clean all {{count}} pending photos",
+        duplicateCleanupOutsideFilter: "{{count}} outside current filter",
+        duplicateViewAllPending: "View all pending",
         duplicateCleanupTitle: "Clean duplicate photos?",
         duplicateCleanupDescription:
-          "Move {{count}} photos from {{groups}} groups to the 30-day trash and reclaim about {{size}}. Each selected keeper will remain.",
-        duplicateConfirmCleanup: "Move to Trash",
+          "Move {{count}} photos from {{groups}} duplicate groups to this app’s Recently Deleted ({{exactGroups}} exact groups / {{exactCount}} photos, {{similarGroups}} visually similar groups / {{similarCount}} photos). Pending file size: {{size}}. Keepers are never cleaned; other album and tag associations are kept while the photos are hidden from library views. Originals move to the system recycle bin after 30 days, and disk space is released when it is emptied.",
+        duplicateConfirmCleanup: "Move to Recently Deleted",
         duplicateCleanupSuccess:
-          "Moved {{count}} duplicate photos to the trash",
+          "Moved {{count}} duplicate photos to Recently Deleted",
         duplicateScanFailed: "Duplicate scan failed",
         duplicateDetailsLoadFailed: "Failed to load duplicate photo details",
         duplicateDetailsRetry: "Retry loading",
@@ -4195,7 +4218,7 @@ i18n.use(initReactI18next).init({
         shareException: "Share page generation failed",
         sharePublishedCloud: "Share page published to cloud",
         shareLink: "Share link",
-        noCloudConfig: "No cloud sync configurations",
+        noCloudConfig: "No cloud storage configurations",
         shareNeedsCloud:
           "Share pages must be uploaded to cloud storage before a link can be generated.",
         shareAddCloudHint:

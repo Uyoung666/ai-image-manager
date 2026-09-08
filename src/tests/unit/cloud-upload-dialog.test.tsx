@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const PRIMARY_CONFIG_PATTERN = /Primary/;
 const ARCHIVE_CONFIG_PATTERN = /Archive/;
+const PRIMARY_BUTTON_PATTERN = /Primary/;
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
@@ -123,5 +124,37 @@ describe("CloudUploadDialog", () => {
 
     expect(primary).toHaveAttribute("aria-pressed", "false");
     expect(archive).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("stops after the current upload and resumes without repeating successes", async () => {
+    const firstUpload = deferred<{ success: boolean }>();
+    mocks.listCloudConfigs.mockResolvedValue([
+      { id: 1, name: "Primary", provider: "webdav" },
+    ]);
+    mocks.uploadPhotoToCloud
+      .mockReturnValueOnce(firstUpload.promise)
+      .mockResolvedValue({ success: true });
+
+    render(<CloudUploadDialog onClose={vi.fn()} open photoIds={[1, 2, 3]} />);
+
+    await screen.findByRole("button", { name: PRIMARY_BUTTON_PATTERN });
+    fireEvent.click(screen.getByRole("button", { name: "cloudUploadAction" }));
+    await waitFor(() =>
+      expect(mocks.uploadPhotoToCloud).toHaveBeenCalledTimes(1)
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "cloudUploadStop" }));
+    firstUpload.resolve({ success: true });
+
+    expect(await screen.findByText("cloudUploadStopped")).toBeInTheDocument();
+    expect(mocks.uploadPhotoToCloud).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "cloudUploadResume" }));
+    await waitFor(() =>
+      expect(mocks.uploadPhotoToCloud).toHaveBeenCalledTimes(3)
+    );
+    expect(
+      mocks.uploadPhotoToCloud.mock.calls.map(([input]) => input.photoId)
+    ).toEqual([1, 2, 3]);
   });
 });

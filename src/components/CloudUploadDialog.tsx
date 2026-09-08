@@ -59,7 +59,10 @@ export function CloudUploadDialog({
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [stopRequested, setStopRequested] = useState(false);
   const abortRef = useRef(false);
+  const statusRef = useRef<Map<number, "success" | "failed">>(new Map());
   const configRequestRef = useRef(0);
   const configLoadInFlightRef = useRef(false);
 
@@ -104,12 +107,18 @@ export function CloudUploadDialog({
       setProgress(null);
       setUploading(false);
       setDone(false);
+      setStopped(false);
+      setStopRequested(false);
       abortRef.current = false;
+      statusRef.current.clear();
       loadConfigs();
     } else {
       configRequestRef.current += 1;
       configLoadInFlightRef.current = false;
     }
+    return () => {
+      abortRef.current = true;
+    };
   }, [open, loadConfigs]);
 
   const handleOpenCloudSettings = useCallback(() => {
@@ -117,37 +126,72 @@ export function CloudUploadDialog({
     navigate({ to: "/settings/cloud-sync" });
   }, [navigate, onClose]);
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: upload queue state and resumable progress are intentionally localized to this dialog
   async function handleUpload() {
     if (!selectedId || uploading) {
       return;
     }
+    abortRef.current = false;
+    setStopRequested(false);
+    setStopped(false);
+    setDone(false);
     setUploading(true);
-    setProgress({ done: 0, fail: 0, total: photoIds.length });
+    const updateProgress = () => {
+      let doneCount = 0;
+      let failCount = 0;
+      for (const photoId of photoIds) {
+        const status = statusRef.current.get(photoId);
+        if (status === "success") {
+          doneCount += 1;
+        } else if (status === "failed") {
+          failCount += 1;
+        }
+      }
+      setProgress({ done: doneCount, fail: failCount, total: photoIds.length });
+    };
+    if (!progress) {
+      setProgress({ done: 0, fail: 0, total: photoIds.length });
+    }
 
     for (const photoId of photoIds) {
       if (abortRef.current) {
         break;
       }
+      if (statusRef.current.get(photoId) === "success") {
+        continue;
+      }
+      // A failed item is retried when the user resumes the stopped queue.
+      statusRef.current.delete(photoId);
+      updateProgress();
       try {
         const res = (await ipc.client.cloud.uploadPhotoToCloud({
           cloudConfigId: selectedId,
           photoId,
         })) as { success: boolean; error?: string };
-        setProgress((p) => {
-          if (!p) {
-            return p;
-          }
-          return res.success
-            ? { ...p, done: p.done + 1 }
-            : { ...p, fail: p.fail + 1 };
-        });
+        statusRef.current.set(photoId, res.success ? "success" : "failed");
+        updateProgress();
       } catch {
-        setProgress((p) => (p ? { ...p, fail: p.fail + 1 } : p));
+        statusRef.current.set(photoId, "failed");
+        updateProgress();
       }
     }
 
     setUploading(false);
-    setDone(true);
+    setStopRequested(false);
+    const hasRemaining = photoIds.some(
+      (photoId) => statusRef.current.get(photoId) !== "success"
+    );
+    if (abortRef.current && hasRemaining) {
+      setStopped(true);
+    } else {
+      setStopped(false);
+      setDone(true);
+    }
+  }
+
+  function requestStop() {
+    abortRef.current = true;
+    setStopRequested(true);
   }
 
   const pct = progress
@@ -156,19 +200,30 @@ export function CloudUploadDialog({
   let progressBarClass = "bg-primary";
   let progressLabel = "";
   if (progress) {
-    if (done && progress.fail === 0) {
-      progressBarClass = "bg-success";
-    } else if (progress.fail > 0) {
+    const remaining = Math.max(
+      0,
+      progress.total - progress.done - progress.fail
+    );
+    if (stopped) {
       progressBarClass = "bg-warning";
-    }
-    if (done && progress.fail === 0) {
+      progressLabel = t("cloudUploadStopped", {
+        done: progress.done,
+        fail: progress.fail,
+        remaining,
+      });
+    } else if (done && progress.fail === 0) {
+      progressBarClass = "bg-success";
       progressLabel = t("cloudUploadDone", { count: progress.done });
     } else if (done) {
+      progressBarClass = "bg-warning";
       progressLabel = t("cloudUploadDonePartial", {
         done: progress.done,
         fail: progress.fail,
       });
     } else {
+      if (progress.fail > 0) {
+        progressBarClass = "bg-warning";
+      }
       progressLabel = t("cloudUploadingProgress", {
         done: progress.done + progress.fail,
         total: progress.total,
@@ -303,6 +358,9 @@ export function CloudUploadDialog({
       >
         <DialogHeader>
           <DialogTitle>{t("cloudUploadTitle")}</DialogTitle>
+          <p className="text-[11px] text-muted-foreground/70 [overflow-wrap:anywhere]">
+            {t("cloudSyncScope")}
+          </p>
           <DialogDescription className="sr-only">
             {t("cloudUploadAction", { count: photoIds.length })}
           </DialogDescription>
@@ -319,6 +377,16 @@ export function CloudUploadDialog({
           >
             {done && progress ? t("close") : t("cancel")}
           </button>
+          {uploading && (
+            <button
+              className="max-w-full rounded-md border border-warning/40 px-4 py-1.5 font-medium text-[13px] text-warning transition-colors [overflow-wrap:anywhere] hover:bg-warning/10 disabled:opacity-40"
+              disabled={stopRequested}
+              onClick={requestStop}
+              type="button"
+            >
+              {t("cloudUploadStop")}
+            </button>
+          )}
           {configLoadState === "loaded" && configs.length > 0 && !done && (
             <button
               className="flex max-w-full items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 font-medium text-[13px] text-primary-foreground transition-opacity [overflow-wrap:anywhere] hover:opacity-90 disabled:opacity-40"
@@ -327,7 +395,9 @@ export function CloudUploadDialog({
               type="button"
             >
               <CloudUpload className="h-4 w-4" />
-              {t("cloudUploadAction", { count: photoIds.length })}
+              {stopped
+                ? t("cloudUploadResume")
+                : t("cloudUploadAction", { count: photoIds.length })}
             </button>
           )}
         </DialogFooter>

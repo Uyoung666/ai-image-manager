@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   Link,
@@ -12,7 +13,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { RouteError } from "@/components/RouteError";
@@ -154,9 +155,16 @@ function AlbumsContent({
       <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4 sm:gap-5">
         {ALBUM_SKELETON_KEYS.map((key) => (
           <div
-            className="aspect-[16/12] animate-pulse rounded-[10px] bg-card"
+            className="overflow-hidden rounded-[10px] border border-border bg-card"
             key={key}
-          />
+          >
+            <div className="aspect-[16/10] animate-pulse bg-muted" />
+            <div className="space-y-2 p-4">
+              <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-1/3 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
         ))}
       </div>
     );
@@ -242,10 +250,28 @@ function AlbumsContent({
 
 export function AlbumsPage() {
   const { t } = useTranslation();
-  const [albums, setAlbums] = useState<AlbumInfo[]>([]);
-  const [covers, setCovers] = useState<Map<number, string>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const {
+    data: albums = [],
+    isError,
+    isLoading: loading,
+    refetch: refreshAlbums,
+  } = useQuery<AlbumInfo[]>({
+    queryKey: ["albums"],
+    queryFn: async () =>
+      (await ipc.client.albums.listAlbums({})) as AlbumInfo[],
+    retry: false,
+    staleTime: 30_000,
+  });
+  const loadError = isError && albums.length === 0;
+  const covers = useMemo(() => {
+    const coverMap = new Map<number, string>();
+    for (const album of albums) {
+      if (album.coverPhotoId && album.coverThumbnailPath) {
+        coverMap.set(album.coverPhotoId, album.coverThumbnailPath);
+      }
+    }
+    return coverMap;
+  }, [albums]);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -254,33 +280,6 @@ export function AlbumsPage() {
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   useRouteScrollRestoration(scrollRef, { getRouteKey: () => "albums-list" });
-
-  const loadAlbums = useCallback(async () => {
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const result = await ipc.client.albums.listAlbums({});
-      const list = result as AlbumInfo[];
-      setAlbums(list);
-
-      const coverMap = new Map<number, string>();
-      for (const album of list) {
-        if (album.coverPhotoId && album.coverThumbnailPath) {
-          coverMap.set(album.coverPhotoId, album.coverThumbnailPath);
-        }
-      }
-      setCovers(coverMap);
-    } catch (err) {
-      console.error("[loadAlbums] failed:", err);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadAlbums();
-  }, [loadAlbums]);
 
   async function handleCreate() {
     const name = newName.trim();
@@ -296,7 +295,7 @@ export function AlbumsPage() {
       setNewName("");
       setNewDesc("");
       setShowCreate(false);
-      loadAlbums();
+      await refreshAlbums();
     } catch {
       toast.error(t("albumCreateFailed"));
     }
@@ -406,13 +405,13 @@ export function AlbumsPage() {
           error={loadError}
           loading={loading}
           onCreate={() => setShowCreate(true)}
-          onRetry={loadAlbums}
+          onRetry={() => refreshAlbums()}
         />
       </div>
 
       <SmartAlbumDialog
         onClose={() => setShowSmartDialog(false)}
-        onCreated={loadAlbums}
+        onCreated={() => refreshAlbums()}
         open={showSmartDialog}
       />
     </div>

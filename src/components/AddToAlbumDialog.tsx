@@ -23,6 +23,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ipc } from "@/ipc/manager";
+import { queryClient } from "@/providers/QueryProvider";
 
 interface AlbumInfo {
   description: string | null;
@@ -114,6 +115,7 @@ export function AddToAlbumDialog({
     setAdding((prev) => new Set(prev).add(albumId));
     try {
       await ipc.client.albums.addPhotosToAlbum({ albumId, photoIds });
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(
         t("toastAddToAlbumSuccess", {
           count: photoIds.length,
@@ -153,6 +155,7 @@ export function AddToAlbumDialog({
         await loadAlbums();
         return;
       }
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(
         t("toastAddToAlbumSuccess", {
           count: photoIds.length,

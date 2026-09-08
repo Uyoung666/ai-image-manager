@@ -174,7 +174,7 @@ vi.mock("react-i18next", () => ({
           "AI 语义搜索暂不可用，当前仅显示文件名、标签和人名匹配。",
         toastScanFolderFailed: "扫描文件夹失败，请重试",
         loadFailedRetry: "加载失败，请重试",
-        toastFolderRemoved: "已移除文件夹",
+        toastFolderRemoved: "已从索引移除文件夹，原文件未删除",
         toastDeleteFolderFailed: "删除文件夹失败",
         toastSearchFailed: "搜索失败",
         toastDeletedCount: "已删除 {{count}} 张照片",
@@ -216,7 +216,7 @@ vi.mock("react-i18next", () => ({
         confirmDeleteTitle: "确认删除",
         confirmDeleteAction: "删除",
         confirmDeleteDescription:
-          "将{{target}}移到系统回收站，可从回收站恢复。",
+          "将{{target}}移入本应用的“最近删除”。原文件暂不移动，可在 30 天内从应用中恢复；这不是仅从当前相册移除。其他相册和标签关系不会被改写，照片在最近删除期间会从图库视图隐藏。",
         confirmDeleteTargetPhoto: "该照片",
         confirmDeleteTargetPhotos: " {{count}} 张照片",
         done: "完成",

@@ -892,6 +892,9 @@ export function PhotoDetailPanel({
                 + {t("addTag")}
               </button>
             </div>
+            <p className="mt-2 text-[10px] text-muted-foreground/60 [overflow-wrap:anywhere]">
+              {t("photoTagsLocalOnly")}
+            </p>
 
             {/* Tag suggestions / create new */}
             {showTagInput && (

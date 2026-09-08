@@ -2438,6 +2438,7 @@ function HomePage() {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["albums"] });
       toast.success(t("toastDeletedCount", { count }));
     } catch {
       toast.error(t("toastDeleteFailed"));

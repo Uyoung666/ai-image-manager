@@ -759,6 +759,21 @@ export function DuplicatesPage() {
     (sum, group) => sum + group.photoCount - 1,
     0
   );
+  const cleanupExactCount = cleanupGroups
+    .filter((group) => group.matchType === "exact")
+    .reduce((sum, group) => sum + group.photoCount - 1, 0);
+  const cleanupExactGroups = cleanupGroups.filter(
+    (group) => group.matchType === "exact"
+  ).length;
+  const cleanupSimilarCount = cleanupGroups
+    .filter((group) => group.matchType === "similar")
+    .reduce((sum, group) => sum + group.photoCount - 1, 0);
+  const cleanupSimilarGroups = cleanupGroups.filter(
+    (group) => group.matchType === "similar"
+  ).length;
+  const cleanupOutsideFilterCount = cleanupGroups
+    .filter((group) => filter !== "all" && group.matchType !== filter)
+    .reduce((sum, group) => sum + group.photoCount - 1, 0);
   const reclaimBytes = cleanupGroups.reduce(
     (sum, group) =>
       sum +
@@ -914,6 +929,22 @@ export function DuplicatesPage() {
               <Trash2 className="h-3.5 w-3.5" />
               {t("duplicateCleanupButton", { count: cleanupCount })}
             </button>
+            {cleanupOutsideFilterCount > 0 ? (
+              <div className="flex max-w-[14rem] flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right text-[10px] text-muted-foreground">
+                <span className="[overflow-wrap:anywhere]">
+                  {t("duplicateCleanupOutsideFilter", {
+                    count: cleanupOutsideFilterCount,
+                  })}
+                </span>
+                <button
+                  className="text-primary underline-offset-2 hover:underline"
+                  onClick={() => setFilter("all")}
+                  type="button"
+                >
+                  {t("duplicateViewAllPending")}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
@@ -1101,6 +1132,10 @@ export function DuplicatesPage() {
         description={t("duplicateCleanupDescription", {
           groups: cleanupGroups.length,
           count: cleanupCount,
+          exactCount: cleanupExactCount,
+          exactGroups: cleanupExactGroups,
+          similarCount: cleanupSimilarCount,
+          similarGroups: cleanupSimilarGroups,
           size: formatFileSize(reclaimBytes),
         })}
         destructive

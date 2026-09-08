@@ -131,7 +131,7 @@ export const listAlbums = os.input(ListAlbumsSchema).handler(({ input }) => {
         path: photos.path,
       })
       .from(photos)
-      .where(inArray(photos.id, coverIds))
+      .where(and(inArray(photos.id, coverIds), isNull(photos.deletedAt)))
       .all();
     for (const row of coverRows) {
       coverThumbnailMap.set(row.id, row.thumbnailPath || row.path);
@@ -214,7 +214,7 @@ export const getAlbum = os.input(IdSchema).handler(({ input }) => {
     })
     .from(albumPhotos)
     .innerJoin(photos, eq(albumPhotos.photoId, photos.id))
-    .where(eq(albumPhotos.albumId, input.id))
+    .where(and(eq(albumPhotos.albumId, input.id), isNull(photos.deletedAt)))
     .orderBy(asc(albumPhotos.sortOrder), desc(photos.fileDate))
     .all();
 
