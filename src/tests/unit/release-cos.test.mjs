@@ -27,6 +27,7 @@ import {
 } from "../../../scripts/release/semver.mjs";
 import {
   filterReleaseManifest,
+  formatGitHubReleases,
   formatReleases,
   parseReleases,
   selectProductionReleases,
@@ -516,6 +517,33 @@ describe("checksums and Squirrel manifests", () => {
     expect(() =>
       parseReleases(`${sha1(full)} App-2.1.0.nupkg ${full.length}\n`)
     ).toThrow(/full|delta/i);
+  });
+
+  it("creates a one-line GitHub compatibility feed with the current full package first", () => {
+    const oldFull = {
+      hash: "a".repeat(40),
+      filename: "App-2.0.0-full.nupkg",
+      size: 10,
+      isFull: true,
+    };
+    const currentFull = {
+      hash: "b".repeat(40),
+      filename: "App-2.1.0-full.nupkg",
+      size: 20,
+      isFull: true,
+    };
+    const delta = {
+      hash: "c".repeat(40),
+      filename: "App-2.1.0-delta.nupkg",
+      size: 5,
+      isDelta: true,
+    };
+    expect(formatGitHubReleases([oldFull, delta, currentFull], "2.1.0")).toBe(
+      formatReleases([currentFull])
+    );
+    expect(() => formatGitHubReleases([oldFull], "2.1.0")).toThrow(
+      /exactly one current full/
+    );
   });
 
   it("checksums in-memory records for unit callers", async () => {

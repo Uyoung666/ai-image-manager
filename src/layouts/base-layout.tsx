@@ -20,10 +20,7 @@ import { PerfOverlay, usePerfMonitor } from "@/components/PerfMonitor";
 import { Sidebar } from "@/components/Sidebar";
 import { SpotlightSearch } from "@/components/SpotlightSearch";
 import { BrowseSessionProvider } from "@/contexts/BrowseSessionContext";
-import {
-  ImportDropProvider,
-  useImportDropContext,
-} from "@/contexts/import-drop-context";
+import { useImportDropContext } from "@/contexts/import-drop-context";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { GlobalAiStatusProvider } from "@/hooks/use-global-ai-status";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -142,11 +139,7 @@ function SidebarSlot() {
 }
 
 export default function BaseLayout({ children }: { children: ReactNode }) {
-  return (
-    <ImportDropProvider>
-      <BaseLayoutContent>{children}</BaseLayoutContent>
-    </ImportDropProvider>
-  );
+  return <BaseLayoutContent>{children}</BaseLayoutContent>;
 }
 
 function BaseLayoutContent({ children }: { children: ReactNode }) {

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useImportDropContext } from "@/contexts/import-drop-context";
 import { useSidebarFilter } from "@/contexts/SidebarFilterContext";
 import { RootSurface } from "@/routes/__root";
 
@@ -23,6 +24,15 @@ function SidebarFilterProbe() {
   );
 }
 
+function ImportDropProbe() {
+  const { registerImageSearch } = useImportDropContext();
+  return (
+    <output data-testid="import-drop-ready">
+      {typeof registerImageSearch === "function" ? "ready" : "missing"}
+    </output>
+  );
+}
+
 describe("RootSurface", () => {
   it("keeps SidebarFilterProvider around the standalone update screen", () => {
     render(
@@ -32,5 +42,15 @@ describe("RootSurface", () => {
     );
 
     expect(screen.getByTestId("sidebar-filter-ready")).toBeInTheDocument();
+  });
+
+  it("provides ImportDropProvider to the standalone update screen", () => {
+    render(
+      <RootSurface pathname="/whats-new">
+        <ImportDropProbe />
+      </RootSurface>
+    );
+
+    expect(screen.getByTestId("import-drop-ready")).toHaveTextContent("ready");
   });
 });

@@ -4,15 +4,11 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import {
   checkForUpdates,
-  getUpdateProxy,
   getUpdateStatus,
   installDownloadedUpdate,
   openReleasePage,
-  setUpdateProxy,
-  testUpdateProxy,
 } from "@/actions/update";
 import { SettingRow } from "@/components/settings/setting-row";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -40,10 +36,6 @@ interface UpdateStatusPayload {
   version?: string;
 }
 
-interface UpdateProxyPayload {
-  proxy?: string;
-}
-
 function mapUpdateErrorMessage(
   message: string | undefined,
   translate: (key: string) => string
@@ -59,6 +51,12 @@ function mapUpdateErrorMessage(
   }
   if (message === "UPDATE_NOT_FOUND") {
     return translate("updateErrorNotFound");
+  }
+  if (message === "UPDATE_PACKAGE_CORRUPT") {
+    return translate("updateErrorPackageCorrupt");
+  }
+  if (message === "UPDATE_BUSY") {
+    return translate("updateErrorBusy");
   }
   if (message === "UPDATE_INSTALLER_UNSUPPORTED") {
     return translate("updateDownloadManually");
@@ -77,19 +75,6 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   const [releaseNotes, setReleaseNotes] = useState("");
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [updateReminder, setUpdateReminder] = useState(true);
-  const [proxy, setProxy] = useState("");
-  const [proxySaved, setProxySaved] = useState(false);
-  const [proxyTesting, setProxyTesting] = useState(false);
-  const [proxyResult, setProxyResult] = useState<
-    | {
-        ok: boolean;
-        latency?: number;
-        error?: string;
-        bytes?: number;
-        bytesPerSecond?: number;
-      }
-    | undefined
-  >();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const downloadStartRef = useRef<number>(0);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -116,13 +101,6 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
       }
       if (status.message && status.message !== "DEV_MODE") {
         setErrorMsg(mapUpdateErrorMessage(status.message, t));
-      }
-    });
-    // Restore saved proxy
-    getUpdateProxy().then((r) => {
-      const proxyResult = r as UpdateProxyPayload;
-      if (proxyResult.proxy) {
-        setProxy(proxyResult.proxy);
       }
     });
     ipc.client.settings
@@ -253,50 +231,18 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   }
 
   async function handleRestart() {
-    await installDownloadedUpdate();
-  }
-
-  async function handleSaveProxy() {
     try {
-      await setUpdateProxy(proxy);
-      setProxySaved(true);
-      setProxyResult(undefined);
-      toast.success(t("updateSaved"));
-      setTimeout(() => setProxySaved(false), 2000);
-    } catch {
-      toast.error(t("saveFailed"));
-    }
-  }
-
-  async function handleTestProxy() {
-    setProxyTesting(true);
-    setProxyResult(undefined);
-    try {
-      const r = (await testUpdateProxy()) as {
-        ok: boolean;
-        status?: number;
-        latency?: number;
+      const result = (await installDownloadedUpdate()) as {
+        ok?: boolean;
         error?: string;
-        bytes?: number;
-        bytesPerSecond?: number;
       };
-      setProxyResult({
-        ok: r.ok,
-        latency: r.latency,
-        error: r.error,
-        bytes: r.bytes,
-        bytesPerSecond: r.bytesPerSecond,
-      });
-      if (r.ok) {
-        toast.success(t("updateProxyTestOk", { latency: r.latency ?? "?" }));
-      } else {
-        toast.error(t("updateProxyTestFail"));
+      if (!result?.ok) {
+        setPhase("error");
+        setErrorMsg(mapUpdateErrorMessage(result?.error, t));
       }
     } catch {
-      setProxyResult({ ok: false, error: "IPC error" });
-      toast.error(t("updateProxyTestFail"));
-    } finally {
-      setProxyTesting(false);
+      setPhase("error");
+      setErrorMsg(t("updateError"));
     }
   }
 
@@ -504,54 +450,9 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         )}
       </div>
 
-      <section className="min-w-0 space-y-3">
-        <div>
-          <h3 className="font-semibold text-[14px] text-foreground">
-            {t("updateProxyLabel")}
-          </h3>
-          <p className="mt-1 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
-            {t("updateProxyHint")}
-          </p>
-        </div>
-        <div className="min-w-0 rounded-[8px] border border-border bg-secondary p-3 min-[480px]:p-4">
-          <label className="sr-only" htmlFor="update-proxy">
-            {t("updateProxyLabel")}
-          </label>
-          <div className="mt-1 flex min-w-0 flex-wrap gap-2">
-            <input
-              className="min-w-0 flex-1 rounded-[6px] border border-input bg-background px-2 py-1 text-[12px] placeholder:text-muted-foreground/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
-              id="update-proxy"
-              onChange={(e) => setProxy(e.target.value)}
-              placeholder="127.0.0.1:7890"
-              value={proxy}
-            />
-            <button
-              className="min-h-8 shrink-0 rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground focus-visible:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
-              onClick={handleSaveProxy}
-              type="button"
-            >
-              {proxySaved ? t("updateSaved") : t("updateSave")}
-            </button>
-            <button
-              className="min-h-8 shrink-0 rounded-[6px] border border-input px-3 py-1 text-[12px] text-muted-foreground transition-colors hover:border-muted-foreground/30 hover:text-foreground focus-visible:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={proxyTesting}
-              onClick={handleTestProxy}
-              type="button"
-            >
-              {proxyTesting ? t("updateProxyTesting") : t("updateProxyTest")}
-            </button>
-          </div>
-          {proxyResult && (
-            <p
-              className={`mt-2 text-[11px] [overflow-wrap:anywhere] ${proxyResult.ok ? "text-green-600" : "text-destructive"}`}
-            >
-              {proxyResult.ok
-                ? `${t("updateProxyTestOk", { latency: proxyResult.latency ?? "?" })} · ${formatSpeed(proxyResult.bytesPerSecond)}`
-                : `${t("updateProxyTestFail")}${proxyResult.error ? `: ${proxyResult.error}` : ""}`}
-            </p>
-          )}
-        </div>
-      </section>
+      <p className="text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+        {t("updateProxySystemHint")}
+      </p>
     </section>
   );
 }

@@ -355,7 +355,17 @@ jobs:
           if (-not (Test-Path -LiteralPath $candidateReleaseFeed -PathType Leaf)) {
             throw "Candidate evidence is missing candidate-RELEASES"
           }
-          Copy-Item -LiteralPath $candidateReleaseFeed -Destination $githubReleaseFeed
+          $githubFeedLines = @(Get-Content -LiteralPath $candidateReleaseFeed | Where-Object {
+            $_ -match "-$([regex]::Escape($env:RELEASE_VERSION))-full\.nupkg"
+          })
+          if ($githubFeedLines.Count -ne 1) {
+            throw "Candidate RELEASES must yield exactly one current full package for the GitHub compatibility feed, found $($githubFeedLines.Count)"
+          }
+          [IO.File]::WriteAllText(
+            $githubReleaseFeed,
+            "$($githubFeedLines[0])`n",
+            [Text.UTF8Encoding]::new($false)
+          )
           $githubExpected += Get-Item -LiteralPath $githubReleaseFeed
           $headers = @{
             Accept = "application/octet-stream"

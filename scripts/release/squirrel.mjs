@@ -78,6 +78,27 @@ export function formatReleases(entries) {
   return `${entries.map((entry) => `${entry.hash} ${entry.filename} ${entry.size}`).join("\n")}\n`;
 }
 
+/**
+ * Build the compatibility manifest consumed through update.electronjs.org.
+ *
+ * That service rewrites only the first .nupkg token to an absolute GitHub
+ * asset URL.  A feed containing the historical baseline first therefore
+ * points old clients at a non-existent package.  The public GitHub feed must
+ * expose only the current full package; COS keeps the complete delta history.
+ */
+export function formatGitHubReleases(entries, version) {
+  const suffix = `-${String(version ?? "").trim()}-full.nupkg`.toLowerCase();
+  const currentFull = entries.filter(
+    (entry) => entry.isFull && entry.filename.toLowerCase().endsWith(suffix)
+  );
+  invariant(
+    currentFull.length === 1,
+    `GitHub compatibility RELEASES must contain exactly one current full package for v${version} (found ${currentFull.length})`,
+    "GITHUB_RELEASE_INVALID"
+  );
+  return formatReleases(currentFull);
+}
+
 export function isDeltaFilename(filename) {
   return DELTA_PATTERN.test(filename);
 }

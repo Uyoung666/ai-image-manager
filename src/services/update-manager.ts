@@ -21,6 +21,8 @@ const NETWORK_ERROR_RE =
   /ENOTFOUND|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|net::ERR/i;
 const HTTP_ERROR_RE = /403|404/i;
 const LOCK_ERROR_RE = /acquire.*lock|another.*instance|mutex/i;
+const PACKAGE_CHECKSUM_ERROR_RE =
+  /checksum|checksummed file size|hash.*mismatch|size doesn't match/i;
 const TRAILING_SLASH_RE = /\/$/;
 
 // The identifier is replaced by vite.main.config.mts during a release build.
@@ -243,6 +245,7 @@ function attachListeners() {
     }
     activePhase = null;
     if (LOCK_ERROR_RE.test(raw)) {
+      broadcast({ phase: "error", message: "UPDATE_BUSY" });
       return;
     }
     let message = raw;
@@ -250,6 +253,8 @@ function attachListeners() {
       message = "NETWORK_ERROR";
     } else if (HTTP_ERROR_RE.test(raw)) {
       message = "UPDATE_NOT_FOUND";
+    } else if (PACKAGE_CHECKSUM_ERROR_RE.test(raw)) {
+      message = "UPDATE_PACKAGE_CORRUPT";
     }
     broadcast({ phase: "error", message: message.slice(0, 200) });
   });

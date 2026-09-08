@@ -327,4 +327,27 @@ describe("update manager event payloads", () => {
       version: "2.1.0",
     });
   });
+
+  it("normalizes package verification and Squirrel lock errors", async () => {
+    const manager = await loadManager();
+    manager.checkForUpdatesManually();
+
+    mocks.emit(
+      "error",
+      new Error(
+        "Checksummed file size doesn't match: packages\\ai-image-manager-2.1.0-full.nupkg"
+      )
+    );
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
+      message: "UPDATE_PACKAGE_CORRUPT",
+      phase: "error",
+    });
+
+    manager.checkForUpdatesManually();
+    mocks.emit("error", new Error("Could not acquire lock for update"));
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
+      message: "UPDATE_BUSY",
+      phase: "error",
+    });
+  });
 });

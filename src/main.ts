@@ -15,7 +15,6 @@ import {
   powerMonitor,
   protocol,
   screen,
-  session,
   shell,
   Tray,
 } from "electron";
@@ -1048,28 +1047,6 @@ function createWindow(httpPort: number, httpAuthToken: string) {
 
 // ── Auto-update state (persisted in main process so settings page can query on mount) ─
 
-// ── Update proxy config ──────────────────────────────────────────────
-function getUpdateConfigStore() {
-  if (!__updateConfigStore) {
-    __updateConfigStore = new Store<{
-      proxy: string;
-    }>({
-      name: "update-config",
-      defaults: { proxy: "" },
-    });
-  }
-  return __updateConfigStore;
-}
-let __updateConfigStore: Store<{ proxy: string }> | null = null;
-
-async function applyProxyConfig() {
-  const proxy = getUpdateConfigStore().get("proxy", "");
-  if (proxy) {
-    await session.defaultSession.setProxy({ proxyRules: proxy });
-    log.info({ proxy }, "Update proxy configured");
-  }
-}
-
 // ── Auto-update check ────────────────────────────────────────────────
 function checkForUpdates() {
   startUpdateManager();
@@ -1608,7 +1585,6 @@ app.whenReady().then(async () => {
     createWindow(httpPort, getHttpServerAuthToken());
     createTray();
     registerGlobalShortcuts();
-    await applyProxyConfig();
     checkForUpdates();
     setupSendToShortcut();
 

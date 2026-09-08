@@ -4,13 +4,10 @@ import {
   consumeUpdateWelcome,
   currentPlatform,
   getHttpPort,
-  getUpdateProxy,
   getUpdateStatus,
   installDownloadedUpdate,
   openReleasePage,
   restartApp,
-  setUpdateProxy,
-  testProxy,
 } from "./handlers";
 
 export const app = {
@@ -22,8 +19,5 @@ export const app = {
   getUpdateStatus,
   getHttpPort,
   installDownloadedUpdate,
-  getUpdateProxy,
-  setUpdateProxy,
-  testProxy,
   openReleasePage,
 };

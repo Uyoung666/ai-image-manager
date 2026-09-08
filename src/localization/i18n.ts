@@ -1040,6 +1040,11 @@ i18n.use(initReactI18next).init({
         updateSaved: "已保存",
         updateErrorNetwork: "网络连接失败，可尝试设置代理",
         updateErrorNotFound: "未找到更新文件",
+        updateErrorPackageCorrupt:
+          "更新包校验失败，文件可能已损坏，请重试或手动下载。",
+        updateErrorBusy: "更新程序正忙，请稍后重试。",
+        updateProxySystemHint:
+          "更新程序由 Windows 系统网络设置管理。如更新失败，请检查系统代理或网络后重试。",
         updateChangelogTitle: "更新日志",
         updateChangelogDescription: "回顾每个版本带来的新体验。",
         updateChangelogView: "进入",
@@ -3225,6 +3230,11 @@ i18n.use(initReactI18next).init({
         updateSaved: "Saved",
         updateErrorNetwork: "Network error, try setting a proxy",
         updateErrorNotFound: "Update files not found",
+        updateErrorPackageCorrupt:
+          "The update package failed verification. Retry or download it manually.",
+        updateErrorBusy: "The updater is busy. Please try again shortly.",
+        updateProxySystemHint:
+          "Updates use the Windows system network settings. If the check fails, review your system proxy or network and try again.",
         updateChangelogTitle: "Release Notes",
         updateChangelogDescription:
           "Revisit the new experiences from each release.",

@@ -609,6 +609,24 @@ jobs:
           Copy-Item -LiteralPath release-feed\SHA256SUMS.txt -Destination release-evidence\candidate-SHA256SUMS.txt
           Copy-Item -LiteralPath release-feed\provenance.json -Destination release-evidence\candidate-provenance.json
           Copy-Item -LiteralPath release-feed\RELEASES -Destination release-evidence\candidate-RELEASES
+          # update.electronjs.org rewrites only the first .nupkg token in a
+          # GitHub RELEASES asset. Keep COS's historical feed for delta
+          # updates, but hand maintainers a one-line compatibility feed whose
+          # first (and only) package is the current full release.
+          $githubFeed = Join-Path $PWD "release-github"
+          New-Item -ItemType Directory -Force -Path $githubFeed | Out-Null
+          $currentFull = @(Get-Content -LiteralPath release-feed\RELEASES | Where-Object {
+            $_ -match "-$([regex]::Escape($env:RELEASE_VERSION))-full\.nupkg"
+          })
+          if ($currentFull.Count -ne 1) {
+            throw "GitHub compatibility RELEASES must contain exactly one current full package, found $($currentFull.Count)"
+          }
+          [IO.File]::WriteAllText(
+            (Join-Path $githubFeed "RELEASES"),
+            "$($currentFull[0])`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+          Copy-Item -LiteralPath (Join-Path $githubFeed "RELEASES") -Destination release-evidence\github-RELEASES
 
       - name: Attest candidate artifacts
         uses: actions/attest@v4
@@ -641,5 +659,5 @@ jobs:
             }
             Write-Host "Maintainer-created GitHub prerelease candidate exists; stable promotion will verify every asset byte."
           } else {
-            Write-Host "Candidate completed. Upload release-download plus release-feed/RELEASES with maintainer credentials and publish them as a prerelease before stable promotion."
+            Write-Host "Candidate completed. Download release-evidence and upload its github-RELEASES file as the GitHub RELEASES asset with maintainer credentials. Keep candidate-RELEASES/release-feed/RELEASES for COS testing."
           }

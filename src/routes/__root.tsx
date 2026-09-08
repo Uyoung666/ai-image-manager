@@ -24,6 +24,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StartupSplash } from "@/components/startup-splash";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ImportDropProvider } from "@/contexts/import-drop-context";
 import { ScrollPositionProvider } from "@/contexts/ScrollPositionContext";
 import { SidebarFilterProvider } from "@/contexts/SidebarFilterContext";
 import BaseLayout from "@/layouts/base-layout";
@@ -278,11 +279,13 @@ export function RootSurface({
 }) {
   return (
     <SidebarFilterProvider>
-      {pathname === "/whats-new" ? (
-        <StandaloneLayout>{children}</StandaloneLayout>
-      ) : (
-        <BaseLayout>{children}</BaseLayout>
-      )}
+      <ImportDropProvider>
+        {pathname === "/whats-new" ? (
+          <StandaloneLayout>{children}</StandaloneLayout>
+        ) : (
+          <BaseLayout>{children}</BaseLayout>
+        )}
+      </ImportDropProvider>
     </SidebarFilterProvider>
   );
 }
