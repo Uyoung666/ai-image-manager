@@ -7,6 +7,8 @@ import { afterEach, expect, it, vi } from "vitest";
 const databaseFailure = vi.hoisted(
   () => new Error("Database initialization failed")
 );
+const invalidateStatsCache = vi.hoisted(() => vi.fn());
+vi.mock("@/ipc/photos/handlers/stats", () => ({ invalidateStatsCache }));
 vi.mock("@/db", () => ({
   getDatabase: () => {
     throw databaseFailure;
@@ -31,6 +33,7 @@ it("records an actual indexing failure and still releases the run for retry", as
   const state = await import("@/services/ai/state");
   await expect(embedAllPhotos()).rejects.toBe(databaseFailure);
   expect(state.aiControlState).toBe("idle");
+  expect(invalidateStatsCache).toHaveBeenCalledTimes(1);
   expect(state.currentProgress.error).toBe(databaseFailure.message);
   expect(getRecentIncidentDetails()).toEqual(
     expect.arrayContaining([

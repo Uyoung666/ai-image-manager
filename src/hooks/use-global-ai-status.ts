@@ -492,6 +492,7 @@ function useGlobalAiStatusState(): GlobalAiProgress {
           lastAiPhaseRef.current = "idle";
           setAi(null);
           queryClient.invalidateQueries({ queryKey: ["aiStatus"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
           break;
         case "face-detection-progress":
           handleFaceMsg(e.data as FaceProgressPayload);

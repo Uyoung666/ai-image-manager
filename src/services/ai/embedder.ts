@@ -1262,6 +1262,12 @@ export async function embedAllPhotos(
     }
     if (didFinishCurrentRun) {
       try {
+        // Clear the server cache before notifying renderers to refetch it.
+        // Failed/cancelled runs may also have changed persisted AI counts.
+        const { invalidateStatsCache } = await import(
+          "@/ipc/photos/handlers/stats"
+        );
+        invalidateStatsCache();
         const { BrowserWindow } = await import("electron");
         for (const win of BrowserWindow.getAllWindows()) {
           win.webContents.send("ai-embedding-done", {
