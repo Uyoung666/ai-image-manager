@@ -140,8 +140,11 @@ const _SQLITE_LIKE_TIMEOUT_MS = 5000; // SQLite LIKE 查询软超时（已有 bu
 
 // EXIF filter cache: cache key -> { result, timestamp }
 export interface CachedSearchResult {
+  hasMore?: boolean;
+  nextOffset?: number | null;
   results: unknown[];
   total: number;
+  totalExact?: boolean;
 }
 
 const filterCache = new Map<
@@ -158,7 +161,7 @@ function getCacheKey(params: Record<string, unknown>): string {
   // Create a deterministic key excluding non-filter params
   const filterParams: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && key !== "limit" && key !== "query") {
+    if (value !== undefined && key !== "query") {
       filterParams[key] = value;
     }
   }
@@ -1609,36 +1612,40 @@ export const searchCompound = os
       );
     }
 
-    const exifBaseQuery = db
+    const matchingExif = db
       .select({ photoId: exifData.photoId })
       .from(exifData)
-      .$dynamic();
-
-    const filteredExif = (
-      exifConditions.length > 0
-        ? exifBaseQuery.where(and(...exifConditions))
-        : exifBaseQuery
-    )
-      .limit(limit)
-      .all();
-    const exifPhotoIds = filteredExif.flatMap((e) =>
-      e.photoId == null ? [] : [e.photoId]
+      .where(and(...exifConditions));
+    // Keep the complete matching set in SQL. Only hydrate the requested page;
+    // the existing gallery continuation consumes hasMore / nextOffset.
+    const matchingPhotos = and(
+      isNull(photos.deletedAt),
+      inArray(photos.id, matchingExif)
     );
-
-    if (exifPhotoIds.length === 0) {
-      const emptyResult = { results: [], total: 0 };
-      setCachedResult(cacheKey, emptyResult);
-      return emptyResult;
-    }
-
-    const photoList = db
-      .select(SEARCH_PHOTO_COLUMNS)
-      .from(photos)
-      .where(inArray(photos.id, exifPhotoIds))
-      .limit(limit)
-      .all();
-
-    const result = { results: photoList, total: photoList.length };
+    const result = db.transaction(() => {
+      const total =
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(photos)
+          .where(matchingPhotos)
+          .get()?.count ?? 0;
+      const photoList = db
+        .select(SEARCH_PHOTO_COLUMNS)
+        .from(photos)
+        .where(matchingPhotos)
+        .orderBy(desc(photos.fileDate), desc(photos.id))
+        .limit(limit)
+        .offset(offset)
+        .all();
+      const hasMore = offset + photoList.length < total;
+      return {
+        results: photoList,
+        total,
+        totalExact: true,
+        hasMore,
+        nextOffset: hasMore ? offset + photoList.length : null,
+      };
+    });
     setCachedResult(cacheKey, result);
     return result;
   });

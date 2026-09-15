@@ -13,6 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { imageSearchActions } from "@/actions/image-search";
+import { searchPhotos } from "@/actions/photo-search";
 import { AddToAlbumDialog } from "@/components/AddToAlbumDialog";
 import { BatchRenameDialog } from "@/components/BatchRenameDialog";
 import { CloudUploadDialog } from "@/components/CloudUploadDialog";
@@ -271,6 +272,7 @@ function HomePage() {
   const searchFilters = filter.appliedSearch?.filters ?? {};
   const [searchTime, setSearchTime] = useState<number | undefined>(undefined);
   const [searchResults, setSearchResults] = useState<Photo[] | null>(null);
+  const [searchExactTotal, setSearchExactTotal] = useState<number | null>(null);
   const [searchError, setSearchError] = useState<"image" | "search" | null>(
     null
   );
@@ -1607,7 +1609,14 @@ function HomePage() {
     },
     [handleOpenSequenceDetails]
   );
-  const totalPhotos = isSearching ? photos.length : totalFromQuery;
+  const searchDisplayCount =
+    searchExactTotal !== null &&
+    !filter.activeFolderId &&
+    filter.activeTagIds.length === 0 &&
+    !filter.favoriteOnly
+      ? searchExactTotal
+      : photos.length;
+  const totalPhotos = isSearching ? searchDisplayCount : totalFromQuery;
   const loading = isSearching
     ? searchLoading
     : photosLoading ||
@@ -1917,8 +1926,7 @@ function HomePage() {
         searchParams.shutterMax = Number(p.filters.shutterMax);
       }
 
-      ipc.client.photos
-        .searchCompound(searchParams)
+      searchPhotos(searchParams)
         .then((rawResult) => {
           const result = rawResult as SearchResponse;
           if (
@@ -2089,6 +2097,7 @@ function HomePage() {
       setSearchError(null);
       setSearchSemantic(null);
       setSearchTime(undefined);
+      setSearchExactTotal(null);
       setSearchResults(null);
       setSearchResultSourceKey(null);
       setSearchResultGeneration(0);
@@ -2098,6 +2107,7 @@ function HomePage() {
 
     // 递增代数，使前一个未完成的请求变成 stale
     const gen = ++searchGenerationRef.current;
+    setSearchExactTotal(null);
     const startTime = performance.now();
     const nextSearchMode = resolveSearchMode(query, effectiveColorHex);
     const appliedFilters = filters ?? {};
@@ -2191,9 +2201,7 @@ function HomePage() {
         colorHex: effectiveColorHex ?? undefined,
       };
 
-      const result = (await ipc.client.photos.searchCompound(
-        searchParams
-      )) as SearchResponse;
+      const result = (await searchPhotos(searchParams)) as SearchResponse;
 
       // 竞态保护：如果代数不匹配，说明已有更新的搜索启动，丢弃此过时响应
       if (gen !== searchGenerationRef.current) {
@@ -2201,6 +2209,7 @@ function HomePage() {
       }
 
       const results = result.results || [];
+      setSearchExactTotal(result.totalExact ? result.total : null);
       searchNextCursorRef.current = result.nextCursor ?? null;
       searchNextOffsetRef.current = result.nextOffset ?? results.length;
       setSearchHasMore(Boolean(result.hasMore));
@@ -2502,6 +2511,7 @@ function HomePage() {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: image search coordinates preview, source validation, and generation-safe result states
   async function handleImageSearch(imagePath: string) {
     const gen = ++searchGenerationRef.current;
+    setSearchExactTotal(null);
     lastImageSearchPathRef.current = imagePath;
     filter.applySearch({
       filters: {},
@@ -2909,7 +2919,7 @@ function HomePage() {
             onTagSelect={handleTagSuggestionSelect}
             query={filter.searchDraft.query}
             resetVersion={filter.searchResetVersion}
-            resultCount={searchMode ? photos.length : undefined}
+            resultCount={searchMode ? searchDisplayCount : undefined}
             searchMode={searchMode}
             searchTime={searchTime}
             semanticDiagnostics={
