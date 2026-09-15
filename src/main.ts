@@ -1711,6 +1711,8 @@ async function waitForQuitCleanup(
 
 async function cleanupApplicationBeforeQuit(): Promise<void> {
   log.info("quit cleanup: started");
+  const { suspendImportsForShutdown } = await import("@/services/import-queue");
+  suspendImportsForShutdown();
   stopAutomaticChecks();
   try {
     if (logDir) {

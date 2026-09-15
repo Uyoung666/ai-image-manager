@@ -1194,7 +1194,7 @@ export async function scanFolder(
     for (const fid of folderIds) {
       db.update(folders)
         .set({
-          lastScannedAt: Date.now(),
+          ...(scanToken.cancelled ? {} : { lastScannedAt: Date.now() }),
           photoCount: folderPhotoCounts.get(fid) ?? 0,
         })
         .where(eq(folders.id, fid))
@@ -1204,12 +1204,14 @@ export async function scanFolder(
     // 重新加载文件夹匹配器缓存
     reloadFolderMatcher();
 
-    onProgress?.({
-      scanned: files.length,
-      total: files.length,
-      phase: "complete",
-      currentFile: "",
-    });
+    if (!scanToken.cancelled) {
+      onProgress?.({
+        scanned: files.length,
+        total: files.length,
+        phase: "complete",
+        currentFile: "",
+      });
+    }
 
     // Auto-tagging now runs after embedAllPhotos() completes, when all CLIP
     // vectors are available in LanceDB. This avoids expensive per-photo worker

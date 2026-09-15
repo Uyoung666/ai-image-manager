@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { BrowserWindow } from "electron";
 import { getDatabase } from "@/db";
 import { exifData, folders, photos, photoTags } from "@/db/schema";
@@ -12,6 +12,7 @@ import {
   stopScanning as stopScanningService,
   watchFolder,
 } from "@/services/indexer";
+import { getSetting, setSetting } from "@/services/settings-manager";
 import { deletePhotoThumbnails } from "@/services/thumbnailer";
 import { importPathKey, normalizeImportFolderPath } from "@/utils/import-path";
 
@@ -58,6 +59,94 @@ let running = false;
 let nextId = 1;
 let aiEmbeddingPending = false;
 let aiEmbeddingRunning = false;
+let suspending = false;
+let recoveryStarted = false;
+let activeScan: Promise<boolean> | null = null;
+const RECOVERY_KEY = "imports.unfinishedRoots";
+
+function readUnfinishedRoots(): string[] {
+  const value = getSetting(RECOVERY_KEY);
+  if (value === null) {
+    // Upgrade recovery for imports interrupted before the journal existed.
+    return getDatabase()
+      .select({ path: folders.path })
+      .from(folders)
+      .where(and(isNull(folders.lastScannedAt), isNull(folders.parentId)))
+      .all()
+      .map((folder) => folder.path);
+  }
+  const roots: unknown = JSON.parse(value);
+  if (
+    !(Array.isArray(roots) && roots.every((root) => typeof root === "string"))
+  ) {
+    throw new Error("Invalid unfinished import journal");
+  }
+  return roots;
+}
+
+function rememberRoot(folderPath: string, unfinished: boolean): void {
+  const roots = readUnfinishedRoots().filter(
+    (root) => importPathKey(root) !== importPathKey(folderPath)
+  );
+  if (unfinished) {
+    roots.push(folderPath);
+  }
+  setSetting(RECOVERY_KEY, JSON.stringify(roots));
+}
+
+/** Removing a registered folder must also discard its deferred recovery. */
+export function forgetInterruptedImports(folderPaths: string[]): void {
+  const removed = new Set(folderPaths.map(importPathKey));
+  setSetting(
+    RECOVERY_KEY,
+    JSON.stringify(
+      readUnfinishedRoots().filter((root) => !removed.has(importPathKey(root)))
+    )
+  );
+}
+
+/** Reconcile only interrupted roots, never rescan every library on startup. */
+export function resumeInterruptedImports(): void {
+  if (suspending) {
+    // The registry can restart in-process when the data directory changes.
+    // Its stop hook drains the old scan before we restore the new profile.
+    suspending = false;
+    recoveryStarted = false;
+    queue.length = 0;
+  }
+  if (recoveryStarted) {
+    return;
+  }
+  recoveryStarted = true;
+  const roots = readUnfinishedRoots();
+  setSetting(RECOVERY_KEY, JSON.stringify(roots));
+  for (const folderPath of roots) {
+    try {
+      enqueueImport(folderPath);
+    } catch (error) {
+      // Keep unavailable roots durable, but try only once per application run.
+      history.push({
+        id: nextId++,
+        folderPath,
+        position: 0,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  broadcast();
+}
+
+/** Shutdown is suspension, not the user's explicit cancel-and-rollback action. */
+export function suspendImportsForShutdown(): void {
+  suspending = true;
+  stopScanningService();
+}
+
+export async function stopImports(): Promise<void> {
+  suspendImportsForShutdown();
+  await activeScan?.catch(() => undefined);
+}
 
 function broadcast(): void {
   const status: ImportQueueStatus = {
@@ -168,6 +257,9 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
     }
   });
 
+  if (suspending) {
+    return false;
+  }
   if (result.cancelled) {
     cleanupCancelledImport(
       result.folderId,
@@ -176,6 +268,7 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
       result.createdFolderIds
     );
     task.status = "cancelled";
+    rememberRoot(task.folderPath, false);
     history.push(task);
     return false;
   }
@@ -218,6 +311,7 @@ async function runEmbedPhase(): Promise<number> {
 
 function runPendingAiEmbedding(): void {
   if (
+    suspending ||
     running ||
     current ||
     queue.length > 0 ||
@@ -245,7 +339,7 @@ function runPendingAiEmbedding(): void {
 // ── Consumer ───────────────────────────────────────────────────────
 
 async function processNext(): Promise<void> {
-  if (running) {
+  if (running || suspending) {
     return;
   }
 
@@ -264,11 +358,13 @@ async function processNext(): Promise<void> {
   broadcast();
 
   try {
-    const ok = await runScanPhase(task);
+    activeScan = runScanPhase(task);
+    const ok = await activeScan;
     if (!ok) {
       return;
     }
     task.status = "done";
+    rememberRoot(task.folderPath, false);
     import("@/services/advanced-exif")
       .then(({ scheduleAdvancedExifEnrichment }) =>
         scheduleAdvancedExifEnrichment(1000)
@@ -276,6 +372,9 @@ async function processNext(): Promise<void> {
       .catch(() => undefined);
     history.push(task);
   } catch (err: unknown) {
+    if (suspending) {
+      return;
+    }
     task.status = "failed";
     task.error = err instanceof Error ? err.message : String(err);
     history.push(task);
@@ -283,12 +382,15 @@ async function processNext(): Promise<void> {
     // Flush IPC-level COUNT cache so the frontend sees accurate totals
     // immediately after import finishes — no stale counts from before
     // the task started.
-    invalidateCountCache();
-    invalidateIndexStatsCache();
     current = null;
     running = false;
-    broadcast();
-    processNext();
+    activeScan = null;
+    if (!suspending) {
+      invalidateCountCache();
+      invalidateIndexStatsCache();
+      broadcast();
+      processNext();
+    }
   }
 }
 
@@ -299,6 +401,9 @@ async function processNext(): Promise<void> {
  * Returns immediately with the queued task — the frontend is unblocked.
  */
 export function enqueueImport(folderPath: string): ImportTask {
+  if (suspending) {
+    throw new Error("Application is shutting down");
+  }
   const resolved = normalizeImportFolderPath(folderPath);
   const resolvedKey = importPathKey(resolved);
 
@@ -323,6 +428,8 @@ export function enqueueImport(folderPath: string): ImportTask {
     position: queue.length + 1,
   };
 
+  // Persist before acknowledging/enqueuing, including tasks not yet started.
+  rememberRoot(resolved, true);
   queue.push(task);
   broadcast();
 
@@ -338,6 +445,7 @@ export function enqueueImport(folderPath: string): ImportTask {
 export function cancelQueuedImports(): ImportTask[] {
   const cancelled = queue.splice(0, queue.length);
   for (const t of cancelled) {
+    rememberRoot(t.folderPath, false);
     t.status = "cancelled";
     history.push(t);
   }

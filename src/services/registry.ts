@@ -16,10 +16,10 @@ import {
   wasAutoRepaired,
 } from "@/services/ai-embedder";
 import { shutdownPool } from "@/services/embed-worker-pool";
+import { resumeInterruptedImports, stopImports } from "@/services/import-queue";
 import {
   cleanupOrphanedRecordsAsync,
   startWatching,
-  stopScanning,
   stopWatching,
 } from "@/services/indexer";
 import {
@@ -307,9 +307,10 @@ registry.register({
         win.webContents.send("file-change", { type: event, photoId });
       }
     });
+    resumeInterruptedImports();
   },
   stop: async () => {
-    stopScanning();
+    await stopImports();
     await stopWatching();
   },
   health: () => {

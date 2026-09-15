@@ -162,7 +162,7 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 
   // 1) Recursively collect all descendant folder IDs with cycle detection.
   const folderHierarchy = db
-    .select({ id: folders.id, parentId: folders.parentId })
+    .select({ id: folders.id, parentId: folders.parentId, path: folders.path })
     .from(folders)
     .all();
   const allFolderIds = getFolderSubtreeIds(folderHierarchy, input.id);
@@ -202,7 +202,13 @@ export const deleteFolder = os.input(IdSchema).handler(async ({ input }) => {
 
   // 4) Execute deletions in a transaction
   // parent_id FK uses ON DELETE SET NULL, so deletion order is safe in any direction
+  const { forgetInterruptedImports } = await import("@/services/import-queue");
   db.transaction(() => {
+    forgetInterruptedImports(
+      folderHierarchy
+        .filter((entry) => allFolderIds.includes(entry.id))
+        .map((entry) => entry.path)
+    );
     if (allPhotoIds.length > 0) {
       db.delete(exifData).where(inArray(exifData.photoId, allPhotoIds)).run();
       db.delete(photoTags).where(inArray(photoTags.photoId, allPhotoIds)).run();
