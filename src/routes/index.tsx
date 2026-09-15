@@ -509,6 +509,36 @@ function HomePage() {
     );
   }, [handleSearch]);
 
+  useEffect(() => {
+    const onTagsChanged = () => {
+      // Text search includes tag evidence. Restart at page one; performSearch
+      // advances the existing generation guard before its first async request.
+      if (
+        searchMode !== null &&
+        searchMode !== "image" &&
+        lastSearchParamsRef.current?.query.trim()
+      ) {
+        handleSearchRetry();
+      }
+      // Only tag-filtered browse queries depend on this mutation. Cancel any
+      // in-flight fetch before refetching so its old membership cannot win.
+      const taggedQueries = {
+        queryKey: ["photos"],
+        predicate: (query: { queryKey: readonly unknown[] }) => {
+          const scope = query.queryKey[1] as
+            | { tagId?: number | null; tagIds?: number[] | null }
+            | undefined;
+          return Boolean(scope?.tagId || scope?.tagIds?.length);
+        },
+      };
+      queryClient.cancelQueries(taggedQueries).then(() => {
+        queryClient.invalidateQueries(taggedQueries);
+      });
+    };
+    window.addEventListener("tags-changed", onTagsChanged);
+    return () => window.removeEventListener("tags-changed", onTagsChanged);
+  }, [handleSearchRetry, searchMode]);
+
   const handleImageSearchRetry = useCallback(() => {
     const imagePath = lastImageSearchPathRef.current;
     if (imagePath) {
@@ -1966,6 +1996,9 @@ function HomePage() {
           }
         })
         .finally(() => {
+          if (generation !== searchGenerationRef.current) {
+            return;
+          }
           searchLoadingMoreRef.current = false;
           setIsFetchingSearchNextPage(false);
         });

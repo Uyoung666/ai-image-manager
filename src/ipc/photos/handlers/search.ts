@@ -55,6 +55,7 @@ import {
   SearchSessionStore,
   takeFrozenSearchPage,
 } from "@/services/search-session";
+import { getTagSearchRevision } from "@/services/tag-search-revision";
 import {
   COLOR_MATCH_MAX_DISTANCE_SQUARED,
   hydrateColorSearchResults,
@@ -391,6 +392,7 @@ export const searchCompound = os
     const fingerprint = createSearchFingerprint({
       ...input,
       sensitivity: activeSensitivity,
+      tagRevision: query?.trim() ? getTagSearchRevision() : undefined,
     });
     const activeSearchSession = cursor ? searchSessions.get(cursor) : null;
     if (

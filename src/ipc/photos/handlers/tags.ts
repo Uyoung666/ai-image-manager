@@ -10,6 +10,7 @@ import {
 } from "@/services/ai/state";
 import { suggestTags as aiSuggestTags } from "@/services/ai-embedder";
 import { getFolderSubtreeIds } from "@/services/folder-hierarchy";
+import { invalidateTagSearch } from "@/services/tag-search-revision";
 import { IdSchema } from "./shared";
 
 export const suggestTags = os.input(IdSchema).handler(async ({ input }) => {
@@ -275,6 +276,7 @@ export const removePhotoTag = os
         sql`${photoTags.photoId} = ${input.photoId} AND ${photoTags.tagId} = ${input.tagId}`
       )
       .run();
+    invalidateTagSearch();
     return { ok: true };
   });
 
@@ -300,5 +302,6 @@ export const deleteTag = os.input(IdSchema).handler(({ input }) => {
     .run();
   db.delete(photoTags).where(eq(photoTags.tagId, input.id)).run();
   db.delete(tags).where(eq(tags.id, input.id)).run();
+  invalidateTagSearch();
   return { ok: true };
 });
