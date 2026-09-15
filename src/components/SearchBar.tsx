@@ -245,14 +245,26 @@ export const SearchBar = memo(
       }, [tags]);
 
       useEffect(() => {
-        ipc.client.photos
-          .getTags({})
-          .then((result) => {
-            setTags((result as TagInfo[]) || []);
-          })
-          .catch(() => {
-            /* ignore */
-          });
+        let generation = 0;
+        function refreshTags() {
+          const current = ++generation;
+          ipc.client.photos
+            .getTags({})
+            .then((result) => {
+              if (current === generation) {
+                setTags((result as TagInfo[]) || []);
+              }
+            })
+            .catch(() => {
+              /* keep the last successful list */
+            });
+        }
+        window.addEventListener("tags-changed", refreshTags);
+        refreshTags();
+        return () => {
+          generation++;
+          window.removeEventListener("tags-changed", refreshTags);
+        };
       }, []);
 
       useEffect(() => {

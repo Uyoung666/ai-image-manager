@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchBar } from "@/components/SearchBar";
+import { ipc } from "@/ipc/manager";
 import type { ExifFilters } from "@/types/search";
 
 const presetToast = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock("@/ipc/manager", () => ({
   },
 }));
 
+const NUMERIC_TAG_PATTERN = /55555/;
 const SEARCH_HISTORY_KEY = "search_history";
 const PRESET_STORAGE_KEY = "exif-filter-presets";
 const FILTER_COUNT_PATTERN = /· 1/;
@@ -96,6 +98,54 @@ describe("SearchBar", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    vi.mocked(ipc.client.photos.getTags)
+      .mockReset()
+      .mockResolvedValue([
+        { color: "#4f46e5", id: 42, name: "自行车" },
+      ] as never);
+  });
+
+  it("refreshes numeric tag suggestions after creation and deletion without remounting", async () => {
+    const getTags = vi.mocked(ipc.client.photos.getTags);
+    getTags.mockResolvedValue([] as never);
+    render(<ControlledSearchBar />);
+    await userEvent.setup().type(screen.getByRole("combobox"), "5");
+    expect(
+      screen.queryByRole("option", { name: NUMERIC_TAG_PATTERN })
+    ).toBeNull();
+    getTags.mockResolvedValue([{ id: 55, name: "55555" }] as never);
+    act(() => window.dispatchEvent(new CustomEvent("tags-changed")));
+    expect(
+      await screen.findByRole("option", { name: NUMERIC_TAG_PATTERN })
+    ).toBeInTheDocument();
+    getTags.mockResolvedValue([] as never);
+    act(() => window.dispatchEvent(new CustomEvent("tags-changed")));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("option", { name: NUMERIC_TAG_PATTERN })
+      ).toBeNull()
+    );
+    expect(screen.getByRole("combobox")).toHaveValue("5");
+  });
+
+  it("does not restore deleted suggestions from an older tag request", async () => {
+    const getTags = vi.mocked(ipc.client.photos.getTags);
+    let finishOld!: (value: never) => void;
+    getTags.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        })
+    );
+    render(<ControlledSearchBar />);
+    await userEvent.setup().type(screen.getByRole("combobox"), "5");
+    getTags.mockResolvedValue([] as never);
+    act(() => window.dispatchEvent(new CustomEvent("tags-changed")));
+    await waitFor(() => expect(getTags).toHaveBeenCalledTimes(2));
+    await act(async () => finishOld([{ id: 55, name: "55555" }] as never));
+    expect(
+      screen.queryByRole("option", { name: NUMERIC_TAG_PATTERN })
+    ).toBeNull();
   });
 
   it("renders the simplified search placeholder", () => {

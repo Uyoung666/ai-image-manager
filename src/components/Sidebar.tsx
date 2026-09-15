@@ -895,6 +895,7 @@ export function Sidebar({
         color: undefined,
         parentId,
       });
+      window.dispatchEvent(new CustomEvent("tags-changed"));
       const updated = await ipc.client.photos.getTags({
         folderId: activeFolderId ?? undefined,
       });
@@ -919,6 +920,7 @@ export function Sidebar({
     setDeleteTagTarget(null);
     try {
       await ipc.client.photos.deleteTag({ id });
+      window.dispatchEvent(new CustomEvent("tags-changed"));
       const updated = await ipc.client.photos.getTags({
         folderId: activeFolderId ?? undefined,
       });
