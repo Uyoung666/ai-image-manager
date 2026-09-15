@@ -683,6 +683,17 @@ async function indexSingleFile(
 
   const { photoRecord, exifRecord, stat, phash } = prepared;
 
+  // A scan or another overlapping watcher may have inserted this path while
+  // metadata/thumbnail preparation yielded. Reuse its row instead of racing it.
+  const indexedDuringPreparation = db
+    .select({ id: photos.id })
+    .from(photos)
+    .where(eq(photos.path, filePath))
+    .get();
+  if (indexedDuringPreparation) {
+    return indexedDuringPreparation.id;
+  }
+
   // Insert photo record
   const result = db
     .insert(photos)
@@ -1031,7 +1042,23 @@ export async function scanFolder(
           break;
         }
 
-        const batch = newRecords.slice(i, i + BATCH_SIZE);
+        // A watcher may finish while this scan prepares its batch. Include
+        // that row in the scan result rather than attempting a duplicate insert.
+        const batch = newRecords.slice(i, i + BATCH_SIZE).filter((record) => {
+          const indexed = db
+            .select({ id: photos.id })
+            .from(photos)
+            .where(eq(photos.path, record.photoRecord.path))
+            .get();
+          if (indexed) {
+            photoIds.push(indexed.id);
+            return false;
+          }
+          return true;
+        });
+        if (batch.length === 0) {
+          continue;
+        }
         const photoRecords = batch.map((r) => r.photoRecord);
 
         try {
@@ -1271,6 +1298,67 @@ export async function scanFolder(
   }
 }
 
+// A watcher can discover files before a scan has registered their directories.
+// Resolve the actual parent before asynchronous metadata work, so a stale
+// ancestor match can never be written as the new photo's folder relation.
+function resolveWatchedFileFolder(filePath: string): number | null {
+  const db = getDatabase();
+  const ancestorId = getFolderMatcher().match(filePath);
+  if (ancestorId === null) {
+    return null;
+  }
+  const ancestor = db
+    .select()
+    .from(folders)
+    .where(eq(folders.id, ancestorId))
+    .get();
+  if (!ancestor) {
+    return null;
+  }
+  const relative = path.relative(ancestor.path, path.dirname(filePath));
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return null;
+  }
+  const folderId = db.transaction(() => {
+    let parentId = ancestor.id;
+    let directory = ancestor.path;
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+      directory = path.join(directory, segment);
+      const existing = db
+        .select({ id: folders.id })
+        .from(folders)
+        .where(
+          process.platform === "win32"
+            ? sql`lower(${folders.path}) = lower(${directory})`
+            : eq(folders.path, directory)
+        )
+        .get();
+      if (existing) {
+        parentId = existing.id;
+      } else {
+        const inserted = db
+          .insert(folders)
+          .values({ path: directory, displayName: segment, parentId })
+          .returning({ id: folders.id })
+          .get();
+        if (!inserted) {
+          throw new Error("Failed to register watched directory");
+        }
+        parentId = inserted.id;
+      }
+    }
+    return parentId;
+  });
+  if (folderId !== ancestorId) {
+    reloadFolderMatcher();
+  }
+  return folderId;
+}
+
 export function startWatching(
   onChange: (photoId: number | null, event: "add" | "remove") => void
 ): void {
@@ -1301,7 +1389,7 @@ export function startWatching(
 
       watcherQueue.add(async () => {
         try {
-          const matchedFolderId = getFolderMatcher().match(filePath);
+          const matchedFolderId = resolveWatchedFileFolder(filePath);
 
           const alreadyIndexed = db
             .select({ id: photos.id })
@@ -1318,7 +1406,7 @@ export function startWatching(
           if (matchedFolderId && photoId) {
             db.update(folders)
               .set({
-                photoCount: sql`photo_count + 1`,
+                photoCount: sql`(select count(*) from photos where folder_id = ${matchedFolderId} and deleted_at is null)`,
                 lastWatcherEventAt: Date.now(),
               })
               .where(eq(folders.id, matchedFolderId))
@@ -1422,7 +1510,7 @@ export function watchFolder(
 
     watcherQueue.add(async () => {
       try {
-        const matchedFolderId = getFolderMatcher().match(filePath);
+        const matchedFolderId = resolveWatchedFileFolder(filePath);
 
         const alreadyIndexed = db
           .select({ id: photos.id })
@@ -1439,7 +1527,7 @@ export function watchFolder(
         if (matchedFolderId && photoId) {
           db.update(folders)
             .set({
-              photoCount: sql`photo_count + 1`,
+              photoCount: sql`(select count(*) from photos where folder_id = ${matchedFolderId} and deleted_at is null)`,
               lastWatcherEventAt: Date.now(),
             })
             .where(eq(folders.id, matchedFolderId))
