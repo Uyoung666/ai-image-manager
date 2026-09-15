@@ -1103,6 +1103,10 @@ i18n.use(initReactI18next).init({
         toastImportQueuedMultiple: "已加入 {{count}} 个文件夹到后台队列",
         toastImportBatchComplete:
           "已导入 {{folders}} 个文件夹、{{photos}} 张新照片，可立即浏览；AI 语义索引正在后台处理。",
+        toastImportBatchIncomplete:
+          "扫描完成：{{indexed}} 张照片已在图库中（新增 {{photos}} 张）；跳过 {{skipped}} 个文件，处理失败 {{failed}} 个。",
+        toastImportSkippedReason:
+          "未加入的文件可能无法解码或读取，或处理写入失败；可读取的照片已保留，原文件未删除。",
         toastImportFailed: "导入 {{folder}} 失败：{{error}}",
         toastAiIndexReady: "AI 语义索引已完成，语义搜索已就绪。",
         toastAiIndexFailed: "AI 语义索引失败，可在设置中重试。",
@@ -3312,6 +3316,10 @@ i18n.use(initReactI18next).init({
           "Added {{count}} folders to background queue",
         toastImportBatchComplete:
           "Imported {{folders}} folders and {{photos}} new photos. You can browse now while AI indexing continues in the background.",
+        toastImportBatchIncomplete:
+          "Scan complete: {{indexed}} photos in the library ({{photos}} new); {{skipped}} files skipped, {{failed}} failed to process.",
+        toastImportSkippedReason:
+          "Files not added could not be decoded or read, or failed during processing or saving. Readable photos are available; original files were not deleted.",
         toastImportFailed: "Failed to import {{folder}}: {{error}}",
         toastAiIndexReady:
           "AI semantic indexing is complete and search is ready.",

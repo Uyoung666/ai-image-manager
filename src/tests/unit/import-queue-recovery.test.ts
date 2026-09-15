@@ -64,6 +64,34 @@ function result(cancelled = false) {
 }
 
 describe("durable import recovery", () => {
+  it("broadcasts scan accounting without losing rejected-file counts", async () => {
+    state.scan.mockResolvedValue({
+      ...result(),
+      photoIds: [1, 2],
+      newPhotoIds: [1, 2],
+      skipped: 3,
+      failed: 1,
+    });
+    const queue = await import("@/services/import-queue");
+    queue.enqueueImport("mixed-fixture");
+    await tick();
+    expect(queue.getImportQueueStatus().history[0]).toMatchObject({
+      status: "done",
+      photoCount: 2,
+      newPhotoCount: 2,
+      skipped: 3,
+      failed: 1,
+    });
+    expect(state.send).toHaveBeenCalledWith(
+      "import-queue-status",
+      expect.objectContaining({
+        history: expect.arrayContaining([
+          expect.objectContaining({ skipped: 3, failed: 1 }),
+        ]),
+      })
+    );
+  });
+
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();

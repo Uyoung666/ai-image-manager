@@ -78,11 +78,13 @@ interface FaceProgressPayload {
 
 interface QueueTask {
   error?: string;
+  failed?: number;
   folderPath: string;
   id: number;
   newPhotoCount?: number;
   photoCount?: number;
   position: number;
+  skipped?: number;
   status: "queued" | "scanning" | "embedding" | "done" | "failed" | "cancelled";
 }
 
@@ -109,7 +111,13 @@ function getFolderDisplayName(fullPath: string): string {
 
 interface QueueHistoryState {
   completedBatchRef: {
-    current: { folders: number; photos: number };
+    current: {
+      folders: number;
+      photos: number;
+      indexed: number;
+      skipped: number;
+      failed: number;
+    };
   };
   prevQueueDoneIdsRef: { current: Set<number> };
   seenTerminalTaskIdsRef: { current: Set<number> };
@@ -127,6 +135,13 @@ function processQueueTask(
   if (task.status === "done") {
     state.completedBatchRef.current.folders++;
     state.completedBatchRef.current.photos += task.newPhotoCount ?? 0;
+    state.completedBatchRef.current.indexed +=
+      task.photoCount ?? task.newPhotoCount ?? 0;
+    state.completedBatchRef.current.skipped += Math.max(
+      0,
+      (task.skipped ?? 0) - (task.failed ?? 0)
+    );
+    state.completedBatchRef.current.failed += task.failed ?? 0;
   } else if (task.status === "failed") {
     onFailure(task);
   }
@@ -402,7 +417,13 @@ function useGlobalAiStatusState(): GlobalAiProgress {
   const lastAiPhaseRef = useRef<AiProgressPayload["phase"]>("idle");
   const prevQueueDoneIdsRef = useRef<Set<number>>(new Set());
   const seenTerminalTaskIdsRef = useRef<Set<number>>(new Set());
-  const completedBatchRef = useRef({ folders: 0, photos: 0 });
+  const completedBatchRef = useRef({
+    folders: 0,
+    photos: 0,
+    indexed: 0,
+    skipped: 0,
+    failed: 0,
+  });
 
   // ── Queue completion → auto-refresh UI caches ─────────────────
 
@@ -437,8 +458,22 @@ function useGlobalAiStatusState(): GlobalAiProgress {
       }
 
       if (!hasActive && completedBatchRef.current.folders > 0) {
-        toast.success(t("toastImportBatchComplete", completedBatchRef.current));
-        completedBatchRef.current = { folders: 0, photos: 0 };
+        const summary = completedBatchRef.current;
+        if (summary.skipped + summary.failed > 0) {
+          toast.warning(t("toastImportBatchIncomplete", summary), {
+            description: t("toastImportSkippedReason"),
+            duration: 12_000,
+          });
+        } else {
+          toast.success(t("toastImportBatchComplete", summary));
+        }
+        completedBatchRef.current = {
+          folders: 0,
+          photos: 0,
+          indexed: 0,
+          skipped: 0,
+          failed: 0,
+        };
       }
     },
     [t]

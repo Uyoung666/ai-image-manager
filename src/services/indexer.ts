@@ -723,6 +723,7 @@ export async function scanFolder(
   photoIds: number[];
   newPhotoIds: number[];
   skipped: number;
+  failed: number;
   cancelled: boolean;
   folderExisted: boolean;
 }> {
@@ -884,6 +885,7 @@ export async function scanFolder(
     const photoIds: number[] = [];
     let scanned = 0;
     let skipped = 0;
+    let failed = 0;
 
     async function runWithConcurrency<T, R>(
       items: T[],
@@ -988,6 +990,7 @@ export async function scanFolder(
             return { type: "new" as const, ...prepared };
           } catch (error) {
             log.error({ file, err: error }, "Error preparing file");
+            failed++;
             scanned++;
             return null;
           }
@@ -1119,6 +1122,7 @@ export async function scanFolder(
               }
             } catch {
               skipped++;
+              failed++;
             }
           }
         }
@@ -1223,6 +1227,7 @@ export async function scanFolder(
       photoIds,
       newPhotoIds,
       skipped,
+      failed,
       cancelled: scanToken.cancelled,
       folderExisted,
     };

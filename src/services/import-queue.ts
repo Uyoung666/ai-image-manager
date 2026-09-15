@@ -28,6 +28,8 @@ export type ImportTaskStatus =
 
 export interface ImportTask {
   error?: string;
+  /** Processing/write failures, included in skipped for compatibility. */
+  failed?: number;
   folderPath: string;
   /** Unique id — timestamp of enqueue. */
   id: number;
@@ -276,6 +278,7 @@ async function runScanPhase(task: ImportTask): Promise<boolean> {
   task.photoCount = result.photoIds.length;
   task.newPhotoCount = result.newPhotoIds.length;
   task.skipped = result.skipped;
+  task.failed = result.failed ?? 0;
 
   watchFolder(task.folderPath, (photoId, event) => {
     for (const win of BrowserWindow.getAllWindows()) {
