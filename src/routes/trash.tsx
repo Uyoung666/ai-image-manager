@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DuplicateCleanupBatches } from "@/components/duplicate-cleanup-batches";
 import { FilterDropdown } from "@/components/filter-dropdown";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { RouteError } from "@/components/RouteError";
@@ -1108,6 +1109,12 @@ function TrashPage() {
               </button>
             </>
           )}
+          <DuplicateCleanupBatches
+            onRestored={() => {
+              clearSelection();
+              loadPhotos(null, false);
+            }}
+          />
           {trashTotalCount > 0 && !searchInput.trim() && (
             <button
               className="hidden rounded-[6px] px-3 py-1.5 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50 sm:block"

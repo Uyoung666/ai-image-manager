@@ -18,6 +18,16 @@ import {
   stopAiIndexing,
 } from "./handlers/ai";
 import {
+  createDuplicateCleanupPlanHandler,
+  executeDuplicateCleanupPlanHandler,
+  listDuplicateCleanupBatchesHandler,
+  restoreDuplicateCleanupBatchHandler,
+} from "./handlers/duplicate-cleanup";
+import {
+  applyDuplicateKeepCountHandler,
+  updateDuplicateReview,
+} from "./handlers/duplicate-review";
+import {
   exportPhotos,
   getWatermarkSettings,
   setWatermarkSettings,
@@ -83,11 +93,14 @@ import {
 } from "./handlers/sequences";
 import { generateAndUploadShare } from "./handlers/share";
 import {
+  cancelDuplicateScanHandler,
   dismissDuplicate,
   dismissDuplicates,
   findDuplicates,
   getColorDistribution,
   getDuplicateGroupPhotos,
+  getDuplicateScan,
+  getDuplicateScanProgressHandler,
   getDuplicateStats,
   getExifCandidates,
   getGeoLocations,
@@ -108,6 +121,7 @@ import {
 } from "./handlers/tags";
 
 export const photos = {
+  applyDuplicateKeepCount: applyDuplicateKeepCountHandler,
   addTag,
   backfillMissingThumbnails,
   batchGenerateTags,
@@ -116,6 +130,7 @@ export const photos = {
   cancelQueuedImports: cancelQueuedImports_h,
   cleanupOrphanPhotos,
   cleanDuplicateGroups,
+  createDuplicateCleanupPlan: createDuplicateCleanupPlanHandler,
   cleanOrphanThumbnails,
   clearThumbCache,
   confirmPhotoTag,
@@ -127,9 +142,15 @@ export const photos = {
   dismissDuplicate,
   dismissDuplicates,
   emptyTrash,
+  executeDuplicateCleanupPlan: executeDuplicateCleanupPlanHandler,
   exportPhotos,
   findDuplicates,
+  startDuplicateScan: findDuplicates,
+  cancelDuplicateScan: cancelDuplicateScanHandler,
+  getDuplicateScanProgress: getDuplicateScanProgressHandler,
+  listDuplicateCleanupBatches: listDuplicateCleanupBatchesHandler,
   getDuplicateGroupPhotos,
+  getDuplicateScan,
   getAiHealth,
   getAiProgress,
   getAiStatus,
@@ -176,6 +197,7 @@ export const photos = {
   renamePhotos,
   resetAiIndex,
   restorePhotos,
+  restoreDuplicateCleanupBatch: restoreDuplicateCleanupBatchHandler,
   resumeAiIndexing,
   resumeAdvancedExif,
   retryAdvancedExif,
@@ -195,6 +217,7 @@ export const photos = {
   suggestTags,
   splitSequence,
   toggleFavorite,
+  updateDuplicateReview,
   updateFolderAppearance,
   updateSequenceMembers,
   generateAndUploadShare,

@@ -942,7 +942,7 @@ export const keepSequencePhotos = os
     }
     const result = db.transaction(() => {
       db.update(photos)
-        .set({ deletedAt: Date.now() })
+        .set({ deletionBatchId: null, deletedAt: Date.now() })
         .where(inArray(photos.id, activeDeleteIds))
         .run();
       for (const [folderId, count] of countsByFolder) {

@@ -25,6 +25,8 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { duplicateActions } from "@/actions/duplicates";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DuplicateCleanupBatches } from "@/components/duplicate-cleanup-batches";
+import { FilterDropdown } from "@/components/filter-dropdown";
 import { MasonryBackToTop } from "@/components/MasonryBackToTop";
 import { type LightboxPhoto, PhotoLightbox } from "@/components/PhotoLightbox";
 import {
@@ -37,7 +39,10 @@ import type {
   DuplicateGroupPhotosResult,
   DuplicateGroupSummary,
   DuplicatePhoto,
+  DuplicatePhotoDecision,
 } from "@/services/duplicate-groups";
+import type { DuplicateReviewState } from "@/services/duplicate-review";
+import { duplicateErrorKey } from "@/utils/duplicate-errors";
 import { toLocalMediaUrl } from "@/utils/local-media-url";
 
 type GroupFilter = "all" | "exact" | "similar" | "dismissed";
@@ -51,12 +56,20 @@ const DUPLICATES_TOOLBAR_FALLBACK_HEIGHT = 48;
 const DUPLICATES_TOOLBAR_CONTENT_GAP = 16;
 const DUPLICATE_GROUP_PAGE_SIZE = 48;
 const DUPLICATE_GROUP_VIRTUAL_THRESHOLD = 24;
+const INTEGER_INPUT_PATTERN = /^\d+$/;
+const DECISION_LABELS = {
+  KEEP: "duplicateDecisionKeep",
+  DELETE: "duplicateDecisionDelete",
+  UNDECIDED: "duplicateDecisionUndecided",
+} as const;
 
 function useDuplicatesQuery() {
   const query = useQuery({
     queryKey: ["duplicates"],
     queryFn: () => duplicateActions.scan(false) as Promise<DuplicatesResult>,
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
   const initialQueryFailed = query.isError && !query.data;
   return {
@@ -96,65 +109,88 @@ function toLightboxPhoto(photo: DuplicatePhoto): LightboxPhoto {
   };
 }
 
-function estimateReclaimBytes(
+interface DuplicateDecisionSummary {
+  complete: boolean;
+  deletePhotoIds: number[];
+  keepPhotoIds: number[];
+  undecidedCount: number;
+}
+
+type DuplicateCleanupPlanResult = Awaited<
+  ReturnType<typeof duplicateActions.createCleanupPlan>
+>;
+
+function getDuplicateDecisionSummary(
   group: DuplicateGroupSummary,
-  photos: DuplicatePhoto[],
-  keeperId: number
-): number {
-  if (keeperId === group.recommendedKeepId) {
-    return group.estimatedReclaimBytes;
+  decisions: Record<number, DuplicatePhotoDecision>
+): DuplicateDecisionSummary {
+  const keepPhotoIds: number[] = [];
+  const deletePhotoIds: number[] = [];
+  for (const [id, decision] of Object.entries(decisions)) {
+    if (decision === "KEEP") {
+      keepPhotoIds.push(Number(id));
+    }
+    if (decision === "DELETE") {
+      deletePhotoIds.push(Number(id));
+    }
   }
-  const recommended = group.previewPhotos.find(
-    (photo) => photo.id === group.recommendedKeepId
-  );
-  const keeper = photos.find((photo) => photo.id === keeperId);
-  if (recommended?.fileSize == null || keeper?.fileSize == null) {
-    return group.estimatedReclaimBytes;
-  }
-  return Math.max(
+  const undecidedCount = Math.max(
     0,
-    group.estimatedReclaimBytes + recommended.fileSize - keeper.fileSize
+    group.photoCount - keepPhotoIds.length - deletePhotoIds.length
   );
+  return {
+    complete: undecidedCount === 0 && keepPhotoIds.length > 0,
+    keepPhotoIds,
+    deletePhotoIds,
+    undecidedCount,
+  };
 }
 
 const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
-  isKeeper,
-  pendingDelete,
+  decision,
+  busy,
+  needsReview,
+  recommended,
   photo,
-  onKeep,
+  onDecisionChange,
   onPreview,
   t,
 }: {
-  isKeeper: boolean;
-  onKeep: () => void;
+  decision: DuplicatePhotoDecision;
+  onDecisionChange: (decision: DuplicatePhotoDecision) => void;
+  busy: boolean;
+  needsReview: boolean;
   onPreview: () => void;
-  pendingDelete: boolean;
   photo: DuplicatePhoto;
+  recommended: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const [failed, setFailed] = useState(false);
   const src = photo.thumbnailPath || photo.path;
+  let decisionLabel = t("duplicateDecisionUndecided");
+  if (decision === "KEEP") {
+    decisionLabel = t("duplicateDecisionKeep");
+  } else if (decision === "DELETE") {
+    decisionLabel = t("duplicateDecisionDelete");
+  }
   let tileClass = "border-border bg-background hover:border-primary/40";
-  let badgeClass =
-    "bg-background/90 text-muted-foreground opacity-0 shadow-sm group-hover:opacity-100";
-  let badgeText = t("duplicateSetKeeper");
-  if (isKeeper) {
+  let badgeClass = "bg-background/90 text-muted-foreground shadow-sm";
+  if (decision === "KEEP") {
     tileClass = "border-success/60 bg-success/5 ring-1 ring-success/20";
     badgeClass = "bg-success text-white";
-    badgeText = t("duplicateKeep");
-  } else if (pendingDelete) {
+  } else if (decision === "DELETE") {
     tileClass = "border-destructive/40 bg-destructive/5";
     badgeClass = "bg-destructive text-white";
-    badgeText = t("pendingDelete");
   }
   return (
     <div
       className={`group relative min-w-0 overflow-hidden rounded-[8px] border transition-colors ${tileClass}`}
     >
       <button
-        className="block h-full w-full text-left"
+        aria-label={`${photo.filename} ${t("duplicatePreviewPhoto")}`}
+        className="block w-full text-left"
         draggable={false}
-        onClick={onKeep}
+        onClick={onPreview}
         type="button"
       >
         <div className="relative flex h-36 items-center justify-center bg-muted/30 p-2">
@@ -164,7 +200,7 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
             // biome-ignore lint/a11y/noNoninteractiveElementInteractions: onError only swaps in a visual fallback
             <img
               alt={photo.filename}
-              className={`h-full w-full object-contain transition-opacity ${pendingDelete ? "opacity-60" : "opacity-100"}`}
+              className={`h-full w-full object-contain transition-opacity ${decision === "DELETE" ? "opacity-60" : "opacity-100"}`}
               decoding="async"
               draggable={false}
               height={144}
@@ -177,9 +213,14 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
           <span
             className={`absolute top-2 right-2 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-[10px] ${badgeClass}`}
           >
-            {isKeeper ? <Check className="h-3 w-3" /> : null}
-            {badgeText}
+            {decision === "KEEP" ? <Check className="h-3 w-3" /> : null}
+            {decisionLabel}
           </span>
+          {recommended ? (
+            <span className="absolute top-2 left-10 rounded-full bg-primary/90 px-2 py-1 font-medium text-[10px] text-white">
+              {t("duplicateRecommended")}
+            </span>
+          ) : null}
         </div>
         <div className="border-border border-t p-2.5">
           <AppTooltip>
@@ -196,11 +237,37 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
           </p>
         </div>
       </button>
+      <fieldset
+        aria-label={photo.filename}
+        className="flex flex-wrap gap-1 border-border border-t p-2"
+      >
+        {(["KEEP", "DELETE", "UNDECIDED"] as const).map((value) => (
+          <button
+            aria-label={`${photo.filename} ${t(DECISION_LABELS[value])}`}
+            aria-pressed={decision === value}
+            className="rounded border border-border px-2 py-1 text-[11px] aria-pressed:bg-primary/15"
+            disabled={busy}
+            key={value}
+            onClick={() => onDecisionChange(value)}
+            type="button"
+          >
+            {t(DECISION_LABELS[value])}
+          </button>
+        ))}
+        {busy ? (
+          <span className="sr-only" role="status">
+            {t("duplicateSavingReview")}
+          </span>
+        ) : null}
+        {needsReview ? (
+          <span className="text-warning">{t("duplicateNeedsReview")}</span>
+        ) : null}
+      </fieldset>
       <AppTooltip>
         <AppTooltipTrigger asChild>
           <button
             aria-label={t("duplicatePreviewPhoto")}
-            className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,color,background-color] hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-hover:opacity-100"
+            className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground shadow-sm backdrop-blur-sm transition-[opacity,color,background-color] hover:bg-background hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-hover:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
               onPreview();
@@ -217,23 +284,23 @@ const DuplicatePhotoTile = memo(function DuplicatePhotoTile({
 });
 
 const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
-  enabled,
+  decisions,
+  busy,
   error,
   group,
-  keeperId,
   loading,
   onLoadMore,
-  onKeeperChange,
+  onDecisionChange,
   onPreview,
   photos,
   t,
 }: {
-  enabled: boolean;
+  decisions: Record<number, DuplicatePhotoDecision>;
+  busy: boolean;
   error: boolean;
   group: DuplicateGroupSummary;
-  keeperId: number;
   loading: boolean;
-  onKeeperChange: (photoId: number) => void;
+  onDecisionChange: (photoId: number, decision: DuplicatePhotoDecision) => void;
   onLoadMore: () => void;
   onPreview: (photoId: number) => void;
   photos: DuplicatePhoto[];
@@ -265,7 +332,7 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
   const rowCount = Math.ceil(photos.length / columnCount);
   const virtualizer = useVirtualizer({
     count: shouldVirtualize ? rowCount : 0,
-    estimateSize: () => 216,
+    estimateSize: () => 260,
     getScrollElement: () => scrollRef.current,
     getItemKey: (index) => `duplicate-row-${group.groupKey}-${index}`,
     overscan: 2,
@@ -298,12 +365,16 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))] gap-2.5 p-3.5">
         {photos.map((photo) => (
           <DuplicatePhotoTile
-            isKeeper={photo.id === keeperId}
+            busy={busy}
+            decision={decisions[photo.id] ?? "UNDECIDED"}
             key={photo.id}
-            onKeep={() => onKeeperChange(photo.id)}
+            needsReview={group.reviewPhotoIds?.includes(photo.id) ?? false}
+            onDecisionChange={(decision) =>
+              onDecisionChange(photo.id, decision)
+            }
             onPreview={() => onPreview(photo.id)}
-            pendingDelete={enabled && photo.id !== keeperId}
             photo={photo}
+            recommended={photo.id === group.recommendedKeepId}
             t={t}
           />
         ))}
@@ -358,12 +429,18 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
             >
               {rowPhotos.map((photo) => (
                 <DuplicatePhotoTile
-                  isKeeper={photo.id === keeperId}
+                  busy={busy}
+                  decision={decisions[photo.id] ?? "UNDECIDED"}
                   key={photo.id}
-                  onKeep={() => onKeeperChange(photo.id)}
+                  needsReview={
+                    group.reviewPhotoIds?.includes(photo.id) ?? false
+                  }
+                  onDecisionChange={(decision) =>
+                    onDecisionChange(photo.id, decision)
+                  }
                   onPreview={() => onPreview(photo.id)}
-                  pendingDelete={enabled && photo.id !== keeperId}
                   photo={photo}
+                  recommended={photo.id === group.recommendedKeepId}
                   t={t}
                 />
               ))}
@@ -377,33 +454,61 @@ const DuplicatePhotoGrid = memo(function DuplicatePhotoGrid({
 });
 
 const DuplicateGroupCard = memo(function DuplicateGroupCard({
+  decisions,
+  busy,
+  decisionSummary,
   enabled,
   group,
   detailError,
   loadingPhotos,
-  keeperId,
   onDismiss,
+  onApplyKeepCount,
+  onDecisionChange,
   onLoadMore,
-  onKeeperChange,
   onPreview,
   onToggleEnabled,
   photos,
   t,
 }: {
+  decisions: Record<number, DuplicatePhotoDecision>;
+  busy: boolean;
+  decisionSummary: DuplicateDecisionSummary;
   enabled: boolean;
   group: DuplicateGroupSummary;
   detailError: boolean;
   loadingPhotos: boolean;
-  keeperId: number;
   onDismiss: () => void;
+  onApplyKeepCount: (count: number) => void;
+  onDecisionChange: (photoId: number, decision: DuplicatePhotoDecision) => void;
   onLoadMore: () => void;
-  onKeeperChange: (photoId: number) => void;
   onPreview: (photoId: number) => void;
   onToggleEnabled: () => void;
   photos: DuplicatePhoto[];
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
+  const [keepCountValue, setKeepCountValue] = useState("");
   const dismissed = group.status === "dismissed";
+  const keepCountOptions = useMemo(
+    () =>
+      [...new Set([1, 2, 3, group.photoCount])]
+        .filter((count) => count >= 1 && count <= group.photoCount)
+        .sort((left, right) => left - right)
+        .map((count) => ({
+          label:
+            count === group.photoCount
+              ? t("duplicateKeepAll")
+              : t("duplicateKeepCountOption", { count }),
+          value: String(count),
+        })),
+    [group.photoCount, t]
+  );
+  const normalizedKeepCount = keepCountValue.trim();
+  const parsedKeepCount = Number.parseInt(normalizedKeepCount, 10);
+  const keepCountIsValid =
+    INTEGER_INPUT_PATTERN.test(normalizedKeepCount) &&
+    Number.isSafeInteger(parsedKeepCount) &&
+    parsedKeepCount >= 1 &&
+    parsedKeepCount <= group.photoCount;
   let toggleClass = "bg-muted text-muted-foreground hover:text-foreground";
   if (enabled) {
     toggleClass = "bg-destructive/10 text-destructive hover:bg-destructive/15";
@@ -459,31 +564,65 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
               </AppTooltipContent>
             </AppTooltip>
           ) : null}
-          {!dismissed && enabled ? (
+          {dismissed ? null : (
             <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive">
-              {t("duplicateWillCleanCount", { count: group.photoCount - 1 })}
+              {t("duplicateDecisionSummary", {
+                deleteCount: decisionSummary.deletePhotoIds.length,
+                keepCount: decisionSummary.keepPhotoIds.length,
+                undecidedCount: decisionSummary.undecidedCount,
+              })}
             </span>
-          ) : null}
+          )}
         </div>
         <div className="flex max-w-full flex-wrap items-center gap-2">
           {dismissed ? null : (
-            <button
-              className={`rounded-[5px] px-2.5 py-1 text-[11px] transition-colors ${toggleClass}`}
-              onClick={onToggleEnabled}
-              type="button"
-            >
-              {enabled
-                ? t("duplicateRemoveFromCleanup")
-                : t("duplicateConfirmGroup")}
-            </button>
+            <div className="flex max-w-full flex-wrap items-center gap-2">
+              <FilterDropdown
+                ariaLabel={t("duplicateApplyKeepCount")}
+                className="h-7 w-[8rem] text-[11px] disabled:opacity-100"
+                disabled={busy}
+                editable
+                onChange={setKeepCountValue}
+                options={keepCountOptions}
+                placeholder={t("duplicateApplyKeepCount")}
+                value={keepCountValue}
+              />
+              <button
+                className="rounded-[5px] border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed"
+                disabled={busy || !keepCountIsValid}
+                onClick={() => {
+                  onApplyKeepCount(parsedKeepCount);
+                  setKeepCountValue("");
+                }}
+                type="button"
+              >
+                {t("duplicateKeepCountConfirm")}
+              </button>
+              <button
+                className={`rounded-[5px] px-2.5 py-1 text-[11px] transition-colors ${toggleClass} disabled:cursor-not-allowed`}
+                disabled={busy || !(decisionSummary.complete || enabled)}
+                onClick={onToggleEnabled}
+                type="button"
+              >
+                {enabled
+                  ? t("duplicateRemoveFromCleanup")
+                  : t("duplicateConfirmGroup")}
+              </button>
+            </div>
           )}
           {dismissed ? (
-            <span className="text-[11px] text-muted-foreground">
-              {t("duplicateIgnored")}
-            </span>
+            <button
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+              disabled={busy}
+              onClick={onDismiss}
+              type="button"
+            >
+              {t("duplicateUnignoreGroup")}
+            </button>
           ) : (
             <button
               className="text-[11px] text-muted-foreground hover:text-foreground"
+              disabled={busy}
               onClick={onDismiss}
               type="button"
             >
@@ -493,12 +632,12 @@ const DuplicateGroupCard = memo(function DuplicateGroupCard({
         </div>
       </header>
       <DuplicatePhotoGrid
-        enabled={enabled}
+        busy={busy || dismissed}
+        decisions={decisions}
         error={detailError}
         group={group}
-        keeperId={keeperId}
         loading={loadingPhotos}
-        onKeeperChange={onKeeperChange}
+        onDecisionChange={onDecisionChange}
         onLoadMore={onLoadMore}
         onPreview={onPreview}
         photos={photos}
@@ -543,6 +682,7 @@ function DuplicateQueryError({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate review coordinates scan, persisted decisions, immutable plans, and responsive confirmation state.
 export function DuplicatesPage() {
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
@@ -551,11 +691,18 @@ export function DuplicatesPage() {
   const parentRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<GroupFilter>("all");
-  const [keeperByGroup, setKeeperByGroup] = useState<Record<string, number>>(
-    {}
-  );
-  const [enabledGroups, setEnabledGroups] = useState<Set<string>>(new Set());
-  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [enabledGroups, setEnabledGroups] = useState<
+    Record<string, number | undefined>
+  >({});
+  const savingGroupKeys = useRef(new Set<string>());
+  const [savingGroups, setSavingGroups] = useState<Record<string, boolean>>({});
+  const [cleanupPlan, setCleanupPlan] =
+    useState<DuplicateCleanupPlanResult | null>(null);
+  const [cleanupDialogOpen, setCleanupDialogOpen] = useState(false);
+  const [keepCountRequest, setKeepCountRequest] = useState<{
+    count: number;
+    group: DuplicateGroupSummary;
+  } | null>(null);
   const [previewState, setPreviewState] = useState<{
     groupKey: string;
     photoId: number;
@@ -603,6 +750,13 @@ export function DuplicatesPage() {
     refetch,
   } = useDuplicatesQuery();
   const groups = data?.groups ?? EMPTY_GROUPS;
+  const decisionsByGroup = useMemo(
+    () =>
+      Object.fromEntries(
+        groups.map((group) => [group.groupKey, group.reviewDecisions ?? {}])
+      ),
+    [groups]
+  );
   const activeGroups = groups.filter((group) => group.status === "active");
   const previewPhotos = useMemo(() => {
     if (!previewState) {
@@ -644,41 +798,97 @@ export function DuplicatesPage() {
     });
   }, [groups]);
 
-  useEffect(() => {
-    setKeeperByGroup((previous) => {
-      const next = { ...previous };
-      for (const group of groups) {
-        if (!(group.groupKey in next)) {
-          next[group.groupKey] = group.recommendedKeepId;
+  const applySavedReview = (review: DuplicateReviewState) => {
+    queryClient.setQueryData<DuplicatesResult>(
+      ["duplicates"],
+      (previous) =>
+        previous && {
+          ...previous,
+          groups: previous.groups.map((group) =>
+            group.groupKey === review.groupKey
+              ? {
+                  ...group,
+                  groupVersion: review.groupVersion,
+                  reviewRevision: review.reviewRevision,
+                  reviewComplete: review.complete,
+                  reviewNeedsReview: review.needsReview,
+                  reviewDecisions: Object.fromEntries(
+                    review.members.map((member) => [
+                      member.photoId,
+                      member.decision,
+                    ])
+                  ),
+                  reviewPhotoIds: review.members
+                    .filter(
+                      (member) =>
+                        member.needsReview && member.decision !== "UNDECIDED"
+                    )
+                    .map((member) => member.photoId),
+                }
+              : group
+          ),
         }
+    );
+  };
+
+  const saveDecisions = async (
+    group: DuplicateGroupSummary,
+    decisions: Array<{ photoId: number; decision: DuplicatePhotoDecision }>,
+    confirm = false
+  ) => {
+    if (
+      savingGroupKeys.current.has(group.groupKey) ||
+      !group.groupVersion ||
+      group.reviewRevision === undefined
+    ) {
+      return;
+    }
+    savingGroupKeys.current.add(group.groupKey);
+    setSavingGroups((previous) => ({ ...previous, [group.groupKey]: true }));
+    setEnabledGroups((previous) => ({
+      ...previous,
+      [group.groupKey]: undefined,
+    }));
+    try {
+      await queryClient.cancelQueries({ queryKey: ["duplicates"] });
+      const result = await duplicateActions.updateReview({
+        groupKey: group.groupKey,
+        groupVersion: group.groupVersion,
+        expectedReviewRevision: group.reviewRevision,
+        decisions,
+      });
+      applySavedReview(result);
+      if (confirm && result.complete) {
+        setEnabledGroups((previous) => ({
+          ...previous,
+          [group.groupKey]: result.reviewRevision,
+        }));
       }
-      return next;
-    });
-    setEnabledGroups((previous) => {
-      const validKeys = new Set(groups.map((group) => group.groupKey));
-      const next = new Set([...previous].filter((key) => validKeys.has(key)));
-      for (const group of groups) {
-        if (
-          group.status === "active" &&
-          group.matchType === "exact" &&
-          !previous.has(group.groupKey)
-        ) {
-          next.add(group.groupKey);
-        }
-      }
-      return next;
-    });
-  }, [groups]);
+    } catch (error) {
+      toast.error(t(duplicateErrorKey(error, "duplicateReviewSaveFailed")));
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+    } finally {
+      savingGroupKeys.current.delete(group.groupKey);
+      setSavingGroups((previous) => ({ ...previous, [group.groupKey]: false }));
+    }
+  };
 
   const rescan = useMutation({
     mutationFn: () => duplicateActions.scan(true) as Promise<DuplicatesResult>,
-    onSuccess: (result) => queryClient.setQueryData(["duplicates"], result),
-    onError: () => toast.error(t("duplicateScanFailed")),
+    onSuccess: (result) => {
+      setEnabledGroups({});
+      queryClient.setQueryData(["duplicates"], result);
+    },
+    onError: (error) =>
+      toast.error(t(duplicateErrorKey(error, "duplicateScanFailed"))),
   });
 
   const dismiss = useMutation({
     mutationFn: (group: DuplicateGroupSummary) =>
-      duplicateActions.dismissGroup(group.groupKey),
+      duplicateActions.dismissGroup(
+        group.groupKey,
+        group.status !== "dismissed"
+      ),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["duplicates"] }),
     onError: () => toast.error(t("duplicateIgnoreFailed")),
@@ -752,62 +962,177 @@ export function DuplicatesPage() {
     }
   };
 
-  const cleanupGroups = activeGroups.filter((group) =>
-    enabledGroups.has(group.groupKey)
+  const decisionSummaries = useMemo(() => {
+    const summaries: Record<string, DuplicateDecisionSummary> = {};
+    for (const group of activeGroups) {
+      summaries[group.groupKey] = getDuplicateDecisionSummary(
+        group,
+        decisionsByGroup[group.groupKey] ?? {}
+      );
+    }
+    return summaries;
+  }, [activeGroups, decisionsByGroup]);
+  const selectedGroups = activeGroups.filter(
+    (group) =>
+      enabledGroups[group.groupKey] !== undefined &&
+      enabledGroups[group.groupKey] === group.reviewRevision &&
+      !savingGroups[group.groupKey]
   );
+  const cleanupGroups = selectedGroups.filter((group) => {
+    const summary = decisionSummaries[group.groupKey];
+    return Boolean(
+      summary?.complete &&
+        summary.keepPhotoIds.length > 0 &&
+        summary.deletePhotoIds.length > 0 &&
+        !group.reviewNeedsReview
+    );
+  });
   const cleanupCount = cleanupGroups.reduce(
-    (sum, group) => sum + group.photoCount - 1,
+    (sum, group) =>
+      sum + (decisionSummaries[group.groupKey]?.deletePhotoIds.length ?? 0),
     0
   );
-  const cleanupExactCount = cleanupGroups
-    .filter((group) => group.matchType === "exact")
-    .reduce((sum, group) => sum + group.photoCount - 1, 0);
-  const cleanupExactGroups = cleanupGroups.filter(
-    (group) => group.matchType === "exact"
-  ).length;
-  const cleanupSimilarCount = cleanupGroups
-    .filter((group) => group.matchType === "similar")
-    .reduce((sum, group) => sum + group.photoCount - 1, 0);
-  const cleanupSimilarGroups = cleanupGroups.filter(
-    (group) => group.matchType === "similar"
-  ).length;
   const cleanupOutsideFilterCount = cleanupGroups
     .filter((group) => filter !== "all" && group.matchType !== filter)
-    .reduce((sum, group) => sum + group.photoCount - 1, 0);
-  const reclaimBytes = cleanupGroups.reduce(
-    (sum, group) =>
+    .reduce(
+      (sum, group) =>
+        sum + (decisionSummaries[group.groupKey]?.deletePhotoIds.length ?? 0),
+      0
+    );
+  const reclaimBytes = cleanupGroups.reduce((sum, group) => {
+    const summary = decisionSummaries[group.groupKey];
+    if (!summary) {
+      return sum;
+    }
+    return (
       sum +
-      estimateReclaimBytes(
-        group,
-        photosByGroup[group.groupKey] ?? group.previewPhotos,
-        keeperByGroup[group.groupKey] ?? group.recommendedKeepId
-      ),
-    0
-  );
+      summary.deletePhotoIds.reduce(
+        (photoSum, photoId) =>
+          photoSum + (group.fileSizeByPhotoId?.[photoId] ?? 0),
+        0
+      )
+    );
+  }, 0);
 
-  const cleanup = useMutation({
-    mutationFn: () =>
-      duplicateActions.cleanGroups(
-        cleanupGroups.map((group) => ({
+  const createCleanupPlan = useMutation({
+    mutationFn: () => {
+      const groups = cleanupGroups.map((group) => {
+        const summary = decisionSummaries[group.groupKey];
+        if (
+          !summary ||
+          group.groupVersion === undefined ||
+          group.reviewRevision === undefined
+        ) {
+          throw new Error("Duplicate group review is stale; rescan first");
+        }
+        return {
+          deletePhotoIds: summary.deletePhotoIds,
           groupKey: group.groupKey,
-          keepPhotoId: keeperByGroup[group.groupKey] ?? group.recommendedKeepId,
-        }))
-      ),
-    onSuccess: async (result) => {
-      setConfirmCleanup(false);
-      setEnabledGroups(new Set());
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["duplicates"] }),
-        queryClient.invalidateQueries({ queryKey: ["photos"] }),
-        queryClient.invalidateQueries({ queryKey: ["folders"] }),
-      ]);
-      toast.success(t("duplicateCleanupSuccess", { count: result.deleted }));
+          groupVersion: group.groupVersion,
+          keepPhotoIds: summary.keepPhotoIds,
+          matchType: group.matchType,
+          reviewRevision: group.reviewRevision,
+        };
+      });
+      return duplicateActions.createCleanupPlan({ groups });
     },
-    onError: () => {
-      setConfirmCleanup(false);
-      toast.error(t("duplicateDeleteFailed"));
+    onError: (error) => {
+      toast.error(t(duplicateErrorKey(error, "duplicateCleanupPlanFailed")));
+    },
+    onSuccess: (plan) => {
+      setCleanupPlan(plan);
+      setCleanupDialogOpen(true);
     },
   });
+
+  const executeCleanupPlan = useMutation({
+    mutationFn: (planId: string) => duplicateActions.executeCleanupPlan(planId),
+    onError: (error) => {
+      toast.error(t(duplicateErrorKey(error, "duplicateCleanupExecuteFailed")));
+      setCleanupPlan(null);
+      setCleanupDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+    },
+    onSuccess: (result) => {
+      setCleanupPlan(null);
+      setCleanupDialogOpen(false);
+      setEnabledGroups({});
+      queryClient.invalidateQueries({
+        queryKey: ["duplicate-cleanup-batches"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+      toast.success(
+        t("duplicateCleanupSuccess", { count: result.deletedCount })
+      );
+    },
+  });
+
+  const applyKeepCount = useMutation({
+    mutationFn: ({
+      count,
+      group,
+    }: {
+      count: number;
+      group: DuplicateGroupSummary;
+    }) => {
+      if (
+        group.groupVersion === undefined ||
+        group.reviewRevision === undefined
+      ) {
+        throw new Error("Duplicate group review is stale; rescan first");
+      }
+      return duplicateActions.applyKeepCount({
+        count,
+        expectedReviewRevision: group.reviewRevision,
+        groupKey: group.groupKey,
+        groupVersion: group.groupVersion,
+      });
+    },
+    onError: () => toast.error(t("duplicateReviewSaveFailed")),
+    onSuccess: (result, variables) => {
+      applySavedReview(result);
+      setKeepCountRequest(null);
+      setEnabledGroups((previous) => ({
+        ...previous,
+        [variables.group.groupKey]: undefined,
+      }));
+    },
+  });
+
+  const requestApplyKeepCount = (
+    group: DuplicateGroupSummary,
+    count: number
+  ) => {
+    const summary = decisionSummaries[group.groupKey];
+    if (
+      summary &&
+      (summary.keepPhotoIds.length > 0 || summary.deletePhotoIds.length > 0)
+    ) {
+      setKeepCountRequest({ count, group });
+      return;
+    }
+    applyKeepCount.mutate({ count, group });
+  };
+
+  const scanBusy = isFetching || rescan.isPending;
+  const [showScanProgress, setShowScanProgress] = useState(false);
+  useEffect(() => {
+    if (!scanBusy) {
+      setShowScanProgress(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowScanProgress(true), 300);
+    return () => clearTimeout(timer);
+  }, [scanBusy]);
+  const reviewBusy =
+    Object.values(savingGroups).some(Boolean) || applyKeepCount.isPending;
+  const progress = useQuery({
+    queryKey: ["duplicate-scan-progress"],
+    queryFn: duplicateActions.getScanProgress,
+    enabled: scanBusy,
+    refetchInterval: scanBusy ? 500 : false,
+  });
+  const cancelScan = useMutation({ mutationFn: duplicateActions.cancelScan });
 
   const filteredGroups = useMemo(() => {
     if (filter === "dismissed") {
@@ -859,7 +1184,7 @@ export function DuplicatesPage() {
 
   return (
     <div
-      className="flex h-full min-w-0 flex-col bg-background"
+      className="relative flex h-full min-w-0 flex-col bg-background"
       data-surface="page"
     >
       <header className="border-border border-b px-4 py-3 sm:px-6">
@@ -909,9 +1234,10 @@ export function DuplicatesPage() {
             <div />
           )}
           <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 lg:ml-0 lg:justify-self-end">
+            <DuplicateCleanupBatches />
             <button
-              className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5 disabled:opacity-40"
-              disabled={rescan.isPending}
+              className="flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 font-medium text-[13px] text-foreground transition-colors hover:bg-foreground/5"
+              disabled={scanBusy || reviewBusy}
               onClick={() => rescan.mutate()}
               type="button"
             >
@@ -920,10 +1246,18 @@ export function DuplicatesPage() {
               />
               {t("rescan")}
             </button>
+
             <button
-              className="flex items-center gap-1.5 rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-              disabled={cleanupCount === 0 || cleanup.isPending}
-              onClick={() => setConfirmCleanup(true)}
+              className="flex items-center gap-1.5 rounded-[6px] bg-destructive px-4 py-1.5 font-medium text-[13px] text-white transition-opacity hover:opacity-90 data-[unavailable=true]:opacity-40"
+              data-unavailable={cleanupGroups.length === 0}
+              disabled={
+                cleanupGroups.length === 0 ||
+                createCleanupPlan.isPending ||
+                executeCleanupPlan.isPending ||
+                scanBusy ||
+                reviewBusy
+              }
+              onClick={() => createCleanupPlan.mutate()}
               type="button"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -948,6 +1282,31 @@ export function DuplicatesPage() {
           </div>
         </div>
       </header>
+
+      {scanBusy && showScanProgress ? (
+        <div
+          className="absolute right-4 bottom-4 left-4 z-50 flex max-w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background/95 px-4 py-2 text-xs shadow-sm"
+          role="status"
+        >
+          <span>
+            {t("duplicateScanProgress", {
+              stage: t(
+                `duplicateScanStage_${progress.data?.stage ?? "queued"}`
+              ),
+              count: progress.data?.processed ?? 0,
+              total: progress.data?.total ?? 0,
+            })}
+          </span>
+          <button
+            className="rounded border border-border px-3 py-1"
+            disabled={cancelScan.isPending}
+            onClick={() => cancelScan.mutate()}
+            type="button"
+          >
+            {t("cancel")}
+          </button>
+        </div>
+      ) : null}
 
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <nav
@@ -1037,7 +1396,8 @@ export function DuplicatesPage() {
             >
               {virtualizer.getVirtualItems().map((item) => {
                 const group = filteredGroups[item.index];
-                const loadedPhotos = photosByGroup[group.groupKey] ?? [];
+                const loadedPhotos =
+                  photosByGroup[group.groupKey] ?? group.previewPhotos;
                 const currentDetailState = detailState[group.groupKey] ?? {
                   error: false,
                   hasMore: loadedPhotos.length < group.photoCount,
@@ -1053,20 +1413,34 @@ export function DuplicatesPage() {
                     style={{ transform: `translateY(${item.start}px)` }}
                   >
                     <DuplicateGroupCard
+                      busy={
+                        Boolean(savingGroups[group.groupKey]) ||
+                        applyKeepCount.isPending ||
+                        scanBusy
+                      }
+                      decisionSummary={
+                        decisionSummaries[group.groupKey] ?? {
+                          complete: false,
+                          deletePhotoIds: [],
+                          keepPhotoIds: [],
+                          undecidedCount: group.photoCount,
+                        }
+                      }
+                      decisions={decisionsByGroup[group.groupKey] ?? {}}
                       detailError={currentDetailState.error}
-                      enabled={enabledGroups.has(group.groupKey)}
+                      enabled={
+                        enabledGroups[group.groupKey] !== undefined &&
+                        enabledGroups[group.groupKey] === group.reviewRevision
+                      }
                       group={group}
-                      keeperId={
-                        keeperByGroup[group.groupKey] ?? group.recommendedKeepId
-                      }
                       loadingPhotos={currentDetailState.loading}
-                      onDismiss={() => dismiss.mutate(group)}
-                      onKeeperChange={(photoId) =>
-                        setKeeperByGroup((previous) => ({
-                          ...previous,
-                          [group.groupKey]: photoId,
-                        }))
+                      onApplyKeepCount={(count) =>
+                        requestApplyKeepCount(group, count)
                       }
+                      onDecisionChange={(photoId, decision) => {
+                        saveDecisions(group, [{ photoId, decision }]);
+                      }}
+                      onDismiss={() => dismiss.mutate(group)}
                       onLoadMore={() => loadGroupPhotos(group.groupKey)}
                       onPreview={(photoId) =>
                         setPreviewState({
@@ -1074,17 +1448,27 @@ export function DuplicatesPage() {
                           photoId,
                         })
                       }
-                      onToggleEnabled={() =>
-                        setEnabledGroups((previous) => {
-                          const next = new Set(previous);
-                          if (next.has(group.groupKey)) {
-                            next.delete(group.groupKey);
-                          } else {
-                            next.add(group.groupKey);
-                          }
-                          return next;
-                        })
-                      }
+                      onToggleEnabled={() => {
+                        if (
+                          enabledGroups[group.groupKey] === group.reviewRevision
+                        ) {
+                          setEnabledGroups((previous) => ({
+                            ...previous,
+                            [group.groupKey]: undefined,
+                          }));
+                          return;
+                        }
+                        saveDecisions(
+                          group,
+                          Object.entries(group.reviewDecisions ?? {}).map(
+                            ([photoId, decision]) => ({
+                              photoId: Number(photoId),
+                              decision,
+                            })
+                          ),
+                          true
+                        );
+                      }}
                       photos={loadedPhotos}
                       t={t}
                     />
@@ -1126,24 +1510,74 @@ export function DuplicatesPage() {
       ) : null}
 
       <ConfirmDialog
-        confirmText={
-          cleanup.isPending ? t("deleting") : t("duplicateConfirmCleanup")
+        confirmText={t("duplicateConfirmCleanup")}
+        description={
+          cleanupPlan
+            ? t("duplicateCleanupDescription", {
+                exactCount: cleanupPlan.groups
+                  .filter((group) => group.matchType === "exact")
+                  .reduce(
+                    (total, group) => total + group.deletePhotoIds.length,
+                    0
+                  ),
+                exactGroups: cleanupPlan.groups.filter(
+                  (group) => group.matchType === "exact"
+                ).length,
+                groups: cleanupPlan.groups.length,
+                count: cleanupPlan.deleteCount,
+                similarCount: cleanupPlan.groups
+                  .filter((group) => group.matchType === "similar")
+                  .reduce(
+                    (total, group) => total + group.deletePhotoIds.length,
+                    0
+                  ),
+                similarGroups: cleanupPlan.groups.filter(
+                  (group) => group.matchType === "similar"
+                ).length,
+                size: formatFileSize(cleanupPlan.deleteBytes),
+              })
+            : undefined
         }
-        description={t("duplicateCleanupDescription", {
-          groups: cleanupGroups.length,
-          count: cleanupCount,
-          exactCount: cleanupExactCount,
-          exactGroups: cleanupExactGroups,
-          similarCount: cleanupSimilarCount,
-          similarGroups: cleanupSimilarGroups,
-          size: formatFileSize(reclaimBytes),
-        })}
         destructive
-        disabled={cleanup.isPending}
-        onCancel={() => setConfirmCleanup(false)}
-        onConfirm={() => cleanup.mutate()}
-        open={confirmCleanup}
+        disabled={executeCleanupPlan.isPending}
+        onCancel={() => {
+          if (!executeCleanupPlan.isPending) {
+            setCleanupDialogOpen(false);
+          }
+        }}
+        onConfirm={() => {
+          if (cleanupPlan) {
+            executeCleanupPlan.mutate(cleanupPlan.planId);
+          }
+        }}
+        open={cleanupDialogOpen}
         title={t("duplicateCleanupTitle")}
+      />
+
+      <ConfirmDialog
+        confirmText={t("duplicateKeepCountConfirm")}
+        description={
+          keepCountRequest
+            ? t("duplicateKeepCountDescription", {
+                count: keepCountRequest.count,
+                deleteCount:
+                  keepCountRequest.group.photoCount - keepCountRequest.count,
+              })
+            : undefined
+        }
+        disabled={applyKeepCount.isPending}
+        onCancel={() => {
+          if (!applyKeepCount.isPending) {
+            setKeepCountRequest(null);
+          }
+        }}
+        onConfirm={() => {
+          if (keepCountRequest) {
+            applyKeepCount.mutate(keepCountRequest);
+          }
+        }}
+        open={keepCountRequest !== null}
+        title={t("duplicateKeepCountTitle")}
       />
     </div>
   );

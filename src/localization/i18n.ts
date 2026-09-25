@@ -1,4 +1,4 @@
-﻿import i18n from "i18next";
+import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import { LOCAL_STORAGE_KEYS } from "@/constants";
 
@@ -1704,12 +1704,26 @@ i18n.use(initReactI18next).init({
         duplicatePhotoCount: "{{count}} 张照片",
         duplicateWillCleanCount: "将清理 {{count}} 张",
         duplicateKeep: "保留",
+        duplicateDecisionKeep: "保留",
+        duplicateDecisionDelete: "删除",
+        duplicateDecisionUndecided: "待决定",
+        duplicateDecisionSummary:
+          "保留 {{keepCount}} · 删除 {{deleteCount}} · 待决定 {{undecidedCount}}",
+        duplicateApplyKeepCount: "按数量选择保留",
+        duplicateKeepCountOption: "保留 {{count}} 张",
+        duplicateKeepAll: "全部保留",
+        duplicateKeepCountTitle: "应用保留数量",
+        duplicateKeepCountDescription:
+          "将按规则排序保留前 {{count}} 张，其余 {{deleteCount}} 张标记为删除；已有审核决定会被覆盖。",
+        duplicateKeepCountConfirm: "应用数量",
+        duplicateRecommended: "推荐保留",
         duplicatePreviewPhoto: "预览照片",
         duplicateSetKeeper: "设为保留",
         duplicateRemoveFromCleanup: "移出待清理",
         duplicateConfirmGroup: "确认清理此组",
         duplicateIgnoreGroup: "忽略整组",
         duplicateIgnored: "已忽略",
+        duplicateUnignoreGroup: "取消忽略",
         duplicateSimilarManualHint:
           "视觉相似照片可能并非真正重复，请确认保留项后再将此组加入清理。",
         duplicateManualReview: "需人工确认",
@@ -1729,10 +1743,52 @@ i18n.use(initReactI18next).init({
           "将从 {{groups}} 个重复组中把 {{count}} 张照片移入本应用的“最近删除”（完全相同 {{exactGroups}} 组 / {{exactCount}} 张，视觉相似 {{similarGroups}} 组 / {{similarCount}} 张），待清理大小 {{size}}。每组指定的保留项不会被清理；其他相册和标签关系不会被改写，照片在最近删除期间会从图库视图隐藏。原文件暂不移动，空间要到系统回收站清空后才会释放。",
         duplicateConfirmCleanup: "移入最近删除",
         duplicateCleanupSuccess: "已将 {{count}} 张重复照片移入最近删除",
+        duplicateCleanupPlanFailed: "创建清理计划失败，请刷新后重试",
+        duplicateCleanupExecuteFailed: "执行清理计划失败，照片未被部分清理",
+        duplicateCleanupRestoreAvailable: "本批次可在 30 天内撤销",
+        duplicateCleanupRestoreButton: "撤销本批次",
+        duplicateCleanupRestoreButtonForBatch: "撤销清理批次 {{id}}",
+        duplicateCleanupRestoreSuccess: "已恢复本批次 {{count}} 张照片",
+        duplicateCleanupRestoreFailed: "批次恢复失败，请从最近删除重试",
         duplicateScanFailed: "重复照片扫描失败",
         duplicateDetailsLoadFailed: "重复照片详情加载失败",
         duplicateDetailsRetry: "重试加载",
         duplicateIgnoreFailed: "忽略重复组失败",
+        duplicateSavingReview: "保存中…",
+        duplicateNeedsReview: "照片或检测依据已变化，请重新确认",
+        duplicateCleanupHistoryHint:
+          "按清理批次恢复照片。失败的文件会保留在此处，处理后可以重试。",
+        duplicateCleanupHistory: "清理批次与恢复（{{count}}）",
+        duplicateCleanupBatchLabel: "{{date}} · 尚有 {{count}} 张可恢复",
+        duplicateCleanupRestorePartial:
+          "已恢复 {{count}} 张，{{failed}} 张失败，请检查后重试",
+        duplicateCleanupRestoreFailureHint:
+          "以下照片恢复失败。请确认原文件仍在原位置，且未被其他批次重新删除。",
+        duplicateBatchLoadFailed: "清理批次加载失败，点击重试",
+        duplicateScanProgress: "{{stage}} · {{count}} / {{total}}",
+        duplicateScanStage_idle: "准备扫描",
+        duplicateScanStage_queued: "等待扫描",
+        duplicateScanStage_hashing: "检查文件",
+        duplicateScanStage_matching: "查找相似照片",
+        duplicateScanStage_verifying: "验证照片内容",
+        duplicateScanStage_publishing: "保存扫描结果",
+        duplicateScanStage_completed: "扫描完成",
+        duplicateScanStage_cancelled: "扫描已取消",
+        duplicateScanStage_failed: "扫描失败",
+        duplicateScanCancelled: "扫描已取消，保留上一次完整结果",
+        duplicatePlanExpired: "清理确认已过期，请重新生成清理计划",
+        duplicateSourceMissing: "原文件无法读取，请检查文件位置后重试",
+        duplicateFileChanged: "照片文件已变化，请重新扫描并审核",
+        duplicateVectorUnavailable: "AI 验证暂不可用，请在索引完成后重试",
+        duplicateReviewStale: "照片或检测结果已变化，请重新扫描并确认选择",
+        duplicateNoKeeper: "请至少保留一张照片",
+        duplicateReviewSaveFailed: "保存重复照片审核状态失败，请刷新后重试",
+        duplicateSensitivity: "检测敏感度",
+        duplicateSensitivityStrict: "严格",
+        duplicateSensitivityStandard: "标准",
+        duplicateSensitivityLoose: "宽松",
+        duplicateSensitivityUpdated: "重复检测敏感度已更新，将在下次扫描生效",
+        duplicateSensitivityUpdateFailed: "更新重复检测敏感度失败",
         duplicateNoIgnored: "暂无已忽略的重复组",
         peopleCount: "{{count}} 个人物分组",
         peopleDescription: "人脸识别与人物管理",
@@ -3947,12 +4003,26 @@ i18n.use(initReactI18next).init({
         duplicatePhotoCount: "{{count}} photos",
         duplicateWillCleanCount: "{{count}} to clean",
         duplicateKeep: "Keep",
+        duplicateDecisionKeep: "Keep",
+        duplicateDecisionDelete: "Delete",
+        duplicateDecisionUndecided: "Undecided",
+        duplicateDecisionSummary:
+          "Keep {{keepCount}} · Delete {{deleteCount}} · Undecided {{undecidedCount}}",
+        duplicateApplyKeepCount: "Choose keep count",
+        duplicateKeepCountOption: "Keep {{count}} photos",
+        duplicateKeepAll: "Keep all",
+        duplicateKeepCountTitle: "Apply keep count",
+        duplicateKeepCountDescription:
+          "Keep the first {{count}} photos by the deterministic rule order and mark the remaining {{deleteCount}} for deletion. Existing review decisions will be replaced.",
+        duplicateKeepCountConfirm: "Apply count",
+        duplicateRecommended: "Recommended",
         duplicatePreviewPhoto: "Preview photo",
         duplicateSetKeeper: "Set as keeper",
         duplicateRemoveFromCleanup: "Remove from cleanup",
         duplicateConfirmGroup: "Confirm this group",
         duplicateIgnoreGroup: "Ignore group",
         duplicateIgnored: "Ignored",
+        duplicateUnignoreGroup: "Unignore group",
         duplicateSimilarManualHint:
           "Visually similar photos may not be true duplicates. Review the keeper before adding this group to cleanup.",
         duplicateManualReview: "Review required",
@@ -3974,10 +4044,66 @@ i18n.use(initReactI18next).init({
         duplicateConfirmCleanup: "Move to Recently Deleted",
         duplicateCleanupSuccess:
           "Moved {{count}} duplicate photos to Recently Deleted",
+        duplicateCleanupPlanFailed:
+          "Could not create a cleanup plan. Refresh and try again.",
+        duplicateCleanupExecuteFailed:
+          "Could not execute the cleanup plan. No partial cleanup was applied.",
+        duplicateCleanupRestoreAvailable:
+          "This batch can be undone within 30 days",
+        duplicateCleanupRestoreButton: "Undo this batch",
+        duplicateCleanupRestoreButtonForBatch: "Undo cleanup batch {{id}}",
+        duplicateCleanupRestoreSuccess:
+          "Restored {{count}} photos from this batch",
+        duplicateCleanupRestoreFailed:
+          "Could not restore this batch. Try again from Recently Deleted.",
         duplicateScanFailed: "Duplicate scan failed",
         duplicateDetailsLoadFailed: "Failed to load duplicate photo details",
         duplicateDetailsRetry: "Retry loading",
         duplicateIgnoreFailed: "Failed to ignore duplicate group",
+        duplicateSavingReview: "Saving…",
+        duplicateNeedsReview: "Photo or detection changed. Confirm again.",
+        duplicateCleanupHistoryHint:
+          "Restore photos by cleanup batch. Failed files remain available here for retry.",
+        duplicateCleanupHistory: "Cleanup batches and recovery ({{count}})",
+        duplicateCleanupBatchLabel: "{{date}} · {{count}} photos remaining",
+        duplicateCleanupRestorePartial:
+          "Restored {{count}} photos; {{failed}} failed. Check and retry.",
+        duplicateCleanupRestoreFailureHint:
+          "Could not restore the following photos. Check their original files and whether another batch deleted them again.",
+        duplicateBatchLoadFailed:
+          "Could not load cleanup batches. Click to retry.",
+        duplicateScanProgress: "{{stage}} · {{count}} / {{total}}",
+        duplicateScanStage_idle: "Preparing scan",
+        duplicateScanStage_queued: "Waiting to scan",
+        duplicateScanStage_hashing: "Checking files",
+        duplicateScanStage_matching: "Finding similar photos",
+        duplicateScanStage_verifying: "Verifying file content",
+        duplicateScanStage_publishing: "Saving results",
+        duplicateScanStage_completed: "Scan complete",
+        duplicateScanStage_cancelled: "Scan cancelled",
+        duplicateScanStage_failed: "Scan failed",
+        duplicateScanCancelled:
+          "Scan cancelled. Previous complete results were preserved.",
+        duplicatePlanExpired:
+          "Confirmation expired. Create a new cleanup plan.",
+        duplicateSourceMissing:
+          "Cannot read an original file. Check its location and retry.",
+        duplicateFileChanged: "Photo content changed. Scan and review again.",
+        duplicateVectorUnavailable:
+          "AI verification is unavailable. Retry after indexing.",
+        duplicateReviewStale:
+          "Photos or detection results changed. Scan and confirm your choices again.",
+        duplicateNoKeeper: "Keep at least one photo.",
+        duplicateReviewSaveFailed:
+          "Failed to save duplicate review state. Refresh and try again.",
+        duplicateSensitivity: "Detection sensitivity",
+        duplicateSensitivityStrict: "Strict",
+        duplicateSensitivityStandard: "Standard",
+        duplicateSensitivityLoose: "Loose",
+        duplicateSensitivityUpdated:
+          "Duplicate detection sensitivity updated; it applies to the next scan",
+        duplicateSensitivityUpdateFailed:
+          "Failed to update duplicate detection sensitivity",
         duplicateNoIgnored: "No ignored duplicate groups",
         peopleCount: "{{count}} people groups",
         peopleDescription: "Face recognition and people management",

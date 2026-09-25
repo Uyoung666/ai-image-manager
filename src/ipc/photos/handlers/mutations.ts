@@ -21,20 +21,19 @@ import { getDatabase } from "@/db";
 import {
   albumPhotos,
   albums,
-  duplicatePairs,
+  duplicateCleanupEvents,
+  duplicateCleanupPlanItems,
+  duplicateCleanupPlans,
+  duplicateReviewEvents,
+  duplicateReviewGroups,
+  duplicateReviewMembers,
   exifData,
   folders,
-  photoSequenceMembers,
   photos,
   photoTags,
 } from "@/db/schema";
 import { invalidateCountCache } from "@/ipc/photos/handlers/listing";
 import { deletePhotoVectors } from "@/services/ai-embedder";
-import {
-  type DuplicatePairRecord,
-  groupDuplicatePairs,
-  validateDuplicateCleanupGroup,
-} from "@/services/duplicate-groups";
 import {
   movePhotoFile,
   type AssetMove as PhotoAssetMove,
@@ -59,57 +58,6 @@ import {
 } from "@/services/trash-operations";
 import { BatchPhotoIdsSchema, IdSchema, TrashListSchema } from "./shared";
 import { invalidateIndexStatsCache, invalidateStatsCache } from "./stats";
-
-function loadPersistedDuplicateGroups(db: ReturnType<typeof getDatabase>) {
-  const photoRows = db
-    .select({
-      id: photos.id,
-      path: photos.path,
-      filename: photos.filename,
-      fileSize: photos.fileSize,
-      fileDate: photos.fileDate,
-      width: photos.width,
-      height: photos.height,
-      createdAt: photos.createdAt,
-      thumbnailPath: photos.thumbnailPath,
-    })
-    .from(photos)
-    .where(isNull(photos.deletedAt))
-    .all();
-  const photoMap = new Map(photoRows.map((photo) => [photo.id, photo]));
-  const sequencePhotoIds = new Set(
-    db
-      .select({ photoId: photoSequenceMembers.photoId })
-      .from(photoSequenceMembers)
-      .innerJoin(photos, eq(photos.id, photoSequenceMembers.photoId))
-      .where(isNull(photos.deletedAt))
-      .all()
-      .map((member) => member.photoId)
-  );
-  const pairs = db.select().from(duplicatePairs).all();
-  const records: DuplicatePairRecord[] = [];
-  for (const pair of pairs) {
-    const photoA = photoMap.get(pair.photoAId);
-    const photoB = photoMap.get(pair.photoBId);
-    if (
-      !(photoA && photoB) ||
-      sequencePhotoIds.has(pair.photoAId) ||
-      sequencePhotoIds.has(pair.photoBId)
-    ) {
-      continue;
-    }
-    records.push({
-      clipSimilarity: pair.clipSimilarity,
-      distance: pair.phashDistance ?? 0,
-      matchType: pair.matchType as DuplicatePairRecord["matchType"],
-      pairId: pair.id,
-      photoA,
-      photoB,
-      status: pair.status as DuplicatePairRecord["status"],
-    });
-  }
-  return groupDuplicatePairs(records);
-}
 
 /**
  * Unified hard-delete: removes photo DB records, updates folder photoCounts,
@@ -312,7 +260,7 @@ export const deletePhoto = os.input(IdSchema).handler(({ input }) => {
     }
     db.transaction(() => {
       db.update(photos)
-        .set({ deletedAt: Date.now() })
+        .set({ deletionBatchId: null, deletedAt: Date.now() })
         .where(eq(photos.id, input.id))
         .run();
       if (photo.folderId) {
@@ -358,7 +306,7 @@ export const deletePhotos = os
     }
     db.transaction(() => {
       db.update(photos)
-        .set({ deletedAt: Date.now() })
+        .set({ deletionBatchId: null, deletedAt: Date.now() })
         .where(inArray(photos.id, activeIds))
         .run();
       for (const [fid, count] of countsByFolder) {
@@ -382,108 +330,18 @@ export const cleanDuplicateGroups = os
       groups: z
         .array(
           z.object({
+            deletePhotoIds: z.array(z.number().int().positive()),
             groupKey: z.string().min(1),
-            keepPhotoId: z.number().int().positive(),
+            keepPhotoIds: z.array(z.number().int().positive()),
           })
         )
         .min(1),
     })
   )
-  .handler(({ input }) => {
-    const db = getDatabase();
-    const deleteIds = new Set<number>();
-    const keepIds = new Set<number>();
-    const claimedPairIds = new Set<number>();
-    const currentGroups = loadPersistedDuplicateGroups(db);
-    const relationById = new Map(
-      db
-        .select({
-          id: duplicatePairs.id,
-          photoAId: duplicatePairs.photoAId,
-          photoBId: duplicatePairs.photoBId,
-        })
-        .from(duplicatePairs)
-        .all()
-        .map((relation) => [relation.id, relation] as const)
+  .handler(() => {
+    throw new Error(
+      "Duplicate cleanup is disabled until a validated deletion plan is available"
     );
-
-    for (const group of input.groups) {
-      const currentGroup = currentGroups.find(
-        (candidate) => candidate.groupKey === group.groupKey
-      );
-      if (!currentGroup) {
-        throw new Error("Duplicate group is stale; rescan before cleaning");
-      }
-      const pairIds = [...new Set(currentGroup.pairIds)];
-      if (pairIds.some((id) => claimedPairIds.has(id))) {
-        throw new Error("Duplicate relationship submitted more than once");
-      }
-      const relations = currentGroup.pairIds.map((pairId) => {
-        const pair = relationById.get(pairId);
-        if (!pair) {
-          throw new Error("Duplicate group is stale; rescan before cleaning");
-        }
-        claimedPairIds.add(pair.id);
-        return pair;
-      });
-      const groupDeleteIds = validateDuplicateCleanupGroup(relations, {
-        deletePhotoIds: currentGroup.photos
-          .filter((photo) => photo.id !== group.keepPhotoId)
-          .map((photo) => photo.id),
-        keepPhotoId: group.keepPhotoId,
-        pairIds,
-      });
-      keepIds.add(group.keepPhotoId);
-      for (const id of groupDeleteIds) {
-        deleteIds.add(id);
-      }
-    }
-
-    if ([...keepIds].some((id) => deleteIds.has(id))) {
-      throw new Error("A keeper cannot be deleted by another group");
-    }
-
-    const targetPhotos = db
-      .select({ id: photos.id, folderId: photos.folderId })
-      .from(photos)
-      .where(
-        and(
-          inArray(photos.id, [...deleteIds]),
-          sql`${photos.deletedAt} IS NULL`
-        )
-      )
-      .all();
-    if (targetPhotos.length === 0) {
-      return { deleted: 0 };
-    }
-
-    const activeIds = targetPhotos.map((photo) => photo.id);
-    db.transaction(() => {
-      db.update(photos)
-        .set({ deletedAt: Date.now() })
-        .where(inArray(photos.id, activeIds))
-        .run();
-      const countsByFolder = new Map<number, number>();
-      for (const photo of targetPhotos) {
-        if (photo.folderId) {
-          countsByFolder.set(
-            photo.folderId,
-            (countsByFolder.get(photo.folderId) ?? 0) + 1
-          );
-        }
-      }
-      for (const [folderId, count] of countsByFolder) {
-        db.update(folders)
-          .set({ photoCount: sql`MAX(0, photo_count - ${count})` })
-          .where(eq(folders.id, folderId))
-          .run();
-      }
-    });
-    cleanupDeletedPhotoSequenceMembers(db);
-    bumpPhotoSequenceRevision();
-    invalidateCountCache();
-    invalidateStatsCache();
-    return { deleted: activeIds.length };
   });
 
 /**
@@ -1082,7 +940,12 @@ export const restorePhotos = os
   .handler(({ input }) => {
     const db = getDatabase();
     const targetPhotos = db
-      .select({ id: photos.id, folderId: photos.folderId, path: photos.path })
+      .select({
+        deletionBatchId: photos.deletionBatchId,
+        id: photos.id,
+        folderId: photos.folderId,
+        path: photos.path,
+      })
       .from(photos)
       .where(
         and(inArray(photos.id, input.ids), sql`${photos.deletedAt} IS NOT NULL`)
@@ -1143,11 +1006,14 @@ export const restorePhotos = os
       }
     }
 
+    const succeededIds = [...idsWithValidFolder, ...idsWithoutFolder];
+
     // Restore photos with valid folders
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Restore keeps photo rows, folder counts, review invalidation, and cleanup audit events consistent.
     db.transaction(() => {
       if (idsWithValidFolder.length > 0) {
         db.update(photos)
-          .set({ deletedAt: null })
+          .set({ deletionBatchId: null, deletedAt: null })
           .where(inArray(photos.id, idsWithValidFolder))
           .run();
         for (const [fid, count] of countsByFolder) {
@@ -1161,13 +1027,105 @@ export const restorePhotos = os
       // Restore photos whose original folder no longer exists — set folderId to NULL
       if (idsWithoutFolder.length > 0) {
         db.update(photos)
-          .set({ deletedAt: null, folderId: null })
+          .set({ deletionBatchId: null, deletedAt: null, folderId: null })
           .where(inArray(photos.id, idsWithoutFolder))
           .run();
       }
+
+      // Restoring a photo invalidates any historical DELETE decision. The
+      // restored content must be reviewed again before another cleanup plan
+      // can include it.
+      if (succeededIds.length > 0) {
+        const restoredReviewMembers = db
+          .select()
+          .from(duplicateReviewMembers)
+          .where(inArray(duplicateReviewMembers.photoId, succeededIds))
+          .all();
+        const groupsToInvalidate = new Map<string, number[]>();
+        for (const member of restoredReviewMembers) {
+          const ids = groupsToInvalidate.get(member.groupKey) ?? [];
+          ids.push(member.photoId);
+          groupsToInvalidate.set(member.groupKey, ids);
+        }
+        for (const [groupKey, photoIds] of groupsToInvalidate) {
+          db.update(duplicateReviewMembers)
+            .set({
+              decision: "UNDECIDED",
+              needsReview: true,
+              updatedAt: Date.now(),
+            })
+            .where(
+              and(
+                eq(duplicateReviewMembers.groupKey, groupKey),
+                inArray(duplicateReviewMembers.photoId, photoIds)
+              )
+            )
+            .run();
+          const group = db
+            .select()
+            .from(duplicateReviewGroups)
+            .where(eq(duplicateReviewGroups.groupKey, groupKey))
+            .get();
+          if (group) {
+            const nextRevision = group.reviewRevision + 1;
+            db.update(duplicateReviewGroups)
+              .set({
+                complete: false,
+                needsReview: true,
+                reviewRevision: nextRevision,
+                updatedAt: Date.now(),
+              })
+              .where(eq(duplicateReviewGroups.groupKey, groupKey))
+              .run();
+            db.insert(duplicateReviewEvents)
+              .values(
+                photoIds.map((photoId) => ({
+                  contentRevision: null,
+                  decision: "UNDECIDED",
+                  eventType: "RESTORED_REQUIRES_REVIEW",
+                  groupKey,
+                  groupVersion: group.groupVersion,
+                  photoId,
+                  reviewRevision: nextRevision,
+                }))
+              )
+              .run();
+          }
+        }
+        const cleanupItems = db
+          .select({
+            batchId: duplicateCleanupPlans.batchId,
+            planId: duplicateCleanupPlanItems.planId,
+            photoId: duplicateCleanupPlanItems.photoId,
+          })
+          .from(duplicateCleanupPlanItems)
+          .innerJoin(
+            duplicateCleanupPlans,
+            eq(duplicateCleanupPlans.id, duplicateCleanupPlanItems.planId)
+          )
+          .where(inArray(duplicateCleanupPlanItems.photoId, succeededIds))
+          .all()
+          .filter(
+            (item) =>
+              item.batchId === targetById.get(item.photoId)?.deletionBatchId
+          );
+        for (const item of cleanupItems) {
+          db.insert(duplicateCleanupEvents)
+            .values({
+              batchId: item.batchId,
+              detailsJson: JSON.stringify({
+                source: "recently-deleted",
+                photoId: item.photoId,
+              }),
+              eventType: "RESTORED_BY_TRASH",
+              photoId: item.photoId,
+              planId: item.planId,
+            })
+            .run();
+        }
+      }
     });
 
-    const succeededIds = [...idsWithValidFolder, ...idsWithoutFolder];
     if (succeededIds.length > 0) {
       cleanupDeletedPhotoSequenceMembers(db);
       bumpPhotoSequenceRevision();
