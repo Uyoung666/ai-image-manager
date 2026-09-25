@@ -316,6 +316,62 @@
       "when": 1787714603153,
       "tag": "0044_add_plugin_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1789732677107,
+      "tag": "0045_duplicate_photo_fingerprints",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1789733560276,
+      "tag": "0046_duplicate_review_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1789734071284,
+      "tag": "0047_duplicate_cleanup_plans",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1789789489050,
+      "tag": "0048_duplicate_cleanup_plan_audit_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1789813021191,
+      "tag": "0049_duplicate_cleanup_plan_match_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1789815250774,
+      "tag": "0050_duplicate_detection_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1789815818967,
+      "tag": "0051_duplicate_deletion_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1789816495406,
+      "tag": "0052_duplicate_run_fingerprint",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `photos` ADD `deletion_batch_id` text;

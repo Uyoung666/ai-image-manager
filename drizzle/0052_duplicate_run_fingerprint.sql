@@ -1,0 +1,2 @@
+ALTER TABLE `duplicate_cleanup_plans` ADD `config_fingerprint` text DEFAULT 'legacy' NOT NULL;--> statement-breakpoint
+ALTER TABLE `duplicate_review_groups` ADD `detection_fingerprint` text DEFAULT 'legacy' NOT NULL;

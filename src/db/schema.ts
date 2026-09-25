@@ -72,6 +72,7 @@ export const photos = sqliteTable(
       .notNull()
       .default(false),
     deletedAt: integer("deleted_at"),
+    deletionBatchId: text("deletion_batch_id"),
     createdAt: integer("created_at")
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -691,6 +692,317 @@ export const duplicatePairs = sqliteTable(
     statusIdx: index("idx_dup_status").on(table.status),
     photoAIdx: index("idx_dup_photo_a").on(table.photoAId),
     photoBIdx: index("idx_dup_photo_b").on(table.photoBId),
+  })
+);
+
+/**
+ * Versioned duplicate-detection fingerprints. The legacy photos.contentHash
+ * column contains sampled values from older releases and remains untouched;
+ * exact matching uses this table only after full verification.
+ */
+export const duplicatePhotoFingerprints = sqliteTable(
+  "duplicate_photo_fingerprints",
+  {
+    photoId: integer("photo_id")
+      .primaryKey()
+      .references(() => photos.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    fileSize: integer("file_size").notNull(),
+    modifiedAt: real("modified_at").notNull(),
+    contentRevision: integer("content_revision").notNull().default(1),
+    sampleHash: text("sample_hash"),
+    fullSha256: text("full_sha256"),
+    hashVersion: text("hash_version").notNull(),
+    verifiedAt: integer("verified_at"),
+  },
+  (table) => ({
+    hashIdx: index("idx_duplicate_fingerprint_hash").on(
+      table.hashVersion,
+      table.fullSha256
+    ),
+    photoPathIdx: index("idx_duplicate_fingerprint_path").on(table.path),
+  })
+);
+
+/**
+ * User review state is kept separate from detector output. A scan may update
+ * its group version, but it must never overwrite an explicit photo decision.
+ */
+export const duplicateReviewGroups = sqliteTable(
+  "duplicate_review_groups",
+  {
+    groupKey: text("group_key").primaryKey(),
+    groupVersion: text("group_version").notNull(),
+    detectionFingerprint: text("detection_fingerprint")
+      .notNull()
+      .default("legacy"),
+    reviewRevision: integer("review_revision").notNull().default(0),
+    ignoreState: text("ignore_state").notNull().default("ACTIVE"),
+    complete: integer("complete", { mode: "boolean" }).notNull().default(false),
+    needsReview: integer("needs_review", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    memberIdsJson: text("member_ids_json").notNull().default("[]"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    groupVersionIdx: index("idx_duplicate_review_group_version").on(
+      table.groupVersion
+    ),
+    needsReviewIdx: index("idx_duplicate_review_group_needs_review").on(
+      table.needsReview
+    ),
+  })
+);
+
+export const duplicateReviewMembers = sqliteTable(
+  "duplicate_review_members",
+  {
+    groupKey: text("group_key")
+      .references(() => duplicateReviewGroups.groupKey, {
+        onDelete: "cascade",
+      })
+      .notNull(),
+    photoId: integer("photo_id")
+      .references(() => photos.id, { onDelete: "cascade" })
+      .notNull(),
+    decision: text("decision").notNull().default("UNDECIDED"),
+    contentRevision: integer("content_revision").notNull().default(0),
+    needsReview: integer("needs_review", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    primaryKey: primaryKey({ columns: [table.groupKey, table.photoId] }),
+    photoIdIdx: index("idx_duplicate_review_member_photo_id").on(table.photoId),
+    decisionIdx: index("idx_duplicate_review_member_decision").on(
+      table.decision
+    ),
+  })
+);
+
+export const duplicateReviewEvents = sqliteTable(
+  "duplicate_review_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    groupKey: text("group_key").notNull(),
+    groupVersion: text("group_version").notNull(),
+    reviewRevision: integer("review_revision").notNull(),
+    eventType: text("event_type").notNull(),
+    photoId: integer("photo_id"),
+    decision: text("decision"),
+    contentRevision: integer("content_revision"),
+    detailsJson: text("details_json"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    groupIdx: index("idx_duplicate_review_event_group").on(
+      table.groupKey,
+      table.createdAt
+    ),
+    photoIdx: index("idx_duplicate_review_event_photo").on(table.photoId),
+  })
+);
+
+export const duplicateCleanupPlans = sqliteTable(
+  "duplicate_cleanup_plans",
+  {
+    id: text("id").primaryKey(),
+    configFingerprint: text("config_fingerprint").notNull().default("legacy"),
+    status: text("status").notNull().default("READY"),
+    expiresAt: integer("expires_at").notNull(),
+    batchId: text("batch_id"),
+    executedAt: integer("executed_at"),
+    deletedCount: integer("deleted_count").notNull().default(0),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer("updated_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    statusIdx: index("idx_duplicate_cleanup_plan_status").on(table.status),
+    batchIdx: uniqueIndex("idx_duplicate_cleanup_plan_batch").on(table.batchId),
+  })
+);
+
+export const duplicateCleanupPlanItems = sqliteTable(
+  "duplicate_cleanup_plan_items",
+  {
+    planId: text("plan_id")
+      .references(() => duplicateCleanupPlans.id, { onDelete: "cascade" })
+      .notNull(),
+    groupKey: text("group_key").notNull(),
+    groupVersion: text("group_version").notNull(),
+    reviewRevision: integer("review_revision").notNull(),
+    // This is an immutable audit snapshot. It intentionally has no live FK:
+    // hard-deleting a photo after the trash window must not erase or block the
+    // cleanup plan's evidence.
+    photoId: integer("photo_id").notNull(),
+    matchType: text("match_type").notNull(),
+    decision: text("decision").notNull(),
+    contentRevision: integer("content_revision").notNull(),
+    path: text("path").notNull(),
+    fileSize: integer("file_size").notNull(),
+    modifiedAt: real("modified_at").notNull(),
+    fileIdentity: text("file_identity"),
+    fullSha256: text("full_sha256"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    primaryKey: primaryKey({
+      columns: [table.planId, table.groupKey, table.photoId],
+    }),
+    photoIdx: index("idx_duplicate_cleanup_plan_item_photo").on(table.photoId),
+    groupIdx: index("idx_duplicate_cleanup_plan_item_group").on(
+      table.planId,
+      table.groupKey
+    ),
+  })
+);
+
+export const duplicateCleanupEvents = sqliteTable(
+  "duplicate_cleanup_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planId: text("plan_id"),
+    batchId: text("batch_id"),
+    eventType: text("event_type").notNull(),
+    photoId: integer("photo_id"),
+    detailsJson: text("details_json"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    planIdx: index("idx_duplicate_cleanup_event_plan").on(
+      table.planId,
+      table.createdAt
+    ),
+    batchIdx: index("idx_duplicate_cleanup_event_batch").on(
+      table.batchId,
+      table.createdAt
+    ),
+    photoIdx: index("idx_duplicate_cleanup_event_photo").on(table.photoId),
+  })
+);
+
+/**
+ * Immutable input/configuration snapshot for a duplicate detection attempt.
+ * The legacy detection_runs table only stores aggregate counters and cannot
+ * prove which hash, threshold, model, or photo revision produced a result.
+ */
+export const duplicateDetectionRuns = sqliteTable(
+  "duplicate_detection_runs",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").notNull().default("running"),
+    algorithmVersion: text("algorithm_version").notNull(),
+    hashVersion: text("hash_version").notNull(),
+    phashVersion: text("phash_version").notNull(),
+    phashThreshold: real("phash_threshold").notNull(),
+    embeddingModelVersion: text("embedding_model_version"),
+    embeddingThreshold: real("embedding_threshold"),
+    thresholdProfileVersion: text("threshold_profile_version").notNull(),
+    photoRevision: text("photo_revision").notNull(),
+    sequenceRevision: integer("sequence_revision").notNull(),
+    vectorRevision: text("vector_revision").notNull(),
+    settingsRevision: text("settings_revision").notNull(),
+    configFingerprint: text("config_fingerprint").notNull(),
+    startedAt: integer("started_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    completedAt: integer("completed_at"),
+    errorMessage: text("error_message"),
+  },
+  (table) => ({
+    statusIdx: index("idx_duplicate_detection_run_status").on(table.status),
+    configIdx: index("idx_duplicate_detection_run_config").on(
+      table.configFingerprint
+    ),
+    startedIdx: index("idx_duplicate_detection_run_started").on(
+      table.startedAt
+    ),
+  })
+);
+
+/** Published result snapshots are isolated by detection run for auditability. */
+export const duplicateRunGroups = sqliteTable(
+  "duplicate_run_groups",
+  {
+    runId: text("run_id")
+      .references(() => duplicateDetectionRuns.id, { onDelete: "cascade" })
+      .notNull(),
+    groupKey: text("group_key").notNull(),
+    groupVersion: text("group_version").notNull(),
+    matchType: text("match_type").notNull(),
+    recommendedKeepId: integer("recommended_keep_id").notNull(),
+    memberIdsJson: text("member_ids_json").notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    primaryKey: primaryKey({ columns: [table.runId, table.groupKey] }),
+    groupIdx: index("idx_duplicate_run_group_key").on(table.groupKey),
+  })
+);
+
+export const duplicateRunMembers = sqliteTable(
+  "duplicate_run_members",
+  {
+    runId: text("run_id")
+      .references(() => duplicateDetectionRuns.id, { onDelete: "cascade" })
+      .notNull(),
+    groupKey: text("group_key").notNull(),
+    photoId: integer("photo_id").notNull(),
+    contentRevision: integer("content_revision").notNull(),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    primaryKey: primaryKey({
+      columns: [table.runId, table.groupKey, table.photoId],
+    }),
+    photoIdx: index("idx_duplicate_run_member_photo").on(table.photoId),
+  })
+);
+
+export const duplicateRunPairs = sqliteTable(
+  "duplicate_run_pairs",
+  {
+    runId: text("run_id")
+      .references(() => duplicateDetectionRuns.id, { onDelete: "cascade" })
+      .notNull(),
+    photoAId: integer("photo_a_id").notNull(),
+    photoBId: integer("photo_b_id").notNull(),
+    matchType: text("match_type").notNull(),
+    phashDistance: integer("phash_distance"),
+    clipSimilarity: real("clip_similarity"),
+    createdAt: integer("created_at")
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (table) => ({
+    primaryKey: primaryKey({
+      columns: [table.runId, table.photoAId, table.photoBId],
+    }),
+    photoAIdx: index("idx_duplicate_run_pair_photo_a").on(table.photoAId),
+    photoBIdx: index("idx_duplicate_run_pair_photo_b").on(table.photoBId),
   })
 );
 
