@@ -1181,6 +1181,11 @@ export function DuplicatesPage() {
       groups.filter((group) => group.status === "dismissed").length,
     ],
   ];
+  const scanProgressLabel = t("duplicateScanProgress", {
+    stage: t(`duplicateScanStage_${progress.data?.stage ?? "queued"}`),
+    count: progress.data?.processed ?? 0,
+    total: progress.data?.total ?? 0,
+  });
 
   return (
     <div
@@ -1283,31 +1288,6 @@ export function DuplicatesPage() {
         </div>
       </header>
 
-      {scanBusy && showScanProgress ? (
-        <div
-          className="absolute right-4 bottom-4 left-4 z-50 flex max-w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background/95 px-4 py-2 text-xs shadow-sm"
-          role="status"
-        >
-          <span>
-            {t("duplicateScanProgress", {
-              stage: t(
-                `duplicateScanStage_${progress.data?.stage ?? "queued"}`
-              ),
-              count: progress.data?.processed ?? 0,
-              total: progress.data?.total ?? 0,
-            })}
-          </span>
-          <button
-            className="rounded border border-border px-3 py-1"
-            disabled={cancelScan.isPending}
-            onClick={() => cancelScan.mutate()}
-            type="button"
-          >
-            {t("cancel")}
-          </button>
-        </div>
-      ) : null}
-
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <nav
           className={`page-toolbar absolute top-0 right-0 left-0 z-50 flex flex-wrap items-center justify-between gap-2 overflow-x-hidden border-b px-4 py-1.5 sm:px-6 ${
@@ -1335,10 +1315,32 @@ export function DuplicatesPage() {
               </button>
             ))}
           </div>
-          <span className="ml-auto flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-success" />
-            {t("duplicateSafetyHint")}
-          </span>
+          {scanBusy && showScanProgress ? (
+            <div
+              className="ml-auto flex min-w-0 max-w-[min(20rem,60vw)] shrink-0 items-center gap-1.5 rounded-md border border-border bg-background/90 px-2 py-1 text-[10px] text-muted-foreground"
+              role="status"
+            >
+              <AppTooltip>
+                <AppTooltipTrigger asChild>
+                  <span className="min-w-0 truncate">{scanProgressLabel}</span>
+                </AppTooltipTrigger>
+                <AppTooltipContent>{scanProgressLabel}</AppTooltipContent>
+              </AppTooltip>
+              <button
+                className="shrink-0 rounded border border-border px-2 py-0.5"
+                disabled={cancelScan.isPending}
+                onClick={() => cancelScan.mutate()}
+                type="button"
+              >
+                {t("cancel")}
+              </button>
+            </div>
+          ) : (
+            <span className="ml-auto flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5 text-success" />
+              {t("duplicateSafetyHint")}
+            </span>
+          )}
         </nav>
 
         <main
