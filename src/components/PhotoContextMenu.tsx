@@ -225,25 +225,23 @@ export function PhotoContextMenu({
       if (!element) {
         return;
       }
-      const bounds = element.getBoundingClientRect();
+      // getBoundingClientRect includes the entry animation's scale transform.
+      // Position against the untransformed layout size so the menu still fits
+      // after the spring animation expands it to its final size.
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
       const left = Math.max(
         viewportMargin,
         Math.min(
           menu.x,
-          Math.max(
-            viewportMargin,
-            window.innerWidth - bounds.width - viewportMargin
-          )
+          Math.max(viewportMargin, window.innerWidth - width - viewportMargin)
         )
       );
       const top = Math.max(
         viewportMargin,
         Math.min(
           menu.y,
-          Math.max(
-            viewportMargin,
-            window.innerHeight - bounds.height - viewportMargin
-          )
+          Math.max(viewportMargin, window.innerHeight - height - viewportMargin)
         )
       );
       setPosition((current) =>
