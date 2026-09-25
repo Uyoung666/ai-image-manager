@@ -88,7 +88,209 @@ interface IndexProgress {
 
 type ProgressCallback = (progress: IndexProgress) => void;
 let activeScanToken: { cancelled: boolean } | null = null;
-const watchers = new Map<string, FSWatcher>();
+
+interface WatcherContext {
+  db: ReturnType<typeof getDatabase>;
+  folderId: number | null;
+  folderPath: string;
+  key: string;
+  watcher: FSWatcher;
+}
+
+const watchers = new Map<string, WatcherContext>();
+
+type WatcherStateContext = Pick<
+  WatcherContext,
+  "db" | "folderId" | "folderPath"
+>;
+
+type WatcherFailurePhase = "close" | "create" | "error" | "state";
+
+function getWatcherErrorField(
+  error: unknown,
+  field: "code" | "syscall"
+): string | undefined {
+  if (typeof error !== "object" || error === null || !(field in error)) {
+    return undefined;
+  }
+  const value = (error as Record<string, unknown>)[field];
+  return value === undefined || value === null ? undefined : String(value);
+}
+
+function logWatcherFailure(
+  context: Pick<WatcherContext, "folderId" | "folderPath">,
+  error: unknown,
+  phase: WatcherFailurePhase,
+  message: string
+): void {
+  log.error(
+    {
+      folderId: context.folderId,
+      folderPath: context.folderPath,
+      code: getWatcherErrorField(error, "code"),
+      syscall: getWatcherErrorField(error, "syscall"),
+      phase,
+      err: error,
+    },
+    message
+  );
+}
+
+function isCurrentWatcher(context: WatcherContext): boolean {
+  return watchers.get(context.key) === context;
+}
+
+function removeCurrentWatcher(context: WatcherContext): void {
+  if (isCurrentWatcher(context)) {
+    watchers.delete(context.key);
+  }
+}
+
+function updateWatcherState(
+  context: WatcherStateContext,
+  isWatching: boolean
+): boolean {
+  try {
+    const update = context.db.update(folders).set({
+      isWatching,
+      watcherStartedAt: isWatching ? Date.now() : null,
+    });
+    let condition = eq(folders.path, context.folderPath);
+    if (context.folderId !== null) {
+      condition = eq(folders.id, context.folderId);
+    } else if (process.platform === "win32") {
+      condition = sql`lower(${folders.path}) = lower(${context.folderPath})`;
+    }
+    update.where(condition).run();
+    return true;
+  } catch (error) {
+    logWatcherFailure(
+      context,
+      error,
+      "state",
+      `Watcher: Failed to update state (${isWatching ? "started" : "stopped"})`
+    );
+    watcherStats.errors++;
+    return false;
+  }
+}
+
+async function closeWatcherSafely(
+  context: Pick<WatcherContext, "folderId" | "folderPath" | "watcher">,
+  phase: WatcherFailurePhase = "close"
+): Promise<void> {
+  let closeResult: Promise<void> | undefined;
+  try {
+    closeResult = context.watcher.close();
+  } catch (error) {
+    watcherStats.errors++;
+    logWatcherFailure(context, error, phase, "Watcher: Failed to close");
+    context.watcher.on("error", () => undefined);
+    return;
+  }
+
+  // chokidar removes every listener synchronously inside close(). Keep a
+  // retired watcher's late native errors from becoming an unhandled error
+  // event while its close promise settles (or after a rejected close).
+  context.watcher.on("error", () => undefined);
+  try {
+    await closeResult;
+  } catch (error) {
+    watcherStats.errors++;
+    logWatcherFailure(context, error, phase, "Watcher: Failed to close");
+  }
+}
+
+function handleWatcherError(context: WatcherContext, error: unknown): void {
+  if (!isCurrentWatcher(context)) {
+    return;
+  }
+  removeCurrentWatcher(context);
+  watcherStats.errors++;
+
+  logWatcherFailure(context, error, "error", "Watcher: File system error");
+  updateWatcherState(context, false);
+  closeWatcherSafely(context).catch(() => undefined);
+}
+
+function failWatcherSetup(
+  context: WatcherContext,
+  error: unknown,
+  phase: WatcherFailurePhase
+): void {
+  removeCurrentWatcher(context);
+  logWatcherFailure(context, error, phase, "Watcher: Failed to start");
+  updateWatcherState(context, false);
+  closeWatcherSafely(context, phase === "create" ? "close" : phase).catch(
+    () => undefined
+  );
+}
+
+function findFolderId(
+  db: ReturnType<typeof getDatabase>,
+  folderPath: string
+): number | null {
+  try {
+    const folder = db
+      .select({ id: folders.id })
+      .from(folders)
+      .where(
+        process.platform === "win32"
+          ? sql`lower(${folders.path}) = lower(${folderPath})`
+          : eq(folders.path, folderPath)
+      )
+      .get();
+    return folder?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function createWatcher(
+  db: ReturnType<typeof getDatabase>,
+  folderPath: string,
+  folderId: number | null
+): WatcherContext | null {
+  const key = watcherPathKey(folderPath);
+  let watcher: FSWatcher;
+  try {
+    watcher = chokidar.watch(folderPath, {
+      ignored: WATCHER_IGNORED_PATTERNS,
+      ignorePermissionErrors: true,
+      ignoreInitial: true,
+      awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
+      depth: 10,
+    });
+  } catch (error) {
+    watcherStats.errors++;
+    updateWatcherState({ db, folderId, folderPath }, false);
+    logWatcherFailure(
+      { folderId, folderPath },
+      error,
+      "create",
+      "Watcher: Failed to create"
+    );
+    return null;
+  }
+
+  const context: WatcherContext = {
+    db,
+    folderId,
+    folderPath,
+    key,
+    watcher,
+  };
+  watchers.set(key, context);
+  try {
+    // Bind this before any event-specific handlers so native async errors
+    // cannot escape during watcher startup.
+    watcher.on("error", (error) => handleWatcherError(context, error));
+  } catch (error) {
+    failWatcherSetup(context, error, "create");
+    return null;
+  }
+  return context;
+}
 
 function watcherPathKey(folderPath: string): string {
   const normalized = path.normalize(folderPath);
@@ -1373,15 +1575,16 @@ export function startWatching(
     if (watchers.has(watcherKey)) {
       continue;
     }
-    const watcher = chokidar.watch(folder.path, {
-      ignored: WATCHER_IGNORED_PATTERNS,
-      ignorePermissionErrors: true,
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
-      depth: 10,
-    });
+    const context = createWatcher(db, folder.path, folder.id);
+    if (!context) {
+      continue;
+    }
+    const watcher = context.watcher;
 
     watcher.on("add", (filePath) => {
+      if (!isCurrentWatcher(context)) {
+        return;
+      }
       if (!shouldIndex(filePath)) {
         return;
       }
@@ -1389,6 +1592,9 @@ export function startWatching(
 
       watcherQueue.add(async () => {
         try {
+          if (!isCurrentWatcher(context)) {
+            return;
+          }
           const matchedFolderId = resolveWatchedFileFolder(filePath);
 
           const alreadyIndexed = db
@@ -1422,10 +1628,16 @@ export function startWatching(
     });
 
     watcher.on("unlink", (filePath) => {
+      if (!isCurrentWatcher(context)) {
+        return;
+      }
       watcherStats.unlinkEvents++;
 
       watcherQueue.add(() => {
         try {
+          if (!isCurrentWatcher(context)) {
+            return;
+          }
           const photo = db
             .select({ id: photos.id, folderId: photos.folderId })
             .from(photos)
@@ -1468,21 +1680,16 @@ export function startWatching(
     });
 
     // 更新文件夹 watcher 状态
-    db.update(folders)
-      .set({
-        isWatching: true,
-        watcherStartedAt: Date.now(),
-      })
-      .where(eq(folders.id, folder.id))
-      .run();
-
-    watchers.set(watcherKey, watcher);
+    if (!isCurrentWatcher(context)) {
+      continue;
+    }
+    if (!updateWatcherState(context, true)) {
+      removeCurrentWatcher(context);
+      closeWatcherSafely(context).catch(() => undefined);
+    }
   }
 
-  log.info(
-    { count: indexedFolders.length },
-    "Watcher: Started watching folders"
-  );
+  log.info({ count: watchers.size }, "Watcher: Started watching folders");
 }
 
 export function watchFolder(
@@ -1494,15 +1701,16 @@ export function watchFolder(
     return;
   }
   const db = getDatabase();
-  const watcher = chokidar.watch(folderPath, {
-    ignored: WATCHER_IGNORED_PATTERNS,
-    ignorePermissionErrors: true,
-    ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 },
-    depth: 10,
-  });
+  const context = createWatcher(db, folderPath, findFolderId(db, folderPath));
+  if (!context) {
+    return;
+  }
+  const watcher = context.watcher;
 
   watcher.on("add", (filePath) => {
+    if (!isCurrentWatcher(context)) {
+      return;
+    }
     if (!shouldIndex(filePath)) {
       return;
     }
@@ -1510,6 +1718,9 @@ export function watchFolder(
 
     watcherQueue.add(async () => {
       try {
+        if (!isCurrentWatcher(context)) {
+          return;
+        }
         const matchedFolderId = resolveWatchedFileFolder(filePath);
 
         const alreadyIndexed = db
@@ -1543,10 +1754,16 @@ export function watchFolder(
   });
 
   watcher.on("unlink", (filePath) => {
+    if (!isCurrentWatcher(context)) {
+      return;
+    }
     watcherStats.unlinkEvents++;
 
     watcherQueue.add(() => {
       try {
+        if (!isCurrentWatcher(context)) {
+          return;
+        }
         const photo = db
           .select({ id: photos.id, folderId: photos.folderId })
           .from(photos)
@@ -1584,8 +1801,6 @@ export function watchFolder(
       }
     });
   });
-
-  watchers.set(watcherKey, watcher);
 }
 
 /** Stop watchers rooted at this folder or one of its descendants. */
@@ -1593,10 +1808,10 @@ export async function unwatchFolder(folderPath: string): Promise<void> {
   const root = watcherPathKey(folderPath);
   const descendantPrefix = `${root}${path.sep}`;
   const closing: Promise<void>[] = [];
-  for (const [key, watcher] of watchers) {
+  for (const [key, context] of watchers) {
     if (key === root || key.startsWith(descendantPrefix)) {
-      watchers.delete(key);
-      closing.push(watcher.close());
+      removeCurrentWatcher(context);
+      closing.push(closeWatcherSafely(context));
     }
   }
   await Promise.all(closing);
@@ -1608,13 +1823,21 @@ export async function stopWatching(): Promise<void> {
   // 等待队列清空
   await watcherQueue.onIdle();
 
-  for (const watcher of watchers.values()) {
-    await watcher.close();
-  }
+  const contexts = Array.from(watchers.values());
   watchers.clear();
+  await Promise.all(contexts.map((context) => closeWatcherSafely(context)));
 
   // 更新所有文件夹状态
-  db.update(folders).set({ isWatching: false }).run();
+  try {
+    db.update(folders).set({ isWatching: false, watcherStartedAt: null }).run();
+  } catch (error) {
+    logWatcherFailure(
+      { folderId: null, folderPath: "<all>" },
+      error,
+      "state",
+      "Watcher: Failed to update stopped state"
+    );
+  }
 
   log.info({ stats: watcherStats }, "Watcher: Stopped");
 
