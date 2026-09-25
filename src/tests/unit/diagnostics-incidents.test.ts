@@ -107,15 +107,17 @@ describe("diagnostic incident identity", () => {
       message: "Repeated worker failure",
       source: "worker-crash" as const,
     };
+    const olderOccurredAt = new Date(Date.now() - 60_000).toISOString();
+    const newerOccurredAt = new Date(Date.now() - 30_000).toISOString();
     appendIncident({
       ...base,
       id: "AIM-OLD",
-      occurredAt: "2026-08-09T12:00:00.000Z",
+      occurredAt: olderOccurredAt,
     });
     appendIncident({
       ...base,
       id: "AIM-NEW",
-      occurredAt: "2026-08-09T12:01:00.000Z",
+      occurredAt: newerOccurredAt,
     });
 
     const incidents = listStoredIncidents();
