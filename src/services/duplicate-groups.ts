@@ -39,12 +39,20 @@ export interface DuplicateSequenceSummary {
 
 export interface DuplicateGroupSummary {
   estimatedReclaimBytes: number;
+  fileSizeByPhotoId?: Record<number, number | null>;
   groupKey: string;
+  groupVersion?: string;
+  ignoreState?: "ACTIVE" | "IGNORED";
   matchType: "exact" | "similar";
   pairCount: number;
   photoCount: number;
   previewPhotos: DuplicatePhoto[];
   recommendedKeepId: number;
+  reviewComplete?: boolean;
+  reviewDecisions?: Record<number, DuplicatePhotoDecision>;
+  reviewNeedsReview?: boolean;
+  reviewPhotoIds?: number[];
+  reviewRevision?: number;
   sequenceSummaries: DuplicateSequenceSummary[];
   status: "active" | "dismissed";
 }
@@ -64,16 +72,28 @@ export interface DuplicateRelationRef {
   photoBId: number;
 }
 
+export type DuplicatePhotoDecision = "KEEP" | "DELETE" | "UNDECIDED";
+
+export interface DuplicateCleanupSelection {
+  deletePhotoIds: number[];
+  keepPhotoIds: number[];
+  pairIds: number[];
+}
+
 export function validateDuplicateCleanupGroup(
   relations: DuplicateRelationRef[],
-  request: {
-    deletePhotoIds: number[];
-    keepPhotoId: number;
-    pairIds: number[];
-  }
+  request: DuplicateCleanupSelection
 ): number[] {
   const pairIds = [...new Set(request.pairIds)];
-  if (relations.length !== pairIds.length) {
+  if (pairIds.length !== request.pairIds.length) {
+    throw new Error("Duplicate relationship submitted more than once");
+  }
+  const relationIds = new Set(relations.map((relation) => relation.id));
+  if (
+    relations.length !== pairIds.length ||
+    relationIds.size !== relations.length ||
+    pairIds.some((pairId) => !relationIds.has(pairId))
+  ) {
     throw new Error("Duplicate group is stale; rescan before cleaning");
   }
   const relatedPhotoIds = new Set<number>();
@@ -90,11 +110,22 @@ export function validateDuplicateCleanupGroup(
       relation.photoAId,
     ]);
   }
-  if (!relatedPhotoIds.has(request.keepPhotoId)) {
+  const uniqueKeepPhotoIds = [...new Set(request.keepPhotoIds)];
+  if (uniqueKeepPhotoIds.length !== request.keepPhotoIds.length) {
+    throw new Error("A photo decision was submitted more than once");
+  }
+  if (uniqueKeepPhotoIds.length === 0) {
+    throw new Error("A duplicate group must retain at least one photo");
+  }
+  if (uniqueKeepPhotoIds.some((id) => !relatedPhotoIds.has(id))) {
     throw new Error("Keeper does not belong to the duplicate group");
   }
+  const firstPhotoId = relatedPhotoIds.values().next().value;
+  if (firstPhotoId === undefined) {
+    throw new Error("Duplicate group is empty");
+  }
   const connected = new Set<number>();
-  const queue = [request.keepPhotoId];
+  const queue = [firstPhotoId];
   while (queue.length > 0) {
     const current = queue.pop();
     if (current === undefined || connected.has(current)) {
@@ -107,12 +138,18 @@ export function validateDuplicateCleanupGroup(
     throw new Error("Duplicate relationships do not form one group");
   }
   const deletePhotoIds = [...new Set(request.deletePhotoIds)];
+  if (deletePhotoIds.length !== request.deletePhotoIds.length) {
+    throw new Error("A photo decision was submitted more than once");
+  }
   if (
-    deletePhotoIds.includes(request.keepPhotoId) ||
+    deletePhotoIds.some((id) => uniqueKeepPhotoIds.includes(id)) ||
     deletePhotoIds.some((id) => !relatedPhotoIds.has(id)) ||
-    deletePhotoIds.length >= relatedPhotoIds.size
+    deletePhotoIds.length >= relatedPhotoIds.size ||
+    uniqueKeepPhotoIds.length + deletePhotoIds.length !== relatedPhotoIds.size
   ) {
-    throw new Error("A duplicate group must retain at least one photo");
+    throw new Error(
+      "A duplicate group must retain at least one photo and decide every member"
+    );
   }
   return deletePhotoIds;
 }
@@ -132,11 +169,18 @@ function compareKeeperCandidates(a: DuplicatePhoto, b: DuplicatePhoto): number {
   return a.id - b.id;
 }
 
+/** Deterministic rule ordering used by both recommendations and bulk review. */
+export function rankDuplicatePhotos(
+  photos: DuplicatePhoto[]
+): DuplicatePhoto[] {
+  return [...photos].sort(compareKeeperCandidates);
+}
+
 export function recommendDuplicateKeeper(photos: DuplicatePhoto[]): number {
   if (photos.length === 0) {
     throw new Error("Cannot recommend a keeper for an empty duplicate group");
   }
-  return [...photos].sort(compareKeeperCandidates)[0].id;
+  return rankDuplicatePhotos(photos)[0].id;
 }
 
 export function createExactDuplicatePairs(

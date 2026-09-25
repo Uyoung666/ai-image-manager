@@ -183,6 +183,19 @@ export function getVectorDbGeneration(): number {
   return vectorDbGeneration;
 }
 
+/** Use Lance's committed version, not SQLite's stable per-photo vector ID.
+ * The operation queue also waits for embedding writes and SQLite bookkeeping.
+ * An interrupted write changes the durable version even before bookkeeping.
+ */
+export function getDuplicateVectorRevision(): Promise<string> {
+  return withVectorDbOperation(async () => {
+    if (!(isVectorDBReady && photoTable)) {
+      return `unavailable:${vectorDbGeneration}`;
+    }
+    return `${vectorDbGeneration}:${await photoTable.version()}:${getActiveEmbeddingRuntime()?.vectorCompatibility ?? "unknown"}`;
+  });
+}
+
 function modelRootCandidates(): string[] {
   const candidates = [
     path.join(getDataPath(), "models"),
@@ -603,7 +616,8 @@ export async function deletePhotoVectors(photoIds: number[]): Promise<void> {
 }
 
 export async function getPhotoVectors(
-  photoIds: number[]
+  photoIds: number[],
+  strict = false
 ): Promise<Map<number, number[]>> {
   const map = new Map<number, number[]>();
   if (!(isVectorDBReady && photoTable) || photoIds.length === 0) {
@@ -642,6 +656,9 @@ export async function getPhotoVectors(
     }
   } catch (err: unknown) {
     console.error("[AI] getPhotoVectors failed:", getErrorMessage(err));
+    if (strict) {
+      throw err;
+    }
   }
   return map;
 }

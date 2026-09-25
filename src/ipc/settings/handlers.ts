@@ -2,8 +2,15 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { os } from "@orpc/server";
+import { eq, sql } from "drizzle-orm";
 import { app, BrowserWindow } from "electron";
 import { z } from "zod";
+import { getDatabase } from "@/db";
+import { duplicateCleanupPlans, duplicateReviewGroups } from "@/db/schema";
+import {
+  getDuplicateSensitivityConfig,
+  parseDuplicateSensitivity,
+} from "@/services/duplicate-sensitivity";
 import { registry } from "@/services/registry";
 import {
   getAllSettings,
@@ -77,6 +84,58 @@ export const getAppSetting = os
       return null;
     }
     return { key: input.key, value };
+  });
+
+export const getDuplicateSettings = os.handler(() => {
+  const preset = parseDuplicateSensitivity(
+    getSetting("duplicates.sensitivity")
+  );
+  return {
+    ...getDuplicateSensitivityConfig(preset),
+    revision: getSetting("duplicates.settingsRevision") ?? "0",
+  };
+});
+
+export const updateDuplicateSettings = os
+  .input(
+    z.object({
+      expectedRevision: z.string().optional(),
+      preset: z.enum(["strict", "standard", "loose"]),
+    })
+  )
+  .handler(({ input }) => {
+    const currentRevision = getSetting("duplicates.settingsRevision") ?? "0";
+    if (input.expectedRevision && input.expectedRevision !== currentRevision) {
+      throw new Error("Duplicate detection settings are stale; refresh first");
+    }
+    const parsedRevision = Number.parseInt(currentRevision, 10);
+    const nextRevision = String(
+      Number.isSafeInteger(parsedRevision) && parsedRevision >= 0
+        ? parsedRevision + 1
+        : 1
+    );
+    setSetting("duplicates.sensitivity", input.preset);
+    setSetting("duplicates.settingsRevision", nextRevision);
+    const db = getDatabase();
+    db.transaction(() => {
+      db.update(duplicateCleanupPlans)
+        .set({ status: "STALE", updatedAt: Date.now() })
+        .where(eq(duplicateCleanupPlans.status, "READY"))
+        .run();
+      db.update(duplicateReviewGroups)
+        .set({
+          complete: false,
+          needsReview: true,
+          reviewRevision: sql`${duplicateReviewGroups.reviewRevision} + 1`,
+          updatedAt: Date.now(),
+        })
+        .where(eq(duplicateReviewGroups.ignoreState, "ACTIVE"))
+        .run();
+    });
+    return {
+      ...getDuplicateSensitivityConfig(input.preset),
+      revision: nextRevision,
+    };
   });
 
 export const setAppSetting = os

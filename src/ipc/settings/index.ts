@@ -5,6 +5,7 @@ import {
   getAppPreferences,
   getAppSetting,
   getDataPathInfo,
+  getDuplicateSettings,
   getGpuSettings,
   getMirrorSettings,
   getOpenAtLogin,
@@ -15,14 +16,17 @@ import {
   setGpuSettings,
   setMirrorSettings,
   setOpenAtLogin,
+  updateDuplicateSettings,
 } from "./handlers";
 
 export const settings = {
   getAllAppSettings,
   getAppPreferences,
   getAppSetting,
+  getDuplicateSettings,
   setAppPreference,
   setAppSetting,
+  updateDuplicateSettings,
   getDataPathInfo,
   setDataPath,
   getGpuSettings,

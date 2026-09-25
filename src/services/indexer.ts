@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -1635,6 +1635,7 @@ export async function cleanupOrphanedRecords(): Promise<{
   const allPhotos = db
     .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
     .from(photos)
+    .where(sql`${photos.deletedAt} IS NULL`)
     .all();
 
   let removed = 0;
@@ -1688,6 +1689,7 @@ export async function cleanupOrphanedRecordsAsync(
   const allPhotos = db
     .select({ id: photos.id, path: photos.path, folderId: photos.folderId })
     .from(photos)
+    .where(sql`${photos.deletedAt} IS NULL`)
     .all();
 
   let removed = 0;

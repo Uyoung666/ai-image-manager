@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { os } from "@orpc/server";
 import {
@@ -17,13 +17,23 @@ import { getDatabase, getDbPath } from "@/db";
 import {
   advancedExifData,
   detectionRuns,
+  duplicateCleanupPlans,
+  duplicateDetectionRuns,
   duplicatePairs,
+  duplicatePhotoFingerprints,
+  duplicateReviewEvents,
+  duplicateReviewGroups,
+  duplicateRunGroups,
+  duplicateRunMembers,
+  duplicateRunPairs,
   exifData,
   photoSequenceMembers,
   photoSequences,
   photos,
 } from "@/db/schema";
-import { getDuplicateThreshold } from "@/services/ai/threshold-profile";
+import { getActiveEmbeddingAdapterFingerprint } from "@/services/ai/model-config";
+import { getThresholdProfileIdentity } from "@/services/ai/threshold-profile";
+import { getDuplicateVectorRevision } from "@/services/ai/vector-db";
 import { getPhotoVectors } from "@/services/ai-embedder";
 import { BKTree } from "@/services/bk-tree";
 import {
@@ -41,6 +51,25 @@ import {
   type DuplicateSequenceSummary,
   groupDuplicatePairs,
 } from "@/services/duplicate-groups";
+import {
+  type DuplicateReviewTransaction,
+  syncDuplicateReviewStates,
+} from "@/services/duplicate-review";
+import {
+  cancelDuplicateScan,
+  type DuplicateScanContext,
+  getDuplicateScanProgress,
+  markDuplicateScanActive,
+  markDuplicateScanFinished,
+  runDuplicateScan,
+} from "@/services/duplicate-scan-runtime";
+import { getDuplicateSensitivityConfig } from "@/services/duplicate-sensitivity";
+import {
+  computeFullFileHash,
+  computeSampleFileHash,
+  FULL_FILE_HASH_VERSION,
+  filesHaveSameBytes,
+} from "@/services/file-hash";
 import {
   bumpPhotoSequenceRevision,
   cleanupDeletedPhotoSequenceMembers,
@@ -99,6 +128,10 @@ const EXIF_CANDIDATES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 const DUPLICATE_SCANNED_SEQUENCE_REVISION_KEY =
   "duplicates.scannedSequenceRevision";
+const DUPLICATE_SCANNED_SIGNATURE_KEY = "duplicates.scannedSignature";
+const DUPLICATE_DETECTION_ALGORITHM_VERSION =
+  "duplicate-v3-reframed-candidates";
+const DUPLICATE_PHASH_VERSION = "phash-v1";
 const DUPLICATE_PREVIEW_LIMIT = 24;
 const DUPLICATE_DETAIL_LIMIT = 48;
 
@@ -980,35 +1013,6 @@ export const getStats = os
     return result;
   });
 
-async function computeFileHash(filePath: string): Promise<string | null> {
-  try {
-    const fd = await fs.promises.open(filePath, "r");
-    const stat = await fd.stat();
-    const size = stat.size;
-    const hash = crypto.createHash("sha256");
-
-    if (size <= 8192) {
-      const buf = Buffer.alloc(size);
-      await fd.read(buf, 0, size, 0);
-      hash.update(buf);
-    } else {
-      const head = Buffer.alloc(4096);
-      await fd.read(head, 0, 4096, 0);
-      hash.update(head);
-      const tail = Buffer.alloc(4096);
-      await fd.read(tail, 0, 4096, size - 4096);
-      hash.update(tail);
-      const sizeBuffer = Buffer.alloc(8);
-      sizeBuffer.writeBigInt64LE(BigInt(size));
-      hash.update(sizeBuffer);
-    }
-    await fd.close();
-    return hash.digest("hex");
-  } catch {
-    return null;
-  }
-}
-
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   let normA = 0;
@@ -1051,6 +1055,226 @@ function setScannedSequenceRevision(revision: number): void {
   setSetting(DUPLICATE_SCANNED_SEQUENCE_REVISION_KEY, String(revision));
 }
 
+function getScannedDuplicateSignature(): string | null {
+  return getSetting(DUPLICATE_SCANNED_SIGNATURE_KEY);
+}
+
+function setScannedDuplicateSignature(signature: string): void {
+  setSetting(DUPLICATE_SCANNED_SIGNATURE_KEY, signature);
+}
+
+function createDuplicateScanSignature(
+  phashThreshold: number,
+  embeddingThreshold: number,
+  photoRevision: string,
+  sequenceRevision: number,
+  vectorRevision: string,
+  settingsRevision: string,
+  embeddingModelVersion: string
+): string {
+  return JSON.stringify({
+    algorithmVersion: DUPLICATE_DETECTION_ALGORITHM_VERSION,
+    embeddingThreshold,
+    embeddingModelVersion,
+    hashVersion: FULL_FILE_HASH_VERSION,
+    phashThreshold,
+    phashVersion: DUPLICATE_PHASH_VERSION,
+    photoRevision,
+    sequenceRevision,
+    settingsRevision,
+    thresholdProfile: getThresholdProfileIdentity(),
+    vectorRevision,
+  });
+}
+
+function createDuplicatePhotoRevision(
+  rows: ReadonlyArray<{
+    id: number;
+    path: string;
+    fileSize: number | null;
+    phash?: string | null;
+    vectorId?: string | null;
+  }>
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        rows
+          .map((row) => {
+            let metadata = "missing";
+            try {
+              metadata = fingerprintMetadata(row.path, fs.statSync(row.path));
+            } catch {
+              /* missing input invalidates the run */
+            }
+            return [row.id, metadata, row.phash, row.vectorId];
+          })
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+      )
+    )
+    .digest("hex");
+}
+
+function currentPhotoRevision(db: ReturnType<typeof getDatabase>): string {
+  const sequenceIds = getPhotoSequenceIds(db);
+  return createDuplicatePhotoRevision(
+    db
+      .select()
+      .from(photos)
+      .where(isNull(photos.deletedAt))
+      .all()
+      .filter((photo) => !sequenceIds.has(photo.id))
+  );
+}
+
+function beginDuplicateDetectionRun(
+  db: ReturnType<typeof getDatabase>,
+  input: {
+    embeddingModelVersion: string;
+    embeddingThreshold: number;
+    phashThreshold: number;
+    photoRevision: string;
+    scanSignature: string;
+    sequenceRevision: number;
+    settingsRevision: string;
+    vectorRevision: string;
+  }
+): string {
+  const id = randomUUID();
+  db.insert(duplicateDetectionRuns)
+    .values({
+      algorithmVersion: DUPLICATE_DETECTION_ALGORITHM_VERSION,
+      configFingerprint: input.scanSignature,
+      embeddingModelVersion:
+        input.embeddingModelVersion === "unavailable"
+          ? null
+          : input.embeddingModelVersion,
+      embeddingThreshold: input.embeddingThreshold,
+      hashVersion: FULL_FILE_HASH_VERSION,
+      id,
+      phashThreshold: input.phashThreshold,
+      phashVersion: DUPLICATE_PHASH_VERSION,
+      photoRevision: input.photoRevision,
+      sequenceRevision: input.sequenceRevision,
+      settingsRevision: input.settingsRevision,
+      status: "running",
+      thresholdProfileVersion: getThresholdProfileIdentity(),
+      vectorRevision: input.vectorRevision,
+    })
+    .run();
+  markDuplicateScanActive(id);
+  return id;
+}
+
+function completeDuplicateDetectionRun(
+  db: ReturnType<typeof getDatabase>,
+  runId: string
+): void {
+  db.update(duplicateDetectionRuns)
+    .set({ completedAt: Date.now(), status: "completed" })
+    .where(eq(duplicateDetectionRuns.id, runId))
+    .run();
+  markDuplicateScanFinished(runId);
+}
+
+function failDuplicateDetectionRun(
+  db: ReturnType<typeof getDatabase>,
+  runId: string,
+  error: unknown
+): void {
+  let status = "failed";
+  if (error instanceof Error && error.message.startsWith("STALE_RUN")) {
+    status = "stale";
+  }
+  if (error instanceof Error && error.message.startsWith("SCAN_CANCELLED")) {
+    status = "cancelled";
+  }
+  db.update(duplicateDetectionRuns)
+    .set({
+      completedAt: Date.now(),
+      errorMessage: error instanceof Error ? error.message : String(error),
+      status,
+    })
+    .where(eq(duplicateDetectionRuns.id, runId))
+    .run();
+  markDuplicateScanFinished(runId);
+}
+
+function publishDuplicateRunSnapshot(
+  db: ReturnType<typeof getDatabase>,
+  runId: string,
+  summaries: DuplicateGroupSummary[],
+  persistedPairs: Array<{
+    clipSimilarity: number | null;
+    matchType: string;
+    phashDistance: number | null;
+    photoAId: number;
+    photoBId: number;
+  }>,
+  transaction?: DuplicateReviewTransaction
+): void {
+  const contentRevisions = new Map(
+    (transaction ?? db)
+      .select({
+        contentRevision: duplicatePhotoFingerprints.contentRevision,
+        photoId: duplicatePhotoFingerprints.photoId,
+      })
+      .from(duplicatePhotoFingerprints)
+      .all()
+      .map((row) => [row.photoId, row.contentRevision])
+  );
+  const publish = (tx: DuplicateReviewTransaction) => {
+    for (const summary of summaries) {
+      const memberIds =
+        summary.groupKey
+          .split(":", 2)[1]
+          ?.split("-")
+          .map((value) => Number(value))
+          .filter((value) => Number.isSafeInteger(value) && value > 0) ?? [];
+      tx.insert(duplicateRunGroups)
+        .values({
+          groupKey: summary.groupKey,
+          groupVersion: summary.groupVersion ?? "legacy",
+          matchType: summary.matchType,
+          memberIdsJson: JSON.stringify(memberIds),
+          recommendedKeepId: summary.recommendedKeepId,
+          runId,
+        })
+        .onConflictDoNothing()
+        .run();
+      for (const photoId of memberIds) {
+        tx.insert(duplicateRunMembers)
+          .values({
+            contentRevision: contentRevisions.get(photoId) ?? 0,
+            groupKey: summary.groupKey,
+            photoId,
+            runId,
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+    }
+    for (const pair of persistedPairs) {
+      tx.insert(duplicateRunPairs)
+        .values({
+          clipSimilarity: pair.clipSimilarity,
+          matchType: pair.matchType,
+          phashDistance: pair.phashDistance,
+          photoAId: pair.photoAId,
+          photoBId: pair.photoBId,
+          runId,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+  };
+  if (transaction) {
+    publish(transaction);
+  } else {
+    db.transaction(publish);
+  }
+}
+
 function createDuplicateGroupPreview(
   group: ReturnType<typeof groupDuplicatePairs>[number]
 ): DuplicateGroupSummary {
@@ -1068,6 +1292,9 @@ function createDuplicateGroupPreview(
   }
   return {
     estimatedReclaimBytes: group.estimatedReclaimBytes,
+    fileSizeByPhotoId: Object.fromEntries(
+      group.photos.map((photo) => [photo.id, photo.fileSize])
+    ),
     groupKey: group.groupKey,
     matchType: group.matchType,
     pairCount: group.pairIds.length,
@@ -1157,11 +1384,126 @@ function addSequenceSummaries(
   }
 }
 
+const verifiedFingerprintCache = new Map<string, string>();
+function fingerprintMetadata(path: string, stat: fs.Stats): string {
+  return JSON.stringify([
+    path,
+    stat.size,
+    stat.mtimeMs,
+    stat.ctimeMs,
+    stat.dev,
+    stat.ino,
+  ]);
+}
+
+async function prepareDuplicateGroupFingerprints(
+  db: ReturnType<typeof getDatabase>,
+  groups: ReturnType<typeof groupDuplicatePairs>,
+  force: boolean,
+  fullHashes: ReadonlyMap<number, string>,
+  context: DuplicateScanContext
+): Promise<(typeof duplicatePhotoFingerprints.$inferInsert)[]> {
+  const uniquePhotos = new Map(
+    groups.flatMap((group) => group.photos).map((photo) => [photo.id, photo])
+  );
+  const result: (typeof duplicatePhotoFingerprints.$inferInsert)[] = [];
+  for (const photo of uniquePhotos.values()) {
+    context.report("verifying", result.length, uniquePhotos.size);
+    const stat = fs.statSync(photo.path);
+    const metadata = fingerprintMetadata(photo.path, stat);
+    const previous = db
+      .select()
+      .from(duplicatePhotoFingerprints)
+      .where(eq(duplicatePhotoFingerprints.photoId, photo.id))
+      .get();
+    const fullSha256 =
+      fullHashes.get(photo.id) ??
+      (force ? undefined : verifiedFingerprintCache.get(metadata)) ??
+      (await computeFullFileHash(photo.path));
+    if (
+      !fullSha256 ||
+      metadata !== fingerprintMetadata(photo.path, fs.statSync(photo.path))
+    ) {
+      throw new Error("FILE_CHANGED: Original file changed while verifying");
+    }
+    // Only evidence of different content invalidates user decisions. A sample
+    // digest or a metadata-only update must never erase an existing full hash.
+    const changed = !previous || previous.fullSha256 !== fullSha256;
+    result.push({
+      photoId: photo.id,
+      path: photo.path,
+      fileSize: stat.size,
+      modifiedAt: stat.mtimeMs,
+      fullSha256,
+      hashVersion: FULL_FILE_HASH_VERSION,
+      sampleHash: previous?.sampleHash ?? null,
+      contentRevision: (previous?.contentRevision ?? 0) + (changed ? 1 : 0),
+      verifiedAt: Date.now(),
+    });
+    if (verifiedFingerprintCache.size > 20_000) {
+      verifiedFingerprintCache.clear();
+    }
+    verifiedFingerprintCache.set(metadata, fullSha256);
+  }
+  return result;
+}
+
+function publishFingerprints(
+  db: ReturnType<typeof getDatabase>,
+  fingerprints: (typeof duplicatePhotoFingerprints.$inferInsert)[]
+): void {
+  for (const fingerprint of fingerprints) {
+    db.insert(duplicatePhotoFingerprints)
+      .values(fingerprint)
+      .onConflictDoUpdate({
+        target: duplicatePhotoFingerprints.photoId,
+        set: fingerprint,
+      })
+      .run();
+    if (fingerprint.photoId !== undefined) {
+      db.update(photos)
+        .set({ fileSize: fingerprint.fileSize })
+        .where(eq(photos.id, fingerprint.photoId))
+        .run();
+    }
+  }
+}
+
 function summarizeDuplicateGroups(
   db: ReturnType<typeof getDatabase>,
-  groups: ReturnType<typeof groupDuplicatePairs>
+  groups: ReturnType<typeof groupDuplicatePairs>,
+  detectionFingerprint = "legacy",
+  legacyIgnoredMemberSignatures: ReadonlySet<string> = new Set(),
+  transaction?: DuplicateReviewTransaction
 ): DuplicateGroupSummary[] {
   const summaries = groups.map(createDuplicateGroupPreview);
+  const reviewStates = syncDuplicateReviewStates(
+    db,
+    groups,
+    detectionFingerprint,
+    legacyIgnoredMemberSignatures,
+    transaction
+  );
+  for (const summary of summaries) {
+    const review = reviewStates.get(summary.groupKey);
+    if (!review) {
+      continue;
+    }
+    summary.groupVersion = review.groupVersion;
+    summary.ignoreState = review.ignoreState;
+    if (review.ignoreState === "IGNORED") {
+      summary.status = "dismissed";
+    }
+    summary.reviewComplete = review.complete;
+    summary.reviewDecisions = Object.fromEntries(
+      review.members.map((member) => [member.photoId, member.decision])
+    );
+    summary.reviewNeedsReview = review.needsReview;
+    summary.reviewPhotoIds = review.members
+      .filter((member) => member.needsReview && member.decision !== "UNDECIDED")
+      .map((member) => member.photoId);
+    summary.reviewRevision = review.reviewRevision;
+  }
   addSequenceSummaries(db, summaries, groups);
   return summaries;
 }
@@ -1270,76 +1612,136 @@ function hydrateDuplicateGroups(
   return groupDuplicatePairs(pairs);
 }
 
-export const findDuplicates = os
-  .input(
-    z.object({
-      threshold: z.number().optional().default(8),
-      forceRescan: z.boolean().optional().default(false),
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The staged detector verifies input versions before its single atomic publication.
+async function scanDuplicates(
+  input: { threshold?: number; forceRescan: boolean },
+  context: DuplicateScanContext
+) {
+  const db = getDatabase();
+  const sensitivity = getDuplicateSensitivityConfig(
+    getSetting("duplicates.sensitivity")
+  );
+  const phashThreshold = input.threshold ?? sensitivity.phashThreshold;
+  const embeddingThreshold = sensitivity.embeddingThreshold;
+  if (cleanupDeletedPhotoSequenceMembers(db)) {
+    bumpPhotoSequenceRevision();
+  }
+  const sequenceByPhoto = getPhotoSequenceIds(db);
+  const scanSequenceRevision = getPhotoSequenceRevision();
+  const allPhotos = db
+    .select({
+      id: photos.id,
+      path: photos.path,
+      filename: photos.filename,
+      fileSize: photos.fileSize,
+      phash: photos.phash,
+      vectorId: photos.vectorId,
+      width: photos.width,
+      height: photos.height,
+      createdAt: photos.createdAt,
+      thumbnailPath: photos.thumbnailPath,
     })
-  )
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Duplicate detection preserves its staged hash and vector pipeline.
-  .handler(async ({ input }) => {
-    const db = getDatabase();
-    if (cleanupDeletedPhotoSequenceMembers(db)) {
-      bumpPhotoSequenceRevision();
+    .from(photos)
+    .where(isNull(photos.deletedAt))
+    // Burst/timelapse photos are managed by the sequence workflow, not duplicate cleanup.
+    .all()
+    .filter((photo) => !sequenceByPhoto.has(photo.id));
+  for (const photo of allPhotos) {
+    try {
+      const stat = fs.statSync(photo.path);
+      if (photo.fileSize !== stat.size) {
+        photo.fileSize = stat.size;
+        db.update(photos)
+          .set({ fileSize: stat.size })
+          .where(eq(photos.id, photo.id))
+          .run();
+      }
+    } catch {
+      // The staged hash step will skip an unreadable source file.
     }
-    const sequenceByPhoto = getPhotoSequenceIds(db);
-    const scanSequenceRevision = getPhotoSequenceRevision();
-
+  }
+  const photoRevision = createDuplicatePhotoRevision(allPhotos);
+  const vectorRevision = await getDuplicateVectorRevision();
+  const settingsRevision = getSetting("duplicates.settingsRevision") ?? "0";
+  let embeddingModelVersion = "unavailable";
+  try {
+    embeddingModelVersion = getActiveEmbeddingAdapterFingerprint();
+  } catch {
+    // A missing model must remain visible in the run fingerprint; it is not
+    // safe to silently reuse a vector-confirmed cache in that case.
+  }
+  const scanSignature = createDuplicateScanSignature(
+    phashThreshold,
+    embeddingThreshold,
+    photoRevision,
+    scanSequenceRevision,
+    vectorRevision,
+    settingsRevision,
+    embeddingModelVersion
+  );
+  const runId = beginDuplicateDetectionRun(db, {
+    embeddingModelVersion,
+    embeddingThreshold,
+    phashThreshold,
+    photoRevision,
+    scanSignature,
+    sequenceRevision: scanSequenceRevision,
+    settingsRevision,
+    vectorRevision,
+  });
+  const assertInputsCurrent = async () => {
+    const currentVectorRevision = await getDuplicateVectorRevision();
+    context.assertCurrent();
+    let currentModel = "unavailable";
+    try {
+      currentModel = getActiveEmbeddingAdapterFingerprint();
+    } catch {
+      /* model unavailable */
+    }
+    if (
+      photoRevision !== currentPhotoRevision(db) ||
+      vectorRevision !== currentVectorRevision ||
+      settingsRevision !== (getSetting("duplicates.settingsRevision") ?? "0") ||
+      scanSequenceRevision !== getPhotoSequenceRevision() ||
+      embeddingModelVersion !== currentModel ||
+      JSON.parse(scanSignature).thresholdProfile !==
+        getThresholdProfileIdentity()
+    ) {
+      throw new Error("STALE_RUN: Scan inputs changed; scan again");
+    }
+  };
+  try {
+    context.report("hashing", 0, allPhotos.length);
     // If not forcing rescan, return persisted results
     if (
       !input.forceRescan &&
-      getScannedSequenceRevision() === scanSequenceRevision
+      getScannedSequenceRevision() === scanSequenceRevision &&
+      getScannedDuplicateSignature() === scanSignature
     ) {
-      const existing = db.select().from(duplicatePairs).all();
-      const stalePairIds = getSequencePhotoPairIds(existing, sequenceByPhoto);
-      if (stalePairIds.length > 0) {
-        db.delete(duplicatePairs)
-          .where(inArray(duplicatePairs.id, stalePairIds))
-          .run();
-      }
-      const current =
-        stalePairIds.length > 0
-          ? existing.filter((pair) => !stalePairIds.includes(pair.id))
-          : existing;
-
-      if (current.length > 0) {
-        return {
-          groups: summarizeDuplicateGroups(
-            db,
-            hydrateDuplicateGroups(db, current)
-          ),
-          fromCache: true,
-        };
-      }
-      return { groups: [], fromCache: true };
-    }
-
-    // Full detection scan
-    const allPhotos = db
-      .select({
-        id: photos.id,
-        path: photos.path,
-        filename: photos.filename,
-        fileSize: photos.fileSize,
-        phash: photos.phash,
-        contentHash: photos.contentHash,
-        width: photos.width,
-        height: photos.height,
-        createdAt: photos.createdAt,
-        thumbnailPath: photos.thumbnailPath,
-      })
-      .from(photos)
-      .where(isNull(photos.deletedAt))
-      // Burst/timelapse photos are managed by the sequence workflow, not duplicate cleanup.
-      .all()
-      .filter((photo) => !sequenceByPhoto.has(photo.id));
-
-    if (allPhotos.length === 0) {
-      if (getPhotoSequenceRevision() === scanSequenceRevision) {
-        setScannedSequenceRevision(scanSequenceRevision);
-      }
-      return { groups: [], fromCache: false };
+      const existing = loadNonSequenceDuplicatePairs(db);
+      const hydrated = hydrateDuplicateGroups(db, existing);
+      const fingerprints = await prepareDuplicateGroupFingerprints(
+        db,
+        hydrated,
+        false,
+        new Map(),
+        context
+      );
+      await assertInputsCurrent();
+      const groups = db.transaction((tx) => {
+        publishFingerprints(db, fingerprints);
+        const summaries = summarizeDuplicateGroups(
+          db,
+          hydrated,
+          scanSignature,
+          undefined,
+          tx
+        );
+        publishDuplicateRunSnapshot(db, runId, summaries, existing, tx);
+        completeDuplicateDetectionRun(db, runId);
+        return summaries;
+      });
+      return { fromCache: true, groups, runId };
     }
 
     // --- Phase 0: Exact duplicate detection via content hash ---
@@ -1364,42 +1766,57 @@ export const findDuplicates = os
     }
 
     const candidates: CandidatePair[] = [];
-    const exactHashByPhotoId = new Map<number, string>();
     const seenPairs = new Set<string>();
+    const verifiedExactHashByPhotoId = new Map<number, string>();
 
-    // Collect all photos across all size-groups that are missing a content hash
-    const needsHash: (typeof allPhotos)[0][] = [];
+    // First compute a cheap sample digest for equal-size candidates. A sample
+    // digest is only a filter; it is never persisted as or treated as exact.
+    const sampleHashByPhotoId = new Map<number, string>();
+    const candidatePhotos: (typeof allPhotos)[0][] = [];
     for (const group of sizeGroups.values()) {
       if (group.length < 2) {
         continue;
       }
       for (const p of group) {
-        if (!p.contentHash) {
-          needsHash.push(p);
+        context.report("hashing", sampleHashByPhotoId.size, allPhotos.length);
+        const sampleHash = await computeSampleFileHash(p.path);
+        if (sampleHash) {
+          sampleHashByPhotoId.set(p.id, sampleHash);
+          candidatePhotos.push(p);
         }
       }
     }
 
-    // Compute missing hashes (file I/O — the bottleneck, not DB writes)
-    for (const p of needsHash) {
-      const hash = await computeFileHash(p.path);
-      if (hash) {
-        p.contentHash = hash;
+    const sampleGroups = new Map<string, (typeof allPhotos)[0][]>();
+    for (const photo of candidatePhotos) {
+      const sampleHash = sampleHashByPhotoId.get(photo.id);
+      if (!sampleHash) {
+        continue;
+      }
+      const group = sampleGroups.get(sampleHash);
+      if (group) {
+        group.push(photo);
+      } else {
+        sampleGroups.set(sampleHash, [photo]);
       }
     }
 
-    // Batch UPDATE in a single transaction
-    if (needsHash.length > 0) {
-      db.transaction(() => {
-        for (const p of needsHash) {
-          if (p.contentHash) {
-            db.update(photos)
-              .set({ contentHash: p.contentHash })
-              .where(eq(photos.id, p.id))
-              .run();
-          }
+    const fullHashByPhotoId = new Map<number, string>();
+    for (const sampleGroup of sampleGroups.values()) {
+      if (sampleGroup.length < 2) {
+        continue;
+      }
+      for (const photo of sampleGroup) {
+        context.report(
+          "hashing",
+          fullHashByPhotoId.size,
+          candidatePhotos.length
+        );
+        const fullHash = await computeFullFileHash(photo.path);
+        if (fullHash) {
+          fullHashByPhotoId.set(photo.id, fullHash);
         }
-      });
+      }
     }
 
     for (const group of sizeGroups.values()) {
@@ -1410,14 +1827,15 @@ export const findDuplicates = os
       // Group by content hash
       const hashGroups = new Map<string, typeof group>();
       for (const p of group) {
-        if (!p.contentHash) {
+        const fullHash = fullHashByPhotoId.get(p.id);
+        if (!fullHash) {
           continue;
         }
-        const hg = hashGroups.get(p.contentHash);
+        const hg = hashGroups.get(fullHash);
         if (hg) {
           hg.push(p);
         } else {
-          hashGroups.set(p.contentHash, [p]);
+          hashGroups.set(fullHash, [p]);
         }
       }
 
@@ -1425,17 +1843,34 @@ export const findDuplicates = os
         if (hGroup.length < 2) {
           continue;
         }
-        const contentHash = hGroup[0]?.contentHash;
+        const contentHash = hGroup[0]
+          ? fullHashByPhotoId.get(hGroup[0].id)
+          : undefined;
         if (!contentHash) {
           continue;
         }
-        for (const photo of hGroup) {
-          exactHashByPhotoId.set(photo.id, contentHash);
-        }
+        let fullyVerified = true;
         for (const {
           photoAId: aId,
           photoBId: bId,
         } of createExactDuplicatePairs(hGroup.map((photo) => photo.id))) {
+          context.assertCurrent();
+          const photoA = hGroup.find((photo) => photo.id === aId);
+          const photoB = hGroup.find((photo) => photo.id === bId);
+          if (
+            !(
+              photoA &&
+              photoB &&
+              (await filesHaveSameBytes(
+                photoA.path,
+                photoB.path,
+                context.assertCurrent
+              ))
+            )
+          ) {
+            fullyVerified = false;
+            continue;
+          }
           const key = `${aId}_${bId}`;
           if (seenPairs.has(key)) {
             continue;
@@ -1448,6 +1883,11 @@ export const findDuplicates = os
             phashDistance: 0,
             clipSimilarity: null,
           });
+        }
+        if (fullyVerified) {
+          for (const photo of hGroup) {
+            verifiedExactHashByPhotoId.set(photo.id, contentHash);
+          }
         }
       }
     }
@@ -1464,16 +1904,18 @@ export const findDuplicates = os
 
     let phashProcessed = 0;
     for (const p of photosWithHash) {
-      phashProcessed++;
-      const neighbors = bkTree.query(p.phash, input.threshold);
+      context.report("matching", phashProcessed++, photosWithHash.length);
+      // Reframing can shift pHash substantially. Wider candidates still need
+      // AI confirmation; the no-vector fallback retains the narrower cutoff.
+      const neighbors = bkTree.query(p.phash, Math.max(phashThreshold, 16));
       for (const n of neighbors) {
         if (n.photoId === p.id) {
           continue;
         }
         const aId = Math.min(p.id, n.photoId);
         const bId = Math.max(p.id, n.photoId);
-        const hashA = exactHashByPhotoId.get(aId);
-        if (hashA !== undefined && hashA === exactHashByPhotoId.get(bId)) {
+        const hashA = verifiedExactHashByPhotoId.get(aId);
+        if (hashA && hashA === verifiedExactHashByPhotoId.get(bId)) {
           continue;
         }
         const key = `${aId}_${bId}`;
@@ -1508,13 +1950,15 @@ export const findDuplicates = os
 
     let vectors: Map<number, number[]> = new Map();
     try {
-      vectors = await getPhotoVectors(Array.from(uniqueIds));
+      vectors = await getPhotoVectors(Array.from(uniqueIds), true);
     } catch {
-      // LanceDB unavailable
+      throw new Error(
+        "VECTOR_UNAVAILABLE: Could not verify duplicate candidates"
+      );
     }
 
     const confirmedPairs: CandidatePair[] = [];
-    const duplicateConfirmationSimilarity = getDuplicateThreshold();
+    const duplicateConfirmationSimilarity = embeddingThreshold;
 
     for (const c of candidates) {
       if (c.matchType === "exact") {
@@ -1537,61 +1981,116 @@ export const findDuplicates = os
         // No vectors: use distance-based confidence
         // High confidence without CLIP
         confirmedPairs.push(c);
-      } else if (c.phashDistance <= input.threshold) {
+      } else if (c.phashDistance <= phashThreshold) {
         // distance 4-8 without vectors: keep as pending for manual review
         c.matchType = "phash";
         confirmedPairs.push(c);
       }
     }
 
-    // --- Persist results ---
-    // Clear old results before inserting new ones
-    db.transaction(() => {
+    const stagedPairs = confirmedPairs.map((pair, index) => ({
+      ...pair,
+      id: index + 1,
+      resolvedAt: null,
+      createdAt: Date.now(),
+      status: pair.matchType === "phash" ? "pending" : "confirmed",
+    }));
+    const hydrated = hydrateDuplicateGroups(db, stagedPairs);
+    const fingerprints = await prepareDuplicateGroupFingerprints(
+      db,
+      hydrated,
+      input.forceRescan,
+      fullHashByPhotoId,
+      context
+    );
+    await assertInputsCurrent();
+    context.report("publishing", allPhotos.length, allPhotos.length);
+    const groups = db.transaction((tx) => {
+      const legacyIgnoredMemberSignatures = new Set(
+        hydrateDuplicateGroups(db, loadNonSequenceDuplicatePairs(db))
+          .filter((group) => group.status === "dismissed")
+          .map((group) =>
+            JSON.stringify(
+              group.photos.map((photo) => photo.id).sort((a, b) => a - b)
+            )
+          )
+      );
+      publishFingerprints(db, fingerprints);
+      db.update(duplicateCleanupPlans)
+        .set({ status: "STALE", updatedAt: Date.now() })
+        .where(eq(duplicateCleanupPlans.status, "READY"))
+        .run();
       db.delete(duplicatePairs).run();
-
-      if (confirmedPairs.length > 0) {
-        for (const pair of confirmedPairs) {
-          db.insert(duplicatePairs)
-            .values({
-              photoAId: pair.photoAId,
-              photoBId: pair.photoBId,
-              matchType: pair.matchType,
-              phashDistance: pair.phashDistance,
-              clipSimilarity: pair.clipSimilarity,
-              status:
-                pair.matchType === "exact" ||
-                pair.matchType === "clip_confirmed"
-                  ? "confirmed"
-                  : "pending",
-            })
-            .onConflictDoNothing()
-            .run();
-        }
+      for (const pair of stagedPairs) {
+        const { id: _id, ...values } = pair;
+        db.insert(duplicatePairs).values(values).onConflictDoNothing().run();
       }
-    });
-
-    // Record detection run
-    const maxId = allPhotos.reduce((max, p) => Math.max(max, p.id), 0);
-    db.insert(detectionRuns)
-      .values({
-        lastPhotoId: maxId,
-        photosProcessed: allPhotos.length,
-        pairsFound: confirmedPairs.length,
-      })
-      .run();
-
-    // Re-query persisted rows so the response always contains real pair IDs.
-    const persisted = db.select().from(duplicatePairs).all();
-    if (getPhotoSequenceRevision() === scanSequenceRevision) {
-      setScannedSequenceRevision(scanSequenceRevision);
-    }
-    return {
-      groups: summarizeDuplicateGroups(
+      const persisted = db.select().from(duplicatePairs).all();
+      const summaries = summarizeDuplicateGroups(
         db,
-        hydrateDuplicateGroups(db, persisted)
-      ),
-      fromCache: false,
-    };
+        hydrateDuplicateGroups(db, persisted),
+        scanSignature,
+        legacyIgnoredMemberSignatures,
+        tx
+      );
+      db.insert(detectionRuns)
+        .values({
+          lastPhotoId: allPhotos.reduce((max, p) => Math.max(max, p.id), 0),
+          photosProcessed: allPhotos.length,
+          pairsFound: persisted.length,
+        })
+        .run();
+      setScannedSequenceRevision(scanSequenceRevision);
+      setScannedDuplicateSignature(scanSignature);
+      publishDuplicateRunSnapshot(db, runId, summaries, persisted, tx);
+      completeDuplicateDetectionRun(db, runId);
+      return summaries;
+    });
+    return { groups, fromCache: false, runId };
+  } catch (error) {
+    failDuplicateDetectionRun(db, runId, error);
+    throw error;
+  }
+}
+
+export const findDuplicates = os
+  .input(
+    z.object({
+      threshold: z.number().int().min(0).max(64).optional(),
+      forceRescan: z.boolean().optional().default(false),
+    })
+  )
+  .handler(({ input }) =>
+    runDuplicateScan(
+      JSON.stringify([
+        input,
+        getSetting("duplicates.settingsRevision"),
+        getPhotoSequenceRevision(),
+      ]),
+      (context) => scanDuplicates(input, context)
+    )
+  );
+
+export const getDuplicateScanProgressHandler = os.handler(() =>
+  getDuplicateScanProgress()
+);
+export const cancelDuplicateScanHandler = os.handler(() => {
+  cancelDuplicateScan();
+  return { cancelled: true };
+});
+
+export const getDuplicateScan = os
+  .input(z.object({ runId: z.string().uuid() }))
+  .handler(({ input }) => {
+    const run = getDatabase()
+      .select()
+      .from(duplicateDetectionRuns)
+      .where(eq(duplicateDetectionRuns.id, input.runId))
+      .get();
+    if (!run) {
+      throw new Error("Duplicate detection run was not found");
+    }
+    return run;
   });
 
 export const getDuplicateGroupPhotos = os
@@ -1628,7 +2127,12 @@ export const dismissDuplicate = os
   });
 
 export const dismissDuplicates = os
-  .input(z.object({ groupKey: z.string().min(1) }))
+  .input(
+    z.object({
+      groupKey: z.string().min(1),
+      dismissed: z.boolean().default(true),
+    })
+  )
   .handler(({ input }) => {
     const db = getDatabase();
     const group = hydrateDuplicateGroups(
@@ -1638,12 +2142,46 @@ export const dismissDuplicates = os
     if (!group) {
       throw new Error("Duplicate group is stale; rescan before ignoring");
     }
-    const result = db
-      .update(duplicatePairs)
-      .set({ status: "dismissed", resolvedAt: Date.now() })
-      .where(inArray(duplicatePairs.id, group.pairIds))
-      .run();
-    return { dismissed: result.changes };
+    return db.transaction((tx) => {
+      const result = tx
+        .update(duplicatePairs)
+        .set({
+          status: input.dismissed ? "dismissed" : "pending",
+          resolvedAt: input.dismissed ? Date.now() : null,
+        })
+        .where(inArray(duplicatePairs.id, group.pairIds))
+        .run();
+      const review = tx
+        .select()
+        .from(duplicateReviewGroups)
+        .where(eq(duplicateReviewGroups.groupKey, input.groupKey))
+        .get();
+      if (review) {
+        const nextRevision = review.reviewRevision + 1;
+        tx.update(duplicateReviewGroups)
+          .set({
+            complete: false,
+            ignoreState: input.dismissed ? "IGNORED" : "ACTIVE",
+            needsReview: !input.dismissed,
+            reviewRevision: nextRevision,
+            updatedAt: Date.now(),
+          })
+          .where(eq(duplicateReviewGroups.groupKey, input.groupKey))
+          .run();
+        tx.insert(duplicateReviewEvents)
+          .values({
+            detailsJson: JSON.stringify({
+              memberIds: group.photos.map((photo) => photo.id),
+            }),
+            eventType: input.dismissed ? "USER_IGNORE" : "USER_UNIGNORE",
+            groupKey: input.groupKey,
+            groupVersion: review.groupVersion,
+            reviewRevision: nextRevision,
+          })
+          .run();
+      }
+      return { dismissed: result.changes };
+    });
   });
 
 export const getDuplicateStats = os.handler(() => {

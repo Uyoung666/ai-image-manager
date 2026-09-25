@@ -155,24 +155,54 @@ describe("duplicate cleanup validation", () => {
     expect(
       validateDuplicateCleanupGroup(relations, {
         pairIds: [1, 2],
-        keepPhotoId: 1,
+        keepPhotoIds: [1],
         deletePhotoIds: [2, 3],
       })
     ).toEqual([2, 3]);
+  });
+
+  it("accepts multiple keepers and returns only explicitly deleted photos", () => {
+    expect(
+      validateDuplicateCleanupGroup(relations, {
+        pairIds: [1, 2],
+        keepPhotoIds: [1, 2],
+        deletePhotoIds: [3],
+      })
+    ).toEqual([3]);
+  });
+
+  it("accepts keeping every photo without creating a deletion set", () => {
+    expect(
+      validateDuplicateCleanupGroup(relations, {
+        pairIds: [1, 2],
+        keepPhotoIds: [1, 2, 3],
+        deletePhotoIds: [],
+      })
+    ).toEqual([]);
+  });
+
+  it("rejects an implicit undecided member", () => {
+    expect(() =>
+      validateDuplicateCleanupGroup(relations, {
+        pairIds: [1, 2],
+        keepPhotoIds: [1],
+        deletePhotoIds: [2],
+      })
+    ).toThrow(RETAIN_ERROR);
   });
 
   it("rejects deleting the keeper or every photo in the group", () => {
     expect(() =>
       validateDuplicateCleanupGroup(relations, {
         pairIds: [1, 2],
-        keepPhotoId: 1,
+        keepPhotoIds: [1],
         deletePhotoIds: [1, 2],
       })
     ).toThrow(RETAIN_ERROR);
     expect(() =>
       validateDuplicateCleanupGroup(relations, {
         pairIds: [1, 2],
-        keepPhotoId: 1,
+        keepPhotoIds: [1],
         deletePhotoIds: [1, 2, 3],
       })
     ).toThrow(RETAIN_ERROR);
@@ -182,14 +212,14 @@ describe("duplicate cleanup validation", () => {
     expect(() =>
       validateDuplicateCleanupGroup(relations.slice(0, 1), {
         pairIds: [1, 2],
-        keepPhotoId: 1,
+        keepPhotoIds: [1],
         deletePhotoIds: [2],
       })
     ).toThrow(STALE_ERROR);
     expect(() =>
       validateDuplicateCleanupGroup(relations, {
         pairIds: [1, 2],
-        keepPhotoId: 1,
+        keepPhotoIds: [1],
         deletePhotoIds: [99],
       })
     ).toThrow(RETAIN_ERROR);
@@ -204,7 +234,7 @@ describe("duplicate cleanup validation", () => {
         ],
         {
           pairIds: [1, 2],
-          keepPhotoId: 1,
+          keepPhotoIds: [1],
           deletePhotoIds: [2, 10, 11],
         }
       )
