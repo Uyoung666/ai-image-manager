@@ -92,7 +92,7 @@ test("mixed media summary, restart, and cleanup session exclusions", async () =>
       );
     const launch = async () => {
       app = await _electron.launch({
-        args: ["-r", preload, "--e2e", path.resolve(".")],
+        args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
         env,
       });
       const paths = await app.evaluate(({ app: instance }) =>

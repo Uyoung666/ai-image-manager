@@ -94,7 +94,7 @@ test("tag removal refreshes active results and rejects a delayed old response ac
       );
     const launch = async () => {
       app = await _electron.launch({
-        args: ["-r", preload, "--e2e", path.resolve(".")],
+        args: ["-r", preload, "--e2e", "--lang=zh-CN", path.resolve(".")],
         env,
       });
       app

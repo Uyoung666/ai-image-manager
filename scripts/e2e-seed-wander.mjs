@@ -32,9 +32,11 @@ const photoCount = Math.max(4, Number(photoCountArg) || 14);
 const root = process.cwd();
 
 const dataDir = path.join(userDataDir, "data");
-const photoDir = path.join(userDataDir, "e2e-photos");
+const requestedPhotoDir = path.join(userDataDir, "e2e-photos");
 fs.mkdirSync(dataDir, { recursive: true });
-fs.mkdirSync(photoDir, { recursive: true });
+fs.mkdirSync(requestedPhotoDir, { recursive: true });
+// Match import normalization, including Windows runner 8.3 temp paths.
+const photoDir = fs.realpathSync.native(requestedPhotoDir);
 
 const dbPath = path.join(dataDir, "ai-image-manager.db");
 const sqlite = new Database(dbPath);
@@ -43,7 +45,7 @@ sqlite.pragma("foreign_keys = ON");
 migrate(drizzle(sqlite), { migrationsFolder: path.join(root, "drizzle") });
 
 const insertFolder = sqlite.prepare(
-  "INSERT INTO folders (path, display_name, photo_count, created_at) VALUES (?, ?, ?, ?)"
+  "INSERT INTO folders (path, display_name, photo_count, created_at, last_scanned_at) VALUES (?, ?, ?, ?, ?)"
 );
 
 const now = new Date();
@@ -62,6 +64,9 @@ const folderResult = insertFolder.run(
   photoDir,
   "E2E Wander",
   photoCount,
+  Date.now(),
+  // This is a completed library. A NULL scan time triggers interrupted-import
+  // recovery, which would rescan fixtures, replace metadata and start AI work.
   Date.now()
 );
 const folderId = Number(folderResult.lastInsertRowid);

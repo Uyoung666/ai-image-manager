@@ -96,6 +96,12 @@ export async function setWanderOverrides(
 
 /** The Playwright window focus is unreliable; force the lifecycle eligible. */
 export async function forceWanderEligible(page: Page): Promise<void> {
+  // reload() can finish before React mounts its lifecycle listener. Wait for
+  // the app gate and Electron's initial snapshot before sending the override.
+  await page.locator("main").first().waitFor({ state: "visible" });
+  await page.waitForFunction(() =>
+    Boolean(window.electronAPI?.getWanderLifecycleState?.())
+  );
   await page.evaluate(() => {
     window.postMessage(
       { channel: "wander:lifecycle", eligible: true, reason: "window-focus" },
