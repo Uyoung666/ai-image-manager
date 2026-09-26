@@ -68,7 +68,7 @@ test("an interrupted committed batch resumes across two launches", async () => {
   };
   const launch = async () => {
     app = await _electron.launch({
-      args: ["-r", preload, path.resolve(".")],
+      args: ["-r", preload, "--e2e", path.resolve(".")],
       env: Object.fromEntries(
         Object.entries(env).filter(
           (entry): entry is [string, string] => entry[1] !== undefined

@@ -68,6 +68,7 @@ test.beforeAll(async () => {
       "--enable-unsafe-swiftshader",
       "--no-sandbox",
       "--use-angle=swiftshader",
+      "--e2e",
       `--user-data-dir=${userDataDir}`,
       path.resolve("."),
     ],

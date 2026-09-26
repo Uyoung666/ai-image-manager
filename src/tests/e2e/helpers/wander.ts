@@ -56,6 +56,7 @@ export async function launchWanderApp(
       "--no-sandbox",
       "--enable-unsafe-swiftshader",
       "--use-angle=swiftshader",
+      "--e2e",
       `--user-data-dir=${userDataDir}`,
       path.resolve("."),
     ],

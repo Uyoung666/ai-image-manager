@@ -87,7 +87,7 @@ test("mixed media import explains skipped files and survives restart", async () 
       );
     const launch = async () => {
       app = await _electron.launch({
-        args: ["-r", preload, path.resolve(".")],
+        args: ["-r", preload, "--e2e", path.resolve(".")],
         env,
       });
       const paths = await app.evaluate(({ app: instance }) =>

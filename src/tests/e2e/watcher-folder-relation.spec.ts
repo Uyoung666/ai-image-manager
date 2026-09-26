@@ -65,7 +65,7 @@ test("first move into a new directory updates filesystem, database, folder tree 
         )
       );
     app = await _electron.launch({
-      args: ["-r", preload, path.resolve(".")],
+      args: ["-r", preload, "--e2e", path.resolve(".")],
       env,
     });
     app
