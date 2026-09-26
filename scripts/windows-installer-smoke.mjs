@@ -42,6 +42,7 @@ const PACKAGED_E2E_READY_STABILITY_MS = 1000;
 const PACKAGED_E2E_POLL_INTERVAL_MS = 250;
 const PACKAGED_E2E_TERMINATION_TIMEOUT_MS = 15 * 1000;
 const INSTALLER_PROCESS_TIMEOUT_MS = 5 * 60 * 1000;
+const MSI_PROCESS_TIMEOUT_MS = 2 * 60 * 1000;
 
 function usage() {
   console.error(`Usage:
@@ -176,6 +177,115 @@ function run(
     throw new Error(`${label} failed with exit code ${result.status ?? 1}`);
   }
   return result.status ?? 0;
+}
+
+async function terminateMsiProcess(child) {
+  if (childHasExited(child)) {
+    return;
+  }
+  try {
+    child.kill();
+  } catch {
+    /* taskkill below is the authoritative Windows cleanup */
+  }
+  if (process.platform === "win32" && hasValidProcessId(child)) {
+    await forceKillProcessTree(child.pid);
+  }
+}
+
+async function finishMsiTimeout(child, label, finish) {
+  let cleanupError;
+  try {
+    await terminateMsiProcess(child);
+  } catch (error) {
+    cleanupError = error;
+  }
+  const suffix = cleanupError
+    ? `; process cleanup failed: ${describeCleanupError(cleanupError)}`
+    : "";
+  finish(
+    new Error(`${label} timed out after ${MSI_PROCESS_TIMEOUT_MS}ms${suffix}`)
+  );
+}
+
+function runMsiProcess(
+  command,
+  args,
+  label,
+  allowedExitCodes = ALLOWED_MSI_EXIT_CODES,
+  environment = process.env
+) {
+  console.log(`[installer-smoke] ${label}`);
+  return new Promise((resolve, reject) => {
+    let child;
+    let settled = false;
+    let timedOut = false;
+    let timer;
+
+    const finish = (error, status = 0) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      child?.removeListener("error", onError);
+      child?.removeListener("exit", onExit);
+      if (error) {
+        reject(error);
+      } else {
+        resolve(status);
+      }
+    };
+
+    const onError = (error) => {
+      if (timedOut) {
+        return;
+      }
+      finish(new Error(`${label} failed to start: ${error.message}`));
+    };
+
+    const onExit = (status, signal) => {
+      if (timedOut) {
+        return;
+      }
+      if (!allowedExitCodes.has(status ?? -1)) {
+        finish(
+          new Error(
+            `${label} failed with ${signal ? `signal ${signal}` : `exit code ${status ?? 1}`}`
+          )
+        );
+        return;
+      }
+      finish(undefined, status ?? 0);
+    };
+
+    try {
+      child = spawn(command, args, {
+        env: environment,
+        stdio: "inherit",
+        windowsHide: true,
+      });
+      child.once("error", onError);
+      child.once("exit", onExit);
+    } catch (error) {
+      finish(
+        new Error(
+          `${label} failed to start: ${error instanceof Error ? error.message : String(error)}`
+        )
+      );
+      return;
+    }
+
+    timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      timedOut = true;
+      finishMsiTimeout(child, label, finish);
+    }, MSI_PROCESS_TIMEOUT_MS);
+  });
 }
 
 function runCapture(command, args, label) {
@@ -1279,7 +1389,7 @@ function assertMsiAutoUpdater(product) {
   return updater;
 }
 
-function runMsiFreshSmoke(currentMsiPath, version) {
+async function runMsiFreshSmoke(currentMsiPath, version) {
   const candidateStat = fs.statSync(currentMsiPath);
   if (!candidateStat.isFile() || candidateStat.size === 0) {
     throw new Error(`Candidate MSI is empty: ${currentMsiPath}`);
@@ -1293,8 +1403,8 @@ function runMsiFreshSmoke(currentMsiPath, version) {
     "msiexec.exe"
   );
   const runMsi = (args, label) =>
-    run(msiexec, args, label, ALLOWED_MSI_EXIT_CODES);
-  runMsi(
+    runMsiProcess(msiexec, args, label, ALLOWED_MSI_EXIT_CODES);
+  await runMsi(
     [
       "/i",
       currentMsiPath,
@@ -1349,11 +1459,11 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
     "msiexec.exe"
   );
   const runMsi = (args, label) =>
-    run(msiexec, args, label, ALLOWED_MSI_EXIT_CODES);
+    runMsiProcess(msiexec, args, label, ALLOWED_MSI_EXIT_CODES);
   let productWasInstalled = false;
   let installedMsiPath;
   try {
-    runMsi(
+    await runMsi(
       [
         "/i",
         oldMsiPath,
@@ -1435,7 +1545,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       version
     );
 
-    runMsi(
+    await runMsi(
       [
         "/x",
         oldMsiPath,
@@ -1453,7 +1563,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
     const customDirectory = fs.mkdtempSync(
       path.join(os.tmpdir(), "ai-image-manager-msi-custom-")
     );
-    runMsi(
+    await runMsi(
       [
         "/i",
         currentMsiPath,
@@ -1484,7 +1594,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       undefined,
       version
     );
-    runMsi(
+    await runMsi(
       [
         "/x",
         currentMsiPath,
@@ -1503,7 +1613,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       // Best effort cleanup after a failed assertion; preserve the original
       // failure while ensuring a rerun does not inherit an installed product.
       try {
-        runMsi(
+        await runMsi(
           ["/x", installedMsiPath, "/qn", "/norestart"],
           "cleanup failed MSI smoke installation"
         );
