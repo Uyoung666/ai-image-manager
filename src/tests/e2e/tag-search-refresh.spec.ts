@@ -304,11 +304,29 @@ test("tag removal refreshes active results and rejects a delayed old response ac
 
     // Creating a tag in details and deleting it in the tree must refresh the
     // already mounted search bar, including numeric-prefix suggestions.
+    await requireApp().evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setSize(1024, 768);
+    });
+    await page.waitForFunction(
+      () => window.matchMedia("(max-width: 1120px)").matches
+    );
     await page.getByRole("button", { name: "+ 添加", exact: true }).click();
     await page.getByPlaceholder("输入新标签名称...").fill("55555");
     await page.getByPlaceholder("输入新标签名称...").press("Enter");
+    // Enter starts two async writes. Wait for the saved tag before closing
+    // details; in a compact window the modal makes the search toolbar inert.
+    await expect(
+      page
+        .getByRole("button", { name: "点击移除", exact: true })
+        .filter({ hasText: "55555" })
+    ).toBeVisible();
+    const details = page.locator('aside[data-surface="inspector"]');
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0);
     const searchInput = page.locator("input.home-search-input");
     await searchInput.fill("5");
+    await expect(searchInput).toBeFocused();
+    await expect(searchInput).toHaveValue("5");
     await expect(
       page.getByRole("option", { name: NUMERIC_TAG_PATTERN })
     ).toBeVisible();
