@@ -8,7 +8,12 @@ type BootstrapIncidentSource = "main-crash" | "startup-failure";
 const LINE_BREAK_PATTERN = /\r?\n/;
 
 const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
-if (process.env.CI === "e2e" && e2eUserDataDir) {
+const isE2E =
+  app.commandLine.hasSwitch("e2e") ||
+  process.argv.includes("--e2e") ||
+  process.env.CI === "e2e" ||
+  Boolean(e2eUserDataDir);
+if (isE2E && e2eUserDataDir) {
   app.setPath("userData", path.resolve(e2eUserDataDir));
   app.disableHardwareAcceleration();
 }

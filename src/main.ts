@@ -122,7 +122,11 @@ if (started) {
 // E2E runs must not share the real profile or its single-instance lock.
 // Set this before requestSingleInstanceLock() and before any userData access.
 const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
-const isE2E = process.env.CI === "e2e" || Boolean(e2eUserDataDir);
+const isE2E =
+  app.commandLine.hasSwitch("e2e") ||
+  process.argv.includes("--e2e") ||
+  process.env.CI === "e2e" ||
+  Boolean(e2eUserDataDir);
 if (isE2E && e2eUserDataDir) {
   app.setPath("userData", path.resolve(e2eUserDataDir));
   app.disableHardwareAcceleration();
