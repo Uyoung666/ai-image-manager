@@ -51,7 +51,10 @@ const httpAuthToken = httpTokenArg
   : "";
 
 // E2E 测试模式：跳过引导流程
-const isE2E = process.argv.includes("--e2e");
+const isE2E =
+  process.argv.includes("--e2e") ||
+  process.env.CI === "e2e" ||
+  Boolean(process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR);
 
 contextBridge.exposeInMainWorld("electronAPI", {
   getFilePath: (file: File): string => webUtils.getPathForFile(file),

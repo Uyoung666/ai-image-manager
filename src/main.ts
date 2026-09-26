@@ -122,7 +122,8 @@ if (started) {
 // E2E runs must not share the real profile or its single-instance lock.
 // Set this before requestSingleInstanceLock() and before any userData access.
 const e2eUserDataDir = process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR;
-if (process.env.CI === "e2e" && e2eUserDataDir) {
+const isE2E = process.env.CI === "e2e" || Boolean(e2eUserDataDir);
+if (isE2E && e2eUserDataDir) {
   app.setPath("userData", path.resolve(e2eUserDataDir));
   app.disableHardwareAcceleration();
 }
@@ -793,7 +794,7 @@ function createWindow(httpPort: number, httpAuthToken: string) {
       additionalArguments: [
         `--http-port=${httpPort}`,
         `--http-token=${httpAuthToken}`,
-        ...(process.env.CI === "e2e" ? ["--e2e"] : []),
+        ...(isE2E ? ["--e2e"] : []),
       ],
       devTools: inDevelopment,
       contextIsolation: true,

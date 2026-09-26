@@ -21,7 +21,10 @@ function getStore(): Store<UpdateWelcomeStore> {
 
 export function consumeUpdateWelcome(): { version: string | null } {
   const currentVersion = app.getVersion();
-  const skip = process.env.CI === "e2e" || process.argv.includes("--e2e");
+  const skip =
+    process.env.CI === "e2e" ||
+    process.argv.includes("--e2e") ||
+    Boolean(process.env.AI_IMAGE_MANAGER_E2E_USER_DATA_DIR);
   if (!app.isPackaged || skip) {
     return { version: null };
   }
