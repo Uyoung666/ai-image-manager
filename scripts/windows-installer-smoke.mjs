@@ -45,6 +45,7 @@ const PACKAGED_E2E_POLL_INTERVAL_MS = 250;
 const PACKAGED_E2E_TERMINATION_TIMEOUT_MS = 15 * 1000;
 const INSTALLER_PROCESS_TIMEOUT_MS = 5 * 60 * 1000;
 const MSI_PROCESS_TIMEOUT_MS = 2 * 60 * 1000;
+const MSI_PROGRESS_INTERVAL_MS = 15 * 1000;
 
 function usage() {
   console.error(`Usage:
@@ -181,7 +182,11 @@ function run(
   return result.status ?? 0;
 }
 
-async function terminateMsiProcess(child, forceKill = forceKillProcessTree) {
+async function terminateMsiProcess(
+  child,
+  forceKill = forceKillProcessTree,
+  timeoutMs = PACKAGED_E2E_TERMINATION_TIMEOUT_MS
+) {
   if (childHasExited(child)) {
     return;
   }
@@ -190,7 +195,47 @@ async function terminateMsiProcess(child, forceKill = forceKillProcessTree) {
     // Killing it first loses the tree and risks a reused PID.
     await forceKill(child.pid);
   } else {
-    child.kill();
+    child.kill("SIGKILL");
+  }
+  await waitForChildExit(child, timeoutMs);
+  if (!childHasExited(child)) {
+    throw new Error("MSI process exit was not observed after cleanup");
+  }
+}
+
+async function withProcessDeadline(operation, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`process cleanup exceeded ${timeoutMs}ms`)),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function killAndWait(child, timeoutMs) {
+  try {
+    if (!childHasExited(child)) {
+      child.kill("SIGKILL");
+    }
+    await waitForChildExit(child, timeoutMs);
+    if (!childHasExited(child)) {
+      throw new Error("process exit was not observed after kill");
+    }
+  } finally {
+    // A failed cleanup must fail the gate without leaving a referenced handle
+    // keeping Node alive forever. Non-detached children remain in its Windows
+    // job object and are also terminated when Node exits. Never unref success.
+    if (!childHasExited(child)) {
+      child.unref();
+    }
   }
 }
 
@@ -199,13 +244,30 @@ async function finishMsiTimeout(
   label,
   finish,
   timeoutMs,
-  terminateProcess
+  terminateProcess,
+  cleanupTimeoutMs
 ) {
   let cleanupError;
+  console.error(
+    `[installer-smoke] ${label} timed out; cleaning PID ${child.pid}`
+  );
   try {
-    await terminateProcess(child);
+    await withProcessDeadline(async () => {
+      await terminateProcess(child);
+      await waitForChildExit(child, cleanupTimeoutMs);
+      if (!childHasExited(child)) {
+        throw new Error("MSI process exit was not observed after cleanup");
+      }
+    }, cleanupTimeoutMs);
   } catch (error) {
     cleanupError = error;
+    try {
+      await killAndWait(child, cleanupTimeoutMs);
+    } catch (killError) {
+      cleanupError = new Error(
+        `${describeCleanupError(error)}; ${describeCleanupError(killError)}`
+      );
+    }
   }
   const suffix = cleanupError
     ? `; process cleanup failed: ${describeCleanupError(cleanupError)}`
@@ -219,10 +281,36 @@ function runMsiProcess(
   label,
   allowedExitCodes = ALLOWED_MSI_EXIT_CODES,
   environment = process.env,
+  options = {}
+) {
+  return runInstallerProcess(
+    command,
+    [
+      ...args,
+      // DisableShutdown still engages Restart Manager. A quiet CI gate
+      // must not enumerate/restart unrelated runner applications/services.
+      "REBOOT=ReallySuppress",
+      "MSIRESTARTMANAGERCONTROL=Disable",
+    ],
+    label,
+    allowedExitCodes,
+    environment,
+    { timeoutMs: MSI_PROCESS_TIMEOUT_MS, ...options }
+  );
+}
+
+function runInstallerProcess(
+  command,
+  args,
+  label,
+  allowedExitCodes = SQUIRREL_EXIT_CODES,
+  environment = process.env,
   {
     spawnProcess = spawn,
     terminateProcess = terminateMsiProcess,
-    timeoutMs = MSI_PROCESS_TIMEOUT_MS,
+    timeoutMs = INSTALLER_PROCESS_TIMEOUT_MS,
+    cleanupTimeoutMs = PACKAGED_E2E_TERMINATION_TIMEOUT_MS,
+    outputPath,
   } = {}
 ) {
   console.log(`[installer-smoke] ${label}`);
@@ -231,6 +319,8 @@ function runMsiProcess(
     let settled = false;
     let timedOut = false;
     let timer;
+    let progressTimer;
+    const startedAt = Date.now();
 
     const finish = (error, status = 0) => {
       if (settled) {
@@ -240,6 +330,7 @@ function runMsiProcess(
       if (timer) {
         clearTimeout(timer);
       }
+      clearInterval(progressTimer);
       child?.removeListener("error", onError);
       child?.removeListener("exit", onExit);
       if (error) {
@@ -257,6 +348,9 @@ function runMsiProcess(
     };
 
     const onExit = (status, signal) => {
+      console.log(
+        `[installer-smoke] ${label} PID ${child.pid} exited: ${signal || status}; elapsed=${Date.now() - startedAt}ms`
+      );
       if (timedOut) {
         return;
       }
@@ -271,28 +365,25 @@ function runMsiProcess(
       finish(undefined, status ?? 0);
     };
 
+    let outputDescriptor;
     try {
-      child = spawnProcess(
-        command,
-        [
-          ...args,
-          // /norestart only prevents a machine reboot; it does not prevent
-          // Restart Manager from closing applications sharing the CI console.
-          // Apply to baseline, candidate, uninstall, and failure cleanup alike.
-          "REBOOT=ReallySuppress",
-          "MSIRESTARTMANAGERCONTROL=DisableShutdown",
-        ],
-        {
-          env: environment,
-          // MSI writes its verbose log to /l*v. Give it a separate console so
-          // installer process management cannot tear down the runner's console.
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        }
-      );
+      if (outputPath) {
+        outputDescriptor = fs.openSync(outputPath, "a");
+      }
+      child = spawnProcess(command, args, {
+        env: environment,
+        // Keep the client in Node's Windows kill-on-close job. No inherited
+        // stdin/stdout/stderr handles; MSI diagnostics use the /l*vx! file.
+        detached: false,
+        stdio:
+          outputDescriptor === undefined
+            ? "ignore"
+            : ["ignore", outputDescriptor, outputDescriptor],
+        windowsHide: true,
+      });
       child.once("error", onError);
       child.once("exit", onExit);
+      console.log(`[installer-smoke] ${label} started PID ${child.pid}`);
     } catch (error) {
       finish(
         new Error(
@@ -300,14 +391,30 @@ function runMsiProcess(
         )
       );
       return;
+    } finally {
+      if (outputDescriptor !== undefined) {
+        fs.closeSync(outputDescriptor);
+      }
     }
 
+    progressTimer = setInterval(() => {
+      console.log(
+        `[installer-smoke] ${label} waiting PID ${child.pid}; elapsed=${Date.now() - startedAt}ms; freeMemory=${os.freemem()}`
+      );
+    }, MSI_PROGRESS_INTERVAL_MS);
     timer = setTimeout(() => {
       if (settled) {
         return;
       }
       timedOut = true;
-      finishMsiTimeout(child, label, finish, timeoutMs, terminateProcess);
+      finishMsiTimeout(
+        child,
+        label,
+        finish,
+        timeoutMs,
+        terminateProcess,
+        cleanupTimeoutMs
+      );
     }, timeoutMs);
   });
 }
@@ -324,6 +431,7 @@ function runCapture(command, args, label) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: PACKAGED_E2E_TERMINATION_TIMEOUT_MS,
     windowsHide: true,
   });
   if (result.error) {
@@ -335,15 +443,24 @@ function runCapture(command, args, label) {
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 }
 
-async function sha256File(filePath) {
+async function sha256File(filePath, signal) {
   const hash = createHash("sha256");
-  for await (const chunk of fs.createReadStream(filePath)) {
+  for await (const chunk of fs.createReadStream(filePath, { signal })) {
     hash.update(chunk);
   }
   return hash.digest("hex");
 }
 
-async function downloadVerifiedAsset(urlValue, expectedHash, suffix) {
+async function downloadVerifiedAsset(
+  urlValue,
+  expectedHash,
+  suffix,
+  {
+    timeoutMs = INSTALLER_PROCESS_TIMEOUT_MS,
+    fetchAsset = fetch,
+    downloadRoot = os.tmpdir(),
+  } = {}
+) {
   let url;
   try {
     url = new URL(urlValue);
@@ -358,46 +475,68 @@ async function downloadVerifiedAsset(urlValue, expectedHash, suffix) {
       "Baseline SHA-256 must be a 64-character hexadecimal value"
     );
   }
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error(
-      `Baseline download failed: ${response.status} ${response.statusText}`
-    );
-  }
-  if (response.url) {
-    let finalUrl;
-    try {
-      finalUrl = new URL(response.url);
-    } catch {
-      throw new Error(`Baseline response URL is not valid: ${response.url}`);
-    }
-    if (finalUrl.protocol !== "https:") {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  console.log(
+    `[installer-smoke] downloading baseline ${urlValue}; timeout=${timeoutMs}ms`
+  );
+  try {
+    const response = await fetchAsset(url, {
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
       throw new Error(
-        `Baseline download redirected to a non-HTTPS URL: ${response.url}`
+        `Baseline download failed: ${response.status} ${response.statusText}`
       );
     }
-  }
-  const destinationDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), `ai-image-manager-baseline-${suffix}-`)
-  );
-  const destination = path.join(destinationDirectory, `baseline${suffix}`);
-  if (!response.body) {
-    throw new Error(`Baseline response has no readable body: ${urlValue}`);
-  }
-  await pipeline(
-    Readable.fromWeb(response.body),
-    fs.createWriteStream(destination)
-  );
-  const actualHash = await sha256File(destination);
-  if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new Error(
-      `Baseline SHA-256 mismatch for ${urlValue}: expected ${expectedHash}, received ${actualHash}`
+    if (response.url) {
+      let finalUrl;
+      try {
+        finalUrl = new URL(response.url);
+      } catch {
+        throw new Error(`Baseline response URL is not valid: ${response.url}`);
+      }
+      if (finalUrl.protocol !== "https:") {
+        throw new Error(
+          `Baseline download redirected to a non-HTTPS URL: ${response.url}`
+        );
+      }
+    }
+    const destinationDirectory = fs.mkdtempSync(
+      path.join(downloadRoot, `ai-image-manager-baseline-${suffix}-`)
     );
+    const destination = path.join(destinationDirectory, `baseline${suffix}`);
+    if (!response.body) {
+      throw new Error(`Baseline response has no readable body: ${urlValue}`);
+    }
+    await pipeline(
+      Readable.fromWeb(response.body),
+      fs.createWriteStream(destination),
+      { signal: controller.signal }
+    );
+    const actualHash = await sha256File(destination, controller.signal);
+    if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
+      throw new Error(
+        `Baseline SHA-256 mismatch for ${urlValue}: expected ${expectedHash}, received ${actualHash}`
+      );
+    }
+    console.log(
+      `[installer-smoke] verified baseline ${urlValue} (${actualHash})`
+    );
+    return destination;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        `Baseline download timed out after ${timeoutMs}ms: ${urlValue}`,
+        { cause: error }
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-  console.log(
-    `[installer-smoke] verified baseline ${urlValue} (${actualHash})`
-  );
-  return destination;
 }
 
 function squirrelRoots() {
@@ -871,11 +1010,16 @@ function waitForChildExit(child, timeoutMs) {
   });
 }
 
-function forceKillProcessTree(pid, spawnProcess = spawn) {
+function forceKillProcessTree(
+  pid,
+  spawnProcess = spawn,
+  timeoutMs = PACKAGED_E2E_TERMINATION_TIMEOUT_MS
+) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer;
     let killer;
+    let timedOut = false;
     const finish = (error) => {
       if (settled) {
         return;
@@ -892,8 +1036,15 @@ function forceKillProcessTree(pid, spawnProcess = spawn) {
         resolve();
       }
     };
-    const onError = (error) => finish(error);
+    const onError = (error) => {
+      if (!timedOut) {
+        finish(error);
+      }
+    };
     const onExit = (code) => {
+      if (timedOut) {
+        return;
+      }
       if (code === 0 || code === 128) {
         finish();
       } else {
@@ -916,10 +1067,16 @@ function forceKillProcessTree(pid, spawnProcess = spawn) {
       onExit(killer.exitCode);
       return;
     }
-    timer = setTimeout(
-      () => finish(new Error("taskkill.exe timed out")),
-      PACKAGED_E2E_TERMINATION_TIMEOUT_MS
-    );
+    timer = setTimeout(() => {
+      timedOut = true;
+      killAndWait(killer, timeoutMs).then(
+        () => finish(new Error("taskkill.exe timed out")),
+        (error) =>
+          finish(
+            new Error(`taskkill.exe timed out; ${describeCleanupError(error)}`)
+          )
+      );
+    }, timeoutMs);
   });
 }
 function tryTerminatePackagedChild(child) {
@@ -1534,10 +1691,13 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       normalizedOldVersion
     );
 
-    run(
+    await runInstallerProcess(
       updateExecutable,
       ["--update", feed],
-      `auto-update MSI installation ${normalizedOldVersion} to ${version} from testing feed`
+      `auto-update MSI installation ${normalizedOldVersion} to ${version} from testing feed`,
+      SQUIRREL_EXIT_CODES,
+      process.env,
+      { outputPath: path.join(logDirectory, "auto-update.log") }
     );
     installedMsiPath = oldMsiPath;
     await waitForPath(
@@ -1712,9 +1872,11 @@ async function main() {
 export {
   assertPackagedExecutable,
   assertSquirrelDeltaUsed,
+  downloadVerifiedAsset,
   findInstalledExecutable,
   forceKillProcessTree,
   readReadinessState,
+  runInstallerProcess,
   runMsiProcess,
   runPackagedE2E,
   terminateMsiProcess,

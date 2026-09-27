@@ -1,13 +1,19 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ReadableStream } from "node:stream/web";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPackagedExecutable,
   assertSquirrelDeltaUsed,
+  downloadVerifiedAsset,
   findInstalledExecutable,
   forceKillProcessTree,
+  runInstallerProcess,
   runMsiProcess,
   runPackagedE2E,
   terminateMsiProcess,
@@ -39,7 +45,7 @@ describe("MSI smoke process isolation", () => {
   it.each([
     "/i",
     "/x",
-  ])("isolates %s from the runner console and suppresses application shutdown", async (operation) => {
+  ])("keeps %s supervised without inherited I/O or Restart Manager", async (operation) => {
     let observed;
     await runMsiProcess(
       "msiexec.exe",
@@ -61,11 +67,11 @@ describe("MSI smoke process isolation", () => {
         "/qn",
         "/norestart",
         "REBOOT=ReallySuppress",
-        "MSIRESTARTMANAGERCONTROL=DisableShutdown",
+        "MSIRESTARTMANAGERCONTROL=Disable",
       ],
       options: {
         env: { MSI_TEST: "yes" },
-        detached: true,
+        detached: false,
         stdio: "ignore",
         windowsHide: true,
       },
@@ -161,12 +167,278 @@ describe("MSI smoke process isolation", () => {
     await terminateMsiProcess(child, (pid) => {
       expect(child.kills).toBe(0);
       killed.push(pid);
+      child.kill();
     });
     expect(killed).toEqual(process.platform === "win32" ? [child.pid] : []);
     child.exitCode = 0;
     await terminateMsiProcess(child, () => {
       throw new Error("already exited");
     });
+  });
+
+  it("waits for the actual MSI exit after taskkill has returned", async () => {
+    const child = createChild("msiexec.exe");
+    child.kill = () => true;
+    let settled = false;
+    const cleanup = terminateMsiProcess(child, noOpForceKill, 200).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+    child.exitCode = 1;
+    child.emit("exit", 1, null);
+    await cleanup;
+    expect(settled).toBe(true);
+  });
+
+  it("fails cleanup if taskkill reports success but MSI is still alive", async () => {
+    const child = createChild("msiexec.exe");
+    child.kill = () => true;
+    await expect(terminateMsiProcess(child, noOpForceKill, 15)).rejects.toThrow(
+      "process did not exit within 15ms"
+    );
+  });
+
+  it("bounds a cleanup promise that never settles and kills the client", async () => {
+    const child = createChild("msiexec.exe");
+    await expect(
+      runMsiProcess("msiexec.exe", [], "hung cleanup", undefined, undefined, {
+        spawnProcess: () => child,
+        timeoutMs: 10,
+        cleanupTimeoutMs: 20,
+        terminateProcess: () =>
+          new Promise(() => {
+            // Simulate a cleanup helper that never reports completion.
+          }),
+      })
+    ).rejects.toThrow("process cleanup exceeded 20ms");
+    expect(child.kills).toBe(1);
+    expect(child.exitCode).toBe(0);
+    expect(child.unrefs).toBe(0);
+  });
+
+  it("fails and releases an unkillable client handle after the final deadline", async () => {
+    const child = createChild("msiexec.exe");
+    child.kill = () => false;
+    await expect(
+      runMsiProcess("msiexec.exe", [], "unkillable MSI", undefined, undefined, {
+        spawnProcess: () => child,
+        timeoutMs: 10,
+        cleanupTimeoutMs: 15,
+        terminateProcess: () => {
+          throw new Error("access denied");
+        },
+      })
+    ).rejects.toThrow("access denied; process did not exit within 15ms");
+    expect(child.unrefs).toBe(1);
+    expect(child.listenerCount("exit")).toBe(0);
+    expect(child.listenerCount("error")).toBe(0);
+  });
+
+  it("does not treat cleanup error events as observable process exit", async () => {
+    const child = createChild("msiexec.exe");
+    child.kill = () => {
+      queueMicrotask(() => child.emit("error", new Error("EPERM")));
+      return false;
+    };
+    await expect(
+      runMsiProcess(
+        "msiexec.exe",
+        [],
+        "MSI error event",
+        undefined,
+        undefined,
+        {
+          spawnProcess: () => child,
+          timeoutMs: 10,
+          cleanupTimeoutMs: 30,
+          terminateProcess: () => {
+            throw new Error("tree cleanup failed");
+          },
+        }
+      )
+    ).rejects.toThrow("process exit was not observed after kill");
+    expect(child.unrefs).toBe(1);
+  });
+
+  it.each([
+    false,
+    true,
+  ])("releases timed-out taskkill (unkillable=%s) without reporting success", async (unkillable) => {
+    const killer = createChild("taskkill.exe");
+    if (unkillable) {
+      killer.kill = () => false;
+    }
+    await expect(forceKillProcessTree(4242, () => killer, 15)).rejects.toThrow(
+      "taskkill.exe timed out"
+    );
+    expect(killer.unrefs).toBe(unkillable ? 1 : 0);
+    expect(killer.listenerCount("exit")).toBe(0);
+    expect(killer.listenerCount("error")).toBe(0);
+  });
+
+  it("lets a real smoke supervisor exit nonzero after terminating a hung child", () => {
+    const moduleUrl = pathToFileURL(
+      path.resolve("scripts/windows-installer-smoke.mjs")
+    ).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { runMsiProcess } from ${JSON.stringify(moduleUrl)};
+         try {
+           await runMsiProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"],
+             "real hung child", undefined, undefined,
+             { timeoutMs: 200, cleanupTimeoutMs: 1000 });
+         } catch (error) {
+           console.error(error.message);
+           process.exitCode = 1;
+         }`,
+      ],
+      { encoding: "utf8", timeout: 5000, windowsHide: true }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("real hung child timed out after 200ms");
+    expect(result.stdout).toContain("exited:");
+  });
+
+  it("supervises Update.exe asynchronously without adding MSI properties or inheriting runner output", async () => {
+    let observed;
+    await runInstallerProcess(
+      "Update.exe",
+      ["--update", "https://example.com/feed"],
+      "MSI auto-update",
+      undefined,
+      undefined,
+      {
+        spawnProcess: msiSpawnWithExit(0, (command, args, options) => {
+          observed = { command, args, options };
+        }),
+      }
+    );
+    expect(observed).toMatchObject({
+      command: "Update.exe",
+      args: ["--update", "https://example.com/feed"],
+      options: { detached: false, stdio: "ignore", windowsHide: true },
+    });
+    await expect(
+      runInstallerProcess(
+        "Update.exe",
+        [],
+        "MSI auto-update",
+        undefined,
+        undefined,
+        {
+          spawnProcess: msiSpawnWithExit(3010),
+        }
+      )
+    ).rejects.toThrow("exit code 3010");
+  });
+
+  it("captures updater output in a file without keeping a runner pipe open", async () => {
+    const outputPath = path.join(
+      path.dirname(createExecutable()),
+      "auto-update.log"
+    );
+    await runInstallerProcess(
+      process.execPath,
+      ["-e", 'console.log("updater finished")'],
+      "updater output",
+      undefined,
+      undefined,
+      {
+        outputPath,
+      }
+    );
+    expect(fs.readFileSync(outputPath, "utf8")).toContain("updater finished");
+  });
+});
+
+describe("installer baseline download deadline", () => {
+  const baselineUrl = "https://example.com/previous.msi";
+  const validHash = "a".repeat(64);
+
+  it("aborts a fetch that never produces response headers", async () => {
+    let signal;
+    await expect(
+      downloadVerifiedAsset(baselineUrl, validHash, ".msi", {
+        timeoutMs: 20,
+        fetchAsset: (_, options) => {
+          signal = options.signal;
+          return new Promise((_, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new Error("aborted")),
+              { once: true }
+            );
+          });
+        },
+      })
+    ).rejects.toThrow("Baseline download timed out after 20ms");
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("aborts the body pipeline after headers and releases the partial file", async () => {
+    const downloadRoot = path.dirname(createExecutable());
+    let cancelled = false;
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(Buffer.from("partial MSI"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(
+      downloadVerifiedAsset(baselineUrl, validHash, ".msi", {
+        timeoutMs: 30,
+        downloadRoot,
+        fetchAsset: () => Promise.resolve({ ok: true, url: baselineUrl, body }),
+      })
+    ).rejects.toThrow("Baseline download timed out after 30ms");
+    expect(cancelled).toBe(true);
+    const directory = fs
+      .readdirSync(downloadRoot)
+      .find((name) => name.startsWith("ai-image-manager-baseline-"));
+    const partialPath = path.join(downloadRoot, directory, "baseline.msi");
+    // Rename preserves partial diagnostics and proves the writer released its
+    // Windows file handle. Never delete a failed download's evidence here.
+    fs.renameSync(partialPath, `${partialPath}.partial`);
+  });
+
+  it.each([
+    true,
+    false,
+  ])("still enforces SHA-256 after a completed download (matches=%s)", async (matches) => {
+    const bytes = Buffer.from("verified MSI bytes");
+    const downloadRoot = path.dirname(createExecutable());
+    const download = downloadVerifiedAsset(
+      baselineUrl,
+      matches ? createHash("sha256").update(bytes).digest("hex") : validHash,
+      ".msi",
+      {
+        timeoutMs: 1000,
+        downloadRoot,
+        fetchAsset: () =>
+          Promise.resolve({
+            ok: true,
+            url: baselineUrl,
+            body: new ReadableStream({
+              start(controller) {
+                controller.enqueue(bytes);
+                controller.close();
+              },
+            }),
+          }),
+      }
+    );
+    if (matches) {
+      expect(fs.readFileSync(await download)).toEqual(bytes);
+    } else {
+      await expect(download).rejects.toThrow("Baseline SHA-256 mismatch");
+    }
   });
 });
 
@@ -188,6 +460,10 @@ function createChild(executable) {
   child.signalCode = null;
   child.spawnfile = executable;
   child.kills = 0;
+  child.unrefs = 0;
+  child.unref = () => {
+    child.unrefs += 1;
+  };
   child.kill = () => {
     child.kills += 1;
     if (child.exitCode === null) {

@@ -466,7 +466,8 @@ jobs:
         run: |
           Write-Host "MSI smoke tooling commit: ${{ github.sha }}; application tag: ${{ steps.release.outputs.tag }}"
           Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free | Format-Table
-          Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory, TotalVisibleMemorySize | Format-Table
+          # Bound the diagnostic query too: it runs before Node's MSI timeout.
+          Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 10 | Select-Object FreePhysicalMemory, TotalVisibleMemorySize | Format-Table
           $baselineValues = @(
             $env:AIM_OLD_MSI_URL,
             $env:AIM_OLD_MSI_SHA256,
@@ -477,21 +478,28 @@ jobs:
             throw "Configure all three previous MSI variables or leave all three empty"
           }
 
-          if ($configuredValues.Count -eq 3) {
-            node scripts/windows-installer-smoke.mjs msi-upgrade `
-              --msi "${{ steps.payload.outputs.msi }}" `
-              --version $env:RELEASE_VERSION `
-              --feed "${{ steps.release.outputs.testing-feed }}"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $mode = "upgrade"
-          } elseif ($env:RELEASE_VERSION -eq $env:AIM_FIRST_OFFICIAL_MSI_VERSION) {
-            node scripts/windows-installer-smoke.mjs msi-fresh `
-              --msi "${{ steps.payload.outputs.msi }}" `
-              --version $env:RELEASE_VERSION
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $mode = "install-bootstrap"
-          } else {
-            throw "A verified previous MSI baseline is mandatory after v$env:AIM_FIRST_OFFICIAL_MSI_VERSION"
+          try {
+            if ($configuredValues.Count -eq 3) {
+              node scripts/windows-installer-smoke.mjs msi-upgrade `
+                --msi "${{ steps.payload.outputs.msi }}" `
+                --version $env:RELEASE_VERSION `
+                --feed "${{ steps.release.outputs.testing-feed }}"
+              if ($LASTEXITCODE -ne 0) { throw "MSI upgrade smoke failed: $LASTEXITCODE" }
+              $mode = "upgrade"
+            } elseif ($env:RELEASE_VERSION -eq $env:AIM_FIRST_OFFICIAL_MSI_VERSION) {
+              node scripts/windows-installer-smoke.mjs msi-fresh `
+                --msi "${{ steps.payload.outputs.msi }}" `
+                --version $env:RELEASE_VERSION
+              if ($LASTEXITCODE -ne 0) { throw "MSI fresh smoke failed: $LASTEXITCODE" }
+              $mode = "install-bootstrap"
+            } else {
+              throw "A verified previous MSI baseline is mandatory after v$env:AIM_FIRST_OFFICIAL_MSI_VERSION"
+            }
+          } finally {
+            # Observe the Windows Installer service's processes, but never
+            # stop the shared service or kill every msiexec on the machine.
+            Write-Host "MSI smoke returned to workflow at $([DateTime]::UtcNow.ToString('o'))"
+            Get-Process -Name msiexec -ErrorAction SilentlyContinue | Select-Object Id, StartTime, CPU, WorkingSet64 | Format-Table
           }
           "mode=$mode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
