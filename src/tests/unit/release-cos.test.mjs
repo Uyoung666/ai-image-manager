@@ -1,8 +1,10 @@
 // biome-ignore-all lint/performance/useTopLevelRegex: test assertions intentionally keep patterns next to expectations.
 // biome-ignore-all lint/suspicious/useAwait: fake store methods model async COS methods while remaining synchronous in memory.
 
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -13,7 +15,11 @@ import {
   formatSha256Sums,
   verifySha256Sums,
 } from "../../../scripts/release/checksums.mjs";
-import { CosStore, formatCopySource } from "../../../scripts/release/cos.mjs";
+import {
+  CosStore,
+  createCosStoreFromEnv,
+  formatCopySource,
+} from "../../../scripts/release/cos.mjs";
 import {
   prefixForKind,
   prepareReleaseArtifacts,
@@ -261,6 +267,35 @@ function decodeCopySourceKey(copySource) {
   return decodeURIComponent(copySource.slice(copySource.indexOf("/") + 1));
 }
 
+async function readWorkflowStep(file, name) {
+  const source = (
+    await fsp.readFile(path.resolve(".github/workflows", file), "utf8")
+  ).replaceAll("\r\n", "\n");
+  const step = source
+    .split(`      - name: ${name}`)[1]
+    ?.split("      - name:")[0];
+  expect(step).toBeDefined();
+  return step
+    .split("        run: |\n")[1]
+    .split("\n")
+    .map((line) => line.slice(10))
+    .join("\n");
+}
+
+function runPowerShellStep(script, env, preamble) {
+  const wrapped = `$ErrorActionPreference = 'Stop'\n${preamble}\n${script}\nif (Test-Path variable:LASTEXITCODE) { exit $LASTEXITCODE }`;
+  return spawnSync(
+    "pwsh",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(wrapped, "utf16le").toString("base64"),
+    ],
+    { env: { ...process.env, ...env }, encoding: "utf8", timeout: 10_000 }
+  );
+}
+
 beforeAll(async () => {
   fixtureRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "aim-release-cos-"));
 });
@@ -268,6 +303,150 @@ beforeAll(async () => {
 afterAll(async () => {
   await fsp.rm(fixtureRoot, { recursive: true, force: true });
 });
+
+describe.skipIf(process.platform !== "win32")(
+  "candidate PowerShell handoff",
+  () => {
+    it.each([
+      { status: 404, release: null, success: true },
+      {
+        status: 200,
+        release: { tag_name: "v2.2.0", prerelease: true },
+        success: true,
+      },
+      {
+        status: 200,
+        release: { tag_name: "v2.2.0", draft: true },
+        success: true,
+      },
+      {
+        status: 200,
+        release: { tag_name: "v2.2.0", prerelease: false },
+        success: false,
+      },
+      {
+        status: 200,
+        release: { tag_name: "v2.1.0", prerelease: true },
+        success: false,
+      },
+      { status: 401, release: null, success: false },
+      { status: 403, release: null, success: false },
+      { status: 500, release: null, success: false },
+      { status: "timeout", release: null, success: false },
+    ])("handles $status / $release without hiding API failures", async ({
+      status,
+      release,
+      success,
+    }) => {
+      const script = await readWorkflowStep(
+        "publish.yaml",
+        "Report GitHub prerelease handoff"
+      );
+      const result = runPowerShellStep(
+        script,
+        {
+          GITHUB_REPOSITORY: "example/repository",
+          RELEASE_TAG: "v2.2.0",
+          GH_TOKEN: "test-token",
+          AIM_TEST_HTTP_STATUS: String(status),
+          AIM_TEST_RELEASE_JSON: JSON.stringify(release),
+        },
+        `
+function gh { throw "The handoff must use the authenticated HTTP request" }
+function Invoke-WebRequest {
+  param($Uri, $Headers, $Method, [switch]$SkipHttpErrorCheck, $TimeoutSec)
+  if ($Headers.Authorization -ne 'Bearer test-token' -or $TimeoutSec -ne 60 -or -not $SkipHttpErrorCheck) { throw 'Invalid request configuration' }
+  if ($env:AIM_TEST_HTTP_STATUS -eq 'timeout') { throw 'Simulated network timeout' }
+  return @{ StatusCode = [int]$env:AIM_TEST_HTTP_STATUS; Content = $env:AIM_TEST_RELEASE_JSON }
+}`
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status === 0, result.stderr || result.stdout).toBe(success);
+    });
+
+    it.each([
+      {
+        failedStep: "Report GitHub prerelease handoff",
+        sourceConclusion: "failure",
+        success: true,
+      },
+      {
+        failedStep: "Upload candidate to COS testing",
+        sourceConclusion: "cancelled",
+        success: false,
+      },
+      {
+        failedStep: "Run MSI install or auto-update smoke",
+        sourceConclusion: "failure",
+        success: false,
+      },
+      {
+        failedStep: "Attest candidate artifacts",
+        sourceConclusion: "failure",
+        success: false,
+      },
+    ])("recovers only a fully verified candidate: $failedStep", async ({
+      failedStep,
+      sourceConclusion,
+      success,
+    }) => {
+      const required = [
+        "Gate - static check",
+        "Gate - unit tests",
+        "Upload candidate to COS testing",
+        "Run Squirrel Setup.exe upgrade smoke",
+        "Run MSI install or auto-update smoke",
+        "Write candidate smoke evidence",
+        "Upload Squirrel candidate to COS candidate prefix",
+        "Upload immutable versioned download payload to COS",
+        "Upload candidate build for promotion",
+        "Generate SHA256 release manifest",
+        "Attest candidate artifacts",
+        "Attest flat download and checksum artifacts",
+        "Upload candidate evidence",
+        "Report GitHub prerelease handoff",
+      ];
+      const script = await readWorkflowStep(
+        "recover-release-candidate.yaml",
+        "Validate failed source run and completed release gates"
+      );
+      const result = runPowerShellStep(
+        script,
+        {
+          VERSION_INPUT: "2.2.0",
+          SOURCE_RUN_ID: "36282664740",
+          CONFIRMATION: "RECOVER 2.2.0",
+          GITHUB_REPOSITORY: "example/repository",
+          GITHUB_OUTPUT: path.join(
+            fixtureRoot,
+            `recovery-${required.indexOf(failedStep)}.txt`
+          ),
+          AIM_TEST_SOURCE_RUN: JSON.stringify({
+            path: ".github/workflows/publish.yaml",
+            status: "completed",
+            conclusion: sourceConclusion,
+          }),
+          AIM_TEST_JOBS: JSON.stringify({
+            jobs: [
+              {
+                steps: required.map((name) => ({
+                  name,
+                  conclusion: name === failedStep ? "failure" : "success",
+                })),
+              },
+            ],
+          }),
+        },
+        `
+function git { if ($args[0] -eq 'rev-list') { return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }
+function gh { if ($args[1].Contains('/jobs?')) { return $env:AIM_TEST_JOBS }; return $env:AIM_TEST_SOURCE_RUN }
+`
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status === 0, result.stderr || result.stdout).toBe(success);
+    });
+  }
+);
 
 describe("release version guard", () => {
   const packageJson = { version: "2.1.0" };
@@ -336,6 +515,144 @@ describe("release version guard", () => {
 });
 
 describe("CosStore SDK v3 boundary", () => {
+  it("bounds stalled real SDK sockets and retries with a complete new body", async () => {
+    const payload = Buffer.from("release body must survive a timed-out upload");
+    const filePath = path.join(fixtureRoot, "stalled-upload.bin");
+    await fsp.writeFile(filePath, payload);
+    const received = [];
+    const server = createServer((request, response) => {
+      if (request.method === "HEAD") {
+        response.writeHead(404).end();
+        return;
+      }
+      const chunks = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push(Buffer.concat(chunks));
+        // Deliberately leave the first request unanswered, like a stalled COS
+        // connection. The real SDK must abort it before the outer retry runs.
+        if (received.length > 1) {
+          response.writeHead(200).end();
+        }
+      });
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const store = createCosStoreFromEnv(
+        {
+          COS_SECRET_ID: "local-test-id",
+          COS_SECRET_KEY: "local-test-key",
+          COS_BUCKET: "bucket-1250000000",
+          COS_REGION: "ap-hongkong",
+          COS_PROTOCOL: "http:",
+          COS_DOMAIN: `127.0.0.1:${server.address().port}`,
+        },
+        { retryCount: 1, retryDelayMs: 0 }
+      );
+      expect(store.client.options.Timeout).toBe(120_000);
+      store.client.options.Timeout = 100;
+      await expect(
+        store.putFile("payload.bin", filePath)
+      ).resolves.toMatchObject({
+        status: "uploaded",
+      });
+      expect(received).toEqual([payload, payload]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("reopens consumed streams on transient failures and closes every attempt", async () => {
+    const filePath = path.join(fixtureRoot, "retry-stream.bin");
+    const payload = Buffer.from("retry the full file, not an exhausted stream");
+    await fsp.writeFile(filePath, payload);
+    const sdk = new FakeCosSdk();
+    const streams = [];
+    sdk.putObject = (params, callback) => {
+      streams.push(params.Body);
+      if (streams.length === 1) {
+        params.Body.on("end", () =>
+          callback(Object.assign(new Error("reset"), { code: "ECONNRESET" }))
+        );
+        params.Body.resume();
+        return;
+      }
+      FakeCosSdk.prototype.putObject.call(sdk, params, callback);
+    };
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryCount: 1,
+      retryDelayMs: 0,
+    });
+    await store.putFile("payload.bin", filePath);
+    expect(streams).toHaveLength(2);
+    expect(streams[0]).not.toBe(streams[1]);
+    expect(streams.every((stream) => stream.destroyed)).toBe(true);
+    expect(sdk.objects.get("payload.bin").data).toEqual(payload);
+  });
+
+  it.each([
+    { error: { code: "ESOCKETTIMEDOUT" }, attempts: 3 },
+    { error: { statusCode: 403 }, attempts: 1 },
+  ])("bounds upload attempts for $error", async ({ error, attempts }) => {
+    const filePath = path.join(fixtureRoot, `failed-upload-${attempts}.bin`);
+    await fsp.writeFile(filePath, "payload");
+    const sdk = new FakeCosSdk();
+    const streams = [];
+    sdk.putObject = (params, callback) => {
+      streams.push(params.Body);
+      callback(Object.assign(new Error("upload failed"), error));
+    };
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryCount: 2,
+      retryDelayMs: 0,
+    });
+    await expect(store.putFile("payload.bin", filePath)).rejects.toThrow(
+      /COS PUT payload.bin failed/
+    );
+    expect(streams).toHaveLength(attempts);
+    expect(streams.every((stream) => stream.destroyed)).toBe(true);
+  });
+
+  it("verifies an immutable upload when the first successful response is lost", async () => {
+    const filePath = path.join(fixtureRoot, "lost-response.bin");
+    const payload = Buffer.from("already committed immutable bytes");
+    await fsp.writeFile(filePath, payload);
+    const sdk = new FakeCosSdk();
+    let attempts = 0;
+    sdk.putObject = (params, callback) => {
+      attempts += 1;
+      FakeCosSdk.prototype.putObject.call(sdk, params, (error, data) => {
+        callback(
+          attempts === 1
+            ? Object.assign(new Error("lost response"), { code: "ETIMEDOUT" })
+            : error,
+          data
+        );
+      });
+    };
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryCount: 1,
+      retryDelayMs: 0,
+    });
+    await expect(store.putFile("payload.bin", filePath)).resolves.toMatchObject(
+      {
+        status: "idempotent",
+      }
+    );
+    expect(attempts).toBe(2);
+    expect(sdk.objects.get("payload.bin").data).toEqual(payload);
+  });
+
   it("uses private HEAD, streaming upload, encoded CopySource, and streaming hash", async () => {
     const directory = path.join(fixtureRoot, "sdk-boundary");
     await fsp.mkdir(directory, { recursive: true });

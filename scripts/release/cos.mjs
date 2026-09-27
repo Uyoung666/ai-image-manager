@@ -14,6 +14,7 @@ export const NO_CACHE_CONTROL = "no-cache, no-store, must-revalidate";
 
 const DEFAULT_RETRY_COUNT = 2;
 const DEFAULT_RETRY_DELAY_MS = 100;
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 /**
  * Build a COS client from environment variables. Secrets are deliberately read
@@ -53,6 +54,9 @@ export function createCosStoreFromEnv(env = process.env, options = {}) {
       ]),
       Protocol: firstEnv(env, ["COS_PROTOCOL"]) ?? "https:",
       Domain: firstEnv(env, ["COS_DOMAIN"]),
+      // SDK v3 defaults to 0 (no timeout). A stalled socket must not consume
+      // the entire release job; the store retries transient network failures.
+      Timeout: DEFAULT_REQUEST_TIMEOUT_MS,
     });
   return new CosStore({ client, bucket, region, ...options });
 }
@@ -156,19 +160,28 @@ export class CosStore {
       // header reject the final request. Release artifacts stay below COS's
       // 5 GB PutObject limit, so stream them through one signed request and
       // preserve the immutable-upload header end to end.
-      data = await invokeCos(
-        this.client,
-        "putObject",
-        {
-          Bucket: this.bucket,
-          Region: this.region,
-          Key: normalizedKey,
-          Body: createReadStream(filePath),
-          ContentLength: expectedSize,
-          Headers: headers,
-        },
-        { retryCount: 0 }
-      );
+      data = await retryCosOperation(async () => {
+        // Streams cannot be replayed. Open a new one for each attempt and
+        // close failed streams before retrying, including early HTTP errors.
+        const body = createReadStream(filePath);
+        try {
+          return await invokeCos(
+            this.client,
+            "putObject",
+            {
+              Bucket: this.bucket,
+              Region: this.region,
+              Key: normalizedKey,
+              Body: body,
+              ContentLength: expectedSize,
+              Headers: headers,
+            },
+            { retryCount: 0 }
+          );
+        } finally {
+          body.destroy();
+        }
+      }, this.requestOptions());
     } catch (error) {
       const idempotent = await this.resolveImmutableRace(
         normalizedKey,
@@ -640,6 +653,7 @@ export function isRetryableCosError(error) {
     "ECONNRESET",
     "ECONNREFUSED",
     "ETIMEDOUT",
+    "ESOCKETTIMEDOUT",
     "EAI_AGAIN",
     "ENETUNREACH",
     "EPIPE",
@@ -710,6 +724,9 @@ async function retryCosOperation(operation, { retryCount, retryDelayMs }) {
         throw error;
       }
       attempt += 1;
+      console.error(
+        `COS transient failure (${error.code ?? error.statusCode ?? "network"}); retry ${attempt}/${attempts - 1}`
+      );
       await waitForRetry(retryDelayMs, attempt);
     }
   }

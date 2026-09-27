@@ -199,6 +199,7 @@ export async function uploadRelease(
   } = {}
 ) {
   const resolvedPrefix = resolvePrefix(prefix, { version, runId });
+  console.error(`Preparing release checksums for ${resolvedPrefix}`);
   const prepared = await prepareReleaseArtifacts(artifactDirectory, {
     version,
     tag,
@@ -227,7 +228,9 @@ export async function uploadRelease(
       record.relativePath === "RELEASES"
         ? NO_CACHE_CONTROL
         : IMMUTABLE_CACHE_CONTROL;
+    console.error(`Uploading ${key} (${record.size} bytes)`);
     const result = await uploadRecord(store, key, record, { cacheControl });
+    console.error(`Verified ${key}: ${result.status}`);
     uploaded.push({
       ...result,
       relativePath: record.relativePath,
