@@ -191,7 +191,12 @@ class FakeCosSdk {
       this.objects.has(params.Key) &&
       params.Headers["x-cos-forbid-overwrite"] === "true"
     ) {
-      callback(Object.assign(new Error("conflict"), { statusCode: 409 }));
+      callback(
+        Object.assign(new Error("conflict"), {
+          statusCode: 409,
+          error: { Code: "FileAlreadyExists" },
+        })
+      );
       return;
     }
     const chunks = [];
@@ -770,7 +775,9 @@ describe("CosStore SDK v3 boundary", () => {
       retryDelayMs: 0,
     });
     const payload = Buffer.from("existing write-only payload");
-    await store.putBytes("existing.bin", payload);
+    const key =
+      "ai-image-manager/updates/win32/x64/candidates/2.2.0/existing.bin";
+    await store.putBytes(key, payload);
 
     let getAttempts = 0;
     sdk.getObjectStream = (_params, callback) => {
@@ -780,9 +787,34 @@ describe("CosStore SDK v3 boundary", () => {
     };
 
     await expect(
-      store.putBytes("existing.bin", payload, { verifyExistingBytes: false })
-    ).resolves.toMatchObject({ status: "idempotent" });
+      store.putBytes(key, payload, { deferCandidateVerification: true })
+    ).resolves.toMatchObject({
+      status: "verification-pending",
+      metadataVerified: true,
+    });
     expect(getAttempts).toBe(0);
+  });
+
+  it("defers a FileAlreadyExists conflict when candidate HEAD is forbidden", async () => {
+    const sdk = new FakeCosSdk();
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryDelayMs: 0,
+    });
+    const key =
+      "ai-image-manager/updates/win32/x64/candidates/2.2.0/existing.bin";
+    const payload = Buffer.from("existing write-only payload");
+    sdk.objects.set(key, { data: payload, sha256: sha256(payload) });
+    sdk.denyHead = true;
+
+    await expect(
+      store.putBytes(key, payload, { deferCandidateVerification: true })
+    ).resolves.toMatchObject({
+      status: "verification-pending",
+      metadataVerified: false,
+    });
   });
 
   it("streams the putObject fallback instead of reading a whole file", async () => {
@@ -1031,7 +1063,7 @@ describe("COS upload and promotion paths", () => {
         }),
         version: "2.1.0",
         requireReleases: true,
-        verifyUploadedHeads: false,
+        deferCandidateVerification: true,
       })
     ).resolves.toMatchObject({
       prefix: "ai-image-manager/updates/win32/x64/candidates/2.1.0",

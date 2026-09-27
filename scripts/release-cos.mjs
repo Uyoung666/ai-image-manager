@@ -242,11 +242,10 @@ export async function runCli(
         await uploadRelease(store, artifactDirectory, {
           ...uploadOptions,
           prefix: prefixForKind("candidate", { version, releasePrefix }),
-          // The candidate CAM identity is intentionally write-only. The
-          // promotion workflow with read permissions verifies every byte
-          // before copying into stable/build-base.
-          verifyUploadedHeads: false,
-          verifyExistingBytes: false,
+          // Candidate credentials cannot read object bodies. Existing objects
+          // remain pending verification, never overwritten. Promotion uses
+          // independently verified build artifacts.
+          deferCandidateVerification: true,
         })
       );
     } else if (command === "upload-versioned") {
@@ -261,8 +260,7 @@ export async function runCli(
         await uploadRelease(store, artifactDirectory, {
           ...uploadOptions,
           prefix: prefixForKind("candidate", { version, releasePrefix }),
-          verifyUploadedHeads: false,
-          verifyExistingBytes: false,
+          deferCandidateVerification: true,
         })
       );
       results.push(
@@ -334,7 +332,15 @@ function formatHumanResult(result) {
       (sum, item) => sum + item.uploaded.length,
       0
     );
-    return `${result.command} passed: ${uploads} object(s) processed`;
+    const pending = result.results.reduce(
+      (sum, item) =>
+        sum +
+        item.uploaded.filter(
+          (upload) => upload.status === "verification-pending"
+        ).length,
+      0
+    );
+    return `${result.command} passed: ${uploads} object(s) processed${pending ? `; ${pending} existing candidate object(s) still require independent verification before promotion` : ""}`;
   }
   if (result.command === "verify") {
     return `verify passed: ${result.checked.length} object(s)`;

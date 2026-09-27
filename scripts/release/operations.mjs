@@ -9,6 +9,7 @@ import {
   verifySha256Sums,
 } from "./checksums.mjs";
 import {
+  assertCandidateVerificationScope,
   IMMUTABLE_CACHE_CONTROL,
   NO_CACHE_CONTROL,
   normalizeKey,
@@ -196,11 +197,15 @@ export async function uploadRelease(
     includeProvenance = true,
     requireReleases = false,
     writeGeneratedFiles = true,
-    verifyUploadedHeads = true,
-    verifyExistingBytes = true,
+    deferCandidateVerification = false,
   } = {}
 ) {
   const resolvedPrefix = resolvePrefix(prefix, { version, runId });
+  assertCandidateVerificationScope(
+    `${resolvedPrefix}/RELEASES`,
+    true,
+    deferCandidateVerification
+  );
   console.error(`Preparing release checksums for ${resolvedPrefix}`);
   const prepared = await prepareReleaseArtifacts(artifactDirectory, {
     version,
@@ -233,10 +238,9 @@ export async function uploadRelease(
     console.error(`Uploading ${key} (${record.size} bytes)`);
     const result = await uploadRecord(store, key, record, {
       cacheControl,
-      verifyUploadedHead: verifyUploadedHeads,
-      verifyExistingBytes,
+      deferCandidateVerification,
     });
-    console.error(`Verified ${key}: ${result.status}`);
+    console.error(`Processed ${key}: ${result.status}`);
     uploaded.push({
       ...result,
       relativePath: record.relativePath,
@@ -520,7 +524,7 @@ async function uploadRecord(
   store,
   key,
   record,
-  { cacheControl, verifyUploadedHead = true, verifyExistingBytes = true }
+  { cacheControl, deferCandidateVerification = false }
 ) {
   let result;
   if (
@@ -533,7 +537,7 @@ async function uploadRecord(
       size: record.size,
       cacheControl,
       contentType: contentTypeFor(record.relativePath),
-      verifyExistingBytes,
+      deferCandidateVerification,
     });
   } else if (typeof store.putBytes === "function") {
     const data =
@@ -548,14 +552,14 @@ async function uploadRecord(
       sha256: record.sha256,
       cacheControl,
       contentType: contentTypeFor(record.relativePath),
-      verifyExistingBytes,
+      deferCandidateVerification,
     });
   } else {
     throw new ReleaseError("release store must implement putFile or putBytes", {
       code: "STORE_PUT_UNSUPPORTED",
     });
   }
-  if (verifyUploadedHead && typeof store.head === "function") {
+  if (!deferCandidateVerification && typeof store.head === "function") {
     const head = await store.head(key);
     invariant(
       head,

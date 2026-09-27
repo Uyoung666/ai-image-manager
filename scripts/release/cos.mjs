@@ -13,6 +13,8 @@ export const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 export const NO_CACHE_CONTROL = "no-cache, no-store, must-revalidate";
 
 const DEFAULT_RETRY_COUNT = 2;
+const CANDIDATE_OBJECT_PATTERN =
+  /(?:^|\/)updates\/win32\/x64\/candidates\/\d+\.\d+\.\d+\/[^/]+$/;
 const DEFAULT_RETRY_DELAY_MS = 100;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
@@ -116,10 +118,15 @@ export class CosStore {
       cacheControl = IMMUTABLE_CACHE_CONTROL,
       contentType,
       immutable = true,
-      verifyExistingBytes = true,
+      deferCandidateVerification = false,
     } = {}
   ) {
     const normalizedKey = normalizeKey(key);
+    assertCandidateVerificationScope(
+      normalizedKey,
+      immutable,
+      deferCandidateVerification
+    );
     const stat = await fsp.stat(filePath);
     const expectedSize = size ?? stat.size;
     invariant(
@@ -130,7 +137,8 @@ export class CosStore {
     const expectedSha256 = sha256 ?? (await sha256File(filePath));
     // A write-only candidate identity may be unable to preflight with HEAD.
     // Immutable PUT still cannot overwrite because the request carries
-    // x-cos-forbid-overwrite; conflict resolution below remains strict.
+    // x-cos-forbid-overwrite. Only explicitly staged candidates may defer
+    // read verification; they are never reported as verified/idempotent.
     const existing = await this.head(normalizedKey, {
       allowForbidden: immutable,
     });
@@ -142,11 +150,9 @@ export class CosStore {
           sha256: expectedSha256,
           size: expectedSize,
         },
-        { verifyBytes: verifyExistingBytes }
+        { deferCandidateVerification }
       );
-      if (result.status === "idempotent") {
-        return { ...result, key: normalizedKey };
-      }
+      return { ...result, key: normalizedKey };
     }
 
     const headers = metadataHeaders({
@@ -185,15 +191,15 @@ export class CosStore {
         }
       }, this.requestOptions());
     } catch (error) {
-      const idempotent = await this.resolveImmutableRace(
+      const resolved = await this.resolveImmutableRace(
         normalizedKey,
         error,
         { sha256: expectedSha256, size: expectedSize },
         immutable,
-        { verifyBytes: verifyExistingBytes }
+        { deferCandidateVerification }
       );
-      if (idempotent) {
-        return idempotent;
+      if (resolved) {
+        return resolved;
       }
       throw wrapCosError("PUT", normalizedKey, error);
     }
@@ -214,10 +220,15 @@ export class CosStore {
       cacheControl = IMMUTABLE_CACHE_CONTROL,
       contentType,
       immutable = true,
-      verifyExistingBytes = true,
+      deferCandidateVerification = false,
     } = {}
   ) {
     const normalizedKey = normalizeKey(key);
+    assertCandidateVerificationScope(
+      normalizedKey,
+      immutable,
+      deferCandidateVerification
+    );
     const body = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
     const expectedSha256 =
       sha256 ?? createHash("sha256").update(body).digest("hex");
@@ -232,11 +243,9 @@ export class CosStore {
           sha256: expectedSha256,
           size: body.byteLength,
         },
-        { verifyBytes: verifyExistingBytes }
+        { deferCandidateVerification }
       );
-      if (result.status === "idempotent") {
-        return { ...result, key: normalizedKey };
-      }
+      return { ...result, key: normalizedKey };
     }
     try {
       const data = await invokeCos(
@@ -265,15 +274,15 @@ export class CosStore {
         size: body.byteLength,
       };
     } catch (error) {
-      const idempotent = await this.resolveImmutableRace(
+      const resolved = await this.resolveImmutableRace(
         normalizedKey,
         error,
         { sha256: expectedSha256, size: body.byteLength },
         immutable,
-        { verifyBytes: verifyExistingBytes }
+        { deferCandidateVerification }
       );
-      if (idempotent) {
-        return idempotent;
+      if (resolved) {
+        return resolved;
       }
       throw wrapCosError("PUT", normalizedKey, error);
     }
@@ -483,30 +492,46 @@ export class CosStore {
     error,
     expected,
     immutable,
-    { verifyBytes = true } = {}
+    { deferCandidateVerification = false } = {}
   ) {
     if (!(immutable && isConflict(error))) {
       return null;
     }
-    const existing = await this.head(key);
+    let existing;
+    try {
+      existing = await this.head(key);
+    } catch (headError) {
+      if (
+        deferCandidateVerification &&
+        isOverwriteConflict(error) &&
+        isForbidden(headError.cause ?? headError)
+      ) {
+        // A guarded PUT conflict proves existence, not equality. Preserve the
+        // object and require independent verification before promotion.
+        return { status: "verification-pending", key, metadataVerified: false };
+      }
+      throw headError;
+    }
     if (!existing) {
       return null;
     }
     const result = await this.verifyImmutableExisting(key, existing, expected, {
-      verifyBytes,
+      deferCandidateVerification,
     });
-    return result.status === "idempotent" ? { ...result, key } : null;
+    return { ...result, key };
   }
 
   async verifyImmutableExisting(
     key,
     head,
     expected,
-    { verifyBytes = true } = {}
+    { deferCandidateVerification = false } = {}
   ) {
     const result = assertImmutableObject(head, expected);
-    if (!verifyBytes) {
-      return result;
+    if (deferCandidateVerification) {
+      // Readable metadata must match even for candidates. It is not a byte
+      // verification: a write-only uploader cannot validate the stored body.
+      return { status: "verification-pending", metadataVerified: true };
     }
     const digest = await this.hashObject(key);
     assertImmutableObject(
@@ -515,6 +540,14 @@ export class CosStore {
     );
     return result;
   }
+}
+
+export function assertCandidateVerificationScope(key, immutable, defer) {
+  invariant(
+    !defer || (immutable && CANDIDATE_OBJECT_PATTERN.test(key)),
+    "deferred verification is restricted to immutable candidate objects",
+    "INVALID_CANDIDATE_VERIFICATION_SCOPE"
+  );
 }
 
 export function metadataHeaders({
@@ -687,6 +720,9 @@ export function isRetryableCosError(error) {
 }
 
 function isConflict(error) {
+  if (isOverwriteConflict(error)) {
+    return true;
+  }
   const statusCode = Number(error?.statusCode ?? error?.status);
   if (statusCode === 409 || statusCode === 412) {
     return true;
@@ -699,6 +735,15 @@ function isConflict(error) {
     "preconditionfailed",
     "conditionalrequestconflict",
   ].includes(code);
+}
+
+function isOverwriteConflict(error) {
+  return [
+    error?.code,
+    error?.Code,
+    error?.error?.code,
+    error?.error?.Code,
+  ].some((code) => String(code).toLowerCase() === "filealreadyexists");
 }
 
 function copySourceHost(bucket, region, endpoint) {
