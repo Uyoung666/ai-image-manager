@@ -673,4 +673,5 @@ jobs:
             Write-Host "Maintainer-created GitHub prerelease candidate exists; stable promotion will verify every asset byte."
           } else {
             Write-Host "Candidate completed. Download release-evidence and upload its github-RELEASES file as the GitHub RELEASES asset with maintainer credentials. Keep candidate-RELEASES/release-feed/RELEASES for COS testing."
+            exit 0
           }
