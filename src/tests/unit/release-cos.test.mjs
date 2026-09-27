@@ -142,6 +142,7 @@ class StreamingMemoryStore extends MemoryStore {
 class FakeCosSdk {
   constructor() {
     this.objects = new Map();
+    this.multipartUploads = new Map();
     this.calls = [];
     this.failPutCount = 0;
     this.denyHead = false;
@@ -213,6 +214,49 @@ class FakeCosSdk {
       this.savePut(params, Buffer.concat(chunks));
       callback(null, { statusCode: 200 });
     });
+  }
+
+  multipartInit(params, callback) {
+    this.calls.push({ method: "multipartInit", params });
+    const uploadId = `upload-${this.multipartUploads.size + 1}`;
+    this.multipartUploads.set(uploadId, {
+      key: params.Key,
+      headers: params.Headers,
+      parts: new Map(),
+    });
+    callback(null, { UploadId: uploadId, statusCode: 200 });
+  }
+
+  multipartUpload(params, callback) {
+    this.calls.push({ method: "multipartUpload", params });
+    const upload = this.multipartUploads.get(params.UploadId);
+    const chunks = [];
+    params.Body.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    params.Body.on("error", callback);
+    params.Body.on("end", () => {
+      upload.parts.set(params.PartNumber, Buffer.concat(chunks));
+      callback(null, { ETag: `part-${params.PartNumber}`, statusCode: 200 });
+    });
+  }
+
+  multipartComplete(params, callback) {
+    this.calls.push({ method: "multipartComplete", params });
+    const upload = this.multipartUploads.get(params.UploadId);
+    const data = Buffer.concat(
+      params.Parts.map(({ PartNumber }) => upload.parts.get(PartNumber))
+    );
+    this.objects.set(upload.key, {
+      data,
+      sha256: params.Headers["x-cos-meta-sha256"],
+    });
+    this.multipartUploads.delete(params.UploadId);
+    callback(null, { statusCode: 200 });
+  }
+
+  multipartAbort(params, callback) {
+    this.calls.push({ method: "multipartAbort", params });
+    this.multipartUploads.delete(params.UploadId);
+    callback(null, { statusCode: 204 });
   }
 
   putObjectCopy(params, callback) {
@@ -834,6 +878,31 @@ describe("CosStore SDK v3 boundary", () => {
     const putCall = sdk.calls.find((call) => call.method === "putObject");
     expect(Buffer.isBuffer(putCall.params.Body)).toBe(false);
     expect(sdk.objects.get("fallback.bin").data.byteLength).toBe(128);
+  });
+
+  it("uses guarded multipart uploads for large files", async () => {
+    const filePath = path.join(fixtureRoot, "multipart.bin");
+    const payload = Buffer.from("multipart upload keeps the immutable guard");
+    await fsp.writeFile(filePath, payload);
+    const sdk = new FakeCosSdk();
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      sliceSize: 8,
+      retryDelayMs: 0,
+    });
+
+    await store.putFile("large.bin", filePath);
+
+    const init = sdk.calls.find((call) => call.method === "multipartInit");
+    const complete = sdk.calls.find(
+      (call) => call.method === "multipartComplete"
+    );
+    expect(init.params.Headers["x-cos-forbid-overwrite"]).toBe("true");
+    expect(complete.params.Headers["x-cos-forbid-overwrite"]).toBe("true");
+    expect(sdk.calls.some((call) => call.method === "putObject")).toBe(false);
+    expect(sdk.objects.get("large.bin").data).toEqual(payload);
   });
 });
 

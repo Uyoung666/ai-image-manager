@@ -163,33 +163,40 @@ export class CosStore {
     });
     let data;
     try {
-      // The SDK's multipart helper drops x-cos-forbid-overwrite when it sends
-      // CompleteMultipartUpload. That makes a CAM policy which requires this
-      // header reject the final request. Release artifacts stay below COS's
-      // 5 GB PutObject limit, so stream them through one signed request and
-      // preserve the immutable-upload header end to end.
-      data = await retryCosOperation(async () => {
+      if (
+        Number(expectedSize) > this.sliceSize &&
+        this.supportsMultipartUpload()
+      ) {
+        data = await this.multipartUploadFile(
+          normalizedKey,
+          filePath,
+          expectedSize,
+          headers
+        );
+      } else {
         // Streams cannot be replayed. Open a new one for each attempt and
         // close failed streams before retrying, including early HTTP errors.
-        const body = createReadStream(filePath);
-        try {
-          return await invokeCos(
-            this.client,
-            "putObject",
-            {
-              Bucket: this.bucket,
-              Region: this.region,
-              Key: normalizedKey,
-              Body: body,
-              ContentLength: expectedSize,
-              Headers: headers,
-            },
-            { retryCount: 0 }
-          );
-        } finally {
-          body.destroy();
-        }
-      }, this.requestOptions());
+        data = await retryCosOperation(async () => {
+          const body = createReadStream(filePath);
+          try {
+            return await invokeCos(
+              this.client,
+              "putObject",
+              {
+                Bucket: this.bucket,
+                Region: this.region,
+                Key: normalizedKey,
+                Body: body,
+                ContentLength: expectedSize,
+                Headers: headers,
+              },
+              { retryCount: 0 }
+            );
+          } finally {
+            body.destroy();
+          }
+        }, this.requestOptions());
+      }
     } catch (error) {
       const resolved = await this.resolveImmutableRace(
         normalizedKey,
@@ -210,6 +217,120 @@ export class CosStore {
       sha256: expectedSha256,
       size: expectedSize,
     };
+  }
+
+  supportsMultipartUpload() {
+    return ["multipartInit", "multipartUpload", "multipartComplete"].every(
+      (method) => typeof this.client?.[method] === "function"
+    );
+  }
+
+  async multipartUploadFile(key, filePath, expectedSize, headers) {
+    let uploadId;
+    try {
+      const initialized = await retryCosOperation(
+        () =>
+          invokeCos(
+            this.client,
+            "multipartInit",
+            {
+              Bucket: this.bucket,
+              Region: this.region,
+              Key: key,
+              Headers: { ...headers },
+            },
+            { retryCount: 0 }
+          ),
+        this.requestOptions()
+      );
+      uploadId = initialized?.UploadId;
+      invariant(
+        uploadId,
+        `COS multipart upload id missing for ${key}`,
+        "COS_MULTIPART_ID_MISSING"
+      );
+
+      const partSize = this.sliceSize;
+      const totalSize = Number(expectedSize);
+      const partCount = Math.ceil(totalSize / partSize);
+      const parts = [];
+      for (let index = 0; index < partCount; index += 1) {
+        const partNumber = index + 1;
+        const start = index * partSize;
+        const contentLength = Math.min(partSize, totalSize - start);
+        const uploaded = await retryCosOperation(async () => {
+          const body = createReadStream(filePath, {
+            start,
+            end: start + contentLength - 1,
+          });
+          try {
+            return await invokeCos(
+              this.client,
+              "multipartUpload",
+              {
+                Bucket: this.bucket,
+                Region: this.region,
+                Key: key,
+                UploadId: uploadId,
+                PartNumber: partNumber,
+                Body: body,
+                ContentLength: contentLength,
+                Headers: {},
+              },
+              { retryCount: 0 }
+            );
+          } finally {
+            body.destroy();
+          }
+        }, this.requestOptions());
+        invariant(
+          uploaded?.ETag,
+          `COS multipart ETag missing for ${key} part ${partNumber}`,
+          "COS_MULTIPART_ETAG_MISSING"
+        );
+        parts.push({ PartNumber: partNumber, ETag: uploaded.ETag });
+      }
+
+      return await retryCosOperation(
+        () =>
+          invokeCos(
+            this.client,
+            "multipartComplete",
+            {
+              Bucket: this.bucket,
+              Region: this.region,
+              Key: key,
+              UploadId: uploadId,
+              Parts: parts,
+              // Keep the immutable guard on the final request. The SDK's
+              // uploadFile helper drops this header during completion.
+              Headers: { ...headers },
+            },
+            { retryCount: 0 }
+          ),
+        this.requestOptions()
+      );
+    } catch (error) {
+      if (uploadId) {
+        try {
+          await invokeCos(
+            this.client,
+            "multipartAbort",
+            {
+              Bucket: this.bucket,
+              Region: this.region,
+              Key: key,
+              UploadId: uploadId,
+            },
+            { retryCount: 0 }
+          );
+        } catch {
+          // Preserve the original upload error; abandoned multipart uploads
+          // can be cleaned up by COS lifecycle rules.
+        }
+      }
+      throw error;
+    }
   }
 
   async putBytes(
