@@ -8,7 +8,9 @@ import {
   assertSquirrelDeltaUsed,
   findInstalledExecutable,
   forceKillProcessTree,
+  runMsiProcess,
   runPackagedE2E,
+  terminateMsiProcess,
   terminatePackagedProcess,
 } from "../../../scripts/windows-installer-smoke.mjs";
 
@@ -20,6 +22,153 @@ const STARTUP_FAILURE_ERROR_PATTERN = /reported startup failure/iu;
 const FULL_FALLBACK_ERROR_PATTERN = /full fallback/iu;
 const MISSING_DELTA_ERROR_PATTERN = /exactly one downloaded/iu;
 const noOpForceKill = () => Promise.resolve();
+
+function msiSpawnWithExit(status, recordSpawn = undefined) {
+  return (command, args, options) => {
+    recordSpawn?.(command, args, options);
+    const child = createChild(command);
+    queueMicrotask(() => {
+      child.exitCode = status;
+      child.emit("exit", status, null);
+    });
+    return child;
+  };
+}
+
+describe("MSI smoke process isolation", () => {
+  it.each([
+    "/i",
+    "/x",
+  ])("isolates %s from the runner console and suppresses application shutdown", async (operation) => {
+    let observed;
+    await runMsiProcess(
+      "msiexec.exe",
+      [operation, "C:\\installer payload\\app.msi", "/qn", "/norestart"],
+      "MSI transaction",
+      undefined,
+      { MSI_TEST: "yes" },
+      {
+        spawnProcess: msiSpawnWithExit(0, (command, args, options) => {
+          observed = { command, args, options };
+        }),
+      }
+    );
+    expect(observed).toEqual({
+      command: "msiexec.exe",
+      args: [
+        operation,
+        "C:\\installer payload\\app.msi",
+        "/qn",
+        "/norestart",
+        "REBOOT=ReallySuppress",
+        "MSIRESTARTMANAGERCONTROL=DisableShutdown",
+      ],
+      options: {
+        env: { MSI_TEST: "yes" },
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    });
+  });
+
+  it.each([0, 3010])("accepts completed MSI exit %i", async (status) => {
+    await expect(
+      runMsiProcess(
+        "msiexec.exe",
+        [],
+        "MSI transaction",
+        undefined,
+        undefined,
+        {
+          spawnProcess: msiSpawnWithExit(status),
+        }
+      )
+    ).resolves.toBe(status);
+  });
+
+  it.each([
+    1603, 1641,
+  ])("rejects MSI failure or initiated reboot %i", async (status) => {
+    await expect(
+      runMsiProcess(
+        "msiexec.exe",
+        [],
+        "MSI transaction",
+        undefined,
+        undefined,
+        {
+          spawnProcess: msiSpawnWithExit(status),
+        }
+      )
+    ).rejects.toThrow(`exit code ${status}`);
+  });
+
+  it("rejects a spawn error immediately", async () => {
+    await expect(
+      runMsiProcess(
+        "missing.exe",
+        [],
+        "MSI transaction",
+        undefined,
+        undefined,
+        {
+          spawnProcess: () => {
+            const child = createChild("missing.exe");
+            queueMicrotask(() => child.emit("error", new Error("ENOENT")));
+            return child;
+          },
+        }
+      )
+    ).rejects.toThrow("failed to start: ENOENT");
+  });
+
+  it("cleans up the timed-out child without accepting its cleanup exit as success", async () => {
+    const child = createChild("msiexec.exe");
+    const cleaned = [];
+    await expect(
+      runMsiProcess("msiexec.exe", [], "hung MSI", undefined, undefined, {
+        spawnProcess: () => child,
+        timeoutMs: 15,
+        terminateProcess: (target) => {
+          cleaned.push(target);
+          target.exitCode = 0;
+          target.emit("exit", 0, null);
+        },
+      })
+    ).rejects.toThrow("hung MSI timed out after 15ms");
+    expect(cleaned).toEqual([child]);
+    expect(child.listenerCount("exit")).toBe(0);
+  });
+
+  it("preserves timeout failure when cleanup also fails", async () => {
+    await expect(
+      runMsiProcess("msiexec.exe", [], "hung MSI", undefined, undefined, {
+        spawnProcess: () => createChild("msiexec.exe"),
+        timeoutMs: 15,
+        terminateProcess: () => {
+          throw new Error("cleanup denied");
+        },
+      })
+    ).rejects.toThrow(
+      "timed out after 15ms; process cleanup failed: cleanup denied"
+    );
+  });
+
+  it("kills only the active MSI tree before its parent can exit", async () => {
+    const child = createChild("msiexec.exe");
+    const killed = [];
+    await terminateMsiProcess(child, (pid) => {
+      expect(child.kills).toBe(0);
+      killed.push(pid);
+    });
+    expect(killed).toEqual(process.platform === "win32" ? [child.pid] : []);
+    child.exitCode = 0;
+    await terminateMsiProcess(child, () => {
+      throw new Error("already exited");
+    });
+  });
+});
 
 function createExecutable(version = "2.1.0") {
   const root = fs.mkdtempSync(

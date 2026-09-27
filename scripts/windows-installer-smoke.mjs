@@ -35,7 +35,9 @@ const SQUIRREL_APP_VERSION_PATH_PATTERN =
 const READY_MARKER_PATTERN = /^WHENREADY\s/imu;
 const MAIN_READY_MARKER_PATTERN = /\[bg\] startLevel\(Critical\) begin/u;
 const STARTUP_FAILURE_MARKER_PATTERN = /^CATCH\s/imu;
-const ALLOWED_MSI_EXIT_CODES = new Set([0, 1641, 3010]);
+// A smoke run cannot reboot its host. 1641 means a reboot was initiated and
+// must never be reported as a successful installer gate.
+const ALLOWED_MSI_EXIT_CODES = new Set([0, 3010]);
 const SQUIRREL_EXIT_CODES = new Set([0]);
 const PACKAGED_E2E_STARTUP_TIMEOUT_MS = 2 * 60 * 1000;
 const PACKAGED_E2E_READY_STABILITY_MS = 1000;
@@ -179,33 +181,36 @@ function run(
   return result.status ?? 0;
 }
 
-async function terminateMsiProcess(child) {
+async function terminateMsiProcess(child, forceKill = forceKillProcessTree) {
   if (childHasExited(child)) {
     return;
   }
-  try {
-    child.kill();
-  } catch {
-    /* taskkill below is the authoritative Windows cleanup */
-  }
   if (process.platform === "win32" && hasValidProcessId(child)) {
-    await forceKillProcessTree(child.pid);
+    // Keep the parent alive until taskkill has enumerated its descendants.
+    // Killing it first loses the tree and risks a reused PID.
+    await forceKill(child.pid);
+  } else {
+    child.kill();
   }
 }
 
-async function finishMsiTimeout(child, label, finish) {
+async function finishMsiTimeout(
+  child,
+  label,
+  finish,
+  timeoutMs,
+  terminateProcess
+) {
   let cleanupError;
   try {
-    await terminateMsiProcess(child);
+    await terminateProcess(child);
   } catch (error) {
     cleanupError = error;
   }
   const suffix = cleanupError
     ? `; process cleanup failed: ${describeCleanupError(cleanupError)}`
     : "";
-  finish(
-    new Error(`${label} timed out after ${MSI_PROCESS_TIMEOUT_MS}ms${suffix}`)
-  );
+  finish(new Error(`${label} timed out after ${timeoutMs}ms${suffix}`));
 }
 
 function runMsiProcess(
@@ -213,7 +218,12 @@ function runMsiProcess(
   args,
   label,
   allowedExitCodes = ALLOWED_MSI_EXIT_CODES,
-  environment = process.env
+  environment = process.env,
+  {
+    spawnProcess = spawn,
+    terminateProcess = terminateMsiProcess,
+    timeoutMs = MSI_PROCESS_TIMEOUT_MS,
+  } = {}
 ) {
   console.log(`[installer-smoke] ${label}`);
   return new Promise((resolve, reject) => {
@@ -262,11 +272,25 @@ function runMsiProcess(
     };
 
     try {
-      child = spawn(command, args, {
-        env: environment,
-        stdio: "inherit",
-        windowsHide: true,
-      });
+      child = spawnProcess(
+        command,
+        [
+          ...args,
+          // /norestart only prevents a machine reboot; it does not prevent
+          // Restart Manager from closing applications sharing the CI console.
+          // Apply to baseline, candidate, uninstall, and failure cleanup alike.
+          "REBOOT=ReallySuppress",
+          "MSIRESTARTMANAGERCONTROL=DisableShutdown",
+        ],
+        {
+          env: environment,
+          // MSI writes its verbose log to /l*v. Give it a separate console so
+          // installer process management cannot tear down the runner's console.
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        }
+      );
       child.once("error", onError);
       child.once("exit", onExit);
     } catch (error) {
@@ -283,9 +307,17 @@ function runMsiProcess(
         return;
       }
       timedOut = true;
-      finishMsiTimeout(child, label, finish);
-    }, MSI_PROCESS_TIMEOUT_MS);
+      finishMsiTimeout(child, label, finish, timeoutMs, terminateProcess);
+    }, timeoutMs);
   });
+}
+
+function createMsiLogDirectory(prefix) {
+  const root = process.env.AIM_INSTALLER_SMOKE_LOG_DIR || os.tmpdir();
+  fs.mkdirSync(root, { recursive: true });
+  const directory = fs.mkdtempSync(path.join(root, prefix));
+  console.log(`[installer-smoke] MSI logs: ${directory}`);
+  return directory;
 }
 
 function runCapture(command, args, label) {
@@ -1394,9 +1426,7 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
   if (!candidateStat.isFile() || candidateStat.size === 0) {
     throw new Error(`Candidate MSI is empty: ${currentMsiPath}`);
   }
-  const logDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "ai-image-manager-msi-fresh-")
-  );
+  const logDirectory = createMsiLogDirectory("ai-image-manager-msi-fresh-");
   const msiexec = path.join(
     process.env.SystemRoot || "C:\\Windows",
     "System32",
@@ -1410,7 +1440,7 @@ async function runMsiFreshSmoke(currentMsiPath, version) {
       currentMsiPath,
       "/qn",
       "/norestart",
-      "/l*v",
+      "/l*vx!",
       path.join(logDirectory, "default-install.log"),
     ],
     `fresh-install first official MSI ${version}`
@@ -1450,9 +1480,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
   assertUpgradeVersion(normalizedOldVersion, version, "MSI");
 
   const oldMsiPath = await downloadVerifiedAsset(oldMsiUrl, oldMsiHash, ".msi");
-  const logDirectory = fs.mkdtempSync(
-    path.join(os.tmpdir(), "ai-image-manager-msi-upgrade-")
-  );
+  const logDirectory = createMsiLogDirectory("ai-image-manager-msi-upgrade-");
   const msiexec = path.join(
     process.env.SystemRoot || "C:\\Windows",
     "System32",
@@ -1469,7 +1497,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         oldMsiPath,
         "/qn",
         "/norestart",
-        "/l*v",
+        "/l*vx!",
         path.join(logDirectory, "old-install.log"),
       ],
       `install verified previous MSI ${normalizedOldVersion} in default directory`
@@ -1551,7 +1579,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         oldMsiPath,
         "/qn",
         "/norestart",
-        "/l*v",
+        "/l*vx!",
         path.join(logDirectory, "default-uninstall.log"),
       ],
       `uninstall auto-updated MSI ${version} from default directory`
@@ -1570,7 +1598,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         "/qn",
         "/norestart",
         `APPLICATIONROOTDIRECTORY=${customDirectory}`,
-        "/l*v",
+        "/l*vx!",
         path.join(logDirectory, "custom-install.log"),
       ],
       `install MSI ${version} in custom directory`
@@ -1600,7 +1628,7 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
         currentMsiPath,
         "/qn",
         "/norestart",
-        "/l*v",
+        "/l*vx!",
         path.join(logDirectory, "custom-uninstall.log"),
       ],
       `uninstall MSI ${version} from custom directory`
@@ -1614,7 +1642,14 @@ async function runMsiUpgradeSmoke(currentMsiPath, version, feed) {
       // failure while ensuring a rerun does not inherit an installed product.
       try {
         await runMsi(
-          ["/x", installedMsiPath, "/qn", "/norestart"],
+          [
+            "/x",
+            installedMsiPath,
+            "/qn",
+            "/norestart",
+            "/l*vx!",
+            path.join(logDirectory, "failure-cleanup.log"),
+          ],
           "cleanup failed MSI smoke installation"
         );
       } catch (cleanupError) {
@@ -1680,7 +1715,9 @@ export {
   findInstalledExecutable,
   forceKillProcessTree,
   readReadinessState,
+  runMsiProcess,
   runPackagedE2E,
+  terminateMsiProcess,
   terminatePackagedProcess,
   waitForPackagedReady,
 };
