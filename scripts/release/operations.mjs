@@ -197,6 +197,7 @@ export async function uploadRelease(
     requireReleases = false,
     writeGeneratedFiles = true,
     verifyUploadedHeads = true,
+    verifyExistingBytes = true,
   } = {}
 ) {
   const resolvedPrefix = resolvePrefix(prefix, { version, runId });
@@ -233,6 +234,7 @@ export async function uploadRelease(
     const result = await uploadRecord(store, key, record, {
       cacheControl,
       verifyUploadedHead: verifyUploadedHeads,
+      verifyExistingBytes,
     });
     console.error(`Verified ${key}: ${result.status}`);
     uploaded.push({
@@ -518,7 +520,7 @@ async function uploadRecord(
   store,
   key,
   record,
-  { cacheControl, verifyUploadedHead = true }
+  { cacheControl, verifyUploadedHead = true, verifyExistingBytes = true }
 ) {
   let result;
   if (
@@ -531,6 +533,7 @@ async function uploadRecord(
       size: record.size,
       cacheControl,
       contentType: contentTypeFor(record.relativePath),
+      verifyExistingBytes,
     });
   } else if (typeof store.putBytes === "function") {
     const data =
@@ -545,6 +548,7 @@ async function uploadRecord(
       sha256: record.sha256,
       cacheControl,
       contentType: contentTypeFor(record.relativePath),
+      verifyExistingBytes,
     });
   } else {
     throw new ReleaseError("release store must implement putFile or putBytes", {

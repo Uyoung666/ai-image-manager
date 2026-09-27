@@ -116,6 +116,7 @@ export class CosStore {
       cacheControl = IMMUTABLE_CACHE_CONTROL,
       contentType,
       immutable = true,
+      verifyExistingBytes = true,
     } = {}
   ) {
     const normalizedKey = normalizeKey(key);
@@ -140,7 +141,8 @@ export class CosStore {
         {
           sha256: expectedSha256,
           size: expectedSize,
-        }
+        },
+        { verifyBytes: verifyExistingBytes }
       );
       if (result.status === "idempotent") {
         return { ...result, key: normalizedKey };
@@ -187,7 +189,8 @@ export class CosStore {
         normalizedKey,
         error,
         { sha256: expectedSha256, size: expectedSize },
-        immutable
+        immutable,
+        { verifyBytes: verifyExistingBytes }
       );
       if (idempotent) {
         return idempotent;
@@ -211,6 +214,7 @@ export class CosStore {
       cacheControl = IMMUTABLE_CACHE_CONTROL,
       contentType,
       immutable = true,
+      verifyExistingBytes = true,
     } = {}
   ) {
     const normalizedKey = normalizeKey(key);
@@ -227,7 +231,8 @@ export class CosStore {
         {
           sha256: expectedSha256,
           size: body.byteLength,
-        }
+        },
+        { verifyBytes: verifyExistingBytes }
       );
       if (result.status === "idempotent") {
         return { ...result, key: normalizedKey };
@@ -264,7 +269,8 @@ export class CosStore {
         normalizedKey,
         error,
         { sha256: expectedSha256, size: body.byteLength },
-        immutable
+        immutable,
+        { verifyBytes: verifyExistingBytes }
       );
       if (idempotent) {
         return idempotent;
@@ -472,7 +478,13 @@ export class CosStore {
     };
   }
 
-  async resolveImmutableRace(key, error, expected, immutable) {
+  async resolveImmutableRace(
+    key,
+    error,
+    expected,
+    immutable,
+    { verifyBytes = true } = {}
+  ) {
     if (!(immutable && isConflict(error))) {
       return null;
     }
@@ -480,12 +492,22 @@ export class CosStore {
     if (!existing) {
       return null;
     }
-    const result = await this.verifyImmutableExisting(key, existing, expected);
+    const result = await this.verifyImmutableExisting(key, existing, expected, {
+      verifyBytes,
+    });
     return result.status === "idempotent" ? { ...result, key } : null;
   }
 
-  async verifyImmutableExisting(key, head, expected) {
+  async verifyImmutableExisting(
+    key,
+    head,
+    expected,
+    { verifyBytes = true } = {}
+  ) {
     const result = assertImmutableObject(head, expected);
+    if (!verifyBytes) {
+      return result;
+    }
     const digest = await this.hashObject(key);
     assertImmutableObject(
       { sha256: digest.sha256, size: digest.size },

@@ -246,6 +246,7 @@ export async function runCli(
           // promotion workflow with read permissions verifies every byte
           // before copying into stable/build-base.
           verifyUploadedHeads: false,
+          verifyExistingBytes: false,
         })
       );
     } else if (command === "upload-versioned") {
@@ -261,6 +262,7 @@ export async function runCli(
           ...uploadOptions,
           prefix: prefixForKind("candidate", { version, releasePrefix }),
           verifyUploadedHeads: false,
+          verifyExistingBytes: false,
         })
       );
       results.push(

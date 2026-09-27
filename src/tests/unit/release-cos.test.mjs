@@ -761,6 +761,30 @@ describe("CosStore SDK v3 boundary", () => {
     expect(sdk.objects.get("write-only.bin").data.equals(payload)).toBe(true);
   });
 
+  it("reuses an existing immutable object from metadata without GET for write-only retries", async () => {
+    const sdk = new FakeCosSdk();
+    const store = new CosStore({
+      client: sdk,
+      bucket: "bucket-1250000000",
+      region: "ap-hongkong",
+      retryDelayMs: 0,
+    });
+    const payload = Buffer.from("existing write-only payload");
+    await store.putBytes("existing.bin", payload);
+
+    let getAttempts = 0;
+    sdk.getObjectStream = (_params, callback) => {
+      getAttempts += 1;
+      callback(Object.assign(new Error("Access Denied"), { statusCode: 403 }));
+      return Readable.from([]);
+    };
+
+    await expect(
+      store.putBytes("existing.bin", payload, { verifyExistingBytes: false })
+    ).resolves.toMatchObject({ status: "idempotent" });
+    expect(getAttempts).toBe(0);
+  });
+
   it("streams the putObject fallback instead of reading a whole file", async () => {
     const directory = path.join(fixtureRoot, "sdk-fallback");
     await fsp.mkdir(directory, { recursive: true });
