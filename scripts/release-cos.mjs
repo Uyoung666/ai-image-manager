@@ -242,6 +242,10 @@ export async function runCli(
         await uploadRelease(store, artifactDirectory, {
           ...uploadOptions,
           prefix: prefixForKind("candidate", { version, releasePrefix }),
+          // The candidate CAM identity is intentionally write-only. The
+          // promotion workflow with read permissions verifies every byte
+          // before copying into stable/build-base.
+          verifyUploadedHeads: false,
         })
       );
     } else if (command === "upload-versioned") {
@@ -256,6 +260,7 @@ export async function runCli(
         await uploadRelease(store, artifactDirectory, {
           ...uploadOptions,
           prefix: prefixForKind("candidate", { version, releasePrefix }),
+          verifyUploadedHeads: false,
         })
       );
       results.push(

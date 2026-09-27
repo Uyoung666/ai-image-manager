@@ -979,6 +979,41 @@ describe("COS upload and promotion paths", () => {
     expect(materializedChecksums.equals(uploadedChecksums)).toBe(true);
   });
 
+  it("allows candidate uploads with a write-only COS identity", async () => {
+    const directory = path.join(fixtureRoot, "write-only-candidate");
+    await fsp.mkdir(directory, { recursive: true });
+    const full = Buffer.from("candidate package");
+    await fsp.writeFile(path.join(directory, "App-2.1.0-full.nupkg"), full);
+    await fsp.writeFile(
+      path.join(directory, "RELEASES"),
+      formatReleases([
+        {
+          hash: sha1(full),
+          filename: "App-2.1.0-full.nupkg",
+          size: full.length,
+        },
+      ])
+    );
+    const store = new MemoryStore();
+    store.head = async () => {
+      throw new Error("Access Denied");
+    };
+
+    await expect(
+      uploadRelease(store, directory, {
+        prefix: prefixForKind("candidate", {
+          version: "2.1.0",
+          releasePrefix: "ai-image-manager",
+        }),
+        version: "2.1.0",
+        requireReleases: true,
+        verifyUploadedHeads: false,
+      })
+    ).resolves.toMatchObject({
+      prefix: "ai-image-manager/updates/win32/x64/candidates/2.1.0",
+    });
+  });
+
   it("promotes packages before stable RELEASES and writes a real build-base directory", async () => {
     const store = new MemoryStore();
     const prefix = "ai-image-manager";

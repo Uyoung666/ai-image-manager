@@ -196,6 +196,7 @@ export async function uploadRelease(
     includeProvenance = true,
     requireReleases = false,
     writeGeneratedFiles = true,
+    verifyUploadedHeads = true,
   } = {}
 ) {
   const resolvedPrefix = resolvePrefix(prefix, { version, runId });
@@ -229,7 +230,10 @@ export async function uploadRelease(
         ? NO_CACHE_CONTROL
         : IMMUTABLE_CACHE_CONTROL;
     console.error(`Uploading ${key} (${record.size} bytes)`);
-    const result = await uploadRecord(store, key, record, { cacheControl });
+    const result = await uploadRecord(store, key, record, {
+      cacheControl,
+      verifyUploadedHead: verifyUploadedHeads,
+    });
     console.error(`Verified ${key}: ${result.status}`);
     uploaded.push({
       ...result,
@@ -510,7 +514,12 @@ function resolvePrefix(prefix, { version, runId } = {}) {
   );
 }
 
-async function uploadRecord(store, key, record, { cacheControl }) {
+async function uploadRecord(
+  store,
+  key,
+  record,
+  { cacheControl, verifyUploadedHead = true }
+) {
   let result;
   if (
     record.sourcePath &&
@@ -542,7 +551,7 @@ async function uploadRecord(store, key, record, { cacheControl }) {
       code: "STORE_PUT_UNSUPPORTED",
     });
   }
-  if (typeof store.head === "function") {
+  if (verifyUploadedHead && typeof store.head === "function") {
     const head = await store.head(key);
     invariant(
       head,
