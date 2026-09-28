@@ -1,0 +1,73 @@
+name: Clean reviewed release temporaries
+on:
+  workflow_dispatch:
+    inputs:
+      inventory_run:
+        description: 'Successful inventory run whose exact objects were reviewed'
+        required: true
+        type: string
+      release_run:
+        description: 'Successful published release with retained recovery artifacts'
+        required: true
+        type: string
+      version:
+        description: 'Published version, for example 2.2.0'
+        required: true
+        type: string
+      run_ids:
+        description: 'Reviewed completed testing run IDs, comma separated'
+        required: true
+        type: string
+      apply:
+        description: 'Delete the reviewed temporary objects after saving a preview'
+        default: false
+        type: boolean
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-candidate
+    env:
+      COS_RELEASE_PREFIX: ai-image-manager
+      COS_BUCKET: ai-image-manager-1392398678
+      COS_REGION: ap-hongkong
+      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      REVIEW_VERSION: ${{ inputs.version }}
+      REVIEW_INVENTORY_RUN: ${{ inputs.inventory_run }}
+      REVIEW_RELEASE_RUN: ${{ inputs.release_run }}
+      REVIEW_RUN_IDS: ${{ inputs.run_ids }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --prefix scripts/release
+      - name: Validate publication and preview exact temporary objects
+        run: node scripts/release/supervise.mjs scripts/release-reviewed-cleanup.mjs preview
+      - name: Save review before deletion
+        uses: actions/upload-artifact@v4
+        with:
+          name: cos-reviewed-plan-${{ github.run_id }}
+          path: cos-reviewed-cleanup.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Apply reviewed cleanup
+        if: inputs.apply
+        run: node scripts/release/supervise.mjs scripts/release-reviewed-cleanup.mjs apply
+      - name: Save cleanup result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cos-reviewed-result-${{ github.run_id }}
+          path: cos-reviewed-cleanup.json
+          retention-days: 90
+          if-no-files-found: ignore
