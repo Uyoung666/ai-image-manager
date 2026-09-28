@@ -2,11 +2,13 @@
 
 ## 正常发布
 
-1. 保证目标版本已有 `vX.Y.Z` Tag，Tag 中 `package.json` 和 `package-lock.json` 的版本一致。
+1. 保证目标版本已有 `vX.Y.Z` Tag，Tag 中 `package.json` 和 `package-lock.json` 的版本一致，并包含用户可读的 `RELEASE_NOTES_vX.Y.Z.md` 更新说明。
 2. 在 GitHub Actions 打开 **Release**，选择包含本流程的 `main`，输入版本号，例如 `2.3.0`。正常发布不要填写 `source_run_id`。
 3. 检查通过后自动发布 GitHub Release，最后切换 COS stable。无需搬运附件或重复审批。
 
 只保留这一手动发布入口。旧 Promote、Recover 工作流成为兼容调用入口，不再单独手动触发。推送 Tag 本身不会开始发布，避免一次版本触发两次构建。
+
+发布预检从应用 Tag 对应的精确提交读取更新说明，保存到发布上下文和产物清单，创建或恢复草稿时使用同一份正文。说明缺失、只有标题或代码对比链接时在构建前报错，不再依赖 GitHub 自动生成的空正文。重试不会覆盖已经正式发布后人工编辑的说明。
 
 任务依赖：预检 → 构建并保存 → 安装测试、构建证明 → GitHub 草稿 / COS 下载文件 → COS 桶内复制更新包 → 正式发布与 stable 切换。stable/build-base 复用已核验的下载对象进行桶内复制，不再从运行器重复上传大包。
 

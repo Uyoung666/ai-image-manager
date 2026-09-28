@@ -44,11 +44,12 @@ v2.2.0 重点提升图库导入、搜索和重复图片整理的可靠性。重�
 - 首次启动 v2.2.0 时会自动执行数据库迁移，请在重要图库上升级前保留数据目录备份。
 - ZIP/便携版不提供应用内自动更新，需要手动替换安装目录。
 
-## 校验状态
+## 下载与安装
 
-- `npm run check`：通过
-- `npm test`：211 个测试文件、1,254 个测试通过
-- `npm run test:e2e`：18 个通过、1 个跳过
-- `npm run make`：Squirrel Setup、MSI 和 ZIP 构建通过
+- **普通安装**：下载附件中的 `AI.Image.Manager-2.2.0.Setup.exe`。
+- **MSI 安装**：下载 `ai-image-manager.msi`。
+- **ZIP/便携使用**：下载 `AI.Image.Manager-win32-x64-2.2.0.zip`，解压后运行。
+- `full.nupkg`、`delta.nupkg` 和 `RELEASES` 是自动更新使用的文件，无需手动安装。
+- 附件中的 `SHA256SUMS.txt` 提供文件校验值，`provenance.json` 提供发布文件信息。
 
-完整包、安装包校验和、provenance 以及 COS 增量包将在正式发布流程中生成。
+[查看 v2.1.0 到 v2.2.0 的完整代码变更](https://github.com/Uyoung666/ai-image-manager/compare/v2.1.0...v2.2.0)

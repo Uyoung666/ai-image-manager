@@ -24,6 +24,7 @@ import {
   exactArtifact,
   finalizeGitHub,
   findRelease,
+  loadReleaseNotes,
   sourceArtifacts,
   stageGitHub,
 } from "./release/github.mjs";
@@ -113,6 +114,7 @@ export async function preflight() {
     sourceRunId,
   };
   assertIdentity(identity);
+  const releaseNotes = await loadReleaseNotes(identity);
   if (sourceRunId) {
     await sourceArtifacts(repo(), sourceRunId);
   }
@@ -143,7 +145,7 @@ export async function preflight() {
   const baseline = sourceRunId
     ? {}
     : await resolveBaseline(previousVersion, buildBase);
-  const config = { ...identity, baseline, feed, buildBase };
+  const config = { ...identity, releaseNotes, baseline, feed, buildBase };
   await writeJson("release-context.json", config);
   await output({ version, tag, commit, sourceRunId: sourceRunId ?? "" });
   console.log(

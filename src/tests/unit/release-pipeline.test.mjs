@@ -23,6 +23,8 @@ import {
   withPublicReleaseReads,
 } from "../../../scripts/release/deploy.mjs";
 import {
+  loadReleaseNotes,
+  validateReleaseNotes,
   validateSourceRun,
   verifyAsset,
 } from "../../../scripts/release/github.mjs";
@@ -309,6 +311,39 @@ describe("local installer feed", () => {
 });
 
 describe("publication and recovery", () => {
+  it("loads authored notes from the exact application commit instead of generated changelog links", async () => {
+    const calls = [];
+    const body = "# v2.2.0\n\n- 支持中断导入恢复。";
+    const result = await loadReleaseNotes(identity, async (...args) => {
+      calls.push(args);
+      return body;
+    });
+    expect(result).toBe(body);
+    expect(calls).toEqual([
+      ["git", ["show", `${identity.commit}:RELEASE_NOTES_v2.2.0.md`]],
+    ]);
+    expect(
+      await loadReleaseNotes({ ...identity, releaseNotes: body }, async () => {
+        throw new Error("Must reuse pinned notes");
+      })
+    ).toBe(body);
+  });
+
+  it("rejects missing notes and placeholder-only release bodies", async () => {
+    for (const body of [
+      "",
+      "# v2.2.0",
+      "**Full Changelog**: https://example.com/compare/a...b",
+      "Release v2.2.0",
+    ]) {
+      expect(() => validateReleaseNotes(body)).toThrow(/describe changes/);
+    }
+    await expect(
+      loadReleaseNotes(identity, async () => {
+        throw new Error("file missing");
+      })
+    ).rejects.toThrow(/RELEASE_NOTES_v2.2.0.md/);
+  });
   it("copies verified download objects once across three staging attempts without uploading files", async () => {
     const { root, manifest } = await fixture("copy-staging");
     const objects = new Map();

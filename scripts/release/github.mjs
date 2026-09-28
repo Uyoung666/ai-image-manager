@@ -1,13 +1,51 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { downloadRecords } from "./bundle.mjs";
+import { assertIdentity, downloadRecords } from "./bundle.mjs";
 import { readFileRecord } from "./checksums.mjs";
 import { compareVersions, isStableVersion } from "./semver.mjs";
 
 const RUN_ID_PATTERN = /^[1-9]\d*$/;
 const UPLOAD_TEMPLATE_PATTERN = /\{.*$/;
 const TAG_PREFIX_PATTERN = /^v/;
+const BOM_PATTERN = /^\uFEFF/;
+const LINE_PATTERN = /\r?\n/;
+const NOTES_METADATA_PATTERN =
+  /^(?:#|\*{0,2}Full Changelog\*{0,2}\s*:|\[Full Changelog\]|https?:\/\/|Release v\d+\.\d+\.\d+$)/i;
+
+export function validateReleaseNotes(text) {
+  const body = String(text ?? "")
+    .replace(BOM_PATTERN, "")
+    .trim();
+  if (
+    !body
+      .split(LINE_PATTERN)
+      .some((line) => line.trim() && !NOTES_METADATA_PATTERN.test(line.trim()))
+  ) {
+    throw new Error(
+      "Release notes must describe changes, not just a title or changelog link"
+    );
+  }
+  return body;
+}
+
+export async function loadReleaseNotes(manifest, runCommand = command) {
+  assertIdentity(manifest);
+  if (manifest.releaseNotes !== undefined) {
+    return validateReleaseNotes(manifest.releaseNotes);
+  }
+  const file = `RELEASE_NOTES_${manifest.tag}.md`;
+  let text;
+  try {
+    text = await runCommand("git", ["show", `${manifest.commit}:${file}`]);
+  } catch (cause) {
+    throw new Error(
+      `Release requires ${file} in application commit ${manifest.commit}`,
+      { cause }
+    );
+  }
+  return validateReleaseNotes(text);
+}
 
 export function command(
   program,
@@ -207,20 +245,24 @@ export async function verifyAsset(asset, record, { fetchFn = fetch } = {}) {
 
 export async function stageGitHub(repo, root, manifest) {
   let release = await findRelease(repo, manifest.tag);
+  const body =
+    !release || release.draft ? await loadReleaseNotes(manifest) : null;
   if (!release) {
-    const notes = await api(`repos/${repo}/releases/generate-notes`, {
-      method: "POST",
-      body: { tag_name: manifest.tag, target_commitish: manifest.commit },
-    });
     release = await api(`repos/${repo}/releases`, {
       method: "POST",
       body: {
         tag_name: manifest.tag,
         target_commitish: manifest.commit,
-        name: manifest.tag,
-        body: notes.body || `Release ${manifest.tag}`,
+        name: `AI Image Manager ${manifest.tag}`,
+        body,
         draft: true,
       },
+    });
+  }
+  if (release.draft && release.body !== body) {
+    await api(`repos/${repo}/releases/${release.id}`, {
+      method: "PATCH",
+      body: { body },
     });
   }
   for (const record of await githubRecords(root, manifest)) {
@@ -284,6 +326,7 @@ export async function finalizeGitHub(repo, root, manifest) {
     await verifyAsset(asset, record);
   }
   if (release.draft || release.prerelease) {
+    validateReleaseNotes(release.body);
     await api(`repos/${repo}/releases/${release.id}`, {
       method: "PATCH",
       body: { draft: false, prerelease: false, make_latest: "true" },
