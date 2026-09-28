@@ -1008,7 +1008,7 @@ i18n.use(initReactI18next).init({
         settingsLicense: "许可证",
         settingsAuthor: "作者",
         settingsUpdate: "软件更新",
-        settingsUpdateDescription: "检查新版本，配置更新行为和更新代理。",
+        settingsUpdateDescription: "检查新版本，配置自动更新和更新提醒。",
         settingsAutoUpdate: "自动更新",
         settingsAutoUpdateHint: "发现新版本后自动下载并准备更新",
         settingsUpdateReminder: "更新提醒",
@@ -1020,7 +1020,7 @@ i18n.use(initReactI18next).init({
         updateDownloading: "正在下载...",
         updateElapsed: "已耗时 {{seconds}} 秒...",
         updateDownloadedStatus: "{{version}} 已下载就绪",
-        updateError: "检查更新失败",
+        updateError: "更新失败，请重试或手动下载。",
         updateCheckBtn: "检查更新",
         updateRetry: "重试",
         updateRestartNow: "重启更新",
@@ -1038,7 +1038,13 @@ i18n.use(initReactI18next).init({
         updateProxyTestFail: "连接失败",
         updateSave: "保存",
         updateSaved: "已保存",
-        updateErrorNetwork: "网络连接失败，可尝试设置代理",
+        updateErrorNetwork:
+          "网络连接失败，请检查网络和 Windows 系统代理后重试。",
+        updateErrorTls:
+          "无法建立安全连接，请检查系统时间、网络和 Windows 系统代理后重试，或手动下载。",
+        updateErrorNotReady: "更新尚未下载完成，请先检查更新。",
+        updateErrorInstallerUnsupported:
+          "此安装方式不支持自动更新，请手动下载。",
         updateErrorNotFound: "未找到更新文件",
         updateErrorPackageCorrupt:
           "更新包校验失败，文件可能已损坏，请重试或手动下载。",
@@ -3266,7 +3272,7 @@ i18n.use(initReactI18next).init({
         settingsAuthor: "Author",
         settingsUpdate: "Software Update",
         settingsUpdateDescription:
-          "Check for new versions and configure update behavior and proxy settings.",
+          "Check for new versions and configure automatic updates and reminders.",
         settingsAutoUpdate: "Automatic updates",
         settingsAutoUpdateHint:
           "Automatically download and prepare new versions when available",
@@ -3280,7 +3286,7 @@ i18n.use(initReactI18next).init({
         updateDownloading: "Downloading...",
         updateElapsed: "{{seconds}}s elapsed...",
         updateDownloadedStatus: "{{version}} ready to install",
-        updateError: "Update check failed",
+        updateError: "Update failed. Please retry or download manually.",
         updateDevMode:
           "Auto-update is not available in dev mode. Use the packaged app.",
         updateCheckBtn: "Check for Updates",
@@ -3299,7 +3305,14 @@ i18n.use(initReactI18next).init({
         updateProxyTestFail: "Connection failed",
         updateSave: "Save",
         updateSaved: "Saved",
-        updateErrorNetwork: "Network error, try setting a proxy",
+        updateErrorNetwork:
+          "Connection failed. Check your network and Windows system proxy, then retry.",
+        updateErrorTls:
+          "A secure connection could not be established. Check your system clock, network and Windows system proxy, then retry or download manually.",
+        updateErrorNotReady:
+          "The update is not downloaded yet. Check for updates first.",
+        updateErrorInstallerUnsupported:
+          "This installation does not support automatic updates. Please download manually.",
         updateErrorNotFound: "Update files not found",
         updateErrorPackageCorrupt:
           "The update package failed verification. Retry or download it manually.",

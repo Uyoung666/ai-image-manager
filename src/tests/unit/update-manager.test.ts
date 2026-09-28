@@ -18,8 +18,13 @@ const mocks = vi.hoisted(() => {
     quitAndInstall: vi.fn(),
     setFeedURL: vi.fn(),
     setUpdateState: vi.fn(),
+    diagnosticLog: vi.fn(),
   };
 });
+
+vi.mock("@/services/diagnostics/logging", () => ({
+  appendDiagnosticLog: mocks.diagnosticLog,
+}));
 
 vi.mock("electron", () => ({
   app: mocks.app,
@@ -81,6 +86,7 @@ beforeEach(() => {
   mocks.quitAndInstall.mockReset();
   mocks.setFeedURL.mockReset();
   mocks.setUpdateState.mockReset();
+  mocks.diagnosticLog.mockReset();
 });
 
 afterEach(() => {
@@ -302,6 +308,63 @@ describe("update feed source", () => {
 });
 
 describe("update manager event payloads", () => {
+  it("classifies .NET TLS errors, logs the full exception and releases the check lock", async () => {
+    const manager = await loadManager();
+    manager.checkForUpdatesManually();
+    const raw = `Command failed: 4294967295 System.AggregateException: ${"�".repeat(220)} System.Net.WebException: System.IO.IOException: at System.Net.TlsStream.EndWrite`;
+    mocks.emit("error", new Error(raw));
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
+      phase: "error",
+      message: "UPDATE_TLS_ERROR",
+    });
+    expect(mocks.diagnosticLog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: raw, action: "update-event" })
+    );
+    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
+    expect(mocks.checkForUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes thrown check/configuration/install failures", async () => {
+    const manager = await loadManager();
+    mocks.setFeedURL.mockImplementationOnce(() => {
+      throw new Error("ETIMEDOUT");
+    });
+    expect(manager.checkForUpdatesManually()).toEqual({
+      ok: false,
+      error: "NETWORK_ERROR",
+    });
+    mocks.checkForUpdates.mockImplementationOnce(() => {
+      throw new Error("unknown ����");
+    });
+    expect(manager.checkForUpdatesManually()).toEqual({
+      ok: false,
+      error: "UPDATE_UNKNOWN_ERROR",
+    });
+    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
+    mocks.emit("update-downloaded", {}, "notes", "2.2.1");
+    mocks.quitAndInstall.mockImplementationOnce(() => {
+      throw new Error("Could not acquire lock");
+    });
+    expect(manager.installUpdate()).toEqual({
+      ok: false,
+      error: "UPDATE_BUSY",
+    });
+    expect(manager.installUpdate()).toEqual({ ok: true });
+  });
+
+  it("still reports failure and permits retry when diagnostics cannot be written", async () => {
+    const manager = await loadManager();
+    manager.checkForUpdatesManually();
+    mocks.diagnosticLog.mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    mocks.emit("error", new Error("System.IO.IOException: disk full"));
+    expect(mocks.setUpdateState).toHaveBeenLastCalledWith({
+      phase: "error",
+      message: "UPDATE_UNKNOWN_ERROR",
+    });
+    expect(manager.checkForUpdatesManually()).toEqual({ ok: true });
+  });
   it("does not invent metadata for update-available and reads downloaded metadata", async () => {
     const manager = await loadManager();
     manager.checkForUpdatesManually();

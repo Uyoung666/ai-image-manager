@@ -2,7 +2,7 @@
   "manifestVersion": 3,
   "apiVersion": 3,
   "id": "com.aiimagemanager.japanese-locale",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": {
     "en": "Japanese",
     "ja-JP": "日本語"

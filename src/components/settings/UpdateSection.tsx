@@ -15,53 +15,16 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
 import { ipc } from "@/ipc/manager";
 
-type UpdatePhase =
-  | "idle"
-  | "checking"
-  | "up-to-date"
-  | "downloading"
-  | "downloaded"
-  | "error";
+import { UPDATE_ERROR_KEYS, type UpdateStatus } from "@/types/update";
+import { classifyUpdateError } from "@/utils/update-error";
 
-interface UpdateStatusPayload {
-  bytesPerSecond?: number;
-  message?: string;
-  percent?: number;
-  phase: UpdatePhase;
-  releaseDate?: string;
-  releaseNotes?: string;
-  total?: number;
-  transferred?: number;
-  updateURL?: string;
-  version?: string;
-}
+type UpdatePhase = UpdateStatus["phase"];
 
 function mapUpdateErrorMessage(
-  message: string | undefined,
+  error: unknown,
   translate: (key: string) => string
 ): string {
-  if (!message) {
-    return translate("updateError");
-  }
-  if (message === "DEV_MODE") {
-    return translate("updateDevMode");
-  }
-  if (message === "NETWORK_ERROR") {
-    return translate("updateErrorNetwork");
-  }
-  if (message === "UPDATE_NOT_FOUND") {
-    return translate("updateErrorNotFound");
-  }
-  if (message === "UPDATE_PACKAGE_CORRUPT") {
-    return translate("updateErrorPackageCorrupt");
-  }
-  if (message === "UPDATE_BUSY") {
-    return translate("updateErrorBusy");
-  }
-  if (message === "UPDATE_INSTALLER_UNSUPPORTED") {
-    return translate("updateDownloadManually");
-  }
-  return message;
+  return translate(UPDATE_ERROR_KEYS[classifyUpdateError(error)]);
 }
 
 export function UpdateSection({ appVersion }: { appVersion: string }) {
@@ -81,28 +44,33 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
 
   // Restore cached update status on mount (e.g. auto-download completed while on another page)
   useEffect(() => {
-    getUpdateStatus().then((rawStatus) => {
-      const status = rawStatus as UpdateStatusPayload | null;
-      if (!status || status.phase === "idle") {
-        return;
-      }
-      setPhase(status.phase);
-      if (status.version) {
-        setUpdateVersion(status.version);
-      }
-      if (status.releaseNotes) {
-        setReleaseNotes(status.releaseNotes);
-      }
-      if (status.percent != null) {
-        setPercent(status.percent);
-      }
-      if (status.bytesPerSecond != null) {
-        setBytesPerSecond(status.bytesPerSecond);
-      }
-      if (status.message && status.message !== "DEV_MODE") {
-        setErrorMsg(mapUpdateErrorMessage(status.message, t));
-      }
-    });
+    getUpdateStatus()
+      .then((rawStatus) => {
+        const status = rawStatus;
+        if (!status || status.phase === "idle") {
+          return;
+        }
+        setPhase(status.phase);
+        if (status.version) {
+          setUpdateVersion(status.version);
+        }
+        if (status.releaseNotes) {
+          setReleaseNotes(status.releaseNotes);
+        }
+        if (status.percent != null) {
+          setPercent(status.percent);
+        }
+        if (status.bytesPerSecond != null) {
+          setBytesPerSecond(status.bytesPerSecond);
+        }
+        if (status.phase === "error") {
+          setErrorMsg(mapUpdateErrorMessage(status.message, t));
+        }
+      })
+      .catch((error: unknown) => {
+        setPhase("error");
+        setErrorMsg(mapUpdateErrorMessage(error, t));
+      });
     ipc.client.settings
       .getAppPreferences({})
       .then((preferences) => {
@@ -215,27 +183,20 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
     setErrorMsg("");
     try {
       const result = await checkForUpdates();
-      const data = result as { ok?: boolean; error?: string } | undefined;
+      const data = result;
       if (!data?.ok) {
         setPhase("error");
         setErrorMsg(mapUpdateErrorMessage(data?.error, t));
       }
     } catch (err: unknown) {
       setPhase("error");
-      setErrorMsg(
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message?: unknown }).message)
-          : t("updateError")
-      );
+      setErrorMsg(mapUpdateErrorMessage(err, t));
     }
   }
 
   async function handleRestart() {
     try {
-      const result = (await installDownloadedUpdate()) as {
-        ok?: boolean;
-        error?: string;
-      };
+      const result = await installDownloadedUpdate();
       if (!result?.ok) {
         setPhase("error");
         setErrorMsg(mapUpdateErrorMessage(result?.error, t));

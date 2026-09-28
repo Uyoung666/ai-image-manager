@@ -143,7 +143,7 @@ describe("Japanese locale plugin contract", () => {
       },
       manifestVersion: 3,
       name: { en: "Japanese", "ja-JP": "日本語" },
-      version: "1.0.0",
+      version: "1.0.1",
     });
   });
 

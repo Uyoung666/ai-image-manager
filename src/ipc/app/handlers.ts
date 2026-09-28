@@ -9,6 +9,7 @@ import {
 } from "@/services/update-manager";
 import { getUpdateState } from "@/services/update-state";
 import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/update-welcome-state";
+import type { UpdateResult, UpdateStatus } from "@/types/update";
 
 export const currentPlatform = os.handler(() => {
   return process.platform;
@@ -37,15 +38,15 @@ export const restartApp = os.handler(() => {
   app.quit();
 });
 
-export const checkForUpdates = os.handler(() => {
+export const checkForUpdates = os.handler((): UpdateResult => {
   return checkForUpdatesManually();
 });
 
-export const getUpdateStatus = os.handler(() => {
+export const getUpdateStatus = os.handler((): UpdateStatus => {
   return getUpdateState(app.getVersion());
 });
 
-export const installDownloadedUpdate = os.handler(() => {
+export const installDownloadedUpdate = os.handler((): UpdateResult => {
   return installUpdate();
 });
 

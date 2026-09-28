@@ -2,19 +2,11 @@
 // Both run in the main process but reside in separate modules, so a simple
 // module-level variable bridges them without requiring ipcMain.invoke.
 import Store from "electron-store";
+import { recordUpdateError } from "@/services/update-error";
+import type { UpdateStatus } from "@/types/update";
+import { classifyUpdateError } from "@/utils/update-error";
 
-export interface UpdateStatus {
-  bytesPerSecond?: number;
-  message?: string;
-  percent?: number;
-  phase: string;
-  releaseDate?: string;
-  releaseNotes?: string;
-  total?: number;
-  transferred?: number;
-  updateURL?: string;
-  version?: string;
-}
+export type { UpdateStatus } from "@/types/update";
 
 interface PersistedUpdateState {
   state: UpdateStatus;
@@ -45,6 +37,14 @@ export function getUpdateState(currentVersion?: string): UpdateStatus {
   ) {
     state = { phase: "idle" };
     getStore().set("state", state);
+  }
+  if (state.phase === "error") {
+    const code = classifyUpdateError(state.message);
+    if (state.message !== code) {
+      recordUpdateError(state.message, "restore-status");
+      state = { ...state, message: code };
+      getStore().set("state", state);
+    }
   }
   return { ...state };
 }

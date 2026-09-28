@@ -2,12 +2,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { app, autoUpdater, BrowserWindow, Notification } from "electron";
 import { getSetting } from "@/services/settings-manager";
+import { recordUpdateError } from "@/services/update-error";
 import { getUpdateState, setUpdateState } from "@/services/update-state";
 import {
   APP_PREFERENCE_DEFAULTS,
   APP_PREFERENCE_KEYS,
   parseBooleanPreference,
 } from "@/types/app-preferences";
+import type { UpdateErrorCode, UpdateResult } from "@/types/update";
 
 /**
  * Windows/Squirrel needs a little time after startup before it is safe to
@@ -17,12 +19,6 @@ import {
 export const UPDATE_INITIAL_DELAY_MS = 10 * 1000;
 export const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-const NETWORK_ERROR_RE =
-  /ENOTFOUND|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH|net::ERR/i;
-const HTTP_ERROR_RE = /403|404/i;
-const LOCK_ERROR_RE = /acquire.*lock|another.*instance|mutex/i;
-const PACKAGE_CHECKSUM_ERROR_RE =
-  /checksum|checksummed file size|hash.*mismatch|size doesn't match/i;
 const TRAILING_SLASH_RE = /\/$/;
 
 // The identifier is replaced by vite.main.config.mts during a release build.
@@ -32,18 +28,13 @@ declare const __AIM_UPDATE_BASE_URL__: unknown;
 type UpdatePayload = Parameters<typeof setUpdateState>[0];
 type UpdatePhase = UpdatePayload["phase"];
 
-interface UpdateResult {
-  error?: string;
-  ok: boolean;
-  skipped?: boolean;
-}
-
 interface UpdateManagerTestOverrides {
   feedURL?: string | null;
   squirrelInstallation?: boolean;
 }
 
 let configured = false;
+let configurationError: UpdateErrorCode = "UPDATE_NOT_FOUND";
 let listenersAttached = false;
 let updateTimer: ReturnType<typeof setInterval> | null = null;
 let initialCheckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -235,28 +226,12 @@ function attachListeners() {
     broadcast({ phase: "up-to-date" });
   });
   updater.on("error", (...args) => {
-    const error = args[0];
-    const raw =
-      error && typeof error === "object" && "message" in error
-        ? String((error as { message?: unknown }).message)
-        : String(error);
     if (activePhase === "downloaded") {
       return;
     }
     activePhase = null;
-    if (LOCK_ERROR_RE.test(raw)) {
-      broadcast({ phase: "error", message: "UPDATE_BUSY" });
-      return;
-    }
-    let message = raw;
-    if (NETWORK_ERROR_RE.test(raw)) {
-      message = "NETWORK_ERROR";
-    } else if (HTTP_ERROR_RE.test(raw)) {
-      message = "UPDATE_NOT_FOUND";
-    } else if (PACKAGE_CHECKSUM_ERROR_RE.test(raw)) {
-      message = "UPDATE_PACKAGE_CORRUPT";
-    }
-    broadcast({ phase: "error", message: message.slice(0, 200) });
+    const message = recordUpdateError(args[0], "update-event");
+    broadcast({ phase: "error", message });
   });
 
   updater.on("update-downloaded", (...args) => {
@@ -318,6 +293,7 @@ function configure(): boolean {
 
   const feedURL = getUpdateFeedURL();
   if (!feedURL) {
+    configurationError = "UPDATE_NOT_FOUND";
     return false;
   }
 
@@ -327,7 +303,8 @@ function configure(): boolean {
     attachListeners();
     configured = true;
     return true;
-  } catch {
+  } catch (error) {
+    configurationError = recordUpdateError(error, "configure");
     return false;
   }
 }
@@ -345,8 +322,8 @@ function check(): UpdateResult {
   if (!configure()) {
     // Keep the existing UI error vocabulary; this also avoids exposing a
     // source URL/configuration detail in the renderer.
-    broadcast({ phase: "error", message: "UPDATE_NOT_FOUND" });
-    return { ok: false, error: "UPDATE_NOT_FOUND" };
+    broadcast({ phase: "error", message: configurationError });
+    return { ok: false, error: configurationError };
   }
   if (isLockedPhase(activePhase)) {
     return { ok: true, skipped: true };
@@ -362,8 +339,8 @@ function check(): UpdateResult {
     return { ok: true };
   } catch (error) {
     activePhase = null;
-    const message = error instanceof Error ? error.message : String(error);
-    broadcast({ phase: "error", message: message.slice(0, 200) });
+    const message = recordUpdateError(error, "check");
+    broadcast({ phase: "error", message });
     return { ok: false, error: message };
   }
 }
@@ -460,7 +437,7 @@ export function installUpdate(): UpdateResult {
     autoUpdater.quitAndInstall();
     return { ok: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = recordUpdateError(error, "install");
     return { ok: false, error: message };
   }
 }
