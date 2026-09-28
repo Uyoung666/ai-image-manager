@@ -2,12 +2,14 @@ import type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 import initial from "./v2.0.0";
 import previous from "./v2.1.0";
 import previousPatch from "./v2.1.1";
-import current from "./v2.2.0";
+import previousMinor from "./v2.2.0";
+import current from "./v2.2.1";
 
 export type { ChangelogEntry, ChangelogLocale, LocalizedText } from "./types";
 
 export const changelogEntries: ChangelogEntry[] = [
   current,
+  previousMinor,
   previousPatch,
   previous,
   initial,
