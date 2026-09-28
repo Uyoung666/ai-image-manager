@@ -27,6 +27,7 @@ env:
   COS_REGION: ${{ vars.COS_REGION || 'ap-hongkong' }}
 jobs:
   maintain:
+    if: github.event_name != 'schedule' || vars.COS_STORAGE_MAINTENANCE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: release-candidate

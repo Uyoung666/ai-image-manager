@@ -32,7 +32,9 @@ COS 单请求截止 120 秒；连续 120 秒没有进展或上传任务超过 20
 
 ## 存储维护
 
-**Maintain COS release storage** 默认手动预览；每日定时先保存预览，再重新盘点并清理超过 7 天的临时安装包。维护与发布共用并发锁；检测到其他发布或恢复运行时停止清理。现存未过期构建和恢复 Artifact 引用的版本/运行受到保护。
+**Maintain COS release storage** 默认手动预览；确认维护权限和手动预览成功后，将仓库变量 `COS_STORAGE_MAINTENANCE_ENABLED` 设置为 `true`，启用每日定时清理。定时运行先保存预览，再重新盘点并清理超过 7 天的临时安装包。维护与发布共用并发锁；检测到其他发布或恢复运行时停止清理。现存未过期构建和恢复 Artifact 引用的版本/运行受到保护。权限未配置时不每日重复运行失败的清理任务。
+
+维护权限缺口排查：`inventory` 的 403 对应 `cos:GetBucket`（桶资源，并通过 URL 编码的 `cos:prefix` 条件限定应用发布目录）；清理还需要 `cos:HeadObject`、`cos:DeleteObject`（仅 testing/runs 和 candidates）及 `cos:GetBucketVersioning`。生命周期配置需要 `cos:GetBucketLifecycle` 和 `cos:PutBucketLifecycle`，由桶管理员授予或单独在控制台配置。参考[官方条件键](https://cloud.tencent.com/document/product/436/71307)和[生命周期权限](https://cloud.tencent.com/document/product/436/8278)。
 
 手动操作：
 
