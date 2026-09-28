@@ -1,0 +1,52 @@
+name: Clean approved old release packages
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete the nine approved old objects after verification'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-candidate
+    env:
+      COS_BUCKET: ai-image-manager-1392398678
+      COS_REGION: ap-hongkong
+      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --prefix scripts/release
+      - name: Verify archives, live feeds and exact old objects
+        run: node scripts/release/supervise.mjs scripts/release-old-package-cleanup.mjs preview
+      - name: Save preview before deletion
+        uses: actions/upload-artifact@v4
+        with:
+          name: cos-old-plan-${{ github.run_id }}
+          path: cos-old-package-cleanup.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Delete approved old packages
+        if: inputs.apply
+        run: node scripts/release/supervise.mjs scripts/release-old-package-cleanup.mjs apply
+      - name: Save verified result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cos-old-result-${{ github.run_id }}
+          path: cos-old-package-cleanup.json
+          retention-days: 90
+          if-no-files-found: ignore

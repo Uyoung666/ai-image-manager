@@ -1,0 +1,61 @@
+{
+  "status": "proposed_only_not_deleted",
+  "sourceReport": "out/cos-reviewed-multipart-result/cos-reviewed-cleanup.json",
+  "objects": [
+    {
+      "key": "ai-image-manager/downloads/2.1.0/AI Image Manager-2.1.0 Setup.exe",
+      "size": 529065472,
+      "lastModified": "2026-09-01T01:38:07.000Z",
+      "etag": "\"064d2edc704b6f677c9b945978a31c02\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/AI Image Manager-win32-x64-2.1.0.zip",
+      "size": 541877522,
+      "lastModified": "2026-09-01T01:38:51.000Z",
+      "etag": "\"6cc4d453c7aeb7a68151a17c3669969b\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/SHA256SUMS.txt",
+      "size": 572,
+      "lastModified": "2026-09-01T01:40:59.000Z",
+      "etag": "\"e557a017f9cd4e538a7ffacfac9a3e7f\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/ai-image-manager-2.1.0-delta.nupkg",
+      "size": 94389047,
+      "lastModified": "2026-09-01T01:39:31.000Z",
+      "etag": "\"f3936e74602ac2131c820d181761d9fd\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/ai-image-manager-2.1.0-full.nupkg",
+      "size": 529080624,
+      "lastModified": "2026-09-01T01:39:39.000Z",
+      "etag": "\"46e1dfc720a150b6dd142dd4664e9be8\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/ai-image-manager.msi",
+      "size": 531632849,
+      "lastModified": "2026-09-01T01:40:19.000Z",
+      "etag": "\"4d65227ce7538797626ce3b24df6ede7\""
+    },
+    {
+      "key": "ai-image-manager/downloads/2.1.0/provenance.json",
+      "size": 1070,
+      "lastModified": "2026-09-01T01:40:58.000Z",
+      "etag": "\"bcaeaeec25a8cdb70e3cd1cf0b29c08d\""
+    },
+    {
+      "key": "ai-image-manager/updates/win32/x64/stable/ai-image-manager-2.0.0-full.nupkg",
+      "size": 538687286,
+      "lastModified": "2026-09-02T13:32:22.000Z",
+      "etag": "\"a43efbd54466334702129f81983467de\""
+    },
+    {
+      "key": "ai-image-manager/updates/win32/x64/build-base/ai-image-manager-2.1.0-full.nupkg",
+      "size": 529080624,
+      "lastModified": "2026-09-02T13:34:15.000Z",
+      "etag": "\"46e1dfc720a150b6dd142dd4664e9be8\""
+    }
+  ],
+  "bytes": 3293815066
+}
