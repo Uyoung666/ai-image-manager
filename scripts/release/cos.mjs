@@ -16,7 +16,16 @@ const DEFAULT_RETRY_COUNT = 2;
 const CANDIDATE_OBJECT_PATTERN =
   /(?:^|\/)updates\/win32\/x64\/candidates\/\d+\.\d+\.\d+\/[^/]+$/;
 const DEFAULT_RETRY_DELAY_MS = 100;
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const activeRequests = new Set();
+let cancellationError;
+
+export function cancelCosRequests(reason) {
+  cancellationError = Object.assign(new Error(reason), { code: "ABORT_ERR" });
+  for (const cancel of activeRequests) {
+    cancel(cancellationError);
+  }
+}
 
 /**
  * Build a COS client from environment variables. Secrets are deliberately read
@@ -72,6 +81,8 @@ export class CosStore {
     sliceSize = 8 * 1024 * 1024,
     retryCount = DEFAULT_RETRY_COUNT,
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    strictReads = false,
   }) {
     invariant(client, "COS client is required", "COS_CLIENT_MISSING");
     invariant(bucket, "COS bucket is required", "COS_BUCKET_MISSING");
@@ -83,6 +94,8 @@ export class CosStore {
     this.sliceSize = sliceSize;
     this.retryCount = normalizeRetryCount(retryCount);
     this.retryDelayMs = normalizeRetryDelay(retryDelayMs);
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.strictReads = strictReads;
   }
 
   async head(key, { allowForbidden = false } = {}) {
@@ -140,7 +153,7 @@ export class CosStore {
     // x-cos-forbid-overwrite. Only explicitly staged candidates may defer
     // read verification; they are never reported as verified/idempotent.
     const existing = await this.head(normalizedKey, {
-      allowForbidden: immutable,
+      allowForbidden: immutable && !this.strictReads,
     });
     if (existing && immutable) {
       const result = await this.verifyImmutableExisting(
@@ -190,7 +203,7 @@ export class CosStore {
                 ContentLength: expectedSize,
                 Headers: headers,
               },
-              { retryCount: 0 }
+              { ...this.requestOptions(), retryCount: 0 }
             );
           } finally {
             body.destroy();
@@ -239,7 +252,7 @@ export class CosStore {
               Key: key,
               Headers: { ...headers },
             },
-            { retryCount: 0 }
+            { ...this.requestOptions(), retryCount: 0 }
           ),
         this.requestOptions()
       );
@@ -276,8 +289,13 @@ export class CosStore {
                 Body: body,
                 ContentLength: contentLength,
                 Headers: {},
+                onProgress: ({ loaded }) => {
+                  console.error(
+                    `COS progress ${key}: part ${partNumber}/${partCount}, ${start + loaded}/${totalSize} bytes`
+                  );
+                },
               },
-              { retryCount: 0 }
+              { ...this.requestOptions(), retryCount: 0 }
             );
           } finally {
             body.destroy();
@@ -289,6 +307,9 @@ export class CosStore {
           "COS_MULTIPART_ETAG_MISSING"
         );
         parts.push({ PartNumber: partNumber, ETag: uploaded.ETag });
+        console.error(
+          `COS uploaded ${key}: part ${partNumber}/${partCount}, ${start + contentLength}/${totalSize} bytes`
+        );
       }
 
       return await retryCosOperation(
@@ -306,7 +327,7 @@ export class CosStore {
               // uploadFile helper drops this header during completion.
               Headers: { ...headers },
             },
-            { retryCount: 0 }
+            { ...this.requestOptions(), retryCount: 0 }
           ),
         this.requestOptions()
       );
@@ -322,7 +343,7 @@ export class CosStore {
               Key: key,
               UploadId: uploadId,
             },
-            { retryCount: 0 }
+            { ...this.requestOptions(), retryCount: 0 }
           );
         } catch {
           // Preserve the original upload error; abandoned multipart uploads
@@ -354,7 +375,7 @@ export class CosStore {
     const expectedSha256 =
       sha256 ?? createHash("sha256").update(body).digest("hex");
     const existing = await this.head(normalizedKey, {
-      allowForbidden: immutable,
+      allowForbidden: immutable && !this.strictReads,
     });
     if (existing && immutable) {
       const result = await this.verifyImmutableExisting(
@@ -605,6 +626,7 @@ export class CosStore {
     return {
       retryCount: this.retryCount,
       retryDelayMs: this.retryDelayMs,
+      requestTimeoutMs: this.requestTimeoutMs,
     };
   }
 
@@ -712,6 +734,7 @@ export function invokeCos(
   {
     retryCount = DEFAULT_RETRY_COUNT,
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   } = {}
 ) {
   invariant(
@@ -724,7 +747,7 @@ export function invokeCos(
     let attempt = 0;
     while (true) {
       try {
-        return await invokeCosOnce(client, method, params);
+        return await invokeCosOnce(client, method, params, requestTimeoutMs);
       } catch (error) {
         if (attempt >= attempts - 1 || !isRetryableCosError(error)) {
           throw error;
@@ -736,16 +759,44 @@ export function invokeCos(
   })();
 }
 
-function invokeCosOnce(client, method, params) {
+function invokeCosOnce(client, method, params, requestTimeoutMs) {
   return new Promise((resolve, reject) => {
+    if (cancellationError && method !== "multipartAbort") {
+      reject(cancellationError);
+      return;
+    }
     let settled = false;
+    let result;
+    const timer = setTimeout(() => {
+      const error = Object.assign(
+        new Error(
+          `COS ${method} timed out after ${requestTimeoutMs}ms: ${params.Key ?? "bucket"}`
+        ),
+        { code: "ETIMEDOUT" }
+      );
+      cancel(error);
+    }, requestTimeoutMs);
     const finish = (callback, value) => {
       if (settled) {
         return;
       }
       settled = true;
+      clearTimeout(timer);
+      activeRequests.delete(cancel);
       callback(value);
     };
+    const cancel = (error) => {
+      params.Body?.on?.("error", () => {
+        /* Cancellation is reported by this promise. */
+      });
+      params.Body?.destroy?.(error);
+      result?.abort?.();
+      result?.destroy?.();
+      finish(reject, error);
+    };
+    if (method !== "multipartAbort") {
+      activeRequests.add(cancel);
+    }
     const callback = (error, data) => {
       if (error) {
         finish(reject, error);
@@ -753,7 +804,6 @@ function invokeCosOnce(client, method, params) {
         finish(resolve, data);
       }
     };
-    let result;
     try {
       result = client[method](params, callback);
     } catch (error) {

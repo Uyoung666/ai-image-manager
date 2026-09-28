@@ -115,14 +115,23 @@ function requiredVersion(options) {
   );
 }
 
-function validateFeed(value) {
+export function validateFeed(
+  value,
+  allowLocal = process.env.AIM_INSTALLER_LOCAL_FEED === "1"
+) {
   let feed;
   try {
     feed = new URL(value);
   } catch {
     throw new Error(`Testing feed is not a valid URL: ${value}`);
   }
-  if (feed.protocol !== "https:") {
+  const loopback =
+    allowLocal &&
+    feed.protocol === "http:" &&
+    feed.hostname === "127.0.0.1" &&
+    !feed.username &&
+    !feed.password;
+  if (feed.protocol !== "https:" && !loopback) {
     throw new Error("Testing feed must use HTTPS");
   }
   return feed.toString().replace(TRAILING_SLASH_PATTERN, "");

@@ -1,0 +1,8 @@
+{
+  "name": "ai-image-manager-release-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "3.0.0"
+  }
+}

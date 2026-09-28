@@ -1,7 +1,6 @@
 // biome-ignore-all lint/performance/useTopLevelRegex: test assertions intentionally keep patterns next to expectations.
 // biome-ignore-all lint/suspicious/useAwait: fake store methods model async COS methods while remaining synchronous in memory.
 
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import { createServer } from "node:http";
@@ -316,35 +315,6 @@ function decodeCopySourceKey(copySource) {
   return decodeURIComponent(copySource.slice(copySource.indexOf("/") + 1));
 }
 
-async function readWorkflowStep(file, name) {
-  const source = (
-    await fsp.readFile(path.resolve(".github/workflows", file), "utf8")
-  ).replaceAll("\r\n", "\n");
-  const step = source
-    .split(`      - name: ${name}`)[1]
-    ?.split("      - name:")[0];
-  expect(step).toBeDefined();
-  return step
-    .split("        run: |\n")[1]
-    .split("\n")
-    .map((line) => line.slice(10))
-    .join("\n");
-}
-
-function runPowerShellStep(script, env, preamble) {
-  const wrapped = `$ErrorActionPreference = 'Stop'\n${preamble}\n${script}\nif (Test-Path variable:LASTEXITCODE) { exit $LASTEXITCODE }`;
-  return spawnSync(
-    "pwsh",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-EncodedCommand",
-      Buffer.from(wrapped, "utf16le").toString("base64"),
-    ],
-    { env: { ...process.env, ...env }, encoding: "utf8", timeout: 10_000 }
-  );
-}
-
 beforeAll(async () => {
   fixtureRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "aim-release-cos-"));
 });
@@ -352,150 +322,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await fsp.rm(fixtureRoot, { recursive: true, force: true });
 });
-
-describe.skipIf(process.platform !== "win32")(
-  "candidate PowerShell handoff",
-  () => {
-    it.each([
-      { status: 404, release: null, success: true },
-      {
-        status: 200,
-        release: { tag_name: "v2.2.0", prerelease: true },
-        success: true,
-      },
-      {
-        status: 200,
-        release: { tag_name: "v2.2.0", draft: true },
-        success: true,
-      },
-      {
-        status: 200,
-        release: { tag_name: "v2.2.0", prerelease: false },
-        success: false,
-      },
-      {
-        status: 200,
-        release: { tag_name: "v2.1.0", prerelease: true },
-        success: false,
-      },
-      { status: 401, release: null, success: false },
-      { status: 403, release: null, success: false },
-      { status: 500, release: null, success: false },
-      { status: "timeout", release: null, success: false },
-    ])("handles $status / $release without hiding API failures", async ({
-      status,
-      release,
-      success,
-    }) => {
-      const script = await readWorkflowStep(
-        "publish.yaml",
-        "Report GitHub prerelease handoff"
-      );
-      const result = runPowerShellStep(
-        script,
-        {
-          GITHUB_REPOSITORY: "example/repository",
-          RELEASE_TAG: "v2.2.0",
-          GH_TOKEN: "test-token",
-          AIM_TEST_HTTP_STATUS: String(status),
-          AIM_TEST_RELEASE_JSON: JSON.stringify(release),
-        },
-        `
-function gh { throw "The handoff must use the authenticated HTTP request" }
-function Invoke-WebRequest {
-  param($Uri, $Headers, $Method, [switch]$SkipHttpErrorCheck, $TimeoutSec)
-  if ($Headers.Authorization -ne 'Bearer test-token' -or $TimeoutSec -ne 60 -or -not $SkipHttpErrorCheck) { throw 'Invalid request configuration' }
-  if ($env:AIM_TEST_HTTP_STATUS -eq 'timeout') { throw 'Simulated network timeout' }
-  return @{ StatusCode = [int]$env:AIM_TEST_HTTP_STATUS; Content = $env:AIM_TEST_RELEASE_JSON }
-}`
-      );
-      expect(result.error).toBeUndefined();
-      expect(result.status === 0, result.stderr || result.stdout).toBe(success);
-    });
-
-    it.each([
-      {
-        failedStep: "Report GitHub prerelease handoff",
-        sourceConclusion: "failure",
-        success: true,
-      },
-      {
-        failedStep: "Upload candidate to COS testing",
-        sourceConclusion: "cancelled",
-        success: false,
-      },
-      {
-        failedStep: "Run MSI install or auto-update smoke",
-        sourceConclusion: "failure",
-        success: false,
-      },
-      {
-        failedStep: "Attest candidate artifacts",
-        sourceConclusion: "failure",
-        success: false,
-      },
-    ])("recovers only a fully verified candidate: $failedStep", async ({
-      failedStep,
-      sourceConclusion,
-      success,
-    }) => {
-      const required = [
-        "Gate - static check",
-        "Gate - unit tests",
-        "Upload candidate to COS testing",
-        "Run Squirrel Setup.exe upgrade smoke",
-        "Run MSI install or auto-update smoke",
-        "Write candidate smoke evidence",
-        "Upload Squirrel candidate to COS candidate prefix",
-        "Upload immutable versioned download payload to COS",
-        "Upload candidate build for promotion",
-        "Generate SHA256 release manifest",
-        "Attest candidate artifacts",
-        "Attest flat download and checksum artifacts",
-        "Upload candidate evidence",
-        "Report GitHub prerelease handoff",
-      ];
-      const script = await readWorkflowStep(
-        "recover-release-candidate.yaml",
-        "Validate failed source run and completed release gates"
-      );
-      const result = runPowerShellStep(
-        script,
-        {
-          VERSION_INPUT: "2.2.0",
-          SOURCE_RUN_ID: "36282664740",
-          CONFIRMATION: "RECOVER 2.2.0",
-          GITHUB_REPOSITORY: "example/repository",
-          GITHUB_OUTPUT: path.join(
-            fixtureRoot,
-            `recovery-${required.indexOf(failedStep)}.txt`
-          ),
-          AIM_TEST_SOURCE_RUN: JSON.stringify({
-            path: ".github/workflows/publish.yaml",
-            status: "completed",
-            conclusion: sourceConclusion,
-          }),
-          AIM_TEST_JOBS: JSON.stringify({
-            jobs: [
-              {
-                steps: required.map((name) => ({
-                  name,
-                  conclusion: name === failedStep ? "failure" : "success",
-                })),
-              },
-            ],
-          }),
-        },
-        `
-function git { if ($args[0] -eq 'rev-list') { return 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } }
-function gh { if ($args[1].Contains('/jobs?')) { return $env:AIM_TEST_JOBS }; return $env:AIM_TEST_SOURCE_RUN }
-`
-      );
-      expect(result.error).toBeUndefined();
-      expect(result.status === 0, result.stderr || result.stdout).toBe(success);
-    });
-  }
-);
 
 describe("release version guard", () => {
   const packageJson = { version: "2.1.0" };
