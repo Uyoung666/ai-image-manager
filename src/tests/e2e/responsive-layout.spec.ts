@@ -31,6 +31,7 @@ const WINDOW_SIZES = [
 ] as const;
 
 const OVERFLOW_TOLERANCE_PX = 2;
+const LANGUAGE_LABEL_PATTERN = /^(Language|语言)$/;
 
 interface OverflowMeasurement {
   clientWidth: number;
@@ -113,7 +114,7 @@ async function navigateTo(route: string): Promise<void> {
     }
     return window.__e2eNavigate(nextRoute);
   }, route);
-  expect(navigatedPath).toBe(route);
+  expect(navigatedPath).toBe(route.split("?")[0]);
   await currentPage.locator("main").first().waitFor({ state: "visible" });
   await currentPage.evaluate(async () => {
     await document.fonts.ready;
@@ -319,6 +320,79 @@ test.afterAll(async () => {
 });
 
 for (const { width, height } of WINDOW_SIZES) {
+  test(`${width}x${height} keeps release notes clear of the continue button`, async () => {
+    const currentPage = requirePage();
+    await resizeWindow(width, height);
+
+    for (const language of ["zh", "en"]) {
+      await navigateTo("/settings/appearance");
+      await currentPage
+        .getByRole("combobox", { name: LANGUAGE_LABEL_PATTERN })
+        .click();
+      await currentPage
+        .getByRole("option", {
+          name: language === "zh" ? "中文 (zh)" : "English (en)",
+          exact: true,
+        })
+        .click();
+      await expect(currentPage.locator("html")).toHaveAttribute(
+        "lang",
+        language
+      );
+
+      for (const version of ["2.2.0", "2.2.1"]) {
+        await navigateTo(`/whats-new?version=${version}`);
+        await expect(
+          currentPage.locator(".whats-new-release-visual-version")
+        ).toHaveText(`v${version}`);
+        const button = currentPage.locator(".whats-new-continue");
+        await expect(button).toHaveText(
+          language === "zh" ? "继续使用" : "Continue"
+        );
+        await button.scrollIntoViewIfNeeded();
+        // Wait for transient startup notifications before checking hit testing.
+        await button.click({ trial: true });
+        const bounds = await button.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const main = document.querySelector(".whats-new-main");
+          const highlights = document.querySelector(".whats-new-highlights");
+          const footer = document.querySelector(".whats-new-actions");
+          if (!(main && highlights && footer)) {
+            throw new Error("Release notes layout is missing");
+          }
+          return {
+            contentBottom: Math.max(
+              main.getBoundingClientRect().bottom,
+              highlights.getBoundingClientRect().bottom
+            ),
+            footerTop: footer.getBoundingClientRect().top,
+            buttonTop: rect.top,
+            buttonBottom: rect.bottom,
+            viewportHeight: window.innerHeight,
+            receivesPointer: element.contains(
+              document.elementFromPoint(
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2
+              )
+            ),
+          };
+        });
+        expect(bounds.contentBottom).toBeLessThanOrEqual(bounds.footerTop + 1);
+        expect(bounds.buttonTop).toBeGreaterThanOrEqual(-OVERFLOW_TOLERANCE_PX);
+        expect(bounds.buttonBottom).toBeLessThanOrEqual(
+          bounds.viewportHeight + OVERFLOW_TOLERANCE_PX
+        );
+        expect(bounds.receivesPointer).toBe(true);
+        expect(await measureHorizontalOverflow()).toEqual([]);
+        await currentPage.screenshot({
+          path: test.info().outputPath(`release-${version}-${language}.png`),
+        });
+        await button.click();
+        await expect(currentPage.locator(".whats-new-page")).toHaveCount(0);
+      }
+    }
+  });
+
   test(`${width}x${height} keeps primary routes within the viewport`, async () => {
     await resizeWindow(width, height);
 

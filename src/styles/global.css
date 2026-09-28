@@ -2865,7 +2865,7 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
   display: flex;
   flex-direction: column;
   width: min(100%, 820px);
-  height: 100%;
+  height: auto;
   min-height: 100%;
   padding: 24px clamp(20px, 4vw, 42px) 26px;
   margin: 0 auto;
@@ -2930,7 +2930,7 @@ html[data-reduced-motion="true"]::view-transition-new(root) {
 
 .whats-new-main {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   flex-direction: column;
   min-height: 0;
 }
