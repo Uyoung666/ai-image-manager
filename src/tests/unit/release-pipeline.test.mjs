@@ -19,6 +19,7 @@ import {
   assertNoDowngrade,
   ensureFile,
   finalizeCos,
+  stageUpdatePackages,
   withPublicReleaseReads,
 } from "../../../scripts/release/deploy.mjs";
 import {
@@ -308,6 +309,41 @@ describe("local installer feed", () => {
 });
 
 describe("publication and recovery", () => {
+  it("copies verified download objects once across three staging attempts without uploading files", async () => {
+    const { root, manifest } = await fixture("copy-staging");
+    const objects = new Map();
+    const copied = [];
+    for (const record of manifest.files.filter((file) =>
+      file.relativePath.endsWith(".nupkg")
+    )) {
+      const name = path.basename(record.relativePath);
+      const version = name.includes("-2.1.0-") ? "2.1.0" : "2.2.0";
+      objects.set(`app/downloads/${version}/${name}`, record);
+    }
+    const store = {
+      async head(key) {
+        return objects.get(key);
+      },
+      async copy(source, destination, record) {
+        if (!objects.has(source)) {
+          throw new Error("Missing copy source");
+        }
+        objects.set(destination, record);
+        copied.push(destination);
+      },
+      async putFile() {
+        throw new Error("Unexpected repeated upload");
+      },
+    };
+    const verify = async (_store, key, record) => {
+      expect(objects.get(key)?.sha256).toBe(record.sha256);
+    };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await stageUpdatePackages(store, root, manifest, "app", verify);
+    }
+    expect(copied).toHaveLength(4);
+    expect(objects.size).toBe(7);
+  });
   it("reads only public production objects and propagates permission failures", async () => {
     const store = withPublicReleaseReads(
       { bucket: "test", region: "test" },

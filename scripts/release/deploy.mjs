@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { downloadRecords, feedRecords } from "./bundle.mjs";
 import { sha256Bytes } from "./checksums.mjs";
-import { NO_CACHE_CONTROL } from "./cos.mjs";
+import { IMMUTABLE_CACHE_CONTROL, NO_CACHE_CONTROL } from "./cos.mjs";
 import { prefixForKind } from "./operations.mjs";
 import { assertImmutableObject, compareVersions } from "./semver.mjs";
 import { formatReleases, parseReleases } from "./squirrel.mjs";
@@ -159,16 +159,47 @@ export async function stageUpdatePackages(
   root,
   manifest,
   releasePrefix,
-  verify
+  verify = verifyPublicObject
 ) {
   const stable = prefixForKind("stable", { releasePrefix });
   const base = prefixForKind("build-base", { releasePrefix });
   for (const record of await feedRecords(root, manifest)) {
-    await ensureFile(store, `${stable}/${record.name}`, record, verify);
+    const version = record.name.match(PACKAGE_VERSION_PATTERN)?.[1];
+    const source = `${prefixForKind("versioned", { version, releasePrefix })}/${record.name}`;
+    await ensureCopiedFile(
+      store,
+      source,
+      `${stable}/${record.name}`,
+      record,
+      verify
+    );
     if (record.name.endsWith(`-${manifest.version}-full.nupkg`)) {
-      await ensureFile(store, `${base}/${record.name}`, record, verify);
+      await ensureCopiedFile(
+        store,
+        source,
+        `${base}/${record.name}`,
+        record,
+        verify
+      );
     }
   }
+}
+
+async function ensureCopiedFile(store, source, destination, record, verify) {
+  const existing = await store.head(destination);
+  if (existing) {
+    assertImmutableObject(existing, record);
+    await verify(store, destination, record);
+    console.error(`COS already verified, skipped: ${destination}`);
+    return;
+  }
+  await verify(store, source, record);
+  console.error(`COS copying verified package: ${source} -> ${destination}`);
+  await store.copy(source, destination, {
+    ...record,
+    cacheControl: IMMUTABLE_CACHE_CONTROL,
+  });
+  await verify(store, destination, record, { bytes: true });
 }
 
 export function assertNoDowngrade(releases, version) {
