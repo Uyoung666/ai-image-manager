@@ -60,7 +60,7 @@ Setup 和启用自动更新的 MSI 具有应用内自动更新能力。禁用更
 已发布的旧客户端仍可能把更新请求发往 COS stable，迁移完成前不能关闭旧地址。2.2.1
 正式上线后迁移期为 30 天，起算时间以公开 Release 的时间为准。一次性切换由 GitHub Actions
 的 `Transition COS stable feed to GitHub` 手动工作流执行；它要求输入版本 `2.2.1` 和精确确认词
-`SWITCH COS STABLE TO GITHUB V2.2.1`，避免误写其他版本或其他仓库。
+`SWITCH COS STABLE TO GITHUB V2.2.1`，并在 `release-stable` 环境执行，避免误写其他版本或其他仓库。
 
 迁移前先对 COS 做完整只读盘点，逐对象记录 key、大小、ETag、修改时间、原清单引用和
 GitHub 替代附件哈希。优先在隔离 Windows 环境用未修改的旧 2.1.0/2.2.0 二进制实测
