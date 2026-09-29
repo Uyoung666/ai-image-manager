@@ -19,7 +19,8 @@ describe("update error classification", () => {
       "System.Net.WebException: The remote server returned an error: (404) Not Found",
       "UPDATE_NOT_FOUND",
     ],
-    ["HTTP/1.1 403 Forbidden", "UPDATE_NOT_FOUND"],
+    ["HTTP/1.1 403 Forbidden", "UPDATE_RATE_LIMITED"],
+    ["HTTP_STATUS_403", "UPDATE_RATE_LIMITED"],
     ["status code: 404", "UPDATE_NOT_FOUND"],
     ["HTTP_STATUS_429", "UPDATE_RATE_LIMITED"],
     [

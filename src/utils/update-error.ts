@@ -5,7 +5,10 @@ const PACKAGE_ERROR_RE =
   /checksum|checksummed file size|hash.*mismatch|size doesn't match/i;
 const HTTP_ERROR_RE =
   /HTTP_STATUS_(?:403|404|429)\b|(?:HTTP(?:\/\d(?:\.\d)?)?\s*(?:status(?:\s+code)?\s*[:=]?\s*)?|status(?:\s+code)?\s*[:=]?\s*)(?:403|404|429)\b|\((?:403|404|429)\)\s*(?:forbidden|not found|too many requests)|\b(?:403\s+forbidden|404\s+not found|429\s+too many requests)\b/i;
-const RATE_LIMITED_RE = /429|too many requests/i;
+// GitHub returns 403 when the unauthenticated API rate limit is exhausted.
+// Keep this separate from 404 so the UI does not tell users that a valid
+// release disappeared when the metadata request was rate-limited.
+const RATE_LIMITED_RE = /403|429|rate limit|too many requests/i;
 const TLS_ERROR_RE =
   /TlsStream|AuthenticationException|SecureChannelFailure|TrustFailure|\bTLS\b|\bSSL\b|ERR_CERT_|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY|certificate|身份验证失败|安全通道|证书/i;
 const NETWORK_ERROR_RE =
