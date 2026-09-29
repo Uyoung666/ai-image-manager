@@ -302,6 +302,27 @@ export async function writeTransitionPointer(cos, key, bytes, record) {
     if (!isCosAccessDenied(error)) {
       throw error;
     }
+    if (
+      typeof cos.putFile === "function" &&
+      cos.sliceSize <= bytes.byteLength
+    ) {
+      const temporaryDirectory = await fsp.mkdtemp(
+        path.join(process.cwd(), ".cos-transition-")
+      );
+      const temporaryFile = path.join(temporaryDirectory, "RELEASES");
+      try {
+        await fsp.writeFile(temporaryFile, bytes);
+        await cos.putFile(key, temporaryFile, {
+          ...record,
+          cacheControl: "no-cache, no-store, must-revalidate",
+          contentType: "text/plain; charset=utf-8",
+          immutable: false,
+        });
+        return { method: "multipart" };
+      } finally {
+        await fsp.rm(temporaryDirectory, { recursive: true, force: true });
+      }
+    }
     const stagingKey = `${key}.transition-${record.sha256}.tmp`;
     try {
       await cos.putBytes(stagingKey, bytes, {
@@ -333,7 +354,8 @@ export async function transition({
   const { repository, version } = assertTransitionAuthorization(env);
   const releasePrefix = env.COS_RELEASE_PREFIX ?? "ai-image-manager";
   const stableKey = `${prefixForKind("stable", { releasePrefix })}/RELEASES`;
-  const cos = store ?? createCosStoreFromEnv(env, { strictReads: true });
+  const cos =
+    store ?? createCosStoreFromEnv(env, { strictReads: true, sliceSize: 1 });
   const currentBytes = Buffer.from(await cos.getBytes(stableKey));
   const currentText = currentBytes.toString("utf8");
   const currentEntries = parseReleases(currentText);

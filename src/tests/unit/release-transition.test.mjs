@@ -157,4 +157,27 @@ describe("COS transition authorization", () => {
     expect(calls[2][0]).toBe("copy");
     expect(calls[3][0]).toBe("delete");
   });
+
+  it("uses COS multipart upload when only overwrite PUT is denied", async () => {
+    const calls = [];
+    const store = {
+      sliceSize: 1,
+      async putMutableBytes() {
+        throw Object.assign(new Error("Access Denied"), { statusCode: 403 });
+      },
+      async putFile(key, file) {
+        calls.push(["putFile", key, file.endsWith("RELEASES")]);
+      },
+    };
+    const result = await writeTransitionPointer(
+      store,
+      "ai-image-manager/updates/win32/x64/stable/RELEASES",
+      Buffer.from("feed"),
+      { sha256: "b".repeat(64), size: 4 }
+    );
+    expect(result.method).toBe("multipart");
+    expect(calls).toEqual([
+      ["putFile", "ai-image-manager/updates/win32/x64/stable/RELEASES", true],
+    ]);
+  });
 });
