@@ -6,7 +6,11 @@ import { sha256Bytes } from "./checksums.mjs";
 import { IMMUTABLE_CACHE_CONTROL, NO_CACHE_CONTROL } from "./cos.mjs";
 import { prefixForKind } from "./operations.mjs";
 import { assertImmutableObject, compareVersions } from "./semver.mjs";
-import { formatReleases, parseReleases } from "./squirrel.mjs";
+import {
+  formatGitHubTransitionReleases,
+  formatReleases,
+  parseReleases,
+} from "./squirrel.mjs";
 
 const PACKAGE_VERSION_PATTERN = /-(\d+\.\d+\.\d+)-(?:full|delta)\.nupkg$/i;
 const PUBLIC_RELEASE_PATTERN =
@@ -255,4 +259,63 @@ export async function finalizeCos(
   // No package writes or other fallible preparation after this pointer switch.
   await writePointer(stableKey, feed);
   console.log(`COS stable now serves ${manifest.tag}`);
+}
+
+/**
+ * Publish only the transition pointer. Package objects stay untouched: old
+ * Squirrel clients read the absolute GitHub asset URLs from this feed, while
+ * the COS bucket no longer needs a second copy of every package.
+ */
+export async function transitionStableFeedToGitHub(
+  store,
+  root,
+  manifest,
+  releasePrefix,
+  repository,
+  verifyGitHubAssets,
+  verifyCosObject = verifyPublicObject
+) {
+  if (typeof verifyGitHubAssets !== "function") {
+    throw new Error(
+      "GitHub transition assets must be verified before switching COS"
+    );
+  }
+  const feed = await fsp.readFile(path.join(root, "feed", "RELEASES"), "utf8");
+  const entries = parseReleases(feed);
+  const records = await feedRecords(root, manifest);
+  await verifyGitHubAssets(entries, records);
+  const transitioned = Buffer.from(
+    formatGitHubTransitionReleases(entries, repository),
+    "utf8"
+  );
+  const stable = prefixForKind("stable", { releasePrefix });
+  const stableKey = `${stable}/RELEASES`;
+  if (await store.head(stableKey)) {
+    assertNoDowngrade(
+      (await store.getBytes(stableKey)).toString("utf8"),
+      manifest.version
+    );
+  }
+  const record = {
+    sha256: sha256Bytes(transitioned),
+    size: transitioned.byteLength,
+  };
+  const existing = await store.head(stableKey);
+  if (
+    existing &&
+    Buffer.from(await store.getBytes(stableKey)).equals(transitioned)
+  ) {
+    await verifyCosObject(store, stableKey, record, { bytes: true });
+    return { key: stableKey, status: "idempotent", record };
+  }
+  await store.putMutableBytes(stableKey, transitioned, {
+    ...record,
+    cacheControl: NO_CACHE_CONTROL,
+    contentType: "text/plain; charset=utf-8",
+  });
+  await verifyCosObject(store, stableKey, record, { bytes: true });
+  console.log(
+    `COS stable feed now points to GitHub assets for ${manifest.tag}`
+  );
+  return { key: stableKey, status: "switched", record };
 }

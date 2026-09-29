@@ -3,7 +3,9 @@ export const UPDATE_ERROR_KEYS = {
   NETWORK_ERROR: "updateErrorNetwork",
   UPDATE_NOT_FOUND: "updateErrorNotFound",
   UPDATE_PACKAGE_CORRUPT: "updateErrorPackageCorrupt",
+  UPDATE_RATE_LIMITED: "updateErrorRateLimited",
   UPDATE_BUSY: "updateErrorBusy",
+  UPDATE_INSTALL_TIMEOUT: "updateErrorInstallTimeout",
   UPDATE_INSTALLER_UNSUPPORTED: "updateErrorInstallerUnsupported",
   UPDATE_NOT_READY: "updateErrorNotReady",
   UPDATE_TLS_ERROR: "updateErrorTls",
@@ -20,6 +22,7 @@ export interface UpdateResult {
 
 export interface UpdateStatus {
   bytesPerSecond?: number;
+  fallbackReason?: string;
   message?: UpdateErrorCode;
   percent?: number;
   phase:
@@ -33,6 +36,7 @@ export interface UpdateStatus {
   releaseNotes?: string;
   total?: number;
   transferred?: number;
+  updateMethod?: "delta" | "full";
   updateURL?: string;
   version?: string;
 }

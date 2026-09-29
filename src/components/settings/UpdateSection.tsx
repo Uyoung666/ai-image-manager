@@ -36,6 +36,10 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   const [percent, setPercent] = useState<number | undefined>();
   const [bytesPerSecond, setBytesPerSecond] = useState<number | undefined>();
   const [releaseNotes, setReleaseNotes] = useState("");
+  const [updateMethod, setUpdateMethod] = useState<
+    "delta" | "full" | undefined
+  >();
+  const [fallbackReason, setFallbackReason] = useState("");
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [updateReminder, setUpdateReminder] = useState(true);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -56,6 +60,12 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
         }
         if (status.releaseNotes) {
           setReleaseNotes(status.releaseNotes);
+        }
+        if (status.updateMethod) {
+          setUpdateMethod(status.updateMethod);
+        }
+        if (status.fallbackReason) {
+          setFallbackReason(status.fallbackReason);
         }
         if (status.percent != null) {
           setPercent(status.percent);
@@ -93,6 +103,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           setPhase("checking");
           setPercent(undefined);
           setBytesPerSecond(undefined);
+          setUpdateMethod(undefined);
+          setFallbackReason("");
           break;
         case "downloading":
           setPhase("downloading");
@@ -118,9 +130,18 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
           if (data.releaseNotes) {
             setReleaseNotes(data.releaseNotes);
           }
+          if (data.updateMethod) {
+            setUpdateMethod(data.updateMethod);
+          }
+          if (data.fallbackReason) {
+            setFallbackReason(data.fallbackReason);
+          }
           break;
         case "error":
           setPhase("error");
+          if (data.version) {
+            setUpdateVersion(data.version);
+          }
           setErrorMsg(mapUpdateErrorMessage(data.message, t));
           break;
       }
@@ -181,6 +202,8 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
   async function handleCheck() {
     setPhase("checking");
     setErrorMsg("");
+    setUpdateMethod(undefined);
+    setFallbackReason("");
     try {
       const result = await checkForUpdates();
       const data = result;
@@ -375,6 +398,16 @@ export function UpdateSection({ appVersion }: { appVersion: string }) {
                     {t("updateDownloadedStatus", { version: updateVersion })}
                   </span>
                 </div>
+                {updateMethod && (
+                  <p className="mt-1 text-[11px] text-muted-foreground/70">
+                    {t(
+                      updateMethod === "delta"
+                        ? "updateDeltaDownloaded"
+                        : "updateFullDownloaded"
+                    )}
+                    {fallbackReason ? ` · ${t("updateDeltaFallback")}` : ""}
+                  </p>
+                )}
                 {releaseNotes && (
                   <div className="mt-2 max-h-32 overflow-y-auto rounded-[6px] border border-border bg-background p-2">
                     <p className="whitespace-pre-wrap text-[11px] text-muted-foreground [overflow-wrap:anywhere]">

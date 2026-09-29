@@ -33,6 +33,7 @@ import {
 import {
   filterReleaseManifest,
   formatGitHubReleases,
+  formatGitHubTransitionReleases,
   formatReleases,
   parseReleases,
   selectProductionReleases,
@@ -787,6 +788,29 @@ describe("checksums and Squirrel manifests", () => {
     ).toThrow(/full|delta/i);
   });
 
+  it("retains and validates absolute HTTPS package URLs in RELEASES", () => {
+    const full = Buffer.alloc(12, 70);
+    const entry = {
+      hash: sha1(full),
+      filename: "App-2.1.0-full.nupkg",
+      size: full.length,
+      isFull: true,
+    };
+    const url =
+      "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.1.0/App-2.1.0-full.nupkg";
+    const parsed = parseReleases(`${entry.hash} ${url} ${entry.size}\n`)[0];
+    expect(parsed.filename).toBe(entry.filename);
+    expect(parsed.url).toBe(url);
+    expect(() =>
+      parseReleases(
+        `${entry.hash} http://example.test/${entry.filename} ${entry.size}\n`
+      )
+    ).toThrow(/HTTPS/);
+    expect(formatGitHubReleases([{ ...entry, url }], "2.1.0")).toBe(
+      formatReleases([entry])
+    );
+  });
+
   it("creates a one-line GitHub compatibility feed with the current full package first", () => {
     const oldFull = {
       hash: "a".repeat(40),
@@ -812,6 +836,38 @@ describe("checksums and Squirrel manifests", () => {
     expect(() => formatGitHubReleases([oldFull], "2.1.0")).toThrow(
       /exactly one current full/
     );
+  });
+
+  it("rewrites every transition package to its fixed formal GitHub asset", () => {
+    const entries = [
+      {
+        hash: "a".repeat(40),
+        filename: "App-2.1.0-full.nupkg",
+        size: 10,
+        isFull: true,
+      },
+      {
+        hash: "b".repeat(40),
+        filename: "App-2.2.0-delta.nupkg",
+        size: 5,
+        isDelta: true,
+      },
+    ];
+    const text = formatGitHubTransitionReleases(entries);
+    expect(text).toContain(
+      "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.1.0/App-2.1.0-full.nupkg"
+    );
+    expect(text).toContain(
+      "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.0/App-2.2.0-delta.nupkg"
+    );
+    expect(
+      parseReleases(text).every((entry) =>
+        entry.url?.startsWith("https://github.com/")
+      )
+    ).toBe(true);
+    expect(() =>
+      formatGitHubTransitionReleases(entries, "https://evil.test/repo")
+    ).toThrow(/repository/);
   });
 
   it("checksums in-memory records for unit callers", async () => {

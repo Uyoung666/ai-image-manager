@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { assertIdentity, downloadRecords } from "./bundle.mjs";
+import { assertIdentity, downloadRecords, feedRecords } from "./bundle.mjs";
 import { readFileRecord } from "./checksums.mjs";
 import { compareVersions, isStableVersion } from "./semver.mjs";
 
@@ -12,6 +12,8 @@ const BOM_PATTERN = /^\uFEFF/;
 const LINE_PATTERN = /\r?\n/;
 const NOTES_METADATA_PATTERN =
   /^(?:#|\*{0,2}Full Changelog\*{0,2}\s*:|\[Full Changelog\]|https?:\/\/|Release v\d+\.\d+\.\d+$)/i;
+const TRANSITION_PACKAGE_VERSION_PATTERN =
+  /-(\d+\.\d+\.\d+)-(?:full|delta)\.nupkg$/i;
 
 export function validateReleaseNotes(text) {
   const body = String(text ?? "")
@@ -116,6 +118,37 @@ export async function findRelease(repo, tag) {
       .flat()
       .find((release) => release.tag_name === tag) ?? null
   );
+}
+
+export async function listReleases(repo) {
+  const pages = await command("gh", [
+    "api",
+    "--paginate",
+    "--slurp",
+    `repos/${repo}/releases?per_page=100`,
+  ]);
+  return JSON.parse(pages).flat();
+}
+
+export function selectBaselineRelease(
+  releases,
+  version,
+  { allowPrerelease = false } = {}
+) {
+  const target = String(version);
+  const candidates = releases
+    .filter(
+      (release) =>
+        !release.draft &&
+        release.tag_name?.startsWith("v") &&
+        isStableVersion(release.tag_name.slice(1)) &&
+        compareVersions(release.tag_name.slice(1), target) < 0 &&
+        (!release.prerelease || allowPrerelease)
+    )
+    .sort((left, right) =>
+      compareVersions(right.tag_name.slice(1), left.tag_name.slice(1))
+    );
+  return candidates[0] ?? null;
 }
 
 export function validateSourceRun(run, jobs) {
@@ -243,8 +276,63 @@ export async function verifyAsset(asset, record, { fetchFn = fetch } = {}) {
   }
 }
 
+export async function verifyPublicAsset(asset, { fetchFn = fetch } = {}) {
+  const response = await fetchFn(asset.browser_download_url, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!(response.ok && response.url.startsWith("https://"))) {
+    throw new Error(`Anonymous GitHub asset download failed: ${asset.name}`);
+  }
+  await response.body?.cancel();
+}
+
+/**
+ * Verify every package in a transition feed against the immutable GitHub
+ * asset for its own version before a COS pointer is changed.
+ */
+export async function verifyGitHubTransitionAssets(
+  repo,
+  root,
+  manifest,
+  { list = listReleases } = {}
+) {
+  const releases = await list(repo);
+  const records = await feedRecords(root, manifest);
+  for (const record of records) {
+    const match = record.name.match(TRANSITION_PACKAGE_VERSION_PATTERN);
+    if (!match) {
+      throw new Error(
+        `Transition feed package has no stable version: ${record.name}`
+      );
+    }
+    const release = releases.find(
+      (candidate) => candidate.tag_name === `v${match[1]}` && !candidate.draft
+    );
+    if (!release) {
+      throw new Error(`Published GitHub release is missing: v${match[1]}`);
+    }
+    const asset = release.assets.find(
+      (candidate) => candidate.name === record.name
+    );
+    if (!asset) {
+      throw new Error(`GitHub transition asset is missing: ${record.name}`);
+    }
+    await verifyAsset(asset, record);
+  }
+  return records;
+}
+
 export async function stageGitHub(repo, root, manifest) {
   let release = await findRelease(repo, manifest.tag);
+  if (
+    release?.target_commitish &&
+    release.target_commitish !== manifest.commit
+  ) {
+    throw new Error(
+      `GitHub release ${manifest.tag} points to ${release.target_commitish}, expected ${manifest.commit}`
+    );
+  }
   const body =
     !release || release.draft ? await loadReleaseNotes(manifest) : null;
   if (!release) {
@@ -331,6 +419,19 @@ export async function finalizeGitHub(repo, root, manifest) {
       method: "PATCH",
       body: { draft: false, prerelease: false, make_latest: "true" },
     });
+  }
+  const published = await api(`repos/${repo}/releases/${release.id}`);
+  if (published.draft || published.prerelease) {
+    throw new Error("GitHub release did not become a formal public release");
+  }
+  for (const record of await githubRecords(root, manifest)) {
+    const asset = published.assets.find(
+      (item) => item.name === record.name.replaceAll(" ", ".")
+    );
+    if (!asset) {
+      throw new Error(`Published GitHub release is missing ${record.name}`);
+    }
+    await verifyPublicAsset(asset);
   }
   console.log(`GitHub release published: ${release.html_url}`);
 }

@@ -1020,6 +1020,9 @@ i18n.use(initReactI18next).init({
         updateDownloading: "正在下载...",
         updateElapsed: "已耗时 {{seconds}} 秒...",
         updateDownloadedStatus: "{{version}} 已下载就绪",
+        updateDeltaDownloaded: "已使用增量包下载",
+        updateFullDownloaded: "已使用完整包下载",
+        updateDeltaFallback: "增量失败后已切换完整包",
         updateError: "更新失败，请重试或手动下载。",
         updateCheckBtn: "检查更新",
         updateRetry: "重试",
@@ -1049,6 +1052,10 @@ i18n.use(initReactI18next).init({
         updateErrorPackageCorrupt:
           "更新包校验失败，文件可能已损坏，请重试或手动下载。",
         updateErrorBusy: "更新程序正忙，请稍后重试。",
+        updateErrorInstallTimeout:
+          "安装更新超时。请关闭其他应用后重试，或手动下载并安装。",
+        updateErrorRateLimited:
+          "GitHub 更新服务暂时繁忙，请稍后重试或手动下载。",
         updateProxySystemHint:
           "更新程序由 Windows 系统网络设置管理。如更新失败，请检查系统代理或网络后重试。",
         updateChangelogTitle: "更新日志",
@@ -3286,6 +3293,10 @@ i18n.use(initReactI18next).init({
         updateDownloading: "Downloading...",
         updateElapsed: "{{seconds}}s elapsed...",
         updateDownloadedStatus: "{{version}} ready to install",
+        updateDeltaDownloaded: "Downloaded with the delta package",
+        updateFullDownloaded: "Downloaded with the full package",
+        updateDeltaFallback:
+          "Fell back to the full package after delta failure",
         updateError: "Update failed. Please retry or download manually.",
         updateDevMode:
           "Auto-update is not available in dev mode. Use the packaged app.",
@@ -3317,6 +3328,10 @@ i18n.use(initReactI18next).init({
         updateErrorPackageCorrupt:
           "The update package failed verification. Retry or download it manually.",
         updateErrorBusy: "The updater is busy. Please try again shortly.",
+        updateErrorInstallTimeout:
+          "Installing the update timed out. Close other apps and retry, or download it manually.",
+        updateErrorRateLimited:
+          "GitHub is temporarily rate limited. Retry later or download manually.",
         updateProxySystemHint:
           "Updates use the Windows system network settings. If the check fails, review your system proxy or network and try again.",
         updateChangelogTitle: "Release Notes",

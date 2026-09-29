@@ -38,11 +38,6 @@ env:
   RELEASE_CONTEXT: ${{ github.workspace }}/release-context.json
   RELEASE_BUNDLE: ${{ github.workspace }}/release-bundle
   RELEASE_EVIDENCE: ${{ github.workspace }}/release-evidence
-  COS_APP_FEED: ${{ vars.COS_APP_FEED || 'https://ai-image-manager-1392398678.cos.ap-hongkong.myqcloud.com/ai-image-manager/updates/win32/x64/stable' }}
-  COS_BUILD_BASE_URL: ${{ vars.COS_BUILD_BASE_URL || 'https://ai-image-manager-1392398678.cos.ap-hongkong.myqcloud.com/ai-image-manager/updates/win32/x64/build-base' }}
-  COS_RELEASE_PREFIX: ${{ vars.COS_RELEASE_PREFIX || 'ai-image-manager' }}
-  COS_BUCKET: ${{ vars.COS_BUCKET || 'ai-image-manager-1392398678' }}
-  COS_REGION: ${{ vars.COS_REGION || 'ap-hongkong' }}
 jobs:
   preflight:
     runs-on: windows-2022
@@ -151,7 +146,6 @@ jobs:
       shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        AIM_UPDATE_BASE_URL: ${{ env.COS_APP_FEED }}
       run: |-
         foreach ($generatedPath in @("out", "release-feed", "release-download", "release-evidence")) {
           if (Test-Path -LiteralPath $generatedPath) {
@@ -165,8 +159,6 @@ jobs:
       working-directory: app
     - name: Gate - packaged update feed injection
       shell: pwsh
-      env:
-        EXPECTED_COS_APP_FEED: ${{ env.COS_APP_FEED }}
       run: |
         $asarFiles = @(Get-ChildItem -LiteralPath "out" -Recurse -File -Filter "app.asar" | Where-Object {
           $_.FullName -notmatch "\\publish-dry-run\\"
@@ -175,7 +167,7 @@ jobs:
           throw "Expected exactly one packaged app.asar, found $($asarFiles.Count)"
         }
         $env:RELEASE_ASAR_PATH = $asarFiles[0].FullName
-        node --input-type=module -e 'import { extractFile, listPackage } from "@electron/asar"; import process from "node:process"; const asarPath = process.env.RELEASE_ASAR_PATH; const expectedFeed = process.env.EXPECTED_COS_APP_FEED; const oldGitHubFeed = "update.electronjs.org/Uyoung666/ai-image-manager"; const runtimeOverrides = ["AIM_UPDATE_TEST_BASE_URL", "process.env.AIM_UPDATE_BASE_URL"]; const entries = listPackage(asarPath).filter((entry) => /^[\\/]?\.vite[\\/]build[\\/].*\.js$/i.test(entry)); if (entries.length === 0) { throw new Error("Packaged app.asar has no .vite/build JavaScript bundles"); } const source = entries.map((entry) => extractFile(asarPath, entry.replace(/^[\\/]/, "")).toString("utf8")).join("\n"); if (!source.includes(expectedFeed)) { throw new Error(`Packaged Vite bundles do not contain the exact COS_APP_FEED: ${expectedFeed}`); } if (source.includes(oldGitHubFeed)) { throw new Error(`Packaged Vite bundles still contain the retired GitHub update feed: ${oldGitHubFeed}`); } for (const override of runtimeOverrides) { if (source.includes(override)) { throw new Error(`Packaged Vite bundles still expose runtime update override: ${override}`); } } console.log(`Verified ${asarPath}: exact COS feed injected; retired/runtime feeds absent across ${entries.length} bundles.`);'
+        node --input-type=module -e 'import { extractFile, listPackage } from "@electron/asar"; import process from "node:process"; const asarPath = process.env.RELEASE_ASAR_PATH; const expectedFeed = process.env.AIM_UPDATE_BASE_URL; const retiredFeed = "ai-image-manager-1392398678.cos.ap-hongkong.myqcloud.com"; const runtimeOverrides = ["AIM_UPDATE_TEST_BASE_URL", "process.env.AIM_UPDATE_BASE_URL"]; const entries = listPackage(asarPath).filter((entry) => /^[\\/]?\.vite[\\/]build[\\/].*\.js$/i.test(entry)); if (entries.length === 0) { throw new Error("Packaged app.asar has no .vite/build JavaScript bundles"); } const source = entries.map((entry) => extractFile(asarPath, entry.replace(/^[\\/]/, "")).toString("utf8")).join("\n"); if (!source.includes(expectedFeed)) { throw new Error(`Packaged Vite bundles do not contain the exact GitHub update base: ${expectedFeed}`); } if (source.includes(retiredFeed)) { throw new Error("Packaged Vite bundles still contain the retired COS update feed"); } for (const override of runtimeOverrides) { if (source.includes(override)) { throw new Error(`Packaged Vite bundles still expose runtime update override: ${override}`); } } console.log(`Verified ${asarPath}: GitHub update base injected and COS/runtime feeds absent across ${entries.length} bundles.`);'
         if ($LASTEXITCODE -ne 0) {
           throw "Packaged update feed injection gate failed"
         }
@@ -371,114 +363,17 @@ jobs:
       contents: write
       actions: read
       attestations: read
-  cos_downloads:
-    needs:
-    - preflight
-    - smoke
-    - attest
-    runs-on: windows-2022
-    timeout-minutes: 30
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-context
-        path: .
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
-        path: release-bundle
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-smoke-${{ needs.preflight.outputs.version }}
-        path: release-evidence
-    - name: Verify immutable bundle and attestation
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |-
-        node scripts/release-pipeline.mjs verify
-        if ($LASTEXITCODE -ne 0) { throw "Bundle verification failed" }
-        gh attestation verify release-bundle/bundle.json --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
-        if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
-    - name: Install release transport only
-      run: npm ci --ignore-scripts --prefix scripts/release
-    - name: Stage cos-downloads
-      timeout-minutes: 21
-      run: node scripts/release/supervise.mjs scripts/release-pipeline.mjs cos-downloads
-    env:
-      GH_TOKEN: ${{ github.token }}
-      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
-      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
-      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
-    environment: release-candidate
-  cos_updates:
-    needs:
-    - preflight
-    - smoke
-    - attest
-    - cos_downloads
-    runs-on: windows-2022
-    timeout-minutes: 30
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-    - uses: actions/setup-node@v6
-      with:
-        node-version: '22'
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-context
-        path: .
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-bundle-${{ needs.preflight.outputs.version }}
-        path: release-bundle
-    - uses: actions/download-artifact@v4
-      with:
-        name: release-smoke-${{ needs.preflight.outputs.version }}
-        path: release-evidence
-    - name: Verify immutable bundle and attestation
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |-
-        node scripts/release-pipeline.mjs verify
-        if ($LASTEXITCODE -ne 0) { throw "Bundle verification failed" }
-        gh attestation verify release-bundle/bundle.json --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
-        if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
-    - name: Install release transport only
-      run: npm ci --ignore-scripts --prefix scripts/release
-    - name: Stage cos-updates
-      timeout-minutes: 21
-      run: node scripts/release/supervise.mjs scripts/release-pipeline.mjs cos-updates
-    env:
-      GH_TOKEN: ${{ github.token }}
-      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
-      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
-      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
-    environment: release-stable
   finalize:
     needs:
     - preflight
     - github
-    - cos_downloads
-    - cos_updates
     runs-on: windows-2022
     timeout-minutes: 15
-    environment: release-stable
     permissions:
       contents: write
       actions: read
       attestations: read
     env:
-      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
-      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
-      COS_SESSION_TOKEN: ${{ secrets.COS_SESSION_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
     - uses: actions/checkout@v6
@@ -507,13 +402,9 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "Bundle verification failed" }
         gh attestation verify release-bundle/bundle.json --repo "$env:GITHUB_REPOSITORY" --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/publish.yaml" --source-digest "$env:GITHUB_SHA"
         if ($LASTEXITCODE -ne 0) { throw "Bundle attestation verification failed" }
-    - name: Install release transport only
-      run: npm ci --ignore-scripts --prefix scripts/release
     - name: Publish verified GitHub release
       run: node scripts/release-pipeline.mjs github-finalize
-    - name: Switch stable update feed last
-      run: node scripts/release/supervise.mjs scripts/release-pipeline.mjs cos-finalize
     - name: Report release state
       if: always()
-      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. If this job failed after GitHub publication, rerun only failed jobs to finish the COS pointer switch." |
+      run: '"Release: v$env:RELEASE_VERSION. Source run: $env:GITHUB_RUN_ID. GitHub assets and update manifest were verified before publication." |
         Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append'

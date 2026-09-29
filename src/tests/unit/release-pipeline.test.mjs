@@ -20,6 +20,7 @@ import {
   ensureFile,
   finalizeCos,
   stageUpdatePackages,
+  transitionStableFeedToGitHub,
   withPublicReleaseReads,
 } from "../../../scripts/release/deploy.mjs";
 import {
@@ -29,6 +30,7 @@ import {
   verifyAsset,
 } from "../../../scripts/release/github.mjs";
 import { startLocalFeed } from "../../../scripts/release/local-feed.mjs";
+import { parseReleases } from "../../../scripts/release/squirrel.mjs";
 import { supervise } from "../../../scripts/release/supervise.mjs";
 import {
   applyExpiredPlan,
@@ -87,6 +89,24 @@ async function fixture(name) {
 }
 
 describe("immutable release bundle", () => {
+  it("records a fixed GitHub manifest and a continuous delta baseline", async () => {
+    const { root } = await fixture("github-manifest");
+    const updateManifest = await readJson(
+      path.join(root, "download", "update-manifest.json")
+    );
+    expect(updateManifest.assetsBaseUrl).toBe(
+      "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.0"
+    );
+    expect(updateManifest.packages.full.url).toBe(
+      "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.0/ai-image-manager-2.2.0-full.nupkg"
+    );
+    expect(updateManifest.packages.delta).toMatchObject({
+      fromVersion: "2.1.0",
+      toVersion: "2.2.0",
+    });
+    await expect(verifyBundle(root, identity)).resolves.toMatchObject(identity);
+  });
+
   it("rejects duplicate manifest entries that hide an omitted file", async () => {
     const { root, manifest } = await fixture("duplicate-manifest");
     manifest.files[1] = manifest.files[0];
@@ -463,6 +483,38 @@ describe("publication and recovery", () => {
         "2.2.0"
       )
     ).toThrow(/newer/);
+  });
+
+  it("switches only the COS pointer after GitHub transition assets are verified", async () => {
+    const { root, manifest } = await fixture("github-transition");
+    const writes = [];
+    const store = {
+      async head() {
+        return null;
+      },
+      async putMutableBytes(key, bytes) {
+        writes.push({ key, bytes: Buffer.from(bytes) });
+      },
+    };
+    await transitionStableFeedToGitHub(
+      store,
+      root,
+      manifest,
+      "app",
+      "Uyoung666/ai-image-manager",
+      async (_entries, records) => {
+        expect(records).toHaveLength(3);
+      },
+      async () => undefined
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0].key).toBe("app/updates/win32/x64/stable/RELEASES");
+    const transitioned = parseReleases(writes[0].bytes.toString("utf8"));
+    expect(
+      transitioned.every((entry) =>
+        entry.url?.startsWith("https://github.com/")
+      )
+    ).toBe(true);
   });
 });
 

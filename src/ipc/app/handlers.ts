@@ -11,6 +11,8 @@ import { getUpdateState } from "@/services/update-state";
 import { consumeUpdateWelcome as consumeUpdateWelcomeState } from "@/services/update-welcome-state";
 import type { UpdateResult, UpdateStatus } from "@/types/update";
 
+const STABLE_VERSION_RE = /^\d+\.\d+\.\d+$/;
+
 export const currentPlatform = os.handler(() => {
   return process.platform;
 });
@@ -64,8 +66,11 @@ export const getHttpPort = os.handler(() => {
 });
 
 export const openReleasePage = os.handler(() => {
-  shell.openExternal(
-    "https://github.com/Uyoung666/ai-image-manager/releases/latest"
-  );
+  const status = getUpdateState(app.getVersion());
+  const target =
+    status.version && STABLE_VERSION_RE.test(status.version)
+      ? `https://github.com/Uyoung666/ai-image-manager/releases/tag/v${status.version}`
+      : "https://github.com/Uyoung666/ai-image-manager/releases/latest";
+  shell.openExternal(target);
   return { ok: true };
 });

@@ -49,6 +49,14 @@ Both installation methods receive new GitHub versions through in-app updates. Cl
 
 If an earlier MSI was installed while its Auto Update feature showed a red X, install the corrected MSI over it once. From that installation onward, the app can detect, download, and apply future versions automatically.
 
+### Automatic update network and migration
+
+Starting with the v2.2.1 formal release, GitHub Releases is the only long-term source for installers and in-app updates. The updater contacts `api.github.com`, `github.com`, and the GitHub attachment download domains. Windows system proxy settings must allow those hosts; a browser extension proxy is not automatically inherited by the updater. If a check fails, review the system proxy, retry, or use the fixed-version GitHub manual download link in Settings.
+
+Setup and MSI builds with the updater enabled support in-app updates. An MSI with its updater disabled and the ZIP build require manual upgrades. Close the app, run the target Setup or MSI, or extract the ZIP into a new directory; the application data directory remains in place, so photos, databases, thumbnails, vector indexes, and local models are preserved. Only formal GitHub Releases are considered; drafts and prereleases are ignored by automatic checks.
+
+The 30-day migration window for old clients that still use the COS update address starts when v2.2.1 is formally published. COS must remain available during that window, and the project will not claim that every client has migrated without telemetry. If an older client cannot reach COS, download Setup or MSI from GitHub Releases and install it manually over the existing installation. COS retirement will be announced separately after migration and download verification are complete.
+
 On first launch, the setup flow helps you:
 
 1. Choose the application data directory for the database, thumbnails, vector index, and local models.

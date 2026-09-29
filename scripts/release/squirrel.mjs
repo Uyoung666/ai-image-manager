@@ -9,6 +9,8 @@ const SIZE_PATTERN = /^\d+$/;
 const DELTA_PATTERN = /-delta\.nupkg$/i;
 const FULL_PATTERN = /-full\.nupkg$/i;
 const DELTA_SUFFIX_PATTERN = /-delta\.nupkg$/i;
+const PACKAGE_VERSION_PATTERN = /-(\d+\.\d+\.\d+)-(?:full|delta)\.nupkg$/i;
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Parse the three-column Squirrel.Windows RELEASES format. */
 export function parseReleases(text) {
@@ -29,7 +31,11 @@ export function parseReleases(text) {
         }
       );
     }
-    const [hash, filename, sizeText] = parts;
+    const [hash, packageReference, sizeText] = parts;
+    const { filename, url } = parsePackageReference(
+      packageReference,
+      index + 1
+    );
     invariant(
       HASH_PATTERN.test(hash),
       `invalid Squirrel hash on line ${index + 1}`,
@@ -37,7 +43,7 @@ export function parseReleases(text) {
     );
     invariant(
       FILENAME_PATTERN.test(filename),
-      `invalid Squirrel package filename on line ${index + 1}: ${filename}`,
+      `invalid Squirrel package filename on line ${index + 1}: ${packageReference}`,
       "INVALID_RELEASES"
     );
     invariant(
@@ -68,6 +74,7 @@ export function parseReleases(text) {
       size,
       isDelta: isDeltaFilename(filename),
       isFull: isFullFilename(filename),
+      ...(url ? { url } : {}),
     });
   }
   invariant(entries.length > 0, "Squirrel RELEASES is empty", "EMPTY_RELEASES");
@@ -75,16 +82,21 @@ export function parseReleases(text) {
 }
 
 export function formatReleases(entries) {
-  return `${entries.map((entry) => `${entry.hash} ${entry.filename} ${entry.size}`).join("\n")}\n`;
+  return `${entries
+    .map(
+      (entry) => `${entry.hash} ${entry.url ?? entry.filename} ${entry.size}`
+    )
+    .join("\n")}\n`;
 }
 
 /**
  * Build the compatibility manifest consumed through update.electronjs.org.
  *
  * That service rewrites only the first .nupkg token to an absolute GitHub
- * asset URL.  A feed containing the historical baseline first therefore
- * points old clients at a non-existent package.  The public GitHub feed must
- * expose only the current full package; COS keeps the complete delta history.
+ * asset URL. A feed containing the historical baseline first therefore points
+ * old clients at a non-existent package. The compatibility feed intentionally
+ * exposes only the current full package; new clients use update-manifest.json
+ * for the verified delta chain.
  */
 export function formatGitHubReleases(entries, version) {
   const suffix = `-${String(version ?? "").trim()}-full.nupkg`.toLowerCase();
@@ -96,7 +108,76 @@ export function formatGitHubReleases(entries, version) {
     `GitHub compatibility RELEASES must contain exactly one current full package for v${version} (found ${currentFull.length})`,
     "GITHUB_RELEASE_INVALID"
   );
-  return formatReleases(currentFull);
+  return formatReleases(currentFull.map(({ url: _url, ...entry }) => entry));
+}
+
+/**
+ * Rewrite an existing Squirrel feed for the old-client transition period.
+ * Every package keeps its verified hash and size while its immutable download
+ * address points at the matching formal GitHub Release asset.
+ */
+export function formatGitHubTransitionReleases(
+  entries,
+  repository = "Uyoung666/ai-image-manager"
+) {
+  invariant(
+    REPOSITORY_PATTERN.test(repository),
+    `invalid GitHub repository: ${repository}`,
+    "INVALID_GITHUB_REPOSITORY"
+  );
+  return formatReleases(
+    entries.map((entry) => {
+      const version = entry.filename.match(PACKAGE_VERSION_PATTERN)?.[1];
+      invariant(
+        version,
+        `Squirrel package has no stable version: ${entry.filename}`,
+        "INVALID_RELEASES"
+      );
+      return {
+        ...entry,
+        url: `https://github.com/${repository}/releases/download/v${version}/${encodeURIComponent(entry.filename)}`,
+      };
+    })
+  );
+}
+
+function parsePackageReference(value, lineNumber) {
+  if (FILENAME_PATTERN.test(value)) {
+    return { filename: value, url: undefined };
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new ReleaseError(
+      `invalid Squirrel package filename on line ${lineNumber}: ${value}`,
+      { code: "INVALID_RELEASES" }
+    );
+  }
+  invariant(
+    parsed.protocol === "https:",
+    `Squirrel package URL must use HTTPS on line ${lineNumber}`,
+    "INVALID_RELEASES"
+  );
+  invariant(
+    !(
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      parsed.search ||
+      parsed.hash
+    ),
+    `Squirrel package URL must be an immutable HTTPS address on line ${lineNumber}`,
+    "INVALID_RELEASES"
+  );
+  const pathname = decodeURIComponent(parsed.pathname);
+  const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
+  invariant(
+    FILENAME_PATTERN.test(filename),
+    `invalid Squirrel package URL on line ${lineNumber}`,
+    "INVALID_RELEASES"
+  );
+  return { filename, url: parsed.toString() };
 }
 
 export function isDeltaFilename(filename) {

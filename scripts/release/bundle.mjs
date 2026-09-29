@@ -9,7 +9,11 @@ import {
   sha256Bytes,
   verifySha256Sums,
 } from "./checksums.mjs";
-import { parseStableVersion } from "./semver.mjs";
+import {
+  compareVersions,
+  isStableVersion,
+  parseStableVersion,
+} from "./semver.mjs";
 import {
   formatGitHubReleases,
   formatReleases,
@@ -20,6 +24,7 @@ import {
 const BOM_PATTERN = /^\uFEFF/;
 const LINES_PATTERN = /\r?\n/;
 const BINARY_PATTERN = /\.(?:exe|msi|zip|nupkg)$/i;
+const PACKAGE_VERSION_PATTERN = /-(\d+\.\d+\.\d+)-full\.nupkg$/i;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/;
 
 export function assertIdentity(metadata, expected = {}) {
@@ -77,6 +82,19 @@ export async function prepareBundle(makeRoot, root, identity) {
   );
   await copy(sourceReleases, path.join(root, "feed", "RELEASES"));
   const files = await collectFileRecords(path.join(root, "files"));
+  const binaryMap = new Map(
+    files.map((record) => [path.basename(record.relativePath), record])
+  );
+  const feed = await fsp.readFile(path.join(root, "feed", "RELEASES"), "utf8");
+  const entries = parseReleases(feed);
+  const updateManifest = buildUpdateManifest(entries, binaryMap, identity);
+  await writeJson(
+    path.join(root, "download", "update-manifest.json"),
+    updateManifest
+  );
+  const updateManifestRecord = await readFileRecord(
+    path.join(root, "download", "update-manifest.json")
+  );
   const downloads = files.filter(
     (record) =>
       !record.relativePath.endsWith(".nupkg") ||
@@ -88,11 +106,18 @@ export async function prepareBundle(makeRoot, root, identity) {
     tag: identity.tag,
     authenticode: "not-signed",
     generatedAt: identity.generatedAt,
-    files: downloads.map(({ relativePath: filePath, size, sha256 }) => ({
-      path: filePath,
-      size,
-      sha256,
-    })),
+    files: [
+      ...downloads.map(({ relativePath: filePath, size, sha256 }) => ({
+        path: filePath,
+        size,
+        sha256,
+      })),
+      {
+        path: "update-manifest.json",
+        size: updateManifestRecord.size,
+        sha256: updateManifestRecord.sha256,
+      },
+    ],
     checksumManifest: "SHA256SUMS.txt (self-entry omitted)",
   };
   await writeJson(path.join(root, "download", "provenance.json"), provenance);
@@ -101,9 +126,8 @@ export async function prepareBundle(makeRoot, root, identity) {
   );
   await fsp.writeFile(
     path.join(root, "download", "SHA256SUMS.txt"),
-    formatSha256Sums([...downloads, provenanceRecord])
+    formatSha256Sums([...downloads, updateManifestRecord, provenanceRecord])
   );
-  const feed = await fsp.readFile(path.join(root, "feed", "RELEASES"), "utf8");
   await fsp.mkdir(path.join(root, "github"), { recursive: true });
   await fsp.writeFile(
     path.join(root, "github", "RELEASES"),
@@ -172,6 +196,15 @@ export async function verifyBundle(root, expected = {}) {
   if (!validation.valid) {
     throw new Error("Bundle RELEASES references invalid package bytes");
   }
+  const updateManifest = await readJson(
+    path.join(root, "download", "update-manifest.json")
+  );
+  validateUpdateManifest(
+    updateManifest,
+    manifest,
+    validation.entries,
+    binaryMap
+  );
   const full = validation.entries.filter((entry) =>
     entry.filename.endsWith(`-${manifest.version}-full.nupkg`)
   );
@@ -198,6 +231,7 @@ export async function verifyBundle(root, expected = {}) {
   const expectedNames = [...binaryMap.keys()].filter(
     (name) => !name.endsWith(".nupkg") || name.includes(`-${manifest.version}-`)
   );
+  expectedNames.push("update-manifest.json");
   const publicNames = publicFiles.map((file) => file.name);
   if (
     new Set(publicNames).size !== publicNames.length ||
@@ -227,7 +261,9 @@ export async function verifyBundle(root, expected = {}) {
     path.join(root, "github", "RELEASES"),
     "utf8"
   );
-  if (githubFeed !== formatReleases(full)) {
+  if (
+    githubFeed !== formatReleases(full.map(({ url: _url, ...entry }) => entry))
+  ) {
     throw new Error("GitHub compatibility feed mismatch");
   }
   return manifest;
@@ -248,8 +284,12 @@ export async function downloadRecords(root, manifest) {
     if (name.includes("/")) {
       throw new Error("Download filenames must be flat");
     }
+    const expectedPath =
+      name === "update-manifest.json"
+        ? "download/update-manifest.json"
+        : `files/${name}`;
     const record = manifest.files.find(
-      (entry) => entry.relativePath === `files/${name}`
+      (entry) => entry.relativePath === expectedPath
     );
     if (!record || record.sha256 !== file.sha256 || record.size !== file.size) {
       throw new Error(`Download provenance mismatch: ${name}`);
@@ -296,6 +336,177 @@ export function validateSmoke(smoke, identity, bundleSha256) {
   }
 }
 
+function buildUpdateManifest(entries, binaryMap, identity) {
+  const currentFull = entries.filter(
+    (entry) =>
+      entry.isFull && entry.filename.endsWith(`-${identity.version}-full.nupkg`)
+  );
+  const currentDelta = entries.filter(
+    (entry) =>
+      entry.isDelta &&
+      entry.filename.endsWith(`-${identity.version}-delta.nupkg`)
+  );
+  if (currentFull.length !== 1 || currentDelta.length > 1) {
+    throw new Error(
+      "Update manifest requires one current full and at most one current delta"
+    );
+  }
+  const repository = identity.repository ?? "Uyoung666/ai-image-manager";
+  const inferredBaselineVersion = entries
+    .filter((entry) => entry.isFull)
+    .map((entry) => entry.filename.match(PACKAGE_VERSION_PATTERN)?.[1])
+    .filter(
+      (version) =>
+        version &&
+        isStableVersion(version) &&
+        compareVersions(version, identity.version) < 0
+    )
+    .sort(compareVersions)
+    .at(-1);
+  const baselineVersion = identity.baseline?.version ?? inferredBaselineVersion;
+  if (currentDelta.length === 1 && !baselineVersion) {
+    throw new Error("Update manifest delta is missing a verified baseline");
+  }
+  if (
+    currentDelta.length === 1 &&
+    !entries.some(
+      (entry) =>
+        entry.isFull &&
+        entry.filename.endsWith(`-${baselineVersion}-full.nupkg`)
+    )
+  ) {
+    throw new Error("Update manifest delta baseline is not in RELEASES");
+  }
+  const releaseBase =
+    identity.releaseAssetBaseUrl ??
+    `https://github.com/${repository}/releases/download/${identity.tag}`;
+  const packageRecord = (entry, fromVersion = undefined) => {
+    const record = binaryMap.get(entry.filename);
+    if (!record) {
+      throw new Error(`Update manifest package is missing: ${entry.filename}`);
+    }
+    return {
+      filename: entry.filename,
+      url: `${releaseBase}/${encodeURIComponent(entry.filename)}`,
+      size: record.size,
+      sha1: record.sha1,
+      sha256: record.sha256,
+      ...(fromVersion ? { fromVersion, toVersion: identity.version } : {}),
+    };
+  };
+  return {
+    schemaVersion: 1,
+    repository,
+    platform: "win32-x64",
+    version: identity.version,
+    tag: identity.tag,
+    releaseUrl: `https://github.com/${repository}/releases/tag/${identity.tag}`,
+    assetsBaseUrl: releaseBase,
+    packages: {
+      full: packageRecord(currentFull[0]),
+      ...(currentDelta.length === 1
+        ? {
+            delta: packageRecord(currentDelta[0], baselineVersion),
+          }
+        : {}),
+    },
+  };
+}
+
+function validateUpdateManifest(updateManifest, identity, entries, binaryMap) {
+  const repository = identity.repository ?? "Uyoung666/ai-image-manager";
+  const releaseBase =
+    identity.releaseAssetBaseUrl ??
+    `https://github.com/${repository}/releases/download/${identity.tag}`;
+  if (
+    updateManifest.schemaVersion !== 1 ||
+    updateManifest.repository !== repository ||
+    updateManifest.platform !== "win32-x64" ||
+    updateManifest.version !== identity.version ||
+    updateManifest.tag !== identity.tag ||
+    updateManifest.assetsBaseUrl !== releaseBase ||
+    updateManifest.releaseUrl !==
+      `https://github.com/${repository}/releases/tag/${identity.tag}`
+  ) {
+    throw new Error("Update manifest identity or release URL mismatch");
+  }
+  const currentFull = entries.find(
+    (entry) =>
+      entry.isFull && entry.filename.endsWith(`-${identity.version}-full.nupkg`)
+  );
+  const currentDelta = entries.find(
+    (entry) =>
+      entry.isDelta &&
+      entry.filename.endsWith(`-${identity.version}-delta.nupkg`)
+  );
+  if (!(currentFull && updateManifest.packages?.full)) {
+    throw new Error("Update manifest is missing the current full package");
+  }
+  validateUpdateManifestPackage(
+    updateManifest.packages.full,
+    currentFull,
+    binaryMap,
+    `${releaseBase}/${encodeURIComponent(currentFull.filename)}`
+  );
+  if (currentDelta) {
+    const delta = updateManifest.packages?.delta;
+    if (
+      !(
+        delta &&
+        isStableVersion(delta.fromVersion) &&
+        compareVersions(delta.fromVersion, identity.version) < 0
+      )
+    ) {
+      throw new Error("Update manifest is missing the delta baseline");
+    }
+    if (
+      !entries.some(
+        (entry) =>
+          entry.isFull &&
+          entry.filename.endsWith(`-${delta.fromVersion}-full.nupkg`)
+      )
+    ) {
+      throw new Error("Update manifest delta baseline is not in RELEASES");
+    }
+    validateUpdateManifestPackage(
+      delta,
+      currentDelta,
+      binaryMap,
+      `${releaseBase}/${encodeURIComponent(currentDelta.filename)}`,
+      identity.version
+    );
+    if (
+      identity.baseline?.version &&
+      delta.fromVersion !== identity.baseline.version
+    ) {
+      throw new Error("Update manifest delta baseline mismatch");
+    }
+  } else if (updateManifest.packages?.delta) {
+    throw new Error("Update manifest references a missing delta package");
+  }
+}
+
+function validateUpdateManifestPackage(
+  value,
+  entry,
+  binaryMap,
+  expectedURL,
+  expectedToVersion = undefined
+) {
+  const record = binaryMap.get(entry.filename);
+  if (
+    !record ||
+    value.filename !== entry.filename ||
+    value.url !== expectedURL ||
+    value.size !== record.size ||
+    value.sha1 !== record.sha1 ||
+    value.sha256 !== record.sha256 ||
+    (expectedToVersion !== undefined && value.toVersion !== expectedToVersion)
+  ) {
+    throw new Error(`Update manifest package mismatch: ${entry.filename}`);
+  }
+}
+
 export async function importLegacyBundle(candidate, evidence, root, identity) {
   const metadata = await fsp.readFile(
     path.join(evidence, "candidate-metadata.txt"),
@@ -336,6 +547,49 @@ export async function importLegacyBundle(candidate, evidence, root, identity) {
   await copy(
     path.join(evidence, "github-RELEASES"),
     path.join(root, "github", "RELEASES")
+  );
+  const legacyFeed = parseReleases(
+    await fsp.readFile(path.join(root, "feed", "RELEASES"), "utf8")
+  );
+  const legacyFiles = new Map(
+    (await collectFileRecords(path.join(root, "files"))).map((record) => [
+      path.basename(record.relativePath),
+      record,
+    ])
+  );
+  const updateManifestPath = path.join(
+    root,
+    "download",
+    "update-manifest.json"
+  );
+  await writeJson(
+    updateManifestPath,
+    buildUpdateManifest(legacyFeed, legacyFiles, identity)
+  );
+  const provenancePath = path.join(root, "download", "provenance.json");
+  const provenance = await readJson(provenancePath);
+  const updateManifestRecord = await readFileRecord(updateManifestPath);
+  provenance.files = [
+    ...provenance.files.filter((file) => file.path !== "update-manifest.json"),
+    {
+      path: "update-manifest.json",
+      size: updateManifestRecord.size,
+      sha256: updateManifestRecord.sha256,
+    },
+  ];
+  await writeJson(provenancePath, provenance);
+  const provenanceRecord = await readFileRecord(provenancePath);
+  const checksumRecords = [];
+  for (const file of provenance.files) {
+    const filePath =
+      file.path === "update-manifest.json"
+        ? updateManifestPath
+        : path.join(root, "files", file.path);
+    checksumRecords.push(await readFileRecord(filePath));
+  }
+  await fsp.writeFile(
+    path.join(root, "download", "SHA256SUMS.txt"),
+    formatSha256Sums([...checksumRecords, provenanceRecord])
   );
   const result = await sealBundle(root, identity);
   return {

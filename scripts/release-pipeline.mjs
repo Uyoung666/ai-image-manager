@@ -17,6 +17,7 @@ import {
   finalizeCos,
   stageDownloads,
   stageUpdatePackages,
+  transitionStableFeedToGitHub,
   withPublicReleaseReads,
 } from "./release/deploy.mjs";
 import {
@@ -24,14 +25,16 @@ import {
   exactArtifact,
   finalizeGitHub,
   findRelease,
+  listReleases,
   loadReleaseNotes,
+  selectBaselineRelease,
   sourceArtifacts,
   stageGitHub,
+  verifyGitHubTransitionAssets,
 } from "./release/github.mjs";
 import { startLocalFeed } from "./release/local-feed.mjs";
 import {
   assertPackageLockVersion,
-  compareVersions,
   parseStableVersion,
 } from "./release/semver.mjs";
 import { parseReleases } from "./release/squirrel.mjs";
@@ -39,10 +42,8 @@ import { supervise } from "./release/supervise.mjs";
 
 const NEWLINE_PATTERN = /[\r\n]/;
 const VERSION_PREFIX_PATTERN = /^v/;
-const FULL_VERSION_PATTERN = /-(\d+\.\d+\.\d+)-full\.nupkg$/;
-const DEFAULT_FEED =
-  "https://ai-image-manager-1392398678.cos.ap-hongkong.myqcloud.com/ai-image-manager/updates/win32/x64/stable";
-const DEFAULT_BUILD_BASE = DEFAULT_FEED.replace(/stable$/, "build-base");
+const DEFAULT_UPDATE_BASE =
+  "https://github.com/Uyoung666/ai-image-manager/releases";
 const root = () => path.resolve(process.env.RELEASE_BUNDLE ?? "release-bundle");
 const evidenceRoot = () =>
   path.resolve(process.env.RELEASE_EVIDENCE ?? "release-evidence");
@@ -118,34 +119,22 @@ export async function preflight() {
   if (sourceRunId) {
     await sourceArtifacts(repo(), sourceRunId);
   }
-  const feed = process.env.COS_APP_FEED ?? DEFAULT_FEED;
-  const buildBase = process.env.COS_BUILD_BASE_URL ?? DEFAULT_BUILD_BASE;
-  const entries = parseReleases(await fetchText(`${feed}/RELEASES`));
-  const versions = entries
-    .filter((entry) => entry.isFull)
-    .map((entry) => entry.filename.match(FULL_VERSION_PATTERN)?.[1]);
-  if (versions.some((value) => !value)) {
-    throw new Error("Invalid stable package version");
-  }
-  versions.sort(compareVersions);
-  const previousVersion = versions.at(-1);
-  if (
-    !previousVersion ||
-    compareVersions(version, previousVersion) < 0 ||
-    (!sourceRunId && version === previousVersion)
-  ) {
-    throw new Error("Use a newer version, or resume the original source run");
-  }
   const existingRelease = await findRelease(repo(), tag);
   if (!sourceRunId && existingRelease) {
     throw new Error(
       "This version already has release assets; resume its source run instead of rebuilding"
     );
   }
-  const baseline = sourceRunId
-    ? {}
-    : await resolveBaseline(previousVersion, buildBase);
-  const config = { ...identity, releaseNotes, baseline, feed, buildBase };
+  const baseline = await resolveGitHubBaseline(version);
+  const updateBaseUrl =
+    process.env.GITHUB_UPDATE_BASE_URL ?? DEFAULT_UPDATE_BASE;
+  const config = {
+    ...identity,
+    repository: repo(),
+    releaseNotes,
+    baseline,
+    updateBaseUrl,
+  };
   await writeJson("release-context.json", config);
   await output({ version, tag, commit, sourceRunId: sourceRunId ?? "" });
   console.log(
@@ -154,12 +143,23 @@ export async function preflight() {
   return config;
 }
 
-async function resolveBaseline(previousVersion, buildBase) {
-  const baseline = {};
-  const previous = await findRelease(repo(), `v${previousVersion}`);
-  if (!previous || previous.draft || previous.prerelease) {
-    throw new Error("The previous stable GitHub release is missing");
+async function resolveGitHubBaseline(version) {
+  const releases = await listReleases(repo());
+  const allowPrerelease = version === "2.2.1";
+  const previous = selectBaselineRelease(releases, version, {
+    allowPrerelease,
+  });
+  if (!previous) {
+    throw new Error("The previous verified GitHub release is missing");
   }
+  const previousVersion = previous.tag_name.slice(1);
+  const releaseBase = `https://github.com/${repo()}/releases/download/${previous.tag_name}`;
+  const baseline = {
+    version: previousVersion,
+    tag: previous.tag_name,
+    releaseId: previous.id,
+    releaseAssetBaseUrl: releaseBase,
+  };
   const checksumAsset = previous.assets.find(
     (asset) => asset.name === "SHA256SUMS.txt"
   );
@@ -194,15 +194,22 @@ async function resolveBaseline(previousVersion, buildBase) {
     }
   }
   const baselineEntries = parseReleases(
-    await fetchText(`${buildBase}/RELEASES`)
+    await fetchText(`${releaseBase}/RELEASES`)
   );
-  if (
-    baselineEntries.length !== 1 ||
-    baselineEntries[0].filename !==
-      `ai-image-manager-${previousVersion}-full.nupkg`
-  ) {
-    throw new Error("Build-base does not match the previous stable version");
+  const baselineFull = baselineEntries.find(
+    (entry) =>
+      entry.filename === `ai-image-manager-${previousVersion}-full.nupkg`
+  );
+  if (!baselineFull) {
+    throw new Error("Previous GitHub release lacks its Squirrel full package");
   }
+  baseline.full = {
+    filename: baselineFull.filename,
+    size: baselineFull.size,
+    sha1: baselineFull.hash,
+    sha256: baseline.AIM_OLD_SQUIRREL_FULL_SHA256,
+    url: `${releaseBase}/${encodeURIComponent(baselineFull.filename)}`,
+  };
   return baseline;
 }
 
@@ -242,11 +249,35 @@ async function recover(identity) {
   };
   let smoke;
   let artifact;
+  let sourceIdentity = null;
   if (source.modern) {
     artifact = await download(`release-bundle-${identity.version}`, root());
     const smokeDirectory = path.join(recovery, "smoke");
     await download(`release-smoke-${identity.version}`, smokeDirectory);
     const original = await verifyBundle(root(), identity);
+    const identityArtifactName = `release-artifact-${identity.version}`;
+    if (!source.artifacts.some((item) => item.name === identityArtifactName)) {
+      throw new Error(
+        "Recovery source lacks release artifact identity evidence"
+      );
+    }
+    const identityDirectory = path.join(recovery, "identity");
+    await download(identityArtifactName, identityDirectory);
+    sourceIdentity = await readJson(
+      path.join(identityDirectory, "release-artifact.json")
+    );
+    if (
+      String(sourceIdentity.artifactId) !== String(artifact.id) ||
+      (artifact.digest &&
+        String(sourceIdentity.digest) !== String(artifact.digest)) ||
+      Number(sourceIdentity.runId) !== Number(identity.sourceRunId) ||
+      sourceIdentity.commit !== identity.commit ||
+      sourceIdentity.toolingCommit !== source.run.head_sha
+    ) {
+      throw new Error(
+        "Recovery source artifact identity does not match its bundle"
+      );
+    }
     await command(
       "gh",
       [
@@ -309,7 +340,11 @@ async function recover(identity) {
     sourceRunId: identity.sourceRunId,
     sourceArtifact: artifact,
   });
-  await sealBundle(root(), { ...identity, sourceArtifact: artifact });
+  const recoveredIdentity =
+    source.modern && sourceIdentity
+      ? { ...identity, toolingCommit: sourceIdentity.toolingCommit }
+      : identity;
+  await sealBundle(root(), { ...recoveredIdentity, sourceArtifact: artifact });
 }
 
 async function smokeTest(identity) {
@@ -399,12 +434,15 @@ export async function runPipeline(operation) {
   }
   const identity = await context();
   if (operation === "configure-build") {
+    const baselineEnvironment = Object.fromEntries(
+      Object.entries(identity.baseline ?? {}).filter(([key]) => key !== "full")
+    );
     return output(
       {
-        ...identity.baseline,
-        AIM_UPDATE_BASE_URL: identity.feed,
-        AIM_SQUIRREL_REMOTE_RELEASES: identity.buildBase,
-        AIM_HAS_STABLE_BASELINE: "1",
+        ...baselineEnvironment,
+        AIM_UPDATE_BASE_URL: identity.updateBaseUrl,
+        AIM_SQUIRREL_REMOTE_RELEASES: identity.baseline.releaseAssetBaseUrl,
+        AIM_HAS_STABLE_BASELINE: identity.baseline?.full ? "1" : "0",
         SOURCE_DATE_EPOCH: identity.sourceDateEpoch,
       },
       process.env.GITHUB_ENV
@@ -451,6 +489,21 @@ export async function runPipeline(operation) {
   }
   if (operation === "cos-finalize") {
     return finalizeCos(store, root(), manifest, prefix);
+  }
+  if (operation === "cos-transition") {
+    if (process.env.COS_TRANSITION_APPROVED !== "1") {
+      throw new Error(
+        "COS transition requires COS_TRANSITION_APPROVED=1 after old-client validation"
+      );
+    }
+    return transitionStableFeedToGitHub(
+      store,
+      root(),
+      manifest,
+      prefix,
+      repo(),
+      () => verifyGitHubTransitionAssets(repo(), root(), manifest)
+    );
   }
   throw new Error(`Unknown release pipeline operation: ${operation}`);
 }
