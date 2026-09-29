@@ -19,6 +19,7 @@ const SHA1_PATTERN = /^[a-f0-9]{40}$/i;
 const VERSION_TAG_PATTERN = /^v/i;
 const DELTA_FILENAME_PATTERN = /-delta\.nupkg$/i;
 const FULL_FILENAME_PATTERN = /-full\.nupkg$/i;
+const ACCESS_DENIED_PATTERN = /access denied/i;
 const MAX_POINTER_BYTES = 1024 * 1024;
 
 /**
@@ -274,6 +275,55 @@ async function writeEvidence(file, evidence) {
   await fsp.writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
 }
 
+function isCosAccessDenied(error) {
+  const status =
+    error?.statusCode ?? error?.cause?.statusCode ?? error?.cause?.status;
+  return (
+    status === 403 || ACCESS_DENIED_PATTERN.test(String(error?.message ?? ""))
+  );
+}
+
+/**
+ * Some COS policies allow creating immutable objects and CopyObject but deny
+ * a direct PUT over an existing public pointer.  Use the direct path first;
+ * on that specific policy response, stage the exact bytes and replace the
+ * pointer with a single CopyObject request.  The temporary object is always
+ * cleaned up after the copy attempt.
+ */
+export async function writeTransitionPointer(cos, key, bytes, record) {
+  try {
+    await cos.putMutableBytes(key, bytes, {
+      ...record,
+      cacheControl: "no-cache, no-store, must-revalidate",
+      contentType: "text/plain; charset=utf-8",
+    });
+    return { method: "put" };
+  } catch (error) {
+    if (!isCosAccessDenied(error)) {
+      throw error;
+    }
+    const stagingKey = `${key}.transition-${record.sha256}.tmp`;
+    try {
+      await cos.putBytes(stagingKey, bytes, {
+        ...record,
+        cacheControl: "no-cache, no-store, must-revalidate",
+        contentType: "text/plain; charset=utf-8",
+        immutable: true,
+      });
+      await cos.copy(stagingKey, key, {
+        cacheControl: "no-cache, no-store, must-revalidate",
+        contentType: "text/plain; charset=utf-8",
+        immutable: false,
+      });
+      return { method: "copy", stagingKey };
+    } finally {
+      await cos.delete(stagingKey).catch((cleanupError) => {
+        console.error(`COS transition staging cleanup failed: ${cleanupError}`);
+      });
+    }
+  }
+}
+
 export async function transition({
   env = process.env,
   store = undefined,
@@ -330,13 +380,15 @@ export async function transition({
   }
 
   let status = "idempotent";
+  let writeMethod = "none";
   if (!latestBytes.equals(transitionedBytes)) {
-    await cos.putMutableBytes(stableKey, transitionedBytes, {
-      sha256: transitionedFeedSha256,
-      size: transitionedBytes.byteLength,
-      cacheControl: "no-cache, no-store, must-revalidate",
-      contentType: "text/plain; charset=utf-8",
-    });
+    const result = await writeTransitionPointer(
+      cos,
+      stableKey,
+      transitionedBytes,
+      { sha256: transitionedFeedSha256, size: transitionedBytes.byteLength }
+    );
+    writeMethod = result.method;
     status = "switched";
   }
   const readback = Buffer.from(await cos.getBytes(stableKey));
@@ -352,6 +404,7 @@ export async function transition({
     key: stableKey,
     currentFeedSha256,
     transitionedFeedSha256,
+    writeMethod,
     entries: transitionedEntries,
     packages: [...packageEvidence, ...targetEvidence],
     generatedAt: now.toISOString(),

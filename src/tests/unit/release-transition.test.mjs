@@ -1,3 +1,5 @@
+// biome-ignore-all lint/suspicious/useAwait: fake COS methods model async SDK calls.
+
 import { describe, expect, it } from "vitest";
 import {
   formatReleases,
@@ -6,6 +8,7 @@ import {
 import {
   assertTransitionAuthorization,
   buildTransitionFeed,
+  writeTransitionPointer,
 } from "../../../scripts/release/transition-cos-to-github.mjs";
 
 const oldEntries = [
@@ -123,5 +126,35 @@ describe("COS transition authorization", () => {
       repository: "Uyoung666/ai-image-manager",
       version: "2.2.1",
     });
+  });
+
+  it("uses a staged object and CopyObject when direct pointer overwrite is denied", async () => {
+    const calls = [];
+    const store = {
+      async putMutableBytes() {
+        calls.push("putMutableBytes");
+        throw Object.assign(new Error("Access Denied"), { statusCode: 403 });
+      },
+      async putBytes(key, bytes) {
+        calls.push(["putBytes", key, Buffer.from(bytes).toString()]);
+      },
+      async copy(source, destination) {
+        calls.push(["copy", source, destination]);
+      },
+      async delete(key) {
+        calls.push(["delete", key]);
+      },
+    };
+    const result = await writeTransitionPointer(
+      store,
+      "ai-image-manager/updates/win32/x64/stable/RELEASES",
+      Buffer.from("feed"),
+      { sha256: "a".repeat(64), size: 4 }
+    );
+    expect(result.method).toBe("copy");
+    expect(calls[0]).toBe("putMutableBytes");
+    expect(calls[1][0]).toBe("putBytes");
+    expect(calls[2][0]).toBe("copy");
+    expect(calls[3][0]).toBe("delete");
   });
 });
