@@ -58,8 +58,9 @@ Setup 和启用自动更新的 MSI 具有应用内自动更新能力。禁用更
 ## COS 过渡与退出
 
 已发布的旧客户端仍可能把更新请求发往 COS stable，迁移完成前不能关闭旧地址。2.2.1
-正式上线后迁移期为 30 天，起算时间以公开 Release 的时间为准。线上切换和删除对象都需要
-另行确认，本仓库工作流不会自动执行这两项操作。
+正式上线后迁移期为 30 天，起算时间以公开 Release 的时间为准。一次性切换由 GitHub Actions
+的 `Transition COS stable feed to GitHub` 手动工作流执行；它要求输入版本 `2.2.1` 和精确确认词
+`SWITCH COS STABLE TO GITHUB V2.2.1`，避免误写其他版本或其他仓库。
 
 迁移前先对 COS 做完整只读盘点，逐对象记录 key、大小、ETag、修改时间、原清单引用和
 GitHub 替代附件哈希。优先在隔离 Windows 环境用未修改的旧 2.1.0/2.2.0 二进制实测
@@ -67,11 +68,13 @@ GitHub 替代附件哈希。优先在隔离 Windows 环境用未修改的旧 2.1
 绝对地址，旧二进制不兼容时必须保留安装矩阵证明必需的最小 full/delta 集合。不得凭清单
 解析成功推断旧客户端已经迁移。
 
-旧二进制矩阵通过后，使用已公开且已核验的 bundle 执行一次受保护的过渡指针切换：
-`COS_TRANSITION_APPROVED=1 node scripts/release-pipeline.mjs cos-transition`。该操作先按
-版本逐个核对 GitHub 已发布 Release 附件的大小和 SHA256，再把 COS stable/RELEASES 的
-包地址改为固定 GitHub URL；它不上传或删除 COS 包，也不改变 GitHub Release。未设置确认
-变量时命令会拒绝执行。切换和后续删除仍分别需要维护者确认。
+旧二进制矩阵通过后，工作流先逐个核对当前 COS 清单引用的 GitHub Release 包，以及目标版本
+的 delta/full 包：检查 Release 状态、附件大小、GitHub SHA256、Squirrel SHA1；缺少可验证
+清单项的 delta 会读取实际附件计算摘要。全部证据通过后，只把 COS
+`updates/win32/x64/stable/RELEASES` 的地址改为固定 GitHub URL，包对象不上传、不删除，
+GitHub Release 也不修改。相同内容重跑会跳过写入，清单或包内容不一致会拒绝切换。切换成功
+后，2.2.0 及更早旧客户端仍从原 COS 地址读取这份清单并下载 GitHub 包；升级到 2.2.1 后，
+后续检查直接使用 GitHub API 和固定 Release 附件，不再依赖 COS。
 
 切换后的最小宽限为 48 小时：原清单引用的对象在宽限内保持可读，并再次核对 GitHub 附件、
 哈希和引用关系。迁移验证通过、GitHub 匿名下载可用、停服公告和手动升级说明准备齐全后，
