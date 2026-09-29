@@ -642,7 +642,7 @@ async function downloadAndPrepare(
   await downloadToFile(plan.package, packagePath);
   await fsp.writeFile(
     path.join(feedDirectory, "RELEASES"),
-    `${plan.package.sha1} ${plan.package.filename} ${plan.package.size}\n`,
+    formatLocalReleaseFeed(plan),
     "utf8"
   );
   await fsp.writeFile(
@@ -665,6 +665,24 @@ async function downloadAndPrepare(
     package: plan.package,
     releaseNotes,
   };
+}
+
+/**
+ * Squirrel needs a full entry to calculate whether the downloaded delta is
+ * smaller, but it only reads the selected package from the local directory.
+ * Keep that metadata in the delta feed without downloading the full package;
+ * a full fallback deliberately rewrites the feed to a single full entry.
+ */
+export function formatLocalReleaseFeed(plan: UpdatePlan): string {
+  const packages =
+    plan.method === "delta" && plan.manifest.packages.delta
+      ? [plan.manifest.packages.full, plan.manifest.packages.delta]
+      : [plan.manifest.packages.full];
+  return `${packages
+    .map((packageInfo) =>
+      [packageInfo.sha1, packageInfo.filename, packageInfo.size].join(" ")
+    )
+    .join("\n")}\n`;
 }
 
 async function downloadToFile(

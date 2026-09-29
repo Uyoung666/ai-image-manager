@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GitHubUpdateManifest } from "@/services/github-update";
 
 const mocks = vi.hoisted(() => {
   const listeners = new Map<string, (...args: unknown[]) => void>();
@@ -412,5 +413,54 @@ describe("update manager event payloads", () => {
       message: "UPDATE_BUSY",
       phase: "error",
     });
+  });
+});
+
+describe("local Squirrel feed preparation", () => {
+  it("keeps full metadata beside a delta, then uses full-only metadata for fallback", async () => {
+    const manager = await loadManager();
+    const full = {
+      filename: "ai-image-manager-2.2.1-full.nupkg",
+      sha1: "a".repeat(40),
+      sha256: "b".repeat(64),
+      size: 100,
+      url: "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.1/ai-image-manager-2.2.1-full.nupkg",
+    };
+    const delta = {
+      filename: "ai-image-manager-2.2.1-delta.nupkg",
+      fromVersion: "2.2.0",
+      sha1: "c".repeat(40),
+      sha256: "d".repeat(64),
+      size: 40,
+      toVersion: "2.2.1",
+      url: "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.1/ai-image-manager-2.2.1-delta.nupkg",
+    };
+    const manifest = {
+      assetsBaseUrl:
+        "https://github.com/Uyoung666/ai-image-manager/releases/download/v2.2.1",
+      packages: { delta, full },
+      platform: "win32-x64",
+      releaseUrl:
+        "https://github.com/Uyoung666/ai-image-manager/releases/tag/v2.2.1",
+      repository: "Uyoung666/ai-image-manager",
+      schemaVersion: 1,
+      tag: "v2.2.1",
+      version: "2.2.1",
+    } satisfies GitHubUpdateManifest;
+    const plan = {
+      currentVersion: "2.2.0",
+      fallback: full,
+      manifest,
+      method: "delta" as const,
+      package: delta,
+      targetVersion: "2.2.1",
+    };
+
+    expect(manager.formatLocalReleaseFeed(plan)).toBe(
+      `${full.sha1} ${full.filename} ${full.size}\n${delta.sha1} ${delta.filename} ${delta.size}\n`
+    );
+    expect(
+      manager.formatLocalReleaseFeed({ ...plan, method: "full", package: full })
+    ).toBe(`${full.sha1} ${full.filename} ${full.size}\n`);
   });
 });
