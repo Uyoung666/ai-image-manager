@@ -76,6 +76,12 @@ GitHub Release 也不修改。相同内容重跑会跳过写入，清单或包�
 后，2.2.0 及更早旧客户端仍从原 COS 地址读取这份清单并下载 GitHub 包；升级到 2.2.1 后，
 后续检查直接使用 GitHub API 和固定 Release 附件，不再依赖 COS。
 
+本次切换已于 2026-09-29 UTC 完成：GitHub Actions 运行 `36525625259` 成功，COS
+stable/RELEASES 的 SHA-256 为 `3b56328a58c8832a967298390428b49d03c38cc56cd5ec4feb9b5555e5cac454`。
+未修改的 2.2.0 Setup 通过真实 COS 地址完成 2.2.1 delta 升级，日志记录
+`AIM_INSTALLER_SMOKE_DELTA=passed`、`bytes=94223148`、`fullFallback=absent`；用户数据标记和
+升级后启动检查均通过。工作流证据保留 90 天，线上没有上传或删除 COS 包。
+
 切换后的最小宽限为 48 小时：原清单引用的对象在宽限内保持可读，并再次核对 GitHub 附件、
 哈希和引用关系。迁移验证通过、GitHub 匿名下载可用、停服公告和手动升级说明准备齐全后，
 再提交 COS 退出申请；申请中列出精确删除 key、大小、ETag 和替代证据。没有遥测依据时不
