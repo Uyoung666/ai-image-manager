@@ -71,6 +71,7 @@ vi.mock("react-i18next", () => ({
         searchMatchExactPerson: "人物命中",
         searchMatchExactTag: "标签命中",
         searchMatchExactFilename: "文件名命中",
+        recentlyViewedPhoto: "刚刚浏览",
         imageSearchTitle: "以图搜图 — 选择参考图片寻找相似照片",
         imageSearchReferenceHint: "参考图片：{{filename}}，点击更换",
         imageSearchToken: "[以图搜图]",

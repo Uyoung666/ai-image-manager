@@ -121,6 +121,9 @@ interface PhotoGridProps {
   onToggleFavorite?: (id: number) => void;
   onToggleSequenceExpand?: (sequenceId: number) => void;
   photos: Photo[];
+  recentlyViewedPhotoId?: number | null;
+  recentlyViewedPulseActive?: boolean;
+  recentlyViewedPulseKey?: number;
   restoreGateReady?: boolean;
   /**
    * 路由唯一标识，用于区分不同页面的滚动位置
@@ -146,12 +149,18 @@ export function createPhotoGridItemStateVersion(
   deletingIds: ReadonlySet<number> | undefined,
   faceOverlayByPhotoId: ReadonlyMap<number, FaceOverlay[]> | undefined,
   faceOverlaysVisible: boolean,
-  selectedIds: ReadonlySet<number>
+  selectedIds: ReadonlySet<number>,
+  recentlyViewedPhotoId?: number | null,
+  recentlyViewedPulseActive?: boolean,
+  recentlyViewedPulseKey?: number
 ) {
   return {
     deletingIds,
     faceOverlayByPhotoId,
     faceOverlaysVisible,
+    recentlyViewedPhotoId,
+    recentlyViewedPulseActive,
+    recentlyViewedPulseKey,
     selectedIds,
   };
 }
@@ -859,6 +868,9 @@ export const PhotoGrid = memo(
     onRestoreSettled,
     onScrollTopChange,
     onBackgroundClick,
+    recentlyViewedPhotoId = null,
+    recentlyViewedPulseActive = false,
+    recentlyViewedPulseKey = 0,
     showToolbar = true,
     topInset = 0,
     restoreGateReady = true,
@@ -1076,9 +1088,20 @@ export const PhotoGrid = memo(
           deletingIds,
           faceOverlayByPhotoId,
           faceOverlaysVisible,
-          selectedIds
+          selectedIds,
+          recentlyViewedPhotoId,
+          recentlyViewedPulseActive,
+          recentlyViewedPulseKey
         ),
-      [deletingIds, faceOverlayByPhotoId, faceOverlaysVisible, selectedIds]
+      [
+        deletingIds,
+        faceOverlayByPhotoId,
+        faceOverlaysVisible,
+        selectedIds,
+        recentlyViewedPhotoId,
+        recentlyViewedPulseActive,
+        recentlyViewedPulseKey,
+      ]
     );
     const groupHeaderCacheRef = useRef<{
       headers: GroupHeader[];
@@ -1176,7 +1199,10 @@ export const PhotoGrid = memo(
         }
 
         e.preventDefault();
-        const currentId = selectedIds.size === 1 ? [...selectedIds][0] : null;
+        const currentId =
+          selectedIds.size === 1
+            ? [...selectedIds][0]
+            : (recentlyViewedPhotoId ?? null);
         let currentIdx = currentId
           ? keyboardPhotos.findIndex((p) => p.id === currentId)
           : -1;
@@ -1204,7 +1230,13 @@ export const PhotoGrid = memo(
       }
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [keyboardPhotos, selectedIds, columnCount, onKeyboardSelect]);
+    }, [
+      keyboardPhotos,
+      selectedIds,
+      columnCount,
+      onKeyboardSelect,
+      recentlyViewedPhotoId,
+    ]);
 
     const skeletonAspects = useCallback(
       () => [3 / 4, 4 / 3, 1 / 1, 3 / 2, 2 / 3],
@@ -1312,6 +1344,11 @@ export const PhotoGrid = memo(
             onNameFace={onNameFace}
             onToggleFavorite={onToggleFavorite}
             path={photo.path}
+            recentlyViewed={recentlyViewedPhotoId === photo.id}
+            recentlyViewedPulseActive={
+              recentlyViewedPulseActive && recentlyViewedPhotoId === photo.id
+            }
+            recentlyViewedPulseKey={recentlyViewedPulseKey}
             searchQuery={searchQuery}
             semanticTopSimilarity={semanticTopSimilarity}
             thumbnailPath={photo.thumbnailPath}
@@ -1373,6 +1410,9 @@ export const PhotoGrid = memo(
         expandingSequenceId,
         onToggleSequenceExpand,
         disablePhotoDrag,
+        recentlyViewedPhotoId,
+        recentlyViewedPulseActive,
+        recentlyViewedPulseKey,
         faceOverlayByPhotoId,
         faceOverlaysVisible,
         t,
@@ -1628,6 +1668,8 @@ export const PhotoGrid = memo(
             ref={gridRef}
             renderItem={renderItem}
             restoreGateReady={restoreGateReady}
+            returnToPhotoId={recentlyViewedPhotoId}
+            returnToPhotoRequest={recentlyViewedPulseKey}
             routeKey={routeKey}
             scrollToAlignment={expandedSequence ? "start" : "center"}
             scrollToId={scrollToId}
@@ -1710,6 +1752,18 @@ export const PhotoGrid = memo(
       return false;
     }
     if (prevProps.selectedIds !== nextProps.selectedIds) {
+      return false;
+    }
+    if (prevProps.recentlyViewedPhotoId !== nextProps.recentlyViewedPhotoId) {
+      return false;
+    }
+    if (
+      prevProps.recentlyViewedPulseActive !==
+      nextProps.recentlyViewedPulseActive
+    ) {
+      return false;
+    }
+    if (prevProps.recentlyViewedPulseKey !== nextProps.recentlyViewedPulseKey) {
       return false;
     }
     if (prevProps.deletingIds !== nextProps.deletingIds) {

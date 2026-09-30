@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotoCard } from "@/components/PhotoCard";
 
@@ -83,6 +83,39 @@ describe("PhotoCard", () => {
     render(<PhotoCard {...baseProps} isSelected={true} />);
     const svg = document.querySelector("svg[viewBox='0 0 12 12']");
     expect(svg).toBeInTheDocument();
+  });
+
+  it("shows the recently viewed marker without selecting the card", () => {
+    render(<PhotoCard {...baseProps} recentlyViewed />);
+
+    const marker = screen.getByRole("status");
+    expect(marker).toHaveTextContent("刚刚浏览");
+    expect(marker).toHaveAttribute("data-recently-viewed", "true");
+    expect(screen.getByRole("option")).not.toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+  });
+
+  it("limits the recently viewed highlight to the pulse window", () => {
+    render(
+      <PhotoCard
+        {...baseProps}
+        recentlyViewed
+        recentlyViewedPulseActive
+        recentlyViewedPulseKey={1}
+      />
+    );
+
+    const card = screen.getByRole("option");
+    expect(card).toHaveClass("photo-card-recently-viewed-pulse");
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    expect(card).not.toHaveClass("photo-card-recently-viewed-pulse");
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
   it("uses thumbnailPath as src when provided", () => {

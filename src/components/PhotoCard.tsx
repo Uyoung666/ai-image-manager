@@ -1,4 +1,5 @@
 // biome-ignore-all lint/complexity/noExcessiveCognitiveComplexity: scoped component lint cleanup preserves existing UI behavior
+import { Eye } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -65,6 +66,9 @@ interface PhotoCardProps {
   onNameFace?: (id: number) => void;
   onToggleFavorite?: (id: number) => void;
   path: string;
+  recentlyViewed?: boolean;
+  recentlyViewedPulseActive?: boolean;
+  recentlyViewedPulseKey?: number;
   renderImage?: boolean;
   searchQuery?: string;
   selectionInset?: boolean;
@@ -223,6 +227,9 @@ export const PhotoCard = memo(function PhotoCard({
   match,
   semanticTopSimilarity,
   renderImage = true,
+  recentlyViewed = false,
+  recentlyViewedPulseActive = false,
+  recentlyViewedPulseKey = 0,
   onClick,
   onDoubleClick,
   onNameFace,
@@ -249,6 +256,25 @@ export const PhotoCard = memo(function PhotoCard({
   }, [thumbnailSmallPath, thumbnailPath]);
 
   const [imgError, setImgError] = useState(false);
+  const [isRecentlyViewedPulseActive, setIsRecentlyViewedPulseActive] =
+    useState(false);
+
+  useEffect(() => {
+    const shouldPulse =
+      recentlyViewed &&
+      recentlyViewedPulseActive &&
+      recentlyViewedPulseKey >= 0;
+    if (!shouldPulse) {
+      setIsRecentlyViewedPulseActive(false);
+      return;
+    }
+
+    setIsRecentlyViewedPulseActive(true);
+    const timeout = window.setTimeout(() => {
+      setIsRecentlyViewedPulseActive(false);
+    }, 1500);
+    return () => window.clearTimeout(timeout);
+  }, [recentlyViewed, recentlyViewedPulseActive, recentlyViewedPulseKey]);
 
   // ── 主色提取 ──────────────────────────────────────────────────────
   const bgColor = useMemo(() => {
@@ -413,18 +439,41 @@ export const PhotoCard = memo(function PhotoCard({
       : "ring-2 ring-primary ring-offset-1 ring-offset-background";
   }
 
+  const recentlyViewedBadge = recentlyViewed ? (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-6 items-center px-2">
+      <span
+        aria-label={t("recentlyViewedPhoto")}
+        className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/30 bg-background/85 px-1.5 py-0.5 font-medium text-[10px] text-primary shadow-sm backdrop-blur-sm"
+        data-recently-viewed="true"
+        role="status"
+      >
+        <Eye aria-hidden="true" className="h-3 w-3 shrink-0" />
+        <span className="truncate">{t("recentlyViewedPhoto")}</span>
+      </span>
+    </div>
+  ) : null;
+
+  const recentlyViewedClass = isRecentlyViewedPulseActive
+    ? "photo-card-recently-viewed-pulse"
+    : "";
+  const hoverOverlayBottomClass = recentlyViewed ? "bottom-6" : "bottom-0";
+  const hoverGradientHeightClass = recentlyViewed ? "h-20" : "h-16";
+
   if (!renderImage) {
     return (
       <div
         aria-hidden="true"
-        className="relative w-full overflow-hidden rounded-[8px] bg-muted"
+        className={`relative w-full overflow-hidden rounded-[8px] bg-muted ${recentlyViewedClass}`}
         data-photo-id={id}
         data-photo-path={path}
+        data-recently-viewed={recentlyViewed ? "true" : undefined}
         style={{
           aspectRatio,
           ...(bgColor ? { backgroundColor: bgColor } : {}),
         }}
-      />
+      >
+        {recentlyViewedBadge}
+      </div>
     );
   }
 
@@ -432,8 +481,14 @@ export const PhotoCard = memo(function PhotoCard({
   if (imgError) {
     return (
       <div
-        className="relative flex w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted"
+        aria-selected={isSelected}
+        className={`group relative flex w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-[8px] bg-muted ${recentlyViewedClass}`}
+        data-photo-id={id}
+        data-photo-path={path}
+        data-recently-viewed={recentlyViewed ? "true" : undefined}
+        role="option"
         style={{ aspectRatio }}
+        tabIndex={-1}
       >
         <svg
           aria-hidden="true"
@@ -464,6 +519,7 @@ export const PhotoCard = memo(function PhotoCard({
         >
           {t("retry")}
         </button>
+        {recentlyViewedBadge}
       </div>
     );
   }
@@ -472,10 +528,11 @@ export const PhotoCard = memo(function PhotoCard({
   return (
     <div
       aria-selected={isSelected}
-      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${cardStateClass}
+      className={`group relative w-full cursor-pointer overflow-hidden rounded-[8px] bg-muted transition-[transform,opacity,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${cardStateClass} ${recentlyViewedClass}
       `}
       data-photo-id={id}
       data-photo-path={path}
+      data-recently-viewed={recentlyViewed ? "true" : undefined}
       draggable={!disableDrag}
       onClick={handleClick}
       onContextMenu={undefined}
@@ -518,8 +575,12 @@ export const PhotoCard = memo(function PhotoCard({
 
       {/* Hover overlay */}
       <div className="absolute inset-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2">
+        <div
+          className={`absolute inset-x-0 bottom-0 ${hoverGradientHeightClass} bg-gradient-to-t from-black/70 via-black/30 to-transparent`}
+        />
+        <div
+          className={`absolute inset-x-0 ${hoverOverlayBottomClass} px-2.5 pb-2`}
+        >
           <p className="truncate font-medium text-[#f7f8f8] text-[11px] leading-tight">
             <HighlightText query={searchQuery} text={filename} />
           </p>
@@ -530,6 +591,8 @@ export const PhotoCard = memo(function PhotoCard({
           )}
         </div>
       </div>
+
+      {recentlyViewedBadge}
 
       {onNameFace &&
         faceOverlaysVisible &&

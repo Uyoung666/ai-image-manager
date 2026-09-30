@@ -86,6 +86,15 @@ function AlbumDetailPage() {
   const canEditAlbum = Boolean(activeAlbum && !activeAlbum.isSmart);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [recentlyViewedPhotoId, setRecentlyViewedPhotoId] = useState<
+    number | null
+  >(null);
+  const [recentlyViewedPulseActive, setRecentlyViewedPulseActive] =
+    useState(false);
+  const [recentlyViewedPulseKey, setRecentlyViewedPulseKey] = useState(0);
+  const recentlyViewedPulseTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const composingRef = useRef(false);
@@ -206,8 +215,142 @@ function AlbumDetailPage() {
     },
     [addToSelection, removeFromSelection]
   );
-  const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
-    usePhotoDetailPanel(selectedIds, photos, routeKey, handleKeyboardSelect);
+  const clearRecentlyViewed = useCallback((preservePhotoId?: number) => {
+    setRecentlyViewedPhotoId((current) => {
+      if (preservePhotoId !== undefined && current === preservePhotoId) {
+        return current;
+      }
+      return null;
+    });
+    setRecentlyViewedPulseActive(false);
+    if (recentlyViewedPulseTimerRef.current !== null) {
+      clearTimeout(recentlyViewedPulseTimerRef.current);
+      recentlyViewedPulseTimerRef.current = null;
+    }
+  }, []);
+  const markRecentlyViewed = useCallback((photoId: number) => {
+    setRecentlyViewedPhotoId(photoId);
+    setRecentlyViewedPulseKey((value) => value + 1);
+    setRecentlyViewedPulseActive(true);
+    if (recentlyViewedPulseTimerRef.current !== null) {
+      clearTimeout(recentlyViewedPulseTimerRef.current);
+    }
+    recentlyViewedPulseTimerRef.current = setTimeout(() => {
+      setRecentlyViewedPulseActive(false);
+      recentlyViewedPulseTimerRef.current = null;
+    }, 1500);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (recentlyViewedPulseTimerRef.current !== null) {
+        clearTimeout(recentlyViewedPulseTimerRef.current);
+      }
+    };
+  }, []);
+  const handleKeyboardPhotoSelect = useCallback(
+    (id: number) => {
+      clearRecentlyViewed(id);
+      handleKeyboardSelect(id);
+    },
+    [clearRecentlyViewed, handleKeyboardSelect]
+  );
+  const {
+    detailDismissed,
+    detailPhoto,
+    dismissDetail,
+    navigateDetail,
+    showPhoto,
+  } = usePhotoDetailPanel(
+    selectedIds,
+    photos,
+    routeKey,
+    handleKeyboardPhotoSelect
+  );
+  const dismissPhotoDetail = useCallback(() => {
+    if (detailPhoto && photos.some((photo) => photo.id === detailPhoto.id)) {
+      markRecentlyViewed(detailPhoto.id);
+    } else if (detailPhoto) {
+      clearRecentlyViewed();
+    }
+    dismissDetail();
+  }, [
+    clearRecentlyViewed,
+    detailPhoto,
+    dismissDetail,
+    markRecentlyViewed,
+    photos,
+  ]);
+  const handleClearSelection = useCallback(() => {
+    if (detailPhoto) {
+      dismissPhotoDetail();
+    } else if (!detailDismissed && selectedIds.size === 1) {
+      const selectedPhotoId = selectedIds.values().next().value;
+      if (
+        selectedPhotoId !== undefined &&
+        photos.some((photo) => photo.id === selectedPhotoId)
+      ) {
+        markRecentlyViewed(selectedPhotoId);
+      } else {
+        clearRecentlyViewed();
+      }
+    }
+    clearSelection();
+  }, [
+    clearRecentlyViewed,
+    clearSelection,
+    detailDismissed,
+    detailPhoto,
+    dismissPhotoDetail,
+    markRecentlyViewed,
+    photos,
+    selectedIds,
+  ]);
+  const recentlyViewedContextKey = [
+    routeKey,
+    sortField,
+    sortOrder,
+    sequenceView.mode,
+  ].join("|");
+  const previousRecentlyViewedContextKeyRef = useRef(recentlyViewedContextKey);
+  useEffect(() => {
+    if (
+      previousRecentlyViewedContextKeyRef.current !== recentlyViewedContextKey
+    ) {
+      clearRecentlyViewed();
+    }
+    previousRecentlyViewedContextKeyRef.current = recentlyViewedContextKey;
+  }, [clearRecentlyViewed, recentlyViewedContextKey]);
+  useEffect(() => {
+    if (
+      recentlyViewedPhotoId !== null &&
+      !photos.some((photo) => photo.id === recentlyViewedPhotoId)
+    ) {
+      clearRecentlyViewed();
+    }
+  }, [clearRecentlyViewed, photos, recentlyViewedPhotoId]);
+  useEffect(() => {
+    if (
+      lightboxIndex >= 0 ||
+      quickPreviewIndex >= 0 ||
+      sequenceView.openSequence ||
+      sequenceView.selectedSequence
+    ) {
+      clearRecentlyViewed();
+    }
+  }, [
+    clearRecentlyViewed,
+    lightboxIndex,
+    quickPreviewIndex,
+    sequenceView.openSequence,
+    sequenceView.selectedSequence,
+  ]);
+  const handlePhotoSelect = useCallback(
+    (id: number, event: React.MouseEvent) => {
+      clearRecentlyViewed(id);
+      handleSelect(id, event);
+    },
+    [clearRecentlyViewed, handleSelect]
+  );
 
   // handleSelect, handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
   const marqueeJustCompleted = useRef(false);
@@ -648,7 +791,7 @@ function AlbumDetailPage() {
           return;
         }
         if (selectedIds.size > 0) {
-          clearSelection();
+          handleClearSelection();
           return;
         }
       }
@@ -714,11 +857,10 @@ function AlbumDetailPage() {
       if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (detailPhoto) {
-          dismissDetail();
-          clearSelection();
+          handleClearSelection();
         } else if (selectedIds.size === 1) {
           const id = selectedIds.values().next().value as number;
-          handleKeyboardSelect(id);
+          handleKeyboardPhotoSelect(id);
         }
       }
     }
@@ -731,6 +873,8 @@ function AlbumDetailPage() {
     convertDialogOpen,
     quickPreviewIndex,
     detailPhoto,
+    handleClearSelection,
+    handleKeyboardPhotoSelect,
   ]);
 
   // handleKeyboardSelect, handleMarqueeSelect 由 usePhotoSelection hook 提供
@@ -753,9 +897,12 @@ function AlbumDetailPage() {
     active: compactDetailOverlay && detailOverlayOpen,
     containerRef: detailOverlayRef,
     onEscape: () => {
-      sequenceView.setSelectedSequence(null);
-      dismissDetail();
-      clearSelection();
+      if (detailPhoto) {
+        handleClearSelection();
+      } else {
+        sequenceView.setSelectedSequence(null);
+        clearSelection();
+      }
     },
   });
 
@@ -912,15 +1059,15 @@ function AlbumDetailPage() {
                 marqueeJustCompleted.current = false;
                 return;
               }
-              clearSelection();
+              handleClearSelection();
             }}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
-            onKeyboardSelect={handleKeyboardSelect}
+            onKeyboardSelect={handleKeyboardPhotoSelect}
             onMarqueeSelect={wrappedMarqueeSelect}
             onOpenSequence={sequenceView.openPlayback}
             onOpenSequenceDetails={sequenceView.openDetails}
-            onSelect={handleSelect}
+            onSelect={handlePhotoSelect}
             onSelectSequence={handleSequenceSelect}
             onSelectSequenceMembers={handleSelectSequenceMembers}
             onSequenceModeChange={sequenceView.setMode}
@@ -930,6 +1077,9 @@ function AlbumDetailPage() {
             onToggleFavorite={handleToggleFavorite}
             onToggleSequenceExpand={sequenceView.toggleExpand}
             photos={photos}
+            recentlyViewedPhotoId={recentlyViewedPhotoId}
+            recentlyViewedPulseActive={recentlyViewedPulseActive}
+            recentlyViewedPulseKey={recentlyViewedPulseKey}
             routeKey={routeKey}
             selectedIds={selectedIds}
             sequenceCount={sequenceView.sequences.length}
@@ -950,7 +1100,7 @@ function AlbumDetailPage() {
               setAddToAlbumIds(Array.from(selectedIds));
               setAddToAlbumOpen(true);
             }}
-            onClearSelection={clearSelection}
+            onClearSelection={handleClearSelection}
             onConvert={() => setConvertDialogOpen(true)}
             onDelete={handleDeleteSelected}
             onExport={handleExportSelected}
@@ -1018,9 +1168,12 @@ function AlbumDetailPage() {
             aria-label={t("close")}
             className="absolute inset-0 z-30 border-0 bg-black/20 lg:hidden"
             onClick={() => {
-              sequenceView.setSelectedSequence(null);
-              dismissDetail();
-              clearSelection();
+              if (detailPhoto) {
+                handleClearSelection();
+              } else {
+                sequenceView.setSelectedSequence(null);
+                clearSelection();
+              }
             }}
             type="button"
           />
@@ -1038,7 +1191,7 @@ function AlbumDetailPage() {
                   (m) => m.id === photoId
                 );
                 sequenceView.setSelectedSequence(null);
-                handleKeyboardSelect(photoId);
+                handleKeyboardPhotoSelect(photoId);
                 if (member) {
                   showPhoto(member);
                 }
@@ -1074,8 +1227,7 @@ function AlbumDetailPage() {
           ) : (
             <PhotoDetailPanel
               onClose={() => {
-                dismissDetail();
-                clearSelection();
+                handleClearSelection();
               }}
               onNavigate={navigateDetail}
               onOpenExplorer={handleOpenExplorer}
@@ -1090,7 +1242,14 @@ function AlbumDetailPage() {
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
           onAddToAlbum={handleAddToAlbum}
-          onClose={() => setLightboxIndex(-1)}
+          onClose={({ photoId }) => {
+            setLightboxIndex(-1);
+            if (photos.some((photo) => photo.id === photoId)) {
+              markRecentlyViewed(photoId);
+            } else {
+              clearRecentlyViewed();
+            }
+          }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={photos}
@@ -1116,7 +1275,7 @@ function AlbumDetailPage() {
               if (next < 0 || next >= photos.length) {
                 return prev;
               }
-              handleKeyboardSelect(photos[next].id);
+              handleKeyboardPhotoSelect(photos[next].id);
               return next;
             });
           }}

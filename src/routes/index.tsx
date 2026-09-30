@@ -302,6 +302,15 @@ function HomePage() {
   const lastImageSearchPathRef = useRef<string | null>(null);
   const colorHex = filter.appliedSearch?.colorHex ?? null;
   const [lightboxIndex, setLightboxIndex] = useState(-1);
+  const [recentlyViewedPhotoId, setRecentlyViewedPhotoId] = useState<
+    number | null
+  >(null);
+  const [recentlyViewedPulseActive, setRecentlyViewedPulseActive] =
+    useState(false);
+  const [recentlyViewedPulseKey, setRecentlyViewedPulseKey] = useState(0);
+  const recentlyViewedPulseTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const [sequenceMode, setSequenceMode] = useState<"photos" | "sequences">(
     () => getBrowseSession("home-search").sequenceMode
   );
@@ -1590,6 +1599,45 @@ function HomePage() {
     removeFromSelection,
     selectAll: selectAllPhotos,
   } = usePhotoSelection(routeKey, actionPhotos);
+  const clearRecentlyViewed = useCallback((preservePhotoId?: number) => {
+    setRecentlyViewedPhotoId((current) => {
+      if (preservePhotoId !== undefined && current === preservePhotoId) {
+        return current;
+      }
+      return null;
+    });
+    setRecentlyViewedPulseActive(false);
+    if (recentlyViewedPulseTimerRef.current !== null) {
+      clearTimeout(recentlyViewedPulseTimerRef.current);
+      recentlyViewedPulseTimerRef.current = null;
+    }
+  }, []);
+  const markRecentlyViewed = useCallback((photoId: number) => {
+    setRecentlyViewedPhotoId(photoId);
+    setRecentlyViewedPulseKey((value) => value + 1);
+    setRecentlyViewedPulseActive(true);
+    if (recentlyViewedPulseTimerRef.current !== null) {
+      clearTimeout(recentlyViewedPulseTimerRef.current);
+    }
+    recentlyViewedPulseTimerRef.current = setTimeout(() => {
+      setRecentlyViewedPulseActive(false);
+      recentlyViewedPulseTimerRef.current = null;
+    }, 1500);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (recentlyViewedPulseTimerRef.current !== null) {
+        clearTimeout(recentlyViewedPulseTimerRef.current);
+      }
+    };
+  }, []);
+  const handleKeyboardPhotoSelect = useCallback(
+    (id: number) => {
+      clearRecentlyViewed(id);
+      handleKeyboardSelect(id);
+    },
+    [clearRecentlyViewed, handleKeyboardSelect]
+  );
   const previousSequenceModeRef = useRef(sequenceMode);
   useEffect(() => {
     if (previousSequenceModeRef.current === sequenceMode) {
@@ -1601,16 +1649,23 @@ function HomePage() {
     setExpandedSequence(null);
     setExpandedSequenceComplete(null);
     setExpandingSequenceId(null);
-  }, [clearSelection, sequenceMode]);
+    clearRecentlyViewed();
+  }, [clearRecentlyViewed, clearSelection, sequenceMode]);
   const handleScopedSequenceExpand = useCallback(
     (sequenceId: number) => {
+      clearRecentlyViewed();
       const sequence = sequences.find((item) => item.id === sequenceId);
       removeFromSelection(
         sequence?.matchedPhotoIds ?? sequence?.memberPhotoIds ?? []
       );
       handleToggleSequenceExpand(sequenceId);
     },
-    [handleToggleSequenceExpand, removeFromSelection, sequences]
+    [
+      clearRecentlyViewed,
+      handleToggleSequenceExpand,
+      removeFromSelection,
+      sequences,
+    ]
   );
   const handleSequenceMutationComplete = useCallback(() => {
     expandedSequenceCacheRef.current.clear();
@@ -1618,26 +1673,118 @@ function HomePage() {
     setExpandedSequenceComplete(null);
     setSequenceRefresh((value) => value + 1);
   }, []);
-  const { detailPhoto, dismissDetail, navigateDetail, showPhoto } =
-    usePhotoDetailPanel(
-      selectedIds,
-      actionPhotos,
-      routeKey,
-      handleKeyboardSelect
-    );
+  const {
+    detailDismissed,
+    detailPhoto,
+    dismissDetail,
+    navigateDetail,
+    showPhoto,
+  } = usePhotoDetailPanel(
+    selectedIds,
+    actionPhotos,
+    routeKey,
+    handleKeyboardPhotoSelect
+  );
+  const dismissPhotoDetail = useCallback(() => {
+    if (detailPhoto && photos.some((photo) => photo.id === detailPhoto.id)) {
+      markRecentlyViewed(detailPhoto.id);
+    } else if (detailPhoto) {
+      clearRecentlyViewed();
+    }
+    dismissDetail();
+  }, [
+    clearRecentlyViewed,
+    detailPhoto,
+    dismissDetail,
+    markRecentlyViewed,
+    photos,
+  ]);
+  // 底部操作胶囊清空选择时，详情面板也会随选中状态关闭，先记录最后查看的照片。
+  const handleClearSelection = useCallback(() => {
+    if (detailPhoto) {
+      dismissPhotoDetail();
+    } else if (!detailDismissed && selectedIds.size === 1) {
+      const selectedPhotoId = selectedIds.values().next().value;
+      if (
+        selectedPhotoId !== undefined &&
+        photos.some((photo) => photo.id === selectedPhotoId)
+      ) {
+        markRecentlyViewed(selectedPhotoId);
+      } else {
+        clearRecentlyViewed();
+      }
+    }
+    clearSelection();
+    setSequenceReturnTarget(null);
+  }, [
+    clearRecentlyViewed,
+    clearSelection,
+    detailPhoto,
+    detailDismissed,
+    dismissPhotoDetail,
+    markRecentlyViewed,
+    photos,
+    selectedIds,
+  ]);
+  const recentlyViewedContextKey = [
+    routeKey,
+    sequenceMode,
+    searchQuery,
+    searchMode ?? "",
+    imageSearchPath ?? "",
+    filter.tagMode,
+    JSON.stringify(searchFilters),
+  ].join("|");
+  const previousRecentlyViewedContextKeyRef = useRef(recentlyViewedContextKey);
+  useEffect(() => {
+    if (
+      previousRecentlyViewedContextKeyRef.current !== recentlyViewedContextKey
+    ) {
+      clearRecentlyViewed();
+    }
+    previousRecentlyViewedContextKeyRef.current = recentlyViewedContextKey;
+  }, [clearRecentlyViewed, recentlyViewedContextKey]);
+  useEffect(() => {
+    if (
+      recentlyViewedPhotoId !== null &&
+      !photos.some((photo) => photo.id === recentlyViewedPhotoId)
+    ) {
+      clearRecentlyViewed();
+    }
+  }, [clearRecentlyViewed, photos, recentlyViewedPhotoId]);
+  useEffect(() => {
+    if (
+      lightboxIndex >= 0 ||
+      quickPreviewIndex >= 0 ||
+      openSequence ||
+      selectedSequence ||
+      sequenceDetailsLoading
+    ) {
+      clearRecentlyViewed();
+    }
+  }, [
+    clearRecentlyViewed,
+    lightboxIndex,
+    openSequence,
+    quickPreviewIndex,
+    selectedSequence,
+    sequenceDetailsLoading,
+  ]);
   const handlePhotoSelect = useCallback(
     (id: number, event: React.MouseEvent) => {
+      clearRecentlyViewed(id);
       setSelectedSequence(null);
       setSequenceDetailsLoading(false);
       handleSelect(id, event);
     },
-    [handleSelect]
+    [clearRecentlyViewed, handleSelect]
   );
   const handleSequenceDetails = useCallback(
     (sequenceId: number) => {
+      clearRecentlyViewed();
       handleOpenSequenceDetails(sequenceId);
     },
-    [handleOpenSequenceDetails]
+    [clearRecentlyViewed, handleOpenSequenceDetails]
   );
   const searchDisplayCount =
     searchExactTotal !== null &&
@@ -2100,11 +2247,11 @@ function HomePage() {
       const idx = photosRef.current.findIndex((p) => p.id === id);
       if (idx >= 0) {
         clearSelection();
-        dismissDetail();
+        dismissPhotoDetail();
         setLightboxIndex(idx);
       }
     },
-    [clearSelection, dismissDetail]
+    [clearSelection, dismissPhotoDetail]
   );
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search fallback and semantic refresh share one request lifecycle
   async function performSearch(
@@ -2689,8 +2836,13 @@ function HomePage() {
           setConvertDialogOpen(false);
           return;
         }
+        if (detailPhoto) {
+          handleClearSelection();
+          setSequenceReturnTarget(null);
+          return;
+        }
         if (selectedIds.size > 0) {
-          clearSelection();
+          handleClearSelection();
           return;
         }
       }
@@ -2795,11 +2947,11 @@ function HomePage() {
       if (e.key === "i" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (detailPhoto) {
-          dismissDetail();
-          clearSelection();
+          handleClearSelection();
+          setSequenceReturnTarget(null);
         } else if (selectedIds.size === 1) {
           const id = selectedIds.values().next().value as number;
-          handleKeyboardSelect(id);
+          handleKeyboardPhotoSelect(id);
         }
         return;
       }
@@ -2812,6 +2964,8 @@ function HomePage() {
     renameDialogOpen,
     convertDialogOpen,
     quickPreviewIndex,
+    detailPhoto,
+    handleClearSelection,
   ]);
 
   const marqueeJustCompleted = useRef(false);
@@ -2839,6 +2993,7 @@ function HomePage() {
   );
   const handleSequenceSelect = useCallback(
     (memberIds: number[], event: React.MouseEvent) => {
+      clearRecentlyViewed();
       if (event.ctrlKey || event.metaKey) {
         setSelectedSequence(null);
         setSequenceDetailsLoading(false);
@@ -2849,7 +3004,7 @@ function HomePage() {
         handleSelectMany(memberIds, event);
       }
     },
-    [handleSelectMany]
+    [clearRecentlyViewed, handleSelectMany]
   );
   const handleSelectSequenceMembers = useCallback(
     (memberIds: number[], selectAll: boolean) => {
@@ -2880,7 +3035,7 @@ function HomePage() {
         setSequenceDetailsLoading(false);
         return;
       }
-      dismissDetail();
+      dismissPhotoDetail();
       clearSelection();
       setSequenceReturnTarget(null);
     },
@@ -3125,12 +3280,12 @@ function HomePage() {
                       marqueeJustCompleted.current = false;
                       return;
                     }
-                    clearSelection();
+                    handleClearSelection();
                   }}
                   onContextMenu={handleContextMenu}
                   onDoubleClick={handleDoubleClick}
                   onEndReached={handleEndReached}
-                  onKeyboardSelect={handleKeyboardSelect}
+                  onKeyboardSelect={handleKeyboardPhotoSelect}
                   onMarqueeSelect={wrappedMarqueeSelect}
                   onOpenSequence={handleOpenSequence}
                   onOpenSequenceDetails={handleSequenceDetails}
@@ -3144,6 +3299,9 @@ function HomePage() {
                   onToggleFavorite={handleToggleFavorite}
                   onToggleSequenceExpand={handleScopedSequenceExpand}
                   photos={photos}
+                  recentlyViewedPhotoId={recentlyViewedPhotoId}
+                  recentlyViewedPulseActive={recentlyViewedPulseActive}
+                  recentlyViewedPulseKey={recentlyViewedPulseKey}
                   restoreGateReady={restoreGateReady}
                   routeKey={routeKey}
                   searchQuery={searchQuery}
@@ -3178,7 +3336,7 @@ function HomePage() {
                   setAddToAlbumIds(Array.from(selectedIds));
                   setAddToAlbumOpen(true);
                 }}
-                onClearSelection={clearSelection}
+                onClearSelection={handleClearSelection}
                 onConvert={() => setConvertDialogOpen(true)}
                 onDelete={handleDeleteSelected}
                 onExport={handleExportSelected}
@@ -3240,7 +3398,7 @@ function HomePage() {
                       setSequenceDetailsLoading(false);
                       return;
                     }
-                    dismissDetail();
+                    dismissPhotoDetail();
                     clearSelection();
                     setSequenceReturnTarget(null);
                   }}
@@ -3270,7 +3428,7 @@ function HomePage() {
                   >
                     <PhotoDetailPanel
                       onClose={() => {
-                        dismissDetail();
+                        dismissPhotoDetail();
                         clearSelection();
                         setSequenceReturnTarget(null);
                       }}
@@ -3279,7 +3437,7 @@ function HomePage() {
                       onReturnToSequence={
                         sequenceReturnTarget
                           ? () => {
-                              dismissDetail();
+                              dismissPhotoDetail();
                               clearSelection();
                               setSelectedSequence(sequenceReturnTarget);
                               setSequenceReturnTarget(null);
@@ -3311,7 +3469,7 @@ function HomePage() {
                           );
                           setSequenceReturnTarget(selectedSequence);
                           setSelectedSequence(null);
-                          handleKeyboardSelect(photoId);
+                          handleKeyboardPhotoSelect(photoId);
                           // 直接设置详情照片，确保即使照片不在 actionPhotos 中也能显示
                           if (member) {
                             showPhoto(member);
@@ -3492,7 +3650,14 @@ function HomePage() {
           initialIndex={lightboxIndex}
           modalOpen={addToAlbumOpen}
           onAddToAlbum={handleAddToAlbum}
-          onClose={() => setLightboxIndex(-1)}
+          onClose={({ photoId }) => {
+            setLightboxIndex(-1);
+            if (photos.some((photo) => photo.id === photoId)) {
+              markRecentlyViewed(photoId);
+            } else {
+              clearRecentlyViewed();
+            }
+          }}
           onToggleFavorite={handleToggleFavorite}
           open={lightboxIndex >= 0}
           photos={actionPhotos}

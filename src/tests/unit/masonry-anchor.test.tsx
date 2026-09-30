@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getMasonryReturnScrollTop } from "@/components/MasonryGrid";
 import { useMasonryAnchor } from "@/hooks/useMasonryAnchor";
 import type { MasonryItem } from "@/hooks/useMasonryLayout";
 import { buildMasonryVisibilityIndex } from "@/utils/masonry-utils";
@@ -127,5 +128,55 @@ describe("useMasonryAnchor", () => {
       el.dispatchEvent(new WheelEvent("wheel"));
     });
     expect(forceUnlock).toHaveBeenCalled();
+  });
+});
+
+describe("getMasonryReturnScrollTop", () => {
+  it("keeps a card that is fully visible out of the way", () => {
+    expect(
+      getMasonryReturnScrollTop({
+        cardHeight: 120,
+        cardTop: 180,
+        clientHeight: 500,
+        scrollTop: 0,
+        topInset: 48,
+      })
+    ).toBeNull();
+  });
+
+  it("moves a card whose lower edge is hidden below the toolbar-safe viewport", () => {
+    expect(
+      getMasonryReturnScrollTop({
+        cardHeight: 100,
+        cardTop: 400,
+        clientHeight: 500,
+        scrollTop: 0,
+        topInset: 48,
+      })
+    ).toBe(228);
+  });
+
+  it("centers a short card in the usable viewport below the toolbar", () => {
+    expect(
+      getMasonryReturnScrollTop({
+        cardHeight: 120,
+        cardTop: 900,
+        clientHeight: 500,
+        scrollTop: 0,
+        topInset: 48,
+      })
+    ).toBe(738);
+  });
+
+  it("aligns a tall card to the usable viewport top", () => {
+    expect(
+      getMasonryReturnScrollTop({
+        cardHeight: 700,
+        cardTop: 900,
+        clientHeight: 500,
+        scrollTop: 0,
+        topInset: 48,
+      })
+    ).toBe(900);
   });
 });

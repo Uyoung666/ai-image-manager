@@ -70,6 +70,33 @@ export function shouldUpdateScrollRenderTop(
   );
 }
 
+export function getMasonryReturnScrollTop({
+  cardHeight,
+  cardTop,
+  clientHeight,
+  scrollTop,
+  topInset,
+}: {
+  cardHeight: number;
+  cardTop: number;
+  clientHeight: number;
+  scrollTop: number;
+  topInset: number;
+}): number | null {
+  const topPadding = topInset > 0 ? topInset + 8 : 0;
+  const availableHeight = Math.max(1, clientHeight - topPadding);
+  const visibleTop = scrollTop;
+  const visibleBottom = scrollTop + availableHeight;
+  if (cardTop >= visibleTop && cardTop + cardHeight <= visibleBottom) {
+    return null;
+  }
+  const nextScrollTop =
+    cardHeight > availableHeight
+      ? cardTop
+      : cardTop - (availableHeight - cardHeight) / 2;
+  return Math.max(0, nextScrollTop);
+}
+
 interface MasonryGridProps {
   className?: string;
   columnCount: number;
@@ -99,6 +126,8 @@ interface MasonryGridProps {
     options: { renderImage: boolean }
   ) => ReactNode;
   restoreGateReady?: boolean;
+  returnToPhotoId?: number | null;
+  returnToPhotoRequest?: number;
   routeKey: string;
   scrollToAlignment?: "center" | "start";
   scrollToId?: number | null;
@@ -128,6 +157,8 @@ export const MasonryGrid = memo(
       className,
       selectionActive = false,
       showGroupHeaders = true,
+      returnToPhotoId = null,
+      returnToPhotoRequest = 0,
       routeKey,
       restoreGateReady = true,
       isPlaceholderData = false,
@@ -156,6 +187,8 @@ export const MasonryGrid = memo(
     const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const rafRef = useRef<number>(0);
     const prevScrollYRef = useRef(0);
+    const returnToPhotoAutoScrollRef = useRef(false);
+    const returnToPhotoFocusFrameRef = useRef<number>(0);
     const routeForceUnlockRef = useRef<(() => void) | null>(null);
     const scrollbarThumbRef = useRef<HTMLDivElement>(null);
     const scrollbarDragRef = useRef<{
@@ -284,6 +317,23 @@ export const MasonryGrid = memo(
     );
 
     const handleScroll = useCallback(() => {
+      if (returnToPhotoAutoScrollRef.current) {
+        returnToPhotoAutoScrollRef.current = false;
+      } else if (
+        pendingReturnToPhotoRequestRef.current !== null ||
+        pendingReturnFocusIdRef.current !== null
+      ) {
+        if (returnToPhotoFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFrameRef.current);
+          returnToPhotoFrameRef.current = 0;
+        }
+        if (returnToPhotoFocusFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
+          returnToPhotoFocusFrameRef.current = 0;
+        }
+        pendingReturnToPhotoRequestRef.current = null;
+        pendingReturnFocusIdRef.current = null;
+      }
       if (rafRef.current) {
         return;
       }
@@ -421,26 +471,77 @@ export const MasonryGrid = memo(
     const prevPositionsRef = useRef(positions);
     const prevScrollToAlignmentRef = useRef(scrollToAlignment);
     const prevScrollToIdRef = useRef(scrollToId);
+    const prevReturnToPhotoRequestRef = useRef(returnToPhotoRequest);
+    const pendingReturnToPhotoRequestRef = useRef<number | null>(null);
     const prevRouteKeyRef = useRef(routeKey);
     const prevContainerWidthRef = useRef(containerWidth);
+    const pendingReturnFocusIdRef = useRef<number | null>(null);
+    const returnToPhotoFrameRef = useRef<number>(0);
+    const latestPositionsRef = useRef(positions);
+    const latestIdToIndexMapRef = useRef(idToIndexMap);
+    const latestReturnToPhotoIdRef = useRef(returnToPhotoId);
+    latestPositionsRef.current = positions;
+    latestIdToIndexMapRef.current = idToIndexMap;
+    latestReturnToPhotoIdRef.current = returnToPhotoId;
 
     useLayoutEffect(() => {
       const prevPositions = prevPositionsRef.current;
       const prevScrollToAlignment = prevScrollToAlignmentRef.current;
       const prevScrollToId = prevScrollToIdRef.current;
+      const prevReturnToPhotoRequest = prevReturnToPhotoRequestRef.current;
       const prevRouteKey = prevRouteKeyRef.current;
       const prevWidth = prevContainerWidthRef.current;
       prevPositionsRef.current = positions;
       prevScrollToAlignmentRef.current = scrollToAlignment;
       prevScrollToIdRef.current = scrollToId;
+      prevReturnToPhotoRequestRef.current = returnToPhotoRequest;
       prevRouteKeyRef.current = routeKey;
       prevContainerWidthRef.current = containerWidth;
+
+      const returnRequestChanged =
+        returnToPhotoRequest !== prevReturnToPhotoRequest;
+      if (returnRequestChanged) {
+        if (returnToPhotoFocusFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
+          returnToPhotoFocusFrameRef.current = 0;
+        }
+        pendingReturnFocusIdRef.current = null;
+        returnToPhotoAutoScrollRef.current = false;
+        pendingReturnToPhotoRequestRef.current =
+          returnToPhotoId === null ? null : returnToPhotoRequest;
+      }
+
+      if (returnToPhotoId === null) {
+        if (returnToPhotoFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFrameRef.current);
+          returnToPhotoFrameRef.current = 0;
+        }
+        if (returnToPhotoFocusFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
+          returnToPhotoFocusFrameRef.current = 0;
+        }
+        pendingReturnToPhotoRequestRef.current = null;
+        pendingReturnFocusIdRef.current = null;
+        returnToPhotoAutoScrollRef.current = false;
+      }
 
       if (positions.length === 0) {
         return;
       }
       const el = scrollRef.current;
       if (!el || prevRouteKey !== routeKey) {
+        if (prevRouteKey !== routeKey) {
+          pendingReturnToPhotoRequestRef.current = null;
+          pendingReturnFocusIdRef.current = null;
+          if (returnToPhotoFrameRef.current) {
+            cancelAnimationFrame(returnToPhotoFrameRef.current);
+            returnToPhotoFrameRef.current = 0;
+          }
+          if (returnToPhotoFocusFrameRef.current) {
+            cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
+            returnToPhotoFocusFrameRef.current = 0;
+          }
+        }
         return;
       }
 
@@ -458,6 +559,78 @@ export const MasonryGrid = memo(
         scrollTopStateRef.current = next;
         setScrollTop(next);
       };
+
+      if (
+        pendingReturnToPhotoRequestRef.current === returnToPhotoRequest &&
+        returnToPhotoId !== null &&
+        returnToPhotoRequest > 0 &&
+        positions.length > 0
+      ) {
+        if (returnToPhotoFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFrameRef.current);
+        }
+        returnToPhotoFrameRef.current = requestAnimationFrame(() => {
+          returnToPhotoFrameRef.current = 0;
+          const el = scrollRef.current;
+          const targetId = latestReturnToPhotoIdRef.current;
+          const targetPositions = latestPositionsRef.current;
+          const targetIndex =
+            targetId === null
+              ? undefined
+              : latestIdToIndexMapRef.current.get(targetId);
+          if (
+            !el ||
+            targetId === null ||
+            targetIndex === undefined ||
+            !targetPositions[targetIndex]
+          ) {
+            pendingReturnToPhotoRequestRef.current = null;
+            return;
+          }
+
+          const position = targetPositions[targetIndex];
+          const nextScrollTop = getMasonryReturnScrollTop({
+            cardHeight: position.height,
+            cardTop: position.top,
+            clientHeight: el.clientHeight,
+            scrollTop: el.scrollTop,
+            topInset,
+          });
+          if (nextScrollTop !== null) {
+            returnToPhotoAutoScrollRef.current = true;
+            el.scrollTop = nextScrollTop;
+            requestAnimationFrame(() => {
+              returnToPhotoAutoScrollRef.current = false;
+            });
+            prevScrollYRef.current = el.scrollTop;
+            scrollTopStateRef.current = el.scrollTop;
+            setScrollTop(el.scrollTop);
+          }
+          pendingReturnFocusIdRef.current = targetId;
+          pendingReturnToPhotoRequestRef.current = null;
+
+          const focusReturnCard = (attempt: number) => {
+            returnToPhotoFocusFrameRef.current = requestAnimationFrame(() => {
+              returnToPhotoFocusFrameRef.current = 0;
+              const card = Array.from(
+                scrollRef.current?.querySelectorAll<HTMLElement>(
+                  '[data-photo-id][role="option"]'
+                ) ?? []
+              ).find((element) => element.dataset.photoId === String(targetId));
+              if (card) {
+                card.focus({ preventScroll: true });
+                pendingReturnFocusIdRef.current = null;
+              } else if (attempt < 2) {
+                focusReturnCard(attempt + 1);
+              } else {
+                pendingReturnFocusIdRef.current = null;
+              }
+            });
+          };
+          focusReturnCard(0);
+        });
+        return;
+      }
 
       // A selection change can open the detail panel and resize the grid in
       // the same frame. Resolve the requested item against the final positions
@@ -515,10 +688,26 @@ export const MasonryGrid = memo(
       positions,
       scrollToAlignment,
       scrollToId,
+      returnToPhotoId,
+      returnToPhotoRequest,
       routeKey,
       containerWidth,
       idToIndexMap,
+      topInset,
     ]);
+
+    useEffect(() => {
+      return () => {
+        if (returnToPhotoFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFrameRef.current);
+          returnToPhotoFrameRef.current = 0;
+        }
+        if (returnToPhotoFocusFrameRef.current) {
+          cancelAnimationFrame(returnToPhotoFocusFrameRef.current);
+          returnToPhotoFocusFrameRef.current = 0;
+        }
+      };
+    }, []);
 
     const { visibleHeaders, visibleItems } = useMasonryVirtualWindow({
       columnCount,
@@ -832,6 +1021,8 @@ export const MasonryGrid = memo(
     prevProps.itemStateVersion === nextProps.itemStateVersion &&
     prevProps.selectionActive === nextProps.selectionActive &&
     prevProps.scrollToId === nextProps.scrollToId &&
+    prevProps.returnToPhotoId === nextProps.returnToPhotoId &&
+    prevProps.returnToPhotoRequest === nextProps.returnToPhotoRequest &&
     prevProps.onScrollTopChange === nextProps.onScrollTopChange &&
     prevProps.onRestoreSettled === nextProps.onRestoreSettled &&
     prevProps.topInset === nextProps.topInset &&
