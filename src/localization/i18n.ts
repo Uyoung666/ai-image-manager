@@ -1428,6 +1428,9 @@ i18n.use(initReactI18next).init({
         focalGte: "焦段 ≥ {{value}}mm",
         focalLte: "焦段 ≤ {{value}}mm",
         clearAll: "清除全部",
+        clearSearchFilters: "清空筛选",
+        drillDownReset: "重置",
+        drillDownResetHint: "清空搜索和筛选，并退出当前钻取",
         filterSavePreset: "保存预设",
         filterPresetNamePlaceholder: "预设名称...",
         filterLoadPresets: "加载预设 ({{count}})",
@@ -1438,7 +1441,7 @@ i18n.use(initReactI18next).init({
         filterPresetRestored: "已恢复筛选预设「{{name}}」",
         filterPresetUndoConflict:
           "筛选预设「{{name}}」已被重新创建或修改，未恢复",
-        drillDownActiveHint: "已从仪表盘钻取，可在下方继续叠加筛选条件",
+        drillDownActiveHint: "来自仪表盘，可继续叠加筛选；点击返回",
         backToDashboard: "返回仪表盘",
         backToPlacesAndColors: "返回地点与色彩",
         dateRangeLabel: "日期范围",
@@ -3737,6 +3740,10 @@ i18n.use(initReactI18next).init({
         focalGte: "Focal length ≥ {{value}}mm",
         focalLte: "Focal length ≤ {{value}}mm",
         clearAll: "Clear all",
+        clearSearchFilters: "Clear filters",
+        drillDownReset: "Reset",
+        drillDownResetHint:
+          "Clear the search and filters and leave this drill-down",
         filterSavePreset: "Save Preset",
         filterPresetNamePlaceholder: "Preset name...",
         filterLoadPresets: "Load presets ({{count}})",
@@ -3748,7 +3755,7 @@ i18n.use(initReactI18next).init({
         filterPresetUndoConflict:
           'Filter preset "{{name}}" was recreated or changed, so it was not restored',
         drillDownActiveHint:
-          "Drilled down from dashboard. You can add more filters below.",
+          "From the dashboard. Add more filters or click to return.",
         backToDashboard: "Back to Dashboard",
         backToPlacesAndColors: "Back to Places & Colors",
         dateRangeLabel: "Date Range",

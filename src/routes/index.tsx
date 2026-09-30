@@ -1,6 +1,6 @@
 import type { InfiniteData } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { CircleAlert, Images, Layers } from "lucide-react";
+import { ArrowLeft, CircleAlert, Images, Layers } from "lucide-react";
 import {
   useCallback,
   useDeferredValue,
@@ -49,6 +49,11 @@ import { SequenceDetailPanel } from "@/components/SequenceDetailPanel";
 import { ShareDialog } from "@/components/ShareDialog";
 import { SortDropdown } from "@/components/SortDropdown";
 import { StatusBar } from "@/components/StatusBar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Welcome } from "@/components/Welcome";
 import { useBrowseSession } from "@/contexts/BrowseSessionContext";
 import { useImportDropContext } from "@/contexts/import-drop-context";
@@ -469,6 +474,18 @@ function HomePage() {
     setDashboardReturnTarget(null);
     saveBrowseSession("home-search", { dashboardReturn: null });
   }, [saveBrowseSession]);
+
+  const resetDrillDown = useCallback(() => {
+    filter.setSearchDraftFilters({});
+    filter.clearSearch();
+    setDrillDownFilters(undefined);
+    setShowDrillBanner(false);
+    clearDashboardReturnTarget();
+  }, [
+    clearDashboardReturnTarget,
+    filter.clearSearch,
+    filter.setSearchDraftFilters,
+  ]);
 
   const resetHomeSearchState = useCallback(() => {
     searchGenerationRef.current += 1;
@@ -3076,6 +3093,53 @@ function HomePage() {
             aiStatus={aiStatus ?? null}
             colorHex={colorHex ?? undefined}
             drillDownFilters={drillDownFilters}
+            filterBarLeadingContent={
+              showDrillBanner ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      aria-label={t(
+                        dashboardReturnTarget?.tab === "places"
+                          ? "backToPlacesAndColors"
+                          : "backToDashboard"
+                      )}
+                      className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-[4px] px-1.5 text-[11px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
+                      onClick={() =>
+                        navigate({
+                          to: "/dashboard",
+                          search: dashboardReturnTarget ?? {},
+                        })
+                      }
+                      type="button"
+                    >
+                      <ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />
+                      {t(
+                        dashboardReturnTarget?.tab === "places"
+                          ? "backToPlacesAndColors"
+                          : "backToDashboard"
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("drillDownActiveHint")}</TooltipContent>
+                </Tooltip>
+              ) : undefined
+            }
+            filterBarTrailingContent={
+              showDrillBanner ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="min-h-8 rounded-[4px] px-1.5 text-[11px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring"
+                      onClick={resetDrillDown}
+                      type="button"
+                    >
+                      {t("drillDownReset")}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("drillDownResetHint")}</TooltipContent>
+                </Tooltip>
+              ) : undefined
+            }
             filters={filter.searchDraft.filters}
             imageSearchActive={searchMode === "image"}
             imageSearchReference={
@@ -3197,54 +3261,6 @@ function HomePage() {
                     })}
               </div>
             )}
-          {/* Drill-down banner */}
-          {showDrillBanner && (
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-primary/20 border-b bg-primary/10 px-4 py-2 dark:border-primary/40 dark:bg-primary/20">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 text-primary text-sm [overflow-wrap:anywhere]">
-                  {t("drillDownActiveHint")}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="rounded-[4px] px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
-                  onClick={() => {
-                    filter.setSearchDraftFilters({});
-                    filter.clearSearch();
-                    setDrillDownFilters(undefined);
-                    setShowDrillBanner(false);
-                    clearDashboardReturnTarget();
-                  }}
-                  type="button"
-                >
-                  {t("clearAll")}
-                </button>
-                {dashboardReturnTarget && (
-                  <button
-                    aria-label={t(
-                      dashboardReturnTarget.tab === "places"
-                        ? "backToPlacesAndColors"
-                        : "backToDashboard"
-                    )}
-                    className="rounded-[4px] border border-primary/40 px-2 py-1 text-[11px] text-primary hover:bg-primary/10"
-                    onClick={() =>
-                      navigate({
-                        to: "/dashboard",
-                        search: dashboardReturnTarget,
-                      })
-                    }
-                    type="button"
-                  >
-                    {t(
-                      dashboardReturnTarget.tab === "places"
-                        ? "backToPlacesAndColors"
-                        : "backToDashboard"
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
         </div>
         {hasPhotos ? (
           <div className="home-gallery-body relative flex min-h-0 flex-1">

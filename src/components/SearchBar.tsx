@@ -120,6 +120,8 @@ interface SearchBarProps {
   } | null;
   colorHex?: string | null;
   drillDownFilters?: ExifFilters;
+  filterBarLeadingContent?: ReactNode;
+  filterBarTrailingContent?: ReactNode;
   filters: ExifFilters;
   imageSearchActive?: boolean;
   imageSearchReference?: ImageSearchReference;
@@ -148,6 +150,8 @@ export const SearchBar = memo(
         aiStatus,
         colorHex,
         drillDownFilters,
+        filterBarLeadingContent,
+        filterBarTrailingContent,
         filters,
         imageSearchActive,
         imageSearchReference,
@@ -1193,139 +1197,157 @@ export const SearchBar = memo(
               </div>
             )}
 
-            {/* Active filter chips */}
-            {hasActiveFilters && (
-              <div className="mt-2 flex max-h-24 min-w-0 max-w-full flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
-                {filters.dateFrom && (
-                  <FilterChip
-                    label={t("filterFrom", { value: filters.dateFrom })}
-                    onRemove={() => updateFilter("dateFrom", "", true)}
-                  />
+            {/* Active filter chips and drill-down actions */}
+            {(hasActiveFilters ||
+              filterBarLeadingContent ||
+              filterBarTrailingContent) && (
+              <div className="mt-2 flex min-w-0 max-w-full flex-wrap items-start gap-1.5">
+                {filterBarLeadingContent && (
+                  <div className="flex min-h-8 shrink-0 items-center border-border border-r pr-2">
+                    {filterBarLeadingContent}
+                  </div>
                 )}
-                {filters.dateTo && (
-                  <FilterChip
-                    label={t("filterTo", { value: filters.dateTo })}
-                    onRemove={() => updateFilter("dateTo", "", true)}
-                  />
+                {hasActiveFilters && (
+                  <div className="flex max-h-24 min-w-0 flex-1 basis-0 flex-wrap items-center gap-1.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
+                    {filters.dateFrom && (
+                      <FilterChip
+                        label={t("filterFrom", { value: filters.dateFrom })}
+                        onRemove={() => updateFilter("dateFrom", "", true)}
+                      />
+                    )}
+                    {filters.dateTo && (
+                      <FilterChip
+                        label={t("filterTo", { value: filters.dateTo })}
+                        onRemove={() => updateFilter("dateTo", "", true)}
+                      />
+                    )}
+                    {filters.dateMonth && (
+                      <FilterChip
+                        label={t("dateMonthValue", {
+                          value: filters.dateMonth,
+                        })}
+                        onRemove={() => updateFilter("dateMonth", "", true)}
+                      />
+                    )}
+                    {filters.dateHour && (
+                      <FilterChip
+                        label={t("dateHourValue", {
+                          next: String(
+                            (Number(filters.dateHour) + 1) % 24
+                          ).padStart(2, "0"),
+                          value: filters.dateHour.padStart(2, "0"),
+                        })}
+                        onRemove={() => updateFilter("dateHour", "", true)}
+                      />
+                    )}
+                    {filters.cameraModel && (
+                      <FilterChip
+                        label={filters.cameraModel}
+                        onRemove={() => updateFilter("cameraModel", "", true)}
+                      />
+                    )}
+                    {filters.creator && (
+                      <FilterChip
+                        label={filters.creator}
+                        onRemove={() => updateFilter("creator", "", true)}
+                      />
+                    )}
+                    {filters.lensModel && (
+                      <FilterChip
+                        label={filters.lensModel}
+                        onRemove={() => updateFilter("lensModel", "", true)}
+                      />
+                    )}
+                    {filters.advancedField && filters.advancedValue && (
+                      <FilterChip
+                        label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedValue}`}
+                        onRemove={() => {
+                          setFilters((previous) => {
+                            const next = {
+                              ...previous,
+                              advancedField: undefined,
+                              advancedValue: undefined,
+                            };
+                            const hasAny = Object.values(next).some((v) => v);
+                            queueMicrotask(() =>
+                              onSearch(query.trim(), hasAny ? next : undefined)
+                            );
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                    {filters.isoMin && (
+                      <FilterChip
+                        label={`ISO ≥ ${filters.isoMin}`}
+                        onRemove={() => updateFilter("isoMin", "", true)}
+                      />
+                    )}
+                    {filters.isoMax && (
+                      <FilterChip
+                        label={`ISO ≤ ${filters.isoMax}`}
+                        onRemove={() => updateFilter("isoMax", "", true)}
+                      />
+                    )}
+                    {filters.apertureMin && (
+                      <FilterChip
+                        label={t("apertureGte", { value: filters.apertureMin })}
+                        onRemove={() => updateFilter("apertureMin", "", true)}
+                      />
+                    )}
+                    {filters.apertureMax && (
+                      <FilterChip
+                        label={t("apertureLte", { value: filters.apertureMax })}
+                        onRemove={() => updateFilter("apertureMax", "", true)}
+                      />
+                    )}
+                    {filters.focalMin && (
+                      <FilterChip
+                        label={t("focalGte", { value: filters.focalMin })}
+                        onRemove={() => updateFilter("focalMin", "", true)}
+                      />
+                    )}
+                    {filters.focalMax && (
+                      <FilterChip
+                        label={t("focalLte", { value: filters.focalMax })}
+                        onRemove={() => updateFilter("focalMax", "", true)}
+                      />
+                    )}
+                    {(filters.shutterMin || filters.shutterMax) && (
+                      <FilterChip
+                        label={`${t("shutterSpeedLabel")}: ${filters.shutterMin || "0"}s-${filters.shutterMax || "∞"}s`}
+                        onRemove={() => {
+                          setFilters((prev) => {
+                            const next = {
+                              ...prev,
+                              shutterMin: "",
+                              shutterMax: "",
+                            };
+                            const hasAny = Object.values(next).some((v) => v);
+                            queueMicrotask(() =>
+                              onSearch(query.trim(), hasAny ? next : undefined)
+                            );
+                            return next;
+                          });
+                        }}
+                      />
+                    )}
+                  </div>
                 )}
-                {filters.dateMonth && (
-                  <FilterChip
-                    label={t("dateMonthValue", {
-                      value: filters.dateMonth,
-                    })}
-                    onRemove={() => updateFilter("dateMonth", "", true)}
-                  />
+                {hasActiveFilters && !filterBarTrailingContent && (
+                  <button
+                    className="min-h-8 rounded-[4px] px-2 text-[11px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
+                    onClick={clearFilters}
+                    type="button"
+                  >
+                    {t("clearSearchFilters")}
+                  </button>
                 )}
-                {filters.dateHour && (
-                  <FilterChip
-                    label={t("dateHourValue", {
-                      next: String(
-                        (Number(filters.dateHour) + 1) % 24
-                      ).padStart(2, "0"),
-                      value: filters.dateHour.padStart(2, "0"),
-                    })}
-                    onRemove={() => updateFilter("dateHour", "", true)}
-                  />
+                {filterBarTrailingContent && (
+                  <div className="ml-auto flex min-h-8 shrink-0 items-center">
+                    {filterBarTrailingContent}
+                  </div>
                 )}
-                {filters.cameraModel && (
-                  <FilterChip
-                    label={filters.cameraModel}
-                    onRemove={() => updateFilter("cameraModel", "", true)}
-                  />
-                )}
-                {filters.creator && (
-                  <FilterChip
-                    label={filters.creator}
-                    onRemove={() => updateFilter("creator", "", true)}
-                  />
-                )}
-                {filters.lensModel && (
-                  <FilterChip
-                    label={filters.lensModel}
-                    onRemove={() => updateFilter("lensModel", "", true)}
-                  />
-                )}
-                {filters.advancedField && filters.advancedValue && (
-                  <FilterChip
-                    label={`${t(`advancedFilter_${filters.advancedField}`)}: ${filters.advancedValue}`}
-                    onRemove={() => {
-                      setFilters((previous) => {
-                        const next = {
-                          ...previous,
-                          advancedField: undefined,
-                          advancedValue: undefined,
-                        };
-                        const hasAny = Object.values(next).some((v) => v);
-                        queueMicrotask(() =>
-                          onSearch(query.trim(), hasAny ? next : undefined)
-                        );
-                        return next;
-                      });
-                    }}
-                  />
-                )}
-                {filters.isoMin && (
-                  <FilterChip
-                    label={`ISO ≥ ${filters.isoMin}`}
-                    onRemove={() => updateFilter("isoMin", "", true)}
-                  />
-                )}
-                {filters.isoMax && (
-                  <FilterChip
-                    label={`ISO ≤ ${filters.isoMax}`}
-                    onRemove={() => updateFilter("isoMax", "", true)}
-                  />
-                )}
-                {filters.apertureMin && (
-                  <FilterChip
-                    label={t("apertureGte", { value: filters.apertureMin })}
-                    onRemove={() => updateFilter("apertureMin", "", true)}
-                  />
-                )}
-                {filters.apertureMax && (
-                  <FilterChip
-                    label={t("apertureLte", { value: filters.apertureMax })}
-                    onRemove={() => updateFilter("apertureMax", "", true)}
-                  />
-                )}
-                {filters.focalMin && (
-                  <FilterChip
-                    label={t("focalGte", { value: filters.focalMin })}
-                    onRemove={() => updateFilter("focalMin", "", true)}
-                  />
-                )}
-                {filters.focalMax && (
-                  <FilterChip
-                    label={t("focalLte", { value: filters.focalMax })}
-                    onRemove={() => updateFilter("focalMax", "", true)}
-                  />
-                )}
-                {(filters.shutterMin || filters.shutterMax) && (
-                  <FilterChip
-                    label={`${t("shutterSpeedLabel")}: ${filters.shutterMin || "0"}s-${filters.shutterMax || "∞"}s`}
-                    onRemove={() => {
-                      setFilters((prev) => {
-                        const next = {
-                          ...prev,
-                          shutterMin: "",
-                          shutterMax: "",
-                        };
-                        const hasAny = Object.values(next).some((v) => v);
-                        queueMicrotask(() =>
-                          onSearch(query.trim(), hasAny ? next : undefined)
-                        );
-                        return next;
-                      });
-                    }}
-                  />
-                )}
-                <button
-                  className="min-h-8 rounded-[4px] px-2 text-[11px] text-muted-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-                  onClick={clearFilters}
-                  type="button"
-                >
-                  {t("clearAll")}
-                </button>
               </div>
             )}
 
@@ -2217,6 +2239,16 @@ export const SearchBar = memo(
       return false;
     }
     if (prevProps.drillDownFilters !== nextProps.drillDownFilters) {
+      return false;
+    }
+    if (
+      prevProps.filterBarLeadingContent !== nextProps.filterBarLeadingContent
+    ) {
+      return false;
+    }
+    if (
+      prevProps.filterBarTrailingContent !== nextProps.filterBarTrailingContent
+    ) {
       return false;
     }
     if (prevProps.resultCount !== nextProps.resultCount) {

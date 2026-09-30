@@ -357,6 +357,72 @@ describe("SearchBar", () => {
     });
   });
 
+  it("keeps drill-down actions visible when no EXIF chip is active", async () => {
+    const user = userEvent.setup();
+    const onReturn = vi.fn();
+    const onReset = vi.fn();
+
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        filterBarLeadingContent={
+          <button onClick={onReturn} type="button">
+            back to dashboard
+          </button>
+        }
+        filterBarTrailingContent={
+          <button onClick={onReset} type="button">
+            reset drill-down
+          </button>
+        }
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "back to dashboard" }));
+    await user.click(screen.getByRole("button", { name: "reset drill-down" }));
+
+    expect(onReturn).toHaveBeenCalledTimes(1);
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the drill-down reset action instead of a duplicate chip-row clear action", () => {
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        filterBarTrailingContent={
+          <button type="button">reset drill-down</button>
+        }
+        initialFilters={{ cameraModel: "Example Camera" }}
+      />
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "clearSearchFilters" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "reset drill-down" })
+    ).toBeInTheDocument();
+  });
+
+  it("labels the chip-row action as clearing filters while preserving the query", async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <ControlledSearchBar
+        {...baseProps}
+        initialFilters={{ cameraModel: "Example Camera" }}
+        initialQuery="sunset"
+        onSearch={onSearch}
+      />
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "clearSearchFilters" })
+    );
+
+    expect(onSearch).toHaveBeenCalledWith("sunset", undefined);
+  });
+
   it("searches with the remaining filters when removing an advanced EXIF chip", async () => {
     const user = userEvent.setup();
     const onSearch = vi.fn();
